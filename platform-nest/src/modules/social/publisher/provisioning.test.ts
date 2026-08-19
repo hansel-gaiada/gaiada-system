@@ -474,6 +474,38 @@ describe.skipIf(!TEST_URL)("SMM-05 · publisher orgs + connector registry", () =
     expect(connectRes.json().code).toBe("platform_app_not_registered");
   });
 
+  it("refuses `platform_app_not_registered` honestly on EVERY deployment-enabled network — today's REAL state, not an edge case (SMM-14 QA gate)", async () => {
+    // Verified on the live engine 2026-08-19: FACEBOOK_APP_ID, FACEBOOK_APP_SECRET,
+    // LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, TIKTOK_CLIENT_ID, YOUTUBE_CLIENT_ID are all length
+    // 0 — there is no platform app for OAuth to start against on ANY network. The instagram-only
+    // test above proves the shape once; this proves the SAME refusal fires for every network this
+    // deployment has actually turned on (`config.social.publisher.enabledNetworks`, default
+    // instagram/facebook/linkedin) rather than dead-ending into a generic error on the ones nobody
+    // happened to test.
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("everynet") }, manager);
+    for (const network of config.social.publisher.enabledNetworks) {
+      const res = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/${network}`, manager);
+      expect(res.statusCode, `readiness read must never throw for network=${network}`).toBe(200);
+      expect(res.json(), `network=${network} must refuse honestly, not fall through`).toMatchObject({
+        ok: false,
+        reason: "platform_app_not_registered",
+      });
+
+      const connectRes = await post(
+        `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network, handle: `@${network}-brandone` }, manager,
+      );
+      expect(connectRes.statusCode, `connect POST for network=${network} must be a typed 409, never a generic 500`).toBe(409);
+      const body = connectRes.json();
+      expect(body.code, `network=${network} connect refusal must name itself`).toBe("platform_app_not_registered");
+      // The agentic bar's own criterion 5: a refusal must never surface as a generic error or an
+      // empty list. `error` must carry real prose naming the actual gap, not a bare code with no
+      // human-readable explanation.
+      expect(typeof body.error).toBe("string");
+      expect(body.error.length).toBeGreaterThan(0);
+    }
+  });
+
   it("refuses a client that is not on the own-brand allow-list — client connects wait for AGPL counsel sign-off (OQ-3)", async () => {
     await registerPlatformApp("instagram");
     await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("oq3") }, manager);

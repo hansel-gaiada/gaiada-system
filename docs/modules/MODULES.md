@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.0` | IN PROGRESS | Social Media | 2026-08-13 |
+| social-media | `0.5.2` | IN PROGRESS | Social Media | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -1245,7 +1245,67 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.1` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.2` · IN PROGRESS
+
+**0.5.2 (2026-08-19, SMM-14 — P1 end-to-end + golden cases, QA gate pass):** P1 is code-complete
+(SMM-06/07/09/10/12/13/36/39, all merged) — this pass is verification + one regression pin, not new
+product code. Findings, stated plainly per the repo's status-language rule:
+
+- **The publish loop is DEV-VERIFIED against the mock driver, end to end: compose → per-network
+  variants → validation → `args_sha256` → approval → the SMM-09 publish gate → SMM-10 dispatch →
+  the transactional `approval_id`+`provider_post_id` stamp → status reconcile.** Driven through the
+  REAL D14 executor (`executeApprovedAutomationWrite`, `core/d14-smm-09-social-publish-registry.test.ts`
+  (D)–(G) blocks) with a stubbed hub boundary asserting the hub is called exactly zero or one times
+  per precondition outcome, and through `dispatchApprovedPublish` directly against real Postgres + the
+  in-memory mock driver (`dispatch.test.ts` T1–T12). **Live network publishing stays BLOCKED on
+  OQ-1**: verified on the live engine 2026-08-19 that `FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET`/
+  `LINKEDIN_CLIENT_ID`/`LINKEDIN_CLIENT_SECRET`/`TIKTOK_CLIENT_ID`/`YOUTUBE_CLIENT_ID` are all length
+  0 — no platform-app review has landed for any network, so OAuth cannot begin. Not fakeable, not in
+  scope for this ticket to close.
+- **Every refusal token in `PUBLISH_REFUSAL` (6 stages) and `DISPATCH_REFUSAL` renders as itself** —
+  a typed `reason`/`code`, never a generic error or an empty list — proven through the real HTTP
+  filters (`publisher-error.filter.ts`, `publish-gate.test.ts`'s HttpErrorFilter-trap pin) and the
+  executor's own `execution_error` column. Added one new adversarial case,
+  `provisioning.test.ts` — "refuses `platform_app_not_registered` honestly on EVERY
+  deployment-enabled network" — looping every network `config.social.publisher.enabledNetworks`
+  actually turns on (not just the instagram case the existing suite happened to cover), asserting
+  the connect POST is a typed 409 with non-empty prose for each.
+- **⚠ REGRESSION FOUND, NOT FIXED — SMM-13's notification/mail routing is dead code in the running
+  app.** `event-handlers.ts` registers `handlePostDispatched`/`handlePostPublished`/`handlePostFailed`
+  against `socialModule.eventHandlers`, keyed to events emitted with entity type
+  `"social_post_variant"` (`dispatch.ts`, `post-status-sync-job.ts`). `main.ts`'s
+  `startConsumerLoop([...])` — the only thing that decides whether a Redis stream is ever drained —
+  does **not** list `"social_post_variant"`. The events are written to the outbox and relayed, and
+  read by nobody: no in-app notification and no risk-shaped mail ever fires for a real
+  dispatch/publish/failure, in any running deployment, today. `event-handlers.test.ts` is green
+  because it calls the three handler functions directly, never through the consumer loop — the same
+  "tests that pass while the feature is dead" class this module has now produced five times. Pinned
+  red by a new static suite, `src/modules/social/event-wiring.test.ts` (mirrors
+  `src/events/position-consumer.test.ts`'s own P2-05 discipline), so this cannot silently re-pass.
+  **Not fixed here** — QA reports defects, senior-be/senior-integrator owns adding the stream to the
+  watched list in `main.ts`. Module status stays `IN PROGRESS` rather than moving toward
+  DEV-VERIFIED across the board because of this.
+- **The UI flow (SMM-12: Calendar drag-to-reschedule, quota strips, submit-with-preview) had never
+  been driven in a browser** — DEMO_MODE had no Social Media department fixture. A fixture
+  (`platform-ui/src/lib/demoSocial.ts`) was added in this pass so the flow is drivable; see that
+  commit and the platform-ui CHANGELOG entry for what was verified in a real browser versus only in
+  unit tests.
+- Module GUC audit (0105's third RLS wall, `app_module_allowed('social')`): every `withTenants` call
+  touching a `social_*` table across `social.controller.ts`, `dispatch.ts`, `post-status-sync-job.ts`,
+  `inbox-retention-job.ts`, `creator-info-verifier.ts`, `publisher/provisioning.ts` and
+  `event-handlers.ts` either passes `{modules:["social"]}` or calls the exported
+  `declareSocialModuleScope` explicitly — no further silent-zero-rows path found beyond the event-
+  wiring regression above (which is a consumer-registration gap, not a GUC gap).
+- No vacuous-test patterns (`.resolves.not.toThrow()`, an empty-tenant-scope read) found in the
+  existing social suite; `mail_log` assertions already read via `adminPool()` with `config.mail.enabled`
+  flipped in-test, matching `mail/queue.test.ts`'s own idiom.
+- Test counts (passed/failed/skipped, three separate numbers, DATABASE_URL_TEST present so nothing
+  silently skipped): `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` together
+  **288 passed / 1 failed / 0 skipped**. The one failure is the `event-wiring.test.ts` pin above —
+  failing BY DESIGN, proof of the SMM-13 regression, not an environmental flake. Baseline for
+  `src/modules/social` alone was 234 passing; it is now 235 (+1: the new provisioning case) plus the
+  new, deliberately-red `event-wiring.test.ts` (1 file, 1 case). `tsc --noEmit` clean.
+  `lint-migration-names.mjs` clean (no migration added).
 
 **0.5.1 (2026-08-19, SMM-39 — `uploadMedia` actually wired into the dispatch path, DEV-VERIFIED
 against a mock driver + a real Postgres):** closes the defect SMM-10 flagged by name in its own
