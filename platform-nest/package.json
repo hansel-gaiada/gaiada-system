@@ -11,6 +11,7 @@
     "seed:personas": "node dist/seed/personas.js",
     "seed:departments": "node dist/seed/departments.js",
     "seed:automation": "node dist/seed/automation.js",
+    "iam:backfill": "node dist/seed/iam-phase2-backfill.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
     "seed:search": "node dist/seed/search.js",
     "seed:portal-clients": "node dist/seed/portal-clients.js",

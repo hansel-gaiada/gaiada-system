@@ -128,6 +128,26 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.052.0105a` - 2026-08-19 - the estate can be described, and IT can hand out the logins
+
+Manifest (counter +1, 0104 -> 0105): `platform-nest 0.28.0 -> 0.29.0`. No migration.
+
+Wave D's data half and the IT surface, both backend-only.
+
+**P2-15** makes the Phase 2 engine describe the estate that already exists: employees from staff
+memberships, assignments where they are derivable, and adoption of hand-made grants that exactly match a
+seat. Adoption's rule — re-label, never create or widen — is enforced as a transaction ABORT on the
+`user_roles` count, not a log line, and proven by a test that plants a row mid-transaction. The
+position import is deliberately report-only forever.
+
+**P2-13** gives IT the worklist ("who still needs a login, whose leaver login is still enabled") and the
+four actions that fix it. It returns a typed 503 rather than an empty list when it cannot see Keycloak,
+because an empty worklist is a claim it has no right to make while blind.
+
+Worth recording: the backfill's first draft would have created HR records for every automation account,
+because bots hold real memberships on purpose. Two walls now stand between them and the HR directory, and
+the report names everything either wall excludes.
+
 ### `Alpha 01.051.0104a` - 2026-08-19 - IAM reaches the agents, and Cerbos goes back to deciding
 
 Manifest (counter +2, 0102 -> 0104): `platform-nest 0.27.0 -> 0.28.0`, `mcp-hub 0.10.1 -> 0.10.2`.
@@ -1905,6 +1925,64 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.29.0] - 2026-08-19 - IN PROGRESS (P2-15 backfill + adoption; P2-13 the IT accounts backend)
+**P2-15 — `src/admin/iam-phase2-backfill.ts` + `npm run iam:backfill`.** Four opt-in pieces; dry run is
+the default and there is no flag that applies everything.
+- **Adoption re-labels and NEVER widens, enforced as an ABORT.** `user_roles`' row count is read before
+  and after INSIDE the writing transaction; a difference raises `AdoptionWidenedAccessError` and rolls
+  the run back. The count is GLOBAL, not tenant-scoped — `user_roles` has no tenant column, and a
+  tenant-filtered count would miss a row written with the WRONG scope, which is exactly the mistake that
+  matters. Proven by a test that plants a row inside the apply transaction via a trigger and asserts
+  both the throw and the rollback.
+- **No second matcher.** "A grant that exactly matches what this seat confers" already exists once, in
+  `position-reconciler.ts`; its `skip_manual` verdict IS the candidate list. A second matcher here could
+  adopt a row the reconciler would never manage.
+- 🔴 **The hazard a one-line INSERT…SELECT would have shipped:** automation accounts hold real
+  `company_memberships` rows on purpose, so a membership-driven backfill mints a person-shaped HR record
+  for every bot. The primary filter is `kind='employee'` (design §9's stated source — migration 0026's
+  column, which I initially and wrongly recorded as non-existent). A SECOND wall excludes anything
+  carrying an `n8n` identity link, because nothing ENFORCES the kind, and every exclusion is NAMED in the
+  report so a reviewer can confirm the wall never fired on a human.
+- **Two categories are REVIEWED rather than decided:** a `@gaiada.system` address with no automation link
+  (including it puts a bot in HR; excluding it hides a person), and a staff membership for a client
+  principal — impossible per 0072, so a non-empty list is a pre-existing data defect and gets a human,
+  never an HR record.
+- **Position import is REPORT-ONLY, permanently.** A blob `role` node carries no role-set, so an imported
+  seat would confer nothing and then read, forever after, as a seat someone deliberately left empty.
+  Pinned by a test that runs apply with every flag and asserts the `positions` count is unchanged while
+  the candidate list is non-empty.
+- **Assignments only where UNAMBIGUOUS** (exactly one active position in the unit); zero and many are
+  both reported. `valid_from` is TODAY, never back-dated — back-dating asserts someone held a seat, and
+  its roles, during a period nobody verified. `hire_date` is left NULL for the same reason.
+- Operator guardrails: `--all-tenants` is dry-run only and refuses to combine with an apply flag; an
+  unknown flag is a hard error (a typo'd `--adoptions` that silently dry-ran would read as "adoption did
+  nothing"); every apply prints the before/after count so the claim is visible rather than trusted.
+
+**P2-13 — `src/admin/it-accounts.controller.ts`** (design §5.4), over the existing
+`core/keycloak-admin.ts`. Worklist + provision/disable/enable/reset-password, all idempotent, all audited.
+- 🔴 **Degradation is a typed 503, never an empty list.** An empty worklist means "everyone has a login",
+  which is the most dangerous sentence this surface can produce while blind.
+- **Idempotence converges.** `provision` looks the address up first, and Keycloak's own 409 is treated as
+  "adopt it" — including the race between lookup and create. Two logins for one address would be an
+  authentication ambiguity, not untidiness. A double-provision returns `adopted:true` and NO password:
+  an existing account's credential is not ours to rotate silently.
+- **The initial password is returned once and never audited** (a credential in an activity row is a
+  credential in every export of it). `reset-password` records the REASON instead.
+- **The identity link is created UNVERIFIED**: an admin creating an account is not the person proving
+  control of it.
+- **NOT HR-module-gated** — IT provisioning is not an HR capability, and gating it would make login
+  management vanish for a company with HR switched off while its people still need logins. Only the
+  employment-status read is module-scoped, so its absence degrades the ROW; `leaver_still_enabled` can
+  therefore only ever be claimed from real data.
+- `deriveRow` is pure and exported, and `leaver_still_enabled` deliberately OUTRANKS `unverified_link`:
+  a leaver who can still log in is a security finding, an unverified link is paperwork.
+- ⚠ **I hit the trap `http-error.filter.ts`'s own header documents** — threw `{error: token}` where the
+  filter renames `message` to `error` and reads nothing called `error`. Every typed refusal was arriving
+  as prose with the meaning stripped; the status codes and shape were right, which is what makes it easy
+  to miss. Tokens now lead the `message` string.
+- Gates: P2-15 19/19 (incl. the abort-and-rollback proof), P2-13 25/25, admin regression 349/349,
+  `tsc --noEmit` + all four lints clean. The P2-15 CLI was also driven end-to-end against a freshly
+  migrated scratch database — dry run, both guardrails refusing, and an apply that wrote exactly one row.
 ### [0.28.0] - 2026-08-19 - IN PROGRESS (core gets a tool surface; IAM Phase 2 becomes agent-reachable)
 - **`src/core/core-tools.ts`** — a registry for tools owned by CORE controllers, unioned into
   `GET /mcp/tool-defs` ahead of the module tools. Closes the structural gap 0.26.0 recorded: the

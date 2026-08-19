@@ -780,3 +780,90 @@ that silently covered two actions would be one edit away from covering neither. 
 an unresolvable requester. Pinned by live-engine probes in
 `src/rbac/client-member-delete-denied.test.ts` (which has outgrown its filename — it is now the
 live-probe suite for several owner decisions).
+
+---
+
+## 13. IAM Phase 2 (P2-15, 2026-08-19) — the backfill, and the two things it refuses to decide
+
+`src/admin/iam-phase2-backfill.ts` + `npm run iam:backfill`. Four independent pieces, each opt-in by
+flag; **dry run is the default and there is no flag that applies everything.**
+
+### 13.1 What counts as staff — and why it is not "every membership"
+
+Source: `company_memberships` where `kind = 'employee'` and `status = 'active'`. Two properties of that
+table make it the right source, and neither is inferred:
+
+* **Clients are structurally absent.** Migration 0072's header records the decision: `company_memberships`
+  keeps its meaning as "staff and service accounts of this company", and the two places that genuinely
+  need client contacts read `client_contacts` instead. The stated reason is exactly this hazard — "a
+  client contact appearing in /people and the HR directory as an employee: a data-exposure bug that looks
+  like ordinary data once it happens."
+* **`kind` separates the bots.** Automation accounts hold real memberships on purpose (bots are `users`
+  rows so authorization, audit and OBO work uniformly), and `seed/automation.ts` marks them
+  `kind='service'`.
+
+**A second wall exists anyway, because nothing ENFORCES the kind.** A bot inserted with the default
+`kind='employee'` — by a future seeder, a fixture, a hand-written row — would otherwise receive a
+person-shaped HR record. The backfill therefore also excludes any candidate carrying an `n8n` identity
+link, and **names every exclusion in the report** so a reviewer can confirm the wall never fired on a
+human. `whatsapp` links are explicitly not disqualifying: those are real people reaching the estate over
+WhatsApp.
+
+Two categories are **reported for review and neither created nor excluded**:
+
+| Category | Why it is a question, not a rule |
+|---|---|
+| `@gaiada.system` address with no automation link | Including it puts a bot in HR; excluding it hides a real person. A script should not decide this quietly. |
+| A `kind='employee'` membership whose user is also a client contact or a client's portal user | Should be impossible per 0072. A non-empty list is a pre-existing data defect, and the answer is a human looking at it — never an HR record for a client. |
+
+`hire_date` is left NULL. The estate does not record when these people started, and `created_at` would
+read as a hire date to every later report.
+
+### 13.2 Position import is REPORT-ONLY, permanently
+
+The report lists candidates derived from org-blob `role` nodes (the informal ancestor of a position).
+**`applyTenantBackfill` never creates a position, and that is not a phase-1 limitation.** A blob role node
+carries no role-set, so an imported seat would confer nothing and then look, to every later reader, like a
+seat someone deliberately left empty. Pinned by a test that runs apply with every flag set and asserts the
+`positions` row count is unchanged while the candidate list is non-empty.
+
+### 13.3 Assignments are derived only where UNAMBIGUOUS
+
+`org_unit_memberships` (open rows) → `position_assignments`, and **only** when the unit has exactly one
+active position. Zero and many are both reported, never guessed: picking "the first" would seat someone
+into a role-set nobody chose for them, and a wrong seat grants a wrong role — the top hazard in this
+program's risk table.
+
+`valid_from` is **today**, never back-dated to the membership: back-dating asserts the person held that
+seat, and its roles, during a period nobody verified. `assigned_by` is NULL because no human assigned it;
+the `reason` string carries the provenance instead.
+
+### 13.4 Adoption re-labels and NEVER widens — enforced as an abort
+
+Adoption re-tags a hand-made `user_roles` row as `managed_by_position` and adds one
+`position_grant_claims` row **per justifying seat** (A2 refcounting — without the full set, a person
+holding two seats that both confer the role loses the grant when the first seat closes).
+
+**The invariant:** `user_roles`' row count is read before and after **inside the writing transaction**, and
+a difference raises `AdoptionWidenedAccessError`, which rolls the whole run back. It is an abort rather
+than a log line because the failure it guards is "someone silently gained access during a maintenance
+run". The count is GLOBAL, not tenant-scoped: `user_roles` has no tenant column, and a tenant-filtered
+count would miss a row written with the wrong scope — exactly the mistake that matters. Proven by a test
+that plants a row inside the apply transaction via a trigger and asserts both the throw and the rollback.
+
+**There is no second matcher.** "A grant that exactly matches what this seat would confer" is already
+implemented once, in `position-reconciler.ts` (`collectDesired` + `classifyExisting`), and its
+`skip_manual` verdict IS the adoption candidate list. A second matcher here could adopt a row the
+reconciler would never manage.
+
+**A user FROZEN by an orphaned seat (A16) is skipped entirely** — the reconciler refuses to reason about
+such a user, and the backfill does not reason further than the engine that will own the result.
+
+### 13.5 Operator guardrails
+
+* `--all-tenants` is dry-run only and **refuses** to combine with any apply flag; apply targets exactly
+  one tenant per run.
+* An unknown flag is a hard error, not an ignored token: a typo'd `--adoptions` that silently ran a dry
+  run would read, to the operator, as "adoption did nothing".
+* Every apply prints the before/after `user_roles` count, so the claim the run is making is visible
+  rather than trusted from an exit code.
