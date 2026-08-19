@@ -307,3 +307,44 @@ fires, which looks identical to peace:
 | Expression against the live job | **empty** ⇒ will not false-fire |
 | Same expression against a deliberately missing job | **1** ⇒ will fire on a real outage |
 | Rule loaded on the remote | yes (22 rules), currently not firing |
+
+---
+
+## 12. MON-09p — attempted, reverted, and it paid for itself
+
+Metrics were switched to `otlphttp` (the only exporter with a disk-backed queue). Prometheus's OTLP
+receiver then promoted **every resource attribute to a label**: `http_scheme`, `net_host_name`,
+`net_host_port`, `server_address`, `server_port`, `service_instance_id`, `service_name`, `url_scheme`.
+
+`job` and `instance` survived, so every alert rule kept matching — which is exactly what would have
+let this through a review. But **series identity changed**, breaking continuity with history and
+multiplying cardinality:
+
+| Metric | Before | After the switch |
+|---|---|---|
+| `up` | 16 | **30** |
+| `pg_up` | 2 | **4** |
+| `probe_success` | 6 | **12** |
+
+Reverted to remote_write.
+
+### The attempt exposed a pre-existing bug
+
+After reverting, the surviving series **still carried those eight labels** — so `remote_write` had
+been doing the same promotion all along, via `resource_to_telemetry_conversion: enabled` set when that
+exporter was first written. Every relocated series had carried eight junk labels since the migration,
+and nothing would have surfaced it: `job`/`instance` were right, counts looked plausible, and no rule
+misbehaved. Now disabled.
+
+Verified **after** the 5-minute staleness window — checking sooner shows the old and new series sets
+simultaneously and reads as a failed revert:
+
+- series identity clean: `{__name__, instance, job}`
+- counts back to baseline: 16 / 2 / 6
+- all 8 jobs present
+
+### What MON-09p still needs
+
+A durable metrics path remains worth having, but it requires a `resource`/`transform` processor
+stripping those attributes **before** export, applied deliberately with a cardinality check — not as a
+tail-end swap. The disk-backed queue on **traces and logs is unaffected** and stays in place.
