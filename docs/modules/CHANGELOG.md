@@ -46,6 +46,28 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-19 — SMM-39**, `social-media 0.5.0 -> 0.5.1` (IN PROGRESS). `dispatch.ts` actually calls
+  `SocialPublisher.uploadMedia` now — SMM-05 built the port method and SMM-10's own "KNOWN
+  LIMITATION" comment named the gap by name (`toDispatchMedia` mapped `fileId` onto the engine ref
+  verbatim, a placeholder that made any post carrying an attachment fail at the publisher with
+  `publisher_http_error`), and no ticket in between ever wired it up. `resolveEngineMedia` reads each
+  attachment's bytes out of `files` (plain core tenant wall, NOT `social_*` — conflating that with
+  the module GUC is this module's most-repeated trap) and uploads OUTSIDE the claim transaction/
+  advisory lock, mirroring SMM-10's own creator-info-fetch discipline. Resolved refs land in a NEW
+  additive `uploaded_media jsonb` column (`migrations/0116_social_variant_uploaded_media.sql`) keyed
+  by `fileId` — deliberately NOT the hashed `media` column, so resolving an attachment can never
+  invalidate the approval it is executing under (D-15). Persisted per-fileId the instant its own
+  upload succeeds, so a redispatch after a partial failure never re-uploads what already succeeded.
+  A partial failure (attachment 2 of 3) refuses BEFORE `schedulePost` — new token
+  `DISPATCH_REFUSAL.mediaUploadFailed`, added to `dispatch.ts`'s own small vocabulary rather than
+  `PUBLISH_REFUSAL` (SMM-12/17/22/31's contract) — and the approval is still consumed (SMM-09's
+  `neverAutoRetry`). Text-only variants never touch `files`/`storage()`/the driver. No new endpoint;
+  `dispatch.test.ts`'s own fixtures had been naming a `fileId` with no `files` row behind it at all
+  (exactly the gap this ticket closes) and now attach real rows throughout, plus 3 new cases
+  (partial-failure refusal, idempotent-redispatch skip, text-only no-op). 225/225 passing in
+  `src/modules/social` (was 222/222), 0 skipped; `tsc --noEmit` clean; `lint:withtenants`,
+  `lint:migration-rls`, `lint:postiz-deps` all green. MAP.md regenerated (migration head 0116).
+
 - **2026-08-13 — SMM-05**, `social-media 0.4.1 -> 0.5.0` (IN PROGRESS). The `SocialPublisher` port,
   its Postiz HTTP+JSON driver, `social_publisher_orgs` provisioning, connector-registry sync and the
   cross-client dispatch-chain check land in `platform-nest/src/modules/social/publisher/`. **This is

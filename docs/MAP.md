@@ -164,9 +164,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0115_iam_override_decide.sql`
-- Next free number: `0116` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 115
+- Head: `0116_social_variant_uploaded_media.sql`
+- Next free number: `0117` — **reserve it by creating the file**, concurrent sessions share this checkout.
+- Applied files on disk: 116
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

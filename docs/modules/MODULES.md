@@ -1245,7 +1245,42 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.0` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.1` · IN PROGRESS
+
+**0.5.1 (2026-08-19, SMM-39 — `uploadMedia` actually wired into the dispatch path, DEV-VERIFIED
+against a mock driver + a real Postgres):** closes the defect SMM-10 flagged by name in its own
+"KNOWN LIMITATION" comment: `dispatch.ts`'s `toDispatchMedia` mapped the composer's `fileId`
+descriptor onto the engine ref verbatim — a placeholder, never a real upload — so any post carrying
+an attachment failed at the publisher (`publisher_http_error`). No ticket had ever called
+`SocialPublisher.uploadMedia` (SMM-05 built it, unused, until now).
+
+- **`resolveEngineMedia`** (`dispatch.ts`) reads each attachment's bytes out of `files` (plain core
+  tenant wall — NOT a `social_*` table, so no module GUC, and conflating the two is the trap this
+  module has already hit four times) and calls `uploadMedia` for real, ONE attachment at a time,
+  OUTSIDE the claim transaction and the advisory lock — the same discipline SMM-10's creator-info
+  fetch already established for this file, because the upload is real network I/O against the
+  licence zone with its own 120s timeout class.
+- **Refs never touch the hashed args.** `social_post_variants.media` stays composer content, inside
+  `args_sha256` (D-15); the resolved `{id, url?}` refs live in a NEW additive column,
+  `uploaded_media jsonb` (migration `0116_social_variant_uploaded_media.sql`), keyed by `fileId`.
+  Writing the upload result into `media` itself would have invalidated the very approval the upload
+  is executing under — a self-inflicted `args_hash_mismatch` deadlock this ticket's own brief named.
+- **Idempotent per (variant, file), durably.** Each fileId's ref is persisted the instant ITS OWN
+  upload succeeds, not batched — so a redispatch (a fresh approval after a prior attempt failed
+  partway through) resumes rather than re-uploading everything from zero.
+- **Refuses closed on partial failure.** A three-image variant whose second upload fails never
+  reaches `schedulePost` at all — no one/two-image post goes out. New token
+  `DISPATCH_REFUSAL.mediaUploadFailed` (`media_upload_failed`), added to `dispatch.ts`'s own small
+  vocabulary (not `PUBLISH_REFUSAL`) because "we never reached the engine" and "the engine rejected
+  it" (`dispatch_error`) are different facts an operator needs to tell apart. The approval is still
+  consumed either way (SMM-09's `neverAutoRetry` doctrine).
+- **Text-only variants are untouched** — `resolveEngineMedia` returns immediately, before touching
+  `files`, `storage()` or the driver, when a variant carries no media.
+- 15 new/changed assertions across `dispatch.test.ts` (3 new cases: partial-failure refusal,
+  idempotent-redispatch skip, text-only no-op; existing cases updated to attach REAL `files` rows —
+  the fixtures had been naming a `fileId` with no row behind it at all, which is exactly the gap this
+  ticket closes). 225 passing in `src/modules/social` (was 222), 0 failing, 0 skipped. `tsc --noEmit`
+  clean.
 
 **0.5.0 (2026-08-13, SMM-05 — the `SocialPublisher` port + org provisioning + connector-registry
 sync, DEV-VERIFIED against a mock/contract suite; the engine itself is still undeployed):**
