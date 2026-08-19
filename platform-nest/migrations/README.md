@@ -506,3 +506,27 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    construction: it clears every TRUE first, so a re-run (or a later bundle re-seed) cannot strand a
    stale marker. Asserts the DELTA (`marked <> expected` raises) rather than any total, per the 0093
    lesson. **Next unused is `0115`** — re-verify with `ls migrations | sort | tail`.
+
+   **⚠ 2026-08-19 — `0114` NUMBER COLLISION (two files, both applied). NOT to be repeated.**
+   `0114_iam_self_scoped_marker.sql` and `0114_social_creator_info_snapshot.sql` both exist and are
+   both in `schema_migrations` on the live box. Two concurrent sessions each ran `ls migrations | sort
+   | tail`, each saw `0113_social_inbox_retention.sql` as the head, and each reserved `0114` — the
+   exact race rule 5 exists to prevent, and the second instance of it in this program (see the
+   2026-08-10 note about pre-assigning numbers when authors overlap).
+
+   **No damage this time, and here is precisely why**, so nobody concludes the protocol is optional:
+   the runner orders by `readdirSync().sort()`, which is deterministic, so `..._iam_...` ran before
+   `..._social_...` on every environment identically; the ledger is keyed on the FULL filename, so
+   both rows coexist without either being skipped; and the two files touch disjoint tables
+   (`role_permissions` vs the social tables). Change any one of those three and this is a corrupted
+   estate rather than an untidy log.
+
+   **Deliberately NOT renumbered.** Renaming an applied file makes the runner treat it as new work:
+   the marker migration is idempotent (it clears every `self_scoped` before re-marking) so a re-run is
+   harmless, but it would add a second ledger row for the same change and rewrite shipped history for
+   no benefit. Both numbers stay; `0114` is now a permanently DOUBLE-BOOKED number, alongside the
+   `0058`/`0059`/`0070` orphan gaps.
+
+   **Next unused is `0115`** — and while two sessions are active in this checkout, RESERVE IT BY
+   CREATING THE FILE before writing DDL, per rule 5. `ls | tail` alone is not sufficient and has now
+   failed twice.
