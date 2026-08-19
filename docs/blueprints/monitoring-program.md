@@ -573,3 +573,29 @@ thinks of as one thing, and every role bundle would then need all of them to pro
 role-only today and need a deliberate decision — either a catalog key each, or fold them under
 `maintenance.create` / `status_page.publish` respectively on the grounds that whoever may open a
 window may close it, and whoever may publish may edit what they published.
+
+### 13.2 Cerbos decisions PROBED against a live server (2026-08-19)
+
+Policies loaded is not policies working — this estate has had a *healthy* Cerbos serve two-day-stale
+policy — so the five monitoring policies were pushed to the live container, Cerbos was restarted, and
+**12 decisions were probed through the real `/api/check/resources`**. All 12 matched the design:
+
+| Principal | Action | Result |
+|---|---|---|
+| `monitoring_staff` | `monitor:read`, `monitor:create`, `incident:acknowledge` | ALLOW |
+| `monitoring_staff` | `monitor:delete`, `maintenance:create`, `channel:manage`, `status_page:publish` | **DENY** |
+| `monitoring_manager` | `monitor:delete`, `maintenance:create`, `status_page:publish` | ALLOW |
+| `client` | `monitor:read` | **DENY** |
+| `monitoring_staff`, assurance `low` | `monitor:read` | **DENY** |
+
+So the staff/manager split is real behaviour, not just a table in a migration: staff can run the desk
+and claim incidents but cannot erase history, suppress alerting, manage outward-delivering channels, or
+expose a client publicly. A client principal gets nothing on the staff-side kinds, and a low-assurance
+session gets nothing at all.
+
+⚠ **Two harness false-negatives on the way, both worth recording** because each looked exactly like a
+broken policy: `docker run` without `-i` never attached stdin, so Cerbos received an empty body and
+reported "principal: value is required" for all 12 cases; then launching one container per case failed
+silently on 8 of them with empty output. Neither was the policy. A probe harness that cannot deliver its
+own request reports the subject as broken — the same shape as every other false signal in this
+programme.

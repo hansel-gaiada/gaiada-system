@@ -36,7 +36,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 | — | UI: `/monitoring` board, detail, editor, channels + `lib/monitoring.ts` + demo fixtures + nav + contract §20 | PROTOTYPED (browser-driven) |
 | MON-10 | Schema `0116`: 9 tables, FORCE RLS on all, `monitor_results` partitioned | DEV-VERIFIED (applied to a throwaway DB) |
 | MON-10b | IAM `0117`: 9 permissions, 2 roles, 32 bundles + module contract + boot registration | DEV-VERIFIED (idempotency proven) |
-| — | Cerbos policies for 5 resource kinds (role arms) | PROTOTYPED — needs a Cerbos restart + probe |
+| — | Cerbos policies for 5 resource kinds (role arms) | **DEV-VERIFIED** — loaded into live Cerbos and **12/12 decisions probed**, incl. every staff/manager boundary |
 | MON-11a | Driver registry: absent-not-inert, no default branch, registration pin | DEV-VERIFIED |
 | MON-11b | SSRF egress floor + **closed an IP-literal bypass** found by probing Node | DEV-VERIFIED (mutation-probed) |
 | MON-11c | `http` + `keyword` drivers, manual redirect re-validation | DEV-VERIFIED |
