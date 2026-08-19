@@ -269,3 +269,129 @@ keyed on the full filename, disjoint tables). That is luck holding, not a protoc
 Candidates, in `migrations/README.md`: per-session number blocks · **timestamp-prefixed filenames**
 (recommended — removes the race by construction and the runner's sort keeps working) · a git-committed
 claims file. Expect recurrence until one is picked.
+
+---
+
+# 2026-08-19 continuation — §§11 and 12 are CLOSED, and two live defects were found closing them
+
+Everything in §11 and §12 above is now resolved rather than pending. Three releases:
+**`Alpha 01.050.0102a`**, **`Alpha 01.051.0104a`**, plus one non-versioned tooling commit. All three
+verified on the live box (`gda-aicenter`), not by a green CI run — CI on `main` is red for reasons that
+belong to another session (see §16).
+
+## 13. §11's write half is done, and the executor had an RLS hole in it
+
+`hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee` are declared, each with a D14 entry
+(`registerJmlExecutableApprovals`), and all three names are in `resource_mcp_tool.yaml`'s executable
+allow-list. **All three parts are load-bearing**: an entry without the allow-list passes its precondition
+and is then denied at the hub door; a tool without an entry suspends and then does nothing on approval.
+`hr-employee-tools.test.ts`'s invariant now reads "declared WITH an executor".
+
+`lockKey` is the PERSON — `employeeId`, else the case-folded `workEmail` (a joiner has no employee row
+yet). Preconditions detect a first attempt that already landed (`employee_already_exists`,
+`already_in_target_position`, `already_terminated`) and refuse a stale request (`position_not_active`).
+None sets `neverAutoRetry`: landed-ness IS observable here, which is `deploy.*`'s property rather than
+`social.publishPost`'s.
+
+🔴 **The defect worth remembering, and it was in `approval-execute.ts`, not in the new code.**
+`employees` sits behind the HR module's third RLS wall; the executor opens its claim transaction with NO
+module scope (correct for every prior entry, whose tables are core). With `app.scopes` unset,
+`app_module_allowed('hr')` is false, so all three preconditions read **ZERO ROWS and no error** — and for
+the hire that is silent in the PERMISSIVE direction: the one guard between a retried approval and a person
+created twice would have passed every time. Fixed with a declared
+`ExecutableApprovalEntry.preconditionModules`, applied by the executor as transaction-local `app.scopes`
+before BOTH precondition sites. `d14-jml-registry.test.ts` (37 cases) asserts the BROKEN unscoped
+behaviour on purpose, so the declaration cannot be dropped as cosmetic.
+
+**Live:** `/mcp/tool-defs` on the box returns 69 tools (was 67) with the three writes at
+`medium/medium/high`; the hub's own `/tools` lists 128 including all three, so the advertising chain is
+closed end to end.
+
+## 14. §11's structural gap is closed — core owns a tool surface now
+
+`src/core/core-tools.ts` is a registry for CORE-owned tools, unioned into `/mcp/tool-defs` ahead of the
+module tools. Of §11's three options this is the third: folding into `hr` is semantically wrong (and
+`hr`'s tools are precisely the ones behind its RLS wall, which these are not), and an `iam`
+ModuleContract would be a module whose tables are core and which no tenant can switch off.
+
+A core tool has **no per-tenant enablement gate** — core has no flag to consult. Stated in the file
+because that is a stronger default than a module tool's.
+
+Declared: `iam.listPositions`, `iam.listAttachableRoles`, `iam.listRoleGrants`, plus
+`iam.requestAssignment` and `iam.requestOverride` at impact **`low`** — their whole effect is a pending
+row a human decides, and `medium` would mean needing an approval to ask for an approval.
+
+🔴 **NOT declared, and this is an OWNER DECISION rather than missing work:** `iam.grantRole`,
+`iam.revokeRoleGrant`, `iam.assignPosition`, `iam.unassignPosition`. The D14-executor objection is gone
+(the pattern is worked), but a role-granting tool is a privilege-escalation surface and this estate's
+audit attribution still says "Alice", not "Alice's agent". If the owner wants them: three D14 entries
+plus allow-list names. Small, and blocked on the decision, not the code.
+
+**Three of the five tool schemas were wrong on first writing** and are now pinned by a test: a filter the
+handler ignores, an optional arg the endpoint 400s without, and — the worst shape — `scopeKind` where the
+handler reads `scopeType`, which would have SUCCEEDED and silently defaulted to company scope.
+
+## 15. §12 is decided: sequential migration numbering is CLOSED
+
+New migrations are `YYYYMMDDHHMM_snake_case.sql` (UTC). `NNNN_` is closed above `0118`, enforced by
+`npm run lint:migration-names` in CI. There is nothing to reserve and nobody to coordinate with.
+
+The lint's FIRST RUN found a fourth collision nobody had noticed: **`0117` is double-booked too**
+(`0117_iam_monitoring_permissions.sql` vs `0117_monitor_results_partition_rls.sql`). Five duplicate
+prefixes now exist (`0003`, `0018`, `0114`, `0117`, `0118`); all are allow-listed by name and a THIRD file
+on any of them fails. Applied files are never renamed — the ledger keys on the filename.
+`docs/MAP.md` no longer advertises a "next free number"; advertising one is what made sessions race.
+
+## 16. 🔴 What is red on `main` and is NOT this program's
+
+1. **The monitoring parity drift.** MON-11a/b landed `monitor`, `monitor_channel`, `monitor_incident`,
+   `monitor_maintenance` and `status_page` Cerbos policies with no `permission-catalog.json` entries, no
+   bundle rows and no `permissions` rows. 12 tests fail across 7 files in `src/rbac` (catalog count,
+   bundle regen-no-diff, DB parity, alignment). Nothing in `hr.*` or IAM drifted. Left alone: that ticket
+   is in flight and editing its catalog underneath it would collide.
+2. **Fixed here, since it was a stale pin from a SHIPPED ticket rather than in-flight work:**
+   `src/mail/templates.test.ts` did not know about `social.post_failed`, which SMM-13 registered without
+   updating the pin. CI's platform-nest job was failing at the mail gate before it ever reached (1).
+
+## 17. 🔴 Cerbos had silently stopped deciding which tools a caller can see
+
+Found by reading `docker logs gaiada-cerbos-1` while verifying `0102a`:
+
+```
+InvalidArgument: number of resources in batch (128) exceeds configured limit (50)
+```
+
+`mcp-hub`'s `visibleToolsFor` asks Cerbos about EVERY registered tool in one `CheckResources` call. The
+server's batch limit is 50. So from the moment the hub passed 50 tools, every visibility check failed and
+`policy.ts` fell back to the in-code engine — **Cerbos was not authoritative for the tool list**, which is
+the one job `resource_mcp_tool.yaml` exists to do.
+
+- **Not fail-open.** The in-code engine is deny-by-default and mirrors the assurance and
+  automation-scope rules. What was lost is any listing rule expressible only in the policy.
+- **The per-CALL path was never affected** — `cerbosAllowsTool` batches exactly one resource. So D14-13's
+  executable allow-list has governed real calls throughout, including §13's new names.
+- Fixed by chunking client-side at `CERBOS_RESOURCE_BATCH_MAX = 40`, concurrent chunks, merged verdicts,
+  any chunk's failure rejecting the whole call (a partial allow-set is indistinguishable from a deny —
+  exactly the ambiguity that let this hide). 4 new cases, verified red-then-green.
+
+**The transferable lesson:** the fallback logged one warning and returned a plausible answer, so nothing
+alerted and no test failed. When a graceful-degradation path exists, ask what proves it is not currently
+active — a warning log is not that proof. Also note the hub's boot banner says "(0 from modules so far)"
+before its bootstrap tick, which looks like a second failure and is not one.
+
+## 18. Also fixed: a test that shipped red with the `0118` split
+
+`authz-permissions.controller.test.ts`'s superadmin parity sweep probed `decide_assignment` /
+`decide_override` with no `creatorId`. Those actions carry a fail-closed DENY on an unknown creator, and
+`resourcePayload()` defaults an omitted `creatorId` to `""` — so the probe tripped the DENY by
+construction and reported two mismatches. **The policy was right; the probe was unsatisfiable**, the same
+shape as `positions.controller.ts`'s "rule a handler can never satisfy" note. Fixed by probing with a
+creator who is somebody else. Earlier targeted runs never covered this file, which is why the split
+shipped with it red.
+
+## 19. Where Phase 2 stands after this
+
+Closed: P2-06, P2-07 (both halves), P2-08, P2-09, the `decide_assignment` split, and both items §§11–12
+left open. Still open and untouched: the UI surfaces (**P2-10 / P2-11 / P2-12-FE / P2-14**), **P2-15**
+backfill, **P2-16** QA battery, **P2-17** doc sync, and Phases 3–7. Two things need the owner rather than
+a session: the direct IAM grant tools (§14) and whether the agent-attribution gap blocks staging.
