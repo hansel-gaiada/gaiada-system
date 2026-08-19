@@ -25,7 +25,7 @@ import { assertPublisherBaseUrlIsPrivate, PublicPublisherBaseUrlError } from "./
 const KEY = "s3cr3t-org-key-do-not-log";
 const handle = (): OrgHandle => new OrgHandle("row-1", "org-abc", KEY);
 
-function driverWithFetch(fetchImpl: typeof fetch, quotaProbeTool = ""): SocialPublisher {
+function driverWithFetch(fetchImpl: typeof fetch, quotaProbeTool = "", creatorInfoProbeTool = ""): SocialPublisher {
   return createPostizDriver({
     baseUrl: "http://10.88.0.2:4007",
     apiPrefix: "/api/public/v1",
@@ -33,6 +33,7 @@ function driverWithFetch(fetchImpl: typeof fetch, quotaProbeTool = ""): SocialPu
     uploadTimeoutMs: 2000,
     connectTimeoutMs: 500,
     quotaProbeTool,
+    creatorInfoProbeTool,
     fetchImpl,
   });
 }

@@ -548,7 +548,38 @@ const configBase = {
       // constant: 25 is obsolete, Meta's own doc says 100 and 50 on the same page, and a synthesized
       // cap is wrong in a way nothing downstream can detect.
       quotaProbeTool: process.env.SOCIAL_POSTIZ_QUOTA_PROBE_TOOL ?? "",
+      // SMM-10/D-22, D-21's fork exception. Same shape and same reasoning as quotaProbeTool
+      // immediately above: EMPTY BY DEFAULT until the ~15-line fork exception is verified against a
+      // live engine. Unset ⇒ the driver does not advertise `creator_info_probe`, the dispatch flow's
+      // live fetch returns `undefined`, and a TikTok publish refuses `creator_info_unverified` — the
+      // fail-closed steady state addendum §A4i/D-22 both describe.
+      creatorInfoProbeTool: process.env.SOCIAL_POSTIZ_CREATOR_INFO_PROBE_TOOL ?? "",
     },
+    // SMM-10 — the dispatch/reconcile pair's own knobs.
+    //
+    // `reconcileIntervalMs` is the SAFETY POLL's cadence: `smm-post-status-sync`'s batched
+    // `getPostStatus` sweep over every in-flight (`queued`/`publishing`) variant. Addendum §A4 already
+    // reasoned that publish LATENCY is not where this programme's cost lives (the queue's own
+    // availability IS publishing reliability for Instagram/LinkedIn — no server-side scheduling on
+    // either), so 15 minutes is deliberately not tuned tighter: a webhook (when the network/engine
+    // offers one) closes the common case immediately, and this poll is the backstop for the case
+    // where it does not fire, is dropped, or fires twice (idempotent either way — see
+    // `post-status-sync-job.ts`'s own header).
+    reconcileIntervalMs: Number(process.env.SOCIAL_RECONCILE_INTERVAL_MS ?? 15 * 60 * 1000),
+    // Dark by default, same convention as every other background sweep in this file
+    // (`pmBurndownSnapshotEnabled`, `itDiscovery.reaperEnabled`, `inboxRetention.purgeEnabled`): a
+    // fresh deployment with no publisher org provisioned has nothing in flight to reconcile, so
+    // starting the loop unconditionally would just be an idle sweep — but turning it on is a
+    // deploy-time decision paired with provisioning the first publisher org, not a boot-time default.
+    reconcileEnabled:
+      process.env.SOCIAL_RECONCILE_ENABLED === "1" || process.env.SOCIAL_RECONCILE_ENABLED === "true",
+    // The webhook intake's shared secret (HMAC-verified, mirroring the search module's
+    // `callbackSecret`/`semCallbackSecret` convention below and MAIL-13's inbound-mail HMAC). Empty
+    // ⇒ the webhook route fail-closed refuses every request rather than trusting an unauthenticated
+    // caller to name a `providerPostId` — a webhook payload is the ONE input in this ticket that
+    // rides an untrusted network hop, and "ids only, never trusted content" does not relax the need
+    // to know WHO is allowed to even name an id.
+    webhookSecret: process.env.SOCIAL_WEBHOOK_SECRET ?? "",
     // SMM-36 — the LinkedIn-driven inbox retention purge (`inbox-retention-job.ts`). DARK by
     // default, same pattern as `pmBurndownSnapshotEnabled`/`serviceAssignmentsEnabled`: unlike
     // those two this job is NOT a pure optimization with a lazy backstop — until it runs, LinkedIn

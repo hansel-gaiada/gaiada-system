@@ -255,16 +255,29 @@ describe.skipIf(!TEST_URL)("SMM-09 · the publish gate over HTTP + the refusal c
     expect((await get(url(variantId), manager)).statusCode).toBe(200);
   });
 
-  it("declares NO publish tool — neither the executable one nor the barred twin", () => {
-    // `social.publishPost` is registered in the D14 executable registry, but its dispatch endpoint is
-    // SMM-10's; declaring it here before that lands would publish a tool the hub cannot successfully
-    // call to every agent in the estate. `social.publishPostMetered` is barred and must NEVER appear.
+  // SMM-10: the dispatch endpoint now exists, so `social.publishPost` is declared — from the pinned
+  // `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` constant, never retyped, because that spread IS the D14
+  // gate this test pins. `social.publishPostMetered` stays undeclared and barred forever.
+  it("declares the EXECUTABLE publish tool from the pinned classification, and the metered twin STILL never appears", async () => {
+    const tool = socialModule.mcpTools.find((t) => t.name === SOCIAL_PUBLISH_TOOL);
+    expect(tool).toBeDefined();
+    expect(tool).toMatchObject({
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/publish",
+      write: true,
+      impact: "high",
+    });
     const names = socialModule.mcpTools.map((t) => t.name);
-    expect(names).not.toContain(SOCIAL_PUBLISH_TOOL);
     expect(names).not.toContain(SOCIAL_PUBLISH_METERED_TOOL);
     // Every declared tool still points at a real endpoint or is explicitly informational.
     for (const t of socialModule.mcpTools) {
       if (t.pathTemplate) expect(t.pathTemplate.startsWith("/api/:tenantId/modules/social")).toBe(true);
     }
+    // Tool parity is only real if the declared path is a route the app actually serves — a random
+    // (never-approved) variant id still reaches the REAL dispatch endpoint and refuses with a typed
+    // token, never Fastify's own "route not found" 404.
+    const res = await post(`/api/${A}/modules/social/variants/${newId()}/publish`, {}, manager);
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({ error: "variant_not_found" });
   });
 });

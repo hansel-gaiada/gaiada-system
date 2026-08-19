@@ -79,7 +79,13 @@ export type PublisherCapability =
   | "post_metrics"
   | "media_upload"
   | "inbox_read"      // Postiz: NO, for every network (spike §8b)
-  | "inbox_reply";    // Postiz: NO, for every network (spike §8b)
+  | "inbox_reply"     // Postiz: NO, for every network (spike §8b)
+  // SMM-10/D-22 — can fetch a TikTok creator's LIVE `creator_info` (allowed privacy levels,
+  // comment/duet/stitch permissions). D-21's fork exception is what makes this reachable on Postiz
+  // at all (the upstream provider fetches this and discards it — see the addendum §5b); on a driver
+  // without the exception, the method returns `undefined` (unknown) and this capability is never
+  // advertised, which is what makes the dispatch-side snapshot come back empty rather than fabricated.
+  | "creator_info_probe";
 
 // ── The org handle: custody split (b), made hard to leak ─────────────────────────────────────────
 //
@@ -148,6 +154,24 @@ export interface IntegrationState {
   /** The network's own account id, when the engine surfaces it. Needed for the Instagram live
    *  quota probe (`GET /<IG_ID>/content_publishing_limit`, §A4f). Absent ⇒ no probe, quota unknown. */
   networkAccountId?: string;
+}
+
+/** D-22's live snapshot shape: the creator's own currently-permitted TikTok posting settings, as
+ *  `creator_info` reports them. Kept small and DESCRIPTIVE (what the creator's account currently
+ *  allows), never PRESCRIPTIVE (this is not a validation verdict) — the comparison against the
+ *  approved `settings` is the `CreatorInfoVerifier`'s job
+ *  (`modules/social/publish-precondition.ts`), not this port's. */
+export interface CreatorInfoSnapshot {
+  /** Privacy levels the creator's account currently permits choosing from, e.g.
+   *  `["PUBLIC_TO_EVERYONE","MUTUAL_FOLLOW_FRIENDS","SELF_ONLY"]`. Empty ⇒ the engine reported none
+   *  (treat as "nothing is permitted", never as "everything is"). */
+  privacyLevelOptions: string[];
+  commentDisabled: boolean;
+  duetDisabled: boolean;
+  stitchDisabled: boolean;
+  /** The engine's own raw payload, preserved for an operator reading a refusal — never re-derived
+   *  logic reads this field; it exists so a human can see what the probe actually returned. */
+  raw?: Record<string, unknown>;
 }
 
 export interface OrgVerification {
@@ -272,6 +296,15 @@ export interface SocialPublisher {
    *  (`GET /<IG_ID>/content_publishing_limit`) or we record that we do not know. A constant here
    *  would be wrong in a way nothing downstream could detect. */
   getQuota(org: OrgHandle, integration: IntegrationState): Promise<QuotaSnapshot | undefined>;
+
+  /** SMM-10/D-22 — the LIVE `creator_info` fetch, called at DISPATCH time, OUTSIDE any claim
+   *  transaction (this is real network I/O — see `publish-precondition.ts`'s `CreatorInfoVerifier`
+   *  header for why that seam forbids it under the advisory lock). Returns `undefined` when the
+   *  driver cannot carry the probe (no `creator_info_probe` capability, or the call itself failed) —
+   *  never a fabricated snapshot. Optional: only meaningful for TikTok-shaped drivers; a driver that
+   *  never advertises `creator_info_probe` may omit it entirely, matching `listComments`/`sendReply`'s
+   *  own optional-capability shape. */
+  getCreatorInfo?(org: OrgHandle, integration: IntegrationState): Promise<CreatorInfoSnapshot | undefined>;
 
   // Publishing. Accepts ONLY approved work: the CALLER enforces §07/D-6, and the driver asserts the
   // approvalId is present so a caller that skipped the gate cannot reach a network by accident.

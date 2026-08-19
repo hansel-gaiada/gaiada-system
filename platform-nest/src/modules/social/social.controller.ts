@@ -29,7 +29,8 @@
 //                        actor, which may be non-human.
 //   7 golden case      — social.test.ts drives each of these against the real endpoint.
 import {
-  BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, Headers, HttpCode,
+  NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
@@ -46,6 +47,11 @@ import {
   evaluatePublishPrecondition, PUBLISH_PRECONDITION_STAGES,
   SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL,
 } from "./publish-precondition";
+// SMM-10 — the dispatch endpoint `social.publishPost`'s `pathTemplate` fronts, and the webhook
+// intake for the reconcile flow. Both are thin: the domain logic (the transactional stamp, the
+// idempotent apply) lives in `dispatch.ts`/`post-status-sync-job.ts`, never re-implemented here.
+import { dispatchApprovedPublish } from "./dispatch";
+import { reconcileOneProviderPost } from "./post-status-sync-job";
 import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
 import { completeViaGateway } from "./gateway-client";
 import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./knowledge-client";
@@ -899,7 +905,14 @@ export class SocialController {
           `UPDATE social_post_variants
               SET body = $1, first_comment = $2, media = $3, settings = $4, scheduled_at = $5,
                   args_sha256 = $6, approval_id = NULL,
-                  status = CASE WHEN status IN ('in_review','approved') THEN 'draft' ELSE status END,
+                  -- SMM-10: 'failed' joins the revert set. Before this ticket a dispatch could never
+                  -- produce 'failed' (SMM-09 built no dispatch path), so this CASE never needed to
+                  -- know about it. It carries approval_id (0105's svar_dispatched_has_approval CHECK
+                  -- requires it for any status outside draft/in_review/approved/cancelled) and this
+                  -- statement clears it in the SAME breath it moves the content — otherwise a failed
+                  -- publish would be permanently unrecoverable: no precondition path and no edit path
+                  -- ever returns it to an editable state.
+                  status = CASE WHEN status IN ('in_review','approved','failed') THEN 'draft' ELSE status END,
                   updated_at = now()
             WHERE id = $7`,
           [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings),
@@ -1077,6 +1090,72 @@ export class SocialController {
       tool: SOCIAL_PUBLISH_TOOL,
       meteredTool: SOCIAL_PUBLISH_METERED_TOOL,
     };
+  }
+
+  // ==================================================== THE DISPATCH ENDPOINT (SMM-10) ========
+  //
+  // What `social.publishPost`'s `pathTemplate` fronts (./index.ts). Reachable in the ordinary flow
+  // ONLY through the D14 executor's re-drive (core/approval-executables.ts's SMM-09 section):
+  // `social.publishPost` is `write:true, impact:'high'`, so an automation/agent principal calling it
+  // directly always suspends into WS4 first. All the domain logic — the second precondition run
+  // under its own lock, the network call, the transactional stamp of `approval_id` +
+  // `provider_post_id` — lives in `dispatch.ts`; this handler is the thin authz + HTTP wrapper every
+  // other endpoint on this controller already is.
+  //
+  // `publish` — not `update` — matching `getVariantPublishPreconditions`'s own comment on why the
+  // dry-run stays read-tier while this, the act itself, is manager-tier
+  // (resource_social_post.yaml). The OBO-resolved principal here is the ORIGINAL FILING principal
+  // (invariant 1, core/approval-execute.ts) — for the automation/agent identity that proposed the
+  // publish, never the human who approved it.
+  @Post("variants/:variantId/publish")
+  @HttpCode(200)
+  async dispatchPublish(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "publish");
+    const verdict = await dispatchApprovedPublish(tenantId, variantId, req.principal.userId);
+    if (!verdict.ok) {
+      // Criterion 2/D22: the SAME snake_case token vocabulary `social.checkPublishPreconditions`
+      // reports, riding `message` — never `error` — so `HttpErrorFilter` renders `{error: token}`
+      // rather than silently replacing it with its own constructor-derived string (src/http-error.
+      // filter.ts's own documented trap).
+      throw new ConflictException({ message: verdict.reason });
+    }
+    return { ok: true, providerPostId: verdict.providerPostId, network: verdict.network };
+  }
+
+  // ==================================================== RECONCILE WEBHOOK INTAKE (SMM-10) =====
+  //
+  // IDS ONLY, NEVER TRUSTED CONTENT. The only field this endpoint reads from the request body is
+  // `providerPostId` — anything else a caller sends (a claimed status, a claimed error message, a
+  // claimed URL) is discarded unread. `reconcileOneProviderPost` re-fetches the authoritative state
+  // itself via `SocialPublisher.getPostStatus` before writing anything, so a malicious or buggy
+  // caller can at most trigger an EARLY, honest re-check — never inject a fabricated outcome.
+  //
+  // No Cerbos authorize() call: this is a machine-to-machine intake, gated by a SECOND, independent
+  // wall on top of the ones every other route on this controller already carries — AuthGuard (the
+  // class-level `@UseGuards`) still requires the platform SERVICE TOKEN bearer (search.controller.ts's
+  // `rank-pulls/callback` is the precedent this mirrors, down to its own "AUTHENTICATION ORDER"
+  // comment: every pre-existing wall stays, a callback secret is additive, never a replacement). A
+  // caller with no service token never reaches this handler at all; `config.social.webhookSecret` is
+  // the SECOND factor a relay holding that token must also present. An unconfigured secret refuses
+  // EVERY request rather than trusting anyone who merely holds the shared service token to name an id.
+  @Post("webhooks/post-status")
+  @HttpCode(200)
+  async postStatusWebhook(
+    @Param("tenantId") tenantId: string,
+    @Body() body: { providerPostId?: string },
+    @Headers("x-social-webhook-secret") presentedSecret?: string,
+  ) {
+    const secret = config.social.webhookSecret;
+    if (!secret || presentedSecret !== secret) throw new UnauthorizedException({ message: "invalid_webhook_secret" });
+    const providerPostId = (body?.providerPostId ?? "").trim();
+    if (!providerPostId) refuse("missing_field");
+    const reconciled = await reconcileOneProviderPost(tenantId, providerPostId);
+    // Always 200: "no such in-flight post" (already terminal, or unknown to this tenant) is not an
+    // error a webhook sender should retry over — it is the expected steady state once a post has
+    // already been reconciled once, and a retry-on-error sender would otherwise hammer this route.
+    return { ok: true, reconciled };
   }
 
   // ==================================================== AI CAPTION DRAFTING (SMM-19) =========
@@ -1501,7 +1580,14 @@ export class SocialController {
           `UPDATE social_post_variants
               SET body = $1, first_comment = $2, media = $3, settings = $4, scheduled_at = $5,
                   args_sha256 = $6, approval_id = NULL,
-                  status = CASE WHEN status IN ('in_review','approved') THEN 'draft' ELSE status END,
+                  -- SMM-10: 'failed' joins the revert set. Before this ticket a dispatch could never
+                  -- produce 'failed' (SMM-09 built no dispatch path), so this CASE never needed to
+                  -- know about it. It carries approval_id (0105's svar_dispatched_has_approval CHECK
+                  -- requires it for any status outside draft/in_review/approved/cancelled) and this
+                  -- statement clears it in the SAME breath it moves the content — otherwise a failed
+                  -- publish would be permanently unrecoverable: no precondition path and no edit path
+                  -- ever returns it to an editable state.
+                  status = CASE WHEN status IN ('in_review','approved','failed') THEN 'draft' ELSE status END,
                   updated_at = now()
             WHERE id = $7`,
           [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings), next.scheduledAt, argsSha256, variantId],

@@ -46,6 +46,7 @@ import type { QuotaSnapshot } from "../media-rules";
 import {
   OrgHandle,
   SocialPublisherError,
+  type CreatorInfoSnapshot,
   type DailyMetrics,
   type DateRange,
   type IntegrationState,
@@ -84,6 +85,12 @@ export interface PostizDriverOptions {
   /** Non-empty ⇒ the driver advertises `quota_probe` and asks the engine for a live limit. Empty ⇒
    *  it does not, and the registry records "unknown" rather than a number. See config.ts. */
   quotaProbeTool: string;
+  /** SMM-10/D-22, D-21's fork exception. Non-empty ⇒ the driver advertises `creator_info_probe` and
+   *  asks the engine for the TikTok creator's live settings via the SAME generic passthrough
+   *  `getQuota` uses. Empty (the default until the fork exception's ~15 lines land and are verified
+   *  against a live engine) ⇒ the driver does not advertise it, and every TikTok dispatch's live
+   *  fetch returns `undefined` — the seam's fail-closed steady state (`creator_info_unverified`). */
+  creatorInfoProbeTool: string;
   /** Injected in tests so no real socket is ever opened. */
   fetchImpl?: typeof fetch;
 }
@@ -104,6 +111,7 @@ export function createPostizDriver(opts: PostizDriverOptions): SocialPublisher {
   const root = `${opts.baseUrl.replace(/\/$/, "")}${opts.apiPrefix}`;
   const capabilities = new Set<PublisherCapability>(POSTIZ_CAPABILITIES);
   if (opts.quotaProbeTool) capabilities.add("quota_probe");
+  if (opts.creatorInfoProbeTool) capabilities.add("creator_info_probe");
 
   /** The one outbound call. Stateless per call: the key comes off the handle, is used for this
    *  request, and is never retained. */
@@ -232,6 +240,29 @@ export function createPostizDriver(opts: PostizDriverOptions): SocialPublisher {
       } catch {
         // Deliberately swallowed: a probe the engine cannot carry is an expected outcome of a
         // documented upstream gap, not an incident. The caller records `probe_unavailable`.
+        return undefined;
+      }
+    },
+
+    async getCreatorInfo(org: OrgHandle, integration: IntegrationState): Promise<CreatorInfoSnapshot | undefined> {
+      // SMM-10/D-22. Same shape as getQuota above, deliberately: one generic passthrough
+      // (`integration-trigger`), gated the same way, failing the same way. D-21's fork exception is
+      // what makes a TikTok provider carry the decorator this needs at all — until it is verified
+      // against a live engine, `creatorInfoProbeTool` is unset and this method is never reached
+      // (the capability isn't advertised, so callers never call it — see the port's own doc).
+      if (!opts.creatorInfoProbeTool) return undefined;
+      if (integration.network !== "tiktok") return undefined;
+      try {
+        const res = await call<unknown>(
+          org,
+          POSTIZ_ROUTES.integrationTrigger(integration.id),
+          { method: "POST", body: { tool: opts.creatorInfoProbeTool, data: {} } },
+        );
+        return parseCreatorInfo(res);
+      } catch {
+        // Deliberately swallowed, same reasoning as getQuota: a probe the engine cannot carry is an
+        // expected outcome of a documented upstream gap, not an incident. The caller (the dispatch
+        // flow) records `creator_info_unverified` — never a fabricated "still permitted".
         return undefined;
       }
     },
@@ -400,6 +431,26 @@ export function parseContentPublishingLimit(raw: unknown): QuotaSnapshot | undef
   return { igPosts24h: { used, cap } };
 }
 
+/** SMM-10/D-22 — normalizes the fork-exception's `creator_info` passthrough response. Tolerant, same
+ *  discipline as every other normalizer in this file: absent fields stay absent, never defaulted to
+ *  "permitted". A missing `privacy_level_options` array becomes an EMPTY one (nothing permitted),
+ *  never omitted from the snapshot — the verifier must be able to distinguish "the engine said
+ *  nothing is allowed" versus "the engine never answered at all" (the latter is `undefined`, this
+ *  function's caller never returning). */
+export function parseCreatorInfo(raw: unknown): CreatorInfoSnapshot | undefined {
+  const rec = asRecord(raw);
+  const payload = asRecord(rec.data ?? rec.creator_info ?? rec.result ?? rec);
+  if (Object.keys(payload).length === 0) return undefined;
+  const options = payload.privacy_level_options ?? payload.privacyLevelOptions;
+  return {
+    privacyLevelOptions: Array.isArray(options) ? options.filter((o): o is string => typeof o === "string") : [],
+    commentDisabled: (payload.comment_disabled ?? payload.disable_comment) === true,
+    duetDisabled: (payload.duet_disabled ?? payload.disable_duet) === true,
+    stitchDisabled: (payload.stitch_disabled ?? payload.disable_stitch) === true,
+    raw: payload,
+  };
+}
+
 export function extractPostId(raw: unknown): string | undefined {
   if (Array.isArray(raw)) {
     const first = asRecord(raw[0]);
@@ -501,5 +552,6 @@ export function createPostizDriverFromConfig(): SocialPublisher | null {
     uploadTimeoutMs: p.uploadTimeoutMs,
     connectTimeoutMs: p.connectTimeoutMs,
     quotaProbeTool: p.quotaProbeTool,
+    creatorInfoProbeTool: p.creatorInfoProbeTool,
   });
 }

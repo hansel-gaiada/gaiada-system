@@ -87,6 +87,11 @@ import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
 import { startStaleReaperLoop } from "./modules/it/discovery.service";
 import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-job";
+// SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
+// verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
+// doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
+import { startPostStatusSyncLoop } from "./modules/social/post-status-sync-job";
+import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifier";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
 // platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
 // `tool_scope` toggle + cadence + budget cap, written under `search:scope:write`), and every automation
@@ -367,6 +372,12 @@ async function bootstrap(): Promise<void> {
   // home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC address, which
   // means the containment perimeter moved (addendum §A4l §2/§3). No network call is made here.
   wireSocialPublisher();
+  // SMM-10/D-22 — install the dispatch-side creator-info verifier. Unconditional: it is a pure,
+  // in-process registration (`setCreatorInfoVerifier`), never a network call, so there is no boot
+  // condition to gate it on. Its own doc states the steady state THIS makes correct: with no
+  // verifier installed, a TikTok publish fails closed as `creator_info_unverified` forever — this
+  // call is what lets the "creator's live settings still permit it" branch ever pass instead.
+  installCreatorInfoVerifier();
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();
@@ -504,6 +515,16 @@ async function bootstrap(): Promise<void> {
     startInboxRetentionPurgeLoop(config.social.inboxRetention.purgeIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`social inbox retention purge on: every ${config.social.inboxRetention.purgeIntervalMs}ms`);
+  }
+  // SMM-10: `smm-post-status-sync`, the publish gate's safety poll. Same dark-by-default pattern as
+  // the sweeps above — a fresh deployment with no publisher org provisioned has nothing in flight to
+  // reconcile, so this is a deploy-time decision paired with provisioning the first org, not a
+  // boot-time default. Cadence default 15 minutes (config.ts's own doc on why that is not tuned
+  // tighter).
+  if (config.social.reconcileEnabled) {
+    startPostStatusSyncLoop(config.social.reconcileIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`social post-status reconcile (smm-post-status-sync) on: every ${config.social.reconcileIntervalMs}ms`);
   }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this

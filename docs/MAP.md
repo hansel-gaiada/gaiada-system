@@ -164,9 +164,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0113_social_inbox_retention.sql`
-- Next free number: `0114` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 112
+- Head: `0114_social_creator_info_snapshot.sql`
+- Next free number: `0115` — **reserve it by creating the file**, concurrent sessions share this checkout.
+- Applied files on disk: 113
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
