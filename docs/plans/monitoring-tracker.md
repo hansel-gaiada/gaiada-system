@@ -43,6 +43,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 | MON-13 | `heartbeat` driver (the inverse check — silence is the signal) | DEV-VERIFIED |
 | — | Controller: 6 read endpoints + unauthenticated heartbeat ingest | IN PROGRESS (untested against a live DB) |
 | MON-12 | Runner: pure decisions + DB shell, allowlist from **verified** properties only | DEV-VERIFIED (decisions mutation-probed) |
+| MON-12c | Runner LOOP, chained `setTimeout`, **dark by default** (`MONITORING_RUNNER_ENABLED=1`) | DEV-VERIFIED (tsc + 69 tests; not yet switched on anywhere) |
 
 ---
 
@@ -52,7 +53,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 
 | Ticket | What | Why it matters |
 |---|---|---|
-| **MON-12c** | **Schedule `runSweep`** from `bootstrap()` on a gated interval | **Nothing probes until this exists.** Only heartbeats self-update (they are push). Must be dark by default — it dials client sites. |
+
 | MON-12d | Backfill `monitors.uptime24h/30d` from `monitor_results` | Board shows `—` today. Deliberate (null ≠ 0), but it is a gap. |
 | MON-12b | Persist egress audit decisions | Currently a documented no-op rather than a log nobody reads. |
 | — | **Deploy** | None of the Plane B backend is live. `/monitoring` renders "backend not connected" in production. |

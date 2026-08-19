@@ -310,3 +310,54 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
 
   return out;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// MON-12c — THE LOOP
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Chained `setTimeout`, never `setInterval` — the next tick is scheduled only after the current one
+ * finishes, so a slow sweep cannot stack overlapping runs. Same shape as the search pull scheduler.
+ *
+ * ⚠ DARK BY DEFAULT, and that is a safety property rather than caution. This loop DIALS CLIENT
+ * WEBSITES. A deployment that starts probing third-party hosts merely because it booted is not a
+ * default anyone chose; someone has to turn it on. The gate is `config.monitoring.runnerEnabled`.
+ *
+ * The interval only controls how often due-ness is re-ASKED. Whether a monitor is actually probed is
+ * decided per monitor by `isDue()` against its own `interval_sec`, never by this value — so setting a
+ * 60s tick does not mean every monitor is checked every 60 seconds.
+ */
+export function startMonitoringRunnerLoop(intervalMs: number): { stop: () => void } {
+  let stopped = false;
+  let timer: NodeJS.Timeout | null = null;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await runSweep();
+      // A tick where nothing was due is SILENT by design: at a 60s cadence across every monitor this
+      // would otherwise bury the log in "considered 40, probed 0". Anything that actually happened,
+      // or any driver gap, is surfaced.
+      if (r.probed > 0 || r.incidentsOpened > 0 || r.incidentsClosed > 0 || r.skippedNoDriver > 0) {
+        // eslint-disable-next-line no-console
+        console.log("[MONITORING] sweep:", r);
+      }
+    } catch (e) {
+      // Never let a failed sweep kill the loop: monitoring that stops because one probe threw is
+      // strictly worse than monitoring that logs and continues — and a dead loop is invisible, which
+      // is the failure this whole module exists to prevent.
+      // eslint-disable-next-line no-console
+      console.error("[MONITORING] sweep failed:", (e as Error).message);
+    } finally {
+      if (!stopped) timer = setTimeout(tick, intervalMs);
+    }
+  };
+
+  timer = setTimeout(tick, intervalMs);
+  return {
+    stop: () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+}

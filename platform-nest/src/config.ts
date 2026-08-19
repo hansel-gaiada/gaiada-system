@@ -366,6 +366,14 @@ const configBase = {
   // and default to empty: an unset PROMETHEUS_URL makes the console report itself unconfigured
   // rather than pretend the box is healthy, and it never blocks boot -- Plane A telemetry is
   // collected by Prometheus whether or not the platform can read it back.
+  // MON-12c: the monitor runner loop. DARK BY DEFAULT and that is a safety property, not caution:
+  // this loop DIALS CLIENT WEBSITES, and a deployment must not start probing third-party hosts
+  // merely because it booted. `intervalMs` only sets how often due-ness is re-asked; each monitor's
+  // own interval_sec decides whether it is actually probed.
+  monitoring: {
+    runnerEnabled: process.env.MONITORING_RUNNER_ENABLED === "1",
+    runnerIntervalMs: Number(process.env.MONITORING_RUNNER_INTERVAL_MS ?? 60_000),
+  },
   observability: {
     prometheusUrl: process.env.PROMETHEUS_URL ?? "",
     // Display-only: an operator-facing hint about where the full dashboards live. Never fetched

@@ -35,6 +35,7 @@ import { monitoringModule } from "./modules/monitoring";
 import { registerDriver } from "./modules/monitoring/drivers/registry";
 import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
 import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
+import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
 import { billingModule } from "./modules/billing";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -543,6 +544,16 @@ async function bootstrap(): Promise<void> {
   // one SPENDS VENDOR MONEY, so its flag is the hard gate rather than a performance opt-in. The
   // interval only controls how often due-ness is re-asked; the cadence that decides whether anything is
   // pulled is derived per engagement from `tool_scope`, never from this value.
+  // MON-12c: the monitor runner. A plain Postgres sweep (no Redis), so it sits outside the redisUrl
+  // gate like the search scheduler -- but unlike that one it does not spend money, it DIALS CLIENT
+  // WEBSITES. That is why the flag is a hard gate rather than a perf opt-in: probing a third party
+  // must be a decision someone made, never a consequence of booting. Nothing is probed until this is
+  // switched on -- heartbeat monitors are the exception, because those are push and update on ingest.
+  if (config.monitoring.runnerEnabled) {
+    startMonitoringRunnerLoop(config.monitoring.runnerIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`monitoring runner on: re-asking due-ness every ${config.monitoring.runnerIntervalMs}ms`);
+  }
   if (config.search.schedulerEnabled) {
     startSearchPullSchedulerLoop(config.search.schedulerIntervalMs);
     // eslint-disable-next-line no-console
