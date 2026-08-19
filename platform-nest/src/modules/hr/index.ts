@@ -85,21 +85,19 @@ export const hrModule: ModuleContract = {
     // HR module's own RLS wall (`app_module_allowed('hr')`, 0109) — the module that gates the table is
     // the module that should own its tools.
     //
-    // ⚠ THE JML WRITES (hire / transfer / terminate) ARE DELIBERATELY NOT DECLARED HERE YET, and that
-    // is the honest state rather than an omission. Design §9 (P2-07) requires medium/high writes to be
-    // "registered with the impact gate [so] an agent-origin approval EXECUTES (D14 closed-loop test)".
-    // Declaring the write tools before those `registerExecutableApproval` entries exist would give an
-    // agent a path that SUSPENDS and then, on approval, does nothing: `getExecutable()` returns
-    // undefined for an unregistered tool, so `execution_status` lands `not_applicable` and the hire
-    // never happens. That is the estate's normal shape for most tools (and correct for the barred
-    // money-spending ones), but it is explicitly NOT what §9 asks of JML.
+    // ── THE JML WRITES, closed-loop as of 2026-08-19 ─────────────────────────────────────────────
+    // hire / transfer / terminate are declared BECAUSE their D14 executors now exist
+    // (`registerJmlExecutableApprovals` in core/approval-executables.ts) AND the three names are in
+    // `resource_mcp_tool.yaml`'s executable allow-list. All three are required: an entry without the
+    // allow-list passes its precondition and is then denied at the hub door; a tool without an entry
+    // suspends and then silently does nothing on approval. `hr-employee-tools.test.ts` asserts the
+    // declared-implies-executor half so this cannot regress by half.
     //
-    // What the write half needs, per tool: a `precondition` that re-checks the world at execution time
-    // (a hire whose position was retired while the approval sat in the inbox must refuse — the same
-    // staleness rule `iam-approval-execute.ts` already implements for assignment requests) and a
-    // `lockKey` chosen so two approvals for the same person cannot interleave. `deploy.staging`'s entry
-    // is the worked precedent. Pinned by `hr-employee-tools.test.ts` so nobody adds the write tools
-    // without noticing this.
+    // Impact is `high` for terminate and `medium` for the other two, and that is a judgement worth
+    // stating: terminate revokes grants, closes seats and can disable a login, and it is the one whose
+    // blast radius does not shrink if it fires twice — the others converge. All three are gated behind
+    // a human decision regardless (medium and high both suspend); impact drives the urgency and the
+    // notification tier, not whether a human is asked.
     {
       name: "hr.listEmployees",
       description: "List the served company's employee records (HR people file). Optional status filter.",
@@ -124,6 +122,66 @@ export const hrModule: ModuleContract = {
       inputSchema: {
         type: "object",
         properties: { tenantId: { type: "string" }, employeeId: { type: "string" } },
+        required: ["tenantId", "employeeId"],
+      },
+    },
+    {
+      name: "hr.hireEmployee",
+      description:
+        "Create an employee record; with positionId, also open the seat and let the reconciler materialise its grants. Idempotent on (tenant, workEmail).",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/hr/employees",
+      write: true,
+      impact: "medium",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          displayName: { type: "string" },
+          workEmail: { type: "string" },
+          positionId: { type: "string" },
+          startDate: { type: "string", description: "YYYY-MM-DD; a FUTURE date is refused (no scheduled JML yet)" },
+        },
+        required: ["tenantId", "displayName", "workEmail"],
+      },
+    },
+    {
+      name: "hr.transferEmployee",
+      description:
+        "Move an employee to another position: closes the outgoing seat, opens the new one, moves their org-chart node, and lets the reconciler move the grants.",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/hr/employees/:employeeId/transfer",
+      write: true,
+      impact: "medium",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          employeeId: { type: "string" },
+          toPositionId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["tenantId", "employeeId", "toPositionId"],
+      },
+    },
+    {
+      name: "hr.terminateEmployee",
+      description:
+        "Close every seat, revoke this tenant's manual grants, mark the record terminated, and disable the login when no other company's membership remains. HIGH impact: not self-correcting if repeated.",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/hr/employees/:employeeId/terminate",
+      write: true,
+      impact: "high",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          employeeId: { type: "string" },
+          reason: { type: "string" },
+        },
         required: ["tenantId", "employeeId"],
       },
     },

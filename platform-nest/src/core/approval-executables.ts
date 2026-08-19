@@ -109,6 +109,33 @@ export interface ExecutableApprovalEntry {
    * class of tool where the coin-flip is public and irreversible.
    */
   neverAutoRetry?: boolean;
+
+  /**
+   * P2-07 — module keys this entry's `precondition` needs in scope to see its own tables.
+   *
+   * ⚠ THIS FIELD EXISTS BECAUSE ITS ABSENCE IS SILENT, AND SILENT IN THE PERMISSIVE DIRECTION.
+   * `core/approval-execute.ts` opens its claim transaction as `withTenants([tenantId], …)` with no
+   * `modules` — correct for every entry that shipped before this one, because `pipeline_runs`,
+   * `pipeline_gates` and friends are CORE tables with a plain `tenant_isolation` policy. A
+   * MODULE-OWNED table composes its policy as `tenant_id = ANY(app_current_tenants()) AND
+   * app_module_allowed('<mod>')`, and with `app.scopes` unset that second conjunct is FALSE — so the
+   * precondition reads ZERO ROWS and gets no error (db/index.ts's WithTenantsOptions note; the
+   * estate's [migration-backfill-rls-trap]).
+   *
+   * Zero rows is not a neutral failure for a precondition. `hr.hireEmployee`'s guard is
+   * "does a live employee with this work email already exist?" — under an unset scope the answer is
+   * always no, so the ONE check that stops an approved hire from being applied twice would pass
+   * every time, and the tool whose retry it protects is the one that creates a person. The
+   * transfer/terminate guards fail the other way (always `employee_not_found`), which is safe but
+   * makes the tools permanently inert. Both shapes are invisible in a test that stubs the client.
+   *
+   * Set as `SET LOCAL`-scoped `app.scopes` immediately before the precondition runs, so it lasts
+   * exactly the transaction that needs it and never leaks to the next borrower of that pooled
+   * connection. Declared on the ENTRY rather than set from inside a precondition deliberately: the
+   * executor owns the transaction, and a precondition that quietly widened its own visibility would
+   * put an RLS decision in the least visible place available.
+   */
+  preconditionModules?: string[];
 }
 
 /**
@@ -125,7 +152,7 @@ export interface ExecutableApprovalEntry {
  *    and notifies), never silently executable.
  */
 export type ExecutableApprovalInput = Pick<ExecutableApprovalEntry, "toolName"> &
-  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry">>;
+  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry" | "preconditionModules">>;
 
 const registry = new Map<string, ExecutableApprovalEntry>();
 
@@ -157,6 +184,10 @@ export function registerExecutableApproval(entry: ExecutableApprovalInput): void
     lockKey: entry.lockKey ?? (() => `executable-approval:${entry.toolName}`),
     precondition: entry.precondition ?? (async () => ({ ok: false, reason: NO_PRECONDITION_REASON })),
     neverAutoRetry: entry.neverAutoRetry === true,
+    // Absent stays absent rather than becoming `[]` — an empty array and an omitted field mean the
+    // same thing to the executor, and normalizing would make "declares no modules" and "declares
+    // none needed" indistinguishable to anyone auditing the registry.
+    ...(entry.preconditionModules?.length ? { preconditionModules: [...entry.preconditionModules] } : {}),
   });
 }
 
@@ -800,3 +831,166 @@ export function registerSocialExecutableApprovals(): void {
 }
 
 registerSocialExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// P2-07 — `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee`: JML's registry entries.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// These three exist so an agent-origin JML write actually COMPLETES when a human approves it. Without
+// an entry, `getExecutable()` returns undefined, `execution_status` lands `not_applicable`, and the
+// approval decides nothing — for a hire, a person approved and never onboarded. Design §9 (P2-07)
+// requires the closed loop, and `src/modules/hr/hr-employee-tools.test.ts` refuses to let the tools be
+// declared without these.
+//
+// ── LOCK SCOPE: THE PERSON, NOT THE TENANT AND NOT THE APPROVAL ────────────────────────────────
+// Every JML write is about one human being. Two approvals for the SAME person must serialize — a
+// transfer and a terminate decided seconds apart would otherwise interleave and leave seats and grants
+// disagreeing. Two approvals for DIFFERENT people must not block each other, which rules out keying on
+// the tenant (this deployment is nearly one tenant, see pipeline-lock.ts's LOCK SCOPE note). Keying on
+// the approval id would be useless: the `pending -> executing` claim already serializes a row against
+// itself.
+//
+// The key is derived from whichever identifier the tool carries — `employeeId` for transfer/terminate,
+// `workEmail` for a hire (no employee row exists yet, and the email IS the joiner's natural key per
+// design §5.1 / migration 0111). Pure function of `toolArgs`, stable across retries, as the contract
+// on `lockKey` requires.
+//
+// ── PRECONDITIONS: DETECT A FIRST ATTEMPT THAT ALREADY LANDED ──────────────────────────────────
+// The verdict is re-derived under the lock, never trusted from the payload the human saw. All three
+// checks are ALSO the reason auto-retry is safe here (no `neverAutoRetry`): a retry after a lost
+// response re-reads state and refuses rather than hiring the same person twice. That is the
+// `deploy.*` property, and it is the difference between these and `social.publishPost`, whose
+// landed-or-not is unobservable and which therefore opts out.
+//
+// An approval can also sit in the inbox for days, so each precondition re-checks the WORLD, not just
+// idempotence: a position retired in the meantime must not be filled — the same staleness rule
+// `admin/iam-approval-execute.ts` already applies to assignment requests.
+
+/** The one unit of consistency a JML approval contends over: the person. */
+function jmlLockKey(toolArgs: Record<string, unknown>, tool: string): string {
+  const id =
+    (typeof toolArgs?.employeeId === "string" && toolArgs.employeeId) ||
+    (typeof toolArgs?.workEmail === "string" && toolArgs.workEmail.toLowerCase()) ||
+    "";
+  // A missing identifier fails the precondition below, so it never reaches the hub. The key must still
+  // be a stable pure function, and it must NOT collapse every malformed payload onto one shared
+  // constant (that would serialize unrelated refusals for no benefit) — same reasoning as
+  // `extractRunId`'s fallback.
+  return id ? `jml:${tool}:${id}` : `jml:${tool}:malformed:${JSON.stringify(toolArgs ?? {})}`;
+}
+
+async function hirePrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const email = typeof args?.workEmail === "string" ? args.workEmail.toLowerCase() : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!email || !tenantId) return { ok: false, reason: "missing_work_email" };
+
+  // ALREADY LANDED? `(tenant_id, work_email)` is the joiner's natural key (0111), so an existing live
+  // row means a previous attempt — or a human hiring the same person — already did this.
+  const { rows } = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM employees
+      WHERE tenant_id = $1 AND lower(work_email) = $2 AND deleted_at IS NULL`,
+    [tenantId, email],
+  );
+  if (Number(rows[0]?.n ?? "0") > 0) return { ok: false, reason: "employee_already_exists" };
+
+  // STALE? A hire naming a position that has since been retired must refuse rather than seat someone
+  // into a dead role.
+  const positionId = typeof args?.positionId === "string" ? args.positionId : "";
+  if (positionId) {
+    const pos = await client.query<{ status: string }>(
+      `SELECT status FROM positions WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, positionId],
+    );
+    if (!pos.rows[0]) return { ok: false, reason: "position_not_found" };
+    if (pos.rows[0].status !== "active") return { ok: false, reason: "position_not_active" };
+  }
+  return { ok: true };
+}
+
+async function transferPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const employeeId = typeof args?.employeeId === "string" ? args.employeeId : "";
+  const toPositionId = typeof args?.toPositionId === "string" ? args.toPositionId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!employeeId || !toPositionId || !tenantId) return { ok: false, reason: "missing_transfer_args" };
+
+  const emp = await client.query<{ user_id: string | null; employment_status: string }>(
+    `SELECT user_id, employment_status FROM employees WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, employeeId],
+  );
+  if (!emp.rows[0]) return { ok: false, reason: "employee_not_found" };
+  if (emp.rows[0].employment_status === "terminated") return { ok: false, reason: "employee_terminated" };
+  if (!emp.rows[0].user_id) return { ok: false, reason: "employee_has_no_principal" };
+
+  const pos = await client.query<{ status: string }>(
+    `SELECT status FROM positions WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, toPositionId],
+  );
+  if (!pos.rows[0]) return { ok: false, reason: "position_not_found" };
+  if (pos.rows[0].status !== "active") return { ok: false, reason: "position_not_active" };
+
+  // ALREADY LANDED? The person already holds the destination seat.
+  const held = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM position_assignments
+      WHERE tenant_id = $1 AND user_id = $2 AND position_id = $3 AND valid_to IS NULL`,
+    [tenantId, emp.rows[0].user_id, toPositionId],
+  );
+  if (Number(held.rows[0]?.n ?? "0") > 0) return { ok: false, reason: "already_in_target_position" };
+  return { ok: true };
+}
+
+async function terminatePrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const employeeId = typeof args?.employeeId === "string" ? args.employeeId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!employeeId || !tenantId) return { ok: false, reason: "missing_employee_id" };
+
+  const emp = await client.query<{ employment_status: string }>(
+    `SELECT employment_status FROM employees WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, employeeId],
+  );
+  if (!emp.rows[0]) return { ok: false, reason: "employee_not_found" };
+  // ALREADY LANDED? Terminating a terminated employee is the retry case, and it must refuse rather
+  // than re-run: the flow revokes manual grants and bumps sessions, and doing that twice would look
+  // like a second departure in the audit trail.
+  if (emp.rows[0].employment_status === "terminated") return { ok: false, reason: "already_terminated" };
+  return { ok: true };
+}
+
+/**
+ * Registers the three JML entries. Exported for the same reason `registerCoreExecutableApprovals` is:
+ * a suite that calls `resetExecutableApprovals()` can restore exactly these without re-deriving their
+ * locks and preconditions. Called once at module load below, so boot needs no separate wiring.
+ */
+export function registerJmlExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "hr.hireEmployee",
+    // `employees` (and nothing else these preconditions read) is behind the HR module's third wall.
+    preconditionModules: ["hr"],
+    lockKey: (args) => jmlLockKey(args, "hr.hireEmployee"),
+    precondition: hirePrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "hr.transferEmployee",
+    // `employees` (and nothing else these preconditions read) is behind the HR module's third wall.
+    preconditionModules: ["hr"],
+    lockKey: (args) => jmlLockKey(args, "hr.transferEmployee"),
+    precondition: transferPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "hr.terminateEmployee",
+    // `employees` (and nothing else these preconditions read) is behind the HR module's third wall.
+    preconditionModules: ["hr"],
+    lockKey: (args) => jmlLockKey(args, "hr.terminateEmployee"),
+    precondition: terminatePrecondition,
+  });
+}
+
+registerJmlExecutableApprovals();

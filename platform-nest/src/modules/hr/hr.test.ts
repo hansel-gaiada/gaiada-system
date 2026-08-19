@@ -126,8 +126,11 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
     // holds that invariant and explains why.
     expect(hrModule.mcpTools.map((t) => t.name)).toEqual([
       "hr.listEmployees", "hr.getEmployee",
+      "hr.hireEmployee", "hr.transferEmployee", "hr.terminateEmployee",
       "hr.listCases", "hr.listLeave", "hr.fileLeave", "hr.listLoans", "hr.requestLoan",
     ]);
+    // P2-07's write half: terminate is the one whose blast radius does not shrink on a repeat.
+    expect(hrModule.mcpTools.find((t) => t.name === "hr.terminateEmployee")?.impact).toBe("high");
     expect(hrModule.mcpTools.find((t) => t.name === "hr.requestLoan")?.impact).toBe("high");
     expect(hrModule.customFieldTargets).toEqual(["hr_case", "hr_record"]);
     // Still exactly TWO keys after wave E: `automation_approval.decided` is keyed by EVENT TYPE, so

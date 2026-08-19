@@ -56,7 +56,7 @@ describe("P2-07 · the employee tool surface", () => {
 
   // ── the invariant ────────────────────────────────────────────────────────────────────────────────
 
-  it("🔴 the JML WRITE tools are NOT declared until their D14 executors exist", () => {
+  it("🔴 every JML WRITE tool is declared WITH a D14 executor — never one without the other", () => {
     // If you are here because you just added one of these, add its `registerExecutableApproval` entry
     // in the same change — a precondition that re-checks staleness at execution time (the position may
     // have been retired while the approval waited) and a lockKey keyed on the person, so two approvals

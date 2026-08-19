@@ -137,4 +137,14 @@ resourcePolicy:
                      type(request.resource.attr.approvalId) == string &&
                      request.resource.attr.approvalId != "" &&
                      request.resource.attr.name in ["deploy.staging", "deploy.production", "webdev.provisionSite",
-                                                    "social.publishPost"])))
+                                                    "social.publishPost",
+                                                    // P2-07: JML's three writes. Listed here because
+                                                    // D14-13's impact conjunct is what lets the
+                                                    // EXECUTOR's branded approvalId call re-enter the
+                                                    // hub for a medium/high tool. An entry in
+                                                    // approval-executables.ts without a name here
+                                                    // would pass its precondition and then be denied
+                                                    // at the door — the loop would close on paper and
+                                                    // fail in practice.
+                                                    "hr.hireEmployee", "hr.transferEmployee",
+                                                    "hr.terminateEmployee"])))

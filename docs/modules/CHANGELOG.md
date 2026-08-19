@@ -128,6 +128,30 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.050.0102a` - 2026-08-19 - an approved hire actually happens, and cannot happen twice
+
+Manifest (counter +1, 0101 -> 0102): `platform-nest 0.26.0 -> 0.27.0`. No migration.
+
+P2-07's write half, which 0.26.0 explicitly left open rather than claiming. hire/transfer/terminate are
+now agent-reachable AND executable: registry entry, hub allow-list entry, tool declaration — all three,
+because any two without the third fail in a different silent way.
+
+The cut is worth reading for the defect it found rather than the feature it adds. `employees` lives
+behind the HR module's RLS wall; the executor's precondition transaction had no module scope; so the
+"has this person already been hired?" check would have read zero rows, found nothing, and let an
+approved-then-retried hire create the same person twice. Nothing would have errored. The fix is a
+declared `preconditionModules` on the registry entry, applied by the executor at both precondition
+sites, with a test that asserts the BROKEN behaviour unscoped so the declaration can never be dropped
+as decoration.
+
+⚠ Not from this cut, found by its regression run and left for the owning session: `monitor`,
+`monitor_channel`, `monitor_incident`, `monitor_maintenance` and `status_page` Cerbos policies landed on
+main (MON-11a/b) with no `permission-catalog.json` entries, no bundle rows and no `permissions` rows —
+12 red tests across 7 files in `src/rbac` (catalog count, bundle regen-no-diff, DB parity, alignment).
+The parity chain this program's Phase 1 built is currently broken at HEAD for the monitoring kinds only;
+nothing in `hr.*` or IAM drifted. Not fixed here because that ticket is in flight in another session and
+editing its catalog under it would collide.
+
 ### `Alpha 01.049.0101a` - 2026-08-19 - the first agent-reachable slice of the people file
 
 Manifest (counter +1, 0100 -> 0101): `platform-nest 0.25.2 -> 0.26.0`. No migration.
@@ -1857,6 +1881,44 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.27.0] - 2026-08-19 - IN PROGRESS (P2-07's write half: the JML loop closes, and an RLS trap inside it)
+- **`hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee` are declared**, and 0.26.0's
+  refusal to declare them is now satisfied rather than waived: each has a `registerExecutableApproval`
+  entry (`registerJmlExecutableApprovals`), and all three names are in `resource_mcp_tool.yaml`'s
+  executable allow-list. All THREE parts are load-bearing — an entry without the allow-list passes its
+  precondition and is then denied at the hub door, and a tool without an entry suspends and then does
+  nothing on approval. `hr-employee-tools.test.ts`'s invariant now reads "declared WITH an executor".
+- **`lockKey` is the PERSON**: `employeeId`, else the case-folded `workEmail` (the joiner has no employee
+  row yet). Not the tenant (nearly one tenant here), not the approval id (the claim already serializes a
+  row against itself). Namespaced per tool, and a malformed payload does not collapse onto one shared key.
+- **Preconditions detect a first attempt that already landed** — `employee_already_exists`,
+  `already_in_target_position`, `already_terminated` — and refuse a request the world moved out from
+  under (`position_not_active`). That observability is why none of the three sets `neverAutoRetry`: this
+  is `deploy.*`'s property, not `social.publishPost`'s.
+- 🔴 **A DEFECT FOUND WHILE WIRING IT, in the executor and not in the new code.** `employees` sits behind
+  the HR module's third RLS wall, and `core/approval-execute.ts` opens its claim transaction with NO
+  module scope — correct for every entry that shipped before, because theirs are core tables. With
+  `app.scopes` unset, `app_module_allowed('hr')` is false, so these preconditions would read ZERO ROWS
+  **and no error**. For the hire that is silent in the PERMISSIVE direction: the one guard standing
+  between a retried approval and a person created twice would have passed every single time.
+  Fixed by declaring it: new `ExecutableApprovalEntry.preconditionModules`, applied by the executor as
+  transaction-local `app.scopes` immediately before BOTH precondition call sites (claim + retry).
+  Declared on the entry rather than set from inside a precondition on purpose — the executor owns the
+  transaction, and a precondition that widened its own visibility would hide an RLS decision in the
+  least visible place available.
+- **`d14-jml-registry.test.ts` (37 cases)** carries a NEGATIVE CONTROL that asserts the broken behaviour
+  on purpose: run unscoped, the hire guard passes on a person who already exists and terminate claims
+  not-found; run scoped, both answer correctly. So `preconditionModules` cannot be deleted as cosmetic,
+  and the fix is a claim with evidence rather than a comment. Plus the PRV-03 shape: stale requests land
+  `failed` with `precondition_failed:*` and the hub is asserted — not inferred — to be called zero times,
+  against a positive control that calls it exactly once.
+- Impact: `high` for terminate (it revokes grants, closes seats, can disable a login, and is the one
+  whose blast radius does not shrink on a repeat), `medium` for hire and transfer. All three suspend
+  either way; impact drives urgency and notification tier, not whether a human is asked.
+- ⚠ **Still open from 0.26.0:** `positions` and `role-grants` are CORE controllers with nowhere to
+  declare tools, so they remain agent-unreachable pending a platform core-tools surface.
+- Gates: `src/core/d14-jml-registry.test.ts` 37/37 (new); approvals + hr regression 311/311 across 18
+  files; `tsc --noEmit` clean; `cerbos compile` clean and the test Cerbos restarted before the run.
 ### [0.26.0] - 2026-08-19 - IN PROGRESS (P2-07 partial: the employee READ surface goes agent-reachable)
 - **`hr.listEmployees` + `hr.getEmployee`** declared on the `hr` module, so they reach the hub through
   `GET /mcp/tool-defs` with nothing hardcoded hub-side. `hr` owns them because `employees` sits behind
