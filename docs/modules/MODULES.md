@@ -1270,21 +1270,23 @@ product code. Findings, stated plainly per the repo's status-language rule:
   deployment-enabled network" — looping every network `config.social.publisher.enabledNetworks`
   actually turns on (not just the instagram case the existing suite happened to cover), asserting
   the connect POST is a typed 409 with non-empty prose for each.
-- **⚠ REGRESSION FOUND, NOT FIXED — SMM-13's notification/mail routing is dead code in the running
-  app.** `event-handlers.ts` registers `handlePostDispatched`/`handlePostPublished`/`handlePostFailed`
-  against `socialModule.eventHandlers`, keyed to events emitted with entity type
-  `"social_post_variant"` (`dispatch.ts`, `post-status-sync-job.ts`). `main.ts`'s
-  `startConsumerLoop([...])` — the only thing that decides whether a Redis stream is ever drained —
-  does **not** list `"social_post_variant"`. The events are written to the outbox and relayed, and
-  read by nobody: no in-app notification and no risk-shaped mail ever fires for a real
-  dispatch/publish/failure, in any running deployment, today. `event-handlers.test.ts` is green
-  because it calls the three handler functions directly, never through the consumer loop — the same
-  "tests that pass while the feature is dead" class this module has now produced five times. Pinned
-  red by a new static suite, `src/modules/social/event-wiring.test.ts` (mirrors
-  `src/events/position-consumer.test.ts`'s own P2-05 discipline), so this cannot silently re-pass.
-  **Not fixed here** — QA reports defects, senior-be/senior-integrator owns adding the stream to the
-  watched list in `main.ts`. Module status stays `IN PROGRESS` rather than moving toward
-  DEV-VERIFIED across the board because of this.
+- **⚠ REGRESSION FOUND AND FIXED (by another seat, `main@635f9fd`) — SMM-13's notification/mail
+  routing was dead code in the running app.** `event-handlers.ts` registers
+  `handlePostDispatched`/`handlePostPublished`/`handlePostFailed` against
+  `socialModule.eventHandlers`, keyed to events emitted with entity type `"social_post_variant"`
+  (`dispatch.ts`, `post-status-sync-job.ts`). `main.ts`'s `startConsumerLoop([...])` — the only
+  thing that decides whether a Redis stream is ever drained — did **not** list
+  `"social_post_variant"`. The events were written to the outbox and relayed, and read by nobody: no
+  in-app notification and no risk-shaped mail ever fired for a real dispatch/publish/failure, in any
+  running deployment. `event-handlers.test.ts` stayed green throughout because it calls the three
+  handler functions directly, never through the consumer loop — the same "tests that pass while the
+  feature is dead" class this module has now produced five times, and the first at the wiring layer
+  rather than inside a query. Pinned red by a new static suite,
+  `src/modules/social/event-wiring.test.ts` (mirrors `src/events/position-consumer.test.ts`'s own
+  P2-05 discipline, reading `main.ts`'s own source rather than trusting the handler tests), caught
+  the regression, and now asserts the fix stays fixed: `"social_post_variant"` is in the watched list
+  as of `main@635f9fd`, and the suite is green again (289/289, see below). QA found and pinned this;
+  QA did not patch `main.ts` — that landed from a separate seat.
 - **The UI flow (SMM-12: Calendar drag-to-reschedule, quota strips, submit-with-preview) had never
   been driven in a browser** — DEMO_MODE had no Social Media department fixture. A fixture
   (`platform-ui/src/lib/demoSocial.ts`) was added in this pass so the flow is drivable; see that
@@ -1300,12 +1302,14 @@ product code. Findings, stated plainly per the repo's status-language rule:
   existing social suite; `mail_log` assertions already read via `adminPool()` with `config.mail.enabled`
   flipped in-test, matching `mail/queue.test.ts`'s own idiom.
 - Test counts (passed/failed/skipped, three separate numbers, DATABASE_URL_TEST present so nothing
-  silently skipped): `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` together
-  **288 passed / 1 failed / 0 skipped**. The one failure is the `event-wiring.test.ts` pin above —
-  failing BY DESIGN, proof of the SMM-13 regression, not an environmental flake. Baseline for
-  `src/modules/social` alone was 234 passing; it is now 235 (+1: the new provisioning case) plus the
-  new, deliberately-red `event-wiring.test.ts` (1 file, 1 case). `tsc --noEmit` clean.
-  `lint-migration-names.mjs` clean (no migration added).
+  silently skipped), taken AFTER merging `main@635f9fd`'s fix: `src/modules/social` +
+  `d14-smm-09-social-publish-registry.test.ts` together **289 passed / 0 failed / 0 skipped**.
+  Before that merge, the same run was 288 passed / 1 failed (the `event-wiring.test.ts` pin, red BY
+  DESIGN — proof of the regression, not an environmental flake) / 0 skipped. Baseline for
+  `src/modules/social` alone was 234 passing; it is now 236 (+1 new provisioning case, +1 new
+  event-wiring pin, now green post-merge). `tsc --noEmit` clean both before and after the merge.
+  `lint-migration-names.mjs` and `lint-migration-rls.mjs` clean (no migration added by this ticket;
+  migration `0119` arrived via the `main` merge, from an unrelated monitoring fix).
 
 **0.5.1 (2026-08-19, SMM-39 — `uploadMedia` actually wired into the dispatch path, DEV-VERIFIED
 against a mock driver + a real Postgres):** closes the defect SMM-10 flagged by name in its own
