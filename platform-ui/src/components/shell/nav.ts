@@ -102,6 +102,17 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // Companies now live inside the Organization Overview.
     { label: "Organization", icon: "sitemap", items: [
       { label: "Overview", href: "/organization", icon: "inventory" },
+      // P2-11 / P2-12-FE. Both are listed for anyone who can browse the directory rather than gated on
+      // a grant capability, because a DEPARTMENT HEAD's authority comes from holding a lead position —
+      // it is not in `me.roles` as a capability this function can test, and the pages themselves render
+      // the server's own refusal. Nav-gating on `admin.access` would hide the surface from exactly the
+      // person the wave was built for.
+      ...(can(me, "people.directory", tenantId) || isElevated(me)
+        ? [
+            { label: "Positions", href: "/organization/positions", icon: "sitemap" as const },
+            { label: "Access", href: "/organization/access", icon: "user" as const },
+          ]
+        : []),
     ] },
     { label: "Departments", icon: "hr", items: deptItems },
     { label: "Business", icon: "briefcase", items: business },
