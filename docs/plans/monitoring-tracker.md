@@ -41,7 +41,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 | MON-11b | SSRF egress floor + **closed an IP-literal bypass** found by probing Node | DEV-VERIFIED (mutation-probed) |
 | MON-11c | `http` + `keyword` drivers, manual redirect re-validation | DEV-VERIFIED |
 | MON-13 | `heartbeat` driver (the inverse check — silence is the signal) | DEV-VERIFIED |
-| — | Controller: 6 read endpoints + unauthenticated heartbeat ingest | IN PROGRESS (untested against a live DB) |
+| — | Controller: 6 read endpoints + unauthenticated heartbeat ingest | **DEV-VERIFIED** — 11/11 against live Postgres RLS + live Cerbos; the suite found a real prod bug (see 0119) |
 | MON-12 | Runner: pure decisions + DB shell, allowlist from **verified** properties only | DEV-VERIFIED (decisions mutation-probed) |
 | MON-12c | Runner LOOP, chained `setTimeout`, **dark by default** (`MONITORING_RUNNER_ENABLED=1`) | DEV-VERIFIED (tsc + 69 tests; not yet switched on anywhere) |
 
@@ -58,7 +58,6 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 | MON-12b | Persist egress audit decisions | Currently a documented no-op rather than a log nobody reads. |
 | — | **Deploy** | None of the Plane B backend is live. `/monitoring` renders "backend not connected" in production. |
 | — | Cerbos **permission arm** (`perm_monitoring_*`) | A principal holding only a fine-grained `monitoring.*` grant is DENIED until it lands. Fail-closed. Needs 9 scope-cascade blocks in a 2,000-line security file + the parity suites. |
-| — | Controller tests against a live DB | The read paths have never executed against real RLS. |
 
 ### Plane B feature work
 

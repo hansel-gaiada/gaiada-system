@@ -89,6 +89,51 @@ function lineOf(src, index) {
   return line;
 }
 
+/**
+ * Blank out the BODY of every `CREATE [OR REPLACE] FUNCTION|PROCEDURE ... AS $tag$ … $tag$`, replacing
+ * it with spaces so every remaining match keeps its original byte offset (the whole scanner is
+ * offset-ordered — see `detect`).
+ *
+ * ── WHY THIS IS NOT A WEAKENING (2026-08-19) ──────────────────────────────────────────────────────
+ * This lint asks one question: "does this MIGRATION, running as platform_owner with no tenant GUC,
+ * silently no-op against a FORCE-RLS table?" A statement inside a function body does not run during the
+ * migration at all — `CREATE FUNCTION` only stores its text. It runs later, when something calls it,
+ * under THAT caller's tenant context (or, for SECURITY DEFINER, deliberately as the owner). So the
+ * question this lint asks is not applicable to those statements, and flagging them was a false positive.
+ *
+ * Found by `0119_monitoring_heartbeat_touch.sql` (MON-13), whose three UPDATEs are all inside a
+ * SECURITY DEFINER function that exists precisely BECAUSE the unauthenticated heartbeat endpoint has no
+ * tenant context. The lint was telling that migration to set a GUC for statements it does not execute.
+ *
+ * ⚠ `DO $$ … $$` IS DELIBERATELY NOT BLANKED. A DO block executes immediately, as part of the
+ * migration, with exactly the privileges and (missing) GUC this lint is about — it is the single most
+ * likely place to hide a real unguarded backfill. Only stored-routine bodies are skipped, and the
+ * regex requires the `FUNCTION`/`PROCEDURE` keyword to reach them.
+ *
+ * A SECURITY DEFINER function is its own review surface (a deliberate RLS bypass, reviewed as such),
+ * not something this filename-and-offset scanner can reason about. Skipping it here says "out of
+ * scope", never "safe".
+ */
+function blankRoutineBodies(text) {
+  // `AS $tag$ … $tag$` where the statement began with CREATE … FUNCTION/PROCEDURE. The tag is captured
+  // so a body containing a DIFFERENT dollar-quote (nested `$inner$`) cannot terminate it early.
+  const re = /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b[\s\S]*?\bAS\s+(\$[A-Za-z_]*\$)/gi;
+  let out = text;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const tag = m[1];
+    const bodyStart = m.index + m[0].length;
+    const bodyEnd = text.indexOf(tag, bodyStart);
+    if (bodyEnd === -1) continue; // unterminated — leave it scannable rather than blanking the rest
+    // Replace with spaces, preserving newlines so `lineOf()` still reports the true line number of
+    // anything AFTER the body.
+    const body = out.slice(bodyStart, bodyEnd);
+    out = out.slice(0, bodyStart) + body.replace(/[^\n]/g, " ") + out.slice(bodyEnd);
+    re.lastIndex = bodyEnd;
+  }
+  return out;
+}
+
 /** Scans one migration file's (comment-stripped) text and returns:
  *   - createdTables: Set<string> of tables CREATE TABLE'd in this file
  *   - forceRlsEvents: [{ table, index }] in the order ALTER ... FORCE ROW LEVEL SECURITY appears
@@ -207,7 +252,10 @@ function loadMigrations(dir) {
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
   return files.map((file) => ({
     file,
-    text: stripComments(readFileSync(join(dir, file), "utf8")),
+    // Comments out first, then stored-routine BODIES blanked: a statement inside a CREATE FUNCTION
+    // body does not execute during the migration, so this lint's question does not apply to it. DO
+    // blocks are NOT blanked — see blankRoutineBodies.
+    text: blankRoutineBodies(stripComments(readFileSync(join(dir, file), "utf8"))),
   }));
 }
 
@@ -243,6 +291,46 @@ function selftest() {
     on0012.length > 0,
   );
   report(`0024_module_backfill.sql (companies, not FORCE-RLS at all) is CLEAN`, on0024.length === 0);
+
+  // 2026-08-19 — the function-body distinction, pinned in BOTH directions on synthetic input so it
+  // cannot regress into either a false positive or a real miss.
+  const fnBody = detect([
+    {
+      file: "9999_synthetic_function_body.sql",
+      text: blankRoutineBodies(
+        `ALTER TABLE widgets ENABLE ROW LEVEL SECURITY;
+         ALTER TABLE widgets FORCE ROW LEVEL SECURITY;
+         CREATE OR REPLACE FUNCTION touch_widget(p uuid) RETURNS void LANGUAGE plpgsql AS $$
+         BEGIN
+           UPDATE widgets SET seen_at = now() WHERE id = p;
+         END $$;`,
+      ),
+    },
+  ]);
+  report(
+    `an UPDATE inside a CREATE FUNCTION body is NOT flagged (it never runs at migration time) ` +
+      `-- got ${fnBody.length} finding(s)`,
+    fnBody.length === 0,
+  );
+
+  const doBlock = detect([
+    {
+      file: "9999_synthetic_do_block.sql",
+      text: blankRoutineBodies(
+        `ALTER TABLE widgets ENABLE ROW LEVEL SECURITY;
+         ALTER TABLE widgets FORCE ROW LEVEL SECURITY;
+         DO $$
+         BEGIN
+           UPDATE widgets SET seen_at = now();
+         END $$;`,
+      ),
+    },
+  ]);
+  report(
+    `an UPDATE inside a DO block IS still flagged (it executes during the migration) ` +
+      `-- got ${doBlock.length} finding(s)`,
+    doBlock.length > 0,
+  );
   report(`0026_service_layer.sql (roles, not FORCE-RLS at all) is CLEAN`, on0026.length === 0);
 
   console.log(ok ? "\n[lint-migration-rls] SELFTEST OK" : "\n[lint-migration-rls] SELFTEST FAILED");

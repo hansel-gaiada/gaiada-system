@@ -17,7 +17,11 @@ import type { ModuleContract } from "../contract";
 
 export const monitoringModule: ModuleContract = {
   key: "monitoring",
-  migrations: ["0116_module_monitoring.sql", "0117_iam_monitoring_permissions.sql"],
+  migrations: [
+    "0116_module_monitoring.sql",
+    "0117_iam_monitoring_permissions.sql",
+    "0119_monitoring_heartbeat_touch.sql",
+  ],
 
   // Mirrors 0117 exactly. Staff/manager split lives in the migration's bundles; this list is the
   // module's declared surface, not a grant.

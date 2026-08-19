@@ -435,6 +435,12 @@ async function bootstrap(): Promise<void> {
       "search_audit",
       "search_property",
       "search_change_proposal",
+      // SMM-14 — the stream SMM-13's handlers hang off. Without it they were registered against
+      // socialModule.eventHandlers and NEVER INVOKED: dispatch.ts and post-status-sync-job.ts emit
+      // with entity type "social_post_variant", and this list is the only thing that decides whether
+      // a Redis stream is ever drained. event-handlers.test.ts stayed green throughout because it
+      // calls the handlers directly -- the handlers were always fine; nothing reached them.
+      "social_post_variant",
       // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
       ...POSITION_STREAMS,
     ]);
