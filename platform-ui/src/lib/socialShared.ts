@@ -230,6 +230,119 @@ export interface CreatedResult {
   created: boolean;
 }
 
+// ── accounts (SMM-05 registry read, first consumed here by SMM-12) ────────────────────────────────
+//
+// `GET .../accounts` (social.controller.ts's `listAccounts`) IS live — corrects `lib/social.ts`'s
+// own header, written during SMM-11 before SMM-05 shipped this route. `quota` is a LIVE PROBE
+// result and is `{}` (or missing a network's bucket) whenever the registry hasn't synced — there is
+// no quota constant anywhere in this module (media-rules.ts's own header) and this type must not
+// grow one. `capabilities` is the AND of what the network's API can ever do and what the registered
+// driver can reach (`publisher/capabilities.ts`'s `AccountCapabilities`) — three different reasons a
+// capability is `false` ("network" permanent, "driver" fixable, "unverified" nobody researched it
+// yet), named per-key in `unsupported` rather than collapsed into one grey control.
+export type QuotaUnsupportedReason = "network" | "driver" | "unverified";
+
+export interface AccountCapabilities {
+  schedule: boolean;
+  nativeSchedule: boolean;
+  directPost: boolean;
+  stories: boolean;
+  comments: boolean;
+  dm: boolean;
+  analytics: boolean;
+  unsupported: Partial<Record<
+    "schedule" | "nativeSchedule" | "directPost" | "stories" | "comments" | "dm" | "analytics",
+    QuotaUnsupportedReason
+  >>;
+}
+
+/** Mirrors `media-rules.ts`'s `QuotaSnapshot` — a live probe result, `{}` when unavailable. `[k:
+ *  string]: unknown` tolerates a bucket this client doesn't know the shape of yet, same reasoning
+ *  as `ToolScope`'s index signature. */
+export interface AccountQuota {
+  igPosts24h?: { used: number; cap: number };
+  youtubeQuota?: {
+    searchListCallsToday?: { used: number; cap: number };
+    videosInsertCallsToday?: { used: number; cap: number };
+    otherUnitsToday?: { used: number; cap: number };
+  };
+  [k: string]: unknown;
+}
+
+export interface SocialAccount {
+  id: string;
+  clientId: string;
+  network: SocialNetwork;
+  handle: string;
+  displayName: string | null;
+  status: "connected" | "expiring" | "expired" | "error";
+  quota: AccountQuota;
+  capabilities: AccountCapabilities;
+  lastError: string | null;
+  healthCheckedAt: string | null;
+  connectedAt: string | null;
+  publisherOrgRef: string;
+  driver: string;
+}
+
+// ── the publish gate's dry-run verdict (SMM-09/SMM-12) ─────────────────────────────────────────────
+//
+// Mirrors `publish-precondition.ts`'s `PublishPreconditionStage`/`PUBLISH_PRECONDITION_STAGES`
+// exactly (six stages, this order) — pinned here as a client-safe copy rather than imported, since
+// this file must stay importable from a client component. `socialShared.test.ts` asserts the order
+// so a reorder on the backend side is caught rather than silently drifting.
+export const PUBLISH_PRECONDITION_STAGES = ["scope", "quota", "hash", "unconsumed", "budget", "creator_info"] as const;
+export type PublishPreconditionStage = (typeof PUBLISH_PRECONDITION_STAGES)[number];
+
+/** `GET .../variants/:variantId/publish-preconditions` — a DRY RUN, returned as DATA with a 200.
+ *  `ok: false` names the exact stage and token that stopped it; never render this as an empty list
+ *  or a generic failure (criterion 5). */
+export interface PublishPreconditionResult {
+  ok: boolean;
+  stage?: PublishPreconditionStage;
+  reason?: string;
+  stages: readonly PublishPreconditionStage[];
+  tool: string;
+  meteredTool: string;
+}
+
+// ── quota strips ────────────────────────────────────────────────────────────────────────────────
+//
+// A pure display-side mirror of `media-rules.ts`'s `checkQuota` bucket selection: for a network
+// that has a MODELED live counter, read that exact bucket (never a sibling one — the YouTube
+// header's own lesson is that reading `otherUnitsToday` where `videosInsertCallsToday` is meant
+// reports headroom in the wrong 10,000-unit pool while the bucket that actually gates an upload is
+// exhausted). For every other network there is no counter modeled at all — that is NOT the same
+// fact as "unsynced": the account never got measured because nobody has ever wired up a probe.
+// `describeQuota` says that as its own status rather than folding it into "unknown".
+export type QuotaStripStatus = "known" | "unknown" | "not_modeled";
+
+export interface QuotaStripInfo {
+  status: QuotaStripStatus;
+  /** Human label, always safe to render standalone. */
+  label: string;
+  used?: number;
+  cap?: number;
+}
+
+export function describeQuota(network: SocialNetwork, quota: AccountQuota | undefined): QuotaStripInfo {
+  if (network === "instagram") {
+    const q = quota?.igPosts24h;
+    if (q && typeof q.used === "number" && typeof q.cap === "number") {
+      return { status: "known", label: `${q.used}/${q.cap} posts used (24h)`, used: q.used, cap: q.cap };
+    }
+    return { status: "unknown", label: "Unknown — registry not synced (never zero)" };
+  }
+  if (network === "youtube") {
+    const q = quota?.youtubeQuota?.videosInsertCallsToday;
+    if (q && typeof q.used === "number" && typeof q.cap === "number") {
+      return { status: "known", label: `${q.used}/${q.cap} uploads used today`, used: q.used, cap: q.cap };
+    }
+    return { status: "unknown", label: "Unknown — registry not synced (never zero)" };
+  }
+  return { status: "not_modeled", label: "Not tracked — no live quota probe is modeled for this network" };
+}
+
 /** True only on a genuine Cerbos 403. Never true for a 404 (module dark / entity absent) — see
  *  `lib/social.ts`'s header for the full "403 must never fold into an empty state" rule this
  *  shape exists to carry. */
@@ -258,6 +371,28 @@ const REFUSAL_LABELS: Record<string, string> = {
   variant_not_editable: "This variant is no longer editable (it's live, in flight, or already published).",
   variant_native_import_immutable: "This variant records a post published by hand — it can't be edited, only viewed.",
   variant_is_live: "This variant is queued, publishing, or already published — it can't be deleted.",
+
+  // ── the publish-precondition vocabulary (platform-nest's `PUBLISH_REFUSAL`, publish-
+  // precondition.ts) — the dry-run endpoint `GET .../publish-preconditions` and the D14 executor
+  // report the SAME sixteen tokens, in the SAME six stages (scope → quota → hash → unconsumed →
+  // budget → creator_info). Every token that file defines gets its own sentence here — none of
+  // them may collapse into a generic "something went wrong" (criterion 5 of the agentic bar).
+  variant_not_found: "That variant no longer exists (deleted, or never did).",
+  cross_client_account: "The target account belongs to a different client than this post's engagement — a cross-client publish is refused outright.",
+  account_not_connected: "The destination account is not in a connected state right now.",
+  network_disabled: "This network is switched off for the whole deployment, above any per-engagement setting.",
+  network_not_in_scope: "This engagement's tool scope does not allow posting to this network.",
+  engagement_inactive: "The engagement is paused, closed, or still a draft — not active — so nothing can publish under it.",
+  metered_network_requires_metered_tool: "This is a metered network and must go through the metered publish path, not the free one.",
+  quota_exhausted: "This account's live posting quota is used up right now.",
+  media_rules_failed: "The content no longer passes this network's media/body/schedule rules (something changed since it was approved).",
+  args_hash_mismatch: "The content has changed since this was approved — the approval no longer matches what's here now.",
+  already_dispatched: "This already went out (or is in flight) — publishing again would post it a second time.",
+  approval_already_consumed: "An approval was already spent on this variant.",
+  variant_not_approved: "This variant isn't in an approved state right now.",
+  budget_exceeded: "This would exceed the engagement's metered budget for the current period.",
+  creator_info_unverified: "TikTok requires the creator's live settings to be re-checked immediately before publishing, and that check isn't available yet — refused until it is.",
+  creator_selection_no_longer_permitted: "The creator's live settings no longer allow what was approved (privacy, comments, duet/stitch, etc. changed since approval).",
 };
 
 /** Maps a controller refusal TOKEN to a short, human sentence. Falls back to the raw token

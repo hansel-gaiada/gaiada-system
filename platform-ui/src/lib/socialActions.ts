@@ -15,7 +15,7 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
-import type { ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult } from "./socialShared";
+import type { ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult, PublishPreconditionResult } from "./socialShared";
 
 async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
   const userId = await getSessionUserId();
@@ -234,5 +234,74 @@ export async function deleteVariant(tenantId: string, variantId: string): Promis
     await platformFetch(`${base(c.tenant)}/variants/${variantId}`, c.userId, { method: "DELETE" });
     revalidatePath(`/departments`, "layout");
     return {};
+  });
+}
+
+// ── submit-with-preview (SMM-12) ────────────────────────────────────────────────────────────────
+//
+// The composer's "would this publish right now?" button. A GET, not a write — routed through a
+// server action anyway (rather than living in `lib/social.ts`) because the caller is a client
+// component firing it on demand from a click, and `lib/social.ts` is `server-only` and cannot be
+// imported from a "use client" file at all. Read-tier on the backend (`social_post`/`read`); no
+// `can()` gate here beyond the ordinary session check — staff who author content are exactly who
+// needs this answer, same reasoning the controller's own comment gives.
+export async function checkPublishPreconditions(
+  tenantId: string, variantId: string,
+): Promise<ActionResult<{ verdict: PublishPreconditionResult }>> {
+  return run(tenantId, async (c) => {
+    const verdict = await platformFetch<PublishPreconditionResult>(
+      `${base(c.tenant)}/variants/${variantId}/publish-preconditions`, c.userId,
+    );
+    return { verdict };
+  });
+}
+
+// ── drag-to-reschedule (SMM-12) ──────────────────────────────────────────────────────────────────
+//
+// Dragging a post card to a new day on the calendar moves the POST's own `scheduledAt` (cosmetic —
+// it's what the calendar groups by) AND every one of its variants' `scheduledAt` (the field that
+// actually matters: it is part of the hashed args, addendum D-15). `updateVariant`'s own statement
+// already reverts an `approved`/`in_review` variant to `draft` and clears `approval_id` in the SAME
+// write that moves the hash — that mechanical invalidation is the backend's, not re-implemented
+// here. This action's job is only to fire one call per row and report each row's own outcome
+// honestly: a locked variant (`variant_not_editable`, `variant_native_import_immutable`) refuses
+// independently of its siblings, and the caller must be able to tell which network that was, not
+// just that "something" in the batch failed. The CALLER (CalendarGrid) is responsible for warning
+// the operator BEFORE calling this — by the time this runs, the drop has already been committed.
+export interface RescheduleVariantOutcome {
+  variantId: string;
+  ok: boolean;
+  approvalInvalidated?: boolean;
+  error?: string;
+}
+
+export async function rescheduleVariants(
+  tenantId: string, postId: string, scheduledAtIso: string, variantIds: string[],
+): Promise<ActionResult<{ variants: RescheduleVariantOutcome[] }>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.manage", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.manage permission." };
+  }
+  return run(tenantId, async (c) => {
+    // The post's own date moves first — purely so the calendar's grouping reflects the drop even
+    // if every variant beneath it turns out to be locked (a post-level reschedule is never refused,
+    // only a variant's can be).
+    await platformFetch(`${base(c.tenant)}/posts/${postId}`, c.userId, {
+      method: "PATCH", body: JSON.stringify({ scheduledAt: scheduledAtIso }),
+    });
+    const variants: RescheduleVariantOutcome[] = [];
+    for (const variantId of variantIds) {
+      try {
+        const res = await platformFetch<UpdateVariantResult>(`${base(c.tenant)}/variants/${variantId}`, c.userId, {
+          method: "PATCH", body: JSON.stringify({ scheduledAt: scheduledAtIso }),
+        });
+        variants.push({ variantId, ok: true, approvalInvalidated: res.approvalInvalidated });
+      } catch (e) {
+        variants.push({ variantId, ok: false, error: e instanceof PlatformError ? e.message : "Reschedule failed." });
+      }
+    }
+    revalidatePath(`/departments`, "layout");
+    return { variants };
   });
 }

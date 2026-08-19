@@ -9,7 +9,7 @@ import { AccessDenied } from "@/components/social/AccessDenied";
 import { PostFieldsForm } from "@/components/social/PostFieldsForm";
 import { VariantCard } from "@/components/social/VariantCard";
 import { BackendPending } from "@/components/BackendPending";
-import { getPost } from "@/lib/social";
+import { getPost, listAccounts } from "@/lib/social";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string; postId: string }>;
@@ -47,6 +47,13 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
 
   const canDeletePost = can(me, "social.post.delete", tenant);
 
+  // Quota strips (SMM-12) read the SMM-05 connector registry so each variant can show its own
+  // account's live quota probe. A 403 here is rendered per-variant (QuotaStrip's own honesty
+  // rule) rather than blocking the whole post — the operator can still read/edit content while
+  // being told plainly that the quota figure is unavailable, never a fabricated zero.
+  const accounts = await listAccounts(userId, tenant);
+  const accountById = new Map(accounts.data.map((a) => [a.id, a]));
+
   return (
     <>
       <Card title={post.title}>
@@ -61,7 +68,10 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 16 }}>
             {post.variants.map((v) => (
-              <VariantCard key={v.id} tenantId={tenant} variant={v} canDelete={canDeletePost} />
+              <VariantCard
+                key={v.id} tenantId={tenant} variant={v} canDelete={canDeletePost}
+                account={accountById.get(v.accountId)} accountsForbidden={accounts.forbidden}
+              />
             ))}
           </div>
         )}

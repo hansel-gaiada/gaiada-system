@@ -4,16 +4,16 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
-import { Card, StatusBadge } from "@/components/ui";
+import { can } from "@/lib/rbac";
+import { Card } from "@/components/ui";
 import { TeachState } from "@/components/departments/TeachState";
 import { AccessDenied } from "@/components/social/AccessDenied";
+import { CalendarGrid, type CalendarGridDay } from "@/components/social/CalendarGrid";
 import { listPosts, listEngagements, type SocialPost } from "@/lib/social";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
 type SearchParams = Promise<{ month?: string; engagementId?: string }>;
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function parseMonth(raw: string | undefined): { year: number; month: number } {
   if (raw && /^\d{4}-\d{2}$/.test(raw)) {
@@ -46,9 +46,12 @@ function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Calendar (SMM-11) — the month grid of posts and their per-network variant chips, driven
-// entirely by `GET posts` (lib/social.ts's `listPosts`), which already carries the variant
-// roll-up (status, schedule, published URL, metered cost) — no N+1 read per post.
+// Calendar (SMM-11, drag-to-reschedule + quota-aware composer added in SMM-12) — the month grid of
+// posts and their per-network variant chips, driven entirely by `GET posts` (lib/social.ts's
+// `listPosts`), which already carries the variant roll-up (status, schedule, published URL,
+// metered cost) — no N+1 read per post. This server component builds the grid/day-grouping as
+// plain data and hands it to `CalendarGrid` (a client component — see its own header) for the
+// interactive part: dragging a post card to another day.
 //
 // ⚠ The roll-up does NOT carry network/handle (only `accountId`) — `social.controller.ts`'s
 // `listPosts` joins nothing beyond `social_post_variants`, unlike `getPost`'s detail join against
@@ -73,6 +76,10 @@ export default async function DepartmentCalendarPage({ params, searchParams }: {
 
   const engagements = await listEngagements(userId, tenant);
   const posts = await listPosts(userId, tenant, { engagementId: sp.engagementId });
+  // `social.manage` — the same capability that gates authoring a post/variant in the Composer.
+  // Drag-to-reschedule calls `updatePost`/`updateVariant` under the hood, so it rides that same
+  // capability rather than inventing a `social.reschedule` key the permission catalog never named.
+  const canReschedule = can(me, "social.manage", tenant);
 
   // A 403 on EITHER read is a denial, not "nothing scheduled" — surface it honestly and stop,
   // rather than rendering an empty-looking grid that reads as "no posts this month."
@@ -84,17 +91,19 @@ export default async function DepartmentCalendarPage({ params, searchParams }: {
     );
   }
 
-  const byDay = new Map<string, SocialPost[]>();
+  // A plain object, not a Map — `CalendarGrid` is a client component, and props crossing the
+  // server/client boundary must be plain serializable values.
+  const byDay: Record<string, SocialPost[]> = {};
   const unscheduled: SocialPost[] = [];
   for (const p of posts.data) {
     if (!p.scheduledAt) { unscheduled.push(p); continue; }
     const k = dateKey(new Date(p.scheduledAt));
-    const list = byDay.get(k) ?? [];
-    list.push(p);
-    byDay.set(k, list);
+    (byDay[k] ??= []).push(p);
   }
 
-  const gridDays = buildGridDays(year, month);
+  const gridDays: CalendarGridDay[] = buildGridDays(year, month).map((d) => ({
+    key: dateKey(d), dayNumber: d.getDate(), inMonth: d.getMonth() === month,
+  }));
   const monthLabel = new Date(year, month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const filterHref = (m: { year: number; month: number }) =>
     `/departments/${deptId}/calendar?month=${monthKey(m.year, m.month)}${sp.engagementId ? `&engagementId=${sp.engagementId}` : ""}`;
@@ -135,67 +144,10 @@ export default async function DepartmentCalendarPage({ params, searchParams }: {
           ctaHref={`/departments/${deptId}/composer`}
         />
       ) : (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1, background: "var(--erp-hairline)", border: "0.5px solid var(--erp-hairline)" }}>
-            {DAY_NAMES.map((d) => (
-              <div key={d} style={{ background: "var(--surface-card)", padding: "6px 8px", font: "700 10px var(--font-body)", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>
-                {d}
-              </div>
-            ))}
-            {gridDays.map((d) => {
-              const inMonth = d.getMonth() === month;
-              const k = dateKey(d);
-              const dayPosts = byDay.get(k) ?? [];
-              return (
-                <div
-                  key={k}
-                  style={{
-                    background: "var(--surface-card)", minHeight: 96, padding: 6,
-                    opacity: inMonth ? 1 : 0.4, display: "flex", flexDirection: "column", gap: 4,
-                  }}
-                >
-                  <span style={{ font: "600 11px var(--font-body)", color: "var(--erp-ink-50)" }}>{d.getDate()}</span>
-                  {dayPosts.map((p) => (
-                    <Link
-                      key={p.id}
-                      href={`/departments/${deptId}/composer/${p.id}`}
-                      style={{ display: "flex", flexDirection: "column", gap: 2, textDecoration: "none", padding: "3px 5px", background: "var(--tint-hover)", border: "0.5px solid var(--erp-hairline-soft)" }}
-                    >
-                      <span style={{ font: "600 11px var(--font-body)", color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {p.title}
-                      </span>
-                      <span style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-                        {p.variants.length === 0 ? (
-                          <StatusBadge label={p.status} />
-                        ) : (
-                          p.variants.map((v) => <StatusBadge key={v.id} label={v.status} />)
-                        )}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-
-          {unscheduled.length > 0 && (
-            <div style={{ marginTop: 20 }}>
-              <span style={{ font: "700 11px var(--font-body)", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>
-                Unscheduled ({unscheduled.length})
-              </span>
-              <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-                {unscheduled.map((p) => (
-                  <li key={p.id}>
-                    <Link href={`/departments/${deptId}/composer/${p.id}`} style={{ display: "flex", gap: 10, alignItems: "center", textDecoration: "none" }}>
-                      <span style={{ font: "600 13px var(--font-body)", color: "var(--text-primary)" }}>{p.title}</span>
-                      <StatusBadge label={p.status} />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </>
+        <CalendarGrid
+          tenantId={tenant} deptId={deptId} gridDays={gridDays} byDay={byDay}
+          unscheduled={unscheduled} canReschedule={canReschedule}
+        />
       )}
     </Card>
   );
