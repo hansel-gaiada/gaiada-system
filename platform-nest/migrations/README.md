@@ -555,3 +555,29 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    `core.role_grant.decide_override` (owner instruction) and corrects the override key's description,
    which had claimed to cover placements. Holder list generated from the bundles; DELTA-asserted, 0 on a
    re-run. No behaviour change: both actions carry the identical four tiers. **Next unused is `0119`.**
+
+   **🔴 2026-08-19 — `0118` DOUBLE-BOOKED TOO, AND THE MITIGATION I ADDED YESTERDAY DID NOT WORK.**
+   `0118_iam_split_decide_assignment.sql` and `0118_social_variant_uploaded_media.sql` both exist and
+   both applied. That is the SECOND collision in two days (`0114` was the first), and it happened
+   *after* this log gained the rule "reserve the number by creating the file before writing DDL" — a
+   rule I followed exactly and which still lost the race.
+
+   **Why reserve-by-creating-the-file cannot work.** It only helps if the OTHER session lists the
+   directory after my file exists. Two sessions that both run `ls | sort | tail` inside the same window
+   both see `0117`, and both then create `0118`. The reservation is not atomic; nothing arbitrates.
+
+   Harmless again, and by the same three properties as `0114`: `readdirSync().sort()` is deterministic
+   so the order is identical everywhere, the ledger is keyed on the full filename so neither is skipped,
+   and the two touch disjoint tables (`permissions`/`role_permissions` vs `social_post_variants`).
+   **Three collisions in, that is luck holding, not a protocol working.**
+
+   **This needs an owner/devops decision, and it is above what a single session should choose:**
+     * per-session number BLOCKS (a session claims 0130-0139 up front and never leaves it), or
+     * timestamp-prefixed filenames (`20260819T1530_iam_split.sql`), which cannot collide by
+       construction and still sort deterministically, or
+     * a committed `migrations/CLAIMS.md` that a session must push to before writing DDL, making the
+       claim atomic through git rather than through the filesystem.
+
+   Until one is chosen, expect this to recur whenever two sessions are active. `0114` and `0118` are now
+   both permanently double-booked, alongside the `0058`/`0059`/`0070` orphan gaps. **Next unused is
+   `0119` — and it is not safe to assume that.**
