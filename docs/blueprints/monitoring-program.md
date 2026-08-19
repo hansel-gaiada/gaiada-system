@@ -500,3 +500,56 @@ migration files named inline (head = 0107 committed). Compose behaviour is read 
 consolidated and deployed, and every figure in §2.1 was verified by query, not estimated. §3–§7 remain
 design; no backend code exists. The Plane B UI in §5 was built and driven in a browser under
 `DEMO_MODE=1`, but has never run against a real backend, because there is not one.
+
+---
+
+## 13. MON-10b — the IAM unit that must land as ONE change (spec, 2026-08-19)
+
+MON-10's schema is committed (migration `0116_module_monitoring.sql`, verified against a throwaway
+database). The module **cannot be registered** until the IAM layer knows about it, and the pieces below
+must ship together — because the failure mode is **boot**, not a red test.
+
+### The three non-obvious constraints, found by reading 0106 (social) rather than assuming
+
+1. **`validateModulePermissions()` refuses boot** if any `ModuleContract.permissions` key does not
+   resolve to a `class='grantable'` row in the `permissions` catalog. So a contract shipped without its
+   catalog migration does not fail a test — **the platform will not start with the module compiled in.**
+   The catalog rows land *before* the module shell, never after.
+2. **Cerbos role names are not a choice.** `derived_roles.yaml` string-composes them at request time
+   from `resource.attr.module`: `module_staff` → `<module>_staff`, `module_manager` →
+   `<module>_manager`. The module key is `monitoring`, so the only names Cerbos will ever look for are
+   **`monitoring_staff`** and **`monitoring_manager`**. Any other name silently never matches — an
+   authz surface that denies everything while looking configured.
+3. **Key format is dotted** `<domain>.<resource>.<action>`, matching the catalog. Colon-style keys from
+   older designs are obsolete.
+
+### The permission set
+
+| Key | Notes |
+|---|---|
+| `monitoring.monitor.read` | The broad grant. Everything on the board is visible to it — which is why `monitor_channels.config` and `monitor_results.detail` hold no secrets and no public-page content. |
+| `monitoring.monitor.create` / `.update` / `.delete` | Authoring a monitor. Per §4.3 this IS the standing authorization to probe on a schedule, and is NOT authorization to act on the target. |
+| `monitoring.incident.acknowledge` | Deliberately separate from `.update`: acknowledging is an accountability record, not an edit. |
+| `monitoring.maintenance.create` | K7. Suppresses alerting *and* SLA math, so it is a real grant, not a convenience. |
+| `monitoring.status_page.publish` | **`sensitive: true`.** It moves tenant data onto the ERP's only unauthenticated read surface. |
+
+### Order of work
+
+1. Migration `0117_iam_monitoring_permissions.sql` — catalog rows (idiom: `INSERT … SELECT FROM
+   (VALUES …) ON CONFLICT (key) DO UPDATE`, so re-running is a metadata sync and never churns ids that
+   `role_permissions` references), the two roles, and the role→permission bundles.
+2. `cerbos/policies/resource_monitor.yaml` (+ incident / maintenance / status_page resources).
+   **Cerbos does not hot-reload — restart it and prove the new decision with a probe.** A healthy
+   Cerbos container has served two-day-stale policy on this estate before.
+3. `src/modules/monitoring/index.ts` — the `ModuleContract` (key `monitoring`, `migrations: ['0116…',
+   '0117…']`, the permissions above, MCP tools with real `pathTemplate`s).
+4. Bootstrap registration, then `array_append` `monitoring` to the demo company's `enabled_modules` —
+   without it every route 404s, which cost the search module a debugging session.
+
+### Then, in order
+
+**MON-11** driver registry (http/keyword/tcp/dns/tls/heartbeat) behind `search-crawl-go`'s egress
+guard — every probe dials a customer-named target, so that guard is mandatory, not optional.
+**MON-12** runner + `/metrics` + partition roll-forward. **MON-13** the heartbeat slice, which is the
+highest value per unit of effort and needs no vendor credential: it closes a class of failure that has
+silently bitten this estate twice.
