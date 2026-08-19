@@ -553,3 +553,23 @@ guard — every probe dials a customer-named target, so that guard is mandatory,
 **MON-12** runner + `/metrics` + partition roll-forward. **MON-13** the heartbeat slice, which is the
 highest value per unit of effort and needs no vendor credential: it closes a class of failure that has
 silently bitten this estate twice.
+
+### 13.1 Cerbos policies landed; the permission arm has one subtlety waiting
+
+Five resource policies exist (`monitor`, `monitor_incident`, `monitor_maintenance`, `monitor_channel`,
+`status_page`), role-arm only. Verified: every one of the 9 catalogued `(cerbos_kind, cerbos_action)`
+pairs from 0117 is governed by a policy rule.
+
+**The subtlety for whoever wires `perm_monitoring_*`:** five policy actions have no catalog permission
+of their own — `monitor_incident/read`, `monitor_maintenance/read`, `monitor_maintenance/delete`,
+`status_page/read`, `status_page/update`. That is **not** five missing permissions. The reads are
+covered conceptually by `monitoring.monitor.read` ("view monitors, results, incidents and uptime"),
+and a Cerbos derived role is not bound to one resource — so the arm should reference the SAME
+`perm_monitoring_monitor_read` from several resource policies rather than minting redundant keys.
+Minting `monitoring.incident.read`, `monitoring.maintenance.read` etc. would fragment a grant a human
+thinks of as one thing, and every role bundle would then need all of them to produce the board.
+
+`monitor_maintenance/delete` and `status_page/update` are the genuine gaps: they are manager-tier
+role-only today and need a deliberate decision — either a catalog key each, or fold them under
+`maintenance.create` / `status_page.publish` respectively on the grounds that whoever may open a
+window may close it, and whoever may publish may edit what they published.
