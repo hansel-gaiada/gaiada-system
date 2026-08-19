@@ -583,9 +583,11 @@ end and dept heads keep their own subtree rule unchanged. `hr_staff` is delibera
 
 The owner also chose the stricter long-term shape: **a dept head's assignment should become a
 REQUEST that HR/company_admin approves.** That half is NOT built — it needs the same approval
-plumbing as §12.3's override. Dept-head DIRECT assign therefore stays live until P2-08 part B lands,
-at which point it flips to the request path; doing it now would remove a working capability and
-leave nothing in its place. Recorded so the flip is a scheduled step, not a forgotten one.
+plumbing as §12.3's override. **P2-08 part B has now landed (2026-08-19), so the flip is UNBLOCKED and
+is the next step — but it is not yet done.** Dept-head DIRECT assign still works today. Doing the flip
+means: route `position · assign` by a dept head through `POST /role-grants/overrides`-style approval
+rather than writing the assignment, and pin that a dept head's direct assign is refused with a typed
+code naming the request path. Recorded here so it stays a scheduled step, not a forgotten one.
 
 ### 11.3 Unchanged by this ticket
 
@@ -665,16 +667,44 @@ permission groups (`invoices_view`, `rollups`) lost their derived `sensitive` fl
 consequence, and both `_meta` counts were re-derived rather than hand-edited.
 
 Rationale: flagging reads meant any role that can *view* contracts, invoices, identity links or
-dashboards routed as an override — and until §12.3's mechanism exists, "routes as an override" means
-"is refused". The override path stays reserved for authority that CHANGES something.
+dashboards routed as an override. (When that was written, "routes as an override" meant "is refused";
+§12.3's mechanism now exists, so the phrase means what it says — but the ruling stands on its own
+merits: an approval step for reading a dashboard is friction without a safety benefit.) The override path stays reserved for authority that CHANGES something.
 
-### 12.3 `decide_override` does not exist — the override path fails closed
+### 12.3 ~~`decide_override` does not exist~~ — SHIPPED 2026-08-19 (P2-08 part B)
 
-§6.5's routed override needs a `decide_override` literal action on `automation_approval`. It is in
-neither the policy nor the catalog. Adding it = catalog entry + bundles migration + re-derived parity
-chain, i.e. its own ticket. Until then a dept head requesting an above-baseline sensitive role is
-**refused** with a typed `override_required`, naming the missing mechanism. company_admin is
-unaffected.
+§6.5's routed override is built. `core.role_grant.decide_override` →
+(`automation_approval`, `decide_override`), migration `0115`, held by `platform_admin`,
+`company_admin`, `group_executive`, `hr_manager`.
+
+**The flow:** `POST /api/:t/role-grants/overrides` (requester needs `role_grant · create` on the
+target, so an override is never a way around the SUBTREE bound — only past the sensitivity bound) files
+an `automation_approvals` row with `origin='iam'`, `workflow_id='iam:override'`. The routed approver
+decides it through the EXISTING inbox — one route, no fork: `automation-approvals.controller.ts` picks
+the Cerbos action from `origin` + `workflow_id`, exactly as it already does for `hr:leave`. An
+approving decision **executes in-band** through the grant choke point, tagged `expires_at` +
+`origin_approval_id`, and bumps the target's session.
+
+**Routing is code this wave** (`role-grants.controller.ts::routeFor`, design §6.5; the configurable
+table is IAM-22): a role carrying above-baseline `hr.*`-sensitive keys routes to `hr_manager`,
+everything else to `company_admin`. Cerbos holds the OUTER bound (the union of routable approvers);
+the router holds the inner one, because "the approver this row was routed to" is a fact about a row,
+not about a role.
+
+**Requester ≠ decider is a structural Cerbos DENY** on `decide_override`, `roles: ["user"]`,
+deny-overrides — so it beats platform_admin's wildcard, and it holds even if a future controller
+forgets it. It fails CLOSED on an unresolvable requester: an override with an unknown author is exactly
+the one nobody should be able to rubber-stamp.
+
+**The routing map earns its keep, demonstrated by a test that first failed:** a `company_admin` cannot
+grant `hr_manager` at all — it lacks `reports.appraisal.confirm_evidence/cycle_admin/finalize`, which
+are `hr_people_ops`-only. The ceiling refuses them correctly, which is precisely why hr-sensitive
+overrides route to the HR tier instead. The ceiling is enforced at EXECUTION against the DECIDER, never
+the requester: the approver's authority is what backs an override.
+
+**Still open:** `automation_approvals.origin` had to be widened to admit `'iam'` (`0115`, following
+`0028`'s drop-and-re-add precedent — Postgres cannot ALTER a CHECK in place). And the dept-head assign
+→ REQUEST flip (§11.2's owner end-state) is now unblocked but NOT yet done.
 
 ### 12.4 `expires_at` is now enforced at RESOLUTION, and swept afterwards
 

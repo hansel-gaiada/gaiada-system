@@ -82,7 +82,12 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
   // it was. If a future social ticket moves this number, that is the change to justify, not the
   // grantable one. Prior movement: HIER-3, 2026-08-11 — core.team.* retired (215 -> 211).
   it("sanity: 267 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM Phase 2 P2-02, 2026-08-13: 249 -> 267 [+18 across role_grant/position/employee/it_account], relationship set untouched; prior: IAM-GAP-01, 2026-08-13: 247 -> 249; SMM-30, 2026-08-12: 211 -> 247)", () => {
-    expect(grantable.length).toBe(267);
+        // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
+    // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
+    // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
+    // as a literal here only because rewriting these three suites' fixed-input style is its own
+    // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
+    expect(grantable.length).toBe(268);
     expect(relationshipKeys.size).toBe(15);
   });
 

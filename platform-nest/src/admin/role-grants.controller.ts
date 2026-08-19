@@ -32,18 +32,40 @@ import {
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
-import { withGlobal, withTenants } from "../db";
+import { newId, withGlobal, withTenants } from "../db";
+import { config } from "../config";
 import { authorize, writeActivity } from "../core/http";
+import { emitEvent } from "../events/outbox.service";
 import { check } from "../rbac/cerbos";
 import { AuthGuard } from "../auth/guards";
 import { loadUnitAncestors } from "../core/org-unit-closure";
-import { insertGrantRow, revokeGrantById } from "./grant-write.service";
+import { assertGrantAllowed, insertGrantRow, revokeGrantById } from "./grant-write.service";
 
 /** Default override expiry, design §12 Q4 (owner recommendation: 90 days, renewable). Applied to
  *  any grant made with `expiresInDays` unset but `temporary: true`; a permanent grant needs
  *  company_admin, which Cerbos already decides. */
 const DEFAULT_EXPIRY_DAYS = 90;
 const MAX_EXPIRY_DAYS = 365;
+
+/**
+ * §6.5's routing map, code-defined this wave (the configurable TABLE is Phase 4 / IAM-22).
+ *
+ * Returns the role NAME of the tier a given override must be decided by. The rule the owner set:
+ * `hr.*`-sensitive goes to the HR manager tier, everything else to company_admin. Cerbos holds the
+ * OUTER bound (the union of every routable approver); this is the INNER one, per row — Cerbos cannot
+ * express "the approver THIS request was routed to", because that is a fact about a row, not a role.
+ */
+async function routeFor(roleId: string): Promise<"hr_manager" | "company_admin"> {
+  const { rows } = await withGlobal((c) =>
+    c.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM role_permissions rp
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE rp.role_id = $1 AND p.sensitive AND NOT rp.self_scoped AND p.module_key = 'hr'`,
+      [roleId],
+    ),
+  );
+  return Number(rows[0]?.n ?? "0") > 0 ? "hr_manager" : "company_admin";
+}
 
 /** D11: a role change on a user must cut their live sessions. */
 async function bumpSession(userId: string): Promise<void> {
@@ -194,9 +216,9 @@ export class RoleGrantsController {
           `override_required: this role carries ${sensitive.rows.length} sensitive permission(s) ` +
             `(${sensitive.rows.slice(0, 5).map((r) => r.key).join(", ")}` +
             `${sensitive.rows.length > 5 ? ", …" : ""}) and a department head may not grant it directly ` +
-            `(design §6.3.7). It must route as an override request for approval — and that mechanism ` +
-            `(the 'decide_override' action) is NOT BUILT YET, so this request is refused rather than ` +
-            `quietly allowed. Ask a company administrator to make this grant in the meantime.`,
+            `(design §6.3.7). Route it as an override request instead: POST ` +
+            `/api/${tenantId}/role-grants/overrides with a justification — it goes to the routed ` +
+            `approver and, if approved, is granted with an expiry.`,
         );
       }
     }
@@ -283,4 +305,117 @@ export class RoleGrantsController {
     });
     return { ok: true, grantId: deleted, userId: row.user_id };
   }
+  // ─────────────────── §6.5 the routed override: REQUEST ───────────────────
+  //
+  // A dept head may not grant a role carrying above-baseline sensitive keys directly (§6.3.7). This
+  // is where that refusal now goes instead of being a dead end: it files an `automation_approvals`
+  // row that the routed approver decides through the EXISTING inbox, and an approving decision
+  // executes the grant in-band with an expiry.
+  //
+  // Routing is CODE this wave, deliberately (design §6.5; the configurable table is IAM-22). A
+  // half-built routing table would be a worse thing to inherit than one function with the rule
+  // written beside it.
+  @Post(":tenantId/role-grants/overrides")
+  @HttpCode(201)
+  async requestOverride(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { userId?: string; roleId?: string; scopeType?: string; scopeId?: string | null; expiresInDays?: number; justification?: string },
+  ) {
+    const target = body?.userId?.trim();
+    const roleId = body?.roleId?.trim();
+    const justification = body?.justification?.trim();
+    if (!target || !roleId) throw new BadRequestException("userId and roleId required");
+    if (!justification) {
+      // An override is an exception to the org chart. An exception with no stated reason is the one
+      // an auditor cannot evaluate later, so the reason is required at the door, not optional.
+      throw new BadRequestException("justification required: an override is an exception, and the reason is its audit trail");
+    }
+    const scopeType = body?.scopeType ?? "company";
+    if (scopeType !== "company" && scopeType !== "org_unit") {
+      throw new BadRequestException("scopeType must be 'company' or 'org_unit' on this surface");
+    }
+    const scopeId = scopeType === "company" ? tenantId : (body?.scopeId ?? null);
+    if (scopeType === "org_unit" && !scopeId) throw new BadRequestException("scopeId required for org_unit scope");
+    const days = body?.expiresInDays ?? DEFAULT_EXPIRY_DAYS;
+    if (!Number.isInteger(days) || days < 1 || days > MAX_EXPIRY_DAYS) {
+      throw new BadRequestException(`expiresInDays must be an integer between 1 and ${MAX_EXPIRY_DAYS}`);
+    }
+
+    const prep = await withTenants([tenantId], async (c) => {
+      const member = await c.query<{ user_id: string }>(
+        `SELECT user_id FROM company_memberships
+          WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+        [tenantId, target],
+      );
+      if (!member.rows[0]) throw new BadRequestException("target is not an active member of this company");
+      return { ancestors: await targetUnitAncestors(c, tenantId, target) };
+    });
+
+    // The REQUESTER must be someone who could grant here at all — Cerbos decides that, with the same
+    // server-derived ancestry the direct path uses. An override routes past the SENSITIVITY bound
+    // only; it is never a way around the subtree bound.
+    await authorize(
+      req.principal,
+      { kind: "role_grant", tenantId, targetUserId: target, unitAncestors: prep.ancestors },
+      "create",
+    );
+
+    const role = await withGlobal(async (c) => {
+      const { rows } = await c.query<{ id: string; name: string }>(`SELECT id, name FROM roles WHERE id = $1`, [roleId]);
+      if (!rows[0]) throw new BadRequestException("roleId does not resolve to a role");
+      // Everything the DIRECT path refuses structurally, this refuses too — elevated fence,
+      // allow-list, scope validity, self-target. Running the choke point's own guard here (it writes
+      // nothing) is what stops a request being filed that could never be executed: an approval queue
+      // full of un-executable rows is its own failure mode.
+      //
+      // The CEILING is the one guard deliberately skipped at request time: the whole point of an
+      // override is that the APPROVER's authority backs it, not the requester's. It is enforced at
+      // execution against the decider (see the decide handler).
+      try {
+        await assertGrantAllowed(c, {
+          origin: "ui",
+          targetUserId: target,
+          roleId,
+          scopeType,
+          scopeId,
+          actorUserId: req.principal.userId,
+          actorPerms: undefined,
+          tenantId,
+          onConflict: "unique_columns",
+        });
+      } catch (e) {
+        if (!(e instanceof BadRequestException) || !/ceiling_exceeded/.test(String((e as Error).message))) throw e;
+      }
+      return rows[0];
+    });
+
+    const approvalId = newId();
+    const route = await routeFor(roleId);
+    await withTenants([tenantId], async (c) => {
+      await c.query(
+        `INSERT INTO automation_approvals
+           (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, origin_site)
+         VALUES ($1,$2,'iam:override','iam.grantOverride',$3,'high',$4,$5,'iam',$6)`,
+        [
+          approvalId, tenantId,
+          JSON.stringify({ targetUserId: target, roleId, roleName: role.name, scopeType, scopeId, expiresInDays: days, justification, routedTo: route }),
+          `${role.name} @ ${scopeType} for ${days} days — ${justification}`,
+          req.principal.userId, config.originSite,
+        ],
+      );
+      await emitEvent(c, tenantId, "automation_approval", approvalId, "iam.override_requested", {
+        targetUserId: target, roleId, roleName: role.name, routedTo: route, requestedBy: req.principal.userId,
+      });
+    });
+    await writeActivity(tenantId, req.principal.userId, "requested", "role_grant", approvalId, { roleId, targetUserId: target });
+    return {
+      ok: true,
+      approvalId,
+      routedTo: route,
+      expiresInDays: days,
+      decideVia: `POST /api/${tenantId}/automation-approvals/${approvalId}/decide`,
+    };
+  }
+
 }

@@ -530,3 +530,13 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    **Next unused is `0115`** — and while two sessions are active in this checkout, RESERVE IT BY
    CREATING THE FILE before writing DDL, per rule 5. `ls | tail` alone is not sufficient and has now
    failed twice.
+
+   **2026-08-19 update (P2-08 part B) — `0115` TAKEN, and RESERVED BEFORE THE DDL WAS WRITTEN.** The
+   file was created as a stub the moment the number was chosen, then filled in — the rule this log
+   added hours earlier after `0114` was double-booked, applied to its own author.
+   `0115_iam_override_decide.sql` seeds `core.role_grant.decide_override` + its 4 bundle rows
+   (generated from `role-permission-bundles.json`, itself generated from the policies) and widens
+   `automation_approvals.origin` to admit `'iam'`, following `0028`'s drop-and-re-add DO block —
+   Postgres cannot ALTER a CHECK in place, and the constraint is looked up BY DEFINITION because
+   `0016` created it auto-named. Purely additive: no existing row can violate a wider set. **Next
+   unused is `0116`.**

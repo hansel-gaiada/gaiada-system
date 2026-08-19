@@ -8,7 +8,7 @@
 // concern the spec defers). The approved row is the durable artifact a future resume step reads.
 import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { withTenants } from "../db";
+import { withGlobal, withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
@@ -16,6 +16,8 @@ import { getExecutable } from "./approval-executables";
 import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, toolArgsOf } from "./approval-execute";
 import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
+// P2-08 part B: an approved IAM override executes in-band through the ONE grant choke point.
+import { insertGrantRow } from "../admin/grant-write.service";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -250,9 +252,14 @@ export class AutomationApprovalsController {
     // (hr.leave.decide) instead of the generic `decide`; loans and every other origin are
     // BYTE-UNCHANGED (still `decide`). Still one route, no fork — only the internal Cerbos
     // action requested differs.
+    //
+    // P2-08 part B: `requested_by` joins the SELECT because an IAM override authorizes against
+    // `decide_override`, whose structural DENY compares `resource.attr.creatorId` to the caller —
+    // requester ≠ decider (design §6.5). Fetching it here keeps the one-route/no-fork shape this
+    // handler already uses for hr:leave: only the Cerbos action and one attribute differ.
     const existing = await withTenants([tenantId], (c) =>
-      c.query<{ origin: string; tool_name: string; workflow_id: string }>(
-        `SELECT origin, tool_name, workflow_id FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+      c.query<{ origin: string; tool_name: string; workflow_id: string; requested_by: string | null }>(
+        `SELECT origin, tool_name, workflow_id, requested_by FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),
     );
@@ -261,8 +268,23 @@ export class AutomationApprovalsController {
     const rowToolName = existing.rows[0].tool_name;
     const module = rowOrigin === "hr" ? "hr" : undefined;
     const isLeave = rowOrigin === "hr" && existing.rows[0].workflow_id === "hr:leave";
+    const isOverride = rowOrigin === "iam" && existing.rows[0].workflow_id === "iam:override";
     const subKind = isLeave ? "leave" : undefined;
-    await authorize(req.principal, { kind: "automation_approval", id, tenantId, module, subKind }, isLeave ? "decide_leave" : "decide");
+    const decideAction = isOverride ? "decide_override" : isLeave ? "decide_leave" : "decide";
+    await authorize(
+      req.principal,
+      {
+        kind: "automation_approval",
+        id,
+        tenantId,
+        module,
+        subKind,
+        // Only ever set for an override. Everywhere else it stays undefined -> "" -> the DENY's
+        // `has() && != ""` guard cannot fire, so no existing approval's behaviour moves.
+        creatorId: isOverride ? (existing.rows[0].requested_by ?? "") : undefined,
+      },
+      decideAction,
+    );
     // D14-02: the executor is REGISTRY-scoped, not origin-scoped (approval-executables.ts's own
     // doctrine + migration 0078's header). execution_status is computed here and flipped in the
     // SAME UPDATE that flips `status` below — never a second statement — so a crash between the two
@@ -298,9 +320,61 @@ export class AutomationApprovalsController {
       });
       return upd.rows[0];
     });
+
+    // ── P2-08 part B: an APPROVED override executes IN-BAND (design §6.5) ────────────────────────
+    //
+    // Not through the D14 executable registry: that registry is deliberately origin-scoped to
+    // `automation|agent` (approval-executables.ts's own doctrine), and the other non-registry origin
+    // — HR's leave — executes through a module eventHandler, which IAM cannot use because IAM is not
+    // a module. So the grant is written here, synchronously, and the HTTP response reflects committed
+    // reality rather than an eventual one.
+    //
+    // The ceiling is enforced HERE, against the DECIDER's own perms — that is the whole point of the
+    // override path. The requester's authority never backs the grant; the approver's does. Every
+    // other invariant (elevated fence, allow-list, scope validity, self-target) is the choke point's
+    // and runs on this same call.
+    let overrideGrant: { grantId: string | null; expiresAt: string } | null = null;
+    if (res && isOverride && decision === "approved") {
+      const args = (res.tool_args ?? {}) as {
+        targetUserId?: string; roleId?: string; scopeType?: string; scopeId?: string | null; expiresInDays?: number;
+      };
+      if (!args.targetUserId || !args.roleId) {
+        throw new BadRequestException("override payload is malformed: targetUserId and roleId are required");
+      }
+      const days = Number(args.expiresInDays ?? 90);
+      const expiresAt = new Date(Date.now() + (Number.isFinite(days) && days > 0 ? days : 90) * 86400000).toISOString();
+      const grantId = await withGlobal((c) =>
+        insertGrantRow(c, {
+          origin: "ui",
+          targetUserId: args.targetUserId!,
+          roleId: args.roleId!,
+          scopeType: args.scopeType ?? "company",
+          scopeId: args.scopeId ?? tenantId,
+          actorUserId: req.principal.userId,
+          actorPerms: req.principal.perms,
+          tenantId,
+          expiresAt,
+          originApprovalId: id,
+          onConflict: "unique_columns",
+        }),
+      );
+      // D11 — the target's live sessions must pick the new grant up (and, when it expires, lose it).
+      await withGlobal((c) =>
+        c.query(`UPDATE users SET session_version = session_version + 1, updated_at = now() WHERE id = $1`, [
+          args.targetUserId,
+        ]),
+      );
+      await writeActivity(tenantId, req.principal.userId, "granted", "role_grant", grantId ?? id, {
+        viaOverride: id, targetUserId: args.targetUserId, roleId: args.roleId, expiresAt,
+      });
+      overrideGrant = { grantId, expiresAt };
+    }
     if (!res) throw new NotFoundException("approval not found or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "automation_approval", id);
-    return { id, status: decision };
+    // `override` is present ONLY for an approved IAM override, so every existing consumer of this
+    // response sees a byte-identical shape. It carries the grant id and the expiry because a decider
+    // who cannot see what their approval actually produced has to go and look it up to be sure.
+    return overrideGrant ? { id, status: decision, override: overrideGrant } : { id, status: decision };
   }
 
   // D14-07 — re-drive execution for a row the executor left in a terminal `failed` state, or

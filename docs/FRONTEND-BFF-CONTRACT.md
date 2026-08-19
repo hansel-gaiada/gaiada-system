@@ -3187,3 +3187,35 @@ Contract notes:
    showed green.
 5. **Disk queries must stay identical to the `DiskSpaceLow` alert expression.** The console and the
    pager reading different series is worse than having only one of them.
+
+---
+
+## IAM Phase 2 — the routed override (P2-08 part B, 2026-08-19)
+
+**Status:** PROTOTYPED / DEV-VERIFIED (`override-request-decide.test.ts` 16/16 through `app.inject()`
+against real Postgres + a restarted Cerbos). Migration `0115`. No UI consumer yet — P2-11 (dept-head
+access page) is the intended one.
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `POST /api/:tenantId/role-grants/overrides` | `role_grant · create` (on the TARGET, with server-derived ancestry) | `{ userId, roleId, scopeType?, scopeId?, expiresInDays?, justification }`. **`justification` is required** — 400 without it. Returns `{ approvalId, routedTo, expiresInDays, decideVia }`. |
+| `POST /api/:tenantId/automation-approvals/:id/decide` | `automation_approval · decide_override` (for `origin='iam'` rows) | The EXISTING inbox endpoint — no new decide route. On `approved`, response gains `override: { grantId, expiresAt }`. Non-IAM approvals are byte-unchanged and carry no `override` key. |
+
+### What a consumer must render
+
+- **`routedTo`** is `"hr_manager"` or `"company_admin"` — tell the requester who it went to, because
+  they cannot decide it themselves and will otherwise wait on the wrong person.
+- **The direct-grant refusal now names this route.** `POST /role-grants` returns
+  `override_required: … Route it as an override request instead: POST /api/:t/role-grants/overrides
+  with a justification`. Offer that action, not a retry.
+- **An override never widens SCOPE.** The requester still needs `role_grant · create` on the target, so
+  a dept head cannot request one for somebody outside their subtree (403), and a non-member target is a
+  400. It routes past the sensitivity bound only.
+- **Requester ≠ decider is a 403 from Cerbos**, including for `platform_admin`. If your UI shows a
+  decide button on the requester's own row, it will 403 — hide it.
+- **Expiry**: default 90 days (`§12 Q4`), max 365, refused (not clamped) outside that. The granted row
+  carries `expires_at` and `origin_approval_id`, and `assemblePrincipal()` stops resolving it the
+  moment it expires — so a UI listing "temporary access" can trust the timestamp.
+- ⚠ **A `company_admin` cannot approve an `hr_manager` override** — they genuinely lack three
+  `hr_people_ops`-only appraisal keys, so the ceiling refuses at execution with `ceiling_exceeded`.
+  That is why routing exists; surface `routedTo` rather than letting an admin try and fail.

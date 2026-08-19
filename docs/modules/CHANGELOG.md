@@ -106,6 +106,19 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.046.0098a` - 2026-08-19 - the routed override: a refusal with somewhere to go
+
+Manifest (counter +1, 0097 -> 0098): `platform-nest 0.24.0 -> 0.25.0`.
+
+Closes the last structural gap in P2-08. Before this, a dept head asking for a sensitive role got a
+typed refusal naming a mechanism that did not exist. Now the same request files a routed approval, and
+approving it grants — time-boxed, traceable to the approval, and decided by someone who is not the
+person who asked.
+
+⚠ Deploying this does NOT change any existing approval's behaviour: the decide route picks a Cerbos
+action from the row's own origin, and every non-IAM row still takes `decide` and returns the same
+shape it always did.
+
 ### `Alpha 01.045.0097a` - 2026-08-19 - the grant ceiling gets its durable mechanism
 
 Manifest (counter +1, 0096 -> 0097): `platform-nest 0.23.2 -> 0.24.0`.
@@ -1787,6 +1800,34 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.25.0] - 2026-08-19 - IN PROGRESS (P2-08 part B: the routed override)
+- **The refusal became a route.** A dept head who cannot grant a sensitive role directly now files
+  `POST /api/:t/role-grants/overrides` with a justification; it routes by domain; the routed approver
+  decides it through the EXISTING inbox; and an approving decision executes the grant IN-BAND with
+  `expires_at` + `origin_approval_id`, bumping the target's session. Migration `0115`.
+- **One route, no fork.** `automation-approvals.controller.ts` already picked its Cerbos action from
+  `origin` + `workflow_id` (`hr:leave` -> `decide_leave`); an override is `iam` + `iam:override` ->
+  `decide_override`. Non-IAM approvals are byte-unchanged and carry no `override` key in the response —
+  pinned by a test that asserts the exact old shape.
+- **Requester ≠ decider is structural**: `EFFECT_DENY` on `roles: ["user"]`, so deny-overrides beats
+  even platform_admin's wildcard, and it fails CLOSED on an unresolvable requester. Both the dept-head
+  and the company_admin self-approval attempts are pinned at 403.
+- **Routing earns its keep, and a failing test proved it.** A `company_admin` cannot grant `hr_manager`
+  at all — it lacks `reports.appraisal.confirm_evidence/cycle_admin/finalize`, which are
+  `hr_people_ops`-only — so the ceiling refuses them at execution. That is exactly why hr-sensitive
+  overrides route to the HR tier. The ceiling runs against the DECIDER, never the requester: the
+  approver's authority is what backs an override.
+- **An override never widens scope.** The requester still needs `role_grant · create` on the target, so
+  a dept head cannot request one outside their subtree (403) and a non-member target is a 400. It
+  routes past the sensitivity bound only — never the subtree bound, the elevated fence or the
+  allow-list, each pinned.
+- `automation_approvals.origin` widened to admit `'iam'`, following `0028`'s drop-and-re-add precedent
+  (Postgres cannot ALTER a CHECK in place) and looking the constraint up BY DEFINITION, not by name.
+- Two schema assumptions corrected the hard way, both caught by the migration failing in test: the
+  catalog's `domain` is stored as `module_key`, and `permissions.id` carries no default.
+- Five tally guards moved (282 -> 283 pairs, 267 -> 268 grantable) and one real gap closed: the new key
+  was in no permission group, now `advancedOnly` alongside its sibling `core.role_grant.create`.
+- Gates: override battery 16/16, catalog/group/ui-grantable suites 46/46.
 ### [0.24.0] - 2026-08-19 - IN PROGRESS (the self-scoped marker: the ceiling's durable mechanism)
 - **`role_permissions.self_scoped` (migration `0114`)** replaces P2-08's interim "subtract the baseline
   `member` bundle" on the REQUIRED side of the grant ceiling. A (role, key) pair is marked when EVERY
