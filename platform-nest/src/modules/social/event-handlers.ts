@@ -25,6 +25,11 @@ interface SocialPostEventPayload {
 interface EngagementRow {
   owner_id: string | null;
   name: string;
+  /** The owner's address. enqueueMail VALIDATES this before it does anything else, so it has to be
+   *  real by the time we call: an empty string throws `implausible recipient address` whenever mail
+   *  is enabled, and is silently skipped whenever it is not. Both are wrong, and the second is the
+   *  one that hides. */
+  owner_email: string | null;
 }
 
 /** Query the engagement to find the owner. */
@@ -37,7 +42,10 @@ async function loadEngagementOwner(tenantId: string, engagementId: string): Prom
     // it would have made the whole ticket a no-op that still reported green.
     await declareSocialModuleScope(c);
     const { rows } = await c.query<EngagementRow>(
-      `SELECT owner_id, name FROM social_engagements WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT e.owner_id, e.name, u.email AS owner_email
+         FROM social_engagements e
+         LEFT JOIN users u ON u.id = e.owner_id
+        WHERE e.id = $1 AND e.deleted_at IS NULL`,
       [engagementId],
     );
     return rows[0] ?? null;
@@ -104,6 +112,7 @@ export async function handlePostFailed(event: OutboxEvent): Promise<void> {
   const network = typeof payload.network === "string" ? payload.network : "unknown";
   const reason = typeof payload.reason === "string" ? payload.reason : "unknown";
   const ownerUserId = engagement.owner_id;
+  const ownerEmail = engagement.owner_email;
 
   // In-app notification (to the bell)
   await notify(event.tenantId, ownerUserId, null, "social.post.failed", {
@@ -129,10 +138,15 @@ export async function handlePostFailed(event: OutboxEvent): Promise<void> {
     detail: typeof payload.detail === "string" ? payload.detail : null,
   };
 
+  // enqueueMail does NOT resolve an address from userId -- it validates `toEmail` first and throws
+  // on an implausible one. With no address on file we send no mail rather than throwing inside an
+  // event handler; the bell notification above has already fired, so the failure is never silent.
+  if (!ownerEmail) return;
+
   await enqueueMail({
     stream: "notify",
     templateKey: "social.post_failed",
-    toEmail: "", // will be resolved from userId
+    toEmail: ownerEmail,
     tenantId: event.tenantId,
     userId: ownerUserId,
     entityType: "social_post_variant",

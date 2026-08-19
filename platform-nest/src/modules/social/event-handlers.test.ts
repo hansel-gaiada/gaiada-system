@@ -1,7 +1,8 @@
 // SMM-13 — tests for social post event handlers (notifications + mail routing)
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { newId, withTenants } from "../../db";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
+import { config } from "../../config";
 import { createCompany, createUser, addMembership } from "../../testing/fixtures";
 import type { OutboxEvent } from "../../events/types";
 import { handlePostDispatched, handlePostPublished, handlePostFailed } from "./event-handlers";
@@ -16,7 +17,13 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
   let ownerUserId: string;
   let MODULES: { modules: string[] };
 
+  // `config.mail.enabled` is the master gate: with it off, enqueueMail returns {skipped} WITHOUT
+  // touching mail_log, so a mail assertion silently reads 0 and looks like a routing bug. Flipped
+  // here and restored in afterAll, the idiom mail/queue.test.ts already established.
+  const savedMailEnabled = config.mail.enabled;
+
   beforeAll(async () => {
+    config.mail.enabled = true;
     await initTestDb();
     MODULES = { modules: ["social"] };
     tenantId = await createCompany("SMM-13 Event Handler Test", ["social"]);
@@ -84,6 +91,7 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
   });
 
   afterAll(async () => {
+    config.mail.enabled = savedMailEnabled;
     await teardownTestDb();
   });
 
@@ -125,15 +133,14 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
     expect(notifRows.length).toBe(1);
     const notif = notifRows[0];
     expect(notif.type).toBe("social.post.dispatched");
-    const notifPayload = JSON.parse(notif.payload);
+    const notifPayload = (notif.payload as Record<string, unknown>);
     expect(notifPayload.severity).toBe("info");
     expect(notifPayload.title).toContain("instagram");
 
     // Assert NO mail was queued (routine success must not trigger mail)
-    const { rows: mailRows } = await withTenants([], (c) =>
-      c.query(
-        `SELECT COUNT(*) as count FROM mail_log WHERE template_key = 'social.post_dispatched'`,
-      ));
+    const { rows: mailRows } = await adminPool().query(
+      `SELECT COUNT(*) as count FROM mail_log WHERE template_key = 'social.post_dispatched'`,
+    );
     expect(Number(mailRows[0].count)).toBe(0);
   });
 
@@ -165,15 +172,14 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
     expect(notifRows.length).toBe(1);
     const notif = notifRows[0];
     expect(notif.type).toBe("social.post.published");
-    const notifPayload = JSON.parse(notif.payload);
+    const notifPayload = (notif.payload as Record<string, unknown>);
     expect(notifPayload.severity).toBe("info");
     expect(notifPayload.title).toContain("instagram");
 
     // Assert NO mail was queued (routine success must not trigger mail)
-    const { rows: mailRows } = await withTenants([], (c) =>
-      c.query(
-        `SELECT COUNT(*) as count FROM mail_log WHERE template_key = 'social.post_published'`,
-      ));
+    const { rows: mailRows } = await adminPool().query(
+      `SELECT COUNT(*) as count FROM mail_log WHERE template_key = 'social.post_published'`,
+    );
     expect(Number(mailRows[0].count)).toBe(0);
   });
 
@@ -206,32 +212,35 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
     expect(notifRows.length).toBe(1);
     const notif = notifRows[0];
     expect(notif.type).toBe("social.post.failed");
-    const notifPayload = JSON.parse(notif.payload);
+    const notifPayload = (notif.payload as Record<string, unknown>);
     expect(notifPayload.severity).toBe("critical");
     expect(notifPayload.title).toContain("failed");
     // Assert refusal token survives in payload (not flattened)
     expect(notifPayload.reason).toBe("dispatch_error");
 
     // Assert mail was queued with social.post_failed template
-    const { rows: mailRows } = await withTenants([], (c) =>
-      c.query(
-        `SELECT template_key, payload FROM mail_log WHERE template_key = 'social.post_failed' ORDER BY created_at DESC LIMIT 1`,
-      ));
+    const { rows: mailRows } = await adminPool().query(
+      `SELECT template_key, payload FROM mail_log WHERE template_key = 'social.post_failed' ORDER BY created_at DESC LIMIT 1`,
+    );
     expect(mailRows.length).toBeGreaterThan(0);
     const mail = mailRows[0];
     expect(mail.template_key).toBe("social.post_failed");
-    const mailPayload = JSON.parse(mail.payload);
+    const mailPayload = (mail.payload as Record<string, unknown>);
     // Assert refusal token also survives in mail payload
     expect(mailPayload.reason).toBe("Dispatch Error"); // Token humanized for mail
     expect(mailPayload.detail).toBe("Network timeout");
   });
 
   it("handles missing engagement gracefully (no-op)", async () => {
+    const noopEntityId = newId();
     const event: OutboxEvent = {
       id: newId(),
       tenantId,
       entityType: "social_post_variant",
-      entityId: variantId,
+      // A DISTINCT entity id on purpose: the dispatched test above already notified on `variantId`,
+      // so counting by that id could never reach 0 once the handlers actually work -- the assertion
+      // would pass only while the feature was broken.
+      entityId: noopEntityId,
       eventType: "social.post.dispatched",
       payload: {
         network: "instagram",
@@ -246,11 +255,12 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
     // Should not throw
     await handlePostDispatched(event);
 
-    // No notification should be created (no owner)
+    // No notification should be created (the engagement does not exist)
     const { rows } = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT COUNT(*) as count FROM notifications WHERE type = 'social.post.dispatched' AND (payload::jsonb->'entityId' = $1)`,
-        [JSON.stringify(variantId)],
+        `SELECT COUNT(*) as count FROM notifications
+          WHERE type = 'social.post.dispatched' AND payload->>'entityId' = $1`,
+        [noopEntityId],
       ));
     expect(Number(rows[0].count)).toBe(0);
   });
