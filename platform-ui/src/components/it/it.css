@@ -87,3 +87,25 @@
 @media (max-width: 900px) {
   .it-wf-wrap { grid-template-columns: 1fr; }
 }
+
+/* P2-14 — the accounts worklist. The password panel is deliberately loud: it is the only place an
+   initial credential ever appears, it will not be shown twice, and a subtle treatment here would
+   invite an operator to close it assuming they can look it up later. */
+.acct-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.acct-actions__reason { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.acct-actions__reason-input { min-width: 220px; }
+.acct-actions__note { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.acct-actions__error { font: 400 12px var(--font-body); color: var(--status-critical-fg); }
+
+.acct-password { display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  border: 0.5px solid var(--erp-hairline); border-left: 2px solid var(--erp-accent);
+  background: var(--surface-card); }
+.acct-password__label { font: 400 12px var(--font-body); color: var(--text-primary); }
+.acct-password__value { font: 700 15px var(--font-mono, monospace); letter-spacing: 0.04em;
+  user-select: all; padding: 6px 8px; background: var(--wash); border: 0.5px solid var(--erp-hairline); }
+.acct-password__hint { font: 400 11px var(--font-body); color: var(--erp-ink-50); max-width: 46ch; }
+
+.acct-state { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.acct-state--finding { color: var(--status-critical-fg); }
+.acct-state--todo { color: var(--erp-accent); }
+.acct-state--ok { color: var(--erp-ink-50); }

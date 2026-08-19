@@ -128,6 +128,19 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.054.0107a` - 2026-08-19 - IT can see who still needs a login
+
+Manifest (counter +1, 0106 -> 0107): `platform-ui 0.25.1 -> 0.26.0`. No migration.
+
+P2-14, the first Phase 2 UI surface. The worklist and its four actions, against P2-13's real endpoints.
+
+Two things worth reading. The accounts reader deliberately breaks this codebase's own
+degrade-to-empty-list convention, because an empty accounts list is a claim ("everyone has a login") and
+not an absence of data. And wiring the tab surfaced a contradiction: the IT console's layout gated every
+tool on the `it` module, which would have hidden the one endpoint specifically built to keep working when
+that module is off — and hidden it behind a reassuring "module disabled" instead of "three leavers can
+still log in". The gate is now per-tool.
+
 ### `Alpha 01.053.0106a` - 2026-08-19 - the phase's own acceptance criterion, proven three ways
 
 Manifest (counter +1, 0105 -> 0106): `platform-nest 0.29.0 -> 0.30.0`. No migration.
@@ -2856,6 +2869,40 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.26.0] - 2026-08-19 - IN PROGRESS (P2-14: the IT accounts console)
+- **`/it/accounts`** — the worklist ("who still needs a login, whose leaver login is still enabled") plus
+  provision / disable / enable / reset-password, against P2-13's real endpoints. Default view is
+  **what needs action**, not the full staff list: an operator opens this page to fix something, and a
+  full roster buries the three rows that need them. `?all=1` shows everyone.
+- 🔴 **`listAccounts` is the ONE reader in this codebase that does not degrade to `[]`.** Every other
+  reader returns an empty array on 403/404 so a page can ship ahead of its backend. Here an empty list
+  asserts "everyone has a login" — the claim the backend refuses to make with a typed 503 — so the reader
+  returns a DISCRIMINATED result (`ok` | `unavailable` | `forbidden`) and the page renders `unavailable`
+  as a warning that says, in words, that this is not a statement that everyone has a login. Three layers
+  saying the same thing on purpose, because the failure is silent and reassuring.
+- 🔴 **A CONTRADICTION IN THE IT LAYOUT, found while wiring the tab.** The layout gated the whole console
+  on `isModuleOnForActiveCompany("it")` — correct for Devices/Topology/Workflows, whose controller is
+  `ModuleEnabledGuard("it")`. But P2-13's accounts endpoint is deliberately NOT module-gated, precisely so
+  login management does not vanish for a company with the module off while its people still need logins.
+  Leaving Accounts under the blanket gate would have re-imposed in the UI exactly what the backend was
+  built to avoid, and it would have failed in the reassuring direction: "IT module disabled" instead of
+  "three leavers can still log in". The gate is now per-tool (`ITModuleGate`), and the tab strip renders
+  always — hiding it would hide the one tool that still works.
+- **The initial password is held in client state and the page does NOT refresh under it.** There is
+  exactly one copy of it in existence; `router.refresh()` runs only after the operator dismisses the
+  panel, the panel says plainly that it will not be shown again, and nothing writes it to the URL,
+  localStorage, or a timer-dismissed toast. Reset requires a REASON before it will submit — the backend
+  accepts null, this surface does not, because resetting someone else's password is the action most likely
+  to be questioned later.
+- `state` and `actionable` are used exactly as the server computed them. Re-deriving "needs attention"
+  here would be a second implementation that drifts, and the direction it drifts in is a leaver the
+  console quietly stops flagging.
+- Employment status renders `—` when the backend returns null (the HR module is off for that company),
+  never "active" — mirroring the backend's own refusal to claim `leaver_still_enabled` without real data.
+- Gates: `it-accounts.test.ts` 10/10 (incl. four cases pinning the no-degradation rule); full UI suite
+  2319/2319 after fixing a design-token violation my first CSS introduced (`var(--erp-danger, #hex)` —
+  the guard caught the hardcoded literal; the real token is `--status-critical-fg`); `next build` clean
+  with `/it/accounts` in the route table; `tsc --noEmit` clean.
 ### [0.25.1] — 2026-08-10 · IN PROGRESS (IAM Phase 1 mirror corrections — DR-6, DR-7, a capability-map defect)
 - `lib/rbac.ts` corrected against re-derived Cerbos ground truth: `it_admin` loses
   `company.manage` (DR-6 — zero Cerbos overlap on `resource_device.yaml`, a dead-button

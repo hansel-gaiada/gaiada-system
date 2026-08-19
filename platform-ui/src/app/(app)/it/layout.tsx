@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTabs } from "@/components/shell/SectionTabs";
 import { isModuleOnForActiveCompany } from "@/lib/modules";
-import { ModuleDisabled } from "@/components/ModuleDisabled";
+import { ITModuleGate } from "@/components/it/ITModuleGate";
 
 // IT is a functional department: same console pattern as Web Dev. This layout
 // owns the header + tab strip; the tool pages (Overview / Devices / Topology /
@@ -11,6 +11,9 @@ const TABS = [
   { key: "devices", label: "Devices", href: "/it/devices", icon: "inventory" as const },
   { key: "topology", label: "Topology", href: "/it/topology", icon: "hub" as const },
   { key: "workflows", label: "Workflows", href: "/it/workflows", icon: "automation" as const },
+  // P2-14. Last because it is the newest, not because it matters least — a leaver who can still log in
+  // is the most urgent thing this console reports.
+  { key: "accounts", label: "Accounts", href: "/it/accounts", icon: "hr" as const },
 ];
 
 export default async function ITConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -25,14 +28,11 @@ export default async function ITConsoleLayout({ children }: { children: React.Re
         subtitle="Device estate, topology and automation for the company."
         breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: "IT" }]}
       />
-      {moduleOn ? (
-        <>
-          <SectionTabs tabs={TABS} />
-          {children}
-        </>
-      ) : (
-        <ModuleDisabled module="it" label="IT" />
-      )}
+      {/* The tab strip renders ALWAYS now: Accounts is reachable with the `it` module off (see
+          ITModuleGate for why), so hiding the strip would hide the one tool that still works. The gate
+          moved inside, per-tool. */}
+      <SectionTabs tabs={TABS} />
+      <ITModuleGate moduleOn={moduleOn}>{children}</ITModuleGate>
     </>
   );
 }
