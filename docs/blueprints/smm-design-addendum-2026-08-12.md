@@ -201,12 +201,41 @@ Business Verification, and TikTok is the highest-risk registration in the fleet;
 Postiz driver until their own phases are scheduled. The D-21 fork exception therefore still applies
 and is still needed.
 
+### PE — media upload before dispatch (found during SMM-10, 2026-08-19)
+
+| # | Ticket | Tier | Model | Deps | Changed? |
+|---|---|---|---|---|---|
+| **SMM-39** | **NEW — wire `uploadMedia` into the dispatch path.** Resolve each variant's composer-side `{fileId}` descriptor to bytes from the `files` subsystem, upload via the port's `uploadMedia`, and hand `schedulePost` the engine refs it actually expects. Idempotent per (variant, file) so a redispatch does not re-upload, and refusing closed rather than posting a partial gallery | senior-be | default | SMM-10, SMM-05 | **NEW** |
+
+**The defect this closes.** `VariantDispatch.media` is documented as *"already-uploaded media references
+(see `uploadMedia`)"*, but `dispatch.ts`'s `toDispatchMedia` maps `fileId` onto `id` **verbatim** — a
+placeholder, flagged in its own comment. SMM-05 built `uploadMedia` on the port and no ticket ever
+wired it. So **any post carrying an attachment cannot publish today**: it fails at the publisher with
+`publisher_http_error`.
+
+That failure direction is the correct one — loud, not a wrong asset posted quietly — which is why this
+was safe to defer. It is not safe to carry into SMM-14, because e2e would then discover it as a
+mysterious publish failure rather than a known gap.
+
+**Constraints worth stating up front:**
+- **Upload happens OUTSIDE the executor's claim transaction.** It is network I/O against the licence
+  zone and it is the slowest call on that hop — media upload is the one call whose duration changed
+  materially when the engine moved hosts, which is why it carries its own timeout class
+  (`SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS`, 120s). Holding an advisory lock across it would be a
+  self-inflicted outage. Same shape as SMM-10's creator-info fetch.
+- **The upload must not invalidate the approval.** Media refs are engine-side artifacts, not composer
+  content; if resolving them mutated the variant's hashed args, every media post would refuse
+  `args_hash_mismatch` against its own approval. Store refs somewhere that is not part of the hash,
+  or do not persist them at all.
+- **Text-only must stay on today's path.** A variant with no media must not acquire an upload round
+  trip it never needed.
+
 **Decision-gated (do not mobilize):** **SMM-28** Mixpost-Pro swap — **DEAD as of the 2026-08-14 free-only constraint and D-20; retained only as a record** ·
 **SMM-29** ClipsAI video repurposing (OQ-6) · **SMM-34** generative images — **gated on
 `render-gateway-go` leaving `0.0.0`** (Creative `CR-*`), then wires into the inert `ai.imageGen`
 toggle + ledger kind SMM-20 leaves in place.
 
-**Totals (revised 2026-08-18):** 31 mobilized (was 30) + 3 decision-gated, of which SMM-28 is dead.
+**Totals (revised 2026-08-19):** 32 mobilized + 3 decision-gated, of which SMM-28 is dead.
 Opus flags: **7** (SMM-01 med,
 SMM-30 med, SMM-03 med, SMM-04 med, SMM-05 med, SMM-09 **high**, SMM-31 med). Concurrency: respect
 the 1–2 agent cap; safe early pairs are (SMM-03 ∥ SMM-04) and (SMM-07 ∥ SMM-08); **SMM-09 runs
