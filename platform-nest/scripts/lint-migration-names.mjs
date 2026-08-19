@@ -40,6 +40,25 @@ const LEGACY = /^(\d{4})_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 const LEGACY_MAX = 118;
 
 /**
+ * The ONE crossing after the scheme closed, exempted BY NAME rather than by raising the ceiling.
+ *
+ * `0119_monitoring_heartbeat_touch.sql` was authored by a concurrent session in the same window this
+ * lint landed — a legitimate migration written against a rule its author had no reason to have read yet.
+ * Two options existed and the quieter one won:
+ *
+ *   * RENAME it to a timestamp. Production-safe (verified: it is not in the live `schema_migrations`),
+ *     but it was already applied on that session's own database, where a rename orphans the ledger row
+ *     and re-runs the file on their next boot — breaking a colleague's working state to tidy a filename.
+ *   * EXEMPT it by name. Records reality, exactly like KNOWN_DUPLICATE_PREFIXES below, and leaves the
+ *     gate fully intact for everything above it.
+ *
+ * ⚠ THIS IS NOT A CEILING RAISE, and the difference matters: `0120_*` still fails. If a second file
+ * shows up here, the exemption has become a habit and the right response is to fix the rule's reach
+ * (a pre-commit hook, or a louder README) rather than to add a third name.
+ */
+const LEGACY_GRANDFATHERED = new Set(["0119_monitoring_heartbeat_touch.sql"]);
+
+/**
  * Collisions that already applied to real databases. Recorded here rather than silently tolerated:
  * renaming them is forbidden (the ledger keys on the filename, so a rename would re-run them), and
  * pretending the directory is clean would make this lint a lie. A THIRD file on any of these prefixes
@@ -82,9 +101,10 @@ for (const f of files) {
 
   if (legacy) {
     const [, num] = legacy;
-    if (Number(num) > LEGACY_MAX) {
+    if (Number(num) > LEGACY_MAX && !LEGACY_GRANDFATHERED.has(f)) {
       errors.push(
-        `${f}: the sequential NNNN_ scheme is CLOSED above ${String(LEGACY_MAX).padStart(4, "0")}. ` +
+        `${f}: the sequential NNNN_ scheme is CLOSED above ${String(LEGACY_MAX).padStart(4, "0")} ` +
+          `(0119 was grandfathered as the last crossing; nothing above it is). ` +
           `Rename to a UTC timestamp prefix — \`date -u +%Y%m%d%H%M\` — e.g. ` +
           `\`202608191530_${f.slice(5)}\`. Sequential numbers collided three times in three days in ` +
           `this shared checkout; see migrations/README.md.`,

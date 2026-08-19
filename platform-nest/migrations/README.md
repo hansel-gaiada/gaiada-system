@@ -18,8 +18,18 @@ That is it. There is no number to look up, nothing to reserve, and nobody to coo
 concurrent session writes DDL in the same minute the lint fails the build and one of you adds a
 minute — which is a loud collision, unlike the four silent ones below.
 
-**The sequential `NNNN_` scheme is closed above `0118`.** The lint rejects `0119_*` and anything
-higher. Legacy files keep their names forever (rule 4).
+**The sequential `NNNN_` scheme is closed above `0118`.** The lint rejects `0120_*` and anything higher.
+Legacy files keep their names forever (rule 4).
+
+**`0119_monitoring_heartbeat_touch.sql` is the ONE grandfathered crossing.** It was written by a
+concurrent session in the same window this rule landed — a legitimate migration against a rule its author
+had no reason to have read yet. Renaming it would have been production-safe (it is not in the live
+`schema_migrations`) but it was already applied on that session's own database, where a rename orphans the
+ledger row and re-runs the file on their next boot. Breaking a colleague's working state to tidy a
+filename is not a trade worth making, so it is exempted BY NAME in
+`scripts/lint-migration-names.mjs` — **not** by raising the ceiling. `0120_*` still fails. If a second
+name ever needs adding, the exemption has become a habit and the fix is the rule's REACH (a pre-commit
+hook, a louder README), not a third entry.
 
 ### Why it changed, since a numbered scheme looks tidier
 
