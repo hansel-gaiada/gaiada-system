@@ -492,3 +492,65 @@ have no `permission-catalog.json` entries, no bundle rows and no `permissions` r
 files in `src/rbac`, and `cerbos-catalog-alignment` is what CI stops on now that the mail-template pin is
 fixed. Adding those entries means deciding which roles get monitoring permissions and which keys are
 sensitive; that is the monitoring ticket's design call, so it was reported rather than guessed.
+
+---
+
+# 2026-08-19 continuation (part 3) — P2-14 ships; three FE surfaces left
+
+**`Alpha 01.054.0107a`** — `platform-ui 0.25.1 → 0.26.0`.
+
+## 24. P2-14 — the IT accounts console
+
+`/it/accounts`: the worklist plus provision / disable / enable / reset-password against P2-13's real
+endpoints. Default view is **what needs action**, not the full roster (`?all=1` shows everyone).
+
+🔴 **`lib/it-accounts.ts` is the ONE reader in this codebase that does not degrade to `[]`.** Every other
+reader returns an empty array on 403/404 so a page can ship ahead of its backend. Here an empty list
+asserts *everyone has a login* — the claim the backend refuses to make with its typed 503 — so the reader
+returns a discriminated `ok | unavailable | forbidden` and the page renders `unavailable` as a warning
+that says so in words. Three layers on purpose: the failure is silent AND reassuring. Recorded as
+[[empty-list-is-a-claim]].
+
+🔴 **A contradiction the wiring surfaced, worth knowing before touching another department console.**
+`app/(app)/it/layout.tsx` gated EVERY tool on `isModuleOnForActiveCompany("it")`. That is right for
+Devices/Topology/Workflows (their controller is `ModuleEnabledGuard("it")`, so with the module off they
+404 and would render as an empty estate). It is wrong for Accounts: P2-13's endpoint is deliberately NOT
+module-gated so login management does not vanish for a company with the module off while its people still
+need logins. The blanket gate would have re-imposed in the UI exactly what the backend was built to avoid,
+and failed in the reassuring direction — "IT module disabled" instead of "three leavers can still log in".
+The gate is now per-tool (`components/it/ITModuleGate.tsx`, a client component reading `usePathname`) and
+the tab strip renders always.
+
+**The display-once password.** There is exactly one copy in existence, so `AccountActions` holds it in
+client state, `router.refresh()` runs only after the operator dismisses the panel (refreshing under it
+would drop it), the panel says plainly it will not be shown again, and nothing writes it to the URL,
+localStorage, or a timer-dismissed toast. Reset requires a reason before it submits — the backend accepts
+null, this surface does not.
+
+`state` and `actionable` are used exactly as the server computed them. Employment status renders `—` when
+null (HR module off), never "active".
+
+**A design-token violation my first CSS introduced** was caught by `src/styles/tokens.test.ts`: I wrote
+`var(--erp-danger, #b3261e)` and the guard fails on any hardcoded colour literal. The real token is
+`--status-critical-fg`. Worth knowing before writing CSS here — the guard is repo-wide and the fallback
+syntax is the trap.
+
+## 25. What is left in Phase 2 — three FE surfaces, all with DEV-VERIFIED backends
+
+| Ticket | Surface | Backend state | Contract |
+|---|---|---|---|
+| **P2-10** | HR console: hire / transfer / terminate + employee record on `/hr/people`, `/people/[userId]` | P2-06, DEV-VERIFIED | FRONTEND-BFF-CONTRACT (employees section) |
+| **P2-11** | Dept-head access page (subtree roster, positions, effective access, grant/override) | P2-08, DEV-VERIFIED | FRONTEND-BFF-CONTRACT (positions + role grants) |
+| **P2-12-FE** | Positions admin UI (create/edit/retire, role-set composer, is_lead, orphan badge) | P2-12 backend, DEV-VERIFIED | same |
+
+P2-14 is the worked precedent for all three: `lib/<x>.ts` reader → `actions.ts` server actions that
+humanize the backend's typed tokens → a server page + one client component for anything stateful. The
+patterns to copy are in §24; the one to copy MOST is refusing to render "cannot see" as "nothing wrong".
+
+**Still needing the OWNER (unchanged from §23):** the direct IAM grant tools, and whether to apply any
+P2-15 backfill piece on the live estate.
+
+**Still red on `main`, still the monitoring ticket's:** MON-11a/b's `monitor*` / `status_page` policies
+have no catalog entries, no bundle rows, no `permissions` rows. `cerbos-catalog-alignment` is where CI
+stops. Adding them means deciding which roles get monitoring permissions and which keys are sensitive —
+that ticket's design call, so it stays reported rather than guessed.
