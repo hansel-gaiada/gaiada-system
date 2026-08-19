@@ -139,6 +139,54 @@ disk has already rolled back a healthy release once ([[deploy-disk-fills-and-rol
 | **MON-09g** | ✅ **CLOSED.** Committed (`966a17a`), shipped in `alpha-01.042.0095a`, and verified present on the box **from the tag** rather than by hand. Zero drift. ⚠ The predicted revert happened first — §2.5. | devops |
 | **MON-09h** | Retire `docker-compose.alertmanager-mail.yml`, `otel-metrics.yml`, `loki.yml`, `obs-local.yml` or mark them dev-only — they now describe projects that no longer exist and would re-create port collisions on 9090/9093 if anyone ran them. | devops |
 
+### 2.7 Making the server visible, and the three blind collectors (2026-08-18)
+
+The question "how does the live system show the monitored server?" had an uncomfortable answer: it
+did not. All four provisioned Grafana dashboards are application-level; grepping every one of them
+for `node_*`, `container_*`, `pg_*`, `redis_*` returned **zero matches**. Server metrics had been
+collected for weeks and rendered nowhere, readable only by SSH-tunnelling to Prometheus and writing
+PromQL by hand.
+
+That was not merely a missing view. It is *why* the following survived unnoticed.
+
+**Three collectors were UP and collecting nothing.** Each had a green scrape target:
+
+| Collector | Looked | Actually |
+|---|---|---|
+| `postgres-exporter` | target up | `pg_up=0` — DSN used `POSTGRES_SUPER_PASSWORD` against database `gaiada`; on this box the host serves `gaiada_platform` via per-service roles. Authenticated as nobody against nothing. |
+| `redis-exporter` | target up | `redis_up=0` — addressed `redis://redis:6379`, a container deliberately never started here. |
+| `postgres-exporter-bot` | target up | Monitored database `gaiada` on pg-bot while the bot uses `gaiada_bot`. It connected, so it produced confident numbers about a database nothing uses. Also broken on PG17 (`checkpoints_timed` moved to `pg_stat_checkpointer`). |
+| `cadvisor` | target up | Only host cgroup series, no `name` label ⇒ **no per-container metrics at all** (MON-09n, still open). |
+
+And **no alert rule read `pg_up` or `redis_up`**, so the fault was invisible from both directions.
+
+**The binding rule, stated once:** *a green scrape target means the exporter answered. It says
+nothing about whether the thing being measured is reachable.* Target-count health — including the
+"14/14 up" recorded earlier in this document — is not evidence that the checks mean anything.
+
+Delivered: exporters repointed at the credentials the platform itself uses (one source of truth for
+"where is the database"), `PostgresDown`/`RedisDown` alerts, a **Host & Infrastructure** Grafana
+dashboard (9 panels, every query verified against live Prometheus before shipping), and
+**Systems → Observability** in the ERP — admin-gated, read-only, deliberately a summary.
+
+**Disk, measured rather than assumed.** The plan said trim Prometheus retention. Measurement said
+otherwise: `prometheus-data` 400 MB, `loki-data` 29 MB, **`tempo-data` 4.0 GB**. Traces — the least
+consulted signal — dominated by 10×. Tempo retention cut 168h → 72h; Prometheus left alone, since
+trimming it would have freed almost nothing and lost the series the alerts run on. Dangling images
+and build cache reclaimed 1.1 GB. Only two release tags exist on the box and **both must stay** (the
+older one is the rollback target), so image pruning is exhausted.
+
+⚠ **The box is structurally undersized for this stack**: ~19 GB of images for two release tags on a
+49 GB disk, at 82% used. That is a sizing decision, not a cleanup task (MON-09o).
+
+### 2.8 Open after this pass
+
+| Ticket | Scope |
+|---|---|
+| **MON-09n** | cAdvisor emits no per-container metrics on this cgroup-v2 host. `/dev/kmsg` + `/dev/disk` cleared the per-container `Failed to create existing container` errors but discovery still yields nothing. The dashboard states the gap rather than showing two empty graphs. |
+| **MON-09m** | Dedicated read-only `pg_monitor` role. The exporter now uses `platform_app`, which is intentionally `NOBYPASSRLS`, so some collectors return nothing. Granting `pg_monitor` needs rights not held in this session. |
+| **MON-09o** | Disk sizing: 49 GB carrying ~19 GB of images for two tags. Grow the volume or reduce what a release retains. |
+
 ### 2.6 The rollback safety gate, and how it was found (see also §2.5 below)
 
 `rollback-to.sh` classifies each service by whether its image exists at the target tag: present =>

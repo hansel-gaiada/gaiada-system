@@ -1,0 +1,45 @@
+# Prometheus config for the RELOCATED stack on the SumoPod VPS (project gaiada-obs).
+# Plan: docs/plans/2026-08-18-observability-relocation.md
+#
+# THIS IS NOT A COPY OF prometheus.yml, on purpose. That file scrapes gda-aicenter's compose service
+# names (node-exporter, cadvisor, blackbox-exporter, postgres-exporter, redis-exporter, otel-collector)
+# which do not resolve on this host. Copying it here would create ~14 permanently-down targets, fire
+# ServiceDown for every one of them, and bury the real signal on day one.
+#
+# Metrics from gda-aicenter arrive by REMOTE WRITE instead (its OTel collector scrapes locally and
+# pushes over WireGuard), which is why there are no scrape_configs for them. The only things scraped
+# here are local: this Prometheus, and this box's own node-exporter -- because the host that now holds
+# the monitoring has to be monitored too, or the move just relocates the blind spot.
+#
+# The alert rules are the SAME files as on gda-aicenter (mounted read-only from
+# observability/prometheus/rules), so alerting behaviour does not fork between the two hosts.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    # Distinguishes rules evaluated HERE from anything evaluated on gda-aicenter, so a duplicate
+    # alert during the parallel-run phase is attributable rather than confusing.
+    monitor: sumopod-obs
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # This VPS's own host metrics. Note the job name matches gda-aicenter's `node` job so the existing
+  # DiskSpaceLow / DiskWillFillIn24h rules apply to BOTH boxes with no rule changes -- the instance
+  # label is what tells them apart. That is deliberate: this box is documented to accumulate build
+  # cache to 147 GB and fill its disk, so it needs the same disk alerting as the box it is replacing.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          host: sumopod

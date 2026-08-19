@@ -34,7 +34,7 @@ Node scripts per component:
 
 ## Compose
 
-All compose files in `infra/compose/`: `docker-compose.alertmanager-mail.yml`, `docker-compose.build.yml`, `docker-compose.devui.yml`, `docker-compose.hostdata.yml`, `docker-compose.local.yml`, `docker-compose.loki.yml`, `docker-compose.obs-local.yml`, `docker-compose.observability.yml`, `docker-compose.otel-metrics.yml`, `docker-compose.social.yml`, `docker-compose.vps.yml`.
+All compose files in `infra/compose/`: `docker-compose.alertmanager-mail.yml`, `docker-compose.build.yml`, `docker-compose.devui.yml`, `docker-compose.hostdata.yml`, `docker-compose.local.yml`, `docker-compose.loki.yml`, `docker-compose.obs-local.yml`, `docker-compose.obs-remote.yml`, `docker-compose.observability.yml`, `docker-compose.otel-metrics.yml`, `docker-compose.social.yml`, `docker-compose.vps.yml`.
 Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ### `infra/compose/docker-compose.vps.yml`

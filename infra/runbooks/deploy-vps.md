@@ -333,9 +333,16 @@ projects, not our department. Three rules, in descending order of how badly they
    firewall says "deny incoming", and `ufw status` will report everything is fine. This is
    controlled by `SOCIAL_BIND_ADDR` in that host's `.env`; its default is `127.0.0.1` so a
    missing value fails safe. The deploy value is the WireGuard address, `10.88.0.2`.
-3. **Take a `docker ps -a` before and after every session there, and diff it.** 19 containers
-   before, 19 + ours after. Anything else is an incident, and finding out at the next
-   `docker ps` beats finding out from the owner.
+3. **Take a `docker ps -a` before and after every session there, and diff it.** Take that count
+   **FRESH every time; do not compare against a number written here.** When this rule was authored
+   the box ran 19 containers. Measured 2026-08-18: **37 total, 36 running.** Following the old
+   number literally would either raise a false incident over 18 containers that legitimately belong
+   to production, or teach the operator to ignore the check -- and the second is how a good rule
+   quietly stops working. The invariant is *baseline + exactly our containers*, never a specific
+   integer. Anything else is an incident, and finding out at the next `docker ps` beats finding out
+   from the owner.
+   Also measured that day, for the item below: build cache back to **57.16 GB, 54.71 GB
+   reclaimable, zero active** -- the creep is real, and it is the disk's main consumer here.
 
 **One maintenance item that IS safe and IS wanted** (from §A4k): `docker builder prune -af`.
 Build cache had accumulated 2467 entries and 147 GB, zero of it active, and filled the disk to

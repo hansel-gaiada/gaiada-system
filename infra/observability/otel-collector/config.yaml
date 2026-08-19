@@ -1,3 +1,9 @@
+extensions:
+  # Backs the exporters' sending queues so a WireGuard outage buffers to disk instead of discarding.
+  file_storage:
+    directory: /var/lib/otelcol/queue
+    timeout: 10s
+
 # WS9 OpenTelemetry Collector — the single ingest point for the estate's telemetry.
 # Services push OTLP (traces + metrics); this fans out to Tempo / Prometheus / Loki. Container
 # stdout (JSON logs with trace_id) is tailed by the filelog receiver and shipped to Loki, so the
@@ -32,6 +38,57 @@ receivers:
         parse_from: attributes.level
         if: 'attributes.level != nil'
 
+  # ── RELOCATION (docs/plans/2026-08-18-observability-relocation.md) ────────────────────────────
+  # Prometheus PULLS, and these exporters have no published ports -- so a Prometheus on another host
+  # cannot reach them without exposing eight-plus ports across the tunnel. Instead the collector
+  # scrapes them HERE, locally, and remote-writes the result. One outbound flow crosses the link and
+  # no inbound port is opened on this box.
+  #
+  # These jobs are copied from prometheus/prometheus.yml deliberately verbatim (names, targets and
+  # blackbox's relabel_configs). Job and instance labels must not drift, or every existing alert rule
+  # and dashboard query silently stops matching -- which would look exactly like a healthy quiet
+  # system rather than like a broken pipeline.
+  prometheus/scrape:
+    config:
+      scrape_configs:
+        - job_name: otel-collector
+          static_configs:
+            - targets: ["otel-collector:8889"]
+        - job_name: otel-collector-self
+          static_configs:
+            - targets: ["otel-collector:8888"]
+        - job_name: postgres
+          static_configs:
+            - targets: ["postgres-exporter:9187", "postgres-exporter-bot:9187"]
+        - job_name: redis
+          static_configs:
+            - targets: ["redis-exporter:9121", "redis-exporter-bot:9121"]
+        - job_name: node
+          static_configs:
+            - targets: ["node-exporter:9100"]
+        - job_name: cadvisor
+          static_configs:
+            - targets: ["cadvisor:8080"]
+        - job_name: blackbox-http
+          metrics_path: /probe
+          params:
+            module: [http_2xx]
+          static_configs:
+            - targets:
+                - http://ai-gateway:3002/health
+                - http://bot:3001/health
+                - http://mcp-hub:3003/health
+                - http://platform:3004/health
+                - http://knowledge:3005/health
+                - http://platform-ui:3005/
+          relabel_configs:
+            - source_labels: [__address__]
+              target_label: __param_target
+            - source_labels: [__param_target]
+              target_label: instance
+            - target_label: __address__
+              replacement: blackbox-exporter:9115
+
 processors:
   batch:
     timeout: 10s
@@ -50,16 +107,55 @@ exporters:
     endpoint: 0.0.0.0:8889
     resource_to_telemetry_conversion:
       enabled: true
-  otlp/tempo:
-    endpoint: tempo:4317
+  # RELOCATED to the SumoPod VPS over WireGuard. The queue is the important part: without a
+  # persistent one, a tunnel blip drops telemetry silently and the gap is indistinguishable from a
+  # quiet system. file_storage keeps the queue across a collector restart too.
+  prometheusremotewrite:
+    endpoint: http://10.88.0.2:19090/api/v1/write
     tls:
       insecure: true
+    # Preserves resource attributes as labels, matching what the local Prometheus recorded before.
+    resource_to_telemetry_conversion:
+      enabled: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+    # NOT `sending_queue`: the prometheusremotewrite exporter in collector 0.116.1 rejects that key
+    # outright (it crash-looped on `'' has invalid keys: sending_queue`) and uses remote_write_queue
+    # instead. ⚠ That queue is IN-MEMORY ONLY -- this exporter has no persistent-storage option, so a
+    # tunnel outage longer than the queue survives loses those metrics, and a collector restart loses
+    # whatever is buffered. Traces and logs below DO get the durable queue.
+    # The durable alternative for metrics is Prometheus's OTLP receiver
+    # (--web.enable-otlp-receiver) plus an otlphttp exporter, which does support file storage;
+    # deliberately not taken mid-migration, tracked as MON-09p.
+    remote_write_queue:
+      enabled: true
+      queue_size: 10000
+      num_consumers: 5
+
+  otlp/tempo:
+    endpoint: 10.88.0.2:4317
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+    # Durable across a tunnel blip AND a collector restart (file_storage extension).
+    sending_queue:
+      enabled: true
+      storage: file_storage
   otlphttp/loki:
-    endpoint: http://loki:3100/otlp
+    endpoint: http://10.88.0.2:13100/otlp
+    retry_on_failure:
+      enabled: true
+    sending_queue:
+      enabled: true
+      storage: file_storage
   debug:
     verbosity: basic
 
 service:
+  extensions: [file_storage]
   telemetry:
     logs:
       level: info
@@ -72,10 +168,20 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, batch]
       exporters: [otlp/tempo]
+    # App/business metrics pushed over OTLP keep landing on :8889 exactly as before, so anything
+    # scraping the collector directly is unaffected.
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resourcedetection, batch]
       exporters: [prometheus]
+    # The scraped half, forwarded to the relocated Prometheus. Kept as a SEPARATE pipeline on
+    # purpose: putting prometheusremotewrite on the pipeline above as well would export OTLP metrics
+    # twice -- once directly, and again after this receiver scrapes them back off :8889 -- which
+    # double-counts every app metric and is very hard to spot in a dashboard.
+    metrics/scrape:
+      receivers: [prometheus/scrape]
+      processors: [memory_limiter, batch]
+      exporters: [prometheusremotewrite]
     logs:
       receivers: [otlp, filelog]
       processors: [memory_limiter, resourcedetection, batch]
