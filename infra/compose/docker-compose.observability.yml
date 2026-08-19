@@ -239,9 +239,22 @@ services:
     # /dev/disk (block device stats); without them container discovery fails per-container
     # rather than failing loudly at startup, which is why it looked healthy.
     # --docker_only drops the host-cgroup noise that was all it managed to report before.
+    # --docker_only was tried and REMOVED: with container discovery still broken (below) it cut
+    # cadvisor from 49 host-cgroup series to exactly 1, trading a partial signal for none. An
+    # optimisation that reduces coverage while the underlying fault is unfixed is a regression.
     command:
-      - "--docker_only=true"
       - "--store_container_labels=false"
+    # MON-09n, the actual fix. This host is cgroup v2 (cgroup2fs), and on cgroup v2 Docker gives
+    # each container a PRIVATE cgroup namespace: inside cadvisor, /sys/fs/cgroup shows only its
+    # own cgroup, so the paths it needs (/system.slice/docker-<id>.scope) do not exist. It logged
+    # `Failed to create existing container: /system.slice/docker-<hash>` once per container and
+    # produced only host-level series with no `name` label -- i.e. no per-container metrics at all,
+    # while its scrape target stayed green.
+    #
+    # The earlier /dev/kmsg + /dev/disk additions were necessary but not sufficient; they silenced
+    # some startup noise without granting visibility. Joining the HOST cgroup namespace is what
+    # actually lets it see other containers' cgroups.
+    cgroup: host
     devices:
       - /dev/kmsg
     volumes:

@@ -183,7 +183,7 @@ older one is the rollback target), so image pruning is exhausted.
 
 | Ticket | Scope |
 |---|---|
-| **MON-09n** | cAdvisor emits no per-container metrics on this cgroup-v2 host. `/dev/kmsg` + `/dev/disk` cleared the per-container `Failed to create existing container` errors but discovery still yields nothing. The dashboard states the gap rather than showing two empty graphs. |
+| **MON-09n** | cAdvisor: **errors eliminated, discovery still absent.** `cgroup: host` was the real missing piece — on cgroup v2 Docker gives each container a PRIVATE cgroup namespace, so cadvisor could not see `/system.slice/docker-<id>.scope` at all and logged `Failed to create existing container` per container. That noise is now gone and host-cgroup coverage is intact (50 series), but no series carries a `name` label, so per-container CPU/memory still does not exist. The Docker factory registers and `docker.sock` is readable, so the remaining suspect is the daemon query itself. ⚠ `--docker_only=true` was tried and **reverted**: it cut cadvisor from 49 series to 1, trading a partial signal for none — an optimisation that reduces coverage while the underlying fault is unfixed is a regression. The dashboard continues to state the gap rather than show empty graphs. |
 | **MON-09m** | Dedicated read-only `pg_monitor` role. The exporter now uses `platform_app`, which is intentionally `NOBYPASSRLS`, so some collectors return nothing. Granting `pg_monitor` needs rights not held in this session. |
 | **MON-09o** | Disk sizing: 49 GB carrying ~19 GB of images for two tags. Grow the volume or reduce what a release retains. |
 
