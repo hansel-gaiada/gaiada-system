@@ -182,7 +182,7 @@ project `gaiada-obs`; collection stayed on `gda-aicenter`.
 | Grafana | datasource health OK for Prometheus *and* Loki; a real query through `/api/ds/query` returns data; 5 dashboards provisioned |
 | Local decommission | storage layer stopped by explicit service name (never `--remove-orphans`); collection layer confirmed surviving; `erp=200` throughout; `gda-aicenter` 82% → 80% |
 
-### 🔴 OPEN — logs are NOT confirmed (MON-09q)
+### 🔴 OPEN — logs (MON-09q). Root cause #1 FOUND AND FIXED; a second fault remains
 
 Loki itself is healthy: a direct push returned **204** and the line read back, and the labels API then
 listed `["job","service_name"]`. So the server, the tunnel and the query path all work.
@@ -209,3 +209,57 @@ it, which is the first diagnostic step, not an assumption. Metrics and traces ar
 | **MON-09p** | Durable metrics queue. `prometheusremotewrite` in collector 0.116.1 has only an in-memory `remote_write_queue`, so a long tunnel outage loses metrics. Traces and logs got the persistent `file_storage` queue. The durable path is Prometheus's OTLP receiver (`--web.enable-otlp-receiver`) + `otlphttp`; deliberately not taken mid-migration because it would re-translate label semantics right after parity was established. |
 | **MON-09q** | The log leg above. |
 | ERP console | `PROMETHEUS_URL` repointed to `http://10.88.0.2:19090` in `observability.yml`, but it only takes effect on the next release. Until then Systems → Observability reports itself unconfigured — the correct failure mode, but still a gap. |
+
+---
+
+## 10. MON-09q progress — logs never worked, and why (2026-08-19)
+
+**This is not a regression from the relocation.** Established by evidence, which is what §9 said to do
+rather than assume.
+
+### Root cause #1 — FIXED: the collector could not list the log directory
+
+`/var/lib/docker/containers` is `drwx--x--- root root` (0710): traversable, **not listable**. The
+collector image defaults to **uid 10001**, so the filelog receiver's glob
+(`/var/lib/docker/containers/*/*-json.log`) could never expand, and it logged
+`no files match the configured criteria` on every single start.
+
+Proven, not inferred:
+
+| Probe | Result |
+|---|---|
+| `*-json.log` files present (as root) | **34** |
+| `ls` that directory as uid 10001 | **Permission denied** |
+| `ls` that directory as uid 0 | **35 entries** |
+
+So container logs have **never** reached Loki on this box. It went unnoticed for the same reason
+everything else in this programme did: nothing ever looked at Loki.
+
+Fixed by running the collector as `user: "0:0"` — a considered tradeoff, recorded in the compose
+file. Reading every container's stdout is already this component's entire purpose, so root buys it no
+capability it did not effectively have, and both host mounts are `:ro`. The alternatives — loosening
+permissions on a Docker-owned system directory, or changing log source entirely — are worse or
+larger than the fault warrants.
+
+After the fix the receiver logs `Started watching file` for the container logs. **That part works.**
+
+### Root cause #2 — STILL OPEN: files are watched, but zero records are accepted
+
+`otelcol_receiver_accepted_log_records_total` has **no series at all**, and OTel only emits a counter
+once it has recorded a value — so the receiver has accepted **zero** log records since the fix. Loki
+confirms it independently: `loki_distributor_lines_received_total` moved 750 → 751, and that single
+line was the hand-pushed probe. No export errors appear on either side, which rules out the transport.
+
+Next suspects, in order:
+
+1. **`start_at` defaults to `end`** — filelog only reads lines appended *after* it starts. Quiet
+   containers would produce exactly this signature. Test by writing a line to a busy container's
+   stdout and watching the counter, or set `start_at: beginning` temporarily.
+2. **The `operators:` chain silently dropping records** — the config chains `json_parser` on the
+   Docker envelope, a `move`, a conditional second `json_parser`, then `severity_parser`. A parser
+   that fails on a non-JSON line can drop the entry rather than pass it through.
+
+Both are cheap to distinguish, and the distinction matters: (1) is benign, (2) means the pipeline is
+discarding real logs.
+
+**Metrics and traces are unaffected** and remain verified (§9).

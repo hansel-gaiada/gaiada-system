@@ -9,6 +9,22 @@ name: gaiada
 services:
   # --- Pipeline: OTLP ingest → fan out to Prometheus/Tempo/Loki ---
   otel-collector:
+    # MON-09q: runs as ROOT, and this is a considered tradeoff rather than laziness.
+    #
+    # The filelog receiver tails /var/lib/docker/containers/*/*-json.log. That directory is
+    # `drwx--x--- root root` (0710): traversable, but NOT LISTABLE by anyone else. The image
+    # defaults to uid 10001, so the receiver's glob could never expand and it logged
+    # `no files match the configured criteria` on every start. Container logs have therefore
+    # NEVER reached Loki on this box -- a pre-existing fault, not a regression from the 2026-08-18
+    # relocation, and it went unnoticed for the same reason everything else did: nothing ever
+    # looked at Loki. Proven rather than assumed: uid 10001 gets 'Permission denied' listing the
+    # dir while uid 0 lists 35 entries, against 34 real *-json.log files.
+    #
+    # Alternatives considered: loosening 0710 on a Docker-owned system directory (worse, and
+    # global), or switching log sources entirely (a bigger change than the fault warrants).
+    # Reading every container's stdout is already this component's whole job, so root buys no
+    # capability it did not effectively have -- and BOTH host mounts below are :ro.
+    user: "0:0"
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
