@@ -161,7 +161,12 @@ export function isHostAllowlisted(host: string, allowlist: readonly string[]): b
  * filtered down to the public one. Filtering would let an attacker keep a public A record purely to
  * get past the check while the private one is what they actually want dialled.
  */
-export function createGuardedLookup(allowlist: readonly string[], audit: EgressAudit) {
+export function createGuardedLookup(
+  allowlist: readonly string[],
+  audit: EgressAudit,
+  /** TEST SEAM ONLY (see ProbeCtx.isDeniedOverride). Unset => the real classifier. */
+  isDenied: (ip: string) => boolean = isDeniedAddress,
+) {
   return function guardedLookup(
     hostname: string,
     options: unknown,
@@ -182,7 +187,7 @@ export function createGuardedLookup(allowlist: readonly string[], audit: EgressA
         return;
       }
       for (const a of addresses) {
-        if (isDeniedAddress(a.address)) {
+        if (isDenied(a.address)) {
           // Named in the audit line: "which private address did it try" is the first question asked
           // during an incident, and a generic refusal cannot answer it.
           audit({ host, ip: a.address, allowed: false, reason: ReasonPrivateIP });

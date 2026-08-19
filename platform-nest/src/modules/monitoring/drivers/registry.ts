@@ -84,6 +84,13 @@ export interface ProbeCtx {
   timeoutMs: number;
   /** Every dial attempt, allowed or refused, is reported here — the guard's audit channel. */
   audit: (event: { host: string; allowed: boolean; reason: string }) => void;
+  /**
+   * TEST SEAM ONLY, and named so it cannot be mistaken for a feature. Behaviour tests must bind a
+   * real server, which lives on loopback, which the classifier correctly denies. The Go crawler
+   * solved the identical problem with a `fakeDialer`; this is the same idea with a smaller surface.
+   * PRODUCTION MUST NEVER SET THIS. Unset => the real classifier, which is the only safe default.
+   */
+  isDeniedOverride?: (ip: string) => boolean;
 }
 
 export interface MonitorDriver<C = unknown> {
