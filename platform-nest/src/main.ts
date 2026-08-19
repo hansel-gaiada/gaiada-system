@@ -31,6 +31,7 @@ import { registerModule, validateModulePermissions } from "./modules/registry";
 import { agencyModule } from "./modules/agency";
 import { pmModule } from "./modules/pm";
 import { itModule } from "./modules/it";
+import { monitoringModule } from "./modules/monitoring";
 import { billingModule } from "./modules/billing";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -343,6 +344,7 @@ async function bootstrap(): Promise<void> {
   registerModule(agencyModule);
   registerModule(pmModule);
   registerModule(itModule);
+  registerModule(monitoringModule);
   registerModule(billingModule);
   registerModule(clientsModule);
   registerModule(knowledgeModule);
