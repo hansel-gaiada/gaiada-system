@@ -540,3 +540,12 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    Postgres cannot ALTER a CHECK in place, and the constraint is looked up BY DEFINITION because
    `0016` created it auto-named. Purely additive: no existing row can violate a wider set. **Next
    unused is `0116`.**
+
+   **2026-08-19 update — `0117` TAKEN (reserved before DDL, again).**
+   `0117_monitor_results_partition_rls.sql` FORCE-RLSes every `monitor_results` PARTITION. `0116`
+   (MON-10, a concurrent session) hardened the partitioned PARENT and its own hardcoded nine-table
+   list missed the partitions; in Postgres a partition queried directly is governed by its own
+   policies, so tenant isolation was absent there. Amended in a NEW migration because 0116 is
+   committed and possibly applied. Loops over `pg_inherits` rather than naming partitions, since 0116
+   derives their names from the month it runs. **Partitions created later by a rollover job are NOT
+   covered** — that belongs with the monitoring owner. **Next unused is `0118`.**

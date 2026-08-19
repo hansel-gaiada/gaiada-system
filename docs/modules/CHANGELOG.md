@@ -106,6 +106,23 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.047.0099a` - 2026-08-19 - a dept head proposes, and a monitoring RLS gap closes
+
+Manifest (counter +1, 0098 -> 0099): `platform-nest 0.25.0 -> 0.25.1`.
+
+Two unrelated things, deliberately in one cut because they were found in the same regression run:
+
+1. **The dept-head assignment flip** (§11.2's owner end-state) — a lead proposes a placement, HR or a
+   company admin agrees, and the seat opens. Application-code only: no Cerbos change, no catalog
+   change, no new permission.
+2. **Migration `0117`** — FORCE RLS on `monitor_results` PARTITIONS. `0116` (MON-10, another session)
+   hardened the partitioned parent but not its partitions, and a query naming a partition directly is
+   governed by that partition's own policies. A direct read would have crossed tenants. Fixed in a new
+   migration rather than by editing theirs.
+
+⚠ Behaviour change for dept heads specifically: direct assign now returns a typed 400. Anyone building
+against `POST /positions/:id/assign` should read FRONTEND-BFF-CONTRACT's new rows first.
+
 ### `Alpha 01.046.0098a` - 2026-08-19 - the routed override: a refusal with somewhere to go
 
 Manifest (counter +1, 0097 -> 0098): `platform-nest 0.24.0 -> 0.25.0`.
@@ -1800,6 +1817,24 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.25.1] - 2026-08-19 - IN PROGRESS (a dept head proposes; HR and admins place)
+- **§11.2's owner end-state is done.** A dept head's `POST /positions/:id/assign` returns
+  `assignment_request_required` naming `POST /positions/:id/assignment-requests`; that files an
+  `automation_approvals` row (`origin='iam'`, `workflow_id='iam:position_assign'`) decided by the SAME
+  `decide_override` action, in the SAME inbox, executed by the SAME seam. HR (`hr_people_ops`) and
+  `company_admin` still place people directly — that is what the 2026-08-18 widening was for.
+- **"Is this a dept head?" is answered by Cerbos, not by a role list.** The same authorization question
+  is asked with EMPTY ancestry: only the tenant-wide tiers can pass it, because `org_unit_lead` matches
+  on subtree containment. Nothing to maintain, nothing that can drift from the policy.
+- **One execution seam** (`admin/iam-approval-execute.ts`) now owns both IAM request kinds, so the
+  shared decide route gained one import instead of a second IAM-specific branch. The decide response's
+  `override` key became `iam`, with `iam.kind` distinguishing them; non-IAM approvals still return
+  `{ id, status }` with no `iam` key, pinned byte-for-byte.
+- **What the flip did NOT relax**, each pinned: a lead still cannot reach outside their subtree —
+  asserted on the REQUEST endpoint too, because a request path that accepted what the write path
+  refuses would be the hole; nobody approves their own request; and a decision against a position
+  RETIRED in the meantime is refused at execution rather than filling a dead seat.
+- Gates: override + assignment battery 19/19, positions 27/27, full sweep 1279/1279 across 81 files.
 ### [0.25.0] - 2026-08-19 - IN PROGRESS (P2-08 part B: the routed override)
 - **The refusal became a route.** A dept head who cannot grant a sensitive role directly now files
   `POST /api/:t/role-grants/overrides` with a justification; it routes by domain; the routed approver

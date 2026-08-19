@@ -393,6 +393,29 @@ export class PositionsController {
       "assign",
     );
 
+    // ⚠ OWNER END-STATE (§11.2, ruled 2026-08-18): a DEPT HEAD's assignment is a REQUEST, not a write.
+    // HR and company_admin place people directly; a lead proposes and someone senior agrees.
+    //
+    // The distinction is drawn by asking Cerbos the same question with NO ancestry: only the
+    // tenant-wide tiers (company_admin, hr_people_ops) can pass that, because `org_unit_lead`'s rule
+    // matches on subtree containment. So a caller who needed their ancestry to get here is a dept head.
+    //
+    // This flip was deliberately deferred until P2-08 part B existed — removing a working capability
+    // with nothing in its place would have been the worse outcome, so direct assign stayed live until
+    // the request path could receive it.
+    const tenantWide = await check(
+      req.principal,
+      { kind: "position", id: positionId, tenantId, targetUserId: userId, unitAncestors: [] },
+      "assign",
+    );
+    if (!tenantWide.allow) {
+      throw new BadRequestException(
+        `assignment_request_required: a department head proposes a placement rather than writing it. ` +
+          `POST /api/${tenantId}/positions/${positionId}/assignment-requests with a justification — it ` +
+          `goes to HR or a company administrator, and the seat opens when they approve.`,
+      );
+    }
+
     const assignmentId = await withTenants([tenantId], async (c) => {
       const member = await c.query<{ user_id: string }>(
         `SELECT user_id FROM company_memberships
@@ -508,4 +531,71 @@ export class PositionsController {
       [newId(), tenantId, positionId, roleId, scopeKind],
     );
   }
+  // ─────────────────── §11.2 the dept head's assignment REQUEST ───────────────────
+  //
+  // Files an `automation_approvals` row (origin='iam', workflow_id='iam:position_assign') decided by
+  // the same `decide_override` action as a routed override, through the same inbox, executed by the
+  // same seam. A dept head cannot approve their own (structural Cerbos DENY on requester == decider).
+  @Post(":tenantId/positions/:positionId/assignment-requests")
+  @HttpCode(201)
+  async requestAssignment(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("positionId") positionId: string,
+    @Body() body: { userId?: string; justification?: string },
+  ) {
+    const userId = body?.userId?.trim();
+    const justification = body?.justification?.trim();
+    if (!userId) throw new BadRequestException("userId required");
+    if (!justification) {
+      throw new BadRequestException("justification required: a placement outside the normal flow needs a stated reason");
+    }
+    const prep = await withTenants([tenantId], async (c) => {
+      const position = await loadPositionRow(c, tenantId, positionId);
+      if (position.status !== "active") {
+        throw new BadRequestException(`position is ${position.status}; only an active position may be requested`);
+      }
+      const member = await c.query<{ user_id: string }>(
+        `SELECT user_id FROM company_memberships
+          WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' AND deleted_at IS NULL`,
+        [tenantId, userId],
+      );
+      if (!member.rows[0]) throw new BadRequestException("user is not an active member of this company");
+      return { position, ancestors: await loadUnitAncestors(c, tenantId, position.unit_node_id) };
+    });
+
+    // The REQUESTER still needs `assign` reach — including the self-assign DENY. Requesting is not a
+    // way around the subtree bound or around "nobody seats themselves"; it is only a way around the
+    // fact that a lead may no longer write the row directly.
+    await authorize(
+      req.principal,
+      { kind: "position", id: positionId, tenantId, targetUserId: userId, unitAncestors: prep.ancestors },
+      "assign",
+    );
+
+    const approvalId = newId();
+    await withTenants([tenantId], async (c) => {
+      await c.query(
+        `INSERT INTO automation_approvals
+           (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, origin_site)
+         VALUES ($1,$2,'iam:position_assign','iam.assignPosition',$3,'medium',$4,$5,'iam',$6)`,
+        [
+          approvalId, tenantId,
+          JSON.stringify({ positionId, userId, reason: justification }),
+          `${prep.position.title} (${prep.position.unit_node_id}) — ${justification}`,
+          req.principal.userId, config.originSite,
+        ],
+      );
+      await emitEvent(c, tenantId, "automation_approval", approvalId, "iam.assignment_requested", {
+        positionId, userId, requestedBy: req.principal.userId,
+      });
+    });
+    await writeActivity(tenantId, req.principal.userId, "requested", "position", approvalId, { userId, positionId });
+    return {
+      ok: true,
+      approvalId,
+      decideVia: `POST /api/${tenantId}/automation-approvals/${approvalId}/decide`,
+    };
+  }
+
 }

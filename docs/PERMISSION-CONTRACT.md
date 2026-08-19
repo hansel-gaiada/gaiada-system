@@ -583,11 +583,22 @@ end and dept heads keep their own subtree rule unchanged. `hr_staff` is delibera
 
 The owner also chose the stricter long-term shape: **a dept head's assignment should become a
 REQUEST that HR/company_admin approves.** That half is NOT built — it needs the same approval
-plumbing as §12.3's override. **P2-08 part B has now landed (2026-08-19), so the flip is UNBLOCKED and
-is the next step — but it is not yet done.** Dept-head DIRECT assign still works today. Doing the flip
-means: route `position · assign` by a dept head through `POST /role-grants/overrides`-style approval
-rather than writing the assignment, and pin that a dept head's direct assign is refused with a typed
-code naming the request path. Recorded here so it stays a scheduled step, not a forgotten one.
+plumbing as §12.3's override. **✅ DONE 2026-08-19.** A dept head's `POST /positions/:id/assign` now
+returns `assignment_request_required` naming `POST /positions/:id/assignment-requests`; that files an
+`automation_approvals` row (`origin='iam'`, `workflow_id='iam:position_assign'`) decided by the SAME
+`decide_override` action, through the SAME inbox, executed by the SAME seam
+(`admin/iam-approval-execute.ts`). HR and company_admin are unaffected — they still place people
+directly, which is what the 2026-08-18 widening was for.
+
+**How "dept head" is detected without a second rule:** Cerbos is asked the same question with EMPTY
+ancestry. Only the tenant-wide tiers can pass that, because `org_unit_lead`'s rule matches on subtree
+containment — so a caller who needed their ancestry to get here is a lead. No new role check, no list
+of who counts as a dept head, nothing to drift.
+
+**What the flip did NOT change:** a lead's subtree bound (outside it is still 403 — asserted on the
+REQUEST endpoint too, because a request path that accepted what the write path refuses would be the
+hole), the self-assign DENY, and the fact that nobody approves their own request. A stale request
+against a position retired in the meantime is refused at execution rather than applied.
 
 ### 11.3 Unchanged by this ticket
 

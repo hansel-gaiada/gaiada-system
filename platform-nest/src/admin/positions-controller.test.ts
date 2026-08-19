@@ -137,17 +137,38 @@ describe.skipIf(!TEST_URL || !live)("P2-12 — positions backend over the real s
     expect(ids).toContain(webPos.json().id);
     expect(ids).not.toContain(hrPos.json().id);
 
+    // ⚠ CHANGED by the owner's §11.2 end-state (2026-08-19): a dept head PROPOSES a placement, they
+    // no longer write it. This case used to assert 201 here; it now asserts the typed refusal that
+    // names the request path, because "the lead can seat people directly" stopped being true.
     const inSubtree = await app.inject({
       method: "POST", url: `/api/${T}/positions/${webPos.json().id}/assign`,
       headers: asUser(webLead), payload: { userId: staffer },
     });
-    expect(inSubtree.statusCode).toBe(201);
+    expect(inSubtree.statusCode).toBe(400);
+    expect(inSubtree.json().error).toContain("assignment_request_required");
+    expect(inSubtree.json().error).toContain("/assignment-requests");
 
+    // ...and the request path IS open to them, for the same seat.
+    const requested = await app.inject({
+      method: "POST", url: `/api/${T}/positions/${webPos.json().id}/assignment-requests`,
+      headers: asUser(webLead), payload: { userId: staffer, justification: "covering the FE rota" },
+    });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json().approvalId).toBeTruthy();
+
+    // Outside their subtree is still a 403 at the AUTHORITY layer — the flip changed how a lead acts
+    // inside their subtree, not how far their subtree reaches. Asserted on the request path too,
+    // because a request endpoint that accepted what the write endpoint refuses would be the hole.
     const outside = await app.inject({
       method: "POST", url: `/api/${T}/positions/${hrPos.json().id}/assign`,
       headers: asUser(webLead), payload: { userId: staffer },
     });
     expect(outside.statusCode).toBe(403);
+    const outsideRequest = await app.inject({
+      method: "POST", url: `/api/${T}/positions/${hrPos.json().id}/assignment-requests`,
+      headers: asUser(webLead), payload: { userId: staffer, justification: "reaching outside" },
+    });
+    expect(outsideRequest.statusCode).toBe(403);
   });
 
   it("assign is idempotent, and unassign closes the seat and revokes what it justified", async () => {

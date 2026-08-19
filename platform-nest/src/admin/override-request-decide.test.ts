@@ -123,13 +123,13 @@ describe.skipIf(!TEST_URL || !live)("P2-08b — the routed override", () => {
     // ceiling correctly refuses them this grant. The router sends it to the tier that can back it.
     const res = await decide(approvalId, hrMgr);
     expect(res.statusCode).toBe(200);
-    expect(res.json().override.grantId).toBeTruthy();
-    expect(res.json().override.expiresAt).toBeTruthy();
+    expect(res.json().iam.grantId).toBeTruthy();
+    expect(res.json().iam.expiresAt).toBeTruthy();
 
     const grant = await withGlobal((c) =>
       c.query<{ expires_at: string | null; origin_approval_id: string | null }>(
         `SELECT expires_at, origin_approval_id FROM user_roles WHERE id = $1`,
-        [res.json().override.grantId],
+        [res.json().iam.grantId],
       ),
     );
     expect(grant.rows[0].expires_at).not.toBeNull();
@@ -152,7 +152,7 @@ describe.skipIf(!TEST_URL || !live)("P2-08b — the routed override", () => {
     const filed = await request({ userId: staff, roleId: hrManagerRole, justification: "not needed after all" }, webLead);
     const res = await decide(filed.json().approvalId as string, hrMgr, "rejected");
     expect(res.statusCode).toBe(200);
-    expect(res.json().override).toBeUndefined();
+    expect(res.json().iam).toBeUndefined();
   });
 
   // ─────────────────────────── the attack battery ───────────────────────────
@@ -239,4 +239,73 @@ describe.skipIf(!TEST_URL || !live)("P2-08b — the routed override", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ id: approvalId, status: "approved" });
   });
+  // ─────────────── §11.2 the dept head's assignment request, end to end ───────────────
+
+  it("an approved ASSIGNMENT request opens the seat and moves access", async () => {
+    // The payoff of the flip: the lead proposes, HR/company_admin agrees, and the seat + its grants
+    // appear. Same inbox, same decide_override action, same execution seam as an override.
+    config.positionSyncEnabled = true;
+    try {
+      const pos = await app.inject({
+        method: "POST", url: `/api/${T}/positions`, headers: asUser(admin),
+        payload: { unitNodeId: "d-web", title: "FE Rota", roles: [{ roleId: memberRole }] },
+      });
+      expect(pos.statusCode).toBe(201);
+      const positionId = pos.json().id as string;
+
+      const requested = await app.inject({
+        method: "POST", url: `/api/${T}/positions/${positionId}/assignment-requests`,
+        headers: asUser(webLead), payload: { userId: staff, justification: "rota cover" },
+      });
+      expect(requested.statusCode).toBe(201);
+
+      const decided = await decide(requested.json().approvalId as string, admin);
+      expect(decided.statusCode).toBe(200);
+      expect(decided.json().iam.kind).toBe("position_assign");
+      expect(decided.json().iam.assignmentId).toBeTruthy();
+
+      const seats = await withTenants([T], (c) =>
+        c.query(`SELECT id FROM position_assignments WHERE tenant_id = $1 AND position_id = $2 AND valid_to IS NULL`, [
+          T, positionId,
+        ]),
+      );
+      expect(seats.rows).toHaveLength(1);
+    } finally {
+      config.positionSyncEnabled = false;
+    }
+  });
+
+  it("🔴 a dept head cannot approve their OWN assignment request either", async () => {
+    const pos = await app.inject({
+      method: "POST", url: `/api/${T}/positions`, headers: asUser(admin),
+      payload: { unitNodeId: "d-web", title: "Self Approve Seat", roles: [{ roleId: memberRole }] },
+    });
+    const requested = await app.inject({
+      method: "POST", url: `/api/${T}/positions/${pos.json().id}/assignment-requests`,
+      headers: asUser(webLead), payload: { userId: staff, justification: "trying to self-approve" },
+    });
+    expect(requested.statusCode).toBe(201);
+    // Same structural DENY as an override — the flip did not create a second, weaker door.
+    expect((await decide(requested.json().approvalId as string, webLead)).statusCode).toBe(403);
+  });
+
+  it("a stale request against a RETIRED position is refused at execution, not applied blindly", async () => {
+    // An approval can sit in the inbox for days. The seat is re-read at execution time precisely so a
+    // decision made against a position that has since been retired does not fill it.
+    const pos = await app.inject({
+      method: "POST", url: `/api/${T}/positions`, headers: asUser(admin),
+      payload: { unitNodeId: "d-web", title: "Doomed Seat", roles: [{ roleId: memberRole }] },
+    });
+    const positionId = pos.json().id as string;
+    const requested = await app.inject({
+      method: "POST", url: `/api/${T}/positions/${positionId}/assignment-requests`,
+      headers: asUser(webLead), payload: { userId: staff, justification: "will go stale" },
+    });
+    expect((await app.inject({ method: "POST", url: `/api/${T}/positions/${positionId}/retire`, headers: asUser(admin) })).statusCode).toBe(200);
+
+    const decided = await decide(requested.json().approvalId as string, admin);
+    expect(decided.statusCode).toBe(400);
+    expect(decided.json().error).toContain("stale");
+  });
+
 });

@@ -3219,3 +3219,20 @@ access page) is the intended one.
 - ⚠ **A `company_admin` cannot approve an `hr_manager` override** — they genuinely lack three
   `hr_people_ops`-only appraisal keys, so the ceiling refuses at execution with `ceiling_exceeded`.
   That is why routing exists; surface `routedTo` rather than letting an admin try and fail.
+
+### Dept-head assignment requests (§11.2's owner end-state, 2026-08-19)
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `POST /api/:tenantId/positions/:positionId/assign` | `position · assign` | **Behaviour change:** a DEPT HEAD now gets `400 assignment_request_required` naming the request path. HR (`hr_people_ops`) and `company_admin` still assign directly. |
+| `POST /api/:tenantId/positions/:positionId/assignment-requests` | `position · assign` (same reach, including the self-assign DENY) | `{ userId, justification }` — justification required. Returns `{ approvalId, decideVia }`. |
+| decide (existing inbox) | `automation_approval · decide_override` | On approve the response carries `iam: { kind: "position_assign", assignmentId, reconciled }`. |
+
+⚠ The decide response's `override` key was renamed to **`iam`** when overrides and assignment requests
+started sharing one execution seam — `iam.kind` is `"override"` or `"position_assign"`. Non-IAM
+approvals still return `{ id, status }` with no `iam` key at all.
+
+**For the dept-head page (P2-11):** render "Request placement" rather than "Assign" when the caller
+lacks tenant-wide `position · assign`, and surface the returned `approvalId` so the lead can follow it.
+A stale request whose position was retired before approval fails at decide time with a `stale` message
+— show that to the approver, not to the requester.
