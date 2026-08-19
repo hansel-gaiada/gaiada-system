@@ -395,3 +395,100 @@ Closed: P2-06, P2-07 (both halves), P2-08, P2-09, the `decide_assignment` split,
 left open. Still open and untouched: the UI surfaces (**P2-10 / P2-11 / P2-12-FE / P2-14**), **P2-15**
 backfill, **P2-16** QA battery, **P2-17** doc sync, and Phases 3–7. Two things need the owner rather than
 a session: the direct IAM grant tools (§14) and whether the agent-attribution gap blocks staging.
+
+---
+
+# 2026-08-19 continuation (part 2) — Wave D is closed; only the UI surfaces remain
+
+Three more releases: **`Alpha 01.052.0105a`** (P2-15 + P2-13), **`Alpha 01.053.0106a`** (P2-16 + P2-17).
+All verified on the live box.
+
+## 20. P2-15 — the backfill, and the two things it refuses to decide
+
+`src/admin/iam-phase2-backfill.ts` + `npm run iam:backfill`. Full contract: PERMISSION-CONTRACT §13.
+
+**The invariant, as an ABORT rather than a log line.** Adoption re-labels a hand-made grant as
+`managed_by_position` and adds one claim per justifying seat; `user_roles`' row count is read before and
+after INSIDE the writing transaction and a difference raises `AdoptionWidenedAccessError`, rolling the
+run back. The count is GLOBAL — `user_roles` has no tenant column, and a tenant-filtered count would miss
+a row written with the WRONG scope, which is the mistake that matters. Proven by a test that plants a row
+mid-transaction via a trigger and asserts both the throw and the rollback.
+
+**No second matcher.** `position-reconciler.ts`'s `skip_manual` verdict IS the candidate list. A second
+matcher here could adopt a row the reconciler would never manage.
+
+🔴 **The hazard a one-line `INSERT…SELECT` would have shipped.** Automation accounts hold real
+`company_memberships` rows on purpose, so a membership-driven backfill mints a person-shaped HR record for
+every bot. Primary filter is `kind='employee'` (migration 0026's column — I first recorded it as
+non-existent, which was wrong). A SECOND wall excludes anything carrying an `n8n` identity link, because
+nothing ENFORCES the kind, and every exclusion is NAMED in the report.
+
+**Two categories are REVIEWED, not decided:** a `@gaiada.system` address with no automation link, and a
+`kind='employee'` membership whose user is also a client principal (impossible per 0072 ⇒ a data defect,
+and the answer is a human, never an HR record).
+
+**Report-only forever:** the position import. A blob `role` node carries no role-set, so an imported seat
+would confer nothing and then read, to every later reader, as a seat someone deliberately left empty.
+
+**LIVE DRY RUN (read-only, run on the box):** 23 employees to create across two companies, 19 assignments
+correctly refused as not-derivable (no positions exist there yet), nothing to adopt, and **zero automation
+exclusions** — which is the evidence that every service account on the estate is properly `kind='service'`
+and the second wall never had to fire. Nobody has APPLIED any piece yet; that is an owner decision, one
+tenant and one flag at a time.
+
+## 21. P2-13 — the IT accounts backend
+
+`src/admin/it-accounts.controller.ts`, five endpoints. Full contract: FRONTEND-BFF-CONTRACT's IT-accounts
+section. Routed live (401, not 404). P2-14 (the console) is the intended consumer and is NOT built.
+
+* **Degradation is a typed 503, never `[]`.** An empty worklist asserts "everyone has a login" — the most
+  dangerous claim this surface can make while blind.
+* **Provision converges:** lookup first, and Keycloak's 409 is treated as "adopt", including the
+  lookup/create race. A double-provision returns `adopted:true` and NO password.
+* The initial password is returned once, never stored or audited. `reset-password` audits the REASON.
+* The identity link is created **unverified** — an admin creating an account is not the person proving
+  control of it.
+* Not HR-module-gated; only the employment-status read is scoped, so `leaver_still_enabled` is only ever
+  claimed from real data.
+
+⚠ **I hit the trap `http-error.filter.ts`'s own header documents:** threw `{error: token}` where the
+filter RENAMES `message` to `error` and reads nothing called `error`. Every typed refusal arrived as prose
+with the meaning stripped while the status codes and shape stayed right. **A thrower must set `message`.**
+
+## 22. P2-16 — the mover criterion, three ways
+
+`src/admin/iam-phase2-three-mode-battery.test.ts`, 8 cases. Design §5.2's four parts asserted identically
+under a UI persona (`x-user-id`), an agent OBO envelope, and an n8n OBO envelope — which is what "three
+modes" reduces to at the platform's door: three header shapes and nothing else.
+
+(b) and (c) are probed against **running Cerbos**. A bundle check cannot witness a mover at all.
+
+**The leaver case is stronger than specified, and the test now says so:** after terminate the probe is
+**401**, not 403, because `assemblePrincipal` yields null for a disabled user. "Still a principal,
+currently unauthorized" is a state a leaver must not be in.
+
+Modes 2 and 3 deliberately do NOT route through the hub — its contribution is covered by
+`d14-jml-registry.test.ts`, and routing through it would test the hub twice and the platform once.
+
+**Two fixture defects worth knowing before writing another suite like this:** `hr_people_ops` is a DERIVED
+role (`== hr_manager`), so granting a role by that name satisfies nothing and every hire 403s; and the
+hire endpoint returns the shaped employee at the TOP level, not inside an `{employee}` envelope.
+
+## 23. Where Phase 2 stands now
+
+**Closed:** P2-01 … P2-09, P2-13, P2-15, P2-16, P2-17, the `decide_assignment` split, and §§11–12.
+
+**Open, and all of it frontend:** **P2-10** (HR console), **P2-11** (dept-head access page), **P2-12-FE**
+(positions admin UI), **P2-14** (IT accounts console). Every one has a DEV-VERIFIED backend and a contract
+row already written; none has a UI.
+
+**Two things need the OWNER, not a session:**
+1. Whether `iam.grantRole` / `revokeRoleGrant` / `assignPosition` / `unassignPosition` should exist as
+   agent tools (§14). Blocked on the decision, not the code — three D14 entries plus allow-list names.
+2. Whether to APPLY any P2-15 piece on the live estate, and in which order. The dry run is in §20.
+
+**Still red on `main`, still not this program's:** the MON-11a/b `monitor*` / `status_page` Cerbos policies
+have no `permission-catalog.json` entries, no bundle rows and no `permissions` rows — 12 tests across 7
+files in `src/rbac`, and `cerbos-catalog-alignment` is what CI stops on now that the mail-template pin is
+fixed. Adding those entries means deciding which roles get monitoring permissions and which keys are
+sensitive; that is the monitoring ticket's design call, so it was reported rather than guessed.
