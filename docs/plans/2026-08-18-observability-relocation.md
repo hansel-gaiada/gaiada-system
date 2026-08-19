@@ -1,6 +1,6 @@
 # Relocating the observability stack to the SumoPod VPS
 
-**Date:** 2026-08-18 · **Status:** **EXECUTED 2026-08-18** — metrics + traces DEV-VERIFIED, logs OPEN (§9) · **Owner ask:** move Prometheus/Loki/Tempo off `gda-aicenter` to the SumoPod VPS "as it has more room"
+**Date:** 2026-08-18 · **Status:** **EXECUTED + DEV-VERIFIED 2026-08-19** — all three signals confirmed on the VPS (§9, §10) · **Owner ask:** move Prometheus/Loki/Tempo off `gda-aicenter` to the SumoPod VPS "as it has more room"
 **Related:** [`docs/blueprints/monitoring-program.md`](../blueprints/monitoring-program.md) §2 · `infra/runbooks/deploy-vps.md` §"Postiz / SMM"
 
 ---
@@ -243,23 +243,38 @@ larger than the fault warrants.
 
 After the fix the receiver logs `Started watching file` for the container logs. **That part works.**
 
-### Root cause #2 — STILL OPEN: files are watched, but zero records are accepted
+### Root cause #2 — RESOLVED: a concurrent release had reverted the collector config
 
-`otelcol_receiver_accepted_log_records_total` has **no series at all**, and OTel only emits a counter
-once it has recorded a value — so the receiver has accepted **zero** log records since the fix. Loki
-confirms it independently: `loki_distributor_lines_received_total` moved 750 → 751, and that single
-line was the hand-pushed probe. No export errors appear on either side, which rules out the transport.
+The collector reported `sent_log_records = 2148, send_failed = 0` while Loki's distributor counter sat
+unchanged. Successful sends that arrive nowhere means the destination is wrong, not broken — and it
+was: the config **on the box** still read `endpoint: http://loki:3100/otlp` and `endpoint: tempo:4317`,
+the pre-relocation values. `loki` still resolved (a stale Docker DNS entry for the removed container),
+so the export "succeeded" into nothing.
 
-Next suspects, in order:
+Cause: a **fourth release shipped during this work** (`alpha-01.044.0096a`), and `deploy.yml` rsyncs
+`infra/` from the tag — reverting the hand-applied collector config, because the tag predated the
+commit carrying it. Metrics had silently fallen back to **2 `up` series** (the VPS's own targets only).
 
-1. **`start_at` defaults to `end`** — filelog only reads lines appended *after* it starts. Quiet
-   containers would produce exactly this signature. Test by writing a line to a busy container's
-   stdout and watching the counter, or set `start_at: beginning` temporarily.
-2. **The `operators:` chain silently dropping records** — the config chains `json_parser` on the
-   Docker envelope, a `move`, a conditional second `json_parser`, then `severity_parser`. A parser
-   that fails on a non-JSON line can drop the entry rather than pass it through.
+This is precisely the rule recorded earlier the same day in
+[`monitoring-program.md`](../blueprints/monitoring-program.md) §2.5: *a hand-applied infra change has a
+maximum lifetime of one deploy by anyone else, and on a shared checkout "anyone else" is routine.* It
+was written down and then walked into anyway — the gap being that the change was committed but not yet
+**in a tag**, which is the state that actually matters to `rsync`.
 
-Both are cheap to distinguish, and the distinction matters: (1) is benign, (2) means the pipeline is
-discarding real logs.
+Re-applied from the committed files and restarted (compose does not recreate on a bind-mount content
+change, so an explicit `docker restart` is required — `up -d` reports "Running" and does nothing).
 
-**Metrics and traces are unaffected** and remain verified (§9).
+### Verified after the fix
+
+| Signal | Evidence |
+|---|---|
+| **Metrics** | **16 `up` series / 8 jobs** — full parity restored |
+| **Logs** | `service_name` now has **6 values** including `platform`, `knowledge`, `wa-chat-bot` — real application logs, queryable |
+| **Traces** | **18,880 spans** received (up from 17,204) |
+| Exporters | `send_failed` = 0 across logs, metrics and spans |
+
+Both MON-09q root causes are closed. Note the first log lines to arrive were cAdvisor's
+`Failed to create existing container` errors — MON-09n, now visible in Loki, which is a fair
+demonstration that the log path works.
+
+
