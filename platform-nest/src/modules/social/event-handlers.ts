@@ -8,6 +8,7 @@
 // Event payload contains: network, engagementId, providerPostId, reason (for failed)
 // We query the engagement to find the owner and notify them of the outcome.
 import { withTenants } from "../../db";
+import { declareSocialModuleScope } from "./publish-precondition";
 import { notify } from "../../core/http";
 import { enqueueMail } from "../../mail/queue";
 import type { OutboxEvent } from "../../events/types";
@@ -29,6 +30,12 @@ interface EngagementRow {
 /** Query the engagement to find the owner. */
 async function loadEngagementOwner(tenantId: string, engagementId: string): Promise<EngagementRow | null> {
   return withTenants([tenantId], async (c) => {
+    // 0105's THIRD wall: every social_* table is additionally gated on app_module_allowed('social'),
+    // which withTenants() alone does not satisfy. Without this the SELECT returns zero rows and
+    // raises nothing, so every handler below decides "no engagement, nothing to notify" and routes
+    // NOTHING -- silently, forever. That is the same trap SMM-09, SMM-36 and SMM-10 each hit; here
+    // it would have made the whole ticket a no-op that still reported green.
+    await declareSocialModuleScope(c);
     const { rows } = await c.query<EngagementRow>(
       `SELECT owner_id, name FROM social_engagements WHERE id = $1 AND deleted_at IS NULL`,
       [engagementId],
