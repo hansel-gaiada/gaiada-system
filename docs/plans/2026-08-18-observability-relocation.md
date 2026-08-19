@@ -278,3 +278,32 @@ Both MON-09q root causes are closed. Note the first log lines to arrive were cAd
 demonstration that the log path works.
 
 
+
+---
+
+## 11. MON-09r — closing the blind spot the relocation itself created
+
+Moving storage off the monitored box **inverted a safety property**, and it would have been easy to
+ship without noticing.
+
+When Prometheus SCRAPED those targets, losing them drove `up` to **0** and `ServiceDown` fired. Under
+remote_write, a dead tunnel means the series stop arriving: `up` goes **absent**, not 0. `up == 0` and
+`probe_success == 0` then match nothing, so **every alert in the file goes quiet at exactly the moment
+we can no longer see the estate.** Silence would read as health.
+
+`Watchdog` does not cover this — it is `vector(1)` evaluated locally on whichever Prometheus runs it,
+so it keeps firing cheerfully while the feed is dark.
+
+**`RemoteWriteStalled`** now fires when nothing has arrived from `gda-aicenter` for 10 minutes, and its
+description says outright that while it is firing the other alerts are *meaningless rather than
+reassuring*. `absent_over_time(...[10m])` rather than `absent()`: the latter trips on a single missed
+evaluation, which a routine restart would cause.
+
+Verified in both directions rather than just loaded — the failure mode for an alert is that it never
+fires, which looks identical to peace:
+
+| Probe | Result |
+|---|---|
+| Expression against the live job | **empty** ⇒ will not false-fire |
+| Same expression against a deliberately missing job | **1** ⇒ will fire on a real outage |
+| Rule loaded on the remote | yes (22 rules), currently not firing |
