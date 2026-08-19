@@ -614,11 +614,34 @@ per-key marker distinguishing self-scoped keys (`hr.case.cancel` — cancel *my 
 authority-over-others keys is the precise form; the baseline subtraction is a proxy that happens to
 work today and would silently widen every grantor's reach if `member`'s bundle ever grew.
 
-**Status: the subtraction SHIPS as the interim** (it is deployed in `alpha-01.041.0094a` and the
-surface is unusable without it). The marker is its own ticket: new catalog field, migration, and the
-parity chain re-derived across all 282 entries — then `assertWithinCeiling()` subtracts on the marker
-instead of on `bundle(member)`, and this section is rewritten. Until then the interim is load-bearing;
-do not remove it without the replacement in place.
+**✅ THE MARKER SHIPPED, 2026-08-19 — and it did NOT subsume the baseline.** `role_permissions
+.self_scoped` (migration `0114`) marks a (role, key) pair when EVERY Cerbos ALLOW rule granting that
+key to that role is self-scoped (`resource.attr.X == principal.id`, or `variables.owns`). It is
+**derived**, not hand-listed: `scripts/generate-role-bundles.mjs::computeSelfScoped` uses the predicate
+copied verbatim from the hazard scan's Pattern-B check, emits it into `role-permission-bundles.json`,
+and `self-scoped-marker-parity.db.test.ts` fails if policies, JSON and DB disagree. 21 pairs today
+(member 17, viewer 4).
+
+⚠ **The correction the ruling did not anticipate, measured before committing to it.** The marker
+replaces the subtraction on the REQUIRED side only. With marker-only:
+
+| grant | required | missing |
+|---|---:|---:|
+| `company_admin` → `member` | 55 | 0 |
+| `org_unit_lead` → `member` | 55 | **55** |
+| `hr_manager` → `hr_staff` | 15 | **1** (`core.member.read`) |
+
+i.e. marker-only re-breaks the dept-head surface. The two rules answer different questions and both
+are needed: **the marker** asks "is this key authority over OTHER people?" (required side), **the
+baseline** asks "does the target already hold this by being staff at all?" (now the HELD side — a
+grantor is themselves staff, so passing on baseline reach confers nothing new). Putting the baseline on
+the held side also keeps the refusal message truthful: a missing key is now genuinely one the grantor
+lacks, not one the algebra hid.
+
+**Why the marker is still the better mechanism**, even though it did not remove the second rule: both
+`hr.case.cancel` and `core.client.delete` sat in `member`'s bundle, the subtraction removed both, and
+only the first was self-service — the second was real tenant-wide reach and a live over-grant (§12.5).
+A subtraction cannot tell those apart. The marker can, and pins `core.client.delete` as never-marked.
 
 **The `core.integration_connection.*` case is the worked example of why the marker is better:** those
 three keys sit in `member`'s bundle from an `owns`-gated self-service rule (manage your own provider
@@ -626,7 +649,7 @@ link), so the baseline subtraction and the marker agree. `core.client.delete` al
 — and there the reach was REAL, not self-scoped (see §12.5). A subtraction cannot tell those two apart;
 a marker can.
 
-### 12.2 The sensitive gate (§6.3.7) inherits the same subtraction — and its data is unratified
+### 12.2 The sensitive gate (§6.3.7) applies the SAME two rules — and its data is now ratified
 
 The baseline `member` role carries **11 `sensitive`-flagged keys**, so an unsubtracted gate routes the
 baseline grant (and everything above it) as an override — refusing the entire dept-head surface. Same

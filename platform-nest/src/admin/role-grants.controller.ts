@@ -165,21 +165,20 @@ export class RoleGrantsController {
       "create",
     );
     if (!tenantWide.allow) {
-      // ⚠ BASELINE-SUBTRACTED, for the same reason `assertWithinCeiling` is (P2-08, found by this
-      // surface's own test): the baseline `member` role — which every staff principal already holds —
-      // itself carries ELEVEN `sensitive`-flagged keys (`core.client.delete`,
-      // `core.integration_connection.*`, `hr.case.cancel`, …). An unsubtracted gate therefore refuses
-      // a dept head the commonest grant in the system and every role above it, i.e. the entire
-      // surface. Only sensitive authority ABOVE the universal baseline routes as an override.
+      // ⚠ SELF-SCOPED-EXCLUDED **and** baseline-excluded — the same two rules the ceiling applies,
+      // for the same two reasons (see `assertWithinCeiling`):
+      //   * `NOT rp.self_scoped` (the 0114 marker): a key whose every rule is self-scoped confers
+      //     authority over the holder's own rows only. Routing that for approval is theatre.
+      //   * the baseline `member` bundle: the baseline role itself carries ELEVEN sensitive-flagged
+      //     keys, so without this a dept head is refused the commonest grant in the system and every
+      //     role above it — i.e. the whole surface.
       //
-      // Worth stating plainly: those flags have never been owner-ratified — PERMISSION-CONTRACT §9's
-      // "sensitivity sign-off" (now 107 keys) is still outstanding, and this gate is the first thing
-      // to depend on them. Whichever way that review lands, this subtraction stays necessary: a key
-      // held by everyone cannot be authority a grant confers.
+      // The flags this gate reads were owner-reviewed on 2026-08-18 (107 -> 100, reads un-flagged
+      // except `hr.record.read`); the review is `docs/superpowers/plans/2026-08-18-sensitivity-review.md`.
       const sensitive = await withGlobal((c) =>
         c.query<{ key: string }>(
           `SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
-            WHERE rp.role_id = $1 AND p.sensitive
+            WHERE rp.role_id = $1 AND p.sensitive AND NOT rp.self_scoped
               AND p.key NOT IN (
                 SELECT p2.key FROM role_permissions rp2
                   JOIN permissions p2 ON p2.id = rp2.permission_id

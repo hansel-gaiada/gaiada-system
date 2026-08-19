@@ -106,6 +106,18 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.045.0097a` - 2026-08-19 - the grant ceiling gets its durable mechanism
+
+Manifest (counter +1, 0096 -> 0097): `platform-nest 0.23.2 -> 0.24.0`.
+
+Closes the interim the owner flagged on 2026-08-18: the ceiling no longer subtracts a whole role's
+bundle, it excludes per-(role, key) SELF-SCOPED pairs derived from the policies themselves. Migration
+`0114` carries the marker; the baseline consideration moves to the held side rather than disappearing,
+because measurement showed the marker alone would refuse every dept-head grant.
+
+No behaviour change for any grant that worked before — the boundary is where it was, the mechanism
+underneath it is the one that can tell self-service from real reach.
+
 ### `Alpha 01.044.0096a` - 2026-08-18 - fix the sweep busy-loop, and verify the reconciler live
 
 Manifest (counter +1, 0095 -> 0096): `platform-nest 0.23.1 -> 0.23.2`.
@@ -1775,6 +1787,28 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.24.0] - 2026-08-19 - IN PROGRESS (the self-scoped marker: the ceiling's durable mechanism)
+- **`role_permissions.self_scoped` (migration `0114`)** replaces P2-08's interim "subtract the baseline
+  `member` bundle" on the REQUIRED side of the grant ceiling. A (role, key) pair is marked when EVERY
+  Cerbos ALLOW rule granting that key to that role is self-scoped (`resource.attr.X == principal.id`,
+  or `variables.owns`). 21 pairs today: member 17, viewer 4.
+- **Derived, never hand-listed.** `scripts/generate-role-bundles.mjs::computeSelfScoped` uses the
+  predicate copied verbatim from `permission-arm-hazard-scan.test.ts::selfScopeField` — the hazard scan
+  asks "can a flat perms mirror express this?" and the ceiling asks "is this authority over OTHER
+  people?", which are the same question about the same rule shape. A policy edit moves the JSON and the
+  diff shows it; `self-scoped-marker-parity.db.test.ts` fails if policies, JSON and DB disagree.
+- 🔴 **The marker does NOT subsume the baseline argument — measured, not assumed.** Marker-only:
+  `company_admin`→`member` 0 missing, but `org_unit_lead`→`member` **55 missing** and
+  `hr_manager`→`hr_staff` 1 missing. That would have re-broken the dept-head surface. The two rules
+  answer different questions, so both apply: the marker on the REQUIRED side, the baseline moved to the
+  HELD side (a grantor is themselves staff, so passing on baseline reach confers nothing new). That
+  placement also keeps the refusal message truthful — a missing key is one the grantor genuinely lacks.
+- **Why the marker is still the better mechanism:** `hr.case.cancel` and `core.client.delete` both sat
+  in `member`'s bundle; the subtraction removed both and only the first was self-service — the second
+  was real tenant-wide reach and a live over-grant (§12.5). The parity suite pins `core.client.delete`
+  as never-markable, on both sides of the chain.
+- The sensitive gate applies the identical pair of rules, so the two guards cannot drift apart.
+- Gates: marker parity 5/5, ceiling invariants 26/26, grant surface 14/14, `src/rbac`+`src/db` 925/925.
 ### [0.23.2] - 2026-08-18 - IN PROGRESS (the sweep busy-looped on the live box; three layers fixed)
 - 🔴 **INCIDENT, self-inflicted and self-found.** Enabling `POSITION_SYNC_ENABLED` on the live box
   produced `IAM grant-expiry + position-drift sweep on: every 0ms` and platform sat at **~46% CPU**

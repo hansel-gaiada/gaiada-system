@@ -211,6 +211,93 @@ function loadCatalog() {
 /** Re-derives, from the live policy files, which catalog permission keys each of the REAL_ROLES
  *  can reach today. class='relationship' pairs are excluded even if some future rule
  *  named a role for them directly (defense in depth matching 0093's DB trigger). */
+/**
+ * A rule's condition is SELF-SCOPED if it compares a resource attribute to the caller's own id —
+ * either inline (`resource.attr.X == principal.id`) or through the shared `variables.owns` CEL
+ * variable. Copied verbatim from `permission-arm-hazard-scan.test.ts::selfScopeField` (its
+ * "Pattern B" predicate); the two are kept identical on purpose — the hazard scan asks "can a flat
+ * `perms` mirror express this?" and the ceiling asks "is this authority over OTHER people?", and
+ * those are the same question about the same rule shape.
+ */
+function isSelfScopedCondition(conditionExpr) {
+  if (!conditionExpr) return false;
+  if (/request\.resource\.attr\.\w+\s*==\s*request\.principal\.id/.test(conditionExpr)) return true;
+  return /variables\.owns\b/.test(conditionExpr);
+}
+
+/**
+ * For each (role, key) in the bundles, is EVERY rule that grants it to that role self-scoped?
+ *
+ * This is the marker the owner ruled for (PERMISSION-CONTRACT §12.1), replacing P2-08's interim
+ * "subtract the baseline `member` bundle". It exists because a bundle records what a role's rules
+ * NAME, while a grant ceiling is a claim about authority over OTHER people — and the two diverge
+ * exactly on self-service rules. The worked example, both from `member`'s bundle:
+ *
+ *   • `hr.case.cancel`             — self-scoped (cancel MY OWN case). Confers nothing over others.
+ *   • `core.client.delete`         — NOT self-scoped. It was real tenant-wide reach, and it was a
+ *                                    live over-grant (fixed 2026-08-18, PERMISSION-CONTRACT §12.5).
+ *
+ * The baseline subtraction could not tell those apart — it removed both. This can: a pair is marked
+ * only when NO unconditional (or merely scope/assurance-gated) rule also grants it to that role.
+ */
+function computeSelfScoped(policies, catalog) {
+  const keyByPair = new Map();
+  const classByPair = new Map();
+  const kindActions = new Map();
+  for (const e of catalog) {
+    const pairId = `${e.cerbosKind}::${e.cerbosAction}`;
+    keyByPair.set(pairId, e.key);
+    classByPair.set(pairId, e.class);
+    const list = kindActions.get(e.cerbosKind) ?? [];
+    list.push(e.cerbosAction);
+    kindActions.set(e.cerbosKind, list);
+  }
+  // role -> key -> { self: n, other: n } — "other" wins, always. A single non-self rule means the
+  // role really can act on someone else, so the pair is NOT marked.
+  const tally = new Map();
+  for (const r of REAL_ROLES) tally.set(r, new Map());
+
+  for (const [kind, entry] of policies) {
+    const universe = kindActions.get(kind) ?? [];
+    for (const rule of entry.rules) {
+      if (rule.effect !== "EFFECT_ALLOW") continue;
+      const actions = rule.actions.includes("*") ? universe : rule.actions;
+      const selfScoped = isSelfScopedCondition(rule.condition);
+      for (const dr of rule.derivedRoles) {
+        if (dr.startsWith("perm_")) continue;
+        let targets;
+        if (dr in DIRECT) targets = DIRECT[dr];
+        else if (dr === "module_staff") targets = moduleStaffTargets(kind, rule.condition);
+        else if (dr === "module_manager") targets = moduleManagerTargets(kind, rule.condition);
+        else if (dr === "module_approver") targets = moduleApproverTargets(kind);
+        else continue; // computeCoverage throws on an unknown derived role; no need to twice
+        for (const role of targets) {
+          for (const action of actions) {
+            const pairId = `${kind}::${action}`;
+            if (classByPair.get(pairId) !== "grantable") continue;
+            const key = keyByPair.get(pairId);
+            if (!key) continue;
+            const perRole = tally.get(role);
+            if (!perRole) continue;
+            const cur = perRole.get(key) ?? { self: 0, other: 0 };
+            if (selfScoped) cur.self += 1;
+            else cur.other += 1;
+            perRole.set(key, cur);
+          }
+        }
+      }
+    }
+  }
+
+  const out = {};
+  for (const role of REAL_ROLES) {
+    const keys = [];
+    for (const [key, c] of tally.get(role) ?? []) if (c.self > 0 && c.other === 0) keys.push(key);
+    if (keys.length) out[role] = keys.sort();
+  }
+  return out;
+}
+
 function computeCoverage(policies, catalog) {
   const keyByPair = new Map();
   const classByPair = new Map();
@@ -271,6 +358,7 @@ export function generate() {
   const relationshipKeys = new Set(catalog.filter((e) => e.class === "relationship").map((e) => e.key));
   const policies = parsePolicies();
   const coverage = computeCoverage(policies, catalog);
+  const selfScoped = computeSelfScoped(policies, catalog);
 
   const roles = {};
   let totalPairs = 0;
@@ -310,6 +398,14 @@ export function generate() {
         "platform-nest/migrations/0094_iam_02a_role_permission_bundles.sql",
       ],
       keyOrder: "roles sorted alphabetically by name; each role's permission keys sorted lexically — stable so diffs are meaningful, not noise",
+      selfScoped:
+        "`selfScoped` (below) is the per-(role, key) marker the owner ruled for on 2026-08-18 " +
+        "(PERMISSION-CONTRACT §12.1), replacing P2-08's interim 'subtract the baseline member bundle'. " +
+        "A pair is listed when EVERY rule granting that key to that role is self-scoped " +
+        "(`resource.attr.X == principal.id` or `variables.owns`) — i.e. it confers authority over the " +
+        "holder's OWN rows only, and therefore nothing a grant ceiling should demand the grantor hold. " +
+        "Derived, never hand-listed: the predicate is copied verbatim from the hazard scan's Pattern-B " +
+        "check, so a policy edit moves this file and the diff shows it.",
       note:
         "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced " +
         "here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against " +
@@ -318,9 +414,11 @@ export function generate() {
         roles: REAL_ROLES.length,
         totalPairs,
         perRole: Object.fromEntries(REAL_ROLES.map((r) => [r, roles[r].length])),
+        selfScopedPairs: Object.values(selfScoped).reduce((n, ks) => n + ks.length, 0),
       },
     },
     roles,
+    selfScoped,
   };
   return doc;
 }

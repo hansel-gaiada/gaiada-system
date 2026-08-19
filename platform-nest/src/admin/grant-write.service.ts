@@ -192,47 +192,51 @@ function assertNotElevated(roleName: string): void {
  * both sides of this comparison.
  */
 async function assertWithinCeiling(c: PoolClient, spec: GrantSpec, roleName: string): Promise<void> {
+  // ── THE REQUIRED SET: the granted role's bundle, MINUS its self-scoped pairs ──────────────────
+  //
+  // `role_permissions.self_scoped` is the per-(role, key) marker the owner ruled for on 2026-08-18
+  // (PERMISSION-CONTRACT §12.1), generated from the policies themselves
+  // (`scripts/generate-role-bundles.mjs::computeSelfScoped`) and seeded by `0113`. A pair is marked
+  // when EVERY rule granting that key to that role is self-scoped (`resource.attr.X ==
+  // principal.id`, or `variables.owns`) — authority over the holder's OWN rows, which is not
+  // authority a ceiling should demand the grantor already hold.
+  //
+  // It REPLACES P2-08's interim "subtract the baseline `member` bundle" on this side, and it is
+  // strictly more precise: both `hr.case.cancel` (cancel my own case) and `core.client.delete` sat
+  // in `member`'s bundle, the subtraction removed both, and only the first was self-service — the
+  // second was a real tenant-wide over-grant (§12.5).
   const { rows } = await c.query<{ key: string }>(
-    // ⚠ THE BASELINE SUBTRACTION — added by P2-08 after the first run of
-    // `role-grants-controller.test.ts` refused the commonest grant in the system.
-    //
-    // What happened: a `company_admin` could not grant `member`. The ceiling reported three missing
-    // keys — `hr.case.cancel`, `reports.appraisal.ack`, `reports.checkin.submit`. All three are in
-    // `member`'s bundle because `member` has SELF-SERVICE rules for them (cancel my own HR case,
-    // acknowledge my own appraisal, submit my own check-in), and `role_permissions`' bundling
-    // methodology (0094's header) records a resource-instance condition as "satisfied". They are
-    // absent from `company_admin`'s bundle because company_admin genuinely has no rule for them —
-    // nobody cancels somebody else's HR case.
-    //
-    // So a plain subset test structurally forbids granting the baseline role to anyone, from any
-    // surface, forever — and with it every role whose bundle includes a self-service key. That is
-    // the `role-bundles-overstate-reach` family again: the bundle records what a role's rules NAME,
-    // not what its holder can exercise over OTHER people, and a ceiling is a statement about
-    // authority over other people.
-    //
-    // The fix subtracts the BASELINE role's bundle from the required set. Justification: `member` is
-    // held by every staff principal (it is one of the six baseline roles seeded by 0095), so nothing
-    // in its bundle is authority a grant can ADD — the target either already holds it or is not
-    // staff at all. Everything ABOVE baseline still needs to be held by the grantor, so the ceiling
-    // keeps its whole point and stays fail-closed for real authority.
-    //
-    // ⚠ This is a change to an invariant P2-04 shipped, made deliberately and visibly rather than by
-    // widening the guard's inputs. It needs architect/owner ratification — recorded in the P2-08
-    // report and in PERMISSION-CONTRACT. If it is rejected, the alternative is a catalog-level
-    // marker for self-scoped keys (a bigger change), NOT reverting to a ceiling that cannot pass a
-    // `member` grant.
     `SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
-      WHERE rp.role_id = $1
-        AND p.key NOT IN (
-          SELECT p2.key FROM role_permissions rp2
-            JOIN permissions p2 ON p2.id = rp2.permission_id
-            JOIN roles r2 ON r2.id = rp2.role_id
-           WHERE r2.name = 'member' AND r2.company_id IS NULL
-        )
+      WHERE rp.role_id = $1 AND NOT rp.self_scoped
       ORDER BY p.key`,
     [spec.roleId],
   );
-  const held = new Set<string>();
+
+  // ── THE HELD SET: the grantor's resolved perms, PLUS the staff baseline ───────────────────────
+  //
+  // ⚠ The marker does NOT subsume the baseline argument, and assuming it did would have broken the
+  // dept-head surface a second time. Measured before writing this (bundles as of 2026-08-19):
+  //
+  //     company_admin grants member  -> 55 required, 0 missing   (fine either way)
+  //     org_unit_lead grants member  -> 55 required, 55 MISSING  (marker-only would refuse)
+  //     hr_manager   grants hr_staff -> 15 required,  1 MISSING  (`core.member.read`)
+  //
+  // The two rules answer different questions. The marker asks "is this key authority over OTHER
+  // people?" and belongs on the REQUIRED side. The baseline asks "does the target already hold this
+  // by virtue of being staff at all?" — every principal with a company membership does — and that
+  // belongs on the HELD side, because the honest statement is that a grantor, being staff, holds
+  // baseline reach themselves and so can confer nothing new by passing it on.
+  //
+  // Expressing it here rather than subtracting it from `required` keeps the refusal message truthful:
+  // a missing key is now genuinely a key the grantor lacks, not one the algebra hid.
+  const baseline = await c.query<{ key: string }>(
+    `SELECT p.key FROM role_permissions rp
+       JOIN permissions p ON p.id = rp.permission_id
+       JOIN roles r ON r.id = rp.role_id
+      WHERE r.name = 'member' AND r.company_id IS NULL`,
+  );
+
+  const held = new Set<string>(baseline.rows.map((r) => r.key));
   for (const g of spec.actorPerms ?? []) {
     const reaches =
       g.scopeType === "global" ||

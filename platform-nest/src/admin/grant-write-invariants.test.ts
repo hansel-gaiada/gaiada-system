@@ -255,12 +255,17 @@ describe.skipIf(!TEST_URL)("P2-04 — GrantWriteService invariants (design §6.3
       await expect(check({ roleId: twoKeyRole, actorPerms: undefined })).rejects.toThrow(/ceiling_exceeded/);
     });
 
-    it("BASELINE SUBTRACTION (P2-08): a bundle that is baseline-only needs nothing held", async () => {
-      // The defect this encodes: `member`'s bundle carries self-service keys no admin holds, so an
-      // unsubtracted subset test refused `company_admin` granting `member` — the commonest grant in
-      // the system. A role whose ENTIRE bundle is inside the baseline confers no authority a grant can
-      // add, so it passes even for a grantor with no resolved perms at all. Everything ABOVE baseline
-      // still fails closed, which the five cases above assert with above-baseline keys.
+    it("BASELINE ON THE HELD SIDE: a bundle that is baseline-only needs nothing held", async () => {
+      // Renamed 2026-08-19: this used to pin P2-08's interim "subtract bundle(member) from the
+      // REQUIRED set". The owner ruled for a per-(role, key) self-scoped MARKER instead (0114), and
+      // the baseline moved to the HELD side — a grantor is themselves staff, so passing on baseline
+      // reach confers nothing new. The observable behaviour this case asserts is unchanged, which is
+      // the point: the mechanism was replaced without moving the boundary.
+      //
+      // The original defect it encodes: `member`'s bundle carries self-service keys no admin holds, so
+      // a plain subset test refused `company_admin` granting `member` — the commonest grant in the
+      // system. Everything ABOVE baseline still fails closed, which the five cases above assert with
+      // above-baseline keys.
       const baselineOnlyRole = await createRole(`p208-baseline-only-${newId()}`);
       await attach(baselineOnlyRole, "core.task.read"); // in the global `member` bundle
       await expect(check({ roleId: baselineOnlyRole, actorPerms: undefined })).resolves.toBeTruthy();
