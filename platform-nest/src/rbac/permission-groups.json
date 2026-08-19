@@ -7,9 +7,9 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 85,
-      "grantablePermissionsInCatalog": 268,
+      "grantablePermissionsInCatalog": 269,
       "permissionsCoveredByGroups": 247,
-      "permissionsAdvancedOnly": 21,
+      "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 49
     }
@@ -1039,6 +1039,10 @@
     {
       "key": "core.position.create",
       "reason": "IAM Phase 2 (P2-02): org-chart seat administration — advancedOnly until the positions admin UI (P2-12) curates a dedicated group."
+    },
+    {
+      "key": "core.position.decide_assignment",
+      "reason": "IAM Phase 2: deciding a placement request. advancedOnly beside core.role_grant.create/.decide_override — it belongs behind the grant/position authoring surfaces with the requester-not-decider and ceiling checks in front of it, not in a friendly group picker."
     },
     {
       "key": "core.position.read",

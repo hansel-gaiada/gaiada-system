@@ -128,6 +128,15 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.048.0100a` - 2026-08-19 - one decision right becomes two
+
+Manifest (counter +1, 0099 -> 0100): `platform-nest 0.25.1 -> 0.25.2`. Migration `0118`.
+
+Owner instruction: split the IAM decision right so a role override and a placement request are
+different permissions. Delivered with the honest caveat that nothing behaves differently today — the
+same four tiers decide both — because the value is an auditable description, the ability to diverge, and
+a decision row that says which kind of exception was approved.
+
 ### `Alpha 01.047.0099a` - 2026-08-19 - a dept head proposes, and a monitoring RLS gap closes
 
 Manifest (counter +1, 0098 -> 0099): `platform-nest 0.25.0 -> 0.25.1`.
@@ -1839,6 +1848,22 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.25.2] - 2026-08-19 - IN PROGRESS (the IAM decision right splits in two)
+- **`core.position.decide_assignment`** is split out of `core.role_grant.decide_override` at the owner's
+  instruction (migration `0118`). A routed ROLE override and a dept head's PLACEMENT request now
+  authorize against different Cerbos actions.
+- **No behaviour changed on the day of the split**, and the migration says so in its own header: both
+  actions are granted to the identical four tiers, so nobody gained or lost the ability to decide
+  anything. What it buys: a description that matches what the permission does (the override key claimed
+  to cover "granting authority beyond a position" while it was deciding placements too — unauditable),
+  the ability to diverge later without a schema change, and an audit row that records WHICH kind of
+  exception was approved. `0118` also corrects the override key's description in the DB.
+- **The requester ≠ decider DENY is restated PER ACTION**, not shared: a DENY silently covering two
+  actions is one edit away from covering neither. Both also fail CLOSED on an unresolvable requester.
+  All four combinations pinned by live-engine probes.
+- Tallies moved again (283 -> 284 pairs, 268 -> 269 grantable) — the third time in two days, and the
+  maintenance tax this program already documented for hardcoded counts.
+- Gates: live-probe + override/assignment batteries 38/38, full sweep 1289/1289 across 81 files.
 ### [0.25.1] - 2026-08-19 - IN PROGRESS (a dept head proposes; HR and admins place)
 - **§11.2's owner end-state is done.** A dept head's `POST /positions/:id/assign` returns
   `assignment_request_required` naming `POST /positions/:id/assignment-requests`; that files an

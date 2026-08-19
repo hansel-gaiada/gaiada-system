@@ -195,3 +195,40 @@ resourcePolicy:
           expr: >-
             !has(request.resource.attr.creatorId) || request.resource.attr.creatorId == "" ||
             request.resource.attr.creatorId == request.principal.id
+
+    # ══════════ `decide_assignment` — the DEPT HEAD's placement request (owner split, 2026-08-19) ═══
+    #
+    # Split out of `decide_override` at the owner's instruction. Both are "an IAM exception somebody
+    # senior agreed to" and both were initially one action — but the catalog key described granting a
+    # ROLE, which read narrowly once assignment requests started riding it, and one action cannot be
+    # narrowed for one kind of request without narrowing the other.
+    #
+    # ⚠ NO BEHAVIOUR CHANGE TODAY, deliberately: the tiers below are identical to `decide_override`'s,
+    # so the same four roles decide both. What the split buys is the ABILITY to diverge (e.g. letting a
+    # senior lead approve placements but never role grants) plus an honest audit trail — a decision row
+    # now records which kind of exception was approved, rather than one action covering both.
+    - actions: ["decide_assignment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["decide_assignment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # IAM-TRAP4 shape: group_executive is global-scope-only, so inTenant is always false for it.
+    - actions: ["decide_assignment"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    #
+    # The SAME structural requester-not-decider DENY as decide_override, restated for this action
+    # rather than shared: a DENY that silently covered two actions would be one edit away from
+    # covering neither. deny-overrides beats every ALLOW above, platform_admin's wildcard included.
+    - actions: ["decide_assignment"]
+      effect: EFFECT_DENY
+      roles: ["user"]
+      condition:
+        match:
+          expr: >-
+            !has(request.resource.attr.creatorId) || request.resource.attr.creatorId == "" ||
+            request.resource.attr.creatorId == request.principal.id

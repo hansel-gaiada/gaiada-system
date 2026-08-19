@@ -18,7 +18,7 @@ import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
 // P2-08 part B: an approved IAM request (override, or a dept head's assignment) executes in-band.
 // One import, one call — the IAM-specific knowledge lives in that module, not in this shared route.
-import { executeApprovedIamRequest, isIamRequest } from "../admin/iam-approval-execute";
+import { IAM_POSITION_ASSIGN_WORKFLOW, executeApprovedIamRequest, isIamRequest } from "../admin/iam-approval-execute";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -274,7 +274,14 @@ export class AutomationApprovalsController {
     // execution seam which one it is; this route does not need to know.
     const isOverride = isIamRequest(rowOrigin, existing.rows[0].workflow_id);
     const subKind = isLeave ? "leave" : undefined;
-    const decideAction = isOverride ? "decide_override" : isLeave ? "decide_leave" : "decide";
+    // Owner split (2026-08-19): the two IAM request kinds authorize against DIFFERENT actions, so a
+    // policy can narrow one without narrowing the other, and the audit row records which kind of
+    // exception was approved. `isIamRequest` still gates the branch; `workflow_id` picks the action.
+    const decideAction = isOverride
+      ? (existing.rows[0].workflow_id === IAM_POSITION_ASSIGN_WORKFLOW ? "decide_assignment" : "decide_override")
+      : isLeave
+        ? "decide_leave"
+        : "decide";
     await authorize(
       req.principal,
       {

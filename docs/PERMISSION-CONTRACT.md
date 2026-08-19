@@ -752,3 +752,31 @@ that `manager`/`company_admin` can *still* delete, so the narrowing did not over
 hold a `delete` key?" was. A permission that is both *sensitive* and *held by everyone* is a
 contradiction, and the resolution is sometimes that the FLAG is wrong (the seven reads) and sometimes
 that the REACH is (this). Check which before adjusting either.
+
+### 12.6 The IAM decision right is SPLIT in two (owner instruction, 2026-08-19)
+
+`0115` shipped one action, `decide_override`, and `0117`'s dept-head flip made it decide two different
+kinds of IAM exception. The owner instructed a split; `0118` delivers it.
+
+| Catalog key | Cerbos action | Decides |
+|---|---|---|
+| `core.role_grant.decide_override` | `automation_approval:decide_override` | a routed request to grant a person a **ROLE** beyond their position |
+| `core.position.decide_assignment` | `automation_approval:decide_assignment` | a department head's request to **PLACE** a person in a position |
+
+**No behaviour changed on the day of the split, and that is worth stating rather than implying.** Both
+actions are granted to the identical four tiers (`platform_admin`, `company_admin`, `group_executive`,
+`hr_manager`), so nobody gained or lost the ability to decide anything. What the split buys:
+
+1. **An honest description.** The override key said "grant a person authority beyond what their position
+   confers", which read narrowly once placements rode it. A permission whose description is not what it
+   does is a permission nobody can audit. `0118` also corrects that description in the DB.
+2. **The ability to diverge.** One action cannot be narrowed for one request kind without narrowing the
+   other. "A senior lead may approve placements but never role grants" is now expressible without a
+   schema change.
+3. **A truthful audit row.** The decision records WHICH kind of exception was approved.
+
+**Each action carries its own requester ≠ decider DENY**, restated per action rather than shared: a DENY
+that silently covered two actions would be one edit away from covering neither. Both also fail CLOSED on
+an unresolvable requester. Pinned by live-engine probes in
+`src/rbac/client-member-delete-denied.test.ts` (which has outgrown its filename — it is now the
+live-probe suite for several owner decisions).

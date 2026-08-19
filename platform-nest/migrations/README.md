@@ -549,3 +549,9 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    committed and possibly applied. Loops over `pg_inherits` rather than naming partitions, since 0116
    derives their names from the month it runs. **Partitions created later by a rollover job are NOT
    covered** — that belongs with the monitoring owner. **Next unused is `0118`.**
+
+   **2026-08-19 update — `0118` TAKEN (reserved before DDL).**
+   `0118_iam_split_decide_assignment.sql` splits `core.position.decide_assignment` out of
+   `core.role_grant.decide_override` (owner instruction) and corrects the override key's description,
+   which had claimed to cover placements. Holder list generated from the bundles; DELTA-asserted, 0 on a
+   re-run. No behaviour change: both actions carry the identical four tiers. **Next unused is `0119`.**

@@ -88,3 +88,37 @@ describe.skipIf(!live)("position · assign reach (owner decision 2026-08-18 — 
     expect((await check(p, selfTarget, "assign")).allow).toBe(false);
   });
 });
+
+describe.skipIf(!live)("automation_approval · the two IAM decision actions (owner split 2026-08-19)", () => {
+  // The split's whole value is that the two request kinds can DIVERGE later. Today the tiers are
+  // identical on purpose, so what is worth pinning is that both actions EXIST, are scoped to the same
+  // four tiers, and each carries its own requester-not-decider DENY — a DENY that silently covered two
+  // actions would be one edit away from covering neither.
+  const approval = (creatorId: string): Resource => ({
+    kind: "automation_approval",
+    id: "66666666-6666-4666-8666-666666666666",
+    tenantId: TENANT,
+    creatorId,
+  });
+  const OTHER = "77777777-7777-4777-8777-777777777777";
+
+  for (const action of ["decide_override", "decide_assignment"]) {
+    it(`company_admin may ${action}`, async () => {
+      expect((await check(principalWith("company_admin"), approval(OTHER), action)).allow).toBe(true);
+    });
+    it(`hr_manager may ${action} (hr_people_ops tier)`, async () => {
+      expect((await check(principalWith("hr_manager"), approval(OTHER), action)).allow).toBe(true);
+    });
+    it(`manager may NOT ${action} — the generic decide tier is deliberately excluded`, async () => {
+      expect((await check(principalWith("manager"), approval(OTHER), action)).allow).toBe(false);
+    });
+    it(`🔴 ${action} refuses the REQUESTER, even for company_admin`, async () => {
+      const p = principalWith("company_admin");
+      expect((await check(p, approval(p.userId!), action)).allow).toBe(false);
+    });
+    it(`🔴 ${action} fails CLOSED when the requester is unknown`, async () => {
+      // An exception whose author cannot be resolved is exactly the one nobody should rubber-stamp.
+      expect((await check(principalWith("company_admin"), approval(""), action)).allow).toBe(false);
+    });
+  }
+});

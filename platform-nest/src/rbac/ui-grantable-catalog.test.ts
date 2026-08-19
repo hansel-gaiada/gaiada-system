@@ -63,8 +63,8 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
     // as a literal here only because rewriting these three suites' fixed-input style is its own
     // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
-    expect(permissions.length).toBe(283);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(268);
+    expect(permissions.length).toBe(284);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(269);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
