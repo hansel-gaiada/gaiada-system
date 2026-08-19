@@ -128,6 +128,22 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.053.0106a` - 2026-08-19 - the phase's own acceptance criterion, proven three ways
+
+Manifest (counter +1, 0105 -> 0106): `platform-nest 0.29.0 -> 0.30.0`. No migration.
+
+P2-16 and P2-17. The criterion design §5.2 calls "the acceptance criterion this whole phase exists for"
+is now asserted in all three operating modes — human, agent, n8n — against running Cerbos rather than
+against a bundle, because a bundle cannot witness a mover at all.
+
+The leaver case turned out to be stronger than specified and the test now says so: after terminate there
+is no assemblable principal, so the probe is 401 rather than 403. "Still a principal, currently
+unauthorized" is a state a leaver must not be in, and the distinction is worth pinning precisely.
+
+Also verified against the live estate, read-only: the backfill's dry run reports 23 employees to create,
+19 assignments it correctly refuses to derive, and zero automation exclusions — which is the evidence
+that the bots on the box are properly kinded and the second wall never had to fire.
+
 ### `Alpha 01.052.0105a` - 2026-08-19 - the estate can be described, and IT can hand out the logins
 
 Manifest (counter +1, 0104 -> 0105): `platform-nest 0.28.0 -> 0.29.0`. No migration.
@@ -1925,6 +1941,38 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.30.0] - 2026-08-19 - IN PROGRESS (P2-16 the three-mode battery; P2-17 contract sync)
+- **P2-16 — the mover criterion proven in ALL THREE operating modes** (`iam-phase2-three-mode-battery.test.ts`,
+  8 cases). Design §5.2's four-part criterion — (a) zero grants tagged to the closed assignment, (b) the
+  OLD department probe 403, (c) the NEW department probe 200, (d) `session_version` moved — asserted
+  identically under a UI persona (`x-user-id`), an agent OBO envelope, and an n8n OBO envelope.
+- **(b) and (c) are probed against RUNNING Cerbos, never derived from a bundle.** `org_unit_lead`'s whole
+  meaning is its condition, so a bundle check would report the same reach before and after a transfer and
+  pass while the estate was broken — the [role-bundles-overstate-reach] lesson, applied.
+- **What "three modes" is at this boundary:** three HEADER SHAPES and nothing else. Modes 2 and 3
+  deliberately do not route through the hub — the hub's own contribution is covered by
+  `d14-jml-registry.test.ts`, and routing through it would test the hub twice and the platform once.
+- **The LEAVER assertion is stronger than a 403 and says so:** after terminate the probe returns 401,
+  because `assemblePrincipal` yields null for a disabled user. There is no principal left to deny. A 403
+  would mean "still a principal, currently unauthorized", which is a state a leaver must not be in.
+- **Adversarial, per mode:** a plain member is refused in all three (and the victim's reach is asserted
+  unchanged after three failed attempts); an UNVERIFIED OBO link gets an anonymous principal and is
+  refused; a transfer to a retired position is a 400 that changes nothing; a cross-company transfer is
+  refused. Two fixture defects were found and fixed while writing it: `hr_people_ops` is a DERIVED role
+  (== `hr_manager`), so granting a role by that name satisfies nothing, and the hire endpoint returns the
+  shaped employee at the TOP level rather than in an `{employee}` envelope.
+- **P2-17** — PERMISSION-CONTRACT §13 (the backfill's sources, its two REVIEW categories, the
+  report-only position import, and the count-assertion abort) and a FRONTEND-BFF-CONTRACT section for
+  P2-13's five endpoints, including the five `state` values, why `actionable` is computed server-side, and
+  why the 503 must never be rendered like an empty list. P2-15 adds no endpoint by design — applying it
+  is a reviewed one-time operation, and an endpoint would invite a button.
+- Gates: battery 8/8; admin + hr regression 457/457 across 36 files; `tsc --noEmit` and all four lints
+  clean. Also verified on the LIVE box: `/api/:t/it/accounts` is routed (401, not 404),
+  `dist/seed/iam-phase2-backfill.js` ships in the image, and the backfill's READ-ONLY dry run was driven
+  against the real estate — 23 employees to create across two companies, 19 assignments correctly
+  reported as not-derivable (no positions exist there yet), nothing to adopt, and NO automation
+  exclusions, which is the evidence that every service account on the box is correctly `kind='service'`
+  and the second wall never had to fire.
 ### [0.29.0] - 2026-08-19 - IN PROGRESS (P2-15 backfill + adoption; P2-13 the IT accounts backend)
 **P2-15 — `src/admin/iam-phase2-backfill.ts` + `npm run iam:backfill`.** Four opt-in pieces; dry run is
 the default and there is no flag that applies everything.

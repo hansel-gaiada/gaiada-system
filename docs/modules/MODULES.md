@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.29.0` | IN PROGRESS | WS1 | 2026-08-19 |
+| platform-nest | `0.30.0` | IN PROGRESS | WS1 | 2026-08-19 |
 | platform-ui | `0.25.1` | IN PROGRESS | WS5 | 2026-08-11 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.2` | PROTOTYPED | WS2 | 2026-08-19 |

@@ -3254,3 +3254,72 @@ A stale request whose position was retired before approval fails at decide time 
   timing oracle, and clear storage would make a DB read equivalent to forging any job's liveness.
 * **A heartbeat arriving CLOSES an open incident.** The ping *is* the recovery signal; leaving it open
   would make a human close something that already resolved itself.
+
+---
+
+## IAM Phase 2 — IT accounts (P2-13 backend, 2026-08-19)
+
+**Status:** PROTOTYPED / DEV-VERIFIED (`it-accounts.test.ts` 25/25 — 8 pure-judgement cases plus 17 via
+`app.inject()` against real Postgres + Cerbos, with Keycloak stubbed at the `fetch` boundary so the real
+admin client and its token cache are exercised). The intended consumer is **P2-14** (`/it/accounts`),
+not built.
+
+### `platform-nest/src/admin/it-accounts.controller.ts`
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `GET /api/:tenantId/it/accounts` | `it_account · read` | `{ accounts[] }`, one row per staff member (`kind='employee'` — service accounts never appear). Each row: `userId`, `email`, `name`, `employmentStatus`, `keycloakId`, `enabled`, `emailVerified`, `linked`, `linkVerified`, `state`, `actionable`. |
+| `POST /api/:tenantId/it/accounts/:userId/provision` | `it_account · provision` | 201 `{ keycloakId, initialPassword, adopted }`. **`initialPassword` is shown ONCE and is never stored or audited** — if the UI loses it, the only path forward is `reset-password`. `adopted:true` ⇒ the account already existed and `initialPassword` is **null**. |
+| `POST /api/:tenantId/it/accounts/:userId/disable` | `it_account · disable` | `{ ok, alreadyDisabled }`. |
+| `POST /api/:tenantId/it/accounts/:userId/enable` | `it_account · enable` | `{ ok, alreadyEnabled }`. |
+| `POST /api/:tenantId/it/accounts/:userId/reset-password` | `it_account · reset_password` | `{ ok, initialPassword }`. Body `{ reason? }` — the reason IS audited, the password is not. |
+
+### The five `state` values, and which ones the console must surface
+
+| `state` | Meaning | `actionable` |
+|---|---|---|
+| `missing` | Staff member with no Keycloak account — the joiner case. | ✅ |
+| `leaver_still_enabled` | Employment is `terminated` and the login is still enabled. **The finding this worklist exists for.** | ✅ |
+| `unverified_link` | Account and link exist, but the person never proved control of it. | ✅ |
+| `disabled` | Login disabled. Actionable **only** when the person is NOT terminated (they cannot work); for a leaver this is the done state. | conditional |
+| `enabled` | Nothing to do. | ❌ |
+
+`actionable` is computed server-side deliberately — two implementations of "needs attention" drift, and
+the direction they drift in is a leaver the UI quietly stops flagging. **Filter on `actionable`, do not
+re-derive it.** `leaver_still_enabled` outranks `unverified_link`: a security finding beats paperwork.
+
+### Refusal tokens (the typed token LEADS the `error` string)
+
+| Token | Status | What a consumer should do |
+|---|---|---|
+| `keycloak_admin_not_configured` | **503** | Render "account management unavailable in this environment". **Never** an empty worklist — see below. |
+| `keycloak_admin_failed` | **502** | Upstream Keycloak problem, not our wiring. Offer retry. |
+| `not_a_member` | 404 | The target is not an active staff member of this company. |
+| `no_keycloak_account` | 400 | `disable`/`enable`/`reset-password` need an account; provision first. |
+
+**⚠ The 503 is load-bearing, not a degradation nicety.** When the admin client is unconfigured this
+endpoint refuses rather than returning `[]`, because an empty worklist asserts "everyone has a login" —
+the single most dangerous claim this surface can make while blind. A consumer must therefore distinguish
+"no findings" (200 with an empty array) from "cannot see" (503) and must never render them the same way.
+
+### Two behaviours a consumer should rely on
+
+* **Provision converges.** It looks the address up first and treats Keycloak's own 409 as "adopt",
+  including the race between lookup and create. Double-clicking Provision cannot produce two logins for
+  one address (which would be an authentication ambiguity, not untidiness) — the second call returns
+  `adopted:true`.
+* **The identity link is created UNVERIFIED.** An admin creating an account is not the person proving
+  control of it, so a freshly provisioned row shows `linked:true, linkVerified:false` and lands in
+  `unverified_link` until the person actually logs in. That is the expected sequence, not a defect.
+
+### Not HR-module-gated
+
+Deliberate (design §5.4): IT provisioning is not an HR capability, and gating it on the `hr` module would
+make login management vanish for a company with HR switched off while its people still need logins. Only
+the employment-status read is module-scoped, so a company without `hr` gets `employmentStatus: null` and
+**never** a `leaver_still_enabled` claim — that verdict is only ever made from real data.
+
+### P2-15 (backfill) adds NO endpoint
+
+It is a CLI (`npm run iam:backfill`), dry-run by default, and deliberately not an HTTP surface: applying
+it is a reviewed one-time operation, and an endpoint would invite a button. See PERMISSION-CONTRACT §13.
