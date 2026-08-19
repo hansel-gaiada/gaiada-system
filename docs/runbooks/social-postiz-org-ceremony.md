@@ -131,50 +131,125 @@ docker exec gaiada-social-postiz-1 printenv DISABLE_REGISTRATION      # must pri
 ss -ltn | grep 4007        # expect 10.88.0.2:4007 and NOTHING on 0.0.0.0
 ```
 
-### 6 — Get the org's API key  ⚠ UNVERIFIED
+### 6 — Get the org's API key  ✅ SOLVED 2026-08-19 — NO BROWSER NEEDED
 
-Postiz surfaces a **public API key per org**. In current builds it lives in the app's settings under
-a "Public API" section — which means a browser, and there is no public listener. Tunnel to it rather
-than exposing anything:
-
-```sh
-# from your laptop
-ssh -L 4007:10.88.0.2:4007 <user>@150.109.15.108
-# then open http://localhost:4007 and log in as the account from step 3
-```
-
-The forward dies with the SSH session and publishes nothing. **Do not** change `SOCIAL_BIND_ADDR` to
-reach the UI.
-
-**Record here what you actually find** — the exact menu path, or the API route if one exists. This
-step is why this file is marked partly unverified.
-
-### 7 — Give the key to the ERP: both halves, or it does nothing
-
-Two edits on `gda-aicenter`:
+**Postiz mints the org API key during registration.** It already exists by the time step 3 returns;
+there is nothing to generate. Read it straight out of the engine's database:
 
 ```sh
-# infra/compose/.env
-SOCIAL_POSTIZ_ORG_API_KEY=<the key>
+docker exec gaiada-social-social-postgres-1 psql -U postiz -d postiz -t -A -c 'SELECT "apiKey" FROM "Organization" WHERE name = '"'"'Gaiada'"'"';'
 ```
 
-The passthrough already exists — SMM-06 added the `SOCIAL_*` block to the `platform` service's
-`environment:` — so for the **default** alias `.env` is now sufficient.
+64 lowercase hex characters. `-t -A` gives one clean line with no padding.
 
-**Per-client aliases are not.** `keys.ts` resolves alias `acme-brand` from
-`SOCIAL_POSTIZ_ORG_API_KEY__ACME_BRAND`, and that variable must be added **explicitly** to the
-`platform` service's `environment:` block in `docker-compose.vps.yml` as each org is provisioned. An
-unresolvable alias **refuses** (`org_key_unresolved`) and never falls back to the default key —
-deliberately, because falling back is how client A publishes with client B's credential.
+🚨 **DO NOT TRY THE UI, AND DO NOT PASTE THE KEY ANYWHERE.** Two hard-won reasons:
 
-Recreate the API container so it reads the new env:
+1. **The UI cannot work from a laptop.** `NEXT_PUBLIC_BACKEND_URL` is baked into the frontend
+   JavaScript as `http://10.88.0.2:4007/api` — the tunnel address. An `ssh -L 4007:...` forward maps
+   *localhost*, so the browser loads the login page fine and then POSTs to an address your machine
+   cannot route. The login spinner never resolves. Nothing is broken; it simply cannot work from
+   outside the tunnel, and no amount of waiting changes that.
+2. **Every `cat` of the key is a leak waiting to happen.** It happened three times in one sitting,
+   because `cat` prints without a trailing newline and the value runs straight into the shell prompt.
+   **Move the key host-to-host and never look at it:**
 
 ```sh
-docker compose -f docker-compose.vps.yml up -d platform     # NO --remove-orphans
+# from the operator's machine -- -3 routes the bytes through it without displaying them
+scp -3 sumopod:~/postiz-org.key gda-aicenter:~/postiz-org.key
 ```
 
-**Check `GAIADA_TAG` in that `.env` first.** `up -d` with a stale tag silently rolls the whole API
-back to an older image.
+**Rotating** (if a key is ever exposed) is a single UPDATE plus a file, and the old key dies
+immediately — verified: old key `401`, new key `200`.
+
+```sh
+NEW=$(openssl rand -hex 32)
+echo "UPDATE \"Organization\" SET \"apiKey\" = '$NEW' WHERE name = 'Gaiada';" > /tmp/rot.sql
+docker exec -i gaiada-social-social-postgres-1 psql -U postiz -d postiz -q < /tmp/rot.sql
+umask 077; printf %s "$NEW" > ~/postiz-org.key; rm -f /tmp/rot.sql
+```
+
+### Reading the API to check your work
+
+`GET /public/v1/posts` **requires ISO 8601 `startDate` and `endDate`** and returns `400` without
+them. **A `400` here is NOT an auth failure** — it means your credential was accepted and the request
+shape was wrong. The auth ladder, all verified:
+
+| Request | Response |
+|---|---|
+| no key | `401` |
+| valid key, no date range | `400 startDate must be a valid ISO 8601 date string` |
+| valid key + ISO range | **`200`** |
+| revoked key + ISO range | `401` |
+
+```sh
+curl -s -o /dev/null -w '%{http_code}
+' -H "Authorization: $(cat ~/postiz-org.key)"   "http://10.88.0.2:4007/api/public/v1/posts?startDate=2026-08-01T00:00:00.000Z&endDate=2026-08-31T23:59:59.000Z"
+```
+
+### 7 — Give the key to the ERP: **BOTH** halves, or the module lies to you
+
+Two variables, on `gda-aicenter` in `/home/Hansel/gaiada/infra/compose/.env`:
+
+```
+SOCIAL_POSTIZ_ORG_API_KEY=<the 64-hex key>
+SOCIAL_POSTIZ_BASE_URL=http://10.88.0.2:4007
+```
+
+🚨 **THE KEY ALONE DOES NOTHING, AND FAILS SILENTLY.** This is the trap that caught us. With the key
+set and the base URL absent, the module boots into its **supported keyless mode**: no driver is
+registered, `/health` returns 200, the container reports `healthy`, every READ serves — and only the
+publish path refuses `publisher_not_configured` (503). Nothing anywhere says "you configured half of
+this". `SOCIAL_POSTIZ_BASE_URL` is not optional; it is what causes a driver to exist.
+
+The base URL is the **WireGuard peer address** — not a hostname, not https. `main.ts`'s
+`assertPublisherBaseUrlIsPrivate` **refuses to boot** on a public-looking value, so a mistake here is
+loud. A booting container is itself evidence the address is private.
+
+The `environment:` passthrough for all nine `SOCIAL_*` vars exists (SMM-06). **Verified on the live
+box 2026-08-19:** the container receives all nine, defaults included.
+
+🚨 **THE COMPOSE FILE SET ON THIS HOST IS THREE FILES, NOT ONE.**
+
+```sh
+docker compose -f docker-compose.vps.yml -f docker-compose.hostdata.yml -f docker-compose.observability.yml up -d platform
+```
+
+A single `-f docker-compose.vps.yml` fails with `service "knowledge" depends on undefined service
+"postgres": invalid compose project` — Postgres and Redis live on the *host* here, and
+`docker-compose.hostdata.yml` is the overlay that accounts for them. Don't guess the set; **read it
+off the running container**, which is authoritative:
+
+```sh
+docker inspect gaiada-platform-1 --format '{{ index .Config.Labels "com.docker.compose.project.config_files" }}'
+```
+
+🚨 **CHECK THE TAG IMMEDIATELY BEFORE, NOT EARLIER.** `up -d` ships whatever `GAIADA_TAG` names.
+During this very ceremony another session deployed and moved the running tag from `alpha-01.050.0102a`
+to `alpha-01.051.0104a`. A tag read an hour ago would have rolled the API back as a side effect of a
+config change. Guard it:
+
+```sh
+grep -E '^GAIADA_TAG=' .env | cut -d= -f2
+docker inspect gaiada-platform-1 --format '{{.Config.Image}}' | sed 's/.*://'
+```
+Equal, or stop.
+
+### The only proof that step 7 worked
+
+Env vars being present is not proof. **Look for the driver registering:**
+
+```sh
+docker logs --tail 400 gaiada-platform-1 2>&1 | grep -i publisher
+```
+
+✅ **Verified 2026-08-19:**
+```
+[social] publisher driver 'postiz' registered (networks enabled: instagram, facebook, linkedin;
+         live quota probe: off; inbox surface: none (engine has no inbound API))
+```
+
+`live quota probe: off` is expected — the probe needs a Postiz route behind the missing decorator and
+is gated on the D-21 fork exception. `inbox surface: none` is the OQ-4 finding, not a fault.
 
 ### 8 — Record the mapping in the ERP
 
@@ -210,6 +285,26 @@ Read-only pass over both hosts. Everything the ceremony depends on is in place:
 roughly nineteen since 2026-08-13. A fixed expected total is therefore not a safety check — it will
 produce a false alarm on every future run. What matters is that **our five are up and nothing of
 theirs disappears**, which is what the checklist now says.
+
+## ✅ RUN AND COMPLETED — 2026-08-19
+
+| | |
+|---|---|
+| Org | **one** — `Gaiada`, id `5b858881-82a0-4eb5-a38b-e9cbe48bcbd0`, alias `default` |
+| Users | **one** — `social@gaiada.com` |
+| Signup | closed; container env `true` AND valid-payload canary refused |
+| API key | auto-minted at registration; rotated twice after transcript exposure; superseded keys return `401` |
+| ERP | both vars set, all nine reaching the container, **driver registered** |
+| Blast radius | VPS 44 containers before and after; ERP 33 before and after; nothing of the owner's touched |
+
+**Still outstanding — SMM-07's, not the ceremony's:** the `social_publisher_orgs` mapping row
+(`api_key_ref = 'default'`) and a `verifyOrg` call against the adopted org.
+
+⚠ **OPEN QUESTION worth closing before any client account exists.** The login page offers **Google
+SSO**. `DISABLE_REGISTRATION=true` is verified to block the *local* signup path. Whether it also
+blocks a first-time Google sign-in is **UNVERIFIED** — and if it does not, a Google-authenticated
+stranger could create a principal inside the engine, which would defeat containment invariant 5 and
+the entire point of this ceremony. Do not test it by trying it on the live instance.
 
 ## What this unblocks
 
