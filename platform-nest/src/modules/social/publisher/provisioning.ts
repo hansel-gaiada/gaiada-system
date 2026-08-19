@@ -2,6 +2,11 @@
 // validation. This is the file where "a mapping bug publishes client A's content to client B's
 // account" is prevented, so it is written defensively and tested adversarially.
 //
+// SMM-07 adds section (2.5): the guided, resumable account-connect flow. Read that section's own
+// header for why it is a NEW small vocabulary rather than a reuse of publish-precondition.ts's
+// PUBLISH_REFUSAL, and for why "no platform app is registered" is answered honestly instead of
+// dead-ending in a Postiz error page.
+//
 // ── EVERY QUERY HERE PASSES `{ modules: ["social"] }` ───────────────────────────────────────────
 // 0105 composes its RLS predicate as `tenant_id = ANY(app_current_tenants()) AND
 // app_module_allowed('social')`. Omit the third argument and every statement below reads or writes
@@ -16,14 +21,17 @@
 // alias and `publisher/keys.ts` resolves it from env at call time. `no-token-columns` in
 // publisher.test.ts pins the written column list so a future field cannot quietly widen it.
 import type { PoolClient } from "pg";
-import { newId, withTenants } from "../../../db";
+import { newId, withGlobal, withTenants } from "../../../db";
 import { config } from "../../../config";
 import { writeActivity } from "../../../core/http";
 import { emitEvent } from "../../../events/outbox.service";
+import { isNetwork, type Network } from "../media-rules";
 import { resolveAccountCapabilities, deriveAccountStatus, KNOWN_NETWORKS, type AccountCapabilities } from "./capabilities";
 import { describeKeyRef, resolveOrgApiKey, DEFAULT_KEY_REF } from "./keys";
 import { invokePublisher, resolvePublisher } from "./registry";
-import { OrgHandle, SocialPublisherError, type IntegrationState, type SocialPublisher } from "./types";
+import {
+  OrgHandle, SocialPublisherError, type IntegrationState, type PublisherRefusalCode, type SocialPublisher,
+} from "./types";
 
 /** The third wall, named once. Every `withTenants` call in this file passes it — see the header. */
 const MODULES: { modules: string[] } = { modules: ["social"] };
@@ -385,6 +393,226 @@ async function upsertAccount(
   );
   const row = inserted.rows[0] as { id: string; inserted?: boolean };
   return { id: row.id, created: row.inserted === true };
+}
+
+// ── (2.5) Account connect flow (SMM-07) ─────────────────────────────────────────────────────────
+//
+// THE CONSTRAINT THIS SECTION IS BUILT AROUND: verified on the live engine 2026-08-19,
+// FACEBOOK_APP_ID/SECRET, LINKEDIN_CLIENT_ID/SECRET, TIKTOK_CLIENT_ID and YOUTUBE_CLIENT_ID are all
+// length 0. No platform app exists on ANY network today, so no OAuth round trip can begin — not for
+// a client, not for our own brand. A connect button that dead-ends in a Postiz error page is worse
+// than one that says so up front, so `checkConnectReadiness` is the SAME precondition both
+// `initiateAccountConnect` (POST, has side effects) and the console's readiness read (GET, none)
+// run — one rule, never two copies that could drift.
+//
+// ── A NEW, SMALL VOCABULARY, AND WHY IT IS NOT `PUBLISH_REFUSAL` ────────────────────────────────
+// publish-precondition.ts's `PUBLISH_REFUSAL` answers "may this VARIANT publish right now" at
+// execution time, for the D14 executor. This section answers a different question at a different
+// time for a different caller: "may this (client, network) START a connect attempt", asked by the
+// console's connect button. Two of the three tokens below are new (`platform_app_not_registered`,
+// `client_connect_requires_signoff`) — see types.ts for why they could not be an existing code
+// wearing a new label. The third (`connect_redirect_not_configured`) joins `SocialPublisherError`'s
+// existing 503 family rather than inventing a fourth status class.
+//
+// ── OWN-BRAND-FIRST (OQ-3), STATED SO IT IS NOT MISSED ──────────────────────────────────────────
+// `config.social.publisher.ownBrandClientIds` is the ONLY thing that lets a connect attempt past
+// `client_connect_requires_signoff`. It is empty by default — so with no configuration at all, EVERY
+// client (including a would-be "own brand" one nobody has listed yet) refuses, which is the correct
+// fail-closed default for a legal gate nobody has cleared yet.
+//
+// ── RESUMABILITY, STATED SO A FUTURE EDIT DOES NOT "SIMPLIFY" IT AWAY ───────────────────────────
+// The addendum is explicit: "every network requires the client's own owner to authenticate
+// personally... onboarding is a scheduled human ceremony per client per network" and SMM-07 "must be
+// built as a guided, resumable flow" — not a one-shot round trip that dies if the human closes the
+// tab, loses connectivity, or comes back tomorrow. The mechanism is the SAME upsert idiom
+// `upsertAccount` above already uses to survive an upstream rename: the pending row's key is
+// `(tenant_id, client_id, network, handle)`, the SAME unique 0105 already enforces, so:
+//   - Calling `initiateAccountConnect` again for the same triple returns the SAME account id
+//     (`resumed:true`) with a freshly re-requested `connectUrl` — never a second, competing row.
+//   - Whenever the human actually finishes the OAuth dance and `syncConnectorRegistry` next runs,
+//     its own `upsertAccount` ON CONFLICT on that identical key is what promotes this exact row from
+//     `pending` to `connected` — convergence through the SAME code path that already handles a
+//     rename, not a second one built for this ticket.
+//   - The pending row is written (and its outbox event committed) BEFORE the engine is ever called,
+//     so a `connectUrl` failure (tunnel down, no capability, no app) leaves the attempt VISIBLE and
+//     retryable rather than losing it — the same "the mapping is OUR data" reasoning
+//     `provisionPublisherOrg` above already applies to `verify()`.
+
+/** Every fact `initiateAccountConnect` must be honest about before it EVER calls the engine.
+ *  Non-throwing by design: the console's read-only readiness check and the connect POST both run
+ *  this, and a read must never throw for an ordinary "not yet" answer. */
+export interface ConnectReadiness {
+  ok: boolean;
+  reason?: PublisherRefusalCode;
+  detail?: string;
+}
+
+/** Query `social_platform_apps` (0105: GLOBAL, no tenant_id, deliberately NO RLS — design D-4) for a
+ *  network with a live credential alias. Exported so the platform-app admin surface (not yet built;
+ *  OQ-1's own tracking, D-4's "reachable only through admin endpoints gated by
+ *  social.platform_app.admin") has a single place this fact is read from, the moment it exists. */
+export async function hasRegisteredPlatformApp(network: string): Promise<boolean> {
+  const { rows } = await withGlobal((c) =>
+    c.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM social_platform_apps
+        WHERE network = $1 AND deleted_at IS NULL AND review_status <> 'rejected'
+          AND credential_ref IS NOT NULL AND credential_ref <> ''`,
+      [network],
+    ),
+  );
+  return rows[0].n > 0;
+}
+
+/** THE precondition, run by both the read-only readiness check and the connect POST. Order:
+ *  cheapest and most structural first (mirrors publish-precondition.ts's own stated doctrine) —
+ *  config dials before database reads, database reads before a driver resolution that may itself
+ *  throw `publisher_not_configured`. */
+export async function checkConnectReadiness(
+  tenantId: string,
+  clientId: string,
+  network: string,
+): Promise<ConnectReadiness> {
+  if (!isNetwork(network)) {
+    return { ok: false, reason: "network_disabled", detail: `'${network}' is not a network this platform models` };
+  }
+  if (!config.social.publisher.enabledNetworks.includes(network)) {
+    return {
+      ok: false, reason: "network_disabled",
+      detail: `'${network}' is disabled in this deployment (SOCIAL_NETWORKS_ENABLED)`,
+    };
+  }
+  // OQ-3, checked before anything that costs a round trip: own-brand proceeds, client connects wait.
+  if (!config.social.publisher.ownBrandClientIds.includes(clientId)) {
+    return {
+      ok: false, reason: "client_connect_requires_signoff",
+      detail: "client account connects wait for AGPL counsel sign-off (design addendum OQ-3); "
+        + "own-brand accounts proceed",
+    };
+  }
+  if (!config.social.publisher.connectRedirectUrl) {
+    return {
+      ok: false, reason: "connect_redirect_not_configured",
+      detail: "SOCIAL_CONNECT_REDIRECT_URL is unset",
+    };
+  }
+  // OQ-1, THE headline check this ticket exists for: is there even an app to start OAuth against.
+  if (!(await hasRegisteredPlatformApp(network))) {
+    return {
+      ok: false, reason: "platform_app_not_registered",
+      detail: `no platform app is registered for '${network}' yet (design addendum OQ-1 — the `
+        + "review is weeks-long and non-code; nothing here can shortcut it)",
+    };
+  }
+  const org = await loadOrgByClient(tenantId, clientId);
+  if (!org) {
+    return {
+      ok: false, reason: "org_not_provisioned",
+      detail: "provision a publisher org for this client before connecting an account",
+    };
+  }
+  try {
+    const driver = resolvePublisher(org.driver);
+    if (!driver.capabilities.has("connect_url")) {
+      return {
+        ok: false, reason: "capability_unsupported",
+        detail: `driver '${driver.key}' cannot start a connect flow`,
+      };
+    }
+  } catch (err) {
+    if (err instanceof SocialPublisherError) return { ok: false, reason: err.code, detail: err.message };
+    throw err;
+  }
+  return { ok: true };
+}
+
+export interface ConnectResult {
+  accountId: string;
+  /** Always `pending` on return: this call starts the human ceremony, it never completes it.
+   *  `syncConnectorRegistry` is what later observes `connected`/`expiring`/etc. */
+  status: "pending";
+  connectUrl: string;
+  /** false the first time this (client, network, handle) triple is attempted; true on every
+   *  subsequent call while it is still pending — the resumability signal a console renders as
+   *  "resuming an earlier attempt" instead of "starting a new one". */
+  resumed: boolean;
+}
+
+/** Start (or resume) the guided connect ceremony for one (client, network, handle). `handle` is the
+ *  handle the AGENCY already knows for this account (e.g. the client told us `@acmebrand`) — it is
+ *  never discovered from Postiz, because at this instant Postiz has not yet been told about this
+ *  account at all. Supplying it up front is what makes the eventual convergence in
+ *  `syncConnectorRegistry`'s `upsertAccount` possible: that function's `ON CONFLICT (tenant_id,
+ *  client_id, network, handle)` is the SAME key this function upserts on, so the row this call
+ *  creates is the SAME row a later sync promotes to `connected` — one row, one history, from attempt
+ *  to live connection. */
+export async function initiateAccountConnect(
+  tenantId: string,
+  input: { clientId: string; network: string; handle: string; actorId: string | null },
+): Promise<ConnectResult> {
+  const readiness = await checkConnectReadiness(tenantId, input.clientId, input.network);
+  if (!readiness.ok) {
+    throw new SocialPublisherError(
+      readiness.reason!,
+      readiness.detail ?? `connect refused for '${input.network}': ${readiness.reason}`,
+    );
+  }
+  const network = input.network as Network;
+  const handle = input.handle.trim();
+
+  const org = await loadOrgByClient(tenantId, input.clientId);
+  /* istanbul ignore next — checkConnectReadiness just proved this row exists */
+  if (!org) throw new SocialPublisherError("org_not_provisioned", "publisher org vanished after the readiness check");
+  const { driver, handle: orgHandle } = openOrg(org);
+
+  // The pending row + its outbox event commit FIRST, before the engine is ever called — see the
+  // section header's "resumability" note for why. `resumed` is read off `xmax = 0`, the SAME idiom
+  // `upsertAccount` above uses to distinguish an insert from a conflict-update.
+  const { accountId, resumed } = await withTenants(
+    [tenantId],
+    async (c) => {
+      const id = newId();
+      const { rows } = await c.query<{ id: string; inserted: boolean }>(
+        `INSERT INTO social_accounts
+           (id, tenant_id, client_id, publisher_org_id, network, handle, status, origin_site)
+         VALUES ($1,$2,$3,$4,$5,$6,'pending',$7)
+         ON CONFLICT (tenant_id, client_id, network, handle) DO UPDATE
+            SET publisher_org_id = EXCLUDED.publisher_org_id,
+                -- Resurrect a soft-deleted or previously-abandoned attempt rather than squatting the
+                -- unique slot forever (same reasoning as upsertAccount's own resurrection branch).
+                deleted_at = NULL,
+                -- Never regress an ALREADY-connected account back to pending: a resumed attempt on a
+                -- triple that converged since the caller last looked must not un-convert it.
+                status = CASE WHEN social_accounts.postiz_integration_id IS NULL THEN 'pending'
+                              ELSE social_accounts.status END,
+                updated_at = now()
+           RETURNING id, (xmax = 0) AS inserted`,
+        [id, tenantId, input.clientId, org.id, network, handle, config.originSite],
+      );
+      const row = rows[0] as { id: string; inserted?: boolean };
+      const wasInserted = row.inserted === true;
+      await emitEvent(
+        c, tenantId, "social_account", row.id,
+        wasInserted ? "social.account.connect_initiated" : "social.account.connect_resumed",
+        { clientId: input.clientId, network, handle },
+      );
+      return { accountId: row.id, resumed: !wasInserted };
+    },
+    MODULES,
+  );
+
+  await writeActivity(tenantId, input.actorId, resumed ? "resumed" : "initiated", "social_account", accountId, {
+    clientId: input.clientId, network, handle,
+  });
+
+  // The network call happens LAST, and its failure is allowed to propagate: the row above already
+  // committed, so a `publisher_unreachable`/`capability_unsupported` here leaves a retryable pending
+  // attempt behind rather than losing it — never a partial, invisible state.
+  const connectUrl = await invokePublisher(
+    { op: "connectUrl", org: orgHandle, network },
+    () => driver.connectUrl(orgHandle, network, config.social.publisher.connectRedirectUrl),
+  );
+
+  return { accountId, status: "pending", connectUrl, resumed };
 }
 
 // ── (3) The dispatch choke-point's FK-chain validation ──────────────────────────────────────────
