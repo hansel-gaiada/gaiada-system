@@ -1,9 +1,59 @@
-# platform-nest migrations — numbering protocol (LOCKED)
+# platform-nest migrations — naming protocol (LOCKED)
 
 **Owner:** DevOps · **Established by:** WS0-1 (Backbone Program, 2026-07-17) · **Status:** NORMATIVE
+**Amended 2026-08-19:** sequential numbering is CLOSED. See "The naming rule" immediately below.
 
 This directory holds the ordered SQL migrations for `gaiada_platform`. The rules below are binding
-for every ticket in the program. New migrations that violate them must not be merged.
+for every ticket in the program. New migrations that violate them must not be merged, and
+`npm run lint:migration-names` (CI-gated) refuses most violations mechanically rather than trusting
+anyone to have read this file.
+
+## The naming rule (read this and nothing else, if you are here to add a migration)
+
+```
+YYYYMMDDHHMM_snake_case_description.sql        # UTC.  date -u +%Y%m%d%H%M
+```
+
+That is it. There is no number to look up, nothing to reserve, and nobody to coordinate with. If a
+concurrent session writes DDL in the same minute the lint fails the build and one of you adds a
+minute — which is a loud collision, unlike the four silent ones below.
+
+**The sequential `NNNN_` scheme is closed above `0118`.** The lint rejects `0119_*` and anything
+higher. Legacy files keep their names forever (rule 4).
+
+### Why it changed, since a numbered scheme looks tidier
+
+Four collisions, and the last three inside two days: `0003` and `0018` (historic, pre-protocol),
+then `0114`, `0117` and `0118` — each one two concurrent sessions in this SHARED CHECKOUT both
+running `ls migrations | sort | tail`, both seeing the same head, both taking the next number.
+
+`0114` produced the rule "reserve the number by creating the file before writing DDL". `0118` then
+collided *while that rule was being followed exactly*, and `0117` collided the same day. The rule
+cannot work: it only helps if the other session lists the directory after your file exists, and two
+sessions inside one window both list first. **The reservation is not atomic and nothing arbitrates
+it.** Three data points is a protocol failing, not luck running out.
+
+The alternatives considered were per-session number BLOCKS (a session claims `0130–0139` up front)
+and a committed `CLAIMS.md` pushed before writing DDL. Both re-introduce coordination — a block can
+be forgotten or overrun, and a claims file has the same race one layer up unless every session
+push-rebases before every migration. A timestamp needs no coordination at all, which is the only
+property that has actually survived contact with this repo.
+
+### Why this cannot disturb already-applied migrations
+
+The runner discovers with `readdirSync().filter(.sql).sort()` — plain lexicographic order — and the
+ledger is keyed on the FULL FILENAME. `"2" > "0"`, so every 12-digit timestamp sorts after every
+4-digit legacy name on every platform: no applied file moves, and no applied file is re-run. The lint
+asserts that ordering property on each run rather than leaving it as a comment, because it is the one
+assumption whose failure would rewrite history silently.
+
+### What was NOT changed, deliberately
+
+The four double-booked prefixes stay exactly as they are. Renaming an applied file orphans its ledger
+row and the runner re-applies it on next boot (rule 4) — so the honest state is "the directory
+contains five duplicate prefixes, all applied, all harmless because their pairs touch disjoint
+tables", and the lint names them explicitly instead of pretending otherwise. The `0058`/`0059`/`0070`
+gaps stay gaps: never backfill a number.
 
 ## How the runner works (read before adding a migration)
 
@@ -24,8 +74,11 @@ and can be run standalone (`node dist/db/migrate.js`).
 
 ## The numbering rules (LOCKED)
 
-1. **Format:** `NNNN_snake_case_description.sql`, zero-padded 4-digit prefix, one concept per file.
-2. **Monotonic + unique from 0025 onward.** `0023` was consumed out-of-band by
+1. **Format:** `YYYYMMDDHHMM_snake_case_description.sql` (UTC minute), one concept per file. The
+   legacy `NNNN_` form is frozen — valid up to `0118`, refused above it by
+   `npm run lint:migration-names`. Everything in rule 2 below is HISTORY, kept because it explains
+   the gaps and duplicates a reader will find in the directory; it is no longer instruction.
+2. **(HISTORICAL) Monotonic + unique from 0025 onward.** `0023` was consumed out-of-band by
    `0023_meeting_recordings.sql` (WS11 capture-edge work landed before this reservation could be
    drawn down) and `0024` was consumed by `0024_module_backfill.sql` (WSA-2 module registration
    backfill). Both merged before the ORG-CORE tickets started, so **the ORG-CORE reservation is
@@ -80,12 +133,15 @@ and can be run standalone (`node dist/db/migrate.js`).
    The ledger keys on the exact filename — renaming an applied file orphans its ledger row, so the
    runner re-applies the (renamed) file on the next boot and its DDL fails against the objects that
    already exist, breaking startup. Corrections ship as a **new, higher-numbered** migration.
-5. **Coordinate numbers across parallel tickets.** If two in-flight tickets both need "the next
-   number", the second to merge bumps to the following free slot. When in doubt, ask the coordinator.
+5. **(SUPERSEDED 2026-08-19) Coordinate numbers across parallel tickets.** This rule is what failed,
+   four times. There is nothing to coordinate now: name the file for the minute you write it. Kept
+   here only so a reader who followed a link to "rule 5" finds out it is gone.
 
-## Grandfather clause — the two existing dual-prefix pairs
+## Grandfather clause — the five existing dual-prefix pairs
 
-Two numeric prefixes are shared by two files each. Both pairs pre-date this protocol and are
+Five numeric prefixes are shared by two files each. `0003`/`0018` pre-date this protocol; `0114`,
+`0117` and `0118` were collisions between concurrent sessions on 2026-08-18/19 and are the reason
+the scheme is now closed (see "Why it changed" above). All five are
 **already applied on every existing database**, so they are LEFT AS-IS by design (renaming them would
 orphan ledger rows and break boot per rule 4). They are safe because the runner keys on full filenames
 and orders deterministically, and because within each pair the two files are **independent** (no
@@ -95,8 +151,15 @@ cross-dependency, so their relative order is immaterial):
 |---|---|---|
 | `0003` | `0003_idp_subject.sql` → `0003_user_title.sql` | different tables/columns |
 | `0018` | `0018_pipeline_portal.sql` → `0018_pm.sql` | portal alters `pipeline_runs`/`clients` (from 0017/0001); pm creates fresh `pm_*` — disjoint |
+| `0114` | `0114_iam_self_scoped_marker.sql` → `0114_social_post_variants.sql` | `permissions`/`role_permissions` vs `social_post_variants` — disjoint |
+| `0117` | `0117_iam_monitoring_permissions.sql` → `0117_monitor_results_partition_rls.sql` | permission seeds vs `ALTER TABLE ... FORCE ROW LEVEL SECURITY` on monitor partitions — disjoint |
+| `0118` | `0118_iam_split_decide_assignment.sql` → `0118_social_variant_uploaded_media.sql` | `permissions`/`role_permissions` vs `social_post_variants` — disjoint |
 
-These are the **only** permitted duplicate prefixes, ever. No new duplicates.
+These five are the **only** permitted duplicate prefixes, ever, and they are permitted only because
+they already applied. The lint hard-codes exactly this set: a THIRD file on any of these prefixes
+fails, as does any new pair. Disjointness was checked per pair, not assumed — within each pair the
+relative order is immaterial, which is why four accidents cost nothing. That is luck, and closing the
+scheme is what stops the run depending on it.
 
 ## WS0-1 resolution of the 0018 collision (rationale of record)
 

@@ -148,6 +148,15 @@ jobs:
       # 0051). Pure static analysis, no DB needed, so it fails at authoring/PR time rather than
       # only showing up as bad data after a real deploy. See scripts/lint-migration-rls.mjs.
       - run: npm run lint:migration-rls
+      # 2026-08-19 — migration FILENAME lint. The sequential `NNNN_` scheme collided four times
+      # (`0114`, `0117`, `0118`, plus the historic `0003`/`0018`) because this is a shared checkout
+      # with concurrent sessions: two sessions that both `ls | sort | tail` in the same window both
+      # see the same head and both take the next number. "Reserve it by creating the file first" was
+      # tried and lost the race anyway — the reservation is not atomic and nothing arbitrates it.
+      # The scheme is now CLOSED above 0118 in favour of UTC-minute timestamps, and this lint is what
+      # makes that a gate rather than another convention in a README. See
+      # platform-nest/migrations/README.md and scripts/lint-migration-names.mjs.
+      - run: npm run lint:migration-names
       # SMM-05 — the AGPL containment line, as a build gate. smm-design.md §11 states it verbatim
       # ("lint-enforced zero Postiz deps in platform-nest"): the social publisher is reached over
       # HTTP+JSON from one adapter, and a single Postiz package or module import would put the
