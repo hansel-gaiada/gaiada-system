@@ -2,6 +2,9 @@
 
 **Read this first if you are picking up the social-media (SMM) department in a new session.**
 
+> ⚠ **For CURRENT ticket state, open `docs/plans/smm-tracker.md`.** This file is the session log and
+> the decision record; the tracker is the scoreboard and is kept up to date as work lands.
+
 The binding design is `docs/blueprints/smm-design-addendum-2026-08-12.md` (it overrides
 `smm-design.md` v1.0 wherever they disagree). This file is the session log: what shipped, what is
 live, what is decided, what is open, and the traps that cost real time.

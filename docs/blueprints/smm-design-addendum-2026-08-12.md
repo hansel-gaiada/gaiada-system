@@ -1140,6 +1140,9 @@ fork budget, so the thin-fork line holds.
 - The two fork-exception candidates (TikTok `creator_info`, the Instagram quota probe) are unchanged
   by this deploy — they are engine capability gaps, not deployment state.
 
+> **Live ticket state lives in `docs/plans/smm-tracker.md`**, not in this document. This addendum is
+> the binding design; the tracker is what says what has landed.
+
 ## §A5 · Sequencing note — what to do first
 
 1. **SMM-30 + SMM-01 together** (they are one schema conversation: tables, then the permission rows
