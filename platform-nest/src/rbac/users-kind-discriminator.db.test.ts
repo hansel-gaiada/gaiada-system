@@ -197,8 +197,14 @@ describe.skipIf(!TEST_URL)("PK-01 · users.kind discriminator", () => {
       "employee",
     );
 
-    // Repair the damage this control deliberately caused, so the idempotence of the real block is
-    // not left broken for anything running afterwards.
+    // ⚠ THIS REPAIR STEP FOUND A REAL DEFECT, and is kept because it is the only thing that would.
+    // The backfill was originally four sequential `UPDATE ... WHERE kind <> ...` statements, each of
+    // which could only ever assign TOWARD a non-employee kind. Nothing in it could say "and
+    // otherwise you are an employee", so once the blinded run above stuck this staff member as
+    // `bot`, re-running the real block left them a `bot` permanently — and step 3 of the design
+    // repoints every people-shaped reader onto this column, so that is a staff member missing from
+    // HR with no path back. Rewritten as a single CASE, the classification became a total function
+    // of the evidence and self-heals. These two assertions are what hold that property in place.
     await withGlobal((c) => c.query(backfillBlock()));
     const { rows: fixed } = await adminPool().query<{ id: string; kind: string }>(
       `SELECT id, kind FROM users WHERE id = ANY($1)`,

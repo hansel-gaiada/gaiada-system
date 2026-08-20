@@ -73,44 +73,66 @@ BEGIN
     PERFORM set_config('app.current_tenant_ids', all_tenants, true);
   END IF;
 
-  -- ── automation: an n8n identity link ───────────────────────────────────────────────────────────
-  -- `identity_links` is the authoritative statement that this account authenticates as a workflow;
-  -- the AuthGuard resolves exactly this row to mint the principal. Keyed on provider rather than an
-  -- email pattern because the email is a seed convention while the link is the mechanism.
-  UPDATE users u SET kind = 'automation'
-  WHERE EXISTS (SELECT 1 FROM identity_links il WHERE il.user_id = u.id AND il.provider = 'n8n');
+  -- ── ONE statement, a TOTAL function of the evidence ────────────────────────────────────────────
+  -- Written as a single CASE rather than four sequential `UPDATE ... WHERE kind <> ...` statements,
+  -- and that shape is the point rather than a style preference.
+  --
+  -- ⚠ THE SEQUENTIAL VERSION COULD NOT CORRECT A WRONG VALUE. Each statement only ever assigned
+  -- TOWARD a non-employee kind, so nothing could ever move a row BACK. Found by this migration's own
+  -- negative control (`users-kind-discriminator.db.test.ts`): after a deliberately GUC-blinded run
+  -- classified a staff member as `bot`, re-running the real block left them a `bot` forever, because
+  -- no rule in it can say "and otherwise you are an employee". Since step 3 of the design repoints
+  -- every people-shaped reader onto this column, that stuck value is a staff member permanently
+  -- missing from HR with nothing to repair it.
+  --
+  -- A single CASE makes the classification a total function of the evidence: every run recomputes
+  -- every row from scratch, so a wrong value self-heals and the statement is safe to re-run. It also
+  -- makes PRECEDENCE explicit instead of emergent from statement order:
+  --
+  --   automation first — an n8n link is unambiguous mechanism, not a hint.
+  --   client before bot — a portal contact who also enrolled WhatsApp is a CLIENT; reading it the
+  --                       other way would hide them from client surfaces to call them a bot.
+  --   bot needs BOTH halves — a messaging identity AND no staff membership (see below).
+  --   employee is the fallback, which is the safe direction (visible, therefore correctable).
+  UPDATE users u SET kind = CASE
+    -- `identity_links` is the authoritative statement that this account authenticates as a workflow;
+    -- the AuthGuard resolves exactly this row to mint the principal. Keyed on provider rather than an
+    -- email pattern because the email is a seed convention while the link is the mechanism.
+    WHEN EXISTS (SELECT 1 FROM identity_links il WHERE il.user_id = u.id AND il.provider = 'n8n')
+      THEN 'automation'
 
-  -- ── client: a portal contact row ───────────────────────────────────────────────────────────────
-  -- ⚠ The design doc (2026-08-03) says to key this on `clients.portal_user_id`. That is now STALE:
-  -- migration 0072 replaced it with `client_contacts` and records in its own header that
-  -- portal_user_id "is written ONLY in testing/fixtures.ts and is NULL for every real client
-  -- (verified on gda-aicenter)". Keying on the retired column alone would classify zero real rows
-  -- while looking like it worked. Both are read — client_contacts as the real source, portal_user_id
-  -- so fixture-built databases classify the same way production does.
-  UPDATE users u SET kind = 'client'
-  WHERE kind <> 'automation'
-    AND (EXISTS (SELECT 1 FROM client_contacts cc WHERE cc.user_id = u.id AND cc.deleted_at IS NULL)
-      OR EXISTS (SELECT 1 FROM clients c WHERE c.portal_user_id = u.id));
+    -- ⚠ The design doc (2026-08-03) says to key `client` on `clients.portal_user_id`. That is now
+    -- STALE: migration 0072 replaced it with `client_contacts` and records in its own header that
+    -- portal_user_id "is written ONLY in testing/fixtures.ts and is NULL for every real client
+    -- (verified on gda-aicenter)". Keying on the retired column alone would classify zero real rows
+    -- while looking like it worked. Both are read — client_contacts as the real source,
+    -- portal_user_id so fixture-built databases classify the same way production does.
+    WHEN EXISTS (SELECT 1 FROM client_contacts cc WHERE cc.user_id = u.id AND cc.deleted_at IS NULL)
+      OR EXISTS (SELECT 1 FROM clients c WHERE c.portal_user_id = u.id)
+      THEN 'client'
 
-  -- ── bot: a messaging identity, and NOT a member of staff ───────────────────────────────────────
-  -- The second half is load-bearing. A real employee who enrolled WhatsApp for notifications has
-  -- exactly the same identity_links shape as a bot identity, so without the membership guard this
-  -- rule would reclassify staff as bots and drop them out of every people surface. Checked against
-  -- `company_memberships.kind = 'employee'` — the interim discriminator, still correct for this one
-  -- question — which is why the GUC above is not optional.
-  UPDATE users u SET kind = 'bot'
-  WHERE kind NOT IN ('automation', 'client')
-    AND EXISTS (
-      SELECT 1 FROM identity_links il
-      WHERE il.user_id = u.id AND il.provider IN ('whatsapp', 'telegram')
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM company_memberships cm
-      WHERE cm.user_id = u.id AND cm.kind = 'employee' AND cm.deleted_at IS NULL
-    );
+    -- The second half of this rule is load-bearing. A real employee who enrolled WhatsApp for
+    -- notifications has byte-identical `identity_links` to a bot identity, so without the membership
+    -- guard this rule reclassifies staff as bots and drops them out of every people surface — a
+    -- person lost from HR because of a notification preference. Checked against
+    -- `company_memberships.kind = 'employee'` (the interim discriminator, still correct for this one
+    -- question), which is exactly why the GUC above is not optional.
+    WHEN EXISTS (
+           SELECT 1 FROM identity_links il
+           WHERE il.user_id = u.id AND il.provider IN ('whatsapp', 'telegram')
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM company_memberships cm
+           WHERE cm.user_id = u.id AND cm.kind = 'employee' AND cm.deleted_at IS NULL
+         )
+      THEN 'bot'
 
-  -- Everything else keeps the 'employee' default. Reported, not silently assumed, so the numbers can
-  -- be checked against the estate rather than trusted.
+    ELSE 'employee'
+  END;
+
+  -- Reported, not silently assumed, so the numbers can be checked against the estate rather than
+  -- trusted. (Live at time of writing, 2026-08-20: 53 active users — 17 n8n, 2 messaging-linked,
+  -- 25 seeded `.test`, and exactly ONE real SSO human.)
   SELECT count(*) FILTER (WHERE kind = 'automation'),
          count(*) FILTER (WHERE kind = 'bot'),
          count(*) FILTER (WHERE kind = 'client'),
