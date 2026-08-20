@@ -8,6 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
+import { socialDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { monitoringDemo } from "./demoMonitoring";
@@ -1811,6 +1812,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Delivery pipeline runs/stages/gates (WD-02 run workspace) — stateful store (lib/demoPipeline.ts).
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
+
+  // Social Media department — calendar + composer (SMM-12), stateful store (lib/demoSocial.ts).
+  // Before this, `/departments/dept-4/{calendar,composer}` had no fixture at all, so SMM-12 could
+  // not be driven in a browser under DEMO_MODE — see that file's header for the full story (SMM-14).
+  const social = socialDemo(method, p, url.searchParams, body);
+  if (social) return social;
 
   // MI-05 — Web Dev maintenance-intake triage queue (staff console) — stateful store
   // (lib/demoWebdevChangeRequests.ts).
