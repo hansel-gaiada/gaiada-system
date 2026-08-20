@@ -70,6 +70,11 @@ import { ItController } from "./modules/it/it.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
 import { HrController } from "./modules/hr/hr.controller";
 import { SocialController } from "./modules/social/social.controller";
+// SMM-23: report snapshot -> AI narrative -> approve -> render -> deliver lifecycle, on its OWN
+// controller class — same reason SearchReportsController gives below (three other seats hold
+// social.controller.ts's edit surface this wave). Shares SocialController's exact route prefix; no
+// individual route path collides (social-reports.controller.ts's own header).
+import { SocialReportsController } from "./modules/social/social-reports.controller";
 import { LoansController } from "./modules/hr/loans.controller";
 import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
@@ -112,6 +117,11 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,
     SocialController,
+    // SMM-23: report review/approve/preview/deliver lifecycle, on its OWN controller class — same
+    // reason as SearchReportsController below (three other seats hold social.controller.ts's edit
+    // surface this wave). Shares SocialController's exact route prefix; no individual route path
+    // collides (social-reports.controller.ts's own header).
+    SocialReportsController,
     // SM-25a: the Google OAuth callback is tenant-agnostic on purpose (Google permits no wildcard
     // redirect URIs — see the file header) and so cannot mount under SearchController's
     // `api/:tenantId/modules/search` prefix. Registered as its own controller, mounted at the fixed

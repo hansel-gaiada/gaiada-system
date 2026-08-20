@@ -268,3 +268,111 @@ export function parseIdeaDraft(raw: string | null, facts: IdeaGroundingFacts): I
   }
   return { ideas: fallbackIdeas(facts), draftedVia: "fallback" };
 }
+
+// ───────────────────────────────────────────── Report narrative (SMM-23) ──────────────────────────
+// The narrative half of "snapshot + AI narrative -> approve -> render -> deliver". This is a
+// CLIENT-FACING document on letterhead, so the "no invented numbers" rule that governs the
+// snapshot's own KPIs/series/tables (social-reports.controller.ts / reports.ts) matters even more
+// here: the prompt below hands the model the EXACT, ALREADY-COMPUTED numbers it may reference and
+// tells it plainly that anything not fetched must be named as such, never guessed. `kpis` here is
+// the caller's ALREADY-FILTERED list — a metric the module never pulled was omitted before this
+// function ever sees it (reports.ts#buildSocialReportSnapshot's own discipline), so this file has
+// nothing to filter a second time; its job is only to phrase what it was given honestly.
+//
+// One necessary honesty limit, named rather than silently assumed away: unlike
+// `applyHashtagStrategy` (a bounded, mechanically-enforceable property — a hashtag count), there is
+// no equivalent runtime guard here that can strip a hallucinated number out of free-form narrative
+// prose. The prompt instructs the model never to state a number it was not given, and the
+// deterministic fallback (used whenever the gateway fails or returns something unparsable) states
+// ONLY the given numbers verbatim, but an AI response that ignores the instruction and states an
+// invented number could still pass `parseReportNarrativeDraft`'s parse check, which validates JSON
+// shape, not numeric provenance. Flagged in this ticket's own report-back as a known limitation,
+// not silently solved.
+export interface ReportNarrativeKpiFact {
+  label: string;
+  value: number;
+  unit: string;
+}
+export interface ReportNarrativeGroundingFacts {
+  engagementName: string;
+  clientName: string;
+  periodLabel: string;
+  /** Already filtered to metrics that were actually fetched — see file header. */
+  kpis: ReportNarrativeKpiFact[];
+  topPosts: Array<{ network: string; publishedAt: string | null; impressions: number | null }>;
+  knowledgeHits: Array<{ sourceRef: string; text: string }>;
+}
+export interface ReportNarrativeDraftResult {
+  text: string;
+  draftedVia: "ai" | "fallback";
+}
+
+export function buildReportNarrativePrompt(facts: ReportNarrativeGroundingFacts): string {
+  const lines = [
+    `You are writing the narrative summary section of a social-media performance report for `
+      + `"${facts.clientName}" (engagement "${facts.engagementName}"), covering ${facts.periodLabel}.`,
+  ];
+  if (facts.kpis.length > 0) {
+    lines.push(
+      "Here are the ONLY numbers you may reference, exactly as given. Do not invent, estimate, "
+        + "round differently, or restate any number not in this list:\n"
+        + facts.kpis.map((k) => `- ${k.label}: ${k.value} ${k.unit}`).join("\n"),
+    );
+  } else {
+    lines.push(
+      "No metrics have been fetched for this engagement yet for this period. Say so plainly — do "
+        + "not invent or guess any number, including zero.",
+    );
+  }
+  if (facts.topPosts.length > 0) {
+    lines.push(
+      "Top posts by impressions this period:\n"
+        + facts.topPosts
+          .map((p) => `- ${p.network}${p.publishedAt ? ` (${p.publishedAt})` : ""}: ${p.impressions ?? "impressions not yet fetched"}`)
+          .join("\n"),
+    );
+  }
+  if (facts.knowledgeHits.length > 0) {
+    lines.push(
+      `Excerpts from this brand's own approved past posts and guidelines:\n${facts.knowledgeHits
+        .map((h) => `- (${h.sourceRef}) ${h.text}`)
+        .join("\n")}`,
+    );
+  }
+  lines.push(
+    "Write 2-4 short paragraphs in this brand's voice, summarizing performance for the period. "
+      + "NEVER state a number you were not given above, and never imply a metric was zero just "
+      + "because it was not mentioned — say it has not been fetched yet instead. Never suggest "
+      + "generating or attaching an image — this system has no image-generation capability.",
+    'Reply with STRICT JSON only, no prose, no markdown fences: {"narrative": "<the summary text>"}',
+  );
+  return lines.join("\n\n");
+}
+
+function fallbackReportNarrative(facts: ReportNarrativeGroundingFacts): string {
+  if (facts.kpis.length === 0) {
+    return `No metrics have been fetched yet for ${facts.engagementName} during ${facts.periodLabel} `
+      + `(AI drafting unavailable — deterministic placeholder only).`;
+  }
+  const lines = [`Performance summary for ${facts.clientName} — ${facts.periodLabel}.`];
+  for (const k of facts.kpis) lines.push(`${k.label}: ${k.value} ${k.unit}.`);
+  return lines.join(" ");
+}
+
+/** Parse the gateway's /complete response for a report narrative. NEVER throws — see file header
+ *  for why this can only validate JSON shape, not numeric provenance. */
+export function parseReportNarrativeDraft(raw: string | null, facts: ReportNarrativeGroundingFacts): ReportNarrativeDraftResult {
+  if (raw) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0]) as { narrative?: unknown };
+        const text = typeof parsed.narrative === "string" ? parsed.narrative.trim() : "";
+        if (text.length > 0) return { text, draftedVia: "ai" };
+      } catch {
+        /* malformed JSON -> fall through to the deterministic default below */
+      }
+    }
+  }
+  return { text: fallbackReportNarrative(facts), draftedVia: "fallback" };
+}
