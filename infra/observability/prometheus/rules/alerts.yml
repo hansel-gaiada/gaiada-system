@@ -51,6 +51,54 @@ groups:
           summary: "{{ $labels.mountpoint }} projected to fill within 24h"
           description: "Trend over the last 6h projects {{ $labels.instance }}:{{ $labels.mountpoint }} full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
 
+      # --- Datastores. MON-09k: these were completely unwatched, and the gap hid a real fault.
+      # postgres-exporter and redis-exporter both pointed at container hostnames that are never
+      # started on this box (Postgres/Redis run on the host), so `pg_up`/`redis_up` were 0 for as
+      # long as the stack had been running. Prometheus showed BOTH TARGETS UP the whole time --- the
+      # exporter was healthy, the database was simply unreachable to it, and no rule read the value.
+      # A scrape target being up is not a check passing. These two rules are what make that visible.
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Postgres unreachable from the exporter ({{ $labels.instance }})"
+          description: "pg_up=0 for 2m. Either the database is down, or the exporter DSN points somewhere the database is not (PG_HOST). Check `docker logs` on the exporter before assuming an outage."
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Redis unreachable from the exporter ({{ $labels.instance }})"
+          description: "redis_up=0 for 2m. As with Postgres, suspect the exporter address (REDIS_URL, including its password) before concluding Redis is down --- a hostname without credentials connects and then fails every command."
+
+      # --- MON-09r: the blind spot the 2026-08-18 relocation CREATED, closed here.
+      #
+      # Storage and alerting now run on the SumoPod VPS; gda-aicenter's collector scrapes locally
+      # and remote-writes over WireGuard. That inverts a safety property. When Prometheus SCRAPED
+      # those targets, losing them made `up` go to 0 and ServiceDown fired. With remote_write, a
+      # dead tunnel means the series simply STOP ARRIVING: `up` goes ABSENT, not 0.
+      # `probe_success == 0` and `up == 0` match nothing at all, so every existing alert goes quiet
+      # and the estate looks calm at the exact moment we can no longer see it.
+      #
+      # Watchdog does NOT cover this: it is `vector(1)` evaluated locally on whichever Prometheus
+      # runs it, so it keeps firing happily while the remote side has gone dark.
+      #
+      # absent_over_time() rather than absent(): absent() fires on a single missed evaluation,
+      # which a routine restart or scrape hiccup would trigger. 10m of continuous absence is a
+      # genuine feed outage.
+      - alert: RemoteWriteStalled
+        expr: absent_over_time(up{job="otel-collector-self"}[10m])
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "No metrics received from gda-aicenter for 10m"
+          description: "The remote_write feed has stopped: the collector is not reporting. Suspect the WireGuard link (10.88.0.1 <-> 10.88.0.2) or the collector itself. IMPORTANT: while this fires, every other alert in this file is meaningless rather than reassuring - their series are absent, so they cannot fire. Treat a quiet estate during this alert as UNKNOWN, not healthy."
+
       # --- Event backbone: any dead-letter is worth a ticket (data path is dropping events).
       - alert: EventBackboneDeadLetters
         expr: increase(platform_events_dead_lettered_total[15m]) > 0

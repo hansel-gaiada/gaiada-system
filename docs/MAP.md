@@ -27,14 +27,14 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:personas`, `seed:portal-clients`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:personas`, `seed:portal-clients`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
 
 ## Compose
 
-All compose files in `infra/compose/`: `docker-compose.alertmanager-mail.yml`, `docker-compose.build.yml`, `docker-compose.devui.yml`, `docker-compose.hostdata.yml`, `docker-compose.local.yml`, `docker-compose.loki.yml`, `docker-compose.obs-local.yml`, `docker-compose.observability.yml`, `docker-compose.otel-metrics.yml`, `docker-compose.social.yml`, `docker-compose.vps.yml`.
+All compose files in `infra/compose/`: `docker-compose.alertmanager-mail.yml`, `docker-compose.build.yml`, `docker-compose.devui.yml`, `docker-compose.hostdata.yml`, `docker-compose.local.yml`, `docker-compose.loki.yml`, `docker-compose.obs-local.yml`, `docker-compose.obs-remote.yml`, `docker-compose.observability.yml`, `docker-compose.otel-metrics.yml`, `docker-compose.social.yml`, `docker-compose.vps.yml`.
 Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ### `infra/compose/docker-compose.vps.yml`
@@ -114,7 +114,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `redis-exporter` | oliver006/redis_exporter:v1.67.0 | — | — | — |
 | `redis-exporter-bot` | oliver006/redis_exporter:v1.67.0 | — | — | — |
 | `sync-central` | — | — | — | — |
-| `synthetic-prober` | ../../infra/observability/synthetic-prober | — | — | otel-collector |
+| `synthetic-prober` | ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-synthetic-prober:${GAIADA_TAG:-latest} | — | — | otel-collector |
 | `tempo` | grafana/tempo:2.7.0 | — | — | — |
 
 ### `infra/compose/docker-compose.build.yml`
@@ -156,6 +156,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `hr` | `hr` | yes |
 | `it` | `it` | yes |
 | `knowledge` | `knowledge` | yes |
+| `monitoring` | `monitoring` | yes |
 | `pm` | `pm` | yes |
 | `reports` | `reports` | yes |
 | `search` | `search` | yes |
@@ -164,9 +165,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `0110_iam_phase2_role_grant_kinds_ui_grantable.sql`
-- Next free number: `0111` — **reserve it by creating the file**, concurrent sessions share this checkout.
-- Applied files on disk: 109
+- Head: `202608191417_iam_monitoring_permissions_completion.sql`
+- New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
+  `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
+  it collided four times between concurrent sessions in this shared checkout.
+- Applied files on disk: 122 (121 legacy `NNNN_`, 1 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -181,7 +184,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/admin/admin-identity.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-admin.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-crud.controller.ts` |
+| `/api` | `platform-nest/src/admin/employees.controller.ts` |
 | `/api` | `platform-nest/src/admin/intelligence.controller.ts` |
+| `/api` | `platform-nest/src/admin/it-accounts.controller.ts` |
+| `/api` | `platform-nest/src/admin/positions.controller.ts` |
+| `/api` | `platform-nest/src/admin/role-grants.controller.ts` |
 | `/api` | `platform-nest/src/admin/service-assignments.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals-decide.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals.controller.ts` |
@@ -205,6 +212,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
 | `/api` | `platform-nest/src/core/portal.controller.ts` |
+| `/api` | `platform-nest/src/core/social-client-review-portal.controller.ts` |
 | `/api` | `platform-nest/src/core/tasks-mine.controller.ts` |
 | `/api` | `platform-nest/src/core/webdev-change-requests-portal.controller.ts` |
 | `/api` | `platform-nest/src/core/webdev-change-requests.controller.ts` |
@@ -215,6 +223,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
+| `/api` | `platform-nest/src/modules/monitoring/monitoring.controller.ts` |
 | `/api` | `platform-nest/src/modules/pm/pm.controller.ts` |
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
@@ -230,6 +239,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
 | `/api/admin/bot` | `platform-nest/src/admin/bot-admin.controller.ts` |
 | `/api/admin/mail` | `platform-nest/src/mail/admin-mail.controller.ts` |
+| `/api/admin/observability` | `platform-nest/src/admin/observability.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/inbound.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/webhook.controller.ts` |
 | `/api/search/google/oauth` | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
@@ -329,6 +339,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/hr/people`
 - `/invite/[token]`
 - `/it`
+- `/it/accounts`
 - `/it/devices`
 - `/it/devices/[deviceId]`
 - `/it/topology`
@@ -348,6 +359,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring/new`
 - `/notifications`
 - `/organization`
+- `/organization/access`
+- `/organization/positions`
 - `/people`
 - `/people/[userId]`
 - `/people/[userId]/edit`
@@ -385,6 +398,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/systems/bot`
 - `/systems/gateway`
 - `/systems/hub`
+- `/systems/observability`
 - `/tasks`
 - `/tasks/[taskId]`
 - `/tasks/[taskId]`
@@ -449,7 +463,7 @@ Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md
 
 Runbooks (`infra/runbooks/`): `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `restore-drill.md`
 
-Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `test-all.sh`, `wire-env.sh`
+Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `test-all.sh`, `wire-env.sh`
 
 Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
 

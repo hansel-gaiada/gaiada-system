@@ -354,7 +354,18 @@ describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (su
 
     const mismatches: string[] = [];
     for (const key of body.scopeLevelPermissions) {
-      const allowed = await can(p, key, { id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr" });
+      // ⚠ `creatorId` is part of the PROBE, not decoration (added 2026-08-19 after this sweep went red).
+      // `resource_automation_approval.yaml`'s `decide_override` / `decide_assignment` carry a
+      // fail-closed DENY: a request whose creator is unknown ("" or absent) may not be decided by
+      // anyone, platform_admin's wildcard included, because deny-overrides beats every ALLOW. And
+      // `resourcePayload()` defaults an omitted `creatorId` to `""` — so the old probe tripped that
+      // DENY by construction and the two keys reported as mismatches. The policy was right; the PROBE
+      // was unsatisfiable, which is the same shape as positions.controller.ts's "rule a handler can
+      // never satisfy" note. A creator who is somebody ELSE is the case this sweep means to ask about;
+      // the requester-is-decider refusal has its own dedicated tests.
+      const allowed = await can(p, key, {
+        id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr", creatorId: "someone-else",
+      });
       if (!allowed) mismatches.push(key);
     }
     expect(mismatches).toEqual([]);
@@ -380,7 +391,13 @@ describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (su
     // can.scopeOnly() -> principal.perms, the same data that suite pins.
     const sample = body.scopeLevelPermissions.filter((_, i) => i % 12 === 0);
     for (const key of sample) {
-      expect(await can(p, key, { id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr" })).toBe(true);
+      // Same `creatorId` reasoning as the platform_admin sweep above — and it matters here even though
+      // the sample is strided, because which keys the stride lands on moves with the catalog.
+      expect(
+        await can(p, key, {
+          id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr", creatorId: "someone-else",
+        }),
+      ).toBe(true);
     }
   }, 30_000);
 });

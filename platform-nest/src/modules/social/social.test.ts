@@ -122,10 +122,13 @@ describe.skipIf(!TEST_URL)("social module (SMM-02)", () => {
     // Every declared permission must be a dotted catalog key; the colon form the design used
     // predates IAM Phase 1 and would refuse boot.
     for (const p of socialModule.permissions) expect(p.key).toMatch(/^social\.[a-z_]+\.[a-z_]+$/);
-    // The publish surface must NOT be declared yet — its endpoint does not exist, and a tool the
-    // hub publishes to every agent without a handler behind it is the frontend-first drift bug
-    // pointed at automation.
-    expect(socialModule.mcpTools.find((t) => t.name === "social.publishPost")).toBeUndefined();
+    // SMM-10: the publish surface IS now declared — its dispatch endpoint exists — and it must be
+    // declared from the pinned classification constant, never retyped: those two literals ARE the
+    // D14 gate (write && impact !== 'low' is what suspends an automation/agent call into WS4).
+    const publish = socialModule.mcpTools.find((t) => t.name === "social.publishPost");
+    expect(publish?.write).toBe(true);
+    expect(publish?.impact).toBe("high");
+    expect(publish?.pathTemplate).toBe("/api/:tenantId/modules/social/variants/:variantId/publish");
   });
 
   // ── (2) the module gate ───────────────────────────────────────────────────────────────────────

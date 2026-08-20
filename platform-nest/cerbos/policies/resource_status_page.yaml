@@ -1,0 +1,67 @@
+# MON-10b - authz for the `status_page` kind (module `monitoring`, Plane B: the tenant's CLIENTS'
+# websites and services). Nothing existed for any monitor_* kind before these files, and an unlisted
+# kind/action is a SILENT DENY that reads exactly like a logic bug - a standing trap on this estate.
+#
+# Cerbos does NOT hot-reload. Restart it after editing and PROVE the new decision with a probe: a
+# *healthy* Cerbos container on this estate has served two-day-stale policy.
+#
+# Handlers pass resource.attr = {kind:"status_page", tenantId, module:"monitoring", id?} - the same shape
+# the search/social/webdev kinds use. `module` is load-bearing: derived_roles.yaml string-composes the
+# module tiers from it, so the only names Cerbos will ever match are `monitoring_manager` /
+# `monitoring_staff`, seeded by migration 0117.
+#
+# -- NOT PLANE A ---------------------------------------------------------------------------------
+# Our own infrastructure health is `/api/admin/observability`: platform-admin only, not a module, not
+# tenant-scoped. It has no policy here and must never acquire one - the two planes never merge.
+#
+# -- PERMISSION ARM DEFERRED, DELIBERATELY -------------------------------------------------------
+# The `perm_monitoring_*` derived roles are NOT wired yet: each needs a scope-cascade condition block
+# in derived_roles.yaml (~2000 lines, security-critical), and adding nine unverified is worse than
+# adding them in a dedicated change with the parity suites run. This mirrors SMM-30, which shipped the
+# role arms first and gained its permission arm later in IAM-04-B6. Consequence, stated plainly: a
+# principal holding ONLY a fine-grained monitoring.* permission grant and no role is DENIED here until
+# that arm lands. Fail-closed, and visible rather than silent.
+#
+# -- TRAP: group_executive is a GLOBAL grant -----------------------------------------------------
+# `variables.inTenant` is built from the caller's company_memberships, so an owner holding the global
+# grant with NO membership row in a company has a non-matching `companies` set and inTenant is FALSE
+# there. Folding the exec into the company_admin/manager rule would produce a global grant that never
+# fires for exactly the case it exists to cover. `notLow` still applies - a low-assurance session gets
+# nothing, owner or not.
+#
+# -- THE ONLY UNAUTHENTICATED SURFACE IN THE ERP ------------------------------------------------
+# `publish` moves selected monitor state onto a page readable with NO session at all. That makes it
+# categorically different from every other action here, and is why the permission is sensitive:true in
+# 0117 and confined to manager tier. The served field allowlist lives in the API (design 3.5) - this
+# policy governs WHO may publish, never WHAT is exposed. Both matter; neither substitutes for the
+# other.
+
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: status_page
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Read-only across companies: an exec oversees client uptime; they do not retune another
+    # department's checks or expose a client's status publicly.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["group_executive"]
+      condition: { match: { expr: "variables.notLow" } }
+    - actions: ["read", "update", "publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "update", "publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

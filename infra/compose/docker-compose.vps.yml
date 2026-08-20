@@ -522,6 +522,28 @@ services:
       # ORG-6 release train (WSD-8 go-live 2026-07-22): shared-service assignments + reconciler.
       # Dark by default (empty/unset -> off); "1"/"true" flips the whole train on.
       SERVICE_ASSIGNMENTS_ENABLED: ${SERVICE_ASSIGNMENTS_ENABLED:-}
+      # IAM Phase 2 (P2-05/P2-06/P2-09): the POSITION reconciler - placement provisions access, a
+      # transfer moves it, a termination removes it. Dark by default, exactly like the ORG-6 train
+      # above (empty/unset -> off; "1"/"true" on).
+      #
+      # THIS LINE IS WHY THE FLAG WORKS AT ALL. Setting POSITION_SYNC_ENABLED in the box `.env`
+      # alone does NOTHING: compose reads `.env` for variable INTERPOLATION, it does not pass it
+      # into the container. Verified on the live box 2026-08-18 - hire/transfer/terminate each
+      # returned 2xx with `reconciled: null` and ZERO `user_roles.managed_by_position` rows, i.e.
+      # the seats moved and the authorization did not. The flows look healthy while the half that
+      # matters is inert.
+      #
+      # WARNING: turning this ON changes live authorization for every position holder. Grants
+      # materialise from role-sets, and closing a seat REVOKES what only that seat justified. The
+      # mass-revoke brake (position-reconciler.ts) is what stops a bad org edit doing that
+      # estate-wide; the drift sweep reports rather than auto-heals.
+      POSITION_SYNC_ENABLED: ${POSITION_SYNC_ENABLED:-}
+      # P2-09's sweep interval. The EXPIRY half of that loop runs regardless of the flag above,
+      # because P2-08's grant surface can write `expires_at` whether or not positions are live.
+      # NOT the `${VAR:-}` form: that passes an EMPTY string when unset, which reached the app
+      # as 0 and busy-looped the sweep at ~46% CPU (2026-08-18). A real default means the
+      # container never receives a value the app has to guess about.
+      POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-86400000}
       # OBS-01 follow-up (2026-08-06 incident): platform used to read the SAME shared OTEL_ENABLED
       # as the other 5 telemetry-carrying services. Turning it on for platform alone meant either an
       # unscoped `.env` edit (which once accidentally restarted ai-gateway) or a shell-level override
@@ -621,6 +643,46 @@ services:
       # App version (docs/modules/VERSIONING.md), surfaced by GET /health. deploy.yml sets this
       # from /VERSION so a running box can always be asked what it is.
       APP_VERSION: ${APP_VERSION:-}
+      # ── SMM-06 · the ERP half of the two-host publisher contract ────────────────────────────────
+      # 🚨 THE COMPOSE ENV-PASSTHROUGH TRAP. Until this block existed, every SOCIAL_* var could be
+      # set correctly in `.env` on the live box and the API container would still never see one:
+      # compose passes `.env` to variable INTERPOLATION, not into the container. The symptom is not
+      # a crash — the publisher is designed so that a missing base URL is a SUPPORTED keyless mode,
+      # so the module boots green, every read serves, and only the publish path refuses
+      # `publisher_not_configured` (503). A silently-degraded feature that looks healthy is exactly
+      # the shape this estate has been bitten by before, which is why it is called out here.
+      #
+      # Postiz's OWN vars (FACEBOOK_APP_ID, JWT_SECRET, the DB passwords…) are NOT here on purpose:
+      # they belong to the licence-zone host in docker-compose.social.yml. Only the ERP's half of
+      # the contract lives on this box. See platform-nest/.env.example §SMM-05/06.
+      SOCIAL_PUBLISHER_DRIVER: ${SOCIAL_PUBLISHER_DRIVER:-postiz}
+      # The WireGuard peer address — NOT a public hostname, NOT https. main.ts refuses BOOT on a
+      # public-looking value; leaving it empty is the supported keyless default.
+      SOCIAL_POSTIZ_BASE_URL: ${SOCIAL_POSTIZ_BASE_URL:-}
+      SOCIAL_POSTIZ_API_PREFIX: ${SOCIAL_POSTIZ_API_PREFIX:-/api/public/v1}
+      SOCIAL_POSTIZ_CONNECT_TIMEOUT_MS: ${SOCIAL_POSTIZ_CONNECT_TIMEOUT_MS:-5000}
+      SOCIAL_POSTIZ_READ_TIMEOUT_MS: ${SOCIAL_POSTIZ_READ_TIMEOUT_MS:-30000}
+      SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS: ${SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS:-120000}
+      # Backs the `default` alias only. Per-client keys resolve from
+      # SOCIAL_POSTIZ_ORG_API_KEY__<ALIAS> and must be added here explicitly as each org is
+      # provisioned — an alias with no matching var REFUSES (`org_key_unresolved`) and never falls
+      # back to this one, which is what stops client A publishing with client B's credential.
+      SOCIAL_POSTIZ_ORG_API_KEY: ${SOCIAL_POSTIZ_ORG_API_KEY:-}
+      # Per-network DEPLOYMENT gate, above the per-engagement tool_scope. x/youtube/tiktok stay off:
+      # x is metered (OQ-2/D-14 keeps the publish path $0), youtube and tiktok are audit-locked.
+      SOCIAL_NETWORKS_ENABLED: ${SOCIAL_NETWORKS_ENABLED:-instagram,facebook,linkedin}
+      SOCIAL_DEFAULT_USAGE_BUDGET_USD: ${SOCIAL_DEFAULT_USAGE_BUDGET_USD:-10}
+
+      # MON-12c — the Plane B sweep loop. Absent/anything-but-"1" means the runner never starts, and
+      # that default is deliberate: this loop DIALS CLIENT WEBSITES, so probing a third party must be
+      # a decision someone made and not a consequence of a container booting. Until this line existed
+      # the flag could not be switched on at all — setting it in `.env` did nothing, because a var
+      # absent from this block is simply not in the process environment.
+      MONITORING_RUNNER_ENABLED: ${MONITORING_RUNNER_ENABLED:-}
+      # `:-}` supplies an EMPTY STRING when unset, and `Number("")` is 0. config.ts parses this with
+      # readIntervalMs() (floor 1s) precisely so an empty passthrough cannot become a 0 ms busy loop
+      # hammering client sites. Do not "simplify" that parse back to `Number(x ?? 60_000)`.
+      MONITORING_RUNNER_INTERVAL_MS: ${MONITORING_RUNNER_INTERVAL_MS:-}
     volumes:
       - platform-files:/data/files
     # SM-45: gives depends_on: condition: service_healthy something to attach to. GET /health is

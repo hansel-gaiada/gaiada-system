@@ -57,6 +57,38 @@ export interface Principal {
    *  once those call sites are updated — not this one's remit. */
   perms?: PermissionGrant[];
   sessionVersion: number; // D11
+
+  /**
+   * ── THE CO-AUTHOR (2026-08-20) — the interim half of [agent-attribution-gate] ──────────────────
+   *
+   * The channel this request arrived on, and the agent driving it if any. Until now `Principal`
+   * carried userId · assurance · companies · roles · sessionVersion and NOTHING about the channel, so
+   * every `activities` row, `work_activity` fact and ledger entry recorded "Alice did X" when the
+   * truth was "Alice's agent did X" — unrecoverably. That was not a dropped log line: it was
+   * information with nowhere to live.
+   *
+   * The owner's framing settles the design as git's `Co-Authored-By`:
+   *   AUTHOR    = the human (authority, permission, accountability — Cerbos still decides on THEM,
+   *               and an agent can never do what its principal could not);
+   *   CO-AUTHOR = the agent (mechanism, recorded ALONGSIDE, never INSTEAD).
+   *
+   * That makes this additive and AUTHORIZATION-NEUTRAL: no new rights are minted, so no policy needs
+   * re-reasoning. Nothing in `can()`/Cerbos reads it. It exists to be stamped onto writes.
+   *
+   * OPTIONAL for the same reason `perms` is: ~dozens of test files hand-construct `Principal`
+   * literals, and this ticket has no business touching them. `assemblePrincipal` does not set it —
+   * the AuthGuard does, because the channel is a property of the REQUEST, not of the user.
+   *
+   * This is step 1 of 2. Step 2 (a real persona per department with its own `users` row, roles and
+   * lifecycle) depends on the `users.kind` migration and is deliberately not here.
+   */
+  via?: {
+    /** `whatsapp` · `platform` · `n8n` · … — the OBO envelope's provider, or `session` for a cookie. */
+    provider: string;
+    externalId: string;
+    /** Present only when an AGENT drove the call. Its absence is the meaningful case: a human did it. */
+    agent?: string;
+  };
 }
 
 export const ANONYMOUS: Principal = {
@@ -115,8 +147,17 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // and kept if any OTHER, validly-scoped grant also reaches it.
   const { roles, perms } = await withGlobal(async (c) => {
     const rolesRes = await c.query<RoleGrant>(
+      // P2-09/§12.4 — EXPIRY IS ENFORCED AT RESOLUTION, not only by the nightly sweep.
+      // `user_roles.expires_at` shipped in 0109; P2-08 became its first writer (time-boxed grants and
+      // §6.5 overrides) and P2-09 added the sweep that revokes on it. A sweep alone means an expired
+      // grant is FULLY LIVE until the next tick — up to a day of access a human explicitly time-boxed
+      // — because nothing in this resolver looked at the column. This conjunct closes that window: the
+      // moment the timestamp passes, the grant stops resolving into the principal, so Cerbos never
+      // sees it and the sweep's job is reduced to tidying the row and auditing it.
+      // NULL = permanent, which is every pre-P2-08 row, so this is a no-op for existing grants.
       `SELECT r.name AS role, ur.scope_type AS "scopeType", ur.scope_id AS "scopeId"
-       FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1`,
+       FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = $1 AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [userId],
     );
     const permsRes = await c.query<PermissionGrant & { roleName: string }>(
@@ -126,7 +167,8 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
        JOIN role_permissions rp ON rp.role_id = ur.role_id
        JOIN permissions p ON p.id = rp.permission_id
        JOIN roles r ON r.id = ur.role_id
-       WHERE ur.user_id = $1 AND p.class = 'grantable'`,
+       WHERE ur.user_id = $1 AND p.class = 'grantable'
+         AND (ur.expires_at IS NULL OR ur.expires_at > now())`,
       [userId],
     );
     const filtered = new Map<string, PermissionGrant>();

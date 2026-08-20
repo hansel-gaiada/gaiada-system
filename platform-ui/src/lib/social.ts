@@ -38,6 +38,8 @@
 //   DELETE        variants/:id                              -> {ok:true}               (refuses variant_is_live)
 //   GET           variants/:id/validation                   -> VariantValidationResult (computed FRESH, not the stored column)
 //   POST          posts/import-native                       -> {id,created}            (bookkeeping only; never settable via POST posts)
+//   GET           accounts                                   -> {accounts: SocialAccount[]} (SMM-05; ?clientId=&status=) — the connector registry, incl. live `quota`
+//   GET           variants/:id/publish-preconditions          -> PublishPreconditionResult (SMM-09 dry run; verdict is DATA on a 200, never thrown)
 //
 // ── CONTRACT DISCREPANCIES FOUND WHILE BUILDING THIS (backend wins; §19 is reconciled here) ──────
 // 1. §19 documents `PATCH engagements/:id/scope` as returning `{toolScope, usageBudgetUsd,
@@ -49,19 +51,20 @@
 //    honestly; callers that need the PERSISTED budget after a scope-only patch must re-read
 //    `getEngagementScope`, never trust this response for that field. Reported to the backend owner
 //    (SMM-02/09) as a fix candidate — not changed here per this ticket's "frontend only" constraint.
-// 2. There is NO `GET .../accounts` route anywhere in the controller — `social_accounts` (0105)
-//    has no listing endpoint yet (that is SMM-05/07's job: the Postiz driver + account-connect
-//    flow, both still P0/P1 and unbuilt). `createVariant`/`importNativePost` both require an
-//    `accountId` the console has no way to look up. The Composer (SMM-11) can create/edit a MASTER
-//    post and edit/delete an EXISTING variant (its account/network arrive already joined via
-//    `getPost`), but cannot offer a "pick an account, add a new network" control — that renders
-//    `BackendPending` until SMM-07 ships `listAccounts`. Flagged again in this ticket's final report.
+// 2. UPDATE (SMM-12): `GET .../accounts` now EXISTS — SMM-05 shipped `listAccounts` (this file's
+//    own header was written before that landed and said otherwise; corrected here rather than
+//    left stale, since a wrong "no UI consumer yet"/"doesn't exist" comment is exactly the kind of
+//    drift the root guide calls out). SMM-12 (calendar + composer quota strips) is its first
+//    consumer, below. "Add a network" on the Composer's post-detail page still has no control —
+//    that needs an account-CONNECT flow (SMM-07, still unbuilt), not just a listing — so
+//    `composer/[postId]/page.tsx`'s `BackendPending` stands; only the READ side of the gap closes
+//    here.
 import { platformFetch, PlatformError } from "./platform";
 import { EMPTY_TOOL_SCOPE } from "./socialShared";
 import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
   SocialCampaign, SocialKpiTarget, SocialPost, SocialPostStatus, SocialPostDetail,
-  VariantValidationResult,
+  VariantValidationResult, SocialAccount, PublishPreconditionResult,
 } from "./socialShared";
 
 export * from "./socialShared";
@@ -167,4 +170,39 @@ export const getPost = async (u: string, t: string, postId: string): Promise<Gua
 export const getVariantValidation = async (u: string, t: string, variantId: string): Promise<Guarded<VariantValidationResult | null>> => {
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/validation`, u), null);
   return { ...r, data: asObject<VariantValidationResult>(r.data) };
+};
+
+// ── accounts (SMM-05 registry — quota strips' data source, SMM-12) ─────────────────────────────────
+
+/** The controller wraps the array in `{accounts: [...]}` (unlike every other list route here, which
+ *  returns a bare array) — unwrap it explicitly rather than assuming the shape, per this file's own
+ *  "a 200 carrying the wrong SHAPE" defensive-coercion rule. DEMO_MODE's generic GET fallback
+ *  returns a bare `[]` for any unmatched path (no social account fixture exists yet), which is
+ *  neither an object nor `{accounts:[...]}` — `asArray` on `.accounts` of a non-object safely
+ *  degrades to `[]` rather than throwing. */
+export const listAccounts = async (
+  u: string, t: string, params?: { clientId?: string; status?: string },
+): Promise<Guarded<SocialAccount[]>> => {
+  const qs = new URLSearchParams();
+  if (params?.clientId) qs.set("clientId", params.clientId);
+  if (params?.status) qs.set("status", params.status);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/accounts${suffix}`, u), { accounts: [] });
+  const obj = asObject<{ accounts: unknown }>(r.data);
+  return { ...r, data: asArray<SocialAccount>(obj?.accounts) };
+};
+
+// ── the publish gate's dry run (SMM-09), read from the Composer (SMM-12) ───────────────────────────
+
+/** `evaluatePublishPrecondition`'s dry run for ONE variant, read-tier (`social_post`/`read`) —
+ *  asking whether a publish WOULD be allowed is not publishing. A missing variant is a 404 (the
+ *  controller's own comment: folding it into the verdict body would make "no such variant"
+ *  indistinguishable from "exists and is currently blocked"), which `readGuarded` turns into the
+ *  `null` fallback here — the caller must render that as "can't check" separately from an actual
+ *  `ok:false` verdict. */
+export const getPublishPreconditions = async (
+  u: string, t: string, variantId: string,
+): Promise<Guarded<PublishPreconditionResult | null>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/publish-preconditions`, u), null);
+  return { ...r, data: asObject<PublishPreconditionResult>(r.data) };
 };

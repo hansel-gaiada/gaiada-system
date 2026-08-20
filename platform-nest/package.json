@@ -11,6 +11,7 @@
     "seed:personas": "node dist/seed/personas.js",
     "seed:departments": "node dist/seed/departments.js",
     "seed:automation": "node dist/seed/automation.js",
+    "iam:backfill": "node dist/seed/iam-phase2-backfill.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
     "seed:search": "node dist/seed/search.js",
     "seed:portal-clients": "node dist/seed/portal-clients.js",
@@ -21,6 +22,7 @@
     "typecheck": "tsc --noEmit",
     "lint:withtenants": "node scripts/lint-withtenants.mjs",
     "lint:migration-rls": "node scripts/lint-migration-rls.mjs",
+    "lint:migration-names": "node scripts/lint-migration-names.mjs",
     "lint:postiz-deps": "node scripts/lint-postiz-deps.mjs",
     "gen:role-bundles": "node scripts/generate-role-bundles.mjs",
     "gen:scope-constrained-roles": "node scripts/generate-scope-constrained-roles.mjs"

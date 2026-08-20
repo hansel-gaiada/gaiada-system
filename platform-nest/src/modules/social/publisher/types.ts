@@ -79,7 +79,13 @@ export type PublisherCapability =
   | "post_metrics"
   | "media_upload"
   | "inbox_read"      // Postiz: NO, for every network (spike §8b)
-  | "inbox_reply";    // Postiz: NO, for every network (spike §8b)
+  | "inbox_reply"     // Postiz: NO, for every network (spike §8b)
+  // SMM-10/D-22 — can fetch a TikTok creator's LIVE `creator_info` (allowed privacy levels,
+  // comment/duet/stitch permissions). D-21's fork exception is what makes this reachable on Postiz
+  // at all (the upstream provider fetches this and discards it — see the addendum §5b); on a driver
+  // without the exception, the method returns `undefined` (unknown) and this capability is never
+  // advertised, which is what makes the dispatch-side snapshot come back empty rather than fabricated.
+  | "creator_info_probe";
 
 // ── The org handle: custody split (b), made hard to leak ─────────────────────────────────────────
 //
@@ -148,6 +154,24 @@ export interface IntegrationState {
   /** The network's own account id, when the engine surfaces it. Needed for the Instagram live
    *  quota probe (`GET /<IG_ID>/content_publishing_limit`, §A4f). Absent ⇒ no probe, quota unknown. */
   networkAccountId?: string;
+}
+
+/** D-22's live snapshot shape: the creator's own currently-permitted TikTok posting settings, as
+ *  `creator_info` reports them. Kept small and DESCRIPTIVE (what the creator's account currently
+ *  allows), never PRESCRIPTIVE (this is not a validation verdict) — the comparison against the
+ *  approved `settings` is the `CreatorInfoVerifier`'s job
+ *  (`modules/social/publish-precondition.ts`), not this port's. */
+export interface CreatorInfoSnapshot {
+  /** Privacy levels the creator's account currently permits choosing from, e.g.
+   *  `["PUBLIC_TO_EVERYONE","MUTUAL_FOLLOW_FRIENDS","SELF_ONLY"]`. Empty ⇒ the engine reported none
+   *  (treat as "nothing is permitted", never as "everything is"). */
+  privacyLevelOptions: string[];
+  commentDisabled: boolean;
+  duetDisabled: boolean;
+  stitchDisabled: boolean;
+  /** The engine's own raw payload, preserved for an operator reading a refusal — never re-derived
+   *  logic reads this field; it exists so a human can see what the probe actually returned. */
+  raw?: Record<string, unknown>;
 }
 
 export interface OrgVerification {
@@ -273,6 +297,15 @@ export interface SocialPublisher {
    *  would be wrong in a way nothing downstream could detect. */
   getQuota(org: OrgHandle, integration: IntegrationState): Promise<QuotaSnapshot | undefined>;
 
+  /** SMM-10/D-22 — the LIVE `creator_info` fetch, called at DISPATCH time, OUTSIDE any claim
+   *  transaction (this is real network I/O — see `publish-precondition.ts`'s `CreatorInfoVerifier`
+   *  header for why that seam forbids it under the advisory lock). Returns `undefined` when the
+   *  driver cannot carry the probe (no `creator_info_probe` capability, or the call itself failed) —
+   *  never a fabricated snapshot. Optional: only meaningful for TikTok-shaped drivers; a driver that
+   *  never advertises `creator_info_probe` may omit it entirely, matching `listComments`/`sendReply`'s
+   *  own optional-capability shape. */
+  getCreatorInfo?(org: OrgHandle, integration: IntegrationState): Promise<CreatorInfoSnapshot | undefined>;
+
   // Publishing. Accepts ONLY approved work: the CALLER enforces §07/D-6, and the driver asserts the
   // approvalId is present so a caller that skipped the gate cannot reach a network by accident.
   schedulePost(org: OrgHandle, req: VariantDispatch): Promise<{ providerPostId: string }>;
@@ -333,7 +366,32 @@ export type PublisherRefusalCode =
   /** A dispatch arrived with no one-shot approval id (D-6). Structural, not advisory. */
   | "approval_required"
   /** A driver key that is not registered. */
-  | "unknown_publisher";
+  | "unknown_publisher"
+  // ── SMM-07 — the connect flow's own refusals. NEW tokens, deliberately, and deliberately NOT in
+  // publish-precondition.ts's `PUBLISH_REFUSAL` — that vocabulary is the D14 execution gate's, keyed
+  // to a VARIANT; these three are keyed to a (client, network) CONNECT ATTEMPT, a different question
+  // asked at a different time, by a different caller (the console's connect button, not the approval
+  // executor). Folding them into PUBLISH_REFUSAL would make one vocabulary answer two questions.
+  /** OQ-1: no `social_platform_apps` row for this network carries a live `credential_ref` (or the
+   *  one that exists is `rejected`/soft-deleted). Verified on the live engine 2026-08-19:
+   *  FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET,
+   *  TIKTOK_CLIENT_ID, YOUTUBE_CLIENT_ID are all length 0 — there is no app for OAuth to start
+   *  against, on ANY network, today. This is NOT `capability_unsupported`: the DRIVER can carry a
+   *  connect flow perfectly well; there is simply no platform app registered yet for the OAuth
+   *  dance to name. And it is NOT `network_disabled`: that is a deployment dial an operator can flip
+   *  today; this is a weeks-long non-code review (the app-review dossier) nobody can shortcut. */
+  | "platform_app_not_registered"
+  /** OQ-3 (owner decision): "own accounts proceed; client connects wait for AGPL counsel sign-off."
+   *  Thrown when the target client is not on the deployment's `ownBrandClientIds` allow-list. This
+   *  token exists to be temporary — the day counsel signs off, the check it names is deleted, not
+   *  flipped, which is also why the gate lives in config rather than a schema column (see
+   *  config.ts's `ownBrandClientIds` comment). */
+  | "client_connect_requires_signoff"
+  /** `SOCIAL_CONNECT_REDIRECT_URL` is unset. The engine's `connectUrl` needs a destination to hand
+   *  the browser back to when its OWN OAuth round trip with the network finishes; an empty string is
+   *  not a URL and must never be sent. A deployment configuration gap, same class as
+   *  `publisher_not_configured` — nothing the caller can fix by retrying. */
+  | "connect_redirect_not_configured";
 
 export class SocialPublisherError extends Error {
   constructor(

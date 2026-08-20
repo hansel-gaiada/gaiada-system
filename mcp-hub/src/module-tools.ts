@@ -13,6 +13,7 @@
 // restart. moduleToolsStatus() makes the state observable (server.ts /health + WS9 metrics) so a
 // persistent zero-tools state is never silent again.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import { registerTool, type Impact } from "./registry";
 import type { Principal } from "./principal";
 
@@ -53,7 +54,12 @@ export interface RemoteToolDef {
   description: string;
   minAssurance: "low" | "verified";
   inputSchema: Record<string, unknown>;
-  method?: "GET" | "POST" | "PATCH";
+  // Mirrors platform-nest's `McpToolDef.method`. DELETE added 2026-08-20 with `iam.revokeRoleGrant`:
+  // `callPlatform` already passed this straight to `fetch`, so the transport always supported it and
+  // only these two type declarations were narrower than reality. A def arriving over the wire is
+  // JSON.parse'd, so the old type never rejected anything at runtime — it just described it wrongly,
+  // which is the kind of lie that survives until someone trusts it.
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   pathTemplate?: string;
   write?: boolean;
   impact?: Impact;
@@ -75,9 +81,7 @@ async function callPlatform(def: RemoteToolDef, args: Record<string, unknown>, p
   const method = def.method ?? "GET";
   const { path, used } = fillPath(def.pathTemplate as string, args);
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${config.platformToken}`,
-    "x-obo-provider": principal.provider,
-    "x-obo-external-id": principal.externalId,
+    ...oboHeaders(principal, config.platformToken),
   };
   let body: string | undefined;
   if (method !== "GET") {
@@ -87,11 +91,21 @@ async function callPlatform(def: RemoteToolDef, args: Record<string, unknown>, p
     body = JSON.stringify(rest);
   }
   const res = await fetch(`${config.platformUrl}${path}`, { method, headers, body });
-  if (res.status === 401 || res.status === 403) {
+  if (!res.ok) {
+    // SMM-10: extract the platform's own typed `.error` token when the response body carries one
+    // (every platform-nest error body is `{error, code?}` — `http-error.filter.ts`/publisher-error
+    // filters both build it), for EVERY non-2xx status, not only 401/403. Before this fix, a 409-
+    // shaped domain refusal (e.g. a publish precondition failing at the SMM-10 dispatch endpoint)
+    // lost its token entirely — `executeApprovedAutomationWrite` recorded only
+    // `tool_error: platform /api/.../publish 409`, discarding exactly the information an operator
+    // reading `automation_approvals.execution_error` needs. 401/403 stay first because their default
+    // fallback text ("platform denied the request") differs from the generic one below.
     const b = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(b.error ?? "platform denied the request");
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(b.error ?? "platform denied the request");
+    }
+    throw new Error(b.error ?? `platform ${path} ${res.status}`);
   }
-  if (!res.ok) throw new Error(`platform ${path} ${res.status}`);
   return JSON.stringify(await res.json());
 }
 

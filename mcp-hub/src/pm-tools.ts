@@ -17,6 +17,7 @@
 // configured ops lead (`NOTIFY_USER_ID`, already reused by the pre-existing report/scope STUB
 // notifies) as an honest placeholder — not a fabricated per-run lookup.
 import { config } from "./config";
+import { oboHeaders, type OboSubject } from "./obo-headers";
 import { registerTool } from "./registry";
 import type { Principal } from "./principal";
 
@@ -28,14 +29,12 @@ import type { Principal } from "./principal";
 // mockup)`) — that text lives ONLY in `{error}`, the filter has already discarded any structured
 // field, so a generic `platform ${path} 409` would silently swallow the one thing that makes the
 // refusal actionable. An agent that can't see "blocked by X" retries forever; this is the fix.
-async function platformSend(method: "POST" | "PATCH", path: string, body: unknown, principal: { provider: string; externalId: string }): Promise<string> {
+async function platformSend(method: "POST" | "PATCH", path: string, body: unknown, principal: OboSubject): Promise<string> {
   const res = await fetch(`${config.platformUrl}${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
     body: JSON.stringify(body),
   });
@@ -79,9 +78,7 @@ async function platformSend(method: "POST" | "PATCH", path: string, body: unknow
 async function platformGetPm(path: string, principal: Principal): Promise<string> {
   const res = await fetch(`${config.platformUrl}${path}`, {
     headers: {
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
   });
   if (res.status === 401 || res.status === 403) {

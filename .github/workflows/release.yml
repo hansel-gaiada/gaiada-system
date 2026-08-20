@@ -46,6 +46,12 @@ jobs:
           - platform-nest
           - platform-ui
           - report-renderer
+          # MON-09f. Unlike every other entry this does NOT live at ./<component> - see the
+          # `context:` expression below. It is here because deploy.yml runs `up -d --no-build`:
+          # a service that exists only as a local `build:` has no image to start, so the deploy
+          # dies at that service. It was previously kept alive by an image built BY HAND on the
+          # box, which survives exactly until the box is rebuilt.
+          - synthetic-prober
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/gaiada-${{ matrix.component }}
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -66,7 +72,11 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.component }}
+          # Every component is a top-level directory EXCEPT synthetic-prober, which belongs to the
+          # observability stack and lives under infra/. Handled with an expression rather than by
+          # turning `component` into an object, because `matrix.component` must stay a flat string:
+          # the GHCR prune step below builds `package-name: gaiada-${{ matrix.component }}` from it.
+          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || format('./{0}', matrix.component) }}
           push: true
           tags: ${{ env.IMAGE }}:${{ env.TAG }}
           provenance: false # we attach a richer SLSA attestation below

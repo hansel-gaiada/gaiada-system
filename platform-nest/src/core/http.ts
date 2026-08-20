@@ -5,6 +5,7 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
+import { currentVia } from "./request-context";
 import { auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
@@ -24,6 +25,27 @@ export async function authorize(principal: Principal, resource: Resource, action
   }
 }
 
+/**
+ * The audit row. ONE choke point, which is why [agent-attribution-gate]'s interim fix lands here.
+ *
+ * ── `via` IS STAMPED AMBIENTLY, NOT PASSED ───────────────────────────────────────────────────────
+ * `actor_id` stays exactly what it was: the HUMAN. Authority, permission and accountability are
+ * theirs, Cerbos decided on them, and an agent can never do what its principal could not. The agent
+ * is recorded ALONGSIDE, in `metadata.via` — the owner's `Co-Authored-By` framing, where author and
+ * co-author are different fields and the co-author never displaces the author.
+ *
+ * It comes from request context rather than a seventh parameter because this function has 263 call
+ * sites. Threading it would have been ~229 mechanical edits AND would have made attribution opt-in —
+ * and the failure mode of an opt-in audit field is that the site somebody forgets is the site that
+ * mattered, with nothing failing when they forget. See `core/request-context.ts`.
+ *
+ * Outside a request scope (a consumer loop, a sweep, a unit test) `currentVia()` is undefined and this
+ * writes precisely the row it always did. An attribution mechanism must never be able to break a
+ * write; the most it may do is add nothing.
+ *
+ * A caller that passes its own `metadata.via` WINS — the executor re-driving an approved write knows
+ * the original filing channel, which is better provenance than the channel of the retry.
+ */
 export async function writeActivity(
   tenantId: string,
   actorId: string | null,
@@ -32,11 +54,13 @@ export async function writeActivity(
   entityId: string,
   metadata: Record<string, unknown> = {},
 ): Promise<void> {
+  const via = currentVia();
+  const withVia = via && metadata.via === undefined ? { ...metadata, via } : metadata;
   await withTenants([tenantId], (c) =>
     c.query(
       `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [newId(), tenantId, actorId, verb, entityType, entityId, JSON.stringify(metadata), config.originSite],
+      [newId(), tenantId, actorId, verb, entityType, entityId, JSON.stringify(withVia), config.originSite],
     ),
   );
 }

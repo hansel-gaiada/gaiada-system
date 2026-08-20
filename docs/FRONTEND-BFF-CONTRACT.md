@@ -1535,6 +1535,26 @@ Portal view for client-submitted change requests + staff triage queue.
 | ⛔ | GET | `/api/:t/modules/webdev/provisioned-sites/:id` | `SiteDto` (single row). Authz: `webdev_provisioned_site` read. |
 | ⛔ | POST | `/api/:t/modules/webdev/provisioned-sites/:id/reconcile` | `{} → SiteDto`. Re-drive the poller synchronously; same logic as `POST /provision` detached poll but on-demand and blocking. Authz: `webdev_provisioned_site` reconcile (different action, can cause egress). |
 
+### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend, NO UI yet (SMM-32 next)**
+
+The client's own decide half of §19's client-review stage; the staff ask/read/withdraw half lives on
+`modules/social/social.controller.ts` (§19). Modelled on §16's own gate-decide pattern
+(`PortalController.decideGate`) — addressed by the REVIEW's own id, ownership resolved before a
+guarded UPDATE. `social_post_client_reviews` is the ONE plain-tenant-wall table in the social
+module (D-16 restates 0088's D-2a lesson: a third-walled table here would read as zero rows on
+every portal query, since portal controllers declare no module scope). Available to every ACTIVE
+contact regardless of `capability` (signer or viewer) — same ratified reasoning `request_change` and
+`update_profile` already carry: approving a draft post is weaker than signing a scope agreement or
+recording a payment.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/social-reviews?status=` | `{id, status, comment, requestedAt, decidedAt, variantId, body, media, settings, scheduledAt, network, postTitle}[]`. Caller's own client's reviews only, newest-first, capped 200. Authz: `portal` read. |
+| ✅ | POST | `/api/:t/portal/social-reviews/:id/decide` | `{decision:'approved'\|'changes_requested', comment?}` → `{id, status, alreadyDecided?}`. Stamps `reviewedArgsSha256` from the variant's LIVE hash at the moment of decision (so a later edit is detectably `stale`, D-15 restated for the client's side). **Idempotent**: the SAME decision replayed is a 200 no-op (`alreadyDecided:true`, no duplicate event/notification); a DIFFERENT decision after the review is already resolved is a genuine **409** (`client_review_already_decided`), never a silent flip. Unknown/out-of-scope review id is a **404** (existence-oracle-safe — never distinguishes "not yours" from "does not exist"). Authz: `portal` `approve_post`. Emits `social.client_review.decided`, notifying the engagement owner. |
+
+Not a signing act: `approve_post` carries no `requireSigner()` gate, matching `request_change`'s own
+ratified reasoning (§16f) — do not add one "for consistency" with `sign`/`pay`.
+
 ---
 
 ## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**
@@ -2749,7 +2769,7 @@ therefore reuses T3b's existing confirm-chip machinery end to end rather than ad
 
 ---
 
-## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05 backend built; NO UI yet)**
+## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05/09/10/31 backend built; NO UI yet)**
 
 Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addendum-2026-08-12.md`
 (binding)**. Schema `migrations/0105_module_social.sql`; IAM registration `0106` + eight
@@ -2865,8 +2885,9 @@ debugging round; its own test caught it.)
 
 **Publisher seam + connector registry (SMM-05).** Cerbos kind `social_account`. This is the
 `SocialPublisher` port's console surface — the mapping publishing will ride on, the registry that
-mirrors it, and a status read that keeps answering while the engine is down. **There is still no
-publish endpoint**; `social.post.publish` and the D14 executable-approval entry are SMM-09's.
+mirrors it, and a status read that keeps answering while the engine is down. The D14
+executable-approval entry and the gate's read surface are SMM-09's, immediately below; the DISPATCH
+endpoint (`schedulePost` + the transactional stamp) is still SMM-10's and does not exist yet.
 
 | Method + path | Permission | Notes |
 |---|---|---|
@@ -2874,6 +2895,8 @@ publish endpoint**; `social.post.publish` and the D14 executable-approval entry 
 | `POST publisher-orgs` | `social.account.connect` | Body `{clientId, publisherOrgRef, apiKeyRef?, driver?}`. **Idempotent**: a repeat with the same org ref answers `created:false`. The organization is created by an operator ON THE PUBLISHER HOST (its API has no such route) — this records the mapping. `apiKeyRef` is an **alias**, never a key. Returns `{publisherOrgId, clientId, driver, publisherOrgRef, apiKeyRef, created, verification}`. |
 | `POST publisher-orgs/:clientId/sync` | `social.account.update` | Mirrors the engine's integrations into the registry: status, live quota, resolved capabilities, health. Returns `{orgId, accounts[], skipped[], disconnected[]}`. |
 | `GET publisher/status` | `social.account.read` | What the seam can do in THIS deployment, **without calling it**: `{configured, driver, enabledNetworks[], capabilities[], inboxSurface, quotaProbe, orgs[]}`. Consult it before spending a call on a capability that may be absent. |
+| `GET publisher-orgs/:clientId/connect/:network` | `social.account.read` | **BUILT (SMM-07).** Read-only, never calls the publisher: may this (client, network) start a connect attempt right now, and if not, why. Returns `{ok, reason?, detail?}`. Render a disabled connect button with the EXACT reason the POST below would refuse — never guess separately from it. |
+| `POST publisher-orgs/:clientId/connect` | `social.account.connect` | **BUILT (SMM-07).** Body `{network, handle}` — `handle` is the account handle the AGENCY already knows (e.g. the client told us `@acmebrand`); it is never discovered from the engine, because at this instant the engine has not been told about the account at all. **Idempotent/resumable** on `(client, network, handle)` (0105's own unique index): a human who closes the tab and comes back later resumes the SAME pending row (`resumed:true`), never a duplicate. Returns `{accountId, status:"pending", connectUrl, resumed}`. The pending row converges to `connected` the next time `sync` (above) observes the SAME `(network, handle)` from the engine — no separate "complete the connection" endpoint exists or is needed. |
 
 Four behaviours a console (and an agent) must render honestly rather than smooth over:
 
@@ -2906,6 +2929,26 @@ driver is deployed, deliberately not a retryable 503) · `org_key_unresolved` (5
 `approval_required` (409). Plain 400 tokens on these routes: `invalid_client`,
 `missing_publisher_org_ref`, `unknown_driver`.
 
+**The connect flow's own two refusals (SMM-07), both new and both explained on the `GET
+.../connect/:network` read before a console ever has to guess:**
+
+- **`platform_app_not_registered` (409).** No `social_platform_apps` row for that network carries a
+  live `credential_ref`. Verified on the live engine 2026-08-19: `FACEBOOK_APP_ID`,
+  `FACEBOOK_APP_SECRET`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `TIKTOK_CLIENT_ID`,
+  `YOUTUBE_CLIENT_ID` are all length 0 — **no account can be connected today, on any network, for
+  any client, including our own brand**, until the OQ-1 app-review dossier lands at least one
+  approved app per network. Render this as "not connectable yet: no platform app is registered", not
+  as a broken button and not as an empty list.
+- **`client_connect_requires_signoff` (409).** OQ-3 (owner decision): own-brand accounts proceed,
+  client accounts wait for AGPL counsel sign-off. Driven by a deployment-level allow-list
+  (`SOCIAL_OWN_BRAND_CLIENT_IDS`), empty by default — so with no configuration at all, the honest
+  default is that EVERY client refuses, including a would-be "own brand" one nobody has listed yet.
+- **`connect_redirect_not_configured` (503).** `SOCIAL_CONNECT_REDIRECT_URL` is unset — a deployment
+  configuration gap, same shape as `publisher_not_configured`, nothing the caller can fix by
+  retrying.
+
+Plain 400 tokens on the connect POST: `invalid_client`, `unknown_network`, `missing_handle`.
+
 **MCP surface** (`GET /mcp/tool-defs`, aggregated — nothing hub-side is hardcoded):
 `social.listEngagements`, `social.getEngagementScope` (reads, `low`),
 `social.createEngagement` (write, impact `low`), `social.setEngagementScope` (write, impact
@@ -2915,10 +2958,86 @@ impact `low` — every one writes a draft row or a knowledge pointer, none can r
 same `authorize()` calls as their HTTP twins above), and SMM-05's `social.listAccounts` /
 `social.getPublisherStatus` (reads, `low`), `social.provisionPublisherOrg` (write, impact
 **`medium`** — it is the tenant-mapping row whose corruption is the wrong-account-publish nightmare)
-and `social.syncConnectorRegistry` (write, impact `low` — mirrored state only, nothing public). The
-publish, inbox, report and ledger tools are deliberately NOT declared yet: their endpoints do not
-exist, and a tool the hub publishes to every agent without a handler behind it is this program's
-"frontend-first drift" bug pointed at automation instead of a console.
+and `social.syncConnectorRegistry` (write, impact `low` — mirrored state only, nothing public), plus
+SMM-09's `social.checkPublishPreconditions` (read, `low`). The publish, inbox, report and ledger
+tools are deliberately NOT declared yet: their endpoints do not exist, and a tool the hub publishes
+to every agent without a handler behind it is this program's "frontend-first drift" bug pointed at
+automation instead of a console. **`social.publishPost` is registered in the D14 executable-approval
+registry but is NOT declared as an MCP tool** until SMM-10 builds the dispatch endpoint it would
+front; `social.publishPostMetered` is BARRED and must never be declared at all.
+
+**The publish gate (SMM-09) — BUILT.** Cerbos kind `social_post`. This is the D14
+executable-approval spine SMM-10/17/22/31 consume. Design: addendum D-14 (publish executes on
+approval, money split out of that path), D-15 (`payload_hash` IS `argsSha256`), D-22 (owner decision
+2026-08-18 — the composer's explicit selections ARE the TikTok creator consent, and `creator_info`
+is re-verified at dispatch).
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `GET variants/:variantId/publish-preconditions` | `social.post.read` | **A dry run of the D14 execution precondition — it publishes nothing, consumes no approval and makes no network call.** Runs the EXACT function the approval executor runs, so a console's "why can't this publish" cannot drift from what execution will actually say. Returns `{ok, stage?, reason?, stages[], tool, meteredTool}`. A refusal is DATA with a **200** (it is a successful answer to the question asked); an unknown variant is a **404**; a principal with no social grant is a **403**, never `ok:false`. Read-tier on purpose: asking whether a publish would be allowed is not publishing, and `social.post.publish` stays manager-tier. |
+
+**The refusal vocabulary — a CONTRACT, not log text.** The same snake_case tokens appear in this
+endpoint's `reason` and in `automation_approvals.execution_error` after the `precondition_failed: `
+prefix. Evaluated strictly in this order, and the first refusal wins:
+
+| Stage | Tokens |
+|---|---|
+| `scope` | `variant_not_found` · `cross_client_account` · `account_not_connected` · `network_disabled` · `network_not_in_scope` · `engagement_inactive` · `metered_network_requires_metered_tool` |
+| `quota` | `quota_exhausted` · `media_rules_failed` |
+| `hash` | `args_hash_mismatch` |
+| `unconsumed` | `already_dispatched` · `approval_already_consumed` · `variant_not_approved` |
+| `budget` | `budget_exceeded` |
+| `creator_info` | `creator_info_unverified` · `creator_selection_no_longer_permitted` |
+
+Five properties a console (and every downstream ticket) must not smooth over:
+
+- **Edit invalidates approval, structurally.** The approval is bound to `args_sha256`. Any content
+  edit moves the hash, so the grant stops matching and the publish refuses `args_hash_mismatch` —
+  this is a property of the hash, not a rule someone remembered to enforce. `PATCH variants/:id`
+  already answers `approvalInvalidated: true`; this is the other end of the same fact.
+- **Replay is refused twice over.** The approval's own single-use claim stops one row executing
+  twice; the VARIANT's `provider_post_id` / `approval_id` stops a SECOND approval publishing the same
+  content (`already_dispatched` / `approval_already_consumed`).
+- **An ambiguous failure is NEVER auto-retried.** A publish whose outcome is unknown
+  (`hub_unreachable`, `tool_error`) may already be on a client's public feed. The row lands `failed`,
+  both principals are notified at severity `warning`, and only a HUMAN pressing Retry (which re-takes
+  the lock and re-runs this precondition) moves it. The tenant's `automation.approvalRetry.autoRetryCount`
+  setting does NOT apply to a publish — the tool's policy outranks it.
+- **`quota_unknown` is still only a warning.** An unsynced registry must never read as an exhausted
+  account; only a live counter at or over its cap refuses.
+- **TikTok fails closed on consent (D-22).** A TikTok variant refuses `creator_info_unverified`
+  unless a dispatch-side `creator_info` verification is available, and
+  `creator_selection_no_longer_permitted` when the creator's live settings no longer permit the
+  approved selections. Neither is auto-retried. SMM-10 installs the verifier; the hook and its typed
+  reasons are SMM-09's.
+
+**The D-14 money split, at the tool surface.** `social.publishPost` (the $0 path) is the registered
+executable; `social.publishPostMetered` (any metered network — X, which ships disabled in every
+scope) is **BARRED**: it is absent from the executable registry and from
+`cerbos/policies/resource_mcp_tool.yaml`'s executable-tool list, so an approved row for it stays
+`execution_status='not_applicable'` forever. Belt and braces, the free tool's own precondition
+refuses a metered-network variant with `metered_network_requires_metered_tool` rather than spending.
+
+**Client review stage (SMM-31, D-16) — BUILT, backend only.** Cerbos kind `social_client_review`
+(staff side) / `portal` action `approve_post` (client side — see §16g). NOT a 7th stage in the table
+above: `PUBLISH_PRECONDITION_STAGES` is unchanged and pinned. When the caller's variant resolves to
+an engagement with `toolScope.posting.requiresClientOk` set, `GET .../publish-preconditions` (and
+the D14 executor, and SMM-10's dispatch) now check client sign-off FIRST, reporting
+`stage:"client_review"` with its own small vocabulary — kept apart from the table above the same way
+`DISPATCH_REFUSAL` is kept apart from it.
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `POST variants/:variantId/client-review` | `social.client_review.request` | Ask the client to sign off. **Idempotent upsert** — 0105's `UNIQUE(variant_id)` means one review row per variant forever; re-asking from ANY prior state (including after `withdrawn`/`changes_requested`, or after an edit staled a prior `approved`) resets the SAME row to `pending`. A repeat call while already `pending` is a no-op (`alreadyPending:true`, no duplicate event/notification). Returns `{id, status:'pending', alreadyPending}`. |
+| `GET variants/:variantId/client-review` | `social.client_review.read` | `{status:'not_requested'}` when nobody has ever asked — data, not a 404 (a variant that never needed sign-off is a legitimate steady state). Otherwise `{id, status, comment, reviewedArgsSha256, requestedAt, decidedBy, decidedAt}`. |
+| `POST variants/:variantId/client-review/withdraw` | `social.client_review.withdraw` (**manager-tier**) | Retract a pending ask. Idempotent: withdrawing an already-withdrawn review is a 200 no-op, never an error. 404 if no review was ever requested; 400 `client_review_not_pending` if it is already `approved`/`changes_requested` (use `request` to re-ask instead of trying to withdraw a decision). |
+
+Refusal tokens (`CLIENT_REVIEW_REFUSAL`, reported as `stage:"client_review"` on the dry-run/dispatch
+paths above): `client_review_not_requested` (requiresClientOk is set, nobody has ever asked) ·
+`client_review_pending` · `client_review_changes_requested` · `client_review_withdrawn` ·
+`client_review_stale` (the client approved, but the content changed since — `reviewedArgsSha256` no
+longer matches the variant's live `argsSha256`; D-15's edit-invalidates-approval rule, restated for
+the client's own side of the same content).
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,
@@ -2943,18 +3062,18 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 
 | Method | Path | Scope / gate | Returns | Status |
 |---|---|---|---|---|
-| GET | `/api/:t/monitoring/monitors?clientId&kind&status` | `monitoring.read` | `Monitor[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors?clientId&kind&status` | `monitoring.read` | `Monitor[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/monitors` | `monitoring.write` | `{ id }` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ✅ BUILT |
 | PATCH | `/api/:t/monitoring/monitors/:id` | `monitoring.write` | `{ id }` | ⏳ PENDING |
 | GET | `/api/:t/monitoring/monitors/:id/results?window=24h\|7d\|30d` | `monitoring.read` | `MonitorResult[]` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/incidents/:id/ack` | `monitoring.ack` | `{ id }` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ✅ BUILT |
+| GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ✅ BUILT (from the driver registry) |
+| GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/maintenance` | `monitoring.write` | `{ id }` | ⏳ PENDING |
-| POST | `/api/:t/monitoring/heartbeat/:token` | **unauthenticated by design** (token IS the credential) | `204` | ⏳ PENDING |
+| POST | `/api/monitoring/heartbeat/:token` | **unauthenticated by design** (token IS the credential) | `{ok:true}`, always | ✅ BUILT — NOTE the path has NO `:t`: there is no principal, so no tenant to scope by; the token identifies the row |
 | GET | `/api/:t/monitoring/channels` | `monitoring.read` | `MonitorChannel[]` | ⏳ PENDING |
 | POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.write` | `{ ok }` | ⏳ PENDING |
 | GET | `/api/:t/monitoring/routes` | `monitoring.read` | `MonitorRoute[]` | ⏳ PENDING |
@@ -3007,3 +3126,282 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 - DEMO_MODE fixtures: `lib/demoMonitoring.ts` — seeded with a down/degraded/stale/maintenance/
   unknown/never-checked spread plus expiring cert and domain, so every branch is drivable with no
   backend. Wired into `demoFixtures.getDemoResponse`.
+
+---
+
+## IAM Phase 2 — employees + joiner/mover/leaver (P2-06, 2026-08-18)
+
+**Status:** PROTOTYPED / DEV-VERIFIED against `gaiada-test-pg` + a restarted test Cerbos
+(`src/admin/employees-jml.test.ts`, 14/14, driven through `app.inject()` — not by calling the
+controller). No UI consumer exists yet; P2-10 (HR console) is the intended one.
+
+Design: `docs/superpowers/plans/2026-08-13-iam-phase2-design.md` §4–§5. Backend:
+`platform-nest/src/admin/employees.controller.ts`. Migration: `0111` (the joiner's natural key).
+
+| Method + path | Cerbos (kind · action) | Notes |
+|---|---|---|
+| `GET /api/:tenantId/hr/employees?status=` | `employee · read` | `{ employees: Employee[] }`. `status` ∈ `pending_start`\|`active`\|`on_leave`\|`suspended`\|`terminated`; unknown ⇒ 400. |
+| `GET /api/:tenantId/hr/employees/:employeeId` | `employee · read` | Employee + `seats[]` (`assignmentId`, `positionId`, `title`, `unitNodeId`, `validFrom`, `validTo`, `current`). |
+| `POST /api/:tenantId/hr/employees` | `employee · create` **+ `position · assign`** when `positionId` is given | 201. Joiner. Body: `displayName` (required), `workEmail`, `legalName`, `personalEmail`, `phone`, `hireDate`, `notes`, `managerUserId`, `positionId`, `startDate`. Returns the employee plus `reconciled: {granted, revoked} \| null`. |
+| `PATCH /api/:tenantId/hr/employees/:employeeId` | `employee · update` | Record edits only. `employmentStatus: "terminated"` is **refused** (400) — termination is a flow, not a field. |
+| `DELETE /api/:tenantId/hr/employees/:employeeId` | `employee · delete` | Soft delete. **Refused (400) while the person holds an open seat** — terminate first. |
+| `POST /api/:tenantId/hr/employees/:employeeId/transfer` | `employee · update` **+ `position · assign`** (incoming) **+ `position · unassign`** (every outgoing seat) | Mover. Body `{ toPositionId, effectiveDate?, reason? }`. Returns `closedAssignmentIds`, `assignmentId`, `reconciled`. Already-held seat ⇒ `{ ok: true, unchanged: true }`. |
+| `POST /api/:tenantId/hr/employees/:employeeId/terminate` | `employee · update` **+ `position · unassign`** per open seat | Leaver. Body `{ lastDay?, reason? }`. Returns `closedAssignmentIds`, `revokedManualGrants[]` (the audited list §5.3 requires), `userDisabled`, `itFollowUp` (`"disable_login"` \| `null`). |
+
+**Error shape** is the platform-wide `{ error: "<message>" }` (`http-error.filter.ts`) — **not**
+`{ message }`. Two consumers have already been written against the wrong one; check this row first.
+
+### ⚠ Three behaviours a consumer must render, not assume
+
+1. **HR runs the whole flow (owner decision 2026-08-18) — but `hr_staff` does not.**
+   `hr_people_ops` now holds `position.assign`/`.unassign` (`0112`), so an `hr_manager` can hire with
+   placement, transfer and terminate. `hr_people_ops` resolves to **`hr_manager` alone**, so an
+   `hr_staff` caller still gets **201 on a record-only hire and 403 the moment `positionId` is
+   present**. Gate the placement fields on `position.assign` reach (via the IAM-05c effective-permission
+   endpoint), never on "is this user in HR" — the two are not the same set.
+   ⚠ ~~A dept head's assignment is slated to become a REQUEST rather than a direct write~~ — **SHIPPED,
+   and P2-11/P2-12-FE are built around it (2026-08-19).** A dept head calling `assign` gets
+   `assignment_request_required`; the UI treats that as GUIDANCE, not an error, and renders a "Propose
+   instead" control aimed at `POST /positions/:id/assignment-requests` with the same person prefilled.
+   Anyone building another placement surface must do the same: the refusal is the mechanism telling the
+   operator what to do, and rendering it red teaches them the system is broken when it is working.
+2. **No future-dated JML.** `startDate`/`effectiveDate`/`lastDay` in the future ⇒ 400. The reconciler
+   resolves on `valid_to IS NULL` with no as-of axis, so a future date would apply *now* while the
+   record claimed otherwise. Scheduled JML is deferred, not silently approximated.
+3. **A candidate with no `positionId` gets NO `users` row** (`userId: null`, `pending_start`) — so a
+   console must not assume every employee is a principal, and must not offer login actions for one.
+
+### Events emitted
+
+`employee.hired`, `employee.transferred`, `employee.terminated`, `employee.record_deleted`,
+`position_assignment.created`, `position_assignment.closed`, plus `org_structure.updated` from the
+shared blob pipeline. The position reconciler already consumes the `position_assignment.*` pair
+(P2-05), and these flows are its first producer; the flows ALSO reconcile in-band so the HTTP
+response reflects committed reality rather than an eventual one.
+
+---
+
+## IAM Phase 2 — positions + role grants (P2-12 backend, P2-08 part A, 2026-08-18)
+
+**Status:** PROTOTYPED / DEV-VERIFIED (`positions-controller.test.ts` 11/11,
+`role-grants-controller.test.ts` 14/14, both via `app.inject()` against real Postgres + Cerbos).
+**CONSUMED as of 2026-08-19** by P2-11 (`/organization/access`) and P2-12-FE (`/organization/positions`).
+
+Three things a future consumer of these endpoints must copy rather than re-decide, because each one is a
+place the obvious implementation is wrong:
+
+1. **`attachable-roles` is never filtered.** Unattachable roles come back WITH a reason and must render
+   disabled-with-reason. The server owns the allow-list; a UI that drops the refusals turns a stated
+   boundary into an invisible one and leaves "why can't I attach that role?" unanswerable.
+2. **`scope: "subtree"` is not a label, it is a warning.** It means the server narrowed the list to the
+   caller's own lead units. Render it as the whole company and you have told a department head that seats
+   they cannot see do not exist. Both pages show a banner.
+3. **A grant with `revocable: false` gets NO revoke control at all** — not a disabled one. The reconciler
+   would restore it, and the operator would conclude the UI lied. Show its `source` instead.
+
+### Positions — `platform-nest/src/admin/positions.controller.ts`
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `GET /api/:tenantId/positions` | `position · read` | `{ positions[], scope: "tenant" \| "subtree" }`. A dept head (`org_unit_lead`) gets **only their subtree** and `scope: "subtree"`; each row carries `roleSet[]`, `currentHolders`, `orphaned`. |
+| `GET /api/:tenantId/positions/attachable-roles` | `position · read` | The composer's option list: `{ roleId, role, attachable, reason }`. Unattachable roles are **returned with a reason**, not omitted — render them disabled. |
+| `POST /api/:tenantId/positions` | `position · create` | `{ unitNodeId, title, isLead?, roles?: [{roleId, scopeKind}] }`. `unitNodeId` must exist in the org blob (400 otherwise). |
+| `PATCH /api/:tenantId/positions/:positionId` | `position · update` | `{ title?, isLead?, unitNodeId? }`. Moving the unit re-reconciles every holder. |
+| `POST /api/:tenantId/positions/:positionId/retire` | `position · retire` | Closes every open assignment and reconciles; a retired seat cannot be assigned (400). |
+| `POST /api/:tenantId/positions/:positionId/roles` | `position · update` | Attach one role. Three bounds: denied-role registry, `uiGrantable` allow-list, and 0109's guard trigger. |
+| `DELETE /api/:tenantId/positions/:positionId/roles/:roleId` | `position · update` | Detach — **revokes from every current holder** immediately, not at the next sweep. |
+| `POST /api/:tenantId/positions/:positionId/assign` | `position · assign` | `{ userId, validFrom?, reason? }`. Idempotent. Self-assign is a **403** (structural Cerbos DENY). Target must be an active member. |
+| `POST /api/:tenantId/positions/:positionId/unassign` | `position · unassign` | `{ userId }`. |
+
+### Role grants — `platform-nest/src/admin/role-grants.controller.ts`
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `GET /api/:tenantId/role-grants?userId=` | `role_grant · read` | Each grant carries `source` (`manual` \| `position` \| `service_assignment`), `expiresAt`, `originApprovalId`, `revocable`. |
+| `POST /api/:tenantId/role-grants` | `role_grant · create` | `{ userId, roleId, scopeType?: "company"\|"org_unit", scopeId?, temporary?, expiresInDays?, reason? }`. `global`/`project` are refused on this surface. |
+| `DELETE /api/:tenantId/role-grants/:grantId` | `role_grant · revoke` | Refused (400 `managed_grant_not_revocable`) for position- or service-managed grants. |
+
+### ⚠ Refusal tokens a consumer must handle (all 400 unless noted)
+
+`elevated_role_forbidden` · `not_ui_grantable` · `ceiling_exceeded` · `override_required` ·
+`managed_grant_not_revocable` · `self_grant_forbidden` (self-target is normally a **403** from Cerbos,
+which fires first) · `denied-role registry` on position role attach.
+
+**`override_required` is the one to design for:** a dept head granting a role with above-baseline
+sensitive permissions is refused, because the routed-override mechanism (`decide_override`) is not
+built. The UI should offer "ask a company administrator", not a retry.
+
+**Unplaced targets:** a member with no org-unit placement has empty ancestry, so only company_admin and
+above can grant to them. That is fail-closed by design, not a bug — surface it as "place this person in
+the org chart first".
+
+### 20.1 Plane A admin console — `GET /api/admin/observability` — **BACKEND ✅ BUILT, UI ✅ WIRED (MON-09i, 2026-08-18)**
+
+Shapes canonical in `platform-ui/src/lib/observability.ts`, mirrored by
+`platform-nest/src/admin/observability.controller.ts`.
+
+| Method | Path | Gate | Returns | Status |
+|---|---|---|---|---|
+| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `ObservabilitySnapshot` | ✅ BUILT |
+
+This is **Plane A** — our own box — and is the deliberate exception to §20's tenancy rules: there is
+nothing per-tenant to scope, so it is admin-gated instead of Cerbos/RLS-scoped, and it must never be
+exposed to a tenant. It exists because Plane A telemetry was collected for weeks and displayed
+nowhere (all four Grafana dashboards are application-level; none reads a `node_*`, `container_*`,
+`pg_*` or `redis_*` series), which is how a completely broken datastore exporter went unnoticed.
+
+Contract notes:
+
+1. **`available:false` is a first-class answer**, returned with a `reason` when `PROMETHEUS_URL` is
+   unset or Prometheus is unreadable. The UI prints the reason. It must never be conflated with a
+   healthy box.
+2. **Every metric is a `Reading` with `value: number | null`** — `null` means "asked, got nothing"
+   and renders as `—`. Do not coerce a missing series to `0`; a zeroed CPU reads as an idle server.
+3. **`alerts` excludes `Watchdog`.** It always fires by design (D15), so including it would show a
+   permanent red on a healthy box — the fastest way to teach operators to ignore the list.
+4. **`targets.up` is scrape health, not check validity.** A target is "up" when the exporter answers;
+   it says nothing about whether the thing being measured is reachable. That distinction is why the
+   response carries `datastores` separately — `pg_up`/`redis_up` were 0 for weeks while both targets
+   showed green.
+5. **Disk queries must stay identical to the `DiskSpaceLow` alert expression.** The console and the
+   pager reading different series is worse than having only one of them.
+
+---
+
+## IAM Phase 2 — the routed override (P2-08 part B, 2026-08-19)
+
+**Status:** PROTOTYPED / DEV-VERIFIED (`override-request-decide.test.ts` 16/16 through `app.inject()`
+against real Postgres + a restarted Cerbos). Migration `0115`. **CONSUMED as of 2026-08-19 by P2-11**
+(`platform-ui/src/app/(app)/organization/access/page.tsx` + `components/iam/PersonAccess.tsx`). The
+override request is offered TWO ways there, deliberately: attached to a refused direct grant (the server
+returns `ceiling_exceeded`/`override_required` and the UI renders the follow-up rather than an error), and
+standalone — somebody who already knows the grant is above their ceiling should not have to trip over the
+wall to find the door.
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `POST /api/:tenantId/role-grants/overrides` | `role_grant · create` (on the TARGET, with server-derived ancestry) | `{ userId, roleId, scopeType?, scopeId?, expiresInDays?, justification }`. **`justification` is required** — 400 without it. Returns `{ approvalId, routedTo, expiresInDays, decideVia }`. |
+| `POST /api/:tenantId/automation-approvals/:id/decide` | `automation_approval · decide_override` (for `origin='iam'` rows) | The EXISTING inbox endpoint — no new decide route. On `approved`, response gains `override: { grantId, expiresAt }`. Non-IAM approvals are byte-unchanged and carry no `override` key. |
+
+### What a consumer must render
+
+- **`routedTo`** is `"hr_manager"` or `"company_admin"` — tell the requester who it went to, because
+  they cannot decide it themselves and will otherwise wait on the wrong person.
+- **The direct-grant refusal now names this route.** `POST /role-grants` returns
+  `override_required: … Route it as an override request instead: POST /api/:t/role-grants/overrides
+  with a justification`. Offer that action, not a retry.
+- **An override never widens SCOPE.** The requester still needs `role_grant · create` on the target, so
+  a dept head cannot request one for somebody outside their subtree (403), and a non-member target is a
+  400. It routes past the sensitivity bound only.
+- **Requester ≠ decider is a 403 from Cerbos**, including for `platform_admin`. If your UI shows a
+  decide button on the requester's own row, it will 403 — hide it.
+- **Expiry**: default 90 days (`§12 Q4`), max 365, refused (not clamped) outside that. The granted row
+  carries `expires_at` and `origin_approval_id`, and `assemblePrincipal()` stops resolving it the
+  moment it expires — so a UI listing "temporary access" can trust the timestamp.
+- ⚠ **A `company_admin` cannot approve an `hr_manager` override** — they genuinely lack three
+  `hr_people_ops`-only appraisal keys, so the ceiling refuses at execution with `ceiling_exceeded`.
+  That is why routing exists; surface `routedTo` rather than letting an admin try and fail.
+
+### Dept-head assignment requests (§11.2's owner end-state, 2026-08-19)
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `POST /api/:tenantId/positions/:positionId/assign` | `position · assign` | **Behaviour change:** a DEPT HEAD now gets `400 assignment_request_required` naming the request path. HR (`hr_people_ops`) and `company_admin` still assign directly. |
+| `POST /api/:tenantId/positions/:positionId/assignment-requests` | `position · assign` (same reach, including the self-assign DENY) | `{ userId, justification }` — justification required. Returns `{ approvalId, decideVia }`. |
+| decide (existing inbox) | `automation_approval · decide_assignment` (**not** `decide_override` — split 2026-08-19) | On approve the response carries `iam: { kind: "position_assign", assignmentId, reconciled }`. |
+
+⚠ The decide response's `override` key was renamed to **`iam`** when overrides and assignment requests
+started sharing one execution seam — `iam.kind` is `"override"` or `"position_assign"`. Non-IAM
+approvals still return `{ id, status }` with no `iam` key at all.
+
+**For the dept-head page (P2-11):** render "Request placement" rather than "Assign" when the caller
+lacks tenant-wide `position · assign`, and surface the returned `approvalId` so the lead can follow it.
+A stale request whose position was retired before approval fails at decide time with a `stale` message
+— show that to the approver, not to the requester.
+
+### 20.2 Implementation notes that change how a caller should read these (2026-08-19)
+
+* **`uptime24h` / `uptime30d` are `null`, not `0`.** MON-12's runner has not landed, so nothing has
+  computed them. The UI renders null as `—` and 0 as `0.00%` — "not computed" must never read as "down
+  all day".
+* **`lastSweepAt` is `null` until the runner reports.** The board prints "the runner has not reported a
+  sweep yet" rather than implying freshness it cannot vouch for.
+* **`MonitorDetail.config` is always `null` today.** It can hold secret *references* and
+  `monitoring.read` is a broad grant, so it is redacted at the boundary rather than filtered per-field.
+* **An unknown `kind` filter is a 400, not an empty list.** `[]` would look like "no monitors of that
+  type" and hide the typo.
+* **The heartbeat endpoint always answers `{ok:true}`, matched token or not.** A 404 on a bad token
+  turns it into an oracle for enumerating valid ones. It compares SHA-256 hashes with
+  `timingSafeEqual`, and the token is only ever stored hashed — a plain SQL `=` on a secret is a
+  timing oracle, and clear storage would make a DB read equivalent to forging any job's liveness.
+* **A heartbeat arriving CLOSES an open incident.** The ping *is* the recovery signal; leaving it open
+  would make a human close something that already resolved itself.
+
+---
+
+## IAM Phase 2 — IT accounts (P2-13 backend, 2026-08-19)
+
+**Status:** PROTOTYPED / DEV-VERIFIED (`it-accounts.test.ts` 25/25 — 8 pure-judgement cases plus 17 via
+`app.inject()` against real Postgres + Cerbos, with Keycloak stubbed at the `fetch` boundary so the real
+admin client and its token cache are exercised). The consumer is **P2-14** (`/it/accounts`), BUILT
+2026-08-19 (`Alpha 01.054.0107a`).
+
+### `platform-nest/src/admin/it-accounts.controller.ts`
+
+| Method + path | Cerbos | Notes |
+|---|---|---|
+| `GET /api/:tenantId/it/accounts` | `it_account · read` | `{ accounts[] }`, one row per staff member (`kind='employee'` — service accounts never appear). Each row: `userId`, `email`, `name`, `employmentStatus`, `keycloakId`, `enabled`, `emailVerified`, `linked`, `linkVerified`, `state`, `actionable`. |
+| `POST /api/:tenantId/it/accounts/:userId/provision` | `it_account · provision` | 201 `{ keycloakId, initialPassword, adopted }`. **`initialPassword` is shown ONCE and is never stored or audited** — if the UI loses it, the only path forward is `reset-password`. `adopted:true` ⇒ the account already existed and `initialPassword` is **null**. |
+| `POST /api/:tenantId/it/accounts/:userId/disable` | `it_account · disable` | `{ ok, alreadyDisabled }`. |
+| `POST /api/:tenantId/it/accounts/:userId/enable` | `it_account · enable` | `{ ok, alreadyEnabled }`. |
+| `POST /api/:tenantId/it/accounts/:userId/reset-password` | `it_account · reset_password` | `{ ok, initialPassword }`. Body `{ reason? }` — the reason IS audited, the password is not. |
+
+### The five `state` values, and which ones the console must surface
+
+| `state` | Meaning | `actionable` |
+|---|---|---|
+| `missing` | Staff member with no Keycloak account — the joiner case. | ✅ |
+| `leaver_still_enabled` | Employment is `terminated` and the login is still enabled. **The finding this worklist exists for.** | ✅ |
+| `unverified_link` | Account and link exist, but the person never proved control of it. | ✅ |
+| `disabled` | Login disabled. Actionable **only** when the person is NOT terminated (they cannot work); for a leaver this is the done state. | conditional |
+| `enabled` | Nothing to do. | ❌ |
+
+`actionable` is computed server-side deliberately — two implementations of "needs attention" drift, and
+the direction they drift in is a leaver the UI quietly stops flagging. **Filter on `actionable`, do not
+re-derive it.** `leaver_still_enabled` outranks `unverified_link`: a security finding beats paperwork.
+
+### Refusal tokens (the typed token LEADS the `error` string)
+
+| Token | Status | What a consumer should do |
+|---|---|---|
+| `keycloak_admin_not_configured` | **503** | Render "account management unavailable in this environment". **Never** an empty worklist — see below. |
+| `keycloak_admin_failed` | **502** | Upstream Keycloak problem, not our wiring. Offer retry. |
+| `not_a_member` | 404 | The target is not an active staff member of this company. |
+| `no_keycloak_account` | 400 | `disable`/`enable`/`reset-password` need an account; provision first. |
+
+**⚠ The 503 is load-bearing, not a degradation nicety.** When the admin client is unconfigured this
+endpoint refuses rather than returning `[]`, because an empty worklist asserts "everyone has a login" —
+the single most dangerous claim this surface can make while blind. A consumer must therefore distinguish
+"no findings" (200 with an empty array) from "cannot see" (503) and must never render them the same way.
+
+### Two behaviours a consumer should rely on
+
+* **Provision converges.** It looks the address up first and treats Keycloak's own 409 as "adopt",
+  including the race between lookup and create. Double-clicking Provision cannot produce two logins for
+  one address (which would be an authentication ambiguity, not untidiness) — the second call returns
+  `adopted:true`.
+* **The identity link is created UNVERIFIED.** An admin creating an account is not the person proving
+  control of it, so a freshly provisioned row shows `linked:true, linkVerified:false` and lands in
+  `unverified_link` until the person actually logs in. That is the expected sequence, not a defect.
+
+### Not HR-module-gated
+
+Deliberate (design §5.4): IT provisioning is not an HR capability, and gating it on the `hr` module would
+make login management vanish for a company with HR switched off while its people still need logins. Only
+the employment-status read is module-scoped, so a company without `hr` gets `employmentStatus: null` and
+**never** a `leaver_still_enabled` claim — that verdict is only ever made from real data.
+
+### P2-15 (backfill) adds NO endpoint
+
+It is a CLI (`npm run iam:backfill`), dry-run by default, and deliberately not an HTTP surface: applying
+it is a reviewed one-time operation, and an endpoint would invite a button. See PERMISSION-CONTRACT §13.

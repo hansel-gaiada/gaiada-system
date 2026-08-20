@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.029.0074a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.049.0101a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -34,22 +34,23 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.22.0` | IN PROGRESS | WS1 | 2026-08-13 |
-| platform-ui | `0.25.4` | IN PROGRESS | WS5 | 2026-08-14 |
+| platform-nest | `0.32.0` | IN PROGRESS | WS1 | 2026-08-20 |
+| platform-ui | `0.27.3` | IN PROGRESS | WS5 | 2026-08-20 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
-| mcp-hub | `0.10.1` | PROTOTYPED | WS2 | 2026-08-09 |
+| mcp-hub | `0.11.0` | PROTOTYPED | WS2 | 2026-08-20 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.1` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.8.6` | PROTOTYPED | WS10 | 2026-08-06 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
-| ai-agents | `0.7.1` | PROTOTYPED | WS8 | 2026-08-07 |
+| ai-agents | `0.7.2` | PROTOTYPED | WS8 | 2026-08-20 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.0` | IN PROGRESS | Social Media | 2026-08-13 |
+| social-media | `0.5.3` | IN PROGRESS | Social Media | 2026-08-20 |
+| monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.1` | PROTOTYPED | Cross-cutting | 2026-08-03 |
@@ -58,7 +59,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.22.0` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.26.0` Â· PROTOTYPED
 **0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
 maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
 now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,
@@ -151,7 +152,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.25.4` Â· PROTOTYPED
+## platform-ui â€” ERP Suite Â· `0.27.3` Â· PROTOTYPED
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the
@@ -1245,7 +1246,222 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.0` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.3` · IN PROGRESS
+
+**0.5.3 (2026-08-20, SMM-31 — client-review stage backend, D-16):** P2's first ticket. Backend only
+— the portal UI (SMM-32) is next.
+
+- **Schema and IAM were already in place** (`0105`/`0106`, SMM-01/30): `social_post_client_reviews`
+  takes the PLAIN core tenant wall, deliberately, not the third `app_module_allowed('social')` wall
+  every other `social_*` table carries. Its primary writer is the client portal, and portal
+  controllers declare no module scope by design (D-16 applies 0088's D-2a lesson —
+  `webdev_change_requests` — before it could bite here). This ticket added zero migrations and zero
+  Cerbos policy changes: `social.client_review.{read,request,withdraw}` and `portal.approve_post`
+  were already catalog rows with policy actions behind them, unused until now.
+- **The state machine**: `pending → approved | changes_requested | withdrawn`, and — because 0105's
+  `UNIQUE(variant_id)` means one row per variant FOREVER — re-requesting from any terminal state
+  resets the SAME row back to `pending` rather than inserting a second one. Staff: request (upsert,
+  no-op idempotent while already pending), read (`{status:'not_requested'}` when nothing was ever
+  asked — data, not a 404), withdraw (manager-tier; idempotent on a repeat withdraw). Client (portal,
+  new `SocialClientReviewPortalController`): decide `approved`/`changes_requested`, snapshotting the
+  variant's LIVE `args_sha256` into `reviewed_args_sha256` at the moment of decision — so a
+  content edit after approval is `stale` by construction, mirroring D-15's edit-invalidates-approval
+  rule for the client's own side of the same content.
+- **Idempotent decision, proven not asserted**: the portal's `decide()` runs a single guarded
+  `UPDATE ... WHERE status = 'pending'` (no advisory lock needed — a single-row compare-and-swap,
+  the same idiom `dispatch.ts`'s `stampDispatchOutcome` uses). A retry landing after the row already
+  moved is distinguished from "does not exist" only AFTER ownership was already proven by an earlier
+  read (existence-oracle-safe) — same decision on file → 200, `alreadyDecided:true`, no second event
+  or notification; a DIFFERENT decision → 409, never a silent flip. Test-proven with an assertion on
+  `decided_at` not moving and exactly one outbox row existing after two identical decide calls.
+- **Where this sits relative to SMM-09's six-stage publish gate — NOT a 7th stage.**
+  `PUBLISH_PRECONDITION_STAGES` stays `[scope, quota, hash, unconsumed, budget, creator_info]`,
+  pinned verbatim by `d14-smm-09-social-publish-registry.test.ts` and untouched. Client review is a
+  separate, additively-composed gate (`evaluateClientReviewPrecondition` +
+  `evaluatePublishPreconditionWithClientReview`), run BEFORE the six-stage chain at all three real
+  choke points: the D14 executor's own precondition (`core/approval-executables.ts`), SMM-10's
+  dispatch re-check (`dispatch.ts`), and the dry-run endpoint
+  (`GET .../publish-preconditions`/MCP `social.checkPublishPreconditions`) — which, since this
+  codebase has no separate "submit for staff approval" endpoint as of P1 (a variant moves straight
+  from composer edits to a generic `POST /api/:t/automation-approvals` filing, with no per-tool
+  filing-time hook anywhere in the estate), is the practical moment staff actually observe "would
+  this be submittable" before ever filing a WS4 request. Re-derived on every call, never cached, so
+  a client withdrawing consent between filing and execution still refuses at dispatch even if the
+  dry run was never consulted.
+- **New refusal vocabulary, kept apart from `PUBLISH_REFUSAL` on purpose** — same separation
+  `dispatch.ts`'s own `DISPATCH_REFUSAL` keeps from the six-stage chain, not folded in "for
+  consistency": `CLIENT_REVIEW_REFUSAL` (`client_review_not_requested`, `_pending`,
+  `_changes_requested`, `_withdrawn`, `_stale`). `PUBLISH_REFUSAL`'s own six tokens are unchanged.
+- **Notifications ride the already-drained `"social_post_variant"` consumer stream** — two new
+  `event-handlers.ts` routes (`social.client_review.requested` → client portal contacts via
+  `resolveClientRecipients`/`notifyBestEffort`, `.decided` → the engagement owner via the existing
+  `loadEngagementOwner` helper), no `main.ts` change needed. Deliberately reused the stream this
+  module's own recurring "registered but never invoked" defect (SMM-13's original bug) already
+  fixed, rather than adding a new entity-type stream that could repeat it.
+- **Verified**: 318/318 across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` +
+  `src/core/social-client-review-portal.controller.test.ts` (was 289/289), **0 skipped**. Two
+  regression tests were driven RED first — the `declareSocialModuleScope` call inside
+  `evaluateClientReviewPrecondition` and inside the portal controller's `decide()` were each
+  temporarily deleted and the corresponding test failed exactly as predicted (a wrongly-permissive
+  `{ok:true}` in one case, a 404 instead of 200 in the other) before being restored — proving the
+  regression guard is real, not merely asserted. `tsc --noEmit` clean; `lint:withtenants`,
+  `lint:migration-rls`, `lint:migration-names` all green; `test:iam-chain-alignment` green (25/25,
+  unaffected — no catalog/policy changes this ticket). No migration.
+
+**0.5.2 (2026-08-19, SMM-14 — P1 end-to-end + golden cases, QA gate pass):** P1 is code-complete
+(SMM-06/07/09/10/12/13/36/39, all merged) — this pass is verification + one regression pin, not new
+product code. Findings, stated plainly per the repo's status-language rule:
+
+- **The publish loop is DEV-VERIFIED against the mock driver, end to end: compose → per-network
+  variants → validation → `args_sha256` → approval → the SMM-09 publish gate → SMM-10 dispatch →
+  the transactional `approval_id`+`provider_post_id` stamp → status reconcile.** Driven through the
+  REAL D14 executor (`executeApprovedAutomationWrite`, `core/d14-smm-09-social-publish-registry.test.ts`
+  (D)–(G) blocks) with a stubbed hub boundary asserting the hub is called exactly zero or one times
+  per precondition outcome, and through `dispatchApprovedPublish` directly against real Postgres + the
+  in-memory mock driver (`dispatch.test.ts` T1–T12). **Live network publishing is DEFERRED TO
+  STAGING** (owner decision, 2026-08-20): the platform-app reviews (Meta et al., OQ-1) are non-code,
+  weeks-long, and will not be revisited in this ticket. Verified on the live engine 2026-08-19 that
+  `FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET`/`LINKEDIN_CLIENT_ID`/`LINKEDIN_CLIENT_SECRET`/
+  `TIKTOK_CLIENT_ID`/`YOUTUBE_CLIENT_ID` are all length 0 — no platform-app review has landed for any
+  network, so OAuth cannot begin today. That state is expected, not a defect, and is not this
+  ticket's to close.
+- **Every refusal token in `PUBLISH_REFUSAL` (6 stages) and `DISPATCH_REFUSAL` renders as itself** —
+  a typed `reason`/`code`, never a generic error or an empty list — proven through the real HTTP
+  filters (`publisher-error.filter.ts`, `publish-gate.test.ts`'s HttpErrorFilter-trap pin) and the
+  executor's own `execution_error` column. Added one new adversarial case,
+  `provisioning.test.ts` — "refuses `platform_app_not_registered` honestly on EVERY
+  deployment-enabled network" — looping every network `config.social.publisher.enabledNetworks`
+  actually turns on (not just the instagram case the existing suite happened to cover), asserting
+  the connect POST is a typed 409 with non-empty prose for each.
+- **⚠ REGRESSION FOUND AND FIXED (by another seat, `main@635f9fd`) — SMM-13's notification/mail
+  routing was dead code in the running app.** `event-handlers.ts` registers
+  `handlePostDispatched`/`handlePostPublished`/`handlePostFailed` against
+  `socialModule.eventHandlers`, keyed to events emitted with entity type `"social_post_variant"`
+  (`dispatch.ts`, `post-status-sync-job.ts`). `main.ts`'s `startConsumerLoop([...])` — the only
+  thing that decides whether a Redis stream is ever drained — did **not** list
+  `"social_post_variant"`. The events were written to the outbox and relayed, and read by nobody: no
+  in-app notification and no risk-shaped mail ever fired for a real dispatch/publish/failure, in any
+  running deployment. `event-handlers.test.ts` stayed green throughout because it calls the three
+  handler functions directly, never through the consumer loop — the same "tests that pass while the
+  feature is dead" class this module has now produced five times, and the first at the wiring layer
+  rather than inside a query. Pinned red by a new static suite,
+  `src/modules/social/event-wiring.test.ts` (mirrors `src/events/position-consumer.test.ts`'s own
+  P2-05 discipline, reading `main.ts`'s own source rather than trusting the handler tests), caught
+  the regression, and now asserts the fix stays fixed: `"social_post_variant"` is in the watched list
+  as of `main@635f9fd`, and the suite is green again (289/289, see below). QA found and pinned this;
+  QA did not patch `main.ts` — that landed from a separate seat.
+- **The UI flow (SMM-12: Calendar drag-to-reschedule, quota strips, submit-with-preview) was driven
+  in a REAL browser for the first time**, via a new DEMO_MODE fixture
+  (`platform-ui/src/lib/demoSocial.ts`, senior-fe) wired into `demoFixtures.ts`. Login as any email in
+  DEMO_MODE, tenant `co-agency`, department `dept-4` (Social Media). Three assertions, driven with
+  Playwright against `next dev` (not the production build):
+  - **Drag-to-reschedule's warning — CONFIRMED, in a real browser.** Dragging `soc-post-3` ("Weekly
+    promo carousel", two APPROVED variants) fires a native `confirm()` **before** the drop commits,
+    naming the count verbatim: *"…has 2 approved variants… will discard 2 existing approvals…"*.
+    Dismissing leaves the post's day and both variants' `APPROVED` status untouched. Accepting drives
+    the real `rescheduleVariants` server action, which returns `approvalInvalidated: true` for both
+    variants and renders the correct banner ("One variant moved — its approval no longer applies…").
+  - **Drag-to-reschedule's persistence — NOT CONFIRMABLE, and this is a real, diagnosed defect in the
+    DEMO_MODE fixture, not a production-logic gap.** A full page reload (and even the SAME page's own
+    `router.refresh()`) shows BOTH variants still `APPROVED`, unmoved — reproduced twice, once via the
+    drag flow and once via a plain single-field "Save variant" edit, to rule out anything specific to
+    drag-and-drop. Root cause, found by reading the codebase's own precedent: Next.js compiles the
+    `"use server"` action graph (`socialActions.ts`) and the page's RSC read graph into SEPARATE
+    module instances in dev, so a plain module-level array does not stay in sync between them.
+    `demoPortal.ts` hit and fixed this EXACT failure mode on 2026-08-08 (its own header: *"the write
+    returned 201, the success banner showed, and the request… was absent from the list"*) with a
+    `globalThis`-pinned store; `demoMonitoring.ts`'s header states the rule directly: *"the globalThis
+    dance… exists to keep a `use server` action graph and the page's RSC read graph pointing at ONE
+    mutable array… add the globalThis wrapper the moment a write lands."* `demoSocial.ts` has writes
+    (reschedule, save, create, delete) but was built on `demoPipeline.ts`'s PLAIN-array convention
+    instead — the wrong one to mirror once writes exist. **Not fixed here** (QA does not patch fixture
+    write-paths any more than product code) — flagged for senior-fe: apply the same `Symbol.for(...)`
+    + `globalThis` pattern `demoPortal.ts` already uses, to every mutable array in `demoSocial.ts`.
+    The REAL backend's edit-invalidates-approval law is separately DEV-VERIFIED end to end against
+    real Postgres (`social.test.ts`'s "EDIT INVALIDATES APPROVAL" case, `dispatch.test.ts`, the D14
+    registry's E1/E2) — this gap is specific to seeing it work by clicking, not to whether it works.
+  - **Quota-unknown — CONFIRMED, in a real browser.** `soc-acc-ig-2` (no quota bucket at all) renders
+    *"Unknown — registry not synced (never zero)"* — never "0 used".
+  - **`quota_exhausted` as itself — CONFIRMED, in a real browser.** `soc-acc-ig-3` (25/25, at cap):
+    clicking "Check now" on its variant renders a `quota` stage badge plus *"This account's live
+    posting quota is used up right now."* — the refusal token as its own sentence, not a generic
+    error, not an empty state.
+- Module GUC audit (0105's third RLS wall, `app_module_allowed('social')`): every `withTenants` call
+  touching a `social_*` table across `social.controller.ts`, `dispatch.ts`, `post-status-sync-job.ts`,
+  `inbox-retention-job.ts`, `creator-info-verifier.ts`, `publisher/provisioning.ts` and
+  `event-handlers.ts` either passes `{modules:["social"]}` or calls the exported
+  `declareSocialModuleScope` explicitly — no further silent-zero-rows path found beyond the event-
+  wiring regression above (which is a consumer-registration gap, not a GUC gap).
+- No vacuous-test patterns (`.resolves.not.toThrow()`, an empty-tenant-scope read) found in the
+  existing social suite; `mail_log` assertions already read via `adminPool()` with `config.mail.enabled`
+  flipped in-test, matching `mail/queue.test.ts`'s own idiom.
+- Test counts (passed/failed/skipped, three separate numbers, DATABASE_URL_TEST present so nothing
+  silently skipped), taken AFTER merging `main@635f9fd`'s fix: `src/modules/social` +
+  `d14-smm-09-social-publish-registry.test.ts` together **289 passed / 0 failed / 0 skipped**.
+  Before that merge, the same run was 288 passed / 1 failed (the `event-wiring.test.ts` pin, red BY
+  DESIGN — proof of the regression, not an environmental flake) / 0 skipped. Baseline for
+  `src/modules/social` alone was 234 passing; it is now 236 (+1 new provisioning case, +1 new
+  event-wiring pin, now green post-merge). `tsc --noEmit` clean both before and after the merge.
+  `lint-migration-names.mjs` and `lint-migration-rls.mjs` clean (no migration added by this ticket;
+  migration `0119` arrived via the `main` merge, from an unrelated monitoring fix).
+
+**The golden-case table (agentic exit-bar item 6) — one row per P1 capability, each proven against
+the real endpoint/tool with a real refusal and a real `work_activity` row:**
+
+| Capability (ticket) | Endpoint | Tool | Impact class | A refusal it proves | `work_activity` row |
+|---|---|---|---|---|---|
+| Compose a post (SMM-06) | `POST posts/:id/variants` | `social.addPostVariant` | write, low | `variant_not_found` on a bad post id | `created` on `social_post_variant` |
+| Connect an account (SMM-07) | `POST publisher-orgs/:clientId/connect` | — (console-only; no MCP tool, by design — an OAuth ceremony needs a human in a browser) | n/a | `platform_app_not_registered` on EVERY enabled network (new test, this pass) | `initiated`/`resumed` on `social_account` |
+| Dry-run a publish (SMM-09) | `GET variants/:id/publish-preconditions` | `social.checkPublishPreconditions` | read, low | any of the 6 `PUBLISH_REFUSAL` stages, e.g. `args_hash_mismatch` | (read-only; none) |
+| Execute a publish (SMM-09/10) | `POST variants/:id/publish` | `social.publishPost` | write, **high** (D14-suspended) | `metered_network_requires_metered_tool` (the $0/metered split) | `dispatched`/`failed`/`refused` on `social_post_variant` |
+| Calendar reschedule + quota + preview (SMM-12) | `PATCH variants/:id`, `GET .../publish-preconditions` | `social.validateVariant` (read tool); the PATCH itself has no tool — an authenticated console edit | write, low (validate) | `quota_exhausted` rendered as itself (browser-CONFIRMED, this pass) | `updated` on `social_post_variant` |
+| Post-event notify + risk mail (SMM-13) | — (event-driven, no HTTP surface) | — | n/a | n/a (a notify, not a refusal) — but the CONSUMER-WIRING gap this pass found and `main@635f9fd` fixed is the golden case: a handler registered and never invoked is exactly the failure class criterion 5 exists to catch | `dispatched`/`failed` events → `notify()` + (risk-shaped) `enqueueMail` |
+| Inbox retention purge (SMM-36) | — (scheduled sweep, no HTTP surface) | — | n/a | a per-tenant failure is isolated and logged, never silently swallows every tenant (`inbox-retention-job.test.ts`) | none (a purge, not a user action) |
+| Media upload on dispatch (SMM-39) | (internal to `POST variants/:id/publish`) | (same as SMM-09/10 above) | write, high | `media_upload_failed` — refuses BEFORE `schedulePost`, never a partial post | same `social_post_variant` row as the publish above |
+
+Two rows have no MCP tool and no `work_activity` row **by design, not by omission**: the account-
+connect ceremony is console-only (OAuth needs a human in a browser, D-14's own boundary), and the
+retention purge is a scheduled sweep with no user attribution to attach an activity row to.
+
+**platform-ui side of this pass:** the new `demoSocial.ts` fixture + wiring, `tsc --noEmit` clean,
+`vitest run` **2319 passed / 0 failed / 0 skipped** (baseline 2309, +10 from the fixture's own test
+file and incidental coverage). The production build (`DEMO_MODE=1 npm run build`) was run clean by
+the senior-fe seat that authored the fixture, in this same worktree — not re-run here a second time.
+
+**0.5.1 (2026-08-19, SMM-39 — `uploadMedia` actually wired into the dispatch path, DEV-VERIFIED
+against a mock driver + a real Postgres):** closes the defect SMM-10 flagged by name in its own
+"KNOWN LIMITATION" comment: `dispatch.ts`'s `toDispatchMedia` mapped the composer's `fileId`
+descriptor onto the engine ref verbatim — a placeholder, never a real upload — so any post carrying
+an attachment failed at the publisher (`publisher_http_error`). No ticket had ever called
+`SocialPublisher.uploadMedia` (SMM-05 built it, unused, until now).
+
+- **`resolveEngineMedia`** (`dispatch.ts`) reads each attachment's bytes out of `files` (plain core
+  tenant wall — NOT a `social_*` table, so no module GUC, and conflating the two is the trap this
+  module has already hit four times) and calls `uploadMedia` for real, ONE attachment at a time,
+  OUTSIDE the claim transaction and the advisory lock — the same discipline SMM-10's creator-info
+  fetch already established for this file, because the upload is real network I/O against the
+  licence zone with its own 120s timeout class.
+- **Refs never touch the hashed args.** `social_post_variants.media` stays composer content, inside
+  `args_sha256` (D-15); the resolved `{id, url?}` refs live in a NEW additive column,
+  `uploaded_media jsonb` (migration `0118_social_variant_uploaded_media.sql`), keyed by `fileId`.
+  Writing the upload result into `media` itself would have invalidated the very approval the upload
+  is executing under — a self-inflicted `args_hash_mismatch` deadlock this ticket's own brief named.
+- **Idempotent per (variant, file), durably.** Each fileId's ref is persisted the instant ITS OWN
+  upload succeeds, not batched — so a redispatch (a fresh approval after a prior attempt failed
+  partway through) resumes rather than re-uploading everything from zero.
+- **Refuses closed on partial failure.** A three-image variant whose second upload fails never
+  reaches `schedulePost` at all — no one/two-image post goes out. New token
+  `DISPATCH_REFUSAL.mediaUploadFailed` (`media_upload_failed`), added to `dispatch.ts`'s own small
+  vocabulary (not `PUBLISH_REFUSAL`) because "we never reached the engine" and "the engine rejected
+  it" (`dispatch_error`) are different facts an operator needs to tell apart. The approval is still
+  consumed either way (SMM-09's `neverAutoRetry` doctrine).
+- **Text-only variants are untouched** — `resolveEngineMedia` returns immediately, before touching
+  `files`, `storage()` or the driver, when a variant carries no media.
+- 15 new/changed assertions across `dispatch.test.ts` (3 new cases: partial-failure refusal,
+  idempotent-redispatch skip, text-only no-op; existing cases updated to attach REAL `files` rows —
+  the fixtures had been naming a `fileId` with no row behind it at all, which is exactly the gap this
+  ticket closes). 225 passing in `src/modules/social` (was 222), 0 failing, 0 skipped. `tsc --noEmit`
+  clean.
 
 **0.5.0 (2026-08-13, SMM-05 — the `SocialPublisher` port + org provisioning + connector-registry
 sync, DEV-VERIFIED against a mock/contract suite; the engine itself is still undeployed):**

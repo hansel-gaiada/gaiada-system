@@ -56,13 +56,19 @@ describe("mail/templates", () => {
   });
 
   it("exposes the known template keys used by this ticket", () => {
-    // MAIL-10 added "auth.magic_link" (design §9) — a fourth code template, registered the same
-    // way as the other three (see this file's own header: templates are code, not DB rows).
+    // MAIL-10 added "auth.magic_link" (design §9) and SMM-13 added "social.post_failed" — code
+    // templates, registered the same way as the rest (see this file's own header: templates are code,
+    // not DB rows). This list is a deliberate pin: a template appearing or vanishing must show up in a
+    // diff, because `enqueue()` throws UnknownMailTemplateError for anything unregistered and a
+    // silently-added key is a mail path nobody reviewed. SMM-13 shipped its key without updating the
+    // pin, so this assertion was red on main for a while — that is the pin doing its job late, not a
+    // reason to loosen it.
     expect(knownTemplateKeys().sort()).toEqual([
       "approval.actionable",
       "approval.warning",
       "auth.magic_link",
       "auth.shell",
+      "social.post_failed",
     ]);
   });
 

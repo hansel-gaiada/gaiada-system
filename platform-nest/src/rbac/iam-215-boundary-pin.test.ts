@@ -126,8 +126,8 @@ describe("IAM-04c-1 · the 215-boundary pin (static, unfiltered re-derivation)",
   // exempt (the 4 relationship kinds are unchanged — social adds no relationship-class permission),
   // which is why the non-exempt count below moves by the same 8. Prior movement: HIER-3, 2026-08-11
   // — the team kind retired (61 -> 60).
-  it("sanity: the catalog + policy files cover the same 72 kinds this test iterates (IAM Phase 2 P2-02, 2026-08-13: 4 new kinds added [role_grant/position/employee/it_account], 68 -> 72; prior: SMM-30, 2026-08-12: 8 social kinds added, 60 -> 68)", () => {
-    expect(universes.size).toBe(72);
+  it("sanity: the catalog + policy files cover the same 77 kinds this test iterates (MON-10b, 2026-08-19: 5 monitoring kinds catalogued [monitor/monitor_incident/monitor_maintenance/monitor_channel/status_page], 72 -> 77; prior: (IAM Phase 2 P2-02, 2026-08-13: 4 new kinds added [role_grant/position/employee/it_account], 68 -> 72; prior: SMM-30, 2026-08-12: 8 social kinds added, 60 -> 68)", () => {
+    expect(universes.size).toBe(77);
     for (const kind of universes.keys()) {
       expect(policies.has(kind), `catalog names kind "${kind}" but no resource_*.yaml defines it`).toBe(true);
     }
@@ -155,8 +155,8 @@ describe("IAM-04c-1 · the 215-boundary pin (static, unfiltered re-derivation)",
 
   const nonExemptKinds = [...universes.keys()].filter((k) => !(EXEMPT_KINDS as readonly string[]).includes(k));
 
-  it("sanity: 68 non-exempt kinds remain (72 - 4) — IAM Phase 2 P2-02, 2026-08-13: 4 new kinds added, 64 -> 68; prior: SMM-30, 2026-08-12: 8 social kinds added, 56 -> 64; the 4 exempt relationship kinds are UNCHANGED", () => {
-    expect(nonExemptKinds.length).toBe(68);
+  it("sanity: 73 non-exempt kinds remain (77 - 4) — MON-10b, 2026-08-19: 5 monitoring kinds added, 68 -> 73; prior: — IAM Phase 2 P2-02, 2026-08-13: 4 new kinds added, 64 -> 68; prior: SMM-30, 2026-08-12: 8 social kinds added, 56 -> 64; the 4 exempt relationship kinds are UNCHANGED", () => {
+    expect(nonExemptKinds.length).toBe(73);
   });
 
   it.each(nonExemptKinds)("kind \"%s\": platform_admin reach == the kind's full action universe", (kind) => {

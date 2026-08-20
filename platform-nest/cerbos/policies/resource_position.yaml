@@ -44,12 +44,21 @@ resourcePolicy:
       derivedRoles: ["company_admin", "hr_people_reader"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # company_admin's full-tenant reach over assign/unassign too (design §6.2: "assign/unassign
-    # carry the same rule shape (company_admin, dept-head-own-rule over the position's unit
-    # ancestry, self-assign DENY)").
+    # company_admin's full-tenant reach over assign/unassign, PLUS hr_people_ops.
+    #
+    # ⚠ OWNER DECISION 2026-08-18 — `hr_people_ops` ADDED. P2-06 discovered that design §5.1
+    # ("HR creates the employee ... open the position assignment") contradicted §4.1/§6.2 ("dept head
+    # assigns"): the policy granted assign to company_admin and org_unit_lead only, so an hr_manager
+    # got 201 on a record-only hire and 403 the moment `positionId` was present — and 403 on transfer
+    # and terminate. The owner ruled HR runs joiner/mover/leaver end to end; the alternative was
+    # handing HR `company_admin`, which is the strictly larger grant.
+    #
+    # Both roles here are SCOPE-ONLY, so folding them into one rule is safe — the §1.4 binding
+    # authoring rule forbids mixing a scope-only role with an ATTRIBUTE-DEPENDENT one, and
+    # `org_unit_lead` keeps its own separate rule below, untouched.
     - actions: ["assign", "unassign"]
       effect: EFFECT_ALLOW
-      derivedRoles: ["company_admin"]
+      derivedRoles: ["company_admin", "hr_people_ops"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # Dept head — OWN rule, never mixed (§1.4 binding authoring rule — the same TRAP-4/REG1 lesson

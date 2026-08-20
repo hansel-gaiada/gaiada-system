@@ -120,10 +120,19 @@ const DIRECT: Record<string, RealRole[]> = {
   it_managers: ["it_admin", "it_manager"],
 };
 
+// MON-10b — the five module-tiered monitoring kinds (0117 + the completion migration). BARE names,
+// like the social set above. The module key is `monitoring`, so `module_staff`/`module_manager`
+// string-compose to exactly `monitoring_staff`/`monitoring_manager` and nothing else. REAL_ROLES is
+// derived from the generator, so those two names arrive here automatically.
+const MONITORING_KINDS = new Set([
+  "monitor", "monitor_incident", "monitor_maintenance", "monitor_channel", "status_page",
+]);
+
 function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] {
   if (kind === "hr_case" || kind === "hr_record") return ["hr_staff"];
   if (SEARCH_KINDS.has(kind)) return ["search_staff"];
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
+  if (MONITORING_KINDS.has(kind)) return ["monitoring_staff"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')
       ? ["reports_staff"]
@@ -133,7 +142,7 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
     return ["webdev_staff"];
   }
   if (kind === "service_assignment" || kind === "member") {
-    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff", "social_staff"];
+    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff", "social_staff", "monitoring_staff"];
   }
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(`role-permission-parity: unhandled module_staff kind "${kind}" — a new module_staff ` +
@@ -146,6 +155,7 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
   if (kind === "automation_approval") return ["hr_manager"]; // rule condition hardcodes attr.module == "hr"
   if (SEARCH_KINDS.has(kind)) return ["search_manager"];
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];
+  if (MONITORING_KINDS.has(kind)) return ["monitoring_manager"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')
       ? ["reports_manager"]
@@ -154,7 +164,7 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
   if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
     return ["webdev_manager"];
   }
-  if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager"];
+  if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager", "monitoring_manager"];
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(`role-permission-parity: unhandled module_manager kind "${kind}" — see moduleStaffTargets' ` +
     `sibling note.`);

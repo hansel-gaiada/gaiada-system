@@ -171,6 +171,48 @@ function mailStreamConfig(prefix: "NOTIFY" | "AUTH", defaultFrom: string) {
   };
 }
 
+/**
+ * Read a POSITIVE integer from the environment, treating **empty string, NaN, and any value <= 0 as
+ * "not configured"** and returning `fallback` instead.
+ *
+ * Why this exists rather than `Number(process.env.X ?? fallback)`: `??` does not fire on `""`, and
+ * `Number("")` is `0`. Compose's `${VAR:-}` passthrough turns an unset variable into an EMPTY one, so
+ * the idiomatic-looking expression silently yields 0 — for an interval that means a hot loop, for a
+ * threshold it means everything trips the brake. Learned the hard way on 2026-08-18; see
+ * `positionDriftSweepIntervalMs` below.
+ *
+ * Deliberately NOT retrofitted onto every numeric env read in this file: none of the others is
+ * currently passed empty by any compose file (audited against the live container the same day), and
+ * rewriting them blind would change behaviour on paths this change has no business touching. New
+ * numeric settings should use this helper.
+ */
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[config] ${name}="${raw}" is not a positive number — falling back to ${fallback}. ` +
+        `A zero or negative interval would busy-loop.`,
+    );
+    return fallback;
+  }
+  return n;
+}
+
+/**
+ * Parse a millisecond interval from the environment, falling back on anything that is not a usable
+ * number. Exported so the empty-string case — the one `??` cannot catch and the one compose actually
+ * produces — is pinned by a test rather than by a comment.
+ */
+export function readIntervalMs(raw: string | undefined, fallback: number, floor: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < floor) return fallback;
+  return n;
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -266,6 +308,33 @@ const configBase = {
   // ORG-7 §3: how often the nightly drift/orphan sweep runs (sweepDriftAndOrphans). Default 24h;
   // dev/tests override to something short-lived. No effect unless serviceAssignmentsEnabled.
   serviceDriftSweepIntervalMs: Number(process.env.SERVICE_DRIFT_SWEEP_INTERVAL_MS ?? 24 * 3600 * 1000),
+  // ── IAM Phase 2 (P2-05) — the POSITION reconciler. Design §3: "Flag-gated
+  // `POSITION_SYNC_ENABLED` (default off) until QA's battery passes." DARK by default exactly as
+  // serviceAssignmentsEnabled is: when off, every entry point in `position-reconciler.ts` returns
+  // an empty result BEFORE reading anything, and the consumer drains its streams materializing
+  // nothing — position rows stay dormant provisioning metadata (as P2-01 left them).
+  positionSyncEnabled:
+    process.env.POSITION_SYNC_ENABLED === "1" || process.env.POSITION_SYNC_ENABLED === "true",
+  // Design §3.2 mass-revoke brake: "a single reconcile computing more than N revocations (N
+  // configurable, default ~20) aborts and reports instead of applying". The program risk table
+  // names "position reconciler mass-revokes on an org edit" as the TOP hazard — a reconciler bug
+  // that revokes everyone is far worse than one that revokes nothing, so this fails CLOSED (the
+  // run aborts before any write commits) rather than clamping to the first N revocations.
+  positionMassRevokeThreshold: Number(process.env.POSITION_MASS_REVOKE_THRESHOLD ?? 20),
+  // Design §3.4 nightly drift detector + expiry sweep cadence. Default 24h.
+  //
+  // 🔴 `??` IS NOT ENOUGH HERE, AND THIS CAUSED A LIVE INCIDENT (2026-08-18). `??` falls back only on
+  // `undefined`/`null`, and `Number("")` is **0** — so an EMPTY value yields a 0ms interval and
+  // `startPositionMaintenanceLoop`'s self-rescheduling `setTimeout(tick, interval)` becomes a hot
+  // loop. Exactly that happened: compose was given
+  // `POSITION_DRIFT_SWEEP_INTERVAL_MS: ${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}`, which turns "unset"
+  // into "empty string"; the box logged `sweep on: every 0ms` and platform sat at ~46% CPU spinning
+  // against Postgres until an explicit value was set.
+  //
+  // `positiveIntFromEnv` treats empty / NaN / <= 0 as "not configured". The loop ALSO refuses a
+  // non-positive value (grant-expiry-sweep.ts) — two layers, because a busy loop presents as healthy
+  // uptime rather than as an error.
+  positionDriftSweepIntervalMs: positiveIntFromEnv("POSITION_DRIFT_SWEEP_INTERVAL_MS", 24 * 3600 * 1000),
   // P2-07 (pm-console-ux-design-spec.md §4, §0 D-2): nightly burndown-snapshot pre-warmer. DARK
   // by default — the lazy upsert-on-read on every burndown GET (pm.controller.ts) is the
   // correctness backstop, so this job is a pure best-effort optimization, never load-bearing.
@@ -305,6 +374,31 @@ const configBase = {
   },
   // Downstream service endpoints the admin/systems console aggregates (Phase C). All
   // read-only; empty URL -> that system reports "not configured" (fail-soft, never fake).
+  // MON-09i: read-only Plane A summary for the admin Observability console. Both are optional
+  // and default to empty: an unset PROMETHEUS_URL makes the console report itself unconfigured
+  // rather than pretend the box is healthy, and it never blocks boot -- Plane A telemetry is
+  // collected by Prometheus whether or not the platform can read it back.
+  // MON-12c: the monitor runner loop. DARK BY DEFAULT and that is a safety property, not caution:
+  // this loop DIALS CLIENT WEBSITES, and a deployment must not start probing third-party hosts
+  // merely because it booted. `intervalMs` only sets how often due-ness is re-asked; each monitor's
+  // own interval_sec decides whether it is actually probed.
+  monitoring: {
+    runnerEnabled: process.env.MONITORING_RUNNER_ENABLED === "1",
+    // NOT `Number(x ?? 60_000)`. `??` only catches null/undefined, and compose's ubiquitous
+    // `${VAR:-}` idiom passes an EMPTY STRING when the var is absent from `.env` — `Number("")` is 0,
+    // so that spelling yields a 0 ms sweep interval: a busy loop that dials CLIENT WEBSITES as fast
+    // as the event loop allows. This estate has already had exactly that bug (46% CPU) from the same
+    // `${VAR:-}` + `??` pairing elsewhere; here the blast radius is third-party hosts, not our CPU.
+    // Empty, non-numeric, zero and negative all fall back. The 1s floor exists because no sane sweep
+    // is sub-second and a typo'd `10` must not become a stampede.
+    runnerIntervalMs: readIntervalMs(process.env.MONITORING_RUNNER_INTERVAL_MS, 60_000, 1_000),
+  },
+  observability: {
+    prometheusUrl: process.env.PROMETHEUS_URL ?? "",
+    // Display-only: an operator-facing hint about where the full dashboards live. Never fetched
+    // (Grafana requires its own auth and is reached over an SSH tunnel, not proxied by us).
+    grafanaUrl: process.env.GRAFANA_PUBLIC_HINT ?? "",
+  },
   services: {
     gateway: { url: process.env.GATEWAY_URL ?? "", token: process.env.GATEWAY_TOKEN ?? "" },
     bot: { url: process.env.BOT_URL ?? "", token: process.env.BOT_ADMIN_TOKEN ?? process.env.ADMIN_TOKEN ?? "" },
@@ -481,6 +575,77 @@ const configBase = {
       // constant: 25 is obsolete, Meta's own doc says 100 and 50 on the same page, and a synthesized
       // cap is wrong in a way nothing downstream can detect.
       quotaProbeTool: process.env.SOCIAL_POSTIZ_QUOTA_PROBE_TOOL ?? "",
+      // SMM-10/D-22, D-21's fork exception. Same shape and same reasoning as quotaProbeTool
+      // immediately above: EMPTY BY DEFAULT until the ~15-line fork exception is verified against a
+      // live engine. Unset ⇒ the driver does not advertise `creator_info_probe`, the dispatch flow's
+      // live fetch returns `undefined`, and a TikTok publish refuses `creator_info_unverified` — the
+      // fail-closed steady state addendum §A4i/D-22 both describe.
+      creatorInfoProbeTool: process.env.SOCIAL_POSTIZ_CREATOR_INFO_PROBE_TOOL ?? "",
+      // SMM-07 — the guided connect flow's own two knobs. Both are EMPTY BY DEFAULT and the
+      // emptiness is a finding, not laziness — see provisioning.ts's `initiateAccountConnect`.
+      //
+      // `connectRedirectUrl` is the platform-ui page the engine hands the browser back to once ITS
+      // OWN OAuth round trip with the network finishes (the third argument of
+      // `SocialPublisher.connectUrl`) — mirroring `GOOGLE_OAUTH_REDIRECT_URI`'s shape (SM-25): one
+      // fixed, deployment-level destination, config-driven rather than derived per request. It is
+      // NOT Postiz's own `FRONTEND_URL` (that is the licence-zone host's env, governs the
+      // network-facing leg of the OAuth dance, and is out of this platform's control by design —
+      // addendum §A4j's containment-invariant-5 finding). Unset ⇒ connect refuses
+      // `connect_redirect_not_configured` rather than handing the engine an empty destination.
+      connectRedirectUrl: (process.env.SOCIAL_CONNECT_REDIRECT_URL ?? "").replace(/\/$/, ""),
+      // OQ-3 (owner decision, addendum §A4i / the design addendum's OQ-3 row): "own accounts
+      // proceed; client connects wait for AGPL counsel sign-off." This is a LEGAL gate, not a
+      // technical capability, and it is temporary by nature — it goes away entirely the day counsel
+      // signs off, at which point this whole check (and this config key) should be deleted rather
+      // than flipped. A schema column would outlive that day as dead weight; a deployment-level list
+      // does not. `clients.id` values, comma-separated — deliberately GLOBAL (not per-tenant) same
+      // as every other deployment dial in this block, because there is exactly one legal answer to
+      // "have we cleared client connects" and it does not vary by tenant.
+      ownBrandClientIds: (process.env.SOCIAL_OWN_BRAND_CLIENT_IDS ?? "")
+        .split(",").map((s) => s.trim()).filter(Boolean),
+    },
+    // SMM-10 — the dispatch/reconcile pair's own knobs.
+    //
+    // `reconcileIntervalMs` is the SAFETY POLL's cadence: `smm-post-status-sync`'s batched
+    // `getPostStatus` sweep over every in-flight (`queued`/`publishing`) variant. Addendum §A4 already
+    // reasoned that publish LATENCY is not where this programme's cost lives (the queue's own
+    // availability IS publishing reliability for Instagram/LinkedIn — no server-side scheduling on
+    // either), so 15 minutes is deliberately not tuned tighter: a webhook (when the network/engine
+    // offers one) closes the common case immediately, and this poll is the backstop for the case
+    // where it does not fire, is dropped, or fires twice (idempotent either way — see
+    // `post-status-sync-job.ts`'s own header).
+    reconcileIntervalMs: Number(process.env.SOCIAL_RECONCILE_INTERVAL_MS ?? 15 * 60 * 1000),
+    // Dark by default, same convention as every other background sweep in this file
+    // (`pmBurndownSnapshotEnabled`, `itDiscovery.reaperEnabled`, `inboxRetention.purgeEnabled`): a
+    // fresh deployment with no publisher org provisioned has nothing in flight to reconcile, so
+    // starting the loop unconditionally would just be an idle sweep — but turning it on is a
+    // deploy-time decision paired with provisioning the first publisher org, not a boot-time default.
+    reconcileEnabled:
+      process.env.SOCIAL_RECONCILE_ENABLED === "1" || process.env.SOCIAL_RECONCILE_ENABLED === "true",
+    // The webhook intake's shared secret (HMAC-verified, mirroring the search module's
+    // `callbackSecret`/`semCallbackSecret` convention below and MAIL-13's inbound-mail HMAC). Empty
+    // ⇒ the webhook route fail-closed refuses every request rather than trusting an unauthenticated
+    // caller to name a `providerPostId` — a webhook payload is the ONE input in this ticket that
+    // rides an untrusted network hop, and "ids only, never trusted content" does not relax the need
+    // to know WHO is allowed to even name an id.
+    webhookSecret: process.env.SOCIAL_WEBHOOK_SECRET ?? "",
+    // SMM-36 — the LinkedIn-driven inbox retention purge (`inbox-retention-job.ts`). DARK by
+    // default, same pattern as `pmBurndownSnapshotEnabled`/`serviceAssignmentsEnabled`: unlike
+    // those two this job is NOT a pure optimization with a lazy backstop — until it runs, LinkedIn
+    // comment text and commenter profile fields accumulate past the 24h/48h ceiling their own
+    // Data Storage Requirements impose (addendum §A4e). It still defaults OFF because
+    // `SOCIAL_NETWORKS_ENABLED` also defaults every network but instagram/facebook/linkedin off at
+    // the deployment level, and no LinkedIn client is connected yet (OQ-1/OQ-3 both still gate
+    // that) — turning this job on is a deploy-time decision paired with turning LinkedIn on for
+    // real, not a boot-time default.
+    inboxRetention: {
+      purgeEnabled:
+        process.env.SOCIAL_INBOX_RETENTION_PURGE_ENABLED === "1"
+        || process.env.SOCIAL_INBOX_RETENTION_PURGE_ENABLED === "true",
+      // Default 1h: LinkedIn's SHORTER window is 24h, so an hourly sweep gives at most ~4% window
+      // slack even at the moment a purge run was due — tight enough that "we purge daily" could
+      // never be mistaken for compliant. No effect unless purgeEnabled.
+      purgeIntervalMs: Number(process.env.SOCIAL_INBOX_RETENTION_PURGE_INTERVAL_MS ?? 3600 * 1000),
     },
   },
   search: {

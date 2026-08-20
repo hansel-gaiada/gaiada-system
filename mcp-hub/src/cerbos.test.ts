@@ -494,3 +494,116 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
     expect(authorize(moneyWf, "search.setBudget", mintVerified("search.setBudget", {})).allow).toBe(true);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// 2026-08-19 — the batch-limit regression, found on the live box and not by any test.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Cerbos rejects a CheckResources request carrying more resources than its configured batch limit (50
+// by default). Once the hub's tool count passed 50, EVERY visibility check failed with
+// `InvalidArgument: number of resources in batch (128) exceeds configured limit (50)` and
+// `visibleToolsFor` fell back to the in-code engine — a plausible answer plus one warning line, so
+// nothing looked broken. Cerbos had stopped being authoritative for the tool list.
+//
+// These cases fail against the pre-fix client: the first because a single 128-resource request would be
+// sent (and the stub asserts no request exceeds the limit), the second because the fallback swallowed
+// the error instead of the client never producing it.
+describe("cerbosAllowedTools batching (2026-08-19 regression)", () => {
+  /** Stub that REFUSES an oversized batch exactly the way the server does, so the test fails if the
+   *  client stops chunking — mirroring the real failure rather than asserting an internal detail. */
+  function stubCerbosWithLimit(limit: number, allow: (name: string) => boolean, seen: number[]) {
+    return vi.fn(async (_url: string, init?: { body?: string }) => {
+      const body = JSON.parse(init?.body ?? "{}") as { resources: Array<{ resource: { id: string } }> };
+      seen.push(body.resources.length);
+      if (body.resources.length > limit) {
+        return { ok: false, status: 400, json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          results: body.resources.map((r) => ({
+            resource: { id: r.resource.id },
+            actions: { call: allow(r.resource.id) ? "EFFECT_ALLOW" : "EFFECT_DENY" },
+          })),
+        }),
+      };
+    }) as unknown as typeof fetch;
+  }
+
+  const manyTools = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      name: `bulk.tool${i}`,
+      description: "x",
+      minAssurance: "low" as const,
+      inputSchema: { type: "object" as const },
+      handler: async () => ({ content: [] }),
+    }));
+
+  beforeEach(() => {
+    config.cerbosUrl = "http://cerbos.test";
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("🔴 128 tools are authorized in chunks no larger than the server's limit — the live failure", async () => {
+    const seen: number[] = [];
+    vi.stubGlobal("fetch", stubCerbosWithLimit(50, () => true, seen));
+    const { cerbosAllowedTools, CERBOS_RESOURCE_BATCH_MAX } = await import("./cerbos");
+
+    const tools = manyTools(128);
+    const allowed = await cerbosAllowedTools(lowUser, tools as never);
+
+    expect(allowed.size).toBe(128); // nothing lost across the chunk seam
+    expect(seen.length).toBeGreaterThan(1); // it actually chunked
+    expect(Math.max(...seen)).toBeLessThanOrEqual(CERBOS_RESOURCE_BATCH_MAX);
+    expect(seen.reduce((a, b) => a + b, 0)).toBe(128); // every tool asked about exactly once
+  });
+
+  it("merges verdicts across chunks — a deny in a later chunk is still a deny", async () => {
+    const seen: number[] = [];
+    vi.stubGlobal("fetch", stubCerbosWithLimit(50, (n) => n !== "bulk.tool100", seen));
+    const { cerbosAllowedTools } = await import("./cerbos");
+
+    const allowed = await cerbosAllowedTools(lowUser, manyTools(128) as never);
+
+    expect(allowed.has("bulk.tool100")).toBe(false);
+    expect(allowed.has("bulk.tool99")).toBe(true);
+    expect(allowed.size).toBe(127);
+  });
+
+  it("FAILS CLOSED: one chunk erroring rejects the whole call, never a partial allow-set", async () => {
+    // A partial answer is indistinguishable from "Cerbos denied those tools", which is precisely the
+    // ambiguity that let the original defect hide behind a fallback.
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init?: { body?: string }) => {
+        const body = JSON.parse(init?.body ?? "{}") as { resources: unknown[] };
+        if (++calls === 2) return { ok: false, status: 503, json: async () => ({}) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            results: (body.resources as Array<{ resource: { id: string } }>).map((r) => ({
+              resource: { id: r.resource.id },
+              actions: { call: "EFFECT_ALLOW" },
+            })),
+          }),
+        };
+      }) as unknown as typeof fetch,
+    );
+    const { cerbosAllowedTools } = await import("./cerbos");
+
+    await expect(cerbosAllowedTools(lowUser, manyTools(128) as never)).rejects.toThrow(/cerbos 503/);
+  });
+
+  it("a single-tool call (the D14-13 path) still sends exactly one resource", async () => {
+    const seen: number[] = [];
+    vi.stubGlobal("fetch", stubCerbosWithLimit(50, () => true, seen));
+    const { cerbosAllowsTool } = await import("./cerbos");
+
+    await cerbosAllowsTool(lowUser, manyTools(1)[0] as never);
+
+    expect(seen).toEqual([1]);
+  });
+});

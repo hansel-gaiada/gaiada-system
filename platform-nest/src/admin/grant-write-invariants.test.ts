@@ -42,8 +42,15 @@ describe.skipIf(!TEST_URL)("P2-04 — GrantWriteService invariants (design §6.3
   let portalCarryingRole: string; // synthetic: bundle = { portal.read } — non-ui_grantable
   let twoKeyRole: string; // synthetic: bundle = { core.task.read, core.task.update }
 
-  const KEY_A = "core.task.read";
-  const KEY_B = "core.task.update";
+  // ⚠ These two keys MUST NOT be in the global `member` bundle. P2-08 taught the ceiling to subtract
+  // the baseline role's bundle from the required set (a bundle records self-service keys that no
+  // admin holds, which made `company_admin` unable to grant `member` — see PERMISSION-CONTRACT §12.1).
+  // The original fixture used `core.task.read`/`core.task.update`, BOTH of which `member` carries, so
+  // after that change the required set was empty and four of the assertions below passed vacuously —
+  // they went red, which is exactly how a decorative guard should announce itself. Swapped for two
+  // above-baseline keys so this suite still tests the ceiling rather than agreeing with it.
+  const KEY_A = "agency.campaign.create";
+  const KEY_B = "agency.campaign.delete";
 
   async function permId(key: string): Promise<string> {
     const { rows } = await withGlobal((c) =>
@@ -246,6 +253,22 @@ describe.skipIf(!TEST_URL)("P2-04 — GrantWriteService invariants (design §6.3
 
     it("FAIL-CLOSED: a grantor with no resolved perms at all holds NOTHING, and is refused", async () => {
       await expect(check({ roleId: twoKeyRole, actorPerms: undefined })).rejects.toThrow(/ceiling_exceeded/);
+    });
+
+    it("BASELINE ON THE HELD SIDE: a bundle that is baseline-only needs nothing held", async () => {
+      // Renamed 2026-08-19: this used to pin P2-08's interim "subtract bundle(member) from the
+      // REQUIRED set". The owner ruled for a per-(role, key) self-scoped MARKER instead (0114), and
+      // the baseline moved to the HELD side — a grantor is themselves staff, so passing on baseline
+      // reach confers nothing new. The observable behaviour this case asserts is unchanged, which is
+      // the point: the mechanism was replaced without moving the boundary.
+      //
+      // The original defect it encodes: `member`'s bundle carries self-service keys no admin holds, so
+      // a plain subset test refused `company_admin` granting `member` — the commonest grant in the
+      // system. Everything ABOVE baseline still fails closed, which the five cases above assert with
+      // above-baseline keys.
+      const baselineOnlyRole = await createRole(`p208-baseline-only-${newId()}`);
+      await attach(baselineOnlyRole, "core.task.read"); // in the global `member` bundle
+      await expect(check({ roleId: baselineOnlyRole, actorPerms: undefined })).resolves.toBeTruthy();
     });
 
     it("BOUNDARY (deliberate): the legacy origin does NOT apply the ceiling (design §6.4)", async () => {

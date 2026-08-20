@@ -159,6 +159,16 @@ const TRUSTED_INTERNAL_CALLERS: Record<string, string> = {
     "role_id resolves ONLY to <module>_staff/<module>_manager via moduleRoleId(), derived from the " +
     "service assignment's OWN module contract — never from request input — and scope_type/scope_id " +
     "are hardcoded 'company'/the served tenant. No caller-chosen role or scope reaches this write.",
+  "src/admin/position-reconciler.ts":
+    "P2-05 — role_id comes from `position_roles`, a STORED template row guarded at its own write " +
+    "time by 0109's position_roles_guard() trigger, never from request input. The scope is derived " +
+    "from position_roles.scope_kind, whose CHECK admits only 'company' (-> the position's own " +
+    "tenant) and 'own_unit' (-> the position's own unit_node_id) — there is deliberately no " +
+    "'global' member, which is the entire structural enforcement of \"a position can never confer " +
+    "platform tier\" (design §2.3). No caller-chosen role or scope reaches this write. Its DELETE " +
+    "goes through revokeGrantById() under a FOR UPDATE lock plus an in-transaction " +
+    "`managed_by_position IS NOT NULL` ownership re-check — see that file's header deviation (1) " +
+    "for why the guard is not in the statement, and the standing follow-up to move it there.",
   "src/core/client-contacts.controller.ts":
     "the role is looked up by the LITERAL name 'client' (`WHERE company_id IS NULL AND name = " +
     "'client'`), never by a caller-supplied roleId, and scope_type is hardcoded 'company'/the " +

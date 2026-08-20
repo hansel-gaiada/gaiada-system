@@ -11,20 +11,73 @@ export interface Principal {
   provider: string;
   externalId: string;
   assurance: Assurance;
+  /**
+   * ── THE CO-AUTHOR (2026-08-20) ────────────────────────────────────────────────────────────────
+   * When an AGENT drives this call on a human's behalf, this is the agent's id. The envelope still
+   * names the HUMAN — authority, permission and accountability stay with them, and Cerbos still
+   * decides on them — so this is purely additive: it mints no rights and no policy needs
+   * re-reasoning. The owner's framing is git's `Co-Authored-By`: author = the human, co-author = the
+   * agent, recorded ALONGSIDE, never INSTEAD ([agent-attribution-gate]).
+   *
+   * ⚠ IT IS ALSO LOAD-BEARING FOR THE D14 IMPACT GATE, which is the defect that made this urgent.
+   * `runAgent` sends the requesting human's OBO envelope verbatim ("an agent can never act with more
+   * authority than the human it serves"), so before this field the hub saw `provider: "whatsapp"` for
+   * an agent-driven call and `isAutomation()` — literally `provider === "n8n"` — was false. The
+   * medium/high-impact suspend branch sat INSIDE that check, so an agent could run a HIGH-impact
+   * write completely unattended while an n8n workflow doing the same thing suspended for approval.
+   *
+   * A client cannot use this to gain anything: it only ever ADDS the impact gate (see
+   * `isUnattended`), and it is not consulted by the assurance rank, the workflow scope, or Cerbos.
+   * Setting it can restrict a call; it can never widen one.
+   */
+  agent?: string;
 }
 
 export interface OboEnvelope {
   provider?: string;
   externalId?: string;
+  /** The agent driving the call, if any — see `Principal.agent`. */
+  agent?: string;
 }
 
 export function mintPrincipal(envelope: OboEnvelope): Principal {
   if (!envelope.provider || !envelope.externalId) {
-    return { provider: "none", externalId: "anonymous", assurance: "anonymous" };
+    // An anonymous principal keeps its agent marker: an unauthenticated agent-driven call is still
+    // agent-driven, and dropping it here would hand back the pre-2026-08-20 hole for the one caller
+    // shape that deserves it least.
+    return { provider: "none", externalId: "anonymous", assurance: "anonymous", ...agentOf(envelope) };
   }
   // "verified" is NEVER minted from an envelope alone — see elevateAssurance below for the only
   // path to it. An envelope names an identity; it can never assert the authority to trust it.
-  return { provider: envelope.provider, externalId: envelope.externalId, assurance: "low" };
+  return {
+    provider: envelope.provider,
+    externalId: envelope.externalId,
+    assurance: "low",
+    ...agentOf(envelope),
+  };
+}
+
+/** Omitted rather than set to `""`/undefined when absent, so a principal that is NOT agent-driven is
+ *  byte-identical to one minted before this field existed — every pre-existing audit ref and rate-limit
+ *  key keeps its exact shape. */
+function agentOf(envelope: OboEnvelope): { agent?: string } {
+  const a = typeof envelope.agent === "string" ? envelope.agent.trim() : "";
+  return a ? { agent: a } : {};
+}
+
+/**
+ * Is this caller UNATTENDED — nobody watching at execution time?
+ *
+ * This is the predicate the D14 impact gate needs, and `isAutomation` was the wrong one for it.
+ * `isAutomation` answers "is this an n8n workflow", which is the right question for the
+ * workflow-scope allow-list and the wrong question for "should a medium/high write suspend".
+ *
+ * Two kinds of caller are unattended: an n8n workflow, and an agent acting for a human who is not
+ * sitting there approving each step. A human on an interactive surface is attended by definition —
+ * they are the human, and the write they just asked for does not need their own approval.
+ */
+export function isUnattended(principal: Principal): boolean {
+  return isAutomation(principal.provider) || !!principal.agent;
 }
 
 // ────────────────────────── assurance elevation (design §2, 2026-08-06) ──────────────────────────

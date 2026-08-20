@@ -102,6 +102,17 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // Companies now live inside the Organization Overview.
     { label: "Organization", icon: "sitemap", items: [
       { label: "Overview", href: "/organization", icon: "inventory" },
+      // P2-11 / P2-12-FE. Both are listed for anyone who can browse the directory rather than gated on
+      // a grant capability, because a DEPARTMENT HEAD's authority comes from holding a lead position —
+      // it is not in `me.roles` as a capability this function can test, and the pages themselves render
+      // the server's own refusal. Nav-gating on `admin.access` would hide the surface from exactly the
+      // person the wave was built for.
+      ...(can(me, "people.directory", tenantId) || isElevated(me)
+        ? [
+            { label: "Positions", href: "/organization/positions", icon: "sitemap" as const },
+            { label: "Access", href: "/organization/access", icon: "user" as const },
+          ]
+        : []),
     ] },
     { label: "Departments", icon: "hr", items: deptItems },
     { label: "Business", icon: "briefcase", items: business },
@@ -136,6 +147,14 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" },
       { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
       { label: "Automation", href: "/systems/automation", icon: "automation" },
+      // MON-09i. Plane A (this box) belongs in Systems, which is where OUR infrastructure
+      // consoles live -- as opposed to Business > Monitoring, which is the CLIENT's sites.
+      // Until now Plane A had no ERP surface at all: server metrics were collected for weeks
+      // and readable only by SSH-tunnelling to Prometheus, which is how a completely broken
+      // datastore exporter stayed invisible. The backend gates on platform-admin; this row is
+      // ungated like its siblings, and a non-admin gets an explicit "restricted" page rather
+      // than a missing row -- a hidden row reads as "gone", a refusal reads as "not yours".
+      { label: "Observability", href: "/systems/observability", icon: "pulse" },
     ] },
   ];
   // Settings (formerly "Admin") — a single sidebar entry; its sub-sections

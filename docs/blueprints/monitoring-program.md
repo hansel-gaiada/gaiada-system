@@ -134,10 +134,101 @@ disk has already rolled back a healthy release once ([[deploy-disk-fills-and-rol
 
 | Ticket | Scope | Tier |
 |---|---|---|
-| **MON-09e** | **Rollback is still broken for any release that ADDS a service** (dies on `<image>:<prev-tag>: not found`). This deploy added 11 services at once, so the exposure is now larger, not smaller. Unfixed. | devops |
-| **MON-09f** | `synthetic-prober` must be **built and pushed to GHCR by `release.yml`**, not built by hand on the box. Today's fix survives only until the box is rebuilt; after that every deploy fails at `--no-build`. | devops |
-| **MON-09g** | Commit the drift: `infra/observability/prometheus/rules/alerts.yml` (disk rules) and `infra/compose/docker-compose.observability.yml` (alertmanager port) exist on the box but are **uncommitted**. The next pipeline deploy re-syncs `infra/` from the tag and **reverts both**. | devops |
+| **MON-09e** | ✅ **DEV-VERIFIED.** `infra/scripts/rollback-to.sh` replaces the bare `up -d` in `deploy.yml`'s rollback: it starts what existed at `<prev>` and **removes** what did not. Carries a safety gate — see §2.6. | devops |
+| **MON-09f** | ✅ **DEV-VERIFIED.** Added to `release.yml`'s matrix (with a `context:` override — it is the only component not at `./<component>`), and the compose service now declares `image:` alongside `build:` so `--no-build` has something to start. | devops |
+| **MON-09g** | ✅ **CLOSED.** Committed (`966a17a`), shipped in `alpha-01.042.0095a`, and verified present on the box **from the tag** rather than by hand. Zero drift. ⚠ The predicted revert happened first — §2.5. | devops |
 | **MON-09h** | Retire `docker-compose.alertmanager-mail.yml`, `otel-metrics.yml`, `loki.yml`, `obs-local.yml` or mark them dev-only — they now describe projects that no longer exist and would re-create port collisions on 9090/9093 if anyone ran them. | devops |
+
+### 2.7 Making the server visible, and the three blind collectors (2026-08-18)
+
+The question "how does the live system show the monitored server?" had an uncomfortable answer: it
+did not. All four provisioned Grafana dashboards are application-level; grepping every one of them
+for `node_*`, `container_*`, `pg_*`, `redis_*` returned **zero matches**. Server metrics had been
+collected for weeks and rendered nowhere, readable only by SSH-tunnelling to Prometheus and writing
+PromQL by hand.
+
+That was not merely a missing view. It is *why* the following survived unnoticed.
+
+**Three collectors were UP and collecting nothing.** Each had a green scrape target:
+
+| Collector | Looked | Actually |
+|---|---|---|
+| `postgres-exporter` | target up | `pg_up=0` — DSN used `POSTGRES_SUPER_PASSWORD` against database `gaiada`; on this box the host serves `gaiada_platform` via per-service roles. Authenticated as nobody against nothing. |
+| `redis-exporter` | target up | `redis_up=0` — addressed `redis://redis:6379`, a container deliberately never started here. |
+| `postgres-exporter-bot` | target up | Monitored database `gaiada` on pg-bot while the bot uses `gaiada_bot`. It connected, so it produced confident numbers about a database nothing uses. Also broken on PG17 (`checkpoints_timed` moved to `pg_stat_checkpointer`). |
+| `cadvisor` | target up | Only host cgroup series, no `name` label ⇒ **no per-container metrics at all** (MON-09n, still open). |
+
+And **no alert rule read `pg_up` or `redis_up`**, so the fault was invisible from both directions.
+
+**The binding rule, stated once:** *a green scrape target means the exporter answered. It says
+nothing about whether the thing being measured is reachable.* Target-count health — including the
+"14/14 up" recorded earlier in this document — is not evidence that the checks mean anything.
+
+Delivered: exporters repointed at the credentials the platform itself uses (one source of truth for
+"where is the database"), `PostgresDown`/`RedisDown` alerts, a **Host & Infrastructure** Grafana
+dashboard (9 panels, every query verified against live Prometheus before shipping), and
+**Systems → Observability** in the ERP — admin-gated, read-only, deliberately a summary.
+
+**Disk, measured rather than assumed.** The plan said trim Prometheus retention. Measurement said
+otherwise: `prometheus-data` 400 MB, `loki-data` 29 MB, **`tempo-data` 4.0 GB**. Traces — the least
+consulted signal — dominated by 10×. Tempo retention cut 168h → 72h; Prometheus left alone, since
+trimming it would have freed almost nothing and lost the series the alerts run on. Dangling images
+and build cache reclaimed 1.1 GB. Only two release tags exist on the box and **both must stay** (the
+older one is the rollback target), so image pruning is exhausted.
+
+⚠ **The box is structurally undersized for this stack**: ~19 GB of images for two release tags on a
+49 GB disk, at 82% used. That is a sizing decision, not a cleanup task (MON-09o).
+
+### 2.8 Open after this pass
+
+| Ticket | Scope |
+|---|---|
+| **MON-09n** | cAdvisor: **errors eliminated, discovery still absent.** `cgroup: host` was the real missing piece — on cgroup v2 Docker gives each container a PRIVATE cgroup namespace, so cadvisor could not see `/system.slice/docker-<id>.scope` at all and logged `Failed to create existing container` per container. That noise is now gone and host-cgroup coverage is intact (50 series), but no series carries a `name` label, so per-container CPU/memory still does not exist. The Docker factory registers and `docker.sock` is readable, so the remaining suspect is the daemon query itself. ⚠ `--docker_only=true` was tried and **reverted**: it cut cadvisor from 49 series to 1, trading a partial signal for none — an optimisation that reduces coverage while the underlying fault is unfixed is a regression. The dashboard continues to state the gap rather than show empty graphs. |
+| **MON-09m** | Dedicated read-only `pg_monitor` role. The exporter now uses `platform_app`, which is intentionally `NOBYPASSRLS`, so some collectors return nothing. Granting `pg_monitor` needs rights not held in this session. |
+| **MON-09o** | Disk sizing: 49 GB carrying ~19 GB of images for two tags. Grow the volume or reduce what a release retains. |
+
+### 2.6 The rollback safety gate, and how it was found (see also §2.5 below)
+
+`rollback-to.sh` classifies each service by whether its image exists at the target tag: present =>
+bring it up, absent-and-ours => it is new in the failed release, so remove it. That logic is correct
+and was verified against the live compose config.
+
+It is also, on its own, capable of destroying the estate. **Testing it with a deliberately bogus tag
+classified all nine of our services as "new"** — because none of our images exist at a tag that was
+never built — and the next thing it would have done is delete every application container. The run
+survived only because the output was piped through `head`, and SIGPIPE killed the script before the
+removal step. Luck, not design.
+
+The missing insight: **"this service is new" and "this tag is wrong" are indistinguishable from a
+single missing image.** Only the *proportion* separates them — a real release adds one or two
+services; a wrong tag is missing all of them. So the script now refuses when none of our images
+exist at the target, and refuses when more of ours are missing than present, and it has a
+`--dry-run` that prints the plan without acting. Verified both ways: bogus tag => refuses, exit 1,
+nothing changed; real tag => plans 32 services up, 0 removed.
+
+The general lesson is not about rollback. It is that **a recovery tool needs a bad-input gate more
+than a normal tool does**, because it runs only when something has already gone wrong, and it runs
+unattended.
+
+### 2.5 The MON-09g revert happened, and is worth keeping
+
+While this work was in progress another session tagged and deployed `alpha-01.040.0093c`. That
+deploy rsynced `infra/` from the tag — which predated the two fixes — and **silently reverted both
+on the box**:
+
+- `alerts.yml` lost `DiskSpaceLow` + `DiskWillFillIn24h`. Prometheus kept serving them *from memory*
+  because it had not reloaded, so `/api/v1/rules` still listed them. **The rules would have vanished
+  at the next restart, with nothing to indicate they had ever been there.** A file check and a
+  runtime check disagreed, and only the file was telling the truth about the future.
+- `docker-compose.observability.yml` lost the alertmanager `ports:` block, so `:9093` went
+  unreachable again — the same silent loss of the silencing UI described in §2.3.
+
+Both were re-applied by hand and verified (`alertmanager=200`, both rules loaded, file on box
+contains them). They are committed, so the next release carries them permanently.
+
+**The general rule this proves:** on this estate, *a hand-applied infra change has a maximum lifetime
+of one deploy by anyone else*, and the shared checkout means "anyone else" is routine. Hand-apply to
+restore service; commit in the same session or accept that it will be undone without warning.
 
 **`COMPOSE_FILES` repo variable updated** to include `docker-compose.observability.yml`, so the
 pipeline keeps OTEL enabled and treats the observability services as owned rather than as orphans.
@@ -409,3 +500,127 @@ migration files named inline (head = 0107 committed). Compose behaviour is read 
 consolidated and deployed, and every figure in §2.1 was verified by query, not estimated. §3–§7 remain
 design; no backend code exists. The Plane B UI in §5 was built and driven in a browser under
 `DEMO_MODE=1`, but has never run against a real backend, because there is not one.
+
+---
+
+## 13. MON-10b — the IAM unit that must land as ONE change (spec, 2026-08-19)
+
+MON-10's schema is committed (migration `0116_module_monitoring.sql`, verified against a throwaway
+database). The module **cannot be registered** until the IAM layer knows about it, and the pieces below
+must ship together — because the failure mode is **boot**, not a red test.
+
+### The three non-obvious constraints, found by reading 0106 (social) rather than assuming
+
+1. **`validateModulePermissions()` refuses boot** if any `ModuleContract.permissions` key does not
+   resolve to a `class='grantable'` row in the `permissions` catalog. So a contract shipped without its
+   catalog migration does not fail a test — **the platform will not start with the module compiled in.**
+   The catalog rows land *before* the module shell, never after.
+2. **Cerbos role names are not a choice.** `derived_roles.yaml` string-composes them at request time
+   from `resource.attr.module`: `module_staff` → `<module>_staff`, `module_manager` →
+   `<module>_manager`. The module key is `monitoring`, so the only names Cerbos will ever look for are
+   **`monitoring_staff`** and **`monitoring_manager`**. Any other name silently never matches — an
+   authz surface that denies everything while looking configured.
+3. **Key format is dotted** `<domain>.<resource>.<action>`, matching the catalog. Colon-style keys from
+   older designs are obsolete.
+
+### The permission set
+
+| Key | Notes |
+|---|---|
+| `monitoring.monitor.read` | The broad grant. Everything on the board is visible to it — which is why `monitor_channels.config` and `monitor_results.detail` hold no secrets and no public-page content. |
+| `monitoring.monitor.create` / `.update` / `.delete` | Authoring a monitor. Per §4.3 this IS the standing authorization to probe on a schedule, and is NOT authorization to act on the target. |
+| `monitoring.incident.read` / `.acknowledge` | Acknowledging is deliberately separate from `.update`: it is an accountability record, not an edit. |
+| `monitoring.maintenance.read` / `.create` / `.delete` | K7. `create` suppresses alerting *and* SLA math (`sensitive: true`), so it is a real grant, not a convenience. `delete` ends suppression early and is therefore **not** sensitive — the concealing direction is the sensitive one. |
+| `monitoring.channel.read` / `.manage` | **`manage` is `sensitive: true`.** Channels carry secret references and deliver outward; a test send is a real notification. |
+| `monitoring.status_page.read` / `.update` / `.publish` | **`update` and `publish` are `sensitive: true`.** Both move tenant data onto the ERP's only unauthenticated read surface — on an already-published page, changing the selection needs no second publish. |
+
+### Order of work
+
+1. Migration `0117_iam_monitoring_permissions.sql` — catalog rows (idiom: `INSERT … SELECT FROM
+   (VALUES …) ON CONFLICT (key) DO UPDATE`, so re-running is a metadata sync and never churns ids that
+   `role_permissions` references), the two roles, and the role→permission bundles.
+2. `cerbos/policies/resource_monitor.yaml` (+ incident / maintenance / status_page resources).
+   **Cerbos does not hot-reload — restart it and prove the new decision with a probe.** A healthy
+   Cerbos container has served two-day-stale policy on this estate before.
+3. `src/modules/monitoring/index.ts` — the `ModuleContract` (key `monitoring`, `migrations: ['0116…',
+   '0117…']`, the permissions above, MCP tools with real `pathTemplate`s).
+4. Bootstrap registration, then `array_append` `monitoring` to the demo company's `enabled_modules` —
+   without it every route 404s, which cost the search module a debugging session.
+
+### Then, in order
+
+**MON-11** driver registry (http/keyword/tcp/dns/tls/heartbeat) behind `search-crawl-go`'s egress
+guard — every probe dials a customer-named target, so that guard is mandatory, not optional.
+**MON-12** runner + `/metrics` + partition roll-forward. **MON-13** the heartbeat slice, which is the
+highest value per unit of effort and needs no vendor credential: it closes a class of failure that has
+silently bitten this estate twice.
+
+### 13.1 Cerbos policies landed; the catalog was half-seeded (RULING REVERSED 2026-08-19)
+
+Five resource policies exist (`monitor`, `monitor_incident`, `monitor_maintenance`, `monitor_channel`,
+`status_page`), role-arm only, and **12/12 decisions have been probed against live Cerbos**.
+
+**⚠ THIS SECTION PREVIOUSLY SAID THE OPPOSITE OF WHAT FOLLOWS.** It recorded that the five policy
+actions without a catalog row — `monitor_incident/read`, `monitor_maintenance/read`,
+`monitor_maintenance/delete`, `status_page/read`, `status_page/update` — were **not** five missing
+permissions, on the reasoning that the reads are covered conceptually by `monitoring.monitor.read` and
+that minting separate keys would "fragment a grant a human thinks of as one thing". That reasoning was
+wrong on the mechanics and is now reversed. All 14 are catalogued.
+
+**Why it was wrong.** The catalog is not a list of things humans grant; it is a 1:1 mirror of concrete
+`(cerbosKind, cerbosAction)` pairs, and `cerbos-catalog-alignment.test.ts` enforces exactly that in
+both directions. A policy action with no pair is drift *by that guard's definition*, no matter how a
+future permission arm chooses to reference it — so "the arm can point several resources at one
+`perm_monitoring_monitor_read`" does not remove the need for the rows. Two independent facts settle it:
+
+- **Two of the five are authorized by code already running in production.**
+  `monitoring.controller.ts` asks Cerbos for `monitor_incident::read` (the incidents list) and
+  `monitor_maintenance::read` (the detail route's window lookup). The live platform was deciding
+  against pairs the catalog did not describe.
+- **The row-count invariant was broken.** `0093` seeds the catalog and every later module migration
+  adds to *both* sides; `0117` moved only one. The table sat 9 rows ahead of the file (293/284,
+  sensitive 105/102). Restored to 298/298 and 106/106.
+
+**And the fragmentation worry was aimed at the wrong layer.** Keeping a grant coherent for humans is
+what `permission-groups.json` is for — that is the whole point of the two-layer model. One
+`monitoring_view` group now carries all five reads, so nobody hand-assembles a board; and each action
+that is destructive, reaches outside the ERP, or conceals an outage is its own withholdable group.
+The catalog stays mechanical; the human-facing shape lives in the groups.
+
+**A second, larger gap surfaced in the same pass.** `manager` and `group_executive` held **zero**
+monitoring bundle rows, although every monitoring policy names them — Cerbos allowed a plain manager
+all 14 actions while the DB mirror recorded none. `role-permission-parity.db.test.ts` found it by
+deriving each role's reach from the live policy. 19 rows added (manager: all 14; group_executive: the
+5 reads, and reads only, since its rule is not `inTenant`-gated).
+
+**For whoever wires `perm_monitoring_*`:** the arm is still unbuilt, and every one of the 14 pairs now
+has a catalog key to reference. `maintenance.delete` and `status_page.update` — flagged here as
+needing "a deliberate decision" — got one: each is its own key, because folding `delete` under
+`create` would make cancelling a window require the grant that can hide an outage, and folding
+`update` under `publish` would hide that editing a live page is itself an exposure path.
+
+### 13.2 Cerbos decisions PROBED against a live server (2026-08-19)
+
+Policies loaded is not policies working — this estate has had a *healthy* Cerbos serve two-day-stale
+policy — so the five monitoring policies were pushed to the live container, Cerbos was restarted, and
+**12 decisions were probed through the real `/api/check/resources`**. All 12 matched the design:
+
+| Principal | Action | Result |
+|---|---|---|
+| `monitoring_staff` | `monitor:read`, `monitor:create`, `incident:acknowledge` | ALLOW |
+| `monitoring_staff` | `monitor:delete`, `maintenance:create`, `channel:manage`, `status_page:publish` | **DENY** |
+| `monitoring_manager` | `monitor:delete`, `maintenance:create`, `status_page:publish` | ALLOW |
+| `client` | `monitor:read` | **DENY** |
+| `monitoring_staff`, assurance `low` | `monitor:read` | **DENY** |
+
+So the staff/manager split is real behaviour, not just a table in a migration: staff can run the desk
+and claim incidents but cannot erase history, suppress alerting, manage outward-delivering channels, or
+expose a client publicly. A client principal gets nothing on the staff-side kinds, and a low-assurance
+session gets nothing at all.
+
+⚠ **Two harness false-negatives on the way, both worth recording** because each looked exactly like a
+broken policy: `docker run` without `-i` never attached stdin, so Cerbos received an empty body and
+reported "principal: value is required" for all 12 cases; then launching one container per case failed
+silently on 8 of them with empty output. Neither was the policy. A probe harness that cannot deliver its
+own request reports the subject as broken — the same shape as every other false signal in this
+programme.

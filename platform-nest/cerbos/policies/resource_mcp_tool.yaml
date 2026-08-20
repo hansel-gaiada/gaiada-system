@@ -55,6 +55,23 @@
 # unchanged deny. Without the `type(...) == string` guard, CEL's heterogeneous `!=` would let a null
 # satisfy `!= ""` — so that guard is load-bearing, not decoration.
 #
+# SMM-09 (2026-08-18) — `social.publishPost` added, and `social.publishPostMetered` deliberately NOT.
+# The free publish path is `write:true`/`impact:"high"` (it puts content on a client's live public
+# feed — the most irreversible action in the estate), so an `origin='automation'` re-drive needs the
+# same grant-lift disjunct `deploy.*` needs, and its registry entry
+# (platform-nest/src/core/approval-executables.ts, SMM-09 section) re-derives scope → quota → hash →
+# unconsumed → budget → creator-info under the approval-exec lock at execution time, trusting no
+# approval-time state.
+#
+# THE TWIN'S ABSENCE IS THE POINT, not an omission. Addendum D-14 splits publishing across two tool
+# NAMES so the money bar stays intact without an owner amendment: any variant on a metered network
+# (X — the only one in v1, and it ships DISABLED in every scope per OQ-2) rides
+# `social.publishPostMetered`, which is BARRED in approval-executables.ts and appears in neither
+# list. Adding it here would be the bug, not a missing feature — exactly as for the three
+# `search.*` money tools named above. Both halves of the D14-13 mirror must move together, and the
+# drift direction is safe: a registry entry without a policy entry is a Cerbos deny and a visible
+# `failed` row, never a silent allow.
+#
 # D14-17 (2026-08-06) — Assistant write-tool entries evaluated, ZERO NET-NEW ENTRIES, so this list is
 # UNCHANGED by that ticket. Full evidence in platform-nest/src/core/approval-executables.ts's own
 # D14-17 section; summary: the assistant broker's ENTIRE tool universe (`ASSISTANT_AGENT_TOOLS` in
@@ -111,12 +128,53 @@ resourcePolicy:
               # Automation callers: in-scope AND (read/probe OR a low-impact write OR a write whose
               # exact call carries a verified execution grant AND whose tool is an approved
               # executable). See the D14-13 header block above before touching this expression.
+              # ── 2026-08-20: the workflow-scope conjunct, still n8n-only ─────────────────────────
+              # An agent has no `wf:*` id, so an allow-list lookup keyed on `externalId` was never
+              # about it and must not start applying to it. This stays on `isAutomation`.
               - expr: >
                   !request.principal.attr.isAutomation ||
-                  (request.resource.attr.name in request.principal.attr.automationScope &&
-                   (!request.resource.attr.write ||
+                  request.resource.attr.name in request.principal.attr.automationScope
+              # ── THE IMPACT GATE — re-keyed from isAutomation to isUnattended ────────────────────
+              # 🔴 THE DEFECT THIS CLOSES WAS LIVE. This conjunct used to be fused to the one above,
+              # so the whole thing was gated on `isAutomation` == `provider == "n8n"`. But `runAgent`
+              # sends the requesting HUMAN's OBO envelope verbatim — deliberately, so an agent can
+              # never out-rank the person it serves — so an agent-driven call arrived with
+              # `provider: "whatsapp"`, `isAutomation: false`, and this entire expression
+              # short-circuited to ALLOW. An n8n workflow calling a high-impact write suspended for
+              # approval; an agent calling the SAME tool ran it unattended. Cerbos is authoritative
+              # whenever CERBOS_URL is set, so this file — not just the hub's in-code fallback — is
+              # where the hole actually lived.
+              #
+              # `isUnattended` = n8n OR agent-driven (mcp-hub/src/principal.ts). A human on an
+              # interactive surface is attended by definition: they are the human, and the write they
+              # just asked for does not need their own approval.
+              #
+              # Splitting the two conjuncts is what makes this correct rather than merely different:
+              # scope stays an n8n question, impact becomes an attendance question, and neither
+              # borrows the other's predicate.
+              - expr: >
+                  !request.principal.attr.isUnattended ||
+                  ((!request.resource.attr.write ||
                     request.resource.attr.impact == "low" ||
                     (has(request.resource.attr.approvalId) &&
                      type(request.resource.attr.approvalId) == string &&
                      request.resource.attr.approvalId != "" &&
-                     request.resource.attr.name in ["deploy.staging", "deploy.production", "webdev.provisionSite"])))
+                     request.resource.attr.name in ["deploy.staging", "deploy.production", "webdev.provisionSite",
+                                                    "social.publishPost",
+                                                    // P2-07: JML's three writes. Listed here because
+                                                    // D14-13's impact conjunct is what lets the
+                                                    // EXECUTOR's branded approvalId call re-enter the
+                                                    // hub for a medium/high tool. An entry in
+                                                    // approval-executables.ts without a name here
+                                                    // would pass its precondition and then be denied
+                                                    // at the door — the loop would close on paper and
+                                                    // fail in practice.
+                                                    "hr.hireEmployee", "hr.transferEmployee",
+                                                    "hr.terminateEmployee",
+                                                    // Owner decision 2026-08-20: the four direct IAM
+                                                    // writes. See approval-executables.ts's own block
+                                                    // for what the decision rested on and what still
+                                                    // bounds them — the ceiling, the single writer and
+                                                    // the self-target DENY are all unchanged.
+                                                    "iam.grantRole", "iam.revokeRoleGrant",
+                                                    "iam.assignPosition", "iam.unassignPosition"])))

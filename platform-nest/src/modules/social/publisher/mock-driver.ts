@@ -17,6 +17,7 @@ import type { QuotaSnapshot } from "../media-rules";
 import {
   OrgHandle,
   SocialPublisherError,
+  type CreatorInfoSnapshot,
   type DailyMetrics,
   type DateRange,
   type IntegrationState,
@@ -35,16 +36,28 @@ export interface MockPublisherState {
   integrations: Map<string, IntegrationState[]>;
   /** Live quota the probe returns, keyed by integration id. Absent ⇒ `undefined` (unknown). */
   quota: Map<string, QuotaSnapshot>;
+  /** SMM-10/D-22 — the live `creator_info` snapshot the probe returns, keyed by integration id.
+   *  Absent ⇒ `undefined` (probe unavailable), matching `quota`'s own convention. */
+  creatorInfo: Map<string, CreatorInfoSnapshot>;
   posts: Map<string, PostStatus>;
   /** Every call made, for assertions: op name + the org id it used. NEVER the key — the suite
    *  asserting "the key never leaves" must not itself become the place it leaks. */
   calls: Array<{ op: string; orgId: string }>;
   /** Set to make the next call throw — how the tests drive "Postiz is unreachable". */
   failWith?: SocialPublisherError;
+  /** SMM-39 — filenames (as passed to `uploadMedia`) that must throw, independent of `failWith`.
+   *  `failWith` is a blunt "everything from now on fails" flag; a partial-media-upload-failure test
+   *  (attachment 2 of 3 fails, 1 and 3 must not) needs a PER-CALL failure a test can target by name
+   *  without also failing the calls around it. */
+  failUploadFilenames?: Set<string>;
+  /** SMM-39 — the full request `schedulePost` was last called with, so a test can assert WHAT
+   *  reached the engine (e.g. that `media` carries resolved `{id, url?}` refs, never the composer's
+   *  raw `{fileId}` descriptors) rather than only that a call happened. */
+  lastScheduleRequest?: VariantDispatch;
 }
 
 export function newMockPublisherState(): MockPublisherState {
-  return { integrations: new Map(), quota: new Map(), posts: new Map(), calls: [] };
+  return { integrations: new Map(), quota: new Map(), creatorInfo: new Map(), posts: new Map(), calls: [] };
 }
 
 export interface MockPublisherOptions {
@@ -53,6 +66,9 @@ export interface MockPublisherOptions {
   capabilities?: PublisherCapability[];
   /** Advertise + implement the inbox surface. Default false: that is Postiz's real answer. */
   withInbox?: boolean;
+  /** SMM-10/D-22 — advertise + implement `getCreatorInfo`. Default false: matching the real driver,
+   *  where `creatorInfoProbeTool` is unset until D-21's fork exception is verified live. */
+  withCreatorInfoProbe?: boolean;
 }
 
 const DEFAULT_CAPS: PublisherCapability[] = [
@@ -65,7 +81,11 @@ export function createMockPublisher(
   opts: MockPublisherOptions = {},
 ): SocialPublisher {
   const caps = new Set<PublisherCapability>(
-    opts.capabilities ?? [...DEFAULT_CAPS, ...(opts.withInbox ? (["inbox_read", "inbox_reply"] as PublisherCapability[]) : [])],
+    opts.capabilities ?? [
+      ...DEFAULT_CAPS,
+      ...(opts.withInbox ? (["inbox_read", "inbox_reply"] as PublisherCapability[]) : []),
+      ...(opts.withCreatorInfoProbe ? (["creator_info_probe"] as PublisherCapability[]) : []),
+    ],
   );
   const record = (op: string, org: OrgHandle): void => {
     state.calls.push({ op, orgId: org.orgId });
@@ -96,14 +116,26 @@ export function createMockPublisher(
       if (!caps.has("quota_probe")) return undefined;
       return state.quota.get(integration.id);
     },
+    async getCreatorInfo(org: OrgHandle, integration: IntegrationState): Promise<CreatorInfoSnapshot | undefined> {
+      record("getCreatorInfo", org);
+      if (!caps.has("creator_info_probe")) return undefined;
+      return state.creatorInfo.get(integration.id);
+    },
     async schedulePost(org: OrgHandle, req: VariantDispatch): Promise<{ providerPostId: string }> {
       record("schedulePost", org);
+      state.lastScheduleRequest = req;
       // The same structural D-6 assertion the real driver makes, so a test that reaches the mock
       // without an approval fails the same way production would.
       if (!req.approvalId) {
         throw new SocialPublisherError("approval_required", "mock publisher refused a dispatch with no approval id");
       }
-      const id = `mock-post-${state.posts.size + 1}`;
+      // GLOBALLY unique, not just unique within this MockPublisherState: 0105's
+      // `ux_social_post_variants_provider` is a partial unique index over EVERY tenant's rows, so a
+      // counter scoped to one test's fresh state (`state.posts.size`) collides with another test's
+      // already-committed row of the same name the moment two tests each dispatch a "first" post —
+      // SMM-10's dispatch.test.ts is what first exercised this driver against real, persisted rows
+      // across multiple cases in one file rather than only asserting on in-memory state.
+      const id = `mock-post-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       state.posts.set(id, { providerPostId: id, state: req.scheduledAt ? "queued" : "publishing" });
       return { providerPostId: id };
     },
@@ -117,7 +149,10 @@ export function createMockPublisher(
     },
     async uploadMedia(org: OrgHandle, file): Promise<{ id: string; url?: string }> {
       record("uploadMedia", org);
-      return { id: `mock-media-${file.filename}` };
+      if (state.failUploadFilenames?.has(file.filename)) {
+        throw new SocialPublisherError("publisher_http_error", `mock upload refused ${file.filename}`);
+      }
+      return { id: `mock-media-${file.filename}`, url: `https://mock.invalid/media/${file.filename}` };
     },
     async getAccountMetrics(org: OrgHandle): Promise<DailyMetrics[]> {
       record("getAccountMetrics", org);

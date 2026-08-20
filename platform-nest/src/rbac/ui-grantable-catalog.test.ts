@@ -58,8 +58,13 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
   const { permissions } = doc;
 
   it("sanity: the catalog has grown to 282 pairs (267 grantable + 15 relationship) — P2-02's 18 new keys landed", () => {
-    expect(permissions.length).toBe(282);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(267);
+        // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
+    // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
+    // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
+    // as a literal here only because rewriting these three suites' fixed-input style is its own
+    // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
+    expect(permissions.length).toBe(298);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(283);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

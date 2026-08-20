@@ -17,7 +17,17 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    - actions: ["create", "update", "delete"]
+    # ⚠ OWNER DECISION 2026-08-18 — `delete` REMOVED from this rule; member keeps create/update.
+    # Found while preparing the sensitivity-flag review: `core.client.delete` appeared in the
+    # BASELINE `member` bundle, and a live probe (principal whose only grant is member@company)
+    # returned EFFECT_ALLOW on create/update/delete — tenant-wide, no `owns` carve-out, and
+    # `clients.controller.ts:80` passes no ownership attribute to narrow it. So every staff member
+    # could remove any client in their company. Soft-delete and audited, therefore recoverable, but
+    # real reach over a core business entity. Rationale for the split rather than removing the rule:
+    # agency staff plausibly onboard and edit clients as ordinary work; nobody plausibly needs every
+    # staffer able to remove one. Deleting stays manager+ (the rule above).
+    # Pinned by `client-member-delete-denied.test.ts`, which probes the live engine both ways.
+    - actions: ["create", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["member"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

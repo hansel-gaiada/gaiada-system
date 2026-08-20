@@ -162,13 +162,16 @@ function controllers() {
 function migrations() {
   const dir = join(ROOT, "platform-nest", "migrations");
   if (!existsSync(dir)) return null;
-  const files = readdirSync(dir).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  // Both naming schemes. The legacy `NNNN_` prefix is CLOSED above 0118 (see migrations/README.md);
+  // new files carry a UTC-minute timestamp, which sorts after every legacy name because "2" > "0" —
+  // so `head` is still simply the last entry under the runner's own ordering.
+  const files = readdirSync(dir).filter((f) => /^\d{4}(\d{8})?_.*\.sql$/.test(f)).sort();
   if (!files.length) return null;
-  const nums = files.map((f) => Number(f.slice(0, 4)));
-  const head = files[files.length - 1];
+  const legacy = files.filter((f) => /^\d{4}_/.test(f));
+  const nums = legacy.map((f) => Number(f.slice(0, 4)));
   const gaps = [];
   for (let i = nums[0]; i < nums[nums.length - 1]; i++) if (!nums.includes(i)) gaps.push(String(i).padStart(4, "0"));
-  return { count: files.length, head, next: String(nums[nums.length - 1] + 1).padStart(4, "0"), gaps };
+  return { count: files.length, head: files[files.length - 1], legacyCount: legacy.length, gaps };
 }
 
 // ── platform-ui routes ────────────────────────────────────────────────────────────────────────
@@ -274,8 +277,13 @@ function render() {
     w("## platform-nest — migrations");
     w();
     w(`- Head: \`${mig.head}\``);
-    w(`- Next free number: \`${mig.next}\` — **reserve it by creating the file**, concurrent sessions share this checkout.`);
-    w(`- Applied files on disk: ${mig.count}`);
+    // No "next free number" line any more, and its absence is the point: advertising one is what made
+    // two sessions race for the same slot. There is nothing to reserve now — name the file for the
+    // minute you write it.
+    w("- New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential");
+    w("  `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);");
+    w("  it collided four times between concurrent sessions in this shared checkout.");
+    w(`- Applied files on disk: ${mig.count} (${mig.legacyCount} legacy \`NNNN_\`, ${mig.count - mig.legacyCount} timestamped)`);
     w(`- Unused numbers below head: ${mig.gaps.length ? mig.gaps.map((g) => `\`${g}\``).join(", ") + " (dead reservations — do not backfill)" : "none"}`);
     w();
   }

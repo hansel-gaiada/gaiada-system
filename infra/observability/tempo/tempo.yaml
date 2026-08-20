@@ -15,7 +15,16 @@ ingester:
 
 compactor:
   compaction:
-    block_retention: 168h # 7 days of traces at trial scale
+    # 2026-08-18: cut 168h -> 72h after MEASURING what actually consumes this box's disk.
+    # The assumption going in was Prometheus (15d retention, the longest window). Wrong:
+    #   prometheus-data  400 MB
+    #   loki-data         29 MB
+    #   tempo-data       4.0 GB   <-- ten times Prometheus, for the least-consulted signal
+    # Traces are the signal nobody reads until an incident, and 3 days covers every incident
+    # anyone has investigated here. Raise it again when there is disk to spare, but measure
+    # first -- trimming the metric store would have freed almost nothing and lost the series
+    # the alerts actually run on.
+    block_retention: 72h # 3 days of traces (see the note above; tempo dominates disk here)
 
 storage:
   trace:

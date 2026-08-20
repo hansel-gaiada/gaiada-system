@@ -18,10 +18,10 @@
 //   (4) an unreachable publisher degrades VISIBLY — reads keep serving, writes refuse with a typed
 //       code, and NOT ONE registry row is rewritten by an outage.
 //   (5) authorization is a refusal, never an empty list.
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../../config";
-import { withTenants, newId } from "../../../db";
+import { withTenants, withGlobal, newId } from "../../../db";
 import { buildApp } from "../../../main";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../../../testing/fixtures";
@@ -72,6 +72,10 @@ describe.skipIf(!TEST_URL)("SMM-05 · publisher orgs + connector registry", () =
     // The default alias's key, resolved server-side at call time. A real deployment sets
     // SOCIAL_POSTIZ_ORG_API_KEY; the suite must not mutate process.env (vitest workers share it).
     config.social.publisher.defaultOrgApiKey = "test-org-key";
+    // SMM-07 — the guided connect flow's own two knobs. Real value for the redirect (a fixed
+    // deployment dial, no per-test dependency); `ownBrandClientIds` is set PER TEST below because it
+    // names a client id that `beforeEach` mints fresh every time.
+    config.social.publisher.connectRedirectUrl = "https://ui.gaiada.test/social/callback";
     resetModules();
     registerModule(socialModule);
 
@@ -432,5 +436,225 @@ describe.skipIf(!TEST_URL)("SMM-05 · publisher orgs + connector registry", () =
     expect(res.statusCode).toBe(400);
     // The token goes in `message`, which HttpErrorFilter renames to `error` on the way out.
     expect(res.json().error).toBe("missing_publisher_org_ref");
+  });
+
+  // ── (6) SMM-07 · the guided, resumable account-connect flow ─────────────────────────────────────
+  //
+  // Both routes below run through `checkConnectReadiness`; `initiateAccountConnect` runs the SAME
+  // function before it ever touches the database or the engine. `ownBrandClientIds` is reset after
+  // every test — it names a client id `beforeEach` mints fresh, so a leftover value from one test
+  // must never leak into the next.
+
+  afterEach(() => {
+    config.social.publisher.ownBrandClientIds = [];
+  });
+
+  /** `social_platform_apps` is 0105's GLOBAL, no-RLS table (design D-4) — no admin endpoint exists
+   *  yet (OQ-1's own review pipeline is what will populate it for real), so the test seeds it
+   *  directly, the same way `createClient` above seeds `clients` directly. */
+  async function registerPlatformApp(network: string, credentialRef = "test-cred"): Promise<void> {
+    await withGlobal((c) => c.query(
+      `INSERT INTO social_platform_apps (network, app_name, review_status, credential_ref)
+       VALUES ($1, $2, 'sandbox', $3)`,
+      [network, `test-${network}-app-${newId()}`, credentialRef],
+    ));
+  }
+
+  it("refuses readiness with `platform_app_not_registered` when no app exists for the network (OQ-1) — the constraint this ticket exists for", async () => {
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("noapp") }, manager);
+    const res = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/instagram`, manager);
+    expect(res.statusCode).toBe(200); // a read never throws for an ordinary "not yet" answer
+    expect(res.json()).toMatchObject({ ok: false, reason: "platform_app_not_registered" });
+
+    const connectRes = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@brandone" }, manager,
+    );
+    expect(connectRes.statusCode).toBe(409);
+    expect(connectRes.json().code).toBe("platform_app_not_registered");
+  });
+
+  it("refuses `platform_app_not_registered` honestly on EVERY deployment-enabled network — today's REAL state, not an edge case (SMM-14 QA gate)", async () => {
+    // Verified on the live engine 2026-08-19: FACEBOOK_APP_ID, FACEBOOK_APP_SECRET,
+    // LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, TIKTOK_CLIENT_ID, YOUTUBE_CLIENT_ID are all length
+    // 0 — there is no platform app for OAuth to start against on ANY network. The instagram-only
+    // test above proves the shape once; this proves the SAME refusal fires for every network this
+    // deployment has actually turned on (`config.social.publisher.enabledNetworks`, default
+    // instagram/facebook/linkedin) rather than dead-ending into a generic error on the ones nobody
+    // happened to test.
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("everynet") }, manager);
+    for (const network of config.social.publisher.enabledNetworks) {
+      const res = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/${network}`, manager);
+      expect(res.statusCode, `readiness read must never throw for network=${network}`).toBe(200);
+      expect(res.json(), `network=${network} must refuse honestly, not fall through`).toMatchObject({
+        ok: false,
+        reason: "platform_app_not_registered",
+      });
+
+      const connectRes = await post(
+        `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network, handle: `@${network}-brandone` }, manager,
+      );
+      expect(connectRes.statusCode, `connect POST for network=${network} must be a typed 409, never a generic 500`).toBe(409);
+      const body = connectRes.json();
+      expect(body.code, `network=${network} connect refusal must name itself`).toBe("platform_app_not_registered");
+      // The agentic bar's own criterion 5: a refusal must never surface as a generic error or an
+      // empty list. `error` must carry real prose naming the actual gap, not a bare code with no
+      // human-readable explanation.
+      expect(typeof body.error).toBe("string");
+      expect(body.error.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("refuses a client that is not on the own-brand allow-list — client connects wait for AGPL counsel sign-off (OQ-3)", async () => {
+    await registerPlatformApp("instagram");
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("oq3") }, manager);
+    // clientOne is deliberately NOT added to ownBrandClientIds here — the default-deny case.
+    const readiness = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/instagram`, manager);
+    expect(readiness.json()).toMatchObject({ ok: false, reason: "client_connect_requires_signoff" });
+
+    const connectRes = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@brandone" }, manager,
+    );
+    expect(connectRes.statusCode).toBe(409);
+    expect(connectRes.json().code).toBe("client_connect_requires_signoff");
+  });
+
+  it("refuses connect when the deployment has no redirect destination configured", async () => {
+    const saved = config.social.publisher.connectRedirectUrl;
+    config.social.publisher.connectRedirectUrl = "";
+    try {
+      config.social.publisher.ownBrandClientIds = [clientOne];
+      await registerPlatformApp("instagram");
+      await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("noredirect") }, manager);
+      const res = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/instagram`, manager);
+      expect(res.json()).toMatchObject({ ok: false, reason: "connect_redirect_not_configured" });
+    } finally {
+      config.social.publisher.connectRedirectUrl = saved;
+    }
+  });
+
+  it("refuses a network disabled at the deployment level before ever consulting the app registry", async () => {
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    // tiktok is off by default (config.social.publisher.enabledNetworks) and no app is registered
+    // for it either — proving THIS is the refusal that fires first pins the stated check ORDER.
+    expect(config.social.publisher.enabledNetworks).not.toContain("tiktok");
+    const res = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/tiktok`, manager);
+    expect(res.json()).toMatchObject({ ok: false, reason: "network_disabled" });
+  });
+
+  it("starts the guided connect ceremony and RESUMES it on a second call instead of duplicating the row", async () => {
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await registerPlatformApp("instagram");
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("connect-ok") }, manager);
+
+    const readiness = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/instagram`, manager);
+    expect(readiness.json()).toEqual({ ok: true });
+
+    const first = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@brandone" }, manager,
+    );
+    expect(first.statusCode).toBe(200);
+    const firstBody = first.json();
+    expect(firstBody).toMatchObject({
+      status: "pending", resumed: false, connectUrl: "https://mock.invalid/connect/instagram",
+    });
+    expect(state.calls.some((c) => c.op === "connectUrl")).toBe(true);
+
+    // The human closes the tab and comes back tomorrow — same triple, same row, no duplicate.
+    const second = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@brandone" }, manager,
+    );
+    expect(second.json()).toMatchObject({ accountId: firstBody.accountId, resumed: true, status: "pending" });
+
+    const { rows } = await withTenants(
+      [A],
+      (c) => c.query(`SELECT id, status, postiz_integration_id AS "integrationId" FROM social_accounts WHERE client_id = $1`, [clientOne]),
+      MODULES,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: firstBody.accountId, status: "pending", integrationId: null });
+  });
+
+  it("converges the pending row to connected once a later sync reports the SAME (network, handle) — one row, not two", async () => {
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await registerPlatformApp("instagram");
+    const ref = orgRef("converge");
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: ref }, manager);
+    const connectRes = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@brandone" }, manager,
+    );
+    const pendingAccountId = connectRes.json().accountId;
+
+    // The engine now reports the completed integration under the SAME handle the connect flow was
+    // given up front — the fact `upsertAccount`'s `ON CONFLICT (tenant_id, client_id, network,
+    // handle)` relies on to promote THIS row rather than minting a second one.
+    state.integrations.set(ref, [integration({ id: "ig-real-1", network: "instagram", handle: "@brandone" })]);
+    const sync = await post(`/api/${A}/modules/social/publisher-orgs/${clientOne}/sync`, {}, manager);
+    const syncedAccount = sync.json().accounts.find((a: { network: string }) => a.network === "instagram");
+    expect(syncedAccount.accountId).toBe(pendingAccountId);
+    expect(syncedAccount.status).toBe("connected");
+    expect(syncedAccount.created).toBe(false); // an UPDATE of the pending row, never a fresh insert
+
+    const { rows } = await withTenants(
+      [A], (c) => c.query(`SELECT count(*)::int AS n FROM social_accounts WHERE client_id = $1 AND network = 'instagram'`, [clientOne]),
+      MODULES,
+    );
+    expect(rows[0].n).toBe(1);
+  });
+
+  it("REGRESSION: the pending row is invisible without the 'social' module scope — the third wall the whole module leans on", async () => {
+    // Proves `initiateAccountConnect` actually declares module scope on its write rather than the
+    // vacuous pass a `withTenants([tenantId])` call with no `modules` option would produce (reads
+    // zero rows, throws nothing, looks green). If a future edit ever drops `MODULES` from that
+    // INSERT's `withTenants` call, THIS assertion is what turns red instead of the bug shipping
+    // silently, exactly the failure mode SMM-09/36/10/13 each hit in this module already.
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await registerPlatformApp("instagram");
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("scope-trap") }, manager);
+    await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@brandone" }, manager,
+    );
+
+    // No `modules` option — the exact trap `app_module_allowed('social')` exists to close.
+    const withoutScope = await withTenants([A], (c) => c.query(`SELECT id FROM social_accounts WHERE client_id = $1`, [clientOne]));
+    expect(withoutScope.rows).toHaveLength(0);
+
+    const withScope = await withTenants(
+      [A], (c) => c.query(`SELECT id FROM social_accounts WHERE client_id = $1`, [clientOne]), MODULES,
+    );
+    expect(withScope.rows).toHaveLength(1);
+  });
+
+  it("denies staff the connect action with a 403 — but lets them read readiness (the department's working surface)", async () => {
+    config.social.publisher.ownBrandClientIds = [clientOne];
+    await registerPlatformApp("instagram");
+    await post(`/api/${A}/modules/social/publisher-orgs`, { clientId: clientOne, publisherOrgRef: orgRef("staff-connect") }, manager);
+
+    const readiness = await get(`/api/${A}/modules/social/publisher-orgs/${clientOne}/connect/instagram`, staff);
+    expect(readiness.statusCode).toBe(200);
+
+    const res = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram", handle: "@x" }, staff,
+    );
+    expect(res.statusCode).toBe(403);
+    const { rows } = await withTenants(
+      [A], (c) => c.query(`SELECT count(*)::int AS n FROM social_accounts WHERE client_id = $1`, [clientOne]), MODULES,
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("refuses a malformed connect request with a token an agent can branch on", async () => {
+    const missingHandle = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "instagram" }, manager,
+    );
+    expect(missingHandle.statusCode).toBe(400);
+    expect(missingHandle.json().error).toBe("missing_handle");
+
+    const badNetwork = await post(
+      `/api/${A}/modules/social/publisher-orgs/${clientOne}/connect`, { network: "myspace", handle: "@x" }, manager,
+    );
+    expect(badNetwork.statusCode).toBe(400);
+    expect(badNetwork.json().error).toBe("unknown_network");
   });
 });

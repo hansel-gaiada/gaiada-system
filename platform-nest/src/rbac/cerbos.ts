@@ -48,6 +48,16 @@ export interface Resource {
    *  (reports.controller.ts's report_document department grain; appraisals.controller.ts's
    *  subject-unit resolution) — see each rule's own comment for why it stops there. */
   unitAncestors?: string[];
+  /** P2-02/P2-06 — the person BEING acted upon, as distinct from the resource's owner or subject:
+   *  the target of a `position` assign or a `role_grant` create/revoke. Backs the self-target DENY
+   *  rules in `resource_position.yaml` and `resource_role_grant.yaml` (`targetUserId ==
+   *  principal.id`), which is why an INEQUALITY-style attribute cannot reuse `subjectUserId`'s
+   *  self-service-EQUALITY semantics. P2-02 registered both kinds expecting callers to set this;
+   *  `employees.controller.ts` (P2-06) is the first caller, and adding it to this type is what makes
+   *  the DENY reachable at all — until now the rule read an attribute no handler could send.
+   *  Omitted -> "" -> the rules' `has() && != ""` guard makes the DENY vacuously false, the same
+   *  fail-open-for-DENY/fail-closed-for-ALLOW convention every other optional attr here follows. */
+  targetUserId?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -92,6 +102,7 @@ function resourcePayload(r: Resource) {
       unitAncestors: r.unitAncestors ?? [],
       creatorId: r.creatorId ?? "",
       subKind: r.subKind ?? "",
+      targetUserId: r.targetUserId ?? "",
     },
   };
 }

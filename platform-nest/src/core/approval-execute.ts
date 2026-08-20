@@ -152,6 +152,23 @@ interface ApprovalRow {
 const CLAIM_RETURNING =
   "id, tenant_id, workflow_id, tool_name, tool_args, origin, requested_by, decided_by, execution_attempts";
 
+/**
+ * Put an entry's declared module scope in force for the rest of THIS transaction, immediately before
+ * its precondition runs. See `ExecutableApprovalEntry.preconditionModules` for why an entry needs
+ * this at all; the short version is that a module-owned table reads ZERO ROWS with `app.scopes`
+ * unset, and a precondition that sees no rows does not fail — it answers wrongly.
+ *
+ * `set_config(..., true)` is the same transaction-local spelling `db/index.ts` uses, so the widening
+ * dies with the transaction. Called AFTER the claim UPDATE, which is safe because
+ * `automation_approvals` is a core table whose policy has no module conjunct — widening the scope
+ * cannot change which approval rows this transaction can see, only which module tables the
+ * precondition can.
+ */
+async function applyPreconditionScopes(c: PoolClient, entry: ExecutableApprovalEntry): Promise<void> {
+  if (!entry.preconditionModules?.length) return;
+  await c.query("SELECT set_config('app.scopes', $1, true)", [entry.preconditionModules.join(",")]);
+}
+
 /** `execution_status='executing'` + untouched for longer than the staleness threshold = wedged by a
  *  dead process. THE crash-wedge predicate; D14-07's retry endpoint imports this instead of
  *  re-deriving the rule (two copies of a staleness threshold is how they drift). */
@@ -232,6 +249,7 @@ export async function executeApprovedAutomationWrite(
 
     // Invariant 3: lock FIRST, then re-read. Same idiom as core/pipeline-lock.ts.
     await c.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [APPROVAL_EXEC_LOCK_NS, entry.lockKey(args)]);
+    await applyPreconditionScopes(c, entry);
 
     let verdict: Awaited<ReturnType<ExecutableApprovalEntry["precondition"]>>;
     try {
@@ -251,7 +269,13 @@ export async function executeApprovedAutomationWrite(
     // Invariant: retry policy is read at EXECUTION time, never cached at boot (constraint 10). Same
     // connection, same instant as the claim, so a change made in the approvals-settings UI a second
     // ago is already in force with no restart.
-    const autoRetryCount = await readAutoRetryCount(c, row.tenant_id);
+    //
+    // SMM-09: an entry may opt OUT entirely, and the ENTRY WINS over the tenant setting — that
+    // direction is deliberate and must not be inverted. `neverAutoRetry` is a property of the TOOL
+    // ("an ambiguous outcome for this action may already be public and irreversible"), not a
+    // preference of the tenant, so a tenant that has turned auto-retry on for its deploys does not
+    // thereby buy an unattended second publish. See `ExecutableApprovalEntry.neverAutoRetry`.
+    const autoRetryCount = entry.neverAutoRetry === true ? 0 : await readAutoRetryCount(c, row.tenant_id);
     return { kind: "claimed" as const, row, args, entry, autoRetryCount };
   });
 
@@ -301,6 +325,7 @@ export async function executeApprovedAutomationWrite(
     // attempt actually landed, the precondition now refuses and we stop instead of double-applying.
     const re = await withTenants([row.tenant_id], async (c) => {
       await c.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [APPROVAL_EXEC_LOCK_NS, entry.lockKey(args)]);
+      await applyPreconditionScopes(c, entry);
       let verdict: Awaited<ReturnType<ExecutableApprovalEntry["precondition"]>>;
       try {
         verdict = await entry.precondition(c, args);

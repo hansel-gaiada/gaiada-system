@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### monitoring `0.2.0` — 2026-08-19 — the IAM catalog was only half-seeded
+
+**Fixed**
+- **Five Cerbos actions had a policy rule and no catalog row**: `monitor_incident::read`,
+  `monitor_maintenance::read`, `monitor_maintenance::delete`, `status_page::read`,
+  `status_page::update`. Two of them — the incident list and the detail route's maintenance lookup —
+  are authorized by code that is **already in production**, so the running platform was deciding
+  against pairs the catalog did not describe. Added to `permission-catalog.json`, to the DB, and to
+  the module contract (9 → 14 declared permissions).
+- **`manager` and `group_executive` held zero monitoring bundle rows** while every monitoring policy
+  names them, so Cerbos allowed a plain manager all 14 actions with the DB mirror recording none.
+  Found by `role-permission-parity.db.test.ts`; 19 rows added (manager 14, group_executive 5 reads).
+- **The `permissions` table had drifted 9 rows ahead of the catalog** (293/284, sensitive 105/102),
+  breaking the row-count invariant `0093` establishes. Restored to 298/298 and 106/106.
+- **Heartbeat ingest could never have worked** (`0119`): being unauthenticated by design it has no
+  tenant context, so FORCE RLS filtered every row and the endpoint returned 200 having matched
+  nothing. Now a `SECURITY DEFINER` function with a pinned `search_path`, matching on the token
+  hash's unique index.
+
+**Added**
+- Seven `monitoring_*` permission groups, giving all 14 keys an authoring path; each action that is
+  destructive, reaches outside the ERP, or conceals an outage is its own withholdable group.
+- `monitoring_staff`/`monitoring_manager` registered in the role-bundle generator, the parity
+  suite's independent resolver, and the role-catalog drift baseline — three places that each
+  silently skip a role they do not know about.
+- The shared-service seam (`core.member.read` / `core.service_assignment.read`), mirroring `social`.
+
+**Verified**
+- 796/796 across `src/rbac` + `src/modules/monitoring` against live Postgres RLS and live Cerbos,
+  with **zero skips** — the DB-backed half of this drift is invisible to CI, which has no test DB.
+
 ### platform-nest `0.22.0` — 2026-08-13 — IAM authorization hardening
 
 **Fixed**
@@ -46,8 +77,65 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-20 — SMM-31**, `social-media 0.5.2 -> 0.5.3` (IN PROGRESS). Client-review stage backend
+  (D-16): `social_post_client_reviews` (already schema'd by `0105`, plain-tenant-wall — see that
+  migration's own header for why, restated in `modules/social/client-review.ts`'s header). No
+  migration and no Cerbos change — `0106` already seeded `social.client_review.{read,request,
+  withdraw}` + `portal.approve_post`, and `resource_social_client_review.yaml` /
+  `resource_portal.yaml` already carried the actions. STAFF side (`social.controller.ts`):
+  `POST/GET/POST .../variants/:id/client-review[/withdraw]`, idempotent request-as-upsert (one row
+  per variant, forever — 0105's `UNIQUE(variant_id)`), manager-tier withdraw. PORTAL side (new
+  `SocialClientReviewPortalController`, modelled on `PortalController.decideGate`):
+  `GET/POST .../portal/social-reviews[/:id/decide]`, ownership resolved before the guarded
+  `UPDATE ... WHERE status='pending'` (idempotent: a retry with the SAME decision is a 200 no-op, a
+  DIFFERENT decision is a 409, never a silent flip). The submission precondition
+  (`evaluateClientReviewPrecondition` + the composed `evaluatePublishPreconditionWithClientReview`)
+  is a NEW, SEPARATE gate — NOT a 7th stage in SMM-09's pinned six-stage chain
+  (`PUBLISH_PRECONDITION_STAGES` stays `[scope,quota,hash,unconsumed,budget,creator_info]`, unchanged
+  and untested-into) — composed in FRONT of it at all three real choke points: the D14 executor's
+  precondition, SMM-10's dispatch re-check, and the dry-run endpoint staff actually consult before
+  filing a WS4 approval (there is no separate "submit" endpoint in this codebase as of P1). New
+  refusal vocabulary `CLIENT_REVIEW_REFUSAL` (5 tokens: `client_review_not_requested/_pending/
+  _changes_requested/_withdrawn/_stale`), kept apart from `PUBLISH_REFUSAL` — same separation
+  `dispatch.ts`'s own `DISPATCH_REFUSAL` keeps. Notifications ride the ALREADY-DRAINED
+  `"social_post_variant"` consumer stream (two new `event-handlers.ts` routes,
+  `social.client_review.requested` → client portal contacts, `.decided` → the engagement owner) —
+  no `main.ts` change needed, avoiding this module's own most-repeated "registered but never
+  invoked" defect. 318/318 in `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` +
+  the new portal controller test (was 289/289), 0 skipped; two of the new tests were driven to FAIL
+  first by temporarily deleting the `declareSocialModuleScope` call each new code path needs, then
+  restored — the module-GUC regression class, proven rather than asserted. `tsc --noEmit` clean;
+  `lint:withtenants`, `lint:migration-rls`, `lint:migration-names` all green; IAM chain-alignment
+  suite green. No migration. SMM-32 (portal UI) is next; full detail in `MODULES.md`'s social-media
+  0.5.3 entry.
+
+- **2026-08-19 — SMM-39**, `social-media 0.5.0 -> 0.5.1` (IN PROGRESS). `dispatch.ts` actually calls
+  `SocialPublisher.uploadMedia` now — SMM-05 built the port method and SMM-10's own "KNOWN
+  LIMITATION" comment named the gap by name (`toDispatchMedia` mapped `fileId` onto the engine ref
+  verbatim, a placeholder that made any post carrying an attachment fail at the publisher with
+  `publisher_http_error`), and no ticket in between ever wired it up. `resolveEngineMedia` reads each
+  attachment's bytes out of `files` (plain core tenant wall, NOT `social_*` — conflating that with
+  the module GUC is this module's most-repeated trap) and uploads OUTSIDE the claim transaction/
+  advisory lock, mirroring SMM-10's own creator-info-fetch discipline. Resolved refs land in a NEW
+  additive `uploaded_media jsonb` column (`migrations/0118_social_variant_uploaded_media.sql`) keyed
+  by `fileId` — deliberately NOT the hashed `media` column, so resolving an attachment can never
+  invalidate the approval it is executing under (D-15). Persisted per-fileId the instant its own
+  upload succeeds, so a redispatch after a partial failure never re-uploads what already succeeded.
+  A partial failure (attachment 2 of 3) refuses BEFORE `schedulePost` — new token
+  `DISPATCH_REFUSAL.mediaUploadFailed`, added to `dispatch.ts`'s own small vocabulary rather than
+  `PUBLISH_REFUSAL` (SMM-12/17/22/31's contract) — and the approval is still consumed (SMM-09's
+  `neverAutoRetry`). Text-only variants never touch `files`/`storage()`/the driver. No new endpoint;
+  `dispatch.test.ts`'s own fixtures had been naming a `fileId` with no `files` row behind it at all
+  (exactly the gap this ticket closes) and now attach real rows throughout, plus 3 new cases
+  (partial-failure refusal, idempotent-redispatch skip, text-only no-op). 225/225 passing in
+  `src/modules/social` (was 222/222), 0 skipped; `tsc --noEmit` clean; `lint:withtenants`,
+  `lint:migration-rls`, `lint:postiz-deps` all green. MAP.md regenerated (migration head 0116).
+
 - **2026-08-14 — activity feed gets a time axis, and a working-zone clock**,
-  `platform-ui 0.25.3 -> 0.25.4` (IN PROGRESS). **Fixed, and this is the reason to read the
+  `platform-ui 0.27.2 -> 0.27.3` (IN PROGRESS). Authored on a branch against `0.25.1` and
+  renumbered when it merged: `0.25.2`–`0.25.4` had been consumed on `main` by the `0107`/`0109`
+  release cuts (`platform-ui 0.25.1 -> 0.26.0 -> 0.27.0`) while this work sat uncommitted.
+  **Fixed, and this is the reason to read the
   entry**: `ActivityFeed` formatted every timestamp with `toLocale*(undefined, …)` and it renders
   on the SERVER, so the clock beside each row was the container's UTC — eight hours off the
   working day, silently. Locale and zone are now pinned (`en-GB` / `Asia/Makassar`, the
@@ -79,7 +167,7 @@ is added to the App release log table until one is cut.
   run in a throwaway git worktree, because building in the shared checkout overwrites the `.next`
   another session's dev server is live on (it did, once, and cost a `__webpack_modules__ is not a
   function`).
-- **2026-08-14 — project-health ring becomes a composition**, `platform-ui 0.25.2 -> 0.25.3`
+- **2026-08-14 — project-health ring becomes a composition**, `platform-ui 0.27.1 -> 0.27.2`
   (IN PROGRESS). `HealthRingCard` drew a single progress arc that turned rust when the project was
   at risk, so "43% complete" was rendered in the alarm colour — recolouring progress to carry a
   fact progress does not hold. The ring now shows the work's **composition**: every task lands in
@@ -109,7 +197,7 @@ is added to the App release log table until one is cut.
   rail leaves a 578px main column that two 340s cannot share. DEV-VERIFIED by driving
   `/departments/dept-1` in `DEMO_MODE=1` at 1280/1440/1680 and in **both** themes, reading the
   rendered rings: 146 files/2313 tests green, `tsc` clean, `DEMO_MODE=1 next build` exit 0.
-- **2026-08-14 — department-console KPI strip craft pass**, `platform-ui 0.25.1 -> 0.25.2`
+- **2026-08-14 — department-console KPI strip craft pass**, `platform-ui 0.27.0 -> 0.27.1`
   (IN PROGRESS). Four defects in `components/departments/KpiStrip.tsx` + `departments.css`, all
   visible on `/departments/[deptId]`: (1) KPI numerals were set in the display face, whose `1` is a
   flagless vertical stroke and rendered as a capital **I** at 32px — in the one component whose job
@@ -188,6 +276,322 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.057.0114a` - 2026-08-20 - the platform can finally tell a human from their agent
+
+Manifest (counter +3, 0111 -> 0114): `platform-nest 0.31.0 -> 0.32.0`, `mcp-hub 0.10.3 -> 0.11.0`,
+`ai-agents 0.7.1 -> 0.7.2`. No migration.
+
+[agent-attribution-gate], the interim half — and a live authorization hole that was hiding inside it.
+
+**The hole first, because it made yesterday's release notes false.** The D14 impact gate was keyed on
+`isAutomation`, which is `provider === "n8n"`. `runAgent` sends the requesting human's envelope verbatim,
+so an agent-driven call never matched it: an n8n workflow calling a high-impact write suspended for
+approval, and an agent calling the SAME tool ran it unattended. `0111a` shipped `iam.grantRole` (high)
+on the stated basis that all four direct IAM writes suspend for a human. That was true for n8n only.
+Fixed in both the in-code engine and the Cerbos policy — the latter mattering more, since Cerbos is
+authoritative live. PERMISSION-CONTRACT §15 records the correction rather than quietly restating it.
+
+**Then attribution itself:** author = the human, co-author = the agent, `actor_id` untouched. The agent
+names itself from its own definition, the marker rides `x-obo-agent` through the hub's now-single
+envelope builder, and `writeActivity` stamps it ambiently across all 263 call sites — because an opt-in
+audit field is missing precisely where it mattered.
+
+**Also fixed properly rather than worked around:** `REGEN-NO-DIFF` compared bytes while git's autocrlf
+gave the working tree CRLF, so it could never pass on Windows. `.gitattributes` already carried
+`eol=lf` for `*.sh` and `*.go`, added for exactly this class of bug; the generated rbac artifacts now
+join them. Yesterday I diagnosed this correctly and then restored the file, which left the test red
+forever — a diagnosis is not a fix.
+
+### `Alpha 01.056.0111a` - 2026-08-20 - an agent can grant, and the reason it may is written down
+
+Manifest (counter +2, 0109 -> 0111): `platform-nest 0.30.0 -> 0.31.0`, `mcp-hub 0.10.2 -> 0.10.3`.
+No migration.
+
+The owner's call on the question the last three releases kept deferring: the four direct IAM writes
+become agent-reachable. What makes this cut worth reading is not the tools — they are four registry
+entries and a widened allow-list — but that the reasoning is recorded at both code sites rather than
+implied by the diff.
+
+The original objection stands unrefuted: audit attribution still says "Alice", not "Alice's agent". It was
+outranked by a verified fact about the data (23 employee memberships, all mock but the owner's own), and
+that fact has an expiry date. Closing [agent-attribution-gate] moved from "pre-staging work" to "the
+thing that must happen before a real employee account exists", and the code says so where somebody
+adding the fifth tool will read it.
+
+Also in this window, on the live estate: **P2-15's employee backfill was applied** — 23 records across two
+companies, `user_roles` 53 before and 53 after in both runs, `hire_date` NULL on every row (never
+invented), and zero records belonging to a bot. Verified independently of the script's own report.
+
+### `Alpha 01.055.0109a` - 2026-08-20 - a department head can run their own department
+
+Manifest (counter +2, 0107 -> 0109): `platform-ui 0.26.0 -> 0.27.0`, `monitoring -> 0.2.0` (another
+session's catalog completion, in this cut's window — its migration
+`202608191417_iam_monitoring_permissions_completion.sql` is the FIRST file to use the timestamp naming the
+scheme moved to yesterday).
+
+P2-10, P2-11 and P2-12-FE. With these every ticket in the IAM Phase 2 wave (P2-01 … P2-17) is closed;
+what remains of the program is Phase 3 and full Phase 4, both scoped out of this wave by design §11.
+
+The owner requirement that started the wave was "the department head handles permissions for their own
+department". `/organization/access` is that surface, and the interesting part is not the roster — it is
+that the two things a dept head is NOT allowed to do now come with the mechanism for doing them properly.
+Placing someone directly is refused with `assignment_request_required`, and the UI answers with "Propose
+instead". Granting above their ceiling is refused, and the UI answers with "Request override". Both were
+already built server-side; until now nothing surfaced them, so the refusal was a wall rather than a door.
+
+### `Alpha 01.054.0107a` - 2026-08-19 - IT can see who still needs a login
+
+Manifest (counter +1, 0106 -> 0107): `platform-ui 0.25.1 -> 0.26.0`. No migration.
+
+P2-14, the first Phase 2 UI surface. The worklist and its four actions, against P2-13's real endpoints.
+
+Two things worth reading. The accounts reader deliberately breaks this codebase's own
+degrade-to-empty-list convention, because an empty accounts list is a claim ("everyone has a login") and
+not an absence of data. And wiring the tab surfaced a contradiction: the IT console's layout gated every
+tool on the `it` module, which would have hidden the one endpoint specifically built to keep working when
+that module is off — and hidden it behind a reassuring "module disabled" instead of "three leavers can
+still log in". The gate is now per-tool.
+
+### `Alpha 01.053.0106a` - 2026-08-19 - the phase's own acceptance criterion, proven three ways
+
+Manifest (counter +1, 0105 -> 0106): `platform-nest 0.29.0 -> 0.30.0`. No migration.
+
+P2-16 and P2-17. The criterion design §5.2 calls "the acceptance criterion this whole phase exists for"
+is now asserted in all three operating modes — human, agent, n8n — against running Cerbos rather than
+against a bundle, because a bundle cannot witness a mover at all.
+
+The leaver case turned out to be stronger than specified and the test now says so: after terminate there
+is no assemblable principal, so the probe is 401 rather than 403. "Still a principal, currently
+unauthorized" is a state a leaver must not be in, and the distinction is worth pinning precisely.
+
+Also verified against the live estate, read-only: the backfill's dry run reports 23 employees to create,
+19 assignments it correctly refuses to derive, and zero automation exclusions — which is the evidence
+that the bots on the box are properly kinded and the second wall never had to fire.
+
+### `Alpha 01.052.0105a` - 2026-08-19 - the estate can be described, and IT can hand out the logins
+
+Manifest (counter +1, 0104 -> 0105): `platform-nest 0.28.0 -> 0.29.0`. No migration.
+
+Wave D's data half and the IT surface, both backend-only.
+
+**P2-15** makes the Phase 2 engine describe the estate that already exists: employees from staff
+memberships, assignments where they are derivable, and adoption of hand-made grants that exactly match a
+seat. Adoption's rule — re-label, never create or widen — is enforced as a transaction ABORT on the
+`user_roles` count, not a log line, and proven by a test that plants a row mid-transaction. The
+position import is deliberately report-only forever.
+
+**P2-13** gives IT the worklist ("who still needs a login, whose leaver login is still enabled") and the
+four actions that fix it. It returns a typed 503 rather than an empty list when it cannot see Keycloak,
+because an empty worklist is a claim it has no right to make while blind.
+
+Worth recording: the backfill's first draft would have created HR records for every automation account,
+because bots hold real memberships on purpose. Two walls now stand between them and the HR directory, and
+the report names everything either wall excludes.
+
+### `Alpha 01.051.0104a` - 2026-08-19 - IAM reaches the agents, and Cerbos goes back to deciding
+
+Manifest (counter +2, 0102 -> 0104): `platform-nest 0.27.0 -> 0.28.0`, `mcp-hub 0.10.1 -> 0.10.2`.
+No migration.
+
+Two things, and the second is the one worth reading.
+
+**Core gets a tool surface.** `positions` and `role-grants` had no module to be declared under, so the
+IAM Phase 2 surface was invisible to agents. Three reads and two PROPOSAL tools now ship;
+`iam.requestAssignment`/`iam.requestOverride` file a pending request a human decides. The direct
+grant/assign writes are deliberately absent pending an owner decision — not for want of a D14
+executor (that pattern is now worked) but because a role-granting tool is a privilege-escalation
+surface and this estate's audit attribution still names the human, not their agent.
+
+**Cerbos had silently stopped deciding which tools a caller can see.** Verifying 0102a on the box
+showed `[policy] cerbos visibility check failed (cerbos 400)` in the hub's log; cerbos's own log gave
+the reason: `number of resources in batch (128) exceeds configured limit (50)`. The hub asks about
+every tool at once, so the check has been failing — and falling back to the in-code engine — since the
+tool count crossed 50. Not fail-open (in-code is deny-by-default and mirrors the same rules) and the
+per-CALL path was never affected (one resource per request), but the policy file was not the authority
+it was believed to be. Fixed by chunking at 40 with fail-closed merging. Nothing detected this: the
+fallback logs one warning and returns a plausible answer, which is worth remembering the next time a
+"graceful degradation" path is written.
+
+### `Alpha 01.050.0102a` - 2026-08-19 - an approved hire actually happens, and cannot happen twice
+
+Manifest (counter +1, 0101 -> 0102): `platform-nest 0.26.0 -> 0.27.0`. No migration.
+
+P2-07's write half, which 0.26.0 explicitly left open rather than claiming. hire/transfer/terminate are
+now agent-reachable AND executable: registry entry, hub allow-list entry, tool declaration — all three,
+because any two without the third fail in a different silent way.
+
+The cut is worth reading for the defect it found rather than the feature it adds. `employees` lives
+behind the HR module's RLS wall; the executor's precondition transaction had no module scope; so the
+"has this person already been hired?" check would have read zero rows, found nothing, and let an
+approved-then-retried hire create the same person twice. Nothing would have errored. The fix is a
+declared `preconditionModules` on the registry entry, applied by the executor at both precondition
+sites, with a test that asserts the BROKEN behaviour unscoped so the declaration can never be dropped
+as decoration.
+
+⚠ Not from this cut, found by its regression run and left for the owning session: `monitor`,
+`monitor_channel`, `monitor_incident`, `monitor_maintenance` and `status_page` Cerbos policies landed on
+main (MON-11a/b) with no `permission-catalog.json` entries, no bundle rows and no `permissions` rows —
+12 red tests across 7 files in `src/rbac` (catalog count, bundle regen-no-diff, DB parity, alignment).
+The parity chain this program's Phase 1 built is currently broken at HEAD for the monitoring kinds only;
+nothing in `hr.*` or IAM drifted. Not fixed here because that ticket is in flight in another session and
+editing its catalog under it would collide.
+
+### `Alpha 01.049.0101a` - 2026-08-19 - the first agent-reachable slice of the people file
+
+Manifest (counter +1, 0100 -> 0101): `platform-nest 0.25.2 -> 0.26.0`. No migration.
+
+P2-07 in part: employee READS are now agent-reachable. The WRITES are not, and these notes say so rather
+than letting "P2-07" read as finished — the write half needs a D14 executor per tool (a precondition that
+re-checks staleness at execution time, a lockKey keyed on the person), or an agent's approved hire would
+silently do nothing.
+
+### `Alpha 01.048.0100a` - 2026-08-19 - one decision right becomes two
+
+Manifest (counter +1, 0099 -> 0100): `platform-nest 0.25.1 -> 0.25.2`. Migration `0118`.
+
+Owner instruction: split the IAM decision right so a role override and a placement request are
+different permissions. Delivered with the honest caveat that nothing behaves differently today — the
+same four tiers decide both — because the value is an auditable description, the ability to diverge, and
+a decision row that says which kind of exception was approved.
+
+### `Alpha 01.047.0099a` - 2026-08-19 - a dept head proposes, and a monitoring RLS gap closes
+
+Manifest (counter +1, 0098 -> 0099): `platform-nest 0.25.0 -> 0.25.1`.
+
+Two unrelated things, deliberately in one cut because they were found in the same regression run:
+
+1. **The dept-head assignment flip** (§11.2's owner end-state) — a lead proposes a placement, HR or a
+   company admin agrees, and the seat opens. Application-code only: no Cerbos change, no catalog
+   change, no new permission.
+2. **Migration `0117`** — FORCE RLS on `monitor_results` PARTITIONS. `0116` (MON-10, another session)
+   hardened the partitioned parent but not its partitions, and a query naming a partition directly is
+   governed by that partition's own policies. A direct read would have crossed tenants. Fixed in a new
+   migration rather than by editing theirs.
+
+⚠ Behaviour change for dept heads specifically: direct assign now returns a typed 400. Anyone building
+against `POST /positions/:id/assign` should read FRONTEND-BFF-CONTRACT's new rows first.
+
+### `Alpha 01.046.0098a` - 2026-08-19 - the routed override: a refusal with somewhere to go
+
+Manifest (counter +1, 0097 -> 0098): `platform-nest 0.24.0 -> 0.25.0`.
+
+Closes the last structural gap in P2-08. Before this, a dept head asking for a sensitive role got a
+typed refusal naming a mechanism that did not exist. Now the same request files a routed approval, and
+approving it grants — time-boxed, traceable to the approval, and decided by someone who is not the
+person who asked.
+
+⚠ Deploying this does NOT change any existing approval's behaviour: the decide route picks a Cerbos
+action from the row's own origin, and every non-IAM row still takes `decide` and returns the same
+shape it always did.
+
+### `Alpha 01.045.0097a` - 2026-08-19 - the grant ceiling gets its durable mechanism
+
+Manifest (counter +1, 0096 -> 0097): `platform-nest 0.23.2 -> 0.24.0`.
+
+Closes the interim the owner flagged on 2026-08-18: the ceiling no longer subtracts a whole role's
+bundle, it excludes per-(role, key) SELF-SCOPED pairs derived from the policies themselves. Migration
+`0114` carries the marker; the baseline consideration moves to the held side rather than disappearing,
+because measurement showed the marker alone would refuse every dept-head grant.
+
+No behaviour change for any grant that worked before — the boundary is where it was, the mechanism
+underneath it is the one that can tell self-service from real reach.
+
+### `Alpha 01.044.0096a` - 2026-08-18 - fix the sweep busy-loop, and verify the reconciler live
+
+Manifest (counter +1, 0095 -> 0096): `platform-nest 0.23.1 -> 0.23.2`.
+
+**Why:** `0095b` made `POSITION_SYNC_ENABLED` reachable; turning it on exposed that an empty
+`POSITION_DRIFT_SWEEP_INTERVAL_MS` became a 0ms sweep interval — a hot loop at ~46% CPU against
+Postgres on the live box. Fixed in the app (empty/NaN/<=0 coerced to the default), in the loop (refuses
+a non-positive interval), and in compose (a real default instead of an empty passthrough).
+
+**Also in this cut:** the reconciler is now VERIFIED live, not just enabled. On the real VPS through
+real SSO: a hire returned `reconciled: {granted: 1}`, and a transfer re-pointed the grant's claim from
+the closed seat to the new open seat in the destination department with zero stale claims — the A2
+refcount behaving as designed (same role at company scope, so the artifact is unchanged and only the
+justification moves).
+
+### `Alpha 01.043.0095b` - 2026-08-18 - the position reconciler is switchable on the live box
+
+Manifest: **no module version moved** — this is an infra/compose change only, so per VERSIONING the
+REVISION LETTER advances (`0095a` -> `0095b`) and the module-reference counter stays at `0095`.
+Module set identical to `Alpha 01.042.0095a`.
+
+**What it changes:** `POSITION_SYNC_ENABLED` and `POSITION_DRIFT_SWEEP_INTERVAL_MS` are now passed
+into the `platform` container by `docker-compose.vps.yml`, and documented in
+`platform-nest/.env.example`.
+
+**Why it is its own cut:** the flag was already read by the code (P2-05 shipped it), but compose never
+forwarded it — so setting it in the box `.env` did nothing. Verified on the live box before this
+change: hire, transfer and terminate each returned 2xx with `reconciled: null` and zero
+`user_roles.managed_by_position` rows. Seats moved; authorization did not. The capability looked
+healthy while the half that matters was inert.
+
+**Deploying this does NOT turn the reconciler on.** It makes the switch reachable. Flipping it is a
+separate, deliberate act: set `POSITION_SYNC_ENABLED=1` in the box `.env` and recreate `platform`.
+That changes live authorization for every position holder — grants materialise from role-sets and
+closing a seat revokes what only that seat justified, with the mass-revoke brake as the backstop.
+
+### `Alpha 01.042.0095a` - 2026-08-18 - four owner decisions, and a client over-grant closed
+
+Manifest (counter +1, 0094 -> 0095): `platform-nest 0.23.0 -> 0.23.1`.
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.23.1`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.1` |
+| platform-ui | `0.25.1` | ai-agents | `0.7.1` | social-media | `0.5.0` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.10.1` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.1` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | | |
+| observability | `0.6.1` | infra | `0.8.6` | | |
+
+**Why this cut exists:** it carries an authorization NARROWING (a plain member can no longer delete
+clients) and an authorization WIDENING (hr_manager can place/transfer/terminate). Both change live
+behaviour, so both want their own deployable version rather than riding along in a later release.
+The Cerbos policy change only takes effect once the container restarts with the new bundle — the
+deploy does that, but verify it, because a healthy Cerbos has served stale policy on this estate before.
+
+### `Alpha 01.041.0094a` - 2026-08-18 - IAM Phase 2: JML, positions, the grant surface
+
+Manifest (counter +1, 0093 -> 0094): `platform-nest 0.22.0 -> 0.23.0`. One module bumped, so the
+revision letter resets to `a`.
+
+> **⚠ LOG GAP (noted at this cut).** Tags `alpha-01.040.0093a`, `alpha-01.040.0093b` and
+> `alpha-01.040.0093c` exist in git with **no entry in this table** — the same rule-2 skip the
+> 2026-08-04 note above records. Not back-filled here (this session does not know what those three
+> cuts contained beyond `platform-nest 0.22.0`); whoever cut them should add them. The
+> **App version** line in `MODULES.md` was also stale at `01.029.0074a` — twelve releases behind —
+> and is corrected at this cut, per VERSIONING rule 5 (`/VERSION` is authoritative).
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.23.0`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.1` |
+| platform-ui | `0.25.1` | ai-agents | `0.7.1` | social-media | `0.5.0` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.10.1` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.1` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | | |
+| observability | `0.6.1` | infra | `0.8.6` | | |
+
+**What is in it:** the IAM Phase-2 capability wave — `POST /hr/employees` + `transfer` + `terminate`
+(P2-06), positions CRUD and the role-set composer (P2-12 backend), the `role_grant` grant/revoke
+surface (P2-08 part A), and the expiry + drift sweeps (P2-09), plus migration `0111`. The §5.2 mover
+criterion is proven against running Cerbos. Expiry is now enforced at resolution time as well as
+swept.
+
+**What is deliberately NOT in it:** the routed override (`decide_override` does not exist), MCP tools
+for any Phase-2 capability (so none of them meet the agentic-native bar yet), future-dated JML, and
+every UI surface. `POSITION_SYNC_ENABLED` remains **off** by default, so the reconciler ships dark;
+the grant surface and the expiry sweep are NOT behind that flag and are live on deploy.
+
+**Two owner decisions ride with it:** the ceiling's new baseline subtraction needs ratification
+(`PERMISSION-CONTRACT` §12.1), and HR's lack of `position.assign` reach needs a ruling (§11.2).
 
 ### `Alpha 01.039.0092a` - 2026-08-13 - the social module gets a surface, and a composer
 
@@ -1762,6 +2166,434 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.32.0] - 2026-08-20 - IN PROGRESS ([agent-attribution-gate] interim: writes name the agent, not only the human)
+- **`Principal.via = {provider, externalId, agent?}`.** Until now `Principal` carried
+  userId · assurance · companies · roles · sessionVersion and NOTHING about the channel, so every
+  `activities` row recorded "Alice did X" when the truth was "Alice's agent did X". That was not a
+  dropped log line — it was information with nowhere to live.
+- **The owner's `Co-Authored-By` framing, implemented literally.** AUTHOR = the human (`actor_id`
+  unchanged; Cerbos still decides on them; an agent can never do what its principal could not).
+  CO-AUTHOR = the agent, in `metadata.via`, recorded ALONGSIDE and never INSTEAD. Additive and
+  authorization-neutral: nothing in `can()`/Cerbos reads it, so no policy needed re-reasoning.
+- 🔴 **AMBIENT, NOT A SEVENTH PARAMETER — and that is the whole design decision.** `writeActivity` has
+  **263 call sites**, 229 of which pass `req.principal.userId` and nothing else. Threading `via` would
+  have been ~229 mechanical edits AND would have made attribution OPT-IN, whose failure mode is that the
+  one site somebody forgets is the site that mattered, with nothing failing when they forget. Ambient
+  context inverts that: a write is attributed unless something actively strips it. `AsyncLocalStorage`
+  is an established idiom here, not a new one — `search/providers/types.ts`'s `withActualCostCapture`
+  uses it for the same reason (parallel in-flight work would clobber a shared field).
+- **Fail-silent by construction:** outside a request scope (a sweep, a consumer, the D14 executor)
+  `currentVia()` is undefined and the row is written exactly as it always was. An attribution mechanism
+  must never be able to break a write; the most it may do is add nothing. A caller's OWN `metadata.via`
+  wins, because the executor re-driving an approved write knows the ORIGINAL filing channel — better
+  provenance than the channel of the retry.
+- **`x-obo-agent` is trusted, and only here:** the OBO block already requires the service token, so the
+  caller is the hub or another first-party service. The value is authorization-neutral, so a client that
+  lies gains nothing and incriminates an agent that did not act.
+- Gates: `request-context.test.ts` 10/10 (new) — including concurrent scopes not leaking, the
+  actor-still-the-human assertion, and the no-scope no-`via` case; `src/core` + `src/admin` + `src/auth` +
+  `src/rbac` regression **1972/1972 across 120 files**; all five lints and `tsc` clean.
+### [0.31.0] - 2026-08-20 - IN PROGRESS (owner decision: the four direct IAM writes go agent-reachable)
+- **`iam.grantRole` / `iam.revokeRoleGrant` / `iam.assignPosition` / `iam.unassignPosition`** are
+  declared, each with a D14 entry (`registerIamExecutableApprovals`) and each named in
+  `resource_mcp_tool.yaml`'s executable allow-list. Full contract: PERMISSION-CONTRACT §14.
+- 🔴 **THE OBJECTION WAS NOT ANSWERED, IT WAS OUTRANKED — and both code sites say so.** These were
+  withheld because a role-granting tool is a privilege-escalation surface while audit attribution still
+  records "Alice" rather than "Alice's agent". The owner ruled to proceed on the basis that every employee
+  on the estate is mock data except their own account. **That was verified against the live database
+  before shipping:** 23 `kind='employee'` memberships, all `.test` addresses bar `hansel@gaiada.com` (the
+  only verified login) and one login-less `@gaiada.com`; 17 bots, all correctly `kind='service'`.
+  **The basis expires when the data does** — closing [agent-attribution-gate] is now a hard pre-staging
+  requirement, and the comments in `core-tools.ts` and `approval-executables.ts` exist to make that
+  unmissable.
+- **What did NOT change:** the executor still re-drives as the ORIGINAL FILING PRINCIPAL (an agent cannot
+  exceed the human behind it), `GrantWriteService` is still the only writer of `user_roles`, the ceiling
+  and sensitive gate and self-target DENY all still apply, and all four suspend for a human decision
+  because medium/high writes do. These entries only make the approval COMPLETE instead of landing
+  `not_applicable`.
+- **Impact tiers with a structural argument, not a vibe:** `grantRole` is HIGH — the only one that widens
+  authority. `assignPosition` is MEDIUM because a placement can confer only what the seat's role-set
+  already carries, and that role-set was authored by a human through a surface with its own allow-list;
+  the escalation ceiling is the position registry.
+- 🔴 **Two preconditions are security properties rather than housekeeping.**
+  `managed_by_position_not_revocable`: the reconciler would restore a position-managed grant on its next
+  pass, so an approval that "succeeded" would leave the access standing while a human believed it was
+  gone. And `position_not_active` deliberately covers **orphaned** seats — their unit is gone from the org
+  chart and grants there are FROZEN, so a placement would appear to work and confer nothing.
+- **No `preconditionModules`**, unlike the JML entries: every table these read is core (`user_roles` is
+  global outright). Cargo-culting `["hr"]` would be harmless and would tell a reader something false.
+- **Two pins I wrote earlier went RED, which is what they were for.** `core-tools.test.ts`'s exact
+  tool-name list, and its test asserting these four were ABSENT. The second was inverted rather than
+  deleted, keeping the history in the comment — a test guarded the absence precisely because it was a
+  stated decision rather than a gap.
+- **`McpToolDef.method` gained `DELETE`** (`iam.revokeRoleGrant`'s endpoint is one). The transport always
+  supported it — `callPlatform` passes `def.method` straight to `fetch` — so only the type was narrower
+  than reality, and since defs arrive as parsed JSON it never rejected anything at runtime; it just
+  described it wrongly.
+- Gates: `d14-iam-direct-registry.test.ts` 26/26 (new); affected pins 18/18; `src/core` + `src/admin` +
+  `src/rbac` regression green; all four lints and `tsc --noEmit` clean; Cerbos restarted and the widened
+  policy compiled before the run.
+### [0.30.0] - 2026-08-19 - IN PROGRESS (P2-16 the three-mode battery; P2-17 contract sync)
+- **P2-16 — the mover criterion proven in ALL THREE operating modes** (`iam-phase2-three-mode-battery.test.ts`,
+  8 cases). Design §5.2's four-part criterion — (a) zero grants tagged to the closed assignment, (b) the
+  OLD department probe 403, (c) the NEW department probe 200, (d) `session_version` moved — asserted
+  identically under a UI persona (`x-user-id`), an agent OBO envelope, and an n8n OBO envelope.
+- **(b) and (c) are probed against RUNNING Cerbos, never derived from a bundle.** `org_unit_lead`'s whole
+  meaning is its condition, so a bundle check would report the same reach before and after a transfer and
+  pass while the estate was broken — the [role-bundles-overstate-reach] lesson, applied.
+- **What "three modes" is at this boundary:** three HEADER SHAPES and nothing else. Modes 2 and 3
+  deliberately do not route through the hub — the hub's own contribution is covered by
+  `d14-jml-registry.test.ts`, and routing through it would test the hub twice and the platform once.
+- **The LEAVER assertion is stronger than a 403 and says so:** after terminate the probe returns 401,
+  because `assemblePrincipal` yields null for a disabled user. There is no principal left to deny. A 403
+  would mean "still a principal, currently unauthorized", which is a state a leaver must not be in.
+- **Adversarial, per mode:** a plain member is refused in all three (and the victim's reach is asserted
+  unchanged after three failed attempts); an UNVERIFIED OBO link gets an anonymous principal and is
+  refused; a transfer to a retired position is a 400 that changes nothing; a cross-company transfer is
+  refused. Two fixture defects were found and fixed while writing it: `hr_people_ops` is a DERIVED role
+  (== `hr_manager`), so granting a role by that name satisfies nothing, and the hire endpoint returns the
+  shaped employee at the TOP level rather than in an `{employee}` envelope.
+- **P2-17** — PERMISSION-CONTRACT §13 (the backfill's sources, its two REVIEW categories, the
+  report-only position import, and the count-assertion abort) and a FRONTEND-BFF-CONTRACT section for
+  P2-13's five endpoints, including the five `state` values, why `actionable` is computed server-side, and
+  why the 503 must never be rendered like an empty list. P2-15 adds no endpoint by design — applying it
+  is a reviewed one-time operation, and an endpoint would invite a button.
+- Gates: battery 8/8; admin + hr regression 457/457 across 36 files; `tsc --noEmit` and all four lints
+  clean. Also verified on the LIVE box: `/api/:t/it/accounts` is routed (401, not 404),
+  `dist/seed/iam-phase2-backfill.js` ships in the image, and the backfill's READ-ONLY dry run was driven
+  against the real estate — 23 employees to create across two companies, 19 assignments correctly
+  reported as not-derivable (no positions exist there yet), nothing to adopt, and NO automation
+  exclusions, which is the evidence that every service account on the box is correctly `kind='service'`
+  and the second wall never had to fire.
+### [0.29.0] - 2026-08-19 - IN PROGRESS (P2-15 backfill + adoption; P2-13 the IT accounts backend)
+**P2-15 — `src/admin/iam-phase2-backfill.ts` + `npm run iam:backfill`.** Four opt-in pieces; dry run is
+the default and there is no flag that applies everything.
+- **Adoption re-labels and NEVER widens, enforced as an ABORT.** `user_roles`' row count is read before
+  and after INSIDE the writing transaction; a difference raises `AdoptionWidenedAccessError` and rolls
+  the run back. The count is GLOBAL, not tenant-scoped — `user_roles` has no tenant column, and a
+  tenant-filtered count would miss a row written with the WRONG scope, which is exactly the mistake that
+  matters. Proven by a test that plants a row inside the apply transaction via a trigger and asserts
+  both the throw and the rollback.
+- **No second matcher.** "A grant that exactly matches what this seat confers" already exists once, in
+  `position-reconciler.ts`; its `skip_manual` verdict IS the candidate list. A second matcher here could
+  adopt a row the reconciler would never manage.
+- 🔴 **The hazard a one-line INSERT…SELECT would have shipped:** automation accounts hold real
+  `company_memberships` rows on purpose, so a membership-driven backfill mints a person-shaped HR record
+  for every bot. The primary filter is `kind='employee'` (design §9's stated source — migration 0026's
+  column, which I initially and wrongly recorded as non-existent). A SECOND wall excludes anything
+  carrying an `n8n` identity link, because nothing ENFORCES the kind, and every exclusion is NAMED in the
+  report so a reviewer can confirm the wall never fired on a human.
+- **Two categories are REVIEWED rather than decided:** a `@gaiada.system` address with no automation link
+  (including it puts a bot in HR; excluding it hides a person), and a staff membership for a client
+  principal — impossible per 0072, so a non-empty list is a pre-existing data defect and gets a human,
+  never an HR record.
+- **Position import is REPORT-ONLY, permanently.** A blob `role` node carries no role-set, so an imported
+  seat would confer nothing and then read, forever after, as a seat someone deliberately left empty.
+  Pinned by a test that runs apply with every flag and asserts the `positions` count is unchanged while
+  the candidate list is non-empty.
+- **Assignments only where UNAMBIGUOUS** (exactly one active position in the unit); zero and many are
+  both reported. `valid_from` is TODAY, never back-dated — back-dating asserts someone held a seat, and
+  its roles, during a period nobody verified. `hire_date` is left NULL for the same reason.
+- Operator guardrails: `--all-tenants` is dry-run only and refuses to combine with an apply flag; an
+  unknown flag is a hard error (a typo'd `--adoptions` that silently dry-ran would read as "adoption did
+  nothing"); every apply prints the before/after count so the claim is visible rather than trusted.
+
+**P2-13 — `src/admin/it-accounts.controller.ts`** (design §5.4), over the existing
+`core/keycloak-admin.ts`. Worklist + provision/disable/enable/reset-password, all idempotent, all audited.
+- 🔴 **Degradation is a typed 503, never an empty list.** An empty worklist means "everyone has a login",
+  which is the most dangerous sentence this surface can produce while blind.
+- **Idempotence converges.** `provision` looks the address up first, and Keycloak's own 409 is treated as
+  "adopt it" — including the race between lookup and create. Two logins for one address would be an
+  authentication ambiguity, not untidiness. A double-provision returns `adopted:true` and NO password:
+  an existing account's credential is not ours to rotate silently.
+- **The initial password is returned once and never audited** (a credential in an activity row is a
+  credential in every export of it). `reset-password` records the REASON instead.
+- **The identity link is created UNVERIFIED**: an admin creating an account is not the person proving
+  control of it.
+- **NOT HR-module-gated** — IT provisioning is not an HR capability, and gating it would make login
+  management vanish for a company with HR switched off while its people still need logins. Only the
+  employment-status read is module-scoped, so its absence degrades the ROW; `leaver_still_enabled` can
+  therefore only ever be claimed from real data.
+- `deriveRow` is pure and exported, and `leaver_still_enabled` deliberately OUTRANKS `unverified_link`:
+  a leaver who can still log in is a security finding, an unverified link is paperwork.
+- ⚠ **I hit the trap `http-error.filter.ts`'s own header documents** — threw `{error: token}` where the
+  filter renames `message` to `error` and reads nothing called `error`. Every typed refusal was arriving
+  as prose with the meaning stripped; the status codes and shape were right, which is what makes it easy
+  to miss. Tokens now lead the `message` string.
+- Gates: P2-15 19/19 (incl. the abort-and-rollback proof), P2-13 25/25, admin regression 349/349,
+  `tsc --noEmit` + all four lints clean. The P2-15 CLI was also driven end-to-end against a freshly
+  migrated scratch database — dry run, both guardrails refusing, and an apply that wrote exactly one row.
+### [0.28.0] - 2026-08-19 - IN PROGRESS (core gets a tool surface; IAM Phase 2 becomes agent-reachable)
+- **`src/core/core-tools.ts`** — a registry for tools owned by CORE controllers, unioned into
+  `GET /mcp/tool-defs` ahead of the module tools. Closes the structural gap 0.26.0 recorded: the
+  endpoint returned `allModules().flatMap(m => m.mcpTools)`, so every tool needed a MODULE owner, and
+  `positions`/`role-grants` have none — they are core controllers over core tables. The whole IAM
+  Phase 2 surface was unreachable to an agent while `hr.*` was reachable.
+- **Why not the other two options.** Folding them into `hr` is semantically wrong (granting a role is
+  not HR, and `hr`'s tools are precisely the ones behind the HR module's RLS wall, which these are
+  not). An `iam` ModuleContract would be a module whose tables are core and which no tenant can
+  meaningfully disable — and `enabled_modules` would then imply IAM is switchable off.
+- **A core tool has NO per-tenant enablement gate**, because core has no flag to consult. Stated in
+  the file, because "advertised to every tenant" is a stronger default than a module tool's and anyone
+  adding an entry is choosing it. Authorization is Cerbos + the controller's own guards — the same
+  posture the human UI already has against these endpoints. No Cerbos change was needed:
+  `resource_mcp_tool.yaml` is name-agnostic apart from automationScope and the D14-13 executable list.
+- **Declared: three reads and two PROPOSALS.** `iam.listPositions`, `iam.listAttachableRoles`,
+  `iam.listRoleGrants`, plus `iam.requestAssignment` and `iam.requestOverride` at impact **`low`** —
+  load-bearing, not a shrug. Their entire effect is a PENDING approval row a human then decides;
+  marking them medium would require an approval in order to ask for an approval, and (since a
+  medium write needs a D14 executor to complete at all) would dead-end the natural agent path
+  silently. Filing a request is the low-impact action.
+- 🔴 **NOT declared, and this one is an owner decision rather than missing work:** `iam.grantRole`,
+  `iam.revokeRoleGrant`, `iam.assignPosition`, `iam.unassignPosition`. The D14-executor objection that
+  held the JML writes back is solved and the pattern is worked — this is a different and bigger
+  objection. A tool that grants a role is a privilege-escalation surface, and the estate's audit
+  attribution still says "Alice" rather than "Alice's agent". Granting rights through a surface whose
+  attribution is known to be wrong is the combination worth refusing on purpose. Pinned by a test, so
+  the absence is a position rather than a hole someone fills by accident. If the owner wants them, the
+  work is three D14 entries plus allow-list names — small, and blocked on the decision, not the code.
+- **The aggregator now THROWS on a duplicate tool name** across the two registries. It is the only
+  place that can see both, and de-duplicating would make the advertised surface depend on registration
+  order with the loser silently unreachable — a failure that presents as "the tool exists but does the
+  wrong thing".
+- `mcp-tools.controller.test.ts`'s "is empty when no modules are registered" case became "with no
+  modules the aggregate is exactly the core set" — the fact it asserted changed, and the new fact is
+  the point: core tools do not depend on modules.
+- Gates: `core-tools.test.ts` 8/8 (new), aggregator 4/4, search module 26/26, `tsc --noEmit` clean.
+### [0.27.0] - 2026-08-19 - IN PROGRESS (P2-07's write half: the JML loop closes, and an RLS trap inside it)
+- **`hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee` are declared**, and 0.26.0's
+  refusal to declare them is now satisfied rather than waived: each has a `registerExecutableApproval`
+  entry (`registerJmlExecutableApprovals`), and all three names are in `resource_mcp_tool.yaml`'s
+  executable allow-list. All THREE parts are load-bearing — an entry without the allow-list passes its
+  precondition and is then denied at the hub door, and a tool without an entry suspends and then does
+  nothing on approval. `hr-employee-tools.test.ts`'s invariant now reads "declared WITH an executor".
+- **`lockKey` is the PERSON**: `employeeId`, else the case-folded `workEmail` (the joiner has no employee
+  row yet). Not the tenant (nearly one tenant here), not the approval id (the claim already serializes a
+  row against itself). Namespaced per tool, and a malformed payload does not collapse onto one shared key.
+- **Preconditions detect a first attempt that already landed** — `employee_already_exists`,
+  `already_in_target_position`, `already_terminated` — and refuse a request the world moved out from
+  under (`position_not_active`). That observability is why none of the three sets `neverAutoRetry`: this
+  is `deploy.*`'s property, not `social.publishPost`'s.
+- 🔴 **A DEFECT FOUND WHILE WIRING IT, in the executor and not in the new code.** `employees` sits behind
+  the HR module's third RLS wall, and `core/approval-execute.ts` opens its claim transaction with NO
+  module scope — correct for every entry that shipped before, because theirs are core tables. With
+  `app.scopes` unset, `app_module_allowed('hr')` is false, so these preconditions would read ZERO ROWS
+  **and no error**. For the hire that is silent in the PERMISSIVE direction: the one guard standing
+  between a retried approval and a person created twice would have passed every single time.
+  Fixed by declaring it: new `ExecutableApprovalEntry.preconditionModules`, applied by the executor as
+  transaction-local `app.scopes` immediately before BOTH precondition call sites (claim + retry).
+  Declared on the entry rather than set from inside a precondition on purpose — the executor owns the
+  transaction, and a precondition that widened its own visibility would hide an RLS decision in the
+  least visible place available.
+- **`d14-jml-registry.test.ts` (37 cases)** carries a NEGATIVE CONTROL that asserts the broken behaviour
+  on purpose: run unscoped, the hire guard passes on a person who already exists and terminate claims
+  not-found; run scoped, both answer correctly. So `preconditionModules` cannot be deleted as cosmetic,
+  and the fix is a claim with evidence rather than a comment. Plus the PRV-03 shape: stale requests land
+  `failed` with `precondition_failed:*` and the hub is asserted — not inferred — to be called zero times,
+  against a positive control that calls it exactly once.
+- Impact: `high` for terminate (it revokes grants, closes seats, can disable a login, and is the one
+  whose blast radius does not shrink on a repeat), `medium` for hire and transfer. All three suspend
+  either way; impact drives urgency and notification tier, not whether a human is asked.
+- ⚠ **Still open from 0.26.0:** `positions` and `role-grants` are CORE controllers with nowhere to
+  declare tools, so they remain agent-unreachable pending a platform core-tools surface.
+- Gates: `src/core/d14-jml-registry.test.ts` 37/37 (new); approvals + hr regression 311/311 across 18
+  files; `tsc --noEmit` clean; `cerbos compile` clean and the test Cerbos restarted before the run.
+### [0.26.0] - 2026-08-19 - IN PROGRESS (P2-07 partial: the employee READ surface goes agent-reachable)
+- **`hr.listEmployees` + `hr.getEmployee`** declared on the `hr` module, so they reach the hub through
+  `GET /mcp/tool-defs` with nothing hardcoded hub-side. `hr` owns them because `employees` sits behind
+  the HR module's own RLS wall (`app_module_allowed('hr')`, 0109) — the module that gates the table owns
+  its tools. Both require a verified caller; neither is a write.
+- 🔴 **The JML WRITE tools are deliberately NOT declared, and that is the honest state.** Design §9 wants
+  medium/high writes registered so an agent-origin approval EXECUTES. Declaring `hr.hireEmployee` before
+  its `registerExecutableApproval` entry exists would give an agent a path that SUSPENDS and then, on a
+  human's approval, does nothing — `getExecutable()` returns undefined, `execution_status` lands
+  `not_applicable`, and the hire silently never happens. For a hire that is a person approved and never
+  onboarded. `hr-employee-tools.test.ts` goes RED the moment one is declared without an executor.
+- **Corrected my own first reading:** suspend-without-auto-execute is the estate's NORM for most tools
+  and deliberate for the barred money-spending ones. It is wrong specifically for JML because §9 asks
+  otherwise — not wrong in general.
+- ⚠ **A structural gap P2-07 surfaced:** `positions` and `role-grants` are CORE controllers, and
+  `/mcp/tool-defs` unions registered MODULES' tools. There is nowhere for them to be declared. Folding
+  them into `hr` is semantically wrong (role granting is not HR); the alternatives are an `iam` module
+  contract or a platform core-tools surface. Until that is chosen they cannot be agent-reachable at all.
+- `hr.test.ts`'s exact tool-name list moved deliberately — it is the one place a tool silently appearing
+  or vanishing from the agent surface shows up, so it moves in the same change, never loosened.
+- Gates: employee tool surface 5/5, hr module suites 75/75.
+### [0.25.2] - 2026-08-19 - IN PROGRESS (the IAM decision right splits in two)
+- **`core.position.decide_assignment`** is split out of `core.role_grant.decide_override` at the owner's
+  instruction (migration `0118`). A routed ROLE override and a dept head's PLACEMENT request now
+  authorize against different Cerbos actions.
+- **No behaviour changed on the day of the split**, and the migration says so in its own header: both
+  actions are granted to the identical four tiers, so nobody gained or lost the ability to decide
+  anything. What it buys: a description that matches what the permission does (the override key claimed
+  to cover "granting authority beyond a position" while it was deciding placements too — unauditable),
+  the ability to diverge later without a schema change, and an audit row that records WHICH kind of
+  exception was approved. `0118` also corrects the override key's description in the DB.
+- **The requester ≠ decider DENY is restated PER ACTION**, not shared: a DENY silently covering two
+  actions is one edit away from covering neither. Both also fail CLOSED on an unresolvable requester.
+  All four combinations pinned by live-engine probes.
+- Tallies moved again (283 -> 284 pairs, 268 -> 269 grantable) — the third time in two days, and the
+  maintenance tax this program already documented for hardcoded counts.
+- Gates: live-probe + override/assignment batteries 38/38, full sweep 1289/1289 across 81 files.
+### [0.25.1] - 2026-08-19 - IN PROGRESS (a dept head proposes; HR and admins place)
+- **§11.2's owner end-state is done.** A dept head's `POST /positions/:id/assign` returns
+  `assignment_request_required` naming `POST /positions/:id/assignment-requests`; that files an
+  `automation_approvals` row (`origin='iam'`, `workflow_id='iam:position_assign'`) decided by the SAME
+  `decide_override` action, in the SAME inbox, executed by the SAME seam. HR (`hr_people_ops`) and
+  `company_admin` still place people directly — that is what the 2026-08-18 widening was for.
+- **"Is this a dept head?" is answered by Cerbos, not by a role list.** The same authorization question
+  is asked with EMPTY ancestry: only the tenant-wide tiers can pass it, because `org_unit_lead` matches
+  on subtree containment. Nothing to maintain, nothing that can drift from the policy.
+- **One execution seam** (`admin/iam-approval-execute.ts`) now owns both IAM request kinds, so the
+  shared decide route gained one import instead of a second IAM-specific branch. The decide response's
+  `override` key became `iam`, with `iam.kind` distinguishing them; non-IAM approvals still return
+  `{ id, status }` with no `iam` key, pinned byte-for-byte.
+- **What the flip did NOT relax**, each pinned: a lead still cannot reach outside their subtree —
+  asserted on the REQUEST endpoint too, because a request path that accepted what the write path
+  refuses would be the hole; nobody approves their own request; and a decision against a position
+  RETIRED in the meantime is refused at execution rather than filling a dead seat.
+- Gates: override + assignment battery 19/19, positions 27/27, full sweep 1279/1279 across 81 files.
+### [0.25.0] - 2026-08-19 - IN PROGRESS (P2-08 part B: the routed override)
+- **The refusal became a route.** A dept head who cannot grant a sensitive role directly now files
+  `POST /api/:t/role-grants/overrides` with a justification; it routes by domain; the routed approver
+  decides it through the EXISTING inbox; and an approving decision executes the grant IN-BAND with
+  `expires_at` + `origin_approval_id`, bumping the target's session. Migration `0115`.
+- **One route, no fork.** `automation-approvals.controller.ts` already picked its Cerbos action from
+  `origin` + `workflow_id` (`hr:leave` -> `decide_leave`); an override is `iam` + `iam:override` ->
+  `decide_override`. Non-IAM approvals are byte-unchanged and carry no `override` key in the response —
+  pinned by a test that asserts the exact old shape.
+- **Requester ≠ decider is structural**: `EFFECT_DENY` on `roles: ["user"]`, so deny-overrides beats
+  even platform_admin's wildcard, and it fails CLOSED on an unresolvable requester. Both the dept-head
+  and the company_admin self-approval attempts are pinned at 403.
+- **Routing earns its keep, and a failing test proved it.** A `company_admin` cannot grant `hr_manager`
+  at all — it lacks `reports.appraisal.confirm_evidence/cycle_admin/finalize`, which are
+  `hr_people_ops`-only — so the ceiling refuses them at execution. That is exactly why hr-sensitive
+  overrides route to the HR tier. The ceiling runs against the DECIDER, never the requester: the
+  approver's authority is what backs an override.
+- **An override never widens scope.** The requester still needs `role_grant · create` on the target, so
+  a dept head cannot request one outside their subtree (403) and a non-member target is a 400. It
+  routes past the sensitivity bound only — never the subtree bound, the elevated fence or the
+  allow-list, each pinned.
+- `automation_approvals.origin` widened to admit `'iam'`, following `0028`'s drop-and-re-add precedent
+  (Postgres cannot ALTER a CHECK in place) and looking the constraint up BY DEFINITION, not by name.
+- Two schema assumptions corrected the hard way, both caught by the migration failing in test: the
+  catalog's `domain` is stored as `module_key`, and `permissions.id` carries no default.
+- Five tally guards moved (282 -> 283 pairs, 267 -> 268 grantable) and one real gap closed: the new key
+  was in no permission group, now `advancedOnly` alongside its sibling `core.role_grant.create`.
+- Gates: override battery 16/16, catalog/group/ui-grantable suites 46/46.
+### [0.24.0] - 2026-08-19 - IN PROGRESS (the self-scoped marker: the ceiling's durable mechanism)
+- **`role_permissions.self_scoped` (migration `0114`)** replaces P2-08's interim "subtract the baseline
+  `member` bundle" on the REQUIRED side of the grant ceiling. A (role, key) pair is marked when EVERY
+  Cerbos ALLOW rule granting that key to that role is self-scoped (`resource.attr.X == principal.id`,
+  or `variables.owns`). 21 pairs today: member 17, viewer 4.
+- **Derived, never hand-listed.** `scripts/generate-role-bundles.mjs::computeSelfScoped` uses the
+  predicate copied verbatim from `permission-arm-hazard-scan.test.ts::selfScopeField` — the hazard scan
+  asks "can a flat perms mirror express this?" and the ceiling asks "is this authority over OTHER
+  people?", which are the same question about the same rule shape. A policy edit moves the JSON and the
+  diff shows it; `self-scoped-marker-parity.db.test.ts` fails if policies, JSON and DB disagree.
+- 🔴 **The marker does NOT subsume the baseline argument — measured, not assumed.** Marker-only:
+  `company_admin`→`member` 0 missing, but `org_unit_lead`→`member` **55 missing** and
+  `hr_manager`→`hr_staff` 1 missing. That would have re-broken the dept-head surface. The two rules
+  answer different questions, so both apply: the marker on the REQUIRED side, the baseline moved to the
+  HELD side (a grantor is themselves staff, so passing on baseline reach confers nothing new). That
+  placement also keeps the refusal message truthful — a missing key is one the grantor genuinely lacks.
+- **Why the marker is still the better mechanism:** `hr.case.cancel` and `core.client.delete` both sat
+  in `member`'s bundle; the subtraction removed both and only the first was self-service — the second
+  was real tenant-wide reach and a live over-grant (§12.5). The parity suite pins `core.client.delete`
+  as never-markable, on both sides of the chain.
+- The sensitive gate applies the identical pair of rules, so the two guards cannot drift apart.
+- Gates: marker parity 5/5, ceiling invariants 26/26, grant surface 14/14, `src/rbac`+`src/db` 925/925.
+### [0.23.2] - 2026-08-18 - IN PROGRESS (the sweep busy-looped on the live box; three layers fixed)
+- 🔴 **INCIDENT, self-inflicted and self-found.** Enabling `POSITION_SYNC_ENABLED` on the live box
+  produced `IAM grant-expiry + position-drift sweep on: every 0ms` and platform sat at **~46% CPU**
+  sweeping Postgres continuously. Nothing errored; `/health` stayed 200. A busy loop presents as
+  healthy uptime, which is why it needed a log line to be noticed at all.
+- **Cause, in three parts, all mine:** compose was given `${POSITION_DRIFT_SWEEP_INTERVAL_MS:-}`, and
+  that form passes an **empty string** when the variable is unset; `config.ts` read it as
+  `Number(env ?? default)`, and `??` does not fire on `""` while `Number("")` is `0`; and
+  `startPositionMaintenanceLoop` accepted a 0 interval without complaint.
+- **Fixed at all three:** `positiveIntFromEnv()` treats empty/NaN/<=0 as unconfigured; the loop
+  REFUSES a non-positive interval loudly and returns an inert handle; compose carries a real default
+  (`:-86400000`) so the container never receives a value the app has to guess about.
+- **Also removed a duplicated env block** in `docker-compose.vps.yml` — the same `POSITION_*` block had
+  been committed twice. Compose tolerated it (last key wins), which is exactly why it went unnoticed.
+- Mitigated live before the fix shipped by setting an explicit interval; CPU returned to ~5%.
+- Pinned by `src/admin/sweep-interval-guard.test.ts` (11 cases): the empty-string case is called out
+  as THE incident value, and both a positive interval and a real configured value are asserted so the
+  guards are not over-broad. The incident itself is the teeth proof — the 0ms behaviour was observed.
+### [0.23.1] - 2026-08-18 - IN PROGRESS (four owner decisions, and a live over-grant closed)
+- 🔴 **`member` could delete any client in the tenant — closed.** Found while preparing the
+  sensitivity-flag review, not by a scan: `core.client.delete` sat in the BASELINE `member` bundle, and
+  a live probe (a principal whose only grant was `member @ company`) returned EFFECT_ALLOW on client
+  create/update/delete — no `owns` carve-out, and the handler passes no ownership attribute to narrow
+  it. Soft-delete and audited, so recoverable, but real reach over a core business entity, and
+  deployed. `member` now keeps create/update and loses delete (owner decision); `manager`/
+  `company_admin` are untouched, which the new test asserts so the narrowing cannot over-correct.
+- **HR runs joiner/mover/leaver end to end.** `hr_people_ops` gains `core.position.assign`/`.unassign`,
+  resolving the §5.1-vs-§4.1 contradiction P2-06 surfaced (an `hr_manager` used to get 403 the moment
+  `positionId` was present). `hr_staff` deliberately does NOT — `hr_people_ops` is the ACTING tier —
+  and that refusal is pinned. A dept head's assignment becoming a REQUEST is the owner's chosen
+  end-state and waits on P2-08 part B; direct assign stays live until then rather than leaving a gap.
+- **Seven READ permissions are no longer `sensitive`** (`contract.read`, `identity_link.read`,
+  `rollup.read`, `role_grant.read`, `invoice.read`, `it.account.read`, `hr.case.read`) — 107 -> 100.
+  `hr.record.read` stays flagged (bulk personal data). The flag became load-bearing when P2-08's
+  dept-head gate started routing sensitive-carrying roles as overrides, and flagging reads meant any
+  role that can *view* a contract or a dashboard was refused. Two groups (`invoices_view`, `rollups`)
+  lost their derived flag mechanically; both `_meta` counts were RE-DERIVED, never hand-edited.
+- **The ceiling's baseline subtraction is now an explicit interim.** The owner ruled the durable form
+  is a per-key catalog marker separating self-scoped keys from authority-over-others keys; the
+  subtraction ships until that lands, and PERMISSION-CONTRACT §12.1 says so rather than leaving it
+  looking permanent. `core.integration_connection.*` vs `core.client.delete` is the worked example of
+  why a marker beats a subtraction: both sat in the baseline bundle, only one was genuinely self-scoped.
+- Migration `0112` syncs the DB half (bundle row dropped, two added, seven flags cleared), asserting
+  every delta with `GET DIAGNOSTICS` rather than trusting it.
+- Gates: parity chain `src/rbac`+`src/db` **920/920**, `employees-jml` 15/15, the new live-probe suite
+  9/9, `cerbos compile` clean, Cerbos restarted before every probe.
+### [0.23.0] - 2026-08-18 - IN PROGRESS (IAM Phase 2: JML, positions, the grant surface, and the expiry sweep)
+- **A hire, a transfer and a termination now move real authorization (P2-06).** Seven endpoints under
+  `/api/:t/hr/employees` — list/detail/hire/patch/delete plus `transfer` and `terminate`. The §5.2 mover
+  criterion is proven in its HTTP form against RUNNING Cerbos: after a transfer, zero `user_roles` rows
+  point at the closed assignment, the OLD department's probe is 403, the NEW department's is 200, and
+  `session_version` moved. Probed with a principal `assemblePrincipal()` builds from the rows the
+  reconciler wrote — not from a role bundle, which cannot witness this at all.
+- **The org-blob write pipeline is now ONE implementation** (`admin/org-structure.service.ts`), with the
+  org PUT and the JML flows as its two callers. A transfer that moved a seat without moving the blob
+  person node would be silently reverted by the next org edit's membership sweep.
+- **Positions have an HTTP surface at last (P2-12 backend).** Until now a seat could only be created with
+  raw SQL, so the JML flows had nothing to hire into. CRUD + the role-set composer + assign/unassign,
+  with a dept head narrowed to their own subtree and `attachable-roles` returning refused roles WITH a
+  reason rather than omitting them.
+- **The grant/revoke surface (P2-08 part A).** `/api/:t/role-grants` over the `role_grant` kind:
+  `unitAncestors` derived server-side from the closure (never from the body), every other invariant left
+  to Cerbos or the choke point, and a position-managed grant refused as `managed_grant_not_revocable`
+  rather than deleted and silently restored by the next reconcile.
+- **`expires_at` finally means something (P2-09).** The column shipped in `0109` and no writer set it;
+  P2-08 writes it and P2-09's sweep revokes on it, bumps the session and audits `role_grant.expired`.
+  P2-05's drift sweep — built, never started — is on the same loop. ⚠ `assemblePrincipal()` still does
+  not filter on `expires_at`, so the gap between expiry and the next tick is real and recorded.
+- 🔴 **The ceiling could not pass the commonest grant in the system.** `company_admin` granting `member`
+  was refused over three keys `member` holds only for SELF-SERVICE. A plain subset test therefore
+  forbids granting the baseline role to anyone, forever — and the sensitive gate had the same defect
+  (baseline `member` carries 11 sensitive-flagged keys). Both now subtract the baseline bundle. This
+  relaxes a guard P2-04 shipped: `PERMISSION-CONTRACT` §12.1 records it as needing ratification.
+- 🔴 **`targetUserId` was an attribute no handler could send**, so the self-assign and self-target DENY
+  rules on `position`/`role_grant` were structurally unreachable. Added to the `Resource` type; the DENY
+  now fires, proven against the strongest possible caller.
+- 🔴 **The leaver flow would have disabled every leaver's login** — the "still employed elsewhere?" count
+  ran under `withGlobal`, so RLS returned zero rows for everyone with no error. Now uses the
+  `principal_lookup` policy. Caught by its own test going red first.
+- ⚠ **HR cannot place, transfer or terminate anyone** — `assign`/`unassign` are `company_admin` +
+  `org_unit_lead` only, which contradicts design §5.1. What shipped honours Cerbos and pins both
+  directions; the owner call is recorded with a recommendation.
+- **NOT built, and refused rather than faked:** the routed override (`decide_override` exists in neither
+  the policy nor the catalog, so an above-baseline sensitive grant from a dept head returns a typed
+  `override_required`); future-dated JML (the reconciler has no as-of axis); P2-07's MCP tools, so none
+  of these capabilities meet the agentic-native bar yet.
+- Migration `0111` (the joiner's natural key, which `0109` did not cover for principal-less candidates).
+- Gates: `employees-jml` 14/14, `positions` 11/11, `role-grants` 14/14, `grant-expiry-sweep` 6/6,
+  `grant-write-invariants` 26/26, `src/admin`+`src/rbac`+`src/db` regression, `tsc` clean,
+  `lint:withtenants` + `lint:migration-rls` clean. **Not deployed** — the push credential in the working
+  session had no write access to the repo.
 ### [0.21.2] - 2026-08-12 - IN PROGRESS (IAM-04 batch 4 + IAM-SEC-04 — 16 permission arms, and the scope guard generalised)
 - **16 of the 17 kinds `team_lead`'s retirement made SAFE now carry a permission arm** (`activity`,
   `client`, `client_contact`, `comment`, `custom_field`, `deliverable`, `device`, `file`,
@@ -2316,6 +3148,77 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.27.0] - 2026-08-20 - IN PROGRESS (P2-10 / P2-11 / P2-12-FE: the three Phase 2 surfaces)
+Shared layer first, because all three write the same endpoints: `lib/iam.ts` (readers),
+`lib/iamActions.ts` (every write plus ONE translation of the typed refusal vocabulary),
+`components/iam/IamAction.tsx` (one control, three outcomes). A per-page copy of "POST, then humanize the
+refusal" is three chances to read `ceiling_exceeded` differently, and that vocabulary IS the contract.
+- 🔴 **THE REFUSALS ARE THE FEATURE.** `assignment_request_required` and `ceiling_exceeded` /
+  `override_required` are not failures — they are the server telling the operator what to do instead. Both
+  render as GUIDANCE with the follow-up control attached ("Propose instead", "Request override",
+  prefilled), in a third outcome style that is deliberately not red and deliberately not announced with
+  `role="alert"`. Colouring guidance as failure teaches an operator the system is broken while it is
+  working exactly as designed. The override is also reachable standalone: someone who already knows the
+  grant is above their ceiling should not have to trip over the wall to find the door.
+- **P2-12-FE `/organization/positions`** — the composer NEVER filters: `attachable-roles` returns
+  unattachable roles WITH a reason and they render disabled-with-reason. Orphaned seats sort FIRST (their
+  holders' access is FROZEN — escalation, not a fix), vacant next; a seat with no role-set says "confers
+  no access" in the row, because that state looks finished in a list.
+- **P2-11 `/organization/access`** — subtree roster, seats, and per-person grants with PROVENANCE. A grant
+  with `revocable: false` gets NO revoke control at all rather than a disabled one: the reconciler would
+  restore it and the operator would conclude the UI lied. Effective access is scope-level and the page
+  says so in words — IAM-05c's caveat is real, and a page implying it could answer "may they edit THIS
+  document" would be confidently wrong some of the time.
+- **`scope: "subtree"` is surfaced as a banner on both pages.** It means the server narrowed the list to
+  the caller's lead units; rendering it as the whole company tells a department head that seats they
+  cannot see do not exist.
+- **P2-10** — hire (position optional; the message says which of the two happened, because a record with
+  no seat confers nothing and no login), transfer (reports grants added AND removed — "granted 2" alone
+  reads as a promotion), terminate (requires a reason and a confirmation that states what will actually
+  happen; the endpoint accepts a bare call, but the least reversible action in the product should not be
+  one click from a table row). `/hr/people` gains an Employment column reading **"No record"** rather than
+  a blank, and counts the gap — that gap is exactly what P2-15's backfill closes.
+- **Nav lists both new pages for `people.directory`, NOT `admin.access`.** A department head's authority
+  comes from holding a lead position, which is not a capability `lib/rbac.ts` can test; gating there would
+  hide the surface from exactly the person this wave was built for. The pages render the server's refusal,
+  which is the real boundary.
+- Gates: `iam.test.ts` 10/10 (ordering and degradation — the two decisions that go invisible once they
+  work); full UI suite **2329/2329** over 148 files; `next build` clean with all four routes in the table;
+  `tsc --noEmit` clean.
+### [0.26.0] - 2026-08-19 - IN PROGRESS (P2-14: the IT accounts console)
+- **`/it/accounts`** — the worklist ("who still needs a login, whose leaver login is still enabled") plus
+  provision / disable / enable / reset-password, against P2-13's real endpoints. Default view is
+  **what needs action**, not the full staff list: an operator opens this page to fix something, and a
+  full roster buries the three rows that need them. `?all=1` shows everyone.
+- 🔴 **`listAccounts` is the ONE reader in this codebase that does not degrade to `[]`.** Every other
+  reader returns an empty array on 403/404 so a page can ship ahead of its backend. Here an empty list
+  asserts "everyone has a login" — the claim the backend refuses to make with a typed 503 — so the reader
+  returns a DISCRIMINATED result (`ok` | `unavailable` | `forbidden`) and the page renders `unavailable`
+  as a warning that says, in words, that this is not a statement that everyone has a login. Three layers
+  saying the same thing on purpose, because the failure is silent and reassuring.
+- 🔴 **A CONTRADICTION IN THE IT LAYOUT, found while wiring the tab.** The layout gated the whole console
+  on `isModuleOnForActiveCompany("it")` — correct for Devices/Topology/Workflows, whose controller is
+  `ModuleEnabledGuard("it")`. But P2-13's accounts endpoint is deliberately NOT module-gated, precisely so
+  login management does not vanish for a company with the module off while its people still need logins.
+  Leaving Accounts under the blanket gate would have re-imposed in the UI exactly what the backend was
+  built to avoid, and it would have failed in the reassuring direction: "IT module disabled" instead of
+  "three leavers can still log in". The gate is now per-tool (`ITModuleGate`), and the tab strip renders
+  always — hiding it would hide the one tool that still works.
+- **The initial password is held in client state and the page does NOT refresh under it.** There is
+  exactly one copy of it in existence; `router.refresh()` runs only after the operator dismisses the
+  panel, the panel says plainly that it will not be shown again, and nothing writes it to the URL,
+  localStorage, or a timer-dismissed toast. Reset requires a REASON before it will submit — the backend
+  accepts null, this surface does not, because resetting someone else's password is the action most likely
+  to be questioned later.
+- `state` and `actionable` are used exactly as the server computed them. Re-deriving "needs attention"
+  here would be a second implementation that drifts, and the direction it drifts in is a leaver the
+  console quietly stops flagging.
+- Employment status renders `—` when the backend returns null (the HR module is off for that company),
+  never "active" — mirroring the backend's own refusal to claim `leaver_still_enabled` without real data.
+- Gates: `it-accounts.test.ts` 10/10 (incl. four cases pinning the no-degradation rule); full UI suite
+  2319/2319 after fixing a design-token violation my first CSS introduced (`var(--erp-danger, #hex)` —
+  the guard caught the hardcoded literal; the real token is `--status-critical-fg`); `next build` clean
+  with `/it/accounts` in the route table; `tsc --noEmit` clean.
 ### [0.25.1] — 2026-08-10 · IN PROGRESS (IAM Phase 1 mirror corrections — DR-6, DR-7, a capability-map defect)
 - `lib/rbac.ts` corrected against re-derived Cerbos ground truth: `it_admin` loses
   `company.manage` (DR-6 — zero Cerbos overlap on `resource_device.yaml`, a dead-button
@@ -3007,6 +3910,67 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Known risk:** docker build unverified. **Next:** verify container build, OpenBao creds, media DLP.
 
 ## mcp-hub
+### [0.11.0] - 2026-08-20 - PROTOTYPED (🔴 the D14 impact gate never fired for an agent)
+- 🔴 **A LIVE AUTHORIZATION HOLE, and it made yesterday's release notes false.** `isAutomation(provider)`
+  is literally `provider === "n8n"`, and the medium/high impact-suspend branch sat INSIDE it. But
+  `runAgent` sends the requesting HUMAN's OBO envelope verbatim — deliberately, so an agent can never act
+  with more authority than the person it serves — so an agent-driven call arrived as
+  `provider: "whatsapp"`, the check was false, and the branch was skipped entirely.
+  **An n8n workflow calling a HIGH-impact write suspended for approval; an agent calling the same tool
+  ran it unattended.** `Alpha 01.056.0111a` shipped `iam.grantRole` (high) claiming all four direct IAM
+  writes suspend for a human. True for n8n, false for an agent. Corrected in PERMISSION-CONTRACT §15.
+- **Fixed by SPLITTING two conjuncts that were never the same question.** Workflow scope stays keyed on
+  `isAutomation` — a `wf:*` allow-list lookup is an n8n concept, and applying it to agents would deny
+  every agent read for a reason that was never about them. The impact gate moves to a new
+  `isUnattended` = n8n OR agent-driven: attendance, not identity. A human on an interactive surface is
+  attended by definition and does not approve their own click.
+- **Fixed in BOTH engines.** The hub now sends `isUnattended` and `agent` as Cerbos principal attributes,
+  and `resource_mcp_tool.yaml`'s impact conjunct is re-keyed. Fixing only the in-code fallback would have
+  left the live deployment open, because Cerbos is authoritative whenever `CERBOS_URL` is set — the hole
+  actually lived in the policy file.
+- **`Principal.agent`** carries the co-author, minted from `x-obo-agent`. Omitted (not `undefined`) when
+  absent, so a non-agent principal is byte-identical to before — every rate-limit key and audit ref keeps
+  its shape. An anonymous principal KEEPS the marker: an unauthenticated agent-driven call is still
+  agent-driven, and that is the shape that deserves the gate most.
+- **`src/obo-headers.ts` is now the ONE place the outbound envelope is built**, replacing 14 hand-built
+  header objects across 8 files. Adding a header to 14 sites guarantees the 15th omits it and silently
+  drops attribution for whichever tool group comes next — a bug that looks like "that one tool's audit
+  rows don't name the agent" and is noticed only when someone needs it. One site was typed structurally
+  as `{provider, externalId}` and would have dropped the field regardless of the header, so the type was
+  widened to `OboSubject`.
+- Gates: `agent-impact-gate.test.ts` 17/17 (new), **verified red-then-green** — reverting `isUnattended`
+  to the old predicate fails 5 cases including "an agent calling a HIGH-impact write SUSPENDS"; full hub
+  suite 268/268; `cerbos compile` clean.
+### [0.10.3] - 2026-08-20 - PROTOTYPED (the tool-def type was narrower than the transport)
+- **`RemoteToolDef.method` gained `DELETE`**, mirroring platform-nest's `McpToolDef.method`, for
+  `iam.revokeRoleGrant`. No behavioural change: `callPlatform` already read `def.method` and handed it to
+  `fetch`, so DELETE always worked on the wire. A def arriving over HTTP is `JSON.parse`d, so the narrow
+  union never rejected anything at runtime — it simply described the transport incorrectly, which is the
+  kind of inaccuracy that survives until somebody trusts it.
+### [0.10.2] - 2026-08-19 - PROTOTYPED (Cerbos was silently not authoritative for the tool list)
+- 🔴 **A LIVE DEFECT, found by reading cerbos's own logs on the box — not by a test and not by an
+  alert.** Cerbos rejects a `CheckResources` request carrying more resources than its configured batch
+  limit (50, the default this deployment runs). The hub asks about EVERY tool in one request for the
+  visibility check, so once the tool count passed 50 every check failed with
+  `InvalidArgument: number of resources in batch (128) exceeds configured limit (50)` and
+  `visibleToolsFor` caught it and fell back to the in-code engine.
+- **What that did and did not mean.** NOT fail-open: the in-code engine is deny-by-default and mirrors
+  the assurance and automation-scope rules, so no caller saw a tool it should not have. But Cerbos had
+  stopped being AUTHORITATIVE for the tool list, which is the one thing `resource_mcp_tool.yaml` exists
+  to be — any listing rule expressible only in the policy was simply not applied. It hid because the
+  fallback logs one warning and returns a plausible answer.
+- **The per-CALL path was never affected** and that distinction is asserted, not assumed:
+  `cerbosAllowsTool` batches exactly one resource. So D14-13's executable allow-list — including the
+  JML names added in `platform-nest 0.27.0` — has governed real calls throughout.
+- **Fixed by chunking client-side** at `CERBOS_RESOURCE_BATCH_MAX = 40` (headroom below 50), chunks
+  evaluated concurrently, verdicts merged, and any one chunk's failure rejecting the whole call. A
+  partial allow-set is indistinguishable from "Cerbos denied those tools" — exactly the ambiguity that
+  let this hide — so the fail-closed contract is preserved. Chunking rather than raising the server
+  limit: the limit is a defence against unbounded requests, and the hub's tool count only grows.
+- **4 new cases** whose stub REFUSES an oversized batch the way the server does, so they fail against
+  the pre-fix client rather than asserting an internal detail. Verified red-then-green by raising the
+  constant to 1000 and re-running (3 failed), then restoring it (29/29).
+- BOOKKEEPING GAP, flagged rather than backfilled silently: MODULES.md recorded `0.10.1` but this changelog has no `[0.10.1]` entry, and rule 1 requires both. Whatever shipped as 0.10.1 is undocumented here. This entry is numbered 0.10.2 so MODULES.md stays continuous.
 ### [0.10.0] — 2026-08-06 · PROTOTYPED (the assurance ceiling is closed — `verified` can finally be minted)
 - **NEW `elevateAssurance()` (`principal.ts`) — the ONLY path from `low` to `verified`.** Nothing in
   the codebase had ever minted `verified`, so every `minAssurance: "verified"` tool was *statically*
@@ -3620,6 +4584,13 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.7.2] - 2026-08-20 - PROTOTYPED (the agent names itself on every tool call)
+- **`Envelope.agent`**, sent as `x-obo-agent`. `runAgent` fills it from the agent's OWN definition
+  (`agent:${def.name}`) rather than from its callers — who correctly pass the requesting human's envelope
+  and would have to remember. An attribution field that depends on every call site remembering it is one
+  that will be missing exactly where it matters.
+- Omitted entirely when absent, so a non-agent caller sends byte-identical headers to before.
+- Gates: full suite 186/186 (45 skipped, unchanged).
 ### [0.7.1] - 2026-08-07 - PROTOTYPED (known near-miss tool names resolve; reads only)
 - Follow-up to the recoverable-refusal loop, not a replacement - that stays as the net for everything
   not in the map. **Root cause moved the design:** the live `pm.listTasks` failure never reached

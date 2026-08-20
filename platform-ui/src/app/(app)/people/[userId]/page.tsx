@@ -4,7 +4,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { canViewEmployee, getEmployee } from "@/lib/people";
-import { can } from "@/lib/rbac";
+import { can, isElevated } from "@/lib/rbac";
+// P2-10. Aliased because `lib/people` already exports a `getEmployee` — that one is the person-360
+// aggregate, this one is the HR employment record. Two different things with one obvious name.
+import { getEmployeeForUser as getIamEmployee, listPositions } from "@/lib/iam";
+import { transferEmployee, terminateEmployee, updateEmployee } from "@/lib/iamActions";
+import { EmployeeRecord } from "@/components/iam/EmployeeRecord";
+import "@/components/iam/iam.css";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, KpiTile, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
@@ -64,6 +70,19 @@ export default async function EmployeePage({ params }: { params: Params }) {
   if (!emp) return shell("Person not found", <EmptyNote>No person with that id in this company.</EmptyNote>);
 
   const { profile, isSelf, tasks, projects, timeEntries, identityLinks, activity, placement } = emp;
+
+  // P2-10 — the employment record and the seats someone could be moved into. Both degrade to
+  // null/empty, which is honest: no record and no seats are ordinary states, not failures.
+  const [iamEmployee, { positions }] = await Promise.all([
+    getIamEmployee(viewerId, tenant, userId),
+    listPositions(viewerId, tenant),
+  ]);
+  const positionOptions = positions
+    .filter((p) => p.status === "active" && !iamEmployee?.seats.some((s) => s.current && s.positionId === p.id))
+    .map((p) => ({ value: p.id, label: `${p.title} — ${p.unitNodeId}${p.roleSet.length === 0 ? " (confers no access)" : ""}` }));
+  // Never on your own record: transferring or terminating yourself is refused server-side anyway
+  // (self-target DENY), and offering the control would be an invitation to discover that the hard way.
+  const canManageEmployment = !isSelf && (can(me, "admin.access", tenant) || can(me, "people.directory", tenant) || isElevated(me));
   const openTasks = tasks.filter((t) => OPEN.has((t.status ?? "").toLowerCase())).length;
   const totalMinutes = timeEntries.reduce((n, e) => n + (e.minutes ?? 0), 0);
 
@@ -114,6 +133,22 @@ export default async function EmployeePage({ params }: { params: Params }) {
               ))}
             </div>
           )}
+        </Card>
+      </div>
+
+      {/* P2-10 — the HR employment record. Placed ABOVE the org card because the placement is a
+          consequence of employment, and a reader scanning for "why do they have this access" should meet
+          the seat before the chart. */}
+      <div style={{ marginTop: 20 }}>
+        <Card title="Employment" hint="The HR record, their current seat, and the JML actions.">
+          <EmployeeRecord
+            employee={iamEmployee}
+            positionOptions={positionOptions}
+            canManage={canManageEmployment}
+            transferEmployee={transferEmployee}
+            terminateEmployee={terminateEmployee}
+            updateEmployee={updateEmployee}
+          />
         </Card>
       </div>
 

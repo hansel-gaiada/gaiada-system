@@ -1,0 +1,186 @@
+# Observability STORAGE + ALERTING, relocated to the SumoPod VPS (150.109.15.108).
+# Plan: docs/plans/2026-08-18-observability-relocation.md
+#
+# ── WHAT RUNS WHERE, AND WHY IT IS SPLIT ────────────────────────────────────────────────────────
+# Collection stays on gda-aicenter; only storage/query/alerting live here. Prometheus PULLS, and the
+# ~14 exporters it scrapes sit on gda-aicenter's compose network with no published ports. Relocating
+# Prometheus naively would mean exposing eight-plus exporter ports across the tunnel — new attack
+# surface, and a direct breach of this host's "never publish on 0.0.0.0" rule. Instead gda-aicenter's
+# OTel collector scrapes locally and remote-writes here, so ONE outbound flow crosses the link and no
+# inbound port is opened on the monitored box.
+#
+# ── THIS BOX IS NOT OURS ────────────────────────────────────────────────────────────────────────
+# It runs the owner's private production — 37 containers across 9 unrelated compose projects
+# (aire, arka-villa, bambusilver, bfs, laundry-qta, mimi, …) plus our own gaiada-social. Therefore:
+#   * this is its OWN compose project (`gaiada-obs`); every command must carry `-p gaiada-obs`,
+#   * NO `system prune`, `image prune -a`, `volume prune`, `network prune`, and never a bare
+#     `--remove-orphans`,
+#   * `docker ps -a` is diffed before and after every session (take the baseline FRESH — it was 19
+#     when the runbook was written and 37 on 2026-08-18).
+# See infra/runbooks/deploy-vps.md §"Postiz / SMM" for the full rules.
+#
+# ── PORTS: BIND ADDRESS IS A SAFETY CONTROL, NOT A PREFERENCE ───────────────────────────────────
+# Docker writes its own DNAT/FORWARD rules and they are evaluated BEFORE ufw's, so a 0.0.0.0 bind is
+# internet-reachable on a box whose firewall reports "deny incoming" — and `ufw status` will happily
+# say everything is fine. Every port below is therefore bound to ${OBS_BIND_ADDR}, which DEFAULTS TO
+# 127.0.0.1 so a missing value fails safe. The deploy value is the WireGuard address 10.88.0.2.
+#
+# Host port numbers are NOT the upstream defaults, because those are already taken on this box by
+# other people's work — verified before choosing:
+#   9090 → cockpit-tls owns *:9090 (systemd)     ⇒ prometheus  on 19090
+#   3001 → another project's docker-proxy 0.0.0.0 ⇒ grafana     on 13000
+#   3100 → another project's docker-proxy 0.0.0.0 ⇒ loki        on 13100
+#   9093/4317/4318 were free                      ⇒ used as-is
+# A wildcard bind occupies the port on every address, so "different interface" would NOT have saved
+# us on the first three.
+name: gaiada-obs
+
+x-bind: &bind ${OBS_BIND_ADDR:-127.0.0.1}
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      # Retention can be generous here: this box has ~105 G free versus gda-aicenter's ~9 G, which is
+      # the whole reason for the move. Still bounded — an unbounded TSDB on someone else's
+      # production disk is not a favour.
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+      # THE load-bearing flag. Without it Prometheus refuses remote_write and every metric from
+      # gda-aicenter is silently dropped: the receiver 404s, the collector queues then discards, and
+      # the dashboards simply show no data with nothing anywhere saying why.
+      - "--web.enable-remote-write-receiver"
+      # MON-09p: also accept OTLP. The collector's prometheusremotewrite exporter has only an
+      # IN-MEMORY queue in 0.116.1, so a tunnel outage longer than the buffer loses metrics
+      # outright. The otlphttp exporter DOES support a disk-backed queue, and this is the
+      # receiver that makes that path possible. remote-write stays enabled so the switch is
+      # reversible without touching this box again.
+      - "--web.enable-otlp-receiver"
+    volumes:
+      - ../observability/prometheus/prometheus.remote.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${OBS_BIND_ADDR:-127.0.0.1}:19090:9090"
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "${OBS_BIND_ADDR:-127.0.0.1}:13100:3100"
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ../observability/tempo/tempo.remote.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      # OTLP in, from gda-aicenter's collector over the tunnel. gRPC ONLY: the collector's
+      # exporter is `otlp/tempo -> tempo:4317` (gRPC), and tempo.yaml declares only the grpc
+      # protocol. 4318 was published here first and answered nothing, because no receiver listens
+      # on it -- so it was an open port on someone else's production box buying exactly zero
+      # capability. Removed rather than 'fixed' by adding an HTTP receiver we have no sender for.
+      - "${OBS_BIND_ADDR:-127.0.0.1}:4317:4317"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${OBS_BIND_ADDR:-127.0.0.1}:13000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  # Alerting moves WITH the storage on purpose. Leaving Alertmanager on gda-aicenter would mean the
+  # box that dies is also the box that was supposed to tell you — which is the resilience argument
+  # for this whole migration, and it applies to the notifier more than to anything else.
+  alertmanager-render:
+    image: alpine:3.21
+    environment: &am_env
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      ALERT_CHAT_ID: ${ALERT_CHAT_ID:-0}
+      SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://ntfy/gaiada-alerts}
+      DEADMANSSWITCH_URL: ${DEADMANSSWITCH_URL:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        apk add --no-cache gettext >/dev/null &&
+        mkdir -p /rendered/templates &&
+        cp /tpl/templates/* /rendered/templates/ &&
+        envsubst < /tpl/alertmanager.yml > /rendered/alertmanager.yml &&
+        echo "alertmanager config rendered"
+    volumes:
+      - ../observability/alertmanager/alertmanager.yml:/tpl/alertmanager.yml:ro
+      - ../observability/alertmanager/templates:/tpl/templates:ro
+      - alertmanager-config:/rendered
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    environment: *am_env
+    volumes:
+      - alertmanager-config:/etc/alertmanager
+      - alertmanager-data:/alertmanager
+    ports:
+      # Needed by a human: silencing an alert happens through this UI, and an alerting system you
+      # cannot silence gets muted at the source instead.
+      - "${OBS_BIND_ADDR:-127.0.0.1}:9093:9093"
+    depends_on:
+      alertmanager-render:
+        condition: service_completed_successfully
+
+  ntfy:
+    image: binwiederhier/ntfy:v2.11.0
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      - ../observability/ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ntfy-data:/var/cache/ntfy
+    # No host port: only Alertmanager talks to it, over the project network.
+
+  # This box now hosts the monitoring, so it must itself be monitored — otherwise the move trades a
+  # blind spot for a different blind spot. Scraped locally by the Prometheus above (see
+  # prometheus.remote.yml), never exposed.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+
+volumes:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:
+  alertmanager-config:
+  alertmanager-data:
+  ntfy-data:

@@ -29,7 +29,8 @@
 //                        actor, which may be non-human.
 //   7 golden case      — social.test.ts drives each of these against the real endpoint.
 import {
-  BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, Get, Headers, HttpCode,
+  NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
@@ -39,7 +40,21 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { DEFAULT_TOOL_SCOPE, DEFAULT_USAGE_BUDGET_USD } from "./index";
-import { variantArgsSha256 } from "./canonical-args";
+import { variantArgsSha256, variantPublishArgs } from "./canonical-args";
+// SMM-09 — the publish gate. The controller imports the SAME evaluator the D14 registry entry runs
+// (core/approval-executables.ts), never a UI-friendly second copy of the rules.
+import {
+  PUBLISH_PRECONDITION_STAGES,
+  SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL,
+} from "./publish-precondition";
+// SMM-31 — the client-review gate (composed IN FRONT of the six-stage chain, never inside it — see
+// client-review.ts's header) and the staff-side state machine for `social_post_client_reviews`.
+import { evaluatePublishPreconditionWithClientReview } from "./client-review";
+// SMM-10 — the dispatch endpoint `social.publishPost`'s `pathTemplate` fronts, and the webhook
+// intake for the reconcile flow. Both are thin: the domain logic (the transactional stamp, the
+// idempotent apply) lives in `dispatch.ts`/`post-status-sync-job.ts`, never re-implemented here.
+import { dispatchApprovedPublish } from "./dispatch";
+import { reconcileOneProviderPost } from "./post-status-sync-job";
 import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
 import { completeViaGateway } from "./gateway-client";
 import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./knowledge-client";
@@ -51,7 +66,9 @@ import {
 // SMM-05 — the publisher seam. Note what is imported and what is NOT: the provisioning/sync
 // capabilities and the driver REGISTRY, never a driver and never a transport. The controller is one
 // client of the port, exactly as it is one client of every other capability here.
-import { provisionPublisherOrg, syncConnectorRegistry } from "./publisher/provisioning";
+import {
+  checkConnectReadiness, initiateAccountConnect, provisionPublisherOrg, syncConnectorRegistry,
+} from "./publisher/provisioning";
 import { getPublisher } from "./publisher/registry";
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
@@ -893,7 +910,14 @@ export class SocialController {
           `UPDATE social_post_variants
               SET body = $1, first_comment = $2, media = $3, settings = $4, scheduled_at = $5,
                   args_sha256 = $6, approval_id = NULL,
-                  status = CASE WHEN status IN ('in_review','approved') THEN 'draft' ELSE status END,
+                  -- SMM-10: 'failed' joins the revert set. Before this ticket a dispatch could never
+                  -- produce 'failed' (SMM-09 built no dispatch path), so this CASE never needed to
+                  -- know about it. It carries approval_id (0105's svar_dispatched_has_approval CHECK
+                  -- requires it for any status outside draft/in_review/approved/cancelled) and this
+                  -- statement clears it in the SAME breath it moves the content — otherwise a failed
+                  -- publish would be permanently unrecoverable: no precondition path and no edit path
+                  -- ever returns it to an editable state.
+                  status = CASE WHEN status IN ('in_review','approved','failed') THEN 'draft' ELSE status END,
                   updated_at = now()
             WHERE id = $7`,
           [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings),
@@ -988,6 +1012,302 @@ export class SocialController {
       estimatedCostUsd: estimateCostUsd(account.network, shape),
       network: account.network,
     };
+  }
+
+  // ==================================================== THE PUBLISH GATE (SMM-09) ============
+  //
+  // A DRY RUN of the D14 execution precondition, and nothing else. It does not publish, does not
+  // consume an approval and does not touch a network — it answers "would the publish gate let this
+  // variant through RIGHT NOW, and if not, which gate stopped it and why".
+  //
+  // Why it exists rather than being inferable from the composer's `validation`: the two answer
+  // different questions. `validation` is about the CONTENT (does this caption fit, is this media
+  // legal for this network). The publish gate is about EVERYTHING ELSE that has to still be true at
+  // dispatch — the client chain, the engagement's scope, the args hash, single-use consumption, the
+  // metered budget and (for TikTok) creator consent. The approval card must show the human WHY a
+  // publish will refuse BEFORE they approve it, because the alternative is an approval that lands
+  // `failed` minutes later with nobody watching, which is precisely the dead end D14 exists to fix.
+  //
+  // ONE IMPLEMENTATION, TWO CALLERS. This runs the exact function
+  // `core/approval-executables.ts`'s `social.publishPost` entry runs at execution time
+  // (`evaluatePublishPrecondition`). A second, "UI-friendly" copy of these rules would drift, and
+  // the drift would show up as a card that says green and an execution that says no.
+  //
+  // Read-tier authorization (`social_post` / `read`), deliberately: asking whether a publish WOULD
+  // be allowed is not publishing, and staff who author the content are exactly who needs the answer.
+  // The `publish` action itself gates the act, and it remains manager-tier (resource_social_post.yaml).
+  //
+  // ⚠ The verdict is returned as DATA with a 200, not thrown as an error. "This variant is not
+  // currently publishable" is a successful answer to the question that was asked. The typed tokens
+  // this surface reports are the same ones the executor writes into
+  // `automation_approvals.execution_error` after the `precondition_failed: ` prefix, so a caller
+  // branches on ONE vocabulary regardless of which side it heard it from.
+  @Get("variants/:variantId/publish-preconditions")
+  async getVariantPublishPreconditions(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "read");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        // The args a publish of this variant WOULD be called with, built from the live row by the
+        // same function the composer and the submit path use. Evaluating against these makes the
+        // hash stage compare live-against-live — which still has teeth: it catches a stored
+        // `args_sha256` that has drifted from the content (a direct SQL edit, or a future write path
+        // that forgot to recompute the anchor), which is exactly the condition that would make a
+        // real approval unmatchable later. What it cannot report is "this specific approval no
+        // longer matches", because a dry run holds no approval; that comparison happens at execution
+        // time against the grant's own args.
+        const { rows } = await c.query<{
+          account_id: string; body: string; first_comment: string | null; media: unknown;
+          settings: Record<string, unknown> | null; scheduled_at: Date | null;
+        }>(
+          `SELECT account_id, body, first_comment, media, settings, scheduled_at
+             FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL`,
+          [variantId],
+        );
+        if (!rows[0]) return { found: false as const };
+        const args = variantPublishArgs({
+          tenantId, id: variantId, accountId: rows[0].account_id, body: rows[0].body,
+          firstComment: rows[0].first_comment, media: rows[0].media,
+          settings: rows[0].settings, scheduledAt: rows[0].scheduled_at,
+        });
+        return {
+          found: true as const,
+          // SMM-31: the client-review gate runs FIRST here too — this dry run is the one surface
+          // staff actually consult before filing a WS4 request, so it is the practical "would this
+          // even be submittable" answer in an architecture with no separate submit endpoint (see
+          // client-review.ts's header).
+          verdict: await evaluatePublishPreconditionWithClientReview(
+            c, args as unknown as Record<string, unknown>, SOCIAL_PUBLISH_TOOL,
+          ),
+        };
+      },
+      { modules: ["social"] },
+    );
+    // A missing variant is a 404, not a 200 carrying `variant_not_found`: every other read on this
+    // controller answers it that way, and folding it into the verdict body would make "no such
+    // variant" indistinguishable from "this variant exists and is currently blocked".
+    if (!result.found) throw new NotFoundException("post variant not found");
+    const verdict = result.verdict;
+    return {
+      ok: verdict.ok,
+      ...(verdict.ok ? {} : { stage: verdict.stage, reason: verdict.reason }),
+      stages: PUBLISH_PRECONDITION_STAGES,
+      // Names the split so a caller never has to infer it: the free tool is the one that
+      // auto-executes on approval; the metered twin exists and cannot (addendum D-14).
+      tool: SOCIAL_PUBLISH_TOOL,
+      meteredTool: SOCIAL_PUBLISH_METERED_TOOL,
+    };
+  }
+
+  // ==================================================== CLIENT REVIEW (SMM-31, D-16) ==========
+  //
+  // The STAFF side of the two-sided seam: ask (`request`), look (`read`), retract (`withdraw`).
+  // The CLIENT's own decision lives on the PORTAL surface (`social-client-review-portal.controller.ts`,
+  // action `approve_post`) — never here; `resource_social_client_review.yaml`'s own header states the
+  // invariant that `client` never appears in THIS kind's policy.
+  //
+  // `social_post_client_reviews` is the ONE plain-tenant-wall table in this module (D-16 / 0088's
+  // D-2a lesson — see client-review.ts's header). Reading/writing it from inside this controller's
+  // usual `{modules:['social']}` transaction is still correct: the plain wall's policy only checks
+  // `tenant_id`, so an ADDITIONAL `app.scopes` declaration is inert for it and load-bearing for the
+  // social_post_variants/social_posts/social_engagements joins these three endpoints also need.
+  //
+  // ONE ROW PER VARIANT, FOREVER (0105's `UNIQUE (variant_id)`) — "request" is therefore an UPSERT
+  // back to `pending`, never a second INSERT: re-asking after `changes_requested`/`withdrawn`, or
+  // even after `approved` (an edit invalidated the prior sign-off), all resolve to the same row.
+
+  @Post("variants/:variantId/client-review")
+  @HttpCode(201)
+  async requestClientReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "request");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        // Everything `event-handlers.ts#handleClientReviewRequested` needs to resolve and notify the
+        // client, gathered in ONE query — a second read in the handler would need this exact same
+        // third-walled join, which is how a copy of it drifts.
+        const { rows } = await c.query<{ client_id: string; project_id: string | null; title: string }>(
+          `SELECT e.client_id, e.project_id, p.title
+             FROM social_post_variants v
+             JOIN social_posts p       ON p.id = v.post_id       AND p.tenant_id = v.tenant_id
+             JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = v.tenant_id
+            WHERE v.id = $1 AND v.deleted_at IS NULL`,
+          [variantId],
+        );
+        if (!rows[0]) return { kind: "not_found" as const };
+        const { client_id: clientId, project_id: projectId, title } = rows[0];
+
+        // Lock the row (if any) so a concurrent double-click cannot race the "was it already
+        // pending" read against the upsert below.
+        const existing = await c.query<{ status: string }>(
+          `SELECT status FROM social_post_client_reviews WHERE variant_id = $1 FOR UPDATE`,
+          [variantId],
+        );
+        const alreadyPending = existing.rows[0]?.status === "pending";
+        const id = newId();
+        const upsert = await c.query<{ id: string }>(
+          `INSERT INTO social_post_client_reviews
+             (id, tenant_id, variant_id, client_id, status, requested_at, updated_at, origin_site)
+           VALUES ($1, $2, $3, $4, 'pending', now(), now(), $5)
+           ON CONFLICT (variant_id) DO UPDATE SET
+             status = 'pending', comment = NULL, reviewed_args_sha256 = NULL,
+             decided_by = NULL, decided_at = NULL, requested_at = now(), updated_at = now()
+           RETURNING id`,
+          [id, tenantId, variantId, clientId, config.originSite],
+        );
+        const reviewId = upsert.rows[0].id;
+        if (!alreadyPending) {
+          // Rides the ALREADY-DRAINED "social_post_variant" stream (main.ts's startConsumerLoop) —
+          // deliberately, so this event reaches `event-handlers.ts`'s consumer without touching
+          // main.ts (defect class #2: "registered but never invoked"). Not emitted on a no-op
+          // re-request: a double-click must not re-notify the client of the same ask.
+          await emitEvent(c, tenantId, "social_post_variant", variantId, "social.client_review.requested", {
+            reviewId, clientId, projectId, postTitle: title,
+          });
+        }
+        return { kind: "ok" as const, reviewId, alreadyPending };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("post variant not found");
+    await writeActivity(tenantId, req.principal.userId, "requested", "social_post_client_review", result.reviewId, {
+      variantId, alreadyPending: result.alreadyPending,
+    });
+    return { id: result.reviewId, status: "pending", alreadyPending: result.alreadyPending };
+  }
+
+  @Get("variants/:variantId/client-review")
+  async getClientReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "read");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT id, status, comment, reviewed_args_sha256 AS "reviewedArgsSha256",
+                requested_at AS "requestedAt", decided_by AS "decidedBy", decided_at AS "decidedAt"
+           FROM social_post_client_reviews WHERE variant_id = $1`,
+        [variantId],
+      ),
+      { modules: ["social"] },
+    );
+    // A variant that never needed client sign-off (or has not been asked for one yet) has no row —
+    // a legitimate steady state, answered as data rather than a 404 (matching the publish-gate
+    // dry-run's own "the verdict is data" doctrine above).
+    if (!rows[0]) return { status: "not_requested" };
+    return rows[0];
+  }
+
+  @Post("variants/:variantId/client-review/withdraw")
+  @HttpCode(200)
+  async withdrawClientReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "withdraw");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const upd = await c.query<{ id: string }>(
+          `UPDATE social_post_client_reviews
+              SET status = 'withdrawn', decided_by = $2, decided_at = now(), updated_at = now()
+            WHERE variant_id = $1 AND status = 'pending'
+            RETURNING id`,
+          [variantId, req.principal.userId],
+        );
+        if (upd.rowCount) {
+          await emitEvent(c, tenantId, "social_post_variant", variantId, "social.client_review.withdrawn", {
+            reviewId: upd.rows[0].id,
+          });
+          return { kind: "ok" as const, reviewId: upd.rows[0].id };
+        }
+        const existing = await c.query<{ id: string; status: string }>(
+          `SELECT id, status FROM social_post_client_reviews WHERE variant_id = $1`,
+          [variantId],
+        );
+        if (!existing.rows[0]) return { kind: "not_found" as const };
+        // IDEMPOTENT: a retry after an already-withdrawn review is a no-op success, not an error —
+        // deciding (or, here, retracting) twice must not double-apply.
+        if (existing.rows[0].status === "withdrawn") return { kind: "already_withdrawn" as const, reviewId: existing.rows[0].id };
+        return { kind: "conflict" as const, status: existing.rows[0].status };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("no client review requested for this variant");
+    if (result.kind === "conflict") refuse("client_review_not_pending");
+    if (result.kind === "ok") {
+      await writeActivity(tenantId, req.principal.userId, "withdrawn", "social_post_client_review", result.reviewId, { variantId });
+    }
+    return { id: result.reviewId, status: "withdrawn" };
+  }
+
+  // ==================================================== THE DISPATCH ENDPOINT (SMM-10) ========
+  //
+  // What `social.publishPost`'s `pathTemplate` fronts (./index.ts). Reachable in the ordinary flow
+  // ONLY through the D14 executor's re-drive (core/approval-executables.ts's SMM-09 section):
+  // `social.publishPost` is `write:true, impact:'high'`, so an automation/agent principal calling it
+  // directly always suspends into WS4 first. All the domain logic — the second precondition run
+  // under its own lock, the network call, the transactional stamp of `approval_id` +
+  // `provider_post_id` — lives in `dispatch.ts`; this handler is the thin authz + HTTP wrapper every
+  // other endpoint on this controller already is.
+  //
+  // `publish` — not `update` — matching `getVariantPublishPreconditions`'s own comment on why the
+  // dry-run stays read-tier while this, the act itself, is manager-tier
+  // (resource_social_post.yaml). The OBO-resolved principal here is the ORIGINAL FILING principal
+  // (invariant 1, core/approval-execute.ts) — for the automation/agent identity that proposed the
+  // publish, never the human who approved it.
+  @Post("variants/:variantId/publish")
+  @HttpCode(200)
+  async dispatchPublish(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "publish");
+    const verdict = await dispatchApprovedPublish(tenantId, variantId, req.principal.userId);
+    if (!verdict.ok) {
+      // Criterion 2/D22: the SAME snake_case token vocabulary `social.checkPublishPreconditions`
+      // reports, riding `message` — never `error` — so `HttpErrorFilter` renders `{error: token}`
+      // rather than silently replacing it with its own constructor-derived string (src/http-error.
+      // filter.ts's own documented trap).
+      throw new ConflictException({ message: verdict.reason });
+    }
+    return { ok: true, providerPostId: verdict.providerPostId, network: verdict.network };
+  }
+
+  // ==================================================== RECONCILE WEBHOOK INTAKE (SMM-10) =====
+  //
+  // IDS ONLY, NEVER TRUSTED CONTENT. The only field this endpoint reads from the request body is
+  // `providerPostId` — anything else a caller sends (a claimed status, a claimed error message, a
+  // claimed URL) is discarded unread. `reconcileOneProviderPost` re-fetches the authoritative state
+  // itself via `SocialPublisher.getPostStatus` before writing anything, so a malicious or buggy
+  // caller can at most trigger an EARLY, honest re-check — never inject a fabricated outcome.
+  //
+  // No Cerbos authorize() call: this is a machine-to-machine intake, gated by a SECOND, independent
+  // wall on top of the ones every other route on this controller already carries — AuthGuard (the
+  // class-level `@UseGuards`) still requires the platform SERVICE TOKEN bearer (search.controller.ts's
+  // `rank-pulls/callback` is the precedent this mirrors, down to its own "AUTHENTICATION ORDER"
+  // comment: every pre-existing wall stays, a callback secret is additive, never a replacement). A
+  // caller with no service token never reaches this handler at all; `config.social.webhookSecret` is
+  // the SECOND factor a relay holding that token must also present. An unconfigured secret refuses
+  // EVERY request rather than trusting anyone who merely holds the shared service token to name an id.
+  @Post("webhooks/post-status")
+  @HttpCode(200)
+  async postStatusWebhook(
+    @Param("tenantId") tenantId: string,
+    @Body() body: { providerPostId?: string },
+    @Headers("x-social-webhook-secret") presentedSecret?: string,
+  ) {
+    const secret = config.social.webhookSecret;
+    if (!secret || presentedSecret !== secret) throw new UnauthorizedException({ message: "invalid_webhook_secret" });
+    const providerPostId = (body?.providerPostId ?? "").trim();
+    if (!providerPostId) refuse("missing_field");
+    const reconciled = await reconcileOneProviderPost(tenantId, providerPostId);
+    // Always 200: "no such in-flight post" (already terminal, or unknown to this tenant) is not an
+    // error a webhook sender should retry over — it is the expected steady state once a post has
+    // already been reconciled once, and a retry-on-error sender would otherwise hammer this route.
+    return { ok: true, reconciled };
   }
 
   // ==================================================== AI CAPTION DRAFTING (SMM-19) =========
@@ -1171,7 +1491,7 @@ export class SocialController {
   // endpoint here. `social.publishPost`, the D14 executable-approval entry and the barred metered
   // twin are SMM-09's, and SMM-09 runs alone. What lands here is the mapping that publishing will
   // ride on, the registry that mirrors it, and a status read that keeps answering when the engine
-  // is unreachable.
+  // is unreachable. SMM-07 (below, after `syncRegistry`) adds the guided connect flow itself.
 
   /** The connector registry as data: which accounts are connected, expiring, erroring, and what
    *  each can actually do. A PURE DB READ — it never touches the publisher, which is what makes it
@@ -1257,6 +1577,48 @@ export class SocialController {
     await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "update");
     if (!UUID_RE.test(clientId)) refuse("invalid_client");
     return syncConnectorRegistry(tenantId, clientId, req.principal.userId);
+  }
+
+  // =============================================== ACCOUNT CONNECT FLOW (SMM-07) ============
+  // The engine holds NO platform-app credentials on any network today (verified on the live engine
+  // 2026-08-19 — every FACEBOOK_APP_ID/LINKEDIN_CLIENT_ID/etc. is length 0), so no OAuth round trip
+  // can start yet, for a client OR for our own brand. Both routes below run the SAME precondition
+  // (`checkConnectReadiness`) so the console can explain a disabled connect button with the EXACT
+  // reason the POST would refuse, never a guess rendered separately from the truth.
+
+  /** Read-only: may this (client, network) connect right now, and if not, why. Never calls the
+   *  publisher and never writes a row — a console renders this to explain a disabled connect button
+   *  honestly ("Instagram is not connectable yet: no platform app is registered") instead of letting
+   *  the user find out by clicking into a dead end. */
+  @Get("publisher-orgs/:clientId/connect/:network")
+  async connectReadiness(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("clientId") clientId: string, @Param("network") network: string,
+  ) {
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    if (!UUID_RE.test(clientId)) refuse("invalid_client");
+    return checkConnectReadiness(tenantId, clientId, network);
+  }
+
+  /** Start — or RESUME — the guided connect ceremony for one (client, network, handle). `connect`,
+   *  same manager-tier action `provisionOrg` already gates: this is the step that grants an outside
+   *  system standing permission to post as a brand. Idempotent on the (client, network, handle)
+   *  triple (0105's own unique index) — a human who closes the tab and comes back tomorrow resumes
+   *  the SAME pending row rather than growing a second one. See provisioning.ts's SMM-07 section for
+   *  the full resumability + own-brand-first (OQ-3) reasoning. */
+  @Post("publisher-orgs/:clientId/connect")
+  @HttpCode(200)
+  async connectAccount(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("clientId") clientId: string,
+    @Body() body: { network?: string; handle?: string },
+  ) {
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "connect");
+    if (!UUID_RE.test(clientId)) refuse("invalid_client");
+    const network = (body?.network ?? "").trim();
+    if (!NETWORKS.has(network)) refuse("unknown_network");
+    const handle = (body?.handle ?? "").trim();
+    if (!handle) refuse("missing_handle");
+    return initiateAccountConnect(tenantId, { clientId, network, handle, actorId: req.principal.userId });
   }
 
   /** What the publisher seam can do in THIS deployment, without calling it. Answers while the
@@ -1412,7 +1774,14 @@ export class SocialController {
           `UPDATE social_post_variants
               SET body = $1, first_comment = $2, media = $3, settings = $4, scheduled_at = $5,
                   args_sha256 = $6, approval_id = NULL,
-                  status = CASE WHEN status IN ('in_review','approved') THEN 'draft' ELSE status END,
+                  -- SMM-10: 'failed' joins the revert set. Before this ticket a dispatch could never
+                  -- produce 'failed' (SMM-09 built no dispatch path), so this CASE never needed to
+                  -- know about it. It carries approval_id (0105's svar_dispatched_has_approval CHECK
+                  -- requires it for any status outside draft/in_review/approved/cancelled) and this
+                  -- statement clears it in the SAME breath it moves the content — otherwise a failed
+                  -- publish would be permanently unrecoverable: no precondition path and no edit path
+                  -- ever returns it to an editable state.
+                  status = CASE WHEN status IN ('in_review','approved','failed') THEN 'draft' ELSE status END,
                   updated_at = now()
             WHERE id = $7`,
           [next.body, next.firstComment, JSON.stringify(next.media), JSON.stringify(next.settings), next.scheduledAt, argsSha256, variantId],

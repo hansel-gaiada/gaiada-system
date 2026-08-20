@@ -9,6 +9,7 @@
 //
 // Only IDENTIFIED callers (assurance >= low) may read resources; anonymous principals see none.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import type { Principal } from "./principal";
 
 export interface ResourceTemplate {
@@ -63,9 +64,7 @@ export async function readResource(uri: string, principal: Principal): Promise<s
   const path = resolveResourcePath(uri);
   const res = await fetch(`${config.platformUrl}${path}`, {
     headers: {
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
   });
   if (res.status === 401 || res.status === 403) {

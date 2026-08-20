@@ -8,6 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
+import { socialDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { monitoringDemo } from "./demoMonitoring";
@@ -1812,6 +1813,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
 
+  // Social Media department — calendar + composer (SMM-12), stateful store (lib/demoSocial.ts).
+  // Before this, `/departments/dept-4/{calendar,composer}` had no fixture at all, so SMM-12 could
+  // not be driven in a browser under DEMO_MODE — see that file's header for the full story (SMM-14).
+  const social = socialDemo(method, p, url.searchParams, body);
+  if (social) return social;
+
   // MI-05 — Web Dev maintenance-intake triage queue (staff console) — stateful store
   // (lib/demoWebdevChangeRequests.ts).
   const webdevCr = webdevChangeRequestsDemo(method, p, url.searchParams, body, userId);
@@ -1824,6 +1831,33 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // MON — monitoring board (Plane B: client properties + services). Read-only fixtures
   // (lib/demoMonitoring.ts); seeded with a down/degraded/stale/maintenance/unknown spread so every
   // branch of the board is drivable in a browser without the backend module existing.
+  // MON-09i - Plane A admin console (/systems/observability). Seeded with a box under real
+  // pressure, NOT an idle one: disk at 78% with a downward projection, one scrape target down and
+  // one Postgres instance unreachable. Those are the exact conditions the page exists to make
+  // visible, and a demo showing a healthy box would prove none of them render.
+  if (p === "/api/admin/observability" && method.toUpperCase() === "GET") {
+    return { status: 200, json: {
+      available: true,
+      grafanaHint: "http://localhost:3001 (via SSH tunnel)",
+      host: {
+        cpuBusyPct: { value: 24.6, note: null },
+        memUsedPct: { value: 56.1, note: null },
+        diskUsedPct: { value: 78.4, note: null },
+        diskFreeGb: { value: 11.0, note: null },
+        diskFreeGb24h: { value: 9.7, note: null },
+        load1: { value: 1.02, note: null },
+        uptimeDays: { value: 19.3, note: null },
+      },
+      targets: { up: 13, down: 1, downJobs: ["blackbox-http"] },
+      datastores: {
+        postgres: [{ instance: "postgres-exporter:9187", up: true }, { instance: "postgres-exporter-bot:9187", up: false }],
+        redis: [{ instance: "redis-exporter:9121", up: true }, { instance: "redis-exporter-bot:9121", up: true }],
+      },
+      alerts: [{ name: "GatewayBudgetNearCap", severity: "ticket" }],
+      collectedAt: new Date().toISOString(),
+    } };
+  }
+
   const monitoring = monitoringDemo(method, p, url.searchParams);
   if (monitoring) return monitoring;
 

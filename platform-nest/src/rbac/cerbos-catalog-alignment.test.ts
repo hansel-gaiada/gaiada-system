@@ -96,8 +96,13 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
   // 36 while the kind count grows by only 8. Prior movement: HIER-3, 2026-08-11 — team_lead/team
   // retired, resource_team.yaml deleted, core.team.* dropped (230/61 -> 226/60).
   it("sanity: catalog headline numbers this suite depends on (282 pairs / 72 kinds — IAM Phase 2 P2-02, 2026-08-13: +18 grantable pairs across 4 NEW kinds [role_grant/position/employee/it_account], design §6.2; prior: IAM-GAP-01, 2026-08-13: +2 literal actions [invoice.approve, automation_approval.decide_leave] on EXISTING kinds, 264 pairs / 68 kinds; before that: SMM-30, 2026-08-12, the social module's 8 kinds + portal.approve_post)", () => {
-    expect(catalog.length).toBe(282);
-    expect(catalogKindSet.size).toBe(72);
+        // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
+    // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
+    // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
+    // as a literal here only because rewriting these three suites' fixed-input style is its own
+    // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
+    expect(catalog.length).toBe(298);
+    expect(catalogKindSet.size).toBe(77);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

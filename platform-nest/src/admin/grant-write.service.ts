@@ -126,6 +126,19 @@ export interface GrantSpec {
   /** Reconciler provenance marker. Only `trusted_internal` may set it (A1: `managed_by` is
    *  reconciler-only, pinned by `managed-by-invariant.test.ts`). */
   managedBy?: string | null;
+  /** P2-08 — the grant's own expiry (`user_roles.expires_at`, added by 0109 and until now written by
+   *  NOBODY). Design §6.5's overrides are time-boxed, and §12 Q4 sets 90 days as the default; the
+   *  column is also what the §3.4 expiry sweep will read. `null` = permanent, which stays the
+   *  default for every existing writer, so this is additive by construction.
+   *
+   *  ⚠ Setting it does NOT itself revoke anything when the moment passes: `assemblePrincipal()` does
+   *  not filter on `expires_at` today, and the sweep that acts on it is P2-09's. So a grant written
+   *  with an expiry is live until something revokes it — recorded here rather than left as an
+   *  assumption, because "expires_at is set" reading as "access ends then" is exactly the kind of
+   *  half-built guarantee this program keeps finding. */
+  expiresAt?: string | null;
+  /** P2-08 — provenance for an override grant executed by an approval (design §6.5). */
+  originApprovalId?: string | null;
   /** Preserved per-writer, NOT unified — see `insertGrantRow`. */
   onConflict: "untargeted" | "unique_columns";
 }
@@ -179,12 +192,51 @@ function assertNotElevated(roleName: string): void {
  * both sides of this comparison.
  */
 async function assertWithinCeiling(c: PoolClient, spec: GrantSpec, roleName: string): Promise<void> {
+  // ── THE REQUIRED SET: the granted role's bundle, MINUS its self-scoped pairs ──────────────────
+  //
+  // `role_permissions.self_scoped` is the per-(role, key) marker the owner ruled for on 2026-08-18
+  // (PERMISSION-CONTRACT §12.1), generated from the policies themselves
+  // (`scripts/generate-role-bundles.mjs::computeSelfScoped`) and seeded by `0113`. A pair is marked
+  // when EVERY rule granting that key to that role is self-scoped (`resource.attr.X ==
+  // principal.id`, or `variables.owns`) — authority over the holder's OWN rows, which is not
+  // authority a ceiling should demand the grantor already hold.
+  //
+  // It REPLACES P2-08's interim "subtract the baseline `member` bundle" on this side, and it is
+  // strictly more precise: both `hr.case.cancel` (cancel my own case) and `core.client.delete` sat
+  // in `member`'s bundle, the subtraction removed both, and only the first was self-service — the
+  // second was a real tenant-wide over-grant (§12.5).
   const { rows } = await c.query<{ key: string }>(
     `SELECT p.key FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
-      WHERE rp.role_id = $1 ORDER BY p.key`,
+      WHERE rp.role_id = $1 AND NOT rp.self_scoped
+      ORDER BY p.key`,
     [spec.roleId],
   );
-  const held = new Set<string>();
+
+  // ── THE HELD SET: the grantor's resolved perms, PLUS the staff baseline ───────────────────────
+  //
+  // ⚠ The marker does NOT subsume the baseline argument, and assuming it did would have broken the
+  // dept-head surface a second time. Measured before writing this (bundles as of 2026-08-19):
+  //
+  //     company_admin grants member  -> 55 required, 0 missing   (fine either way)
+  //     org_unit_lead grants member  -> 55 required, 55 MISSING  (marker-only would refuse)
+  //     hr_manager   grants hr_staff -> 15 required,  1 MISSING  (`core.member.read`)
+  //
+  // The two rules answer different questions. The marker asks "is this key authority over OTHER
+  // people?" and belongs on the REQUIRED side. The baseline asks "does the target already hold this
+  // by virtue of being staff at all?" — every principal with a company membership does — and that
+  // belongs on the HELD side, because the honest statement is that a grantor, being staff, holds
+  // baseline reach themselves and so can confer nothing new by passing it on.
+  //
+  // Expressing it here rather than subtracting it from `required` keeps the refusal message truthful:
+  // a missing key is now genuinely a key the grantor lacks, not one the algebra hid.
+  const baseline = await c.query<{ key: string }>(
+    `SELECT p.key FROM role_permissions rp
+       JOIN permissions p ON p.id = rp.permission_id
+       JOIN roles r ON r.id = rp.role_id
+      WHERE r.name = 'member' AND r.company_id IS NULL`,
+  );
+
+  const held = new Set<string>(baseline.rows.map((r) => r.key));
   for (const g of spec.actorPerms ?? []) {
     const reaches =
       g.scopeType === "global" ||
@@ -251,10 +303,13 @@ export async function insertGrantRow(c: PoolClient, spec: GrantSpec): Promise<st
   await assertGrantAllowed(c, spec);
   const conflict = spec.onConflict === "untargeted" ? "ON CONFLICT DO NOTHING" : "ON CONFLICT (user_id, role_id, scope_type, scope_id) DO NOTHING";
   const { rows } = await c.query<{ id: string }>(
-    `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, managed_by)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, managed_by, expires_at, origin_approval_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ${conflict} RETURNING id`,
-    [newId(), spec.targetUserId, spec.roleId, spec.scopeType, spec.scopeId, spec.managedBy ?? null],
+    [
+      newId(), spec.targetUserId, spec.roleId, spec.scopeType, spec.scopeId, spec.managedBy ?? null,
+      spec.expiresAt ?? null, spec.originApprovalId ?? null,
+    ],
   );
   return rows[0]?.id ?? null;
 }

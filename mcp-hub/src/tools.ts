@@ -4,6 +4,7 @@
 import { registerTool } from "./registry";
 import { gatewayComplete, gatewayMedia } from "./gateway-client";
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 
 export function registerCoreTools(): void {
   registerTool({
@@ -123,9 +124,7 @@ export function registerCoreTools(): void {
       const qs = args.period ? `?period=${encodeURIComponent(String(args.period))}` : "";
       const res = await fetch(`${config.platformUrl}/rollups${qs}`, {
         headers: {
-          Authorization: `Bearer ${config.platformToken}`,
-          "x-obo-provider": principal.provider,
-          "x-obo-external-id": principal.externalId,
+          ...oboHeaders(principal, config.platformToken),
         },
       });
       if (res.status === 401 || res.status === 403) {

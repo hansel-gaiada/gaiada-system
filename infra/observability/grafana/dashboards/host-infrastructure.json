@@ -1,0 +1,352 @@
+{
+  "uid": "gaiada-host",
+  "title": "Gaiada - Host & Infrastructure",
+  "tags": [
+    "gaiada",
+    "infrastructure"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "description": "MON-09l. The box itself: CPU, memory, disk, load, containers and datastore reachability. This existed nowhere before -- every other Gaiada dashboard is application-level, and checking all four for node_*/container_*/pg_*/redis_* returned zero matches, which is how two completely blind datastore exporters went unnoticed for weeks.",
+  "panels": [
+    {
+      "id": 1,
+      "title": "CPU busy %",
+      "type": "gauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "cpu",
+          "refId": "A"
+        }
+      ],
+      "description": "Whole-host busy percentage. This box has no per-core panel on purpose: at this size the aggregate is the decision, and 8 idle cores hide one saturated one either way."
+    },
+    {
+      "id": 2,
+      "title": "Memory used %",
+      "type": "gauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+          "legendFormat": "memory",
+          "refId": "A"
+        }
+      ],
+      "description": "Uses MemAvailable, not MemFree. MemFree excludes reclaimable page cache and makes a healthy Linux box look nearly full."
+    },
+    {
+      "id": 3,
+      "title": "Disk used % (/)",
+      "type": "gauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "(1 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint=\"/\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint=\"/\"})) * 100",
+          "legendFormat": "disk",
+          "refId": "A"
+        }
+      ],
+      "description": "Same expression as the DiskSpaceLow alert (fires below 15% free). Kept identical deliberately: a dashboard that stays green while the pager fires teaches people to distrust the dashboard."
+    },
+    {
+      "id": 4,
+      "title": "Load average",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "node_load1",
+          "legendFormat": "1m",
+          "refId": "A"
+        },
+        {
+          "expr": "node_load5",
+          "legendFormat": "5m",
+          "refId": "B"
+        },
+        {
+          "expr": "node_load15",
+          "legendFormat": "15m",
+          "refId": "C"
+        }
+      ],
+      "description": "Compare against core count, not against 1.0."
+    },
+    {
+      "id": 5,
+      "title": "Disk free, with 24h projection",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint=\"/\"}",
+          "legendFormat": "free now",
+          "refId": "A"
+        },
+        {
+          "expr": "predict_linear(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\",mountpoint=\"/\"}[6h], 24*3600)",
+          "legendFormat": "projected 24h",
+          "refId": "B"
+        }
+      ],
+      "description": "The projection is the actionable series: this box carries ~19 GB of release images for two tags and only reclaims on the next release, so free space steps down and drifts rather than sitting flat. `docker system df` reports near-zero reclaimable, so pruning is not a recovery lever here."
+    },
+    {
+      "id": 6,
+      "title": "Datastore reachability",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "pg_up",
+          "legendFormat": "postgres {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "redis_up",
+          "legendFormat": "redis {{instance}}",
+          "refId": "B"
+        }
+      ],
+      "description": "1 = the exporter can reach the datastore; 0 = it cannot. This is NOT the same as the scrape target being up. Both of these read 0 for weeks while Prometheus showed both targets green, because the exporters pointed at container hostnames that are never started on this box. That is the whole reason this panel exists."
+    },
+    {
+      "id": 9,
+      "title": "Scrape targets down",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "count(up == 0) or vector(0)",
+          "legendFormat": "targets down",
+          "refId": "A"
+        }
+      ],
+      "description": "`or vector(0)` matters: with no targets down the inner query returns an EMPTY result, which draws as a gap and is indistinguishable from Prometheus being broken. The fallback makes healthy render as an explicit 0."
+    },
+    {
+      "id": 10,
+      "title": "Postgres backends by database",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "pg_stat_database_numbackends{datname!~\"template.*|postgres\"}",
+          "legendFormat": "{{datname}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Excludes template/postgres databases, which are always idle and only add legend noise."
+    },
+    {
+      "id": 7,
+      "title": "Per-container CPU / memory -- NOT AVAILABLE (MON-09n)",
+      "type": "text",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Per-container metrics are not being collected\n\ncAdvisor is running and its scrape target is **green**, but it emits only host cgroup series (`/`, `/init.scope`, `/system.slice/...`) with no `name` label, so there are no per-container CPU or memory metrics to graph.\n\nAdding `/dev/kmsg` and `/dev/disk` cleared the `Failed to create existing container: /system.slice/docker-<hash>` errors, but container discovery still yields nothing on this cgroup-v2 host.\n\n**Two working panels are deliberately not shown here rather than shown empty.** The queries are correct and will light up when the collector does:\n\n```\ntopk(10, sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[5m])) * 100)\ntopk(10, sum by (name) (container_memory_working_set_bytes{name!=\"\"}))\n```\n\nTracked as **MON-09n**. Note the pattern: this is the third collector found today that was *up* while collecting nothing (the two datastore exporters were the others). A green scrape target is not a passing check."
+      }
+    }
+  ]
+}

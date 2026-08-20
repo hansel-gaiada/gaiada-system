@@ -20,6 +20,18 @@
 // zero rows until the write paths land, exactly as searchModule's did.
 import { config } from "../../config";
 import type { ModuleContract, RollupProvider } from "../contract";
+// SMM-10 — the publish gate's dispatch endpoint. `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` is the pinned
+// `{write:true, impact:'high'}` constant `core/approval-executables.ts`'s SMM-09 section already
+// documents as THE D14 gate; declaring the tool from it (never retyping the two literals) is what
+// this ticket's own AC requires. `social.publishPostMetered` stays undeclared and barred — see the
+// module contract's own header for why a declared tool needs a real endpoint before it exists here.
+import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "./publish-precondition";
+// SMM-13 — event handlers for social post notifications and mail routing
+// SMM-31 — the client-review stage's own two events, same routing table
+import {
+  handlePostDispatched, handlePostPublished, handlePostFailed,
+  handleClientReviewRequested, handleClientReviewDecided,
+} from "./event-handlers";
 
 const socialRollups: RollupProvider = {
   metrics: [
@@ -76,7 +88,15 @@ export const socialModule: ModuleContract = {
   key: "social",
   // Registered AT WRITE TIME. searchModule's own header records this as its repeated bug (0047 was
   // omitted from that array and had to be fixed after the fact); it is cheap to not repeat.
-  migrations: ["0105_module_social.sql", "0106_iam_social_permissions.sql"],
+  migrations: [
+    "0105_module_social.sql", "0106_iam_social_permissions.sql",
+    // SMM-36 — inbox retention purge markers + state-law CHECKs; registered at write time.
+    "0113_social_inbox_retention.sql",
+    // SMM-10 — D-22's creator-info snapshot columns on social_post_variants; registered at write time.
+    "0114_social_creator_info_snapshot.sql",
+    // SMM-39 — `uploaded_media` column (already-uploaded engine media refs, kept out of args_sha256).
+    "0118_social_variant_uploaded_media.sql",
+  ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
   // registered, not after. Only the keys THIS ticket's surfaces use are declared; the rest of the
@@ -105,6 +125,19 @@ export const socialModule: ModuleContract = {
     { key: "social.account.read", description: "View the social connector registry: connection status, quota and health" },
     { key: "social.account.connect", description: "Bind a client to a publisher organization so its accounts can be connected" },
     { key: "social.account.update", description: "Refresh connector-registry state from the publisher" },
+    // SMM-10 — the dispatch endpoint's own gate. Already a catalog row + Cerbos action (0106 /
+    // resource_social_post.yaml, manager-tier) from SMM-30's forward-looking seed; this is the
+    // first ticket to actually declare it on the module contract, because it is the first ticket
+    // whose endpoint honours it.
+    { key: "social.post.publish", description: "Decide that approved content is published to a client's live social account." },
+    // SMM-31 (D-16) — the STAFF side of the client-review stage. Already catalog rows + Cerbos
+    // actions (0106 / resource_social_client_review.yaml) from SMM-30's forward-looking seed; this
+    // is the first ticket whose endpoints (`social.controller.ts`'s client-review trio) honour them.
+    // The CLIENT's own decision rides `portal.approve_post` — a `portal.*` key, not `social.*`, so it
+    // is never declared here (portal is core, not a registered module).
+    { key: "social.client_review.read", description: "View client sign-off state on social posts" },
+    { key: "social.client_review.request", description: "Send a social post to the client for sign-off" },
+    { key: "social.client_review.withdraw", description: "Withdraw a pending client sign-off request" },
   ],
   customFieldTargets: ["social_engagement", "social_campaign", "social_post"],
   // Agentic-bar criterion 1 (tool parity): everything this ticket's UI can do is reachable as a
@@ -401,6 +434,81 @@ export const socialModule: ModuleContract = {
     // here and there must not be one until SMM-09 — a declared MCP tool whose endpoint does not
     // exist is a lie the hub publishes to every agent in the estate, and a publish tool is the
     // worst possible instance of it.
+    // SMM-09 — the publish GATE's read surface (agentic criterion 1: tool parity, same authorize()
+    // call as the endpoint). Note what is still ABSENT and why: `social.publishPost` itself is NOT
+    // declared here. It is registered in the D14 executable-approval registry
+    // (core/approval-executables.ts, SMM-09 section) with `write:true, impact:"high"` semantics
+    // pinned as `SOCIAL_PUBLISH_TOOL_CLASSIFICATION`, but the dispatch endpoint it would front —
+    // approval-execution → `schedulePost` + the transactional stamp — is SMM-10's. This file's own
+    // header states the rule that keeps it out until then: "a declared MCP tool whose endpoint does
+    // not exist is a lie the hub will happily publish to every agent in the estate", and a publish
+    // tool is the worst possible instance of it. `social.publishPostMetered` is barred outright and
+    // must never appear here at all.
+    {
+      name: "social.checkPublishPreconditions",
+      description:
+        "Dry-run the publish gate for one post variant: would an approved publish of it actually "
+        + "execute right now, and if not, which gate stopped it and why. Runs the EXACT server-side "
+        + "precondition the D14 approval executor runs (scope → quota → hash → unconsumed → budget → "
+        + "creator-info), so the answer cannot drift from the one execution will give. Publishes "
+        + "nothing, consumes no approval and makes no network call. `reason` is a snake_case token "
+        + "(e.g. 'network_not_in_scope', 'quota_exhausted', 'args_hash_mismatch', "
+        + "'already_dispatched', 'budget_exceeded', 'creator_info_unverified') — the SAME vocabulary "
+        + "that lands in an approval's execution_error after the 'precondition_failed: ' prefix.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/publish-preconditions",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The per-network post variant to check." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
+    // ── SMM-10: THE PUBLISH GATE'S DISPATCH ENDPOINT ───────────────────────────────────────────
+    // The tool `core/approval-executables.ts`'s SMM-09 section left undeclared, naming exactly this
+    // ticket as the one that builds the endpoint. Declared from the pinned classification constant
+    // — never `write: true, impact: "high"` retyped — because those two literals ARE the D14 gate
+    // (`write && impact !== 'low'` is what suspends an automation/agent call into WS4,
+    // mcp-hub/src/policy.ts) and a typo here is a silent authz downgrade.
+    //
+    // Reachable in practice only through the D14 executor's re-drive: `social.publishPost` is
+    // `write:true, impact:'high'`, so an automation/agent principal calling it directly always
+    // suspends (mints no grant), and the dispatch handler (`social.controller.ts#dispatchPublish`,
+    // wired to `modules/social/dispatch.ts`) re-runs the FULL precondition — hash, scope, budget,
+    // creator-info — a second time under its own lock before ever calling the publisher, so a call
+    // that somehow reached this path stale still refuses rather than posting.
+    {
+      name: SOCIAL_PUBLISH_TOOL,
+      description:
+        "Publish an APPROVED post variant to its live social account. Never called directly by a "
+        + "human or an agent in the ordinary flow — it is registered in the D14 executable-approval "
+        + "registry and executes automatically the moment a human approves the suspended write. "
+        + "Re-verifies scope, quota, the args hash, single-use consumption, the metered budget and "
+        + "(for TikTok) creator consent immediately before dispatching, and refuses with the SAME "
+        + "typed token vocabulary `social.checkPublishPreconditions` reports.",
+      minAssurance: "low",
+      // Spread, never retyped — see this block's own comment above for why.
+      ...SOCIAL_PUBLISH_TOOL_CLASSIFICATION,
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/publish",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The approved post variant to publish." },
+          accountId: { type: "string", description: "The target account (attribution only — the account actually dispatched to comes from the live row, never the caller)." },
+          body: { type: "string" },
+          firstComment: { type: "string" },
+          media: { type: "array", items: { type: "object" } },
+          settings: { type: "object" },
+          scheduledAt: { type: "string" },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
     {
       name: "social.listAccounts",
       description:
@@ -499,6 +607,16 @@ export const socialModule: ModuleContract = {
   // `social-media` dept slug. The pages themselves are SMM-11; this entry is what makes the module
   // visible in the module catalog meanwhile.
   uiManifest: [{ label: "Social Media", path: "/departments/social-media" }],
+  // SMM-13 — event handlers for social post notifications and mail routing
+  eventHandlers: {
+    "social.post.dispatched": handlePostDispatched,
+    "social.post.published": handlePostPublished,
+    "social.post.failed": handlePostFailed,
+    // SMM-31 — both ride the already-drained "social_post_variant" stream (see event-handlers.ts's
+    // own header for why that is deliberate, not an oversight).
+    "social.client_review.requested": handleClientReviewRequested,
+    "social.client_review.decided": handleClientReviewDecided,
+  },
 };
 
 /** The scope shape every social capability reads. Exported so the controller, the tests and every

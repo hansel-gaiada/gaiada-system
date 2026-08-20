@@ -31,6 +31,11 @@ import { registerModule, validateModulePermissions } from "./modules/registry";
 import { agencyModule } from "./modules/agency";
 import { pmModule } from "./modules/pm";
 import { itModule } from "./modules/it";
+import { monitoringModule } from "./modules/monitoring";
+import { registerDriver } from "./modules/monitoring/drivers/registry";
+import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
+import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
+import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
 import { billingModule } from "./modules/billing";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
@@ -75,15 +80,23 @@ import { registerCoreRollupProvider, coreTaskRollups, syncMetricDefinitions } fr
 import { clientWorkRollups } from "./core/client-work";
 import { startRelayLoop } from "./events/relay";
 import { startConsumerLoop, registerCoreEventHandler } from "./events/consumer.service";
+import { registerPositionEventHandlers, POSITION_STREAMS } from "./events/position-consumer";
 // D14-03 — the core automation-approval EXECUTOR (replaces D14-02's stub handler below).
 import { automationApprovalExecutorHandler } from "./core/approval-execute";
 import { startReconcileLoop, startDriftSweepLoop } from "./events/reconcile-consumer";
+import { startPositionMaintenanceLoop } from "./admin/grant-expiry-sweep";
 import { startN8nBridgeLoop } from "./events/n8n-bridge";
 import { startGraphBridgeLoop } from "./events/graph-bridge";
 import { startWorkActivityConsumerLoop } from "./events/work-activity-consumer";
 import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
 import { startStaleReaperLoop } from "./modules/it/discovery.service";
+import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-job";
+// SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
+// verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
+// doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
+import { startPostStatusSyncLoop } from "./modules/social/post-status-sync-job";
+import { installCreatorInfoVerifier } from "./modules/social/creator-info-verifier";
 // SM-54 (tracker §6ad Ruling 1 / addendum §A13.2) — the search department's cadence loop lives in the
 // platform, NOT in n8n: it executes configuration a verified human already set (each engagement's
 // `tool_scope` toggle + cadence + budget cap, written under `search:scope:write`), and every automation
@@ -101,6 +114,7 @@ import { startMailSenderLoop } from "./mail/sender";
 // URL-scoped raw-body hook rather than a global parser change.
 import type { FastifyInstance } from "fastify";
 import { registerInboundRawBodyCapture } from "./mail/inbound/raw-body";
+import { registerRequestContext } from "./core/request-context";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -160,6 +174,11 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // mail well below the documented `MAIL_INBOUND_MAX_BYTES` cap. URL-scoped, so no other route's
   // parsing behaviour changes — see src/mail/inbound/raw-body.ts for the full rationale.
   registerInboundRawBodyCapture(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
+  // [agent-attribution-gate] interim — wrap every request in an AsyncLocalStorage box so
+  // `writeActivity` can record WHICH CHANNEL (and which agent) drove a write without threading a
+  // parameter through 263 call sites. See src/core/request-context.ts for why ambient beats explicit
+  // here: an opt-in audit field is forgotten exactly where it mattered, and nothing fails when it is.
+  registerRequestContext(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
   await app.init();
   return app;
 }
@@ -335,6 +354,14 @@ async function bootstrap(): Promise<void> {
   registerModule(agencyModule);
   registerModule(pmModule);
   registerModule(itModule);
+  registerModule(monitoringModule);
+  // Registering the MODULE does not register DRIVERS. Kept explicit rather than folded into the
+  // module contract: a kind with no driver reports available:false and refuses at dispatch, so the
+  // failure is visible either way - but this line is what makes http/keyword/heartbeat runnable,
+  // and it should be obvious in the boot sequence which kinds this deployment can actually check.
+  registerDriver(httpDriver);
+  registerDriver(keywordDriver);
+  registerDriver(heartbeatDriver);
   registerModule(billingModule);
   registerModule(clientsModule);
   registerModule(knowledgeModule);
@@ -364,6 +391,12 @@ async function bootstrap(): Promise<void> {
   // home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC address, which
   // means the containment perimeter moved (addendum §A4l §2/§3). No network call is made here.
   wireSocialPublisher();
+  // SMM-10/D-22 — install the dispatch-side creator-info verifier. Unconditional: it is a pure,
+  // in-process registration (`setCreatorInfoVerifier`), never a network call, so there is no boot
+  // condition to gate it on. Its own doc states the steady state THIS makes correct: with no
+  // verifier installed, a TikTok publish fails closed as `creator_info_unverified` forever — this
+  // call is what lets the "creator's live settings still permit it" branch ever pass instead.
+  installCreatorInfoVerifier();
   registerCoreRollupProvider(coreTaskRollups);
   registerCoreRollupProvider(clientWorkRollups);
   await syncMetricDefinitions();
@@ -390,7 +423,33 @@ async function bootstrap(): Promise<void> {
     // registerCoreEventHandler's header (consumer.service.ts) for why this runs with no
     // isModuleEnabled gate. The stream is already in the watched list below ("automation_approval").
     registerCoreEventHandler("automation_approval.decided", automationApprovalExecutorHandler);
-    startConsumerLoop(["deliverable", "user", "automation_approval", "search_engagement", "search_audit", "search_property", "search_change_proposal"]);
+    // P2-05: the position reconciler's outbox triggers. The HANDLERS are flag-gated (they also
+    // re-check `positionSyncEnabled` internally, and every reconciler entry point returns null when
+    // it is off) but the STREAMS below are listed unconditionally — an always-drained stream can
+    // never build a backlog that a later flag flip suddenly replays, and it makes the
+    // registered-handler-with-no-stream trap structurally impossible for this pair.
+    if (config.positionSyncEnabled) {
+      registerPositionEventHandlers();
+      // eslint-disable-next-line no-console
+      console.log(`position reconciler on: streams [${POSITION_STREAMS.join(", ")}]`);
+    }
+    startConsumerLoop([
+      "deliverable",
+      "user",
+      "automation_approval",
+      "search_engagement",
+      "search_audit",
+      "search_property",
+      "search_change_proposal",
+      // SMM-14 — the stream SMM-13's handlers hang off. Without it they were registered against
+      // socialModule.eventHandlers and NEVER INVOKED: dispatch.ts and post-status-sync-job.ts emit
+      // with entity type "social_post_variant", and this list is the only thing that decides whether
+      // a Redis stream is ever drained. event-handlers.test.ts stayed green throughout because it
+      // calls the handlers directly -- the handlers were always fine; nothing reached them.
+      "social_post_variant",
+      // P2-05 — see registerPositionEventHandlers' header for why these are unconditional.
+      ...POSITION_STREAMS,
+    ]);
     // ORG-6 service-assignment reconciler (A7): outbox-driven, own consumer group. Only when the
     // release-train flag is on — dark by default so assignments stay dormant metadata.
     if (config.serviceAssignmentsEnabled) {
@@ -438,6 +497,19 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`service-assignment drift sweep on: every ${config.serviceDriftSweepIntervalMs}ms`);
   }
+  // P2-09 (IAM Phase 2): the position maintenance loop — the grant EXPIRY sweep plus P2-05's drift
+  // sweep, which P2-05 built and deliberately left unstarted. Started unconditionally, unlike the
+  // sweeps around it, because the expiry half is NOT position-scoped: P2-08's grant surface writes
+  // `user_roles.expires_at` regardless of POSITION_SYNC_ENABLED, and `assemblePrincipal()` does not
+  // filter on it — so gating this loop on the position flag would leave expired grants fully live in
+  // exactly the configuration able to create them. The drift half self-gates (`sweepPositionDrift()`
+  // returns zeroes when the flag is off), so nothing position-related runs early because of this.
+  startPositionMaintenanceLoop(config.positionDriftSweepIntervalMs);
+  // eslint-disable-next-line no-console
+  console.log(
+    `IAM grant-expiry + position-drift sweep on: every ${config.positionDriftSweepIntervalMs}ms ` +
+      `(expiry always; drift only while POSITION_SYNC_ENABLED)`,
+  );
   // P2-07: nightly burndown-snapshot pre-warmer — a plain Postgres sweep (no Redis dependency),
   // same as the drift sweep above. Dark unless PM_BURNDOWN_SNAPSHOT_ENABLED; the lazy
   // upsert-on-read in pm.controller.ts's getBurndown() is the correctness backstop regardless.
@@ -457,11 +529,43 @@ async function bootstrap(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`IT device stale reaper on: every ${config.itDiscovery.reaperIntervalMs}ms`);
   }
+  // SMM-36: the LinkedIn-driven engagement-inbox retention purge. A plain Postgres sweep (no Redis
+  // dependency), same dark-by-default pattern as the sweeps above — but unlike the burndown/drift
+  // sweeps this one is NOT a pure optimization: until it runs, LinkedIn comment text and commenter
+  // profile fields accumulate past the 24h/48h ceiling LinkedIn's own Data Storage Requirements
+  // impose (addendum §A4e), which is checked at their Standard Tier review. Off by default because
+  // no LinkedIn client is connected yet (OQ-1/OQ-3 still gate that) — turning this on is a
+  // deploy-time decision paired with turning LinkedIn on for real.
+  if (config.social.inboxRetention.purgeEnabled) {
+    startInboxRetentionPurgeLoop(config.social.inboxRetention.purgeIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`social inbox retention purge on: every ${config.social.inboxRetention.purgeIntervalMs}ms`);
+  }
+  // SMM-10: `smm-post-status-sync`, the publish gate's safety poll. Same dark-by-default pattern as
+  // the sweeps above — a fresh deployment with no publisher org provisioned has nothing in flight to
+  // reconcile, so this is a deploy-time decision paired with provisioning the first org, not a
+  // boot-time default. Cadence default 15 minutes (config.ts's own doc on why that is not tuned
+  // tighter).
+  if (config.social.reconcileEnabled) {
+    startPostStatusSyncLoop(config.social.reconcileIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`social post-status reconcile (smm-post-status-sync) on: every ${config.social.reconcileIntervalMs}ms`);
+  }
   // SM-54: the search pull scheduler. A plain Postgres sweep (no Redis dependency), so it sits outside
   // the redisUrl gate above alongside the drift sweep and the burndown job — but unlike those two this
   // one SPENDS VENDOR MONEY, so its flag is the hard gate rather than a performance opt-in. The
   // interval only controls how often due-ness is re-asked; the cadence that decides whether anything is
   // pulled is derived per engagement from `tool_scope`, never from this value.
+  // MON-12c: the monitor runner. A plain Postgres sweep (no Redis), so it sits outside the redisUrl
+  // gate like the search scheduler -- but unlike that one it does not spend money, it DIALS CLIENT
+  // WEBSITES. That is why the flag is a hard gate rather than a perf opt-in: probing a third party
+  // must be a decision someone made, never a consequence of booting. Nothing is probed until this is
+  // switched on -- heartbeat monitors are the exception, because those are push and update on ingest.
+  if (config.monitoring.runnerEnabled) {
+    startMonitoringRunnerLoop(config.monitoring.runnerIntervalMs);
+    // eslint-disable-next-line no-console
+    console.log(`monitoring runner on: re-asking due-ness every ${config.monitoring.runnerIntervalMs}ms`);
+  }
   if (config.search.schedulerEnabled) {
     startSearchPullSchedulerLoop(config.search.schedulerIntervalMs);
     // eslint-disable-next-line no-console

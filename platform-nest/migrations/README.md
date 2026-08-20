@@ -1,9 +1,69 @@
-# platform-nest migrations — numbering protocol (LOCKED)
+# platform-nest migrations — naming protocol (LOCKED)
 
 **Owner:** DevOps · **Established by:** WS0-1 (Backbone Program, 2026-07-17) · **Status:** NORMATIVE
+**Amended 2026-08-19:** sequential numbering is CLOSED. See "The naming rule" immediately below.
 
 This directory holds the ordered SQL migrations for `gaiada_platform`. The rules below are binding
-for every ticket in the program. New migrations that violate them must not be merged.
+for every ticket in the program. New migrations that violate them must not be merged, and
+`npm run lint:migration-names` (CI-gated) refuses most violations mechanically rather than trusting
+anyone to have read this file.
+
+## The naming rule (read this and nothing else, if you are here to add a migration)
+
+```
+YYYYMMDDHHMM_snake_case_description.sql        # UTC.  date -u +%Y%m%d%H%M
+```
+
+That is it. There is no number to look up, nothing to reserve, and nobody to coordinate with. If a
+concurrent session writes DDL in the same minute the lint fails the build and one of you adds a
+minute — which is a loud collision, unlike the four silent ones below.
+
+**The sequential `NNNN_` scheme is closed above `0118`.** The lint rejects `0120_*` and anything higher.
+Legacy files keep their names forever (rule 4).
+
+**`0119_monitoring_heartbeat_touch.sql` is the ONE grandfathered crossing.** It was written by a
+concurrent session in the same window this rule landed — a legitimate migration against a rule its author
+had no reason to have read yet. Renaming it would have been production-safe (it is not in the live
+`schema_migrations`) but it was already applied on that session's own database, where a rename orphans the
+ledger row and re-runs the file on their next boot. Breaking a colleague's working state to tidy a
+filename is not a trade worth making, so it is exempted BY NAME in
+`scripts/lint-migration-names.mjs` — **not** by raising the ceiling. `0120_*` still fails. If a second
+name ever needs adding, the exemption has become a habit and the fix is the rule's REACH (a pre-commit
+hook, a louder README), not a third entry.
+
+### Why it changed, since a numbered scheme looks tidier
+
+Four collisions, and the last three inside two days: `0003` and `0018` (historic, pre-protocol),
+then `0114`, `0117` and `0118` — each one two concurrent sessions in this SHARED CHECKOUT both
+running `ls migrations | sort | tail`, both seeing the same head, both taking the next number.
+
+`0114` produced the rule "reserve the number by creating the file before writing DDL". `0118` then
+collided *while that rule was being followed exactly*, and `0117` collided the same day. The rule
+cannot work: it only helps if the other session lists the directory after your file exists, and two
+sessions inside one window both list first. **The reservation is not atomic and nothing arbitrates
+it.** Three data points is a protocol failing, not luck running out.
+
+The alternatives considered were per-session number BLOCKS (a session claims `0130–0139` up front)
+and a committed `CLAIMS.md` pushed before writing DDL. Both re-introduce coordination — a block can
+be forgotten or overrun, and a claims file has the same race one layer up unless every session
+push-rebases before every migration. A timestamp needs no coordination at all, which is the only
+property that has actually survived contact with this repo.
+
+### Why this cannot disturb already-applied migrations
+
+The runner discovers with `readdirSync().filter(.sql).sort()` — plain lexicographic order — and the
+ledger is keyed on the FULL FILENAME. `"2" > "0"`, so every 12-digit timestamp sorts after every
+4-digit legacy name on every platform: no applied file moves, and no applied file is re-run. The lint
+asserts that ordering property on each run rather than leaving it as a comment, because it is the one
+assumption whose failure would rewrite history silently.
+
+### What was NOT changed, deliberately
+
+The four double-booked prefixes stay exactly as they are. Renaming an applied file orphans its ledger
+row and the runner re-applies it on next boot (rule 4) — so the honest state is "the directory
+contains five duplicate prefixes, all applied, all harmless because their pairs touch disjoint
+tables", and the lint names them explicitly instead of pretending otherwise. The `0058`/`0059`/`0070`
+gaps stay gaps: never backfill a number.
 
 ## How the runner works (read before adding a migration)
 
@@ -24,8 +84,11 @@ and can be run standalone (`node dist/db/migrate.js`).
 
 ## The numbering rules (LOCKED)
 
-1. **Format:** `NNNN_snake_case_description.sql`, zero-padded 4-digit prefix, one concept per file.
-2. **Monotonic + unique from 0025 onward.** `0023` was consumed out-of-band by
+1. **Format:** `YYYYMMDDHHMM_snake_case_description.sql` (UTC minute), one concept per file. The
+   legacy `NNNN_` form is frozen — valid up to `0118`, refused above it by
+   `npm run lint:migration-names`. Everything in rule 2 below is HISTORY, kept because it explains
+   the gaps and duplicates a reader will find in the directory; it is no longer instruction.
+2. **(HISTORICAL) Monotonic + unique from 0025 onward.** `0023` was consumed out-of-band by
    `0023_meeting_recordings.sql` (WS11 capture-edge work landed before this reservation could be
    drawn down) and `0024` was consumed by `0024_module_backfill.sql` (WSA-2 module registration
    backfill). Both merged before the ORG-CORE tickets started, so **the ORG-CORE reservation is
@@ -80,12 +143,15 @@ and can be run standalone (`node dist/db/migrate.js`).
    The ledger keys on the exact filename — renaming an applied file orphans its ledger row, so the
    runner re-applies the (renamed) file on the next boot and its DDL fails against the objects that
    already exist, breaking startup. Corrections ship as a **new, higher-numbered** migration.
-5. **Coordinate numbers across parallel tickets.** If two in-flight tickets both need "the next
-   number", the second to merge bumps to the following free slot. When in doubt, ask the coordinator.
+5. **(SUPERSEDED 2026-08-19) Coordinate numbers across parallel tickets.** This rule is what failed,
+   four times. There is nothing to coordinate now: name the file for the minute you write it. Kept
+   here only so a reader who followed a link to "rule 5" finds out it is gone.
 
-## Grandfather clause — the two existing dual-prefix pairs
+## Grandfather clause — the five existing dual-prefix pairs
 
-Two numeric prefixes are shared by two files each. Both pairs pre-date this protocol and are
+Five numeric prefixes are shared by two files each. `0003`/`0018` pre-date this protocol; `0114`,
+`0117` and `0118` were collisions between concurrent sessions on 2026-08-18/19 and are the reason
+the scheme is now closed (see "Why it changed" above). All five are
 **already applied on every existing database**, so they are LEFT AS-IS by design (renaming them would
 orphan ledger rows and break boot per rule 4). They are safe because the runner keys on full filenames
 and orders deterministically, and because within each pair the two files are **independent** (no
@@ -95,8 +161,15 @@ cross-dependency, so their relative order is immaterial):
 |---|---|---|
 | `0003` | `0003_idp_subject.sql` → `0003_user_title.sql` | different tables/columns |
 | `0018` | `0018_pipeline_portal.sql` → `0018_pm.sql` | portal alters `pipeline_runs`/`clients` (from 0017/0001); pm creates fresh `pm_*` — disjoint |
+| `0114` | `0114_iam_self_scoped_marker.sql` → `0114_social_post_variants.sql` | `permissions`/`role_permissions` vs `social_post_variants` — disjoint |
+| `0117` | `0117_iam_monitoring_permissions.sql` → `0117_monitor_results_partition_rls.sql` | permission seeds vs `ALTER TABLE ... FORCE ROW LEVEL SECURITY` on monitor partitions — disjoint |
+| `0118` | `0118_iam_split_decide_assignment.sql` → `0118_social_variant_uploaded_media.sql` | `permissions`/`role_permissions` vs `social_post_variants` — disjoint |
 
-These are the **only** permitted duplicate prefixes, ever. No new duplicates.
+These five are the **only** permitted duplicate prefixes, ever, and they are permitted only because
+they already applied. The lint hard-codes exactly this set: a THIRD file on any of these prefixes
+fails, as does any new pair. Disjointness was checked per pair, not assumed — within each pair the
+relative order is immaterial, which is why four accidents cost nothing. That is luck, and closing the
+scheme is what stops the run depending on it.
 
 ## WS0-1 resolution of the 0018 collision (rationale of record)
 
@@ -450,3 +523,134 @@ at it, run `node dist/db/migrate.js`, confirm the ordered `applied:` list and ex
    unused is `0110`** — re-verify with `ls migrations | sort | tail` before trusting that, exactly
    as every entry in this log has had to; this checkout is shared with at least one other
    concurrent session (a monitoring feature, per this ticket's own brief) as of this entry.
+
+   **2026-08-18 update (P2-06, IAM Phase 2 JML) — `0111` TAKEN.** `ls migrations | sort | tail`
+   immediately before writing showed the head as
+   `0110_iam_phase2_role_grant_kinds_ui_grantable.sql` with `0111` free.
+   `0111_iam_phase2_employee_work_email_key.sql` adds ONE partial unique index —
+   `ux_employees_tenant_work_email` on `(tenant_id, work_email) WHERE work_email IS NOT NULL AND
+   deleted_at IS NULL` — because design §5.1's stated joiner natural key was NOT enforced by
+   `0109`: its unique is on `(tenant_id, user_id) WHERE user_id IS NOT NULL`, and a `pending_start`
+   candidate has no `user_id`, so two retries of the same hire before the principal existed would
+   have produced two employee rows for one person. Index creation only, zero DML (the table had no
+   rows in any environment before P2-06 wrote the first one). Case-insensitivity is maintained by
+   the application lowercasing `work_email` on every write — recorded here because that half of the
+   invariant lives in `employees.controller.ts`, not in the index. Full report:
+   `docs/superpowers/plans/2026-08-18-p2-06-report.md`. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps — still do NOT fill them. **Next unused is `0112`** —
+   re-verify with `ls migrations | sort | tail` before trusting that.
+
+   **2026-08-18 update (owner decisions) — `0112` TAKEN.** `ls migrations | sort | tail` immediately
+   before writing showed the head as `0111_iam_phase2_employee_work_email_key.sql` with `0112` free.
+   `0112_iam_owner_decisions_2026_08_18.sql` is **DML only, zero schema change**: it drops the
+   `(member, core.client.delete)` bundle row (the live over-grant PERMISSION-CONTRACT §12.5 records),
+   adds `(hr_manager, core.position.assign/.unassign)`, and clears `sensitive` on seven READ keys
+   (107 -> 100, `hr.record.read` deliberately excluded). Every statement asserts its own DELTA with
+   `GET DIAGNOSTICS` — never a total, per the 0093 lesson that a migration may assert what it did but
+   never the state of a shared table forever. The `member` delete is tolerant of 0 rows (an
+   environment seeded after the policy change never had the row) but refuses >1 (duplicates are a real
+   defect). Two negative invariants are asserted rather than assumed: `hr.record.read` must still be
+   sensitive, and `hr_staff` must NOT hold the position keys. Paired with the policy edits and the
+   regenerated JSON in the same commit, because the parity suites compare all three. **Next unused is
+   `0113`** — re-verify with `ls migrations | sort | tail` before trusting that.
+
+
+   **2026-08-18 update (SMM-36, per-network inbox retention + purge) -- `0113` TAKEN.**
+   `ls migrations | sort | tail` immediately before writing showed the head as
+   `0112_iam_owner_decisions_2026_08_18.sql` with `0113` genuinely free.
+   `0113_social_inbox_retention.sql` is additive-only, zero DML (both inbox tables have zero rows in
+   every environment -- SMM-15's sync has not shipped yet): two purge-marker columns
+   (`profile_data_purged_at`, `activity_content_purged_at`) on BOTH `social_inbox_threads` and
+   `social_inbox_messages`, four state-law CHECK constraints ("if the marker is set, the column it
+   covers is scrubbed"), and two partial retention-scan indexes matching 0105's own
+   `deleted_at IS NULL` idiom. The retention NUMBERS themselves (LinkedIn 24h profile / 48h activity,
+   documented; every other network `unverified`, never a guessed default) live in code
+   (`src/modules/social/retention-policy.ts`), not in this migration -- a schema-level constant would
+   need a new migration every time OQ-1 research corrects or adds a network. Registered in
+   `src/modules/social/index.ts`'s `migrations` array. `0058`/`0059`/`0070` remain the
+   permanently-orphaned reservation gaps -- still do NOT fill them. **Next unused is `0114`** --
+   re-verify with `ls migrations | sort | tail` before trusting that; this checkout has other
+   concurrent social-module sessions in flight as of this entry.
+
+   **2026-08-19 update (the self-scoped marker) — `0114` TAKEN.** `ls migrations | sort | tail` showed
+   the head as `0113_social_inbox_retention.sql` (a concurrent session took `0113`), so this is `0114`.
+   `0114_iam_self_scoped_marker.sql` adds `role_permissions.self_scoped` and marks 21 (role, permission)
+   pairs generated by `scripts/generate-role-bundles.mjs::computeSelfScoped`. Idempotent by
+   construction: it clears every TRUE first, so a re-run (or a later bundle re-seed) cannot strand a
+   stale marker. Asserts the DELTA (`marked <> expected` raises) rather than any total, per the 0093
+   lesson. **Next unused is `0115`** — re-verify with `ls migrations | sort | tail`.
+
+   **⚠ 2026-08-19 — `0114` NUMBER COLLISION (two files, both applied). NOT to be repeated.**
+   `0114_iam_self_scoped_marker.sql` and `0114_social_creator_info_snapshot.sql` both exist and are
+   both in `schema_migrations` on the live box. Two concurrent sessions each ran `ls migrations | sort
+   | tail`, each saw `0113_social_inbox_retention.sql` as the head, and each reserved `0114` — the
+   exact race rule 5 exists to prevent, and the second instance of it in this program (see the
+   2026-08-10 note about pre-assigning numbers when authors overlap).
+
+   **No damage this time, and here is precisely why**, so nobody concludes the protocol is optional:
+   the runner orders by `readdirSync().sort()`, which is deterministic, so `..._iam_...` ran before
+   `..._social_...` on every environment identically; the ledger is keyed on the FULL filename, so
+   both rows coexist without either being skipped; and the two files touch disjoint tables
+   (`role_permissions` vs the social tables). Change any one of those three and this is a corrupted
+   estate rather than an untidy log.
+
+   **Deliberately NOT renumbered.** Renaming an applied file makes the runner treat it as new work:
+   the marker migration is idempotent (it clears every `self_scoped` before re-marking) so a re-run is
+   harmless, but it would add a second ledger row for the same change and rewrite shipped history for
+   no benefit. Both numbers stay; `0114` is now a permanently DOUBLE-BOOKED number, alongside the
+   `0058`/`0059`/`0070` orphan gaps.
+
+   **Next unused is `0115`** — and while two sessions are active in this checkout, RESERVE IT BY
+   CREATING THE FILE before writing DDL, per rule 5. `ls | tail` alone is not sufficient and has now
+   failed twice.
+
+   **2026-08-19 update (P2-08 part B) — `0115` TAKEN, and RESERVED BEFORE THE DDL WAS WRITTEN.** The
+   file was created as a stub the moment the number was chosen, then filled in — the rule this log
+   added hours earlier after `0114` was double-booked, applied to its own author.
+   `0115_iam_override_decide.sql` seeds `core.role_grant.decide_override` + its 4 bundle rows
+   (generated from `role-permission-bundles.json`, itself generated from the policies) and widens
+   `automation_approvals.origin` to admit `'iam'`, following `0028`'s drop-and-re-add DO block —
+   Postgres cannot ALTER a CHECK in place, and the constraint is looked up BY DEFINITION because
+   `0016` created it auto-named. Purely additive: no existing row can violate a wider set. **Next
+   unused is `0116`.**
+
+   **2026-08-19 update — `0117` TAKEN (reserved before DDL, again).**
+   `0117_monitor_results_partition_rls.sql` FORCE-RLSes every `monitor_results` PARTITION. `0116`
+   (MON-10, a concurrent session) hardened the partitioned PARENT and its own hardcoded nine-table
+   list missed the partitions; in Postgres a partition queried directly is governed by its own
+   policies, so tenant isolation was absent there. Amended in a NEW migration because 0116 is
+   committed and possibly applied. Loops over `pg_inherits` rather than naming partitions, since 0116
+   derives their names from the month it runs. **Partitions created later by a rollover job are NOT
+   covered** — that belongs with the monitoring owner. **Next unused is `0118`.**
+
+   **2026-08-19 update — `0118` TAKEN (reserved before DDL).**
+   `0118_iam_split_decide_assignment.sql` splits `core.position.decide_assignment` out of
+   `core.role_grant.decide_override` (owner instruction) and corrects the override key's description,
+   which had claimed to cover placements. Holder list generated from the bundles; DELTA-asserted, 0 on a
+   re-run. No behaviour change: both actions carry the identical four tiers. **Next unused is `0119`.**
+
+   **🔴 2026-08-19 — `0118` DOUBLE-BOOKED TOO, AND THE MITIGATION I ADDED YESTERDAY DID NOT WORK.**
+   `0118_iam_split_decide_assignment.sql` and `0118_social_variant_uploaded_media.sql` both exist and
+   both applied. That is the SECOND collision in two days (`0114` was the first), and it happened
+   *after* this log gained the rule "reserve the number by creating the file before writing DDL" — a
+   rule I followed exactly and which still lost the race.
+
+   **Why reserve-by-creating-the-file cannot work.** It only helps if the OTHER session lists the
+   directory after my file exists. Two sessions that both run `ls | sort | tail` inside the same window
+   both see `0117`, and both then create `0118`. The reservation is not atomic; nothing arbitrates.
+
+   Harmless again, and by the same three properties as `0114`: `readdirSync().sort()` is deterministic
+   so the order is identical everywhere, the ledger is keyed on the full filename so neither is skipped,
+   and the two touch disjoint tables (`permissions`/`role_permissions` vs `social_post_variants`).
+   **Three collisions in, that is luck holding, not a protocol working.**
+
+   **This needs an owner/devops decision, and it is above what a single session should choose:**
+     * per-session number BLOCKS (a session claims 0130-0139 up front and never leaves it), or
+     * timestamp-prefixed filenames (`20260819T1530_iam_split.sql`), which cannot collide by
+       construction and still sort deterministically, or
+     * a committed `migrations/CLAIMS.md` that a session must push to before writing DDL, making the
+       claim atomic through git rather than through the filesystem.
+
+   Until one is chosen, expect this to recur whenever two sessions are active. `0114` and `0118` are now
+   both permanently double-booked, alongside the `0058`/`0059`/`0070` orphan gaps. **Next unused is
+   `0119` — and it is not safe to assume that.**

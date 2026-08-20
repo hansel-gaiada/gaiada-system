@@ -79,6 +79,112 @@ export const hrModule: ModuleContract = {
   ],
   customFieldTargets: ["hr_case", "hr_record"],
   mcpTools: [
+    // ── P2-07 (partial): the EMPLOYEE READ surface, agent-reachable ──────────────────────────────
+    //
+    // The `hr` module declares these rather than some core surface because `employees` sits behind the
+    // HR module's own RLS wall (`app_module_allowed('hr')`, 0109) — the module that gates the table is
+    // the module that should own its tools.
+    //
+    // ── THE JML WRITES, closed-loop as of 2026-08-19 ─────────────────────────────────────────────
+    // hire / transfer / terminate are declared BECAUSE their D14 executors now exist
+    // (`registerJmlExecutableApprovals` in core/approval-executables.ts) AND the three names are in
+    // `resource_mcp_tool.yaml`'s executable allow-list. All three are required: an entry without the
+    // allow-list passes its precondition and is then denied at the hub door; a tool without an entry
+    // suspends and then silently does nothing on approval. `hr-employee-tools.test.ts` asserts the
+    // declared-implies-executor half so this cannot regress by half.
+    //
+    // Impact is `high` for terminate and `medium` for the other two, and that is a judgement worth
+    // stating: terminate revokes grants, closes seats and can disable a login, and it is the one whose
+    // blast radius does not shrink if it fires twice — the others converge. All three are gated behind
+    // a human decision regardless (medium and high both suspend); impact drives the urgency and the
+    // notification tier, not whether a human is asked.
+    {
+      name: "hr.listEmployees",
+      description: "List the served company's employee records (HR people file). Optional status filter.",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/hr/employees",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          status: { type: "string", enum: ["pending_start", "active", "on_leave", "suspended", "terminated"] },
+        },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "hr.getEmployee",
+      description: "Read one employee record plus their position history (current and past seats)",
+      minAssurance: "verified",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/hr/employees/:employeeId",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string" }, employeeId: { type: "string" } },
+        required: ["tenantId", "employeeId"],
+      },
+    },
+    {
+      name: "hr.hireEmployee",
+      description:
+        "Create an employee record; with positionId, also open the seat and let the reconciler materialise its grants. Idempotent on (tenant, workEmail).",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/hr/employees",
+      write: true,
+      impact: "medium",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          displayName: { type: "string" },
+          workEmail: { type: "string" },
+          positionId: { type: "string" },
+          startDate: { type: "string", description: "YYYY-MM-DD; a FUTURE date is refused (no scheduled JML yet)" },
+        },
+        required: ["tenantId", "displayName", "workEmail"],
+      },
+    },
+    {
+      name: "hr.transferEmployee",
+      description:
+        "Move an employee to another position: closes the outgoing seat, opens the new one, moves their org-chart node, and lets the reconciler move the grants.",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/hr/employees/:employeeId/transfer",
+      write: true,
+      impact: "medium",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          employeeId: { type: "string" },
+          toPositionId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["tenantId", "employeeId", "toPositionId"],
+      },
+    },
+    {
+      name: "hr.terminateEmployee",
+      description:
+        "Close every seat, revoke this tenant's manual grants, mark the record terminated, and disable the login when no other company's membership remains. HIGH impact: not self-correcting if repeated.",
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/hr/employees/:employeeId/terminate",
+      write: true,
+      impact: "high",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          employeeId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["tenantId", "employeeId"],
+      },
+    },
     {
       name: "hr.listCases",
       description: "List the served company's HR cases",

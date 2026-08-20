@@ -14,6 +14,7 @@
 // taken in the ADNARA ERP / client portal via the platform BFF, not automation — n8n only opens
 // gates and then waits for the `pipeline.gate.decided` / `scope.signed` event.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import { registerTool } from "./registry";
 import { gatewayComplete } from "./gateway-client";
 import type { Principal } from "./principal";
@@ -21,9 +22,7 @@ import type { Principal } from "./principal";
 async function platformGet(path: string, principal: Principal): Promise<string> {
   const res = await fetch(`${config.platformUrl}${path}`, {
     headers: {
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
   });
   if (res.status === 401 || res.status === 403) {
@@ -39,9 +38,7 @@ async function platformSend(method: "POST" | "PATCH", path: string, body: unknow
     method,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
     body: JSON.stringify(body),
   });

@@ -28,6 +28,16 @@
 import type { PoolClient } from "pg";
 import { lockPipelineRun } from "./pipeline-lock";
 import { evaluateProvisionPrecondition } from "../modules/webdev/provisioning.service";
+// SMM-09 — see this file's own SMM-09 section, at the bottom, for the reasoning behind every one of
+// these four. Same siting as PRV-03's import above: the domain rules live in the module.
+import {
+  SOCIAL_PUBLISH_TOOL,
+  SOCIAL_PUBLISH_METERED_TOOL,
+  publishLockKey,
+} from "../modules/social/publish-precondition";
+// SMM-31 — the client-review gate, composed IN FRONT of the six-stage chain (never inside it — see
+// that file's header for why `PUBLISH_PRECONDITION_STAGES` stays untouched).
+import { evaluatePublishPreconditionWithClientReview } from "../modules/social/client-review";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -75,6 +85,59 @@ export interface ExecutableApprovalEntry {
    * Must not write. Must not call out over the network (it runs inside an open transaction).
    */
   precondition(client: PoolClient, toolArgs: Record<string, unknown>): Promise<PreconditionVerdict>;
+
+  /**
+   * SMM-09 — opt OUT of `core/approval-execute.ts`'s bounded in-invocation auto-retry, entirely and
+   * regardless of the tenant's `automation.approvalRetry.autoRetryCount` setting.
+   *
+   * Default `false` (absent), which preserves the existing behaviour for every entry that shipped
+   * before this field: the tenant setting decides, and 0 (manual retry only) is already that
+   * setting's own default.
+   *
+   * WHY AN ENTRY WOULD SET IT. The executor's auto-retry is safe for a tool whose precondition can
+   * DETECT a first attempt that landed — `deploy.*` re-reads the stage's `done` status, so a retry
+   * after a lost response refuses instead of redeploying. For an OUTBOUND-PUBLIC action there is no
+   * such observation available in the ambiguous window: a `hub_unreachable` (no verdict obtained,
+   * the call may or may not have landed) or a `tool_error` (may have partially applied) on a publish
+   * means the post may ALREADY BE ON A CLIENT'S PUBLIC FEED while our row says nothing landed. The
+   * one thing that must not happen next is an unattended second attempt.
+   *
+   * So a publish surfaces for HUMAN resolution instead: the row lands `failed` with its typed error,
+   * both principals are notified at severity `warning`, and D14-07's retry endpoint is the only way
+   * forward — a human decision, re-earning the right through a fresh lock + precondition. That is
+   * the same doctrine `approval-execute.ts`'s header already states for the crash-wedge case ("the
+   * platform cannot know whether a call whose response was lost actually landed, so unwedging
+   * automatically would be a coin-flip on double-execution"), applied to the retry loop for the one
+   * class of tool where the coin-flip is public and irreversible.
+   */
+  neverAutoRetry?: boolean;
+
+  /**
+   * P2-07 — module keys this entry's `precondition` needs in scope to see its own tables.
+   *
+   * ⚠ THIS FIELD EXISTS BECAUSE ITS ABSENCE IS SILENT, AND SILENT IN THE PERMISSIVE DIRECTION.
+   * `core/approval-execute.ts` opens its claim transaction as `withTenants([tenantId], …)` with no
+   * `modules` — correct for every entry that shipped before this one, because `pipeline_runs`,
+   * `pipeline_gates` and friends are CORE tables with a plain `tenant_isolation` policy. A
+   * MODULE-OWNED table composes its policy as `tenant_id = ANY(app_current_tenants()) AND
+   * app_module_allowed('<mod>')`, and with `app.scopes` unset that second conjunct is FALSE — so the
+   * precondition reads ZERO ROWS and gets no error (db/index.ts's WithTenantsOptions note; the
+   * estate's [migration-backfill-rls-trap]).
+   *
+   * Zero rows is not a neutral failure for a precondition. `hr.hireEmployee`'s guard is
+   * "does a live employee with this work email already exist?" — under an unset scope the answer is
+   * always no, so the ONE check that stops an approved hire from being applied twice would pass
+   * every time, and the tool whose retry it protects is the one that creates a person. The
+   * transfer/terminate guards fail the other way (always `employee_not_found`), which is safe but
+   * makes the tools permanently inert. Both shapes are invisible in a test that stubs the client.
+   *
+   * Set as `SET LOCAL`-scoped `app.scopes` immediately before the precondition runs, so it lasts
+   * exactly the transaction that needs it and never leaks to the next borrower of that pooled
+   * connection. Declared on the ENTRY rather than set from inside a precondition deliberately: the
+   * executor owns the transaction, and a precondition that quietly widened its own visibility would
+   * put an RLS decision in the least visible place available.
+   */
+  preconditionModules?: string[];
 }
 
 /**
@@ -91,7 +154,7 @@ export interface ExecutableApprovalEntry {
  *    and notifies), never silently executable.
  */
 export type ExecutableApprovalInput = Pick<ExecutableApprovalEntry, "toolName"> &
-  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition">>;
+  Partial<Pick<ExecutableApprovalEntry, "lockKey" | "precondition" | "neverAutoRetry" | "preconditionModules">>;
 
 const registry = new Map<string, ExecutableApprovalEntry>();
 
@@ -101,11 +164,20 @@ export const NO_PRECONDITION_REASON = "no_precondition_registered";
 /**
  * Register an executable-approval entry. Throws on a duplicate `toolName` — registration is
  * deliberate and one-shot per tool (see the file header's doctrine), never a silent overwrite that
- * could let a later, weaker registration replace an earlier precondition unnoticed.
+ * could let a later, weaker registration replace an earlier precondition unnoticed. Also throws for
+ * a tool that is BARRED (see `registerBarredExecutable` below): a bar is a decision, and a later
+ * ticket must not be able to un-make it by adding an entry.
  */
 export function registerExecutableApproval(entry: ExecutableApprovalInput): void {
   if (registry.has(entry.toolName)) {
     throw new Error(`executable approval already registered for tool '${entry.toolName}'`);
+  }
+  if (barred.has(entry.toolName)) {
+    throw new Error(
+      `tool '${entry.toolName}' is BARRED from executable approval (${barred.get(entry.toolName)!.reason}) `
+      + "— registering it would undo a deliberate bar; if the bar is genuinely wrong, remove the "
+      + "registerBarredExecutable() call in the same change and say why",
+    );
   }
   registry.set(entry.toolName, {
     toolName: entry.toolName,
@@ -113,7 +185,80 @@ export function registerExecutableApproval(entry: ExecutableApprovalInput): void
     // lock is still taken and still real), and the precondition refuses outright.
     lockKey: entry.lockKey ?? (() => `executable-approval:${entry.toolName}`),
     precondition: entry.precondition ?? (async () => ({ ok: false, reason: NO_PRECONDITION_REASON })),
+    neverAutoRetry: entry.neverAutoRetry === true,
+    // Absent stays absent rather than becoming `[]` — an empty array and an omitted field mean the
+    // same thing to the executor, and normalizing would make "declares no modules" and "declares
+    // none needed" indistinguishable to anyone auditing the registry.
+    ...(entry.preconditionModules?.length ? { preconditionModules: [...entry.preconditionModules] } : {}),
   });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE BARRED LIST — a NEGATIVE registration (SMM-09).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Read this before assuming a barred entry weakens the header's doctrine — it is the opposite.
+//
+// The doctrine says an absent entry is the SAFE default and money-spending tools must NEVER be
+// registered. Both still hold, byte for byte: a barred tool is NOT in the executable map,
+// `getExecutable()` returns undefined for it, so both decide surfaces leave its approved rows at
+// `execution_status='not_applicable'` FOREVER and the executor fails closed with `not_executable`.
+// Nothing about a bar makes a tool more reachable.
+//
+// What a bar ADDS is that the decision is a FACT IN CODE with a typed reason, rather than an absence
+// somebody has to already know about:
+//   * `registerExecutableApproval` throws for a barred name, so a future ticket cannot quietly make
+//     the twin executable — the bar is enforced, not merely documented in a comment.
+//   * `isBarredExecutable(name)` gives the UI, the tool surface and the tests a positive answer to
+//     "why can this never auto-execute", instead of an undefined that is indistinguishable from
+//     "nobody has got round to it yet".
+//
+// SMM-09's `social.publishPostMetered` is the first, and it exists for D-14's money split: the free
+// path is registry-eligible precisely BECAUSE the metered one is separately named and cannot
+// execute. The pre-existing permanent bars (`search.setBudget` / `search.applyNegatives` /
+// `search.launchCampaign`, SM-55 / architect ruling A13) are deliberately NOT converted here — that
+// is a behaviour-neutral change to another module's contract and belongs to whoever owns it next.
+
+export interface BarredExecutableEntry {
+  toolName: string;
+  /** A snake_case TOKEN, same contract rules as a `PreconditionVerdict.reason`. */
+  reason: string;
+  /** Prose for a human reading the registry or a refusal. Never rendered as the token. */
+  note: string;
+}
+
+const barred = new Map<string, BarredExecutableEntry>();
+
+/**
+ * Record that a tool may NEVER auto-execute on approval. Throws if the name is already registered
+ * as executable (a bar must not silently disarm a live entry — remove the registration in the same
+ * change) or already barred.
+ */
+export function registerBarredExecutable(entry: BarredExecutableEntry): void {
+  if (registry.has(entry.toolName)) {
+    throw new Error(
+      `cannot bar '${entry.toolName}': it is already registered as an executable approval — remove `
+      + "that registration in the same change if the bar is intended",
+    );
+  }
+  if (barred.has(entry.toolName)) {
+    throw new Error(`tool '${entry.toolName}' is already barred`);
+  }
+  barred.set(entry.toolName, entry);
+}
+
+/** The bar entry for `toolName`, or undefined. */
+export function getBarredExecutable(toolName: string): BarredExecutableEntry | undefined {
+  return barred.get(toolName);
+}
+
+export function isBarredExecutable(toolName: string): boolean {
+  return barred.has(toolName);
+}
+
+/** Every bar, for a status/registry surface. Copy, never the live map. */
+export function listBarredExecutables(): BarredExecutableEntry[] {
+  return [...barred.values()];
 }
 
 /**
@@ -132,16 +277,22 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * prior test run in the same process.
  *
  * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries, the
- * D14-15 `pm.createTask`/`pm.createDoc` entries, AND the PRV-03 `webdev.provisionSite` entry
- * registered below (they are all plain calls to `registerExecutableApproval`, no different from a
- * test fixture, once the module has loaded). A test file that needs the deploy pair back after
+ * D14-15 `pm.createTask`/`pm.createDoc` entries, the PRV-03 `webdev.provisionSite` entry AND the
+ * SMM-09 `social.publishPost` entry + its `social.publishPostMetered` BAR registered below (they
+ * are all plain calls to `registerExecutableApproval`/`registerBarredExecutable`, no different from
+ * a test fixture, once the module has loaded). A test file that needs the deploy pair back after
  * resetting calls `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
- * `registerPmExecutableApprovals()`; one that needs the webdev entry back calls
- * `registerWebdevExecutableApprovals()` — either way, do not hand-roll a second copy of their
- * lock/precondition.
+ * `registerPmExecutableApprovals()`; the webdev entry, `registerWebdevExecutableApprovals()`; the
+ * social entry AND its bar, `registerSocialExecutableApprovals()` — either way, do not hand-roll a
+ * second copy of their lock/precondition.
+ *
+ * ⚠ It clears the BARRED map too. That is the right direction for a test seam (a leftover bar would
+ * make an unrelated suite's registration throw), and it is safe because the bar's real enforcement
+ * is the empty executable map, not the bar itself: a cleared registry executes nothing at all.
  */
 export function resetExecutableApprovals(): void {
   registry.clear();
+  barred.clear();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -567,3 +718,482 @@ export function registerWebdevExecutableApprovals(): void {
 }
 
 registerWebdevExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// SMM-09 — `social.publishPost` (executable) and `social.publishPostMetered` (BARRED twin).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/blueprints/smm-design-addendum-2026-08-12.md — the SMM-09 row, D-14 (publish executes
+// on approval; money split out of that path), D-15 (`payload_hash` IS `argsSha256`), OQ-2 (X ships
+// disabled), plus D-22 (owner decision 2026-08-18, TikTok creator consent). The precondition body
+// lives in `modules/social/publish-precondition.ts` — same siting decision as PRV-03's
+// `evaluateProvisionPrecondition`: the domain rules belong to the module, this file is the thin,
+// auditable binding of (lockKey, precondition, retry policy) to a tool name.
+//
+// ── WHY A PUBLISH IS REGISTRY-ELIGIBLE AT ALL ────────────────────────────────────────────────────
+// The doctrine at the top of this file bars money-spending tools PERMANENTLY, and publishing is the
+// obvious candidate for that bar. D-14 resolves it by SPLITTING THE PATH BY TOOL NAME rather than by
+// a runtime branch:
+//
+//   social.publishPost         — every network Postiz reaches for $0. Registered below. An approval
+//                                for it EXECUTES, which is what closes the "approved but never
+//                                published" dead end D14 exists to fix (agentic criterion 4).
+//   social.publishPostMetered  — any variant on a metered network. X is the only one in v1, it
+//                                ships DISABLED in every scope (OQ-2, and `DEFAULT_TOOL_SCOPE` in
+//                                modules/social/index.ts pins `networks.x: false`), and this name is
+//                                BARRED below. It stays caller-re-driven, honouring the money bar.
+//
+// Splitting by NAME is the load-bearing choice: it makes the metered path visibly different at the
+// tool surface, where an operator, an agent and this registry can all see it, instead of hiding the
+// distinction inside a conditional that a later edit could invert. Belt and braces, the free tool's
+// own precondition ALSO refuses a metered-network variant
+// (`metered_network_requires_metered_tool`), so a routing bug cannot spend a client's money by
+// reaching the registered tool with an X variant.
+//
+// ── LOCK KEY: THE VARIANT, NOT THE POST AND NOT THE TENANT ───────────────────────────────────────
+// `tool_args.variantId`. A variant is one post on one account — the actual unit of publication, and
+// the unit two approvals contend over. Keying on the POST would serialize a five-network fan-out
+// behind itself for no correctness gain; keying on the TENANT would serialize every publish in the
+// agency behind every other (this deployment is nearly all one tenant — see pipeline-lock.ts's
+// "LOCK SCOPE" note). A missing/malformed id falls back to a tool-prefixed key over the raw args:
+// still pure and stable across retries, and it never collapses every bad call onto one shared lock.
+//
+// ── NO PIPELINE CO-LOCK ──────────────────────────────────────────────────────────────────────────
+// Stated so nobody adds `lockPipelineRun` here "for safety" later: nothing in the social module
+// reads or writes `pipeline_runs`/`pipeline_stages`. Co-locking would manufacture a false dependency
+// between two systems that share no state. The state THIS precondition reads (`social_post_variants`,
+// `social_engagements`, `social_accounts`, `social_usage_ledger`) is written under
+// `APPROVAL_EXEC_LOCK_NS` by this path and by SMM-10's dispatch, which must take the SAME key.
+//
+// ── NO AUTO-RETRY (the one behavioural difference from every entry above) ────────────────────────
+// `neverAutoRetry: true`. A publish whose outcome is UNKNOWN — `hub_unreachable` (no verdict) or
+// `tool_error` (may have partially applied) — may already be on a client's public feed. `deploy.*`
+// can afford the executor's bounded auto-retry because its precondition can OBSERVE a landed first
+// attempt (the stage goes `done`); a publish in the ambiguous window has no such observation, so an
+// unattended second attempt is a coin-flip on a duplicate public post. It surfaces for a human
+// instead: `failed`, notified at `warning`, and D14-07's retry endpoint (which re-takes the lock and
+// re-evaluates this precondition) is the only way forward.
+//
+// ── THE CERBOS HALF ──────────────────────────────────────────────────────────────────────────────
+// `social.publishPost` is `write:true, impact:"high"` at the hub, so an `origin='automation'`
+// re-drive also needs the tool name in `cerbos/policies/resource_mcp_tool.yaml`'s executable-tool
+// list (D14-13). That file's own header states the both-places rule and that drift fails CLOSED.
+// This ticket adds it there. `social.publishPostMetered` is added to NEITHER list, which is what
+// being barred means.
+//
+// ── WHAT THIS TICKET DELIBERATELY DOES NOT DO ────────────────────────────────────────────────────
+// It declares no `McpToolDef` for either name. `modules/social/index.ts`'s own header states the
+// rule: "a declared MCP tool whose endpoint does not exist is a lie the hub will happily publish to
+// every agent in the estate" — and a publish tool is the worst possible instance of it. The dispatch
+// endpoint (approval-execution → `schedulePost` + the transactional stamp of `approval_id` and
+// `provider_post_id`) is SMM-10's. When SMM-10 wires it, it declares the tool with
+// `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` (`write:true, impact:"high"`, exported and pinned by a test)
+// — those two values ARE the D14 gate, and a publish that is not `high` is a publish that never
+// suspends. Until then the entry below is inert in exactly the way the doctrine wants: registered,
+// precondition-guarded, and reachable by nothing.
+
+function socialPublishLockKey(toolArgs: Record<string, unknown>): string {
+  return publishLockKey(toolArgs, SOCIAL_PUBLISH_TOOL);
+}
+
+/** Adapts the module's richer `{ok, stage, reason}` verdict onto the registry's `PreconditionVerdict`.
+ *  The STAGE is dropped on this path deliberately: `execution_error` carries one typed token and
+ *  `PUBLISH_REFUSAL_STAGE` maps it back to its stage for anyone who wants it, so putting both in the
+ *  string would give the estate two spellings of one refusal.
+ *
+ *  SMM-31: runs the client-review gate FIRST (composed by `evaluatePublishPreconditionWithClientReview`,
+ *  never folded into the six-stage chain — see `modules/social/client-review.ts`'s header), so an
+ *  engagement with `tool_scope.posting.requiresClientOk` set refuses here before ever reaching the
+ *  hash/budget/creator-info stages, and re-derives on every execution attempt exactly like the rest
+ *  of this gate. */
+async function socialPublishPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const verdict = await evaluatePublishPreconditionWithClientReview(client, toolArgs, SOCIAL_PUBLISH_TOOL);
+  if (verdict.ok) return { ok: true };
+  return { ok: false, reason: verdict.reason };
+}
+
+/**
+ * Registers `social.publishPost` AND the `social.publishPostMetered` bar. Exported for the same
+ * reason the other three bootstraps are: a test file that calls `resetExecutableApprovals()` and
+ * wants this state back should call this rather than hand-roll a second copy of the lock/precondition
+ * — or, worse, restore the executable entry and forget the bar.
+ */
+export function registerSocialExecutableApprovals(): void {
+  registerBarredExecutable({
+    toolName: SOCIAL_PUBLISH_METERED_TOOL,
+    reason: "metered_tool_barred",
+    note:
+      "D-14: any variant on a metered network (X today) rides this separately-named tool, which is "
+      + "never auto-executed on approval. It stays caller-re-driven so the registry's permanent bar "
+      + "on money-spending tools holds without an owner amendment. SMM-22 owns the metered path.",
+  });
+  registerExecutableApproval({
+    toolName: SOCIAL_PUBLISH_TOOL,
+    lockKey: socialPublishLockKey,
+    precondition: socialPublishPrecondition,
+    neverAutoRetry: true,
+  });
+}
+
+registerSocialExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// P2-07 — `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee`: JML's registry entries.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// These three exist so an agent-origin JML write actually COMPLETES when a human approves it. Without
+// an entry, `getExecutable()` returns undefined, `execution_status` lands `not_applicable`, and the
+// approval decides nothing — for a hire, a person approved and never onboarded. Design §9 (P2-07)
+// requires the closed loop, and `src/modules/hr/hr-employee-tools.test.ts` refuses to let the tools be
+// declared without these.
+//
+// ── LOCK SCOPE: THE PERSON, NOT THE TENANT AND NOT THE APPROVAL ────────────────────────────────
+// Every JML write is about one human being. Two approvals for the SAME person must serialize — a
+// transfer and a terminate decided seconds apart would otherwise interleave and leave seats and grants
+// disagreeing. Two approvals for DIFFERENT people must not block each other, which rules out keying on
+// the tenant (this deployment is nearly one tenant, see pipeline-lock.ts's LOCK SCOPE note). Keying on
+// the approval id would be useless: the `pending -> executing` claim already serializes a row against
+// itself.
+//
+// The key is derived from whichever identifier the tool carries — `employeeId` for transfer/terminate,
+// `workEmail` for a hire (no employee row exists yet, and the email IS the joiner's natural key per
+// design §5.1 / migration 0111). Pure function of `toolArgs`, stable across retries, as the contract
+// on `lockKey` requires.
+//
+// ── PRECONDITIONS: DETECT A FIRST ATTEMPT THAT ALREADY LANDED ──────────────────────────────────
+// The verdict is re-derived under the lock, never trusted from the payload the human saw. All three
+// checks are ALSO the reason auto-retry is safe here (no `neverAutoRetry`): a retry after a lost
+// response re-reads state and refuses rather than hiring the same person twice. That is the
+// `deploy.*` property, and it is the difference between these and `social.publishPost`, whose
+// landed-or-not is unobservable and which therefore opts out.
+//
+// An approval can also sit in the inbox for days, so each precondition re-checks the WORLD, not just
+// idempotence: a position retired in the meantime must not be filled — the same staleness rule
+// `admin/iam-approval-execute.ts` already applies to assignment requests.
+
+/** The one unit of consistency a JML approval contends over: the person. */
+function jmlLockKey(toolArgs: Record<string, unknown>, tool: string): string {
+  const id =
+    (typeof toolArgs?.employeeId === "string" && toolArgs.employeeId) ||
+    (typeof toolArgs?.workEmail === "string" && toolArgs.workEmail.toLowerCase()) ||
+    "";
+  // A missing identifier fails the precondition below, so it never reaches the hub. The key must still
+  // be a stable pure function, and it must NOT collapse every malformed payload onto one shared
+  // constant (that would serialize unrelated refusals for no benefit) — same reasoning as
+  // `extractRunId`'s fallback.
+  return id ? `jml:${tool}:${id}` : `jml:${tool}:malformed:${JSON.stringify(toolArgs ?? {})}`;
+}
+
+async function hirePrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const email = typeof args?.workEmail === "string" ? args.workEmail.toLowerCase() : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!email || !tenantId) return { ok: false, reason: "missing_work_email" };
+
+  // ALREADY LANDED? `(tenant_id, work_email)` is the joiner's natural key (0111), so an existing live
+  // row means a previous attempt — or a human hiring the same person — already did this.
+  const { rows } = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM employees
+      WHERE tenant_id = $1 AND lower(work_email) = $2 AND deleted_at IS NULL`,
+    [tenantId, email],
+  );
+  if (Number(rows[0]?.n ?? "0") > 0) return { ok: false, reason: "employee_already_exists" };
+
+  // STALE? A hire naming a position that has since been retired must refuse rather than seat someone
+  // into a dead role.
+  const positionId = typeof args?.positionId === "string" ? args.positionId : "";
+  if (positionId) {
+    const pos = await client.query<{ status: string }>(
+      `SELECT status FROM positions WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, positionId],
+    );
+    if (!pos.rows[0]) return { ok: false, reason: "position_not_found" };
+    if (pos.rows[0].status !== "active") return { ok: false, reason: "position_not_active" };
+  }
+  return { ok: true };
+}
+
+async function transferPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const employeeId = typeof args?.employeeId === "string" ? args.employeeId : "";
+  const toPositionId = typeof args?.toPositionId === "string" ? args.toPositionId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!employeeId || !toPositionId || !tenantId) return { ok: false, reason: "missing_transfer_args" };
+
+  const emp = await client.query<{ user_id: string | null; employment_status: string }>(
+    `SELECT user_id, employment_status FROM employees WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, employeeId],
+  );
+  if (!emp.rows[0]) return { ok: false, reason: "employee_not_found" };
+  if (emp.rows[0].employment_status === "terminated") return { ok: false, reason: "employee_terminated" };
+  if (!emp.rows[0].user_id) return { ok: false, reason: "employee_has_no_principal" };
+
+  const pos = await client.query<{ status: string }>(
+    `SELECT status FROM positions WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, toPositionId],
+  );
+  if (!pos.rows[0]) return { ok: false, reason: "position_not_found" };
+  if (pos.rows[0].status !== "active") return { ok: false, reason: "position_not_active" };
+
+  // ALREADY LANDED? The person already holds the destination seat.
+  const held = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM position_assignments
+      WHERE tenant_id = $1 AND user_id = $2 AND position_id = $3 AND valid_to IS NULL`,
+    [tenantId, emp.rows[0].user_id, toPositionId],
+  );
+  if (Number(held.rows[0]?.n ?? "0") > 0) return { ok: false, reason: "already_in_target_position" };
+  return { ok: true };
+}
+
+async function terminatePrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const employeeId = typeof args?.employeeId === "string" ? args.employeeId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!employeeId || !tenantId) return { ok: false, reason: "missing_employee_id" };
+
+  const emp = await client.query<{ employment_status: string }>(
+    `SELECT employment_status FROM employees WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, employeeId],
+  );
+  if (!emp.rows[0]) return { ok: false, reason: "employee_not_found" };
+  // ALREADY LANDED? Terminating a terminated employee is the retry case, and it must refuse rather
+  // than re-run: the flow revokes manual grants and bumps sessions, and doing that twice would look
+  // like a second departure in the audit trail.
+  if (emp.rows[0].employment_status === "terminated") return { ok: false, reason: "already_terminated" };
+  return { ok: true };
+}
+
+/**
+ * Registers the three JML entries. Exported for the same reason `registerCoreExecutableApprovals` is:
+ * a suite that calls `resetExecutableApprovals()` can restore exactly these without re-deriving their
+ * locks and preconditions. Called once at module load below, so boot needs no separate wiring.
+ */
+export function registerJmlExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "hr.hireEmployee",
+    // `employees` (and nothing else these preconditions read) is behind the HR module's third wall.
+    preconditionModules: ["hr"],
+    lockKey: (args) => jmlLockKey(args, "hr.hireEmployee"),
+    precondition: hirePrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "hr.transferEmployee",
+    // `employees` (and nothing else these preconditions read) is behind the HR module's third wall.
+    preconditionModules: ["hr"],
+    lockKey: (args) => jmlLockKey(args, "hr.transferEmployee"),
+    precondition: transferPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "hr.terminateEmployee",
+    // `employees` (and nothing else these preconditions read) is behind the HR module's third wall.
+    preconditionModules: ["hr"],
+    lockKey: (args) => jmlLockKey(args, "hr.terminateEmployee"),
+    precondition: terminatePrecondition,
+  });
+}
+
+registerJmlExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// OWNER DECISION 2026-08-20 — the four DIRECT IAM writes become agent-reachable.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `iam.grantRole`, `iam.revokeRoleGrant`, `iam.assignPosition`, `iam.unassignPosition`. Until today
+// `src/core/core-tools.ts` deliberately shipped only reads plus two low-impact PROPOSAL tools, and its
+// comment recorded why: a role-granting tool is a privilege-escalation surface, and this estate's audit
+// attribution still records "Alice" rather than "Alice's agent".
+//
+// ── WHAT THE OWNER DECIDED, AND ON WHAT BASIS ────────────────────────────────────────────────────
+// The owner ruled to proceed on 2026-08-20, on the basis that every employee on the estate is seed/mock
+// data except their own account — verified before shipping this: 23 `kind='employee'` memberships, all
+// `.test` addresses except `hansel@gaiada.com` (the only account that can log in) and one
+// `@gaiada.com` address with no login. The blast radius of an escalation here is therefore mock data.
+//
+// ⚠ THAT REASONING HAS AN EXPIRY, and it is not the reasoning the original objection raised. The
+// attribution gap is unchanged: an agent-origin grant is still indistinguishable in the audit trail from
+// one the human made themselves. That was already recorded as pre-staging work
+// ([agent-attribution-gate]); it must be closed BEFORE real employee accounts exist, because at that
+// point "the data is mock" stops being true and these four tools become a real escalation surface with
+// an audit trail that cannot say who used them. Do not read this registration as the objection being
+// answered — it is the objection being outranked, temporarily, by a fact about the data.
+//
+// ── WHAT STILL BOUNDS THESE, INDEPENDENTLY OF THE DECISION ───────────────────────────────────────
+// None of the following is relaxed, and none of it depends on the data being mock:
+//   * the executor re-drives as the ORIGINAL FILING PRINCIPAL, so an agent can never exceed what the
+//     human behind it holds (approval-execute.ts invariant 1);
+//   * `GrantWriteService` remains the only writer, so the ceiling arithmetic, the `ui_grantable`
+//     allow-list, the sensitive gate and the self-target DENY all still apply;
+//   * Cerbos still decides `role_grant · create/revoke` and `position · assign/unassign`;
+//   * every one of these is a medium/high write, so it SUSPENDS for a human decision either way — what
+//     these entries add is that the approval, once given, actually completes.
+//
+// ── LOCK SCOPE: THE TARGET PERSON ────────────────────────────────────────────────────────────────
+// Same reasoning as JML's: every one of these is about one human's authority, and two approvals for the
+// same person must serialize while two for different people must not. Keying on the tenant would
+// serialize the whole estate (nearly one tenant); keying on the approval id is what the single-use claim
+// already does. Grant/revoke additionally namespace by the GRANT so two different roles for one person
+// do not block each other unnecessarily — a revoke is about one artifact, not about the person's whole
+// authority.
+
+/** One unit of consistency per (tool, person) — see the LOCK SCOPE note. */
+function iamLockKey(toolArgs: Record<string, unknown>, tool: string): string {
+  const person =
+    (typeof toolArgs?.userId === "string" && toolArgs.userId) ||
+    (typeof toolArgs?.targetUserId === "string" && toolArgs.targetUserId) ||
+    "";
+  // A grant id narrows further for the revoke path, where the artifact IS the unit of work.
+  const grant = typeof toolArgs?.grantId === "string" ? toolArgs.grantId : "";
+  const key = grant || person;
+  return key ? `iam:${tool}:${key}` : `iam:${tool}:malformed:${JSON.stringify(toolArgs ?? {})}`;
+}
+
+/**
+ * `iam.grantRole` — refuse when the exact grant ALREADY EXISTS.
+ *
+ * This is the landed-detection that makes auto-retry safe (no `neverAutoRetry`): a retry after a lost
+ * response re-reads `user_roles` and stops. It deliberately does NOT re-check the ceiling — that is
+ * `GrantWriteService`'s job at the actual write, and duplicating the arithmetic here would create a
+ * second implementation of the estate's most security-sensitive rule.
+ */
+async function grantRolePrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const userId = typeof args?.userId === "string" ? args.userId : "";
+  const roleId = typeof args?.roleId === "string" ? args.roleId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!userId || !roleId || !tenantId) return { ok: false, reason: "missing_grant_args" };
+
+  const scopeType = typeof args?.scopeType === "string" ? args.scopeType : "company";
+  // `company` scope stores the TENANT as scope_id (0100's shape), which is what the surface itself does.
+  const scopeId = scopeType === "company" ? tenantId : typeof args?.scopeId === "string" ? args.scopeId : null;
+  if (scopeType === "org_unit" && !scopeId) return { ok: false, reason: "missing_scope_id" };
+
+  const { rows } = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM user_roles
+      WHERE user_id = $1 AND role_id = $2 AND scope_type = $3
+        AND (scope_id = $4 OR ($4 IS NULL AND scope_id IS NULL))`,
+    [userId, roleId, scopeType, scopeId],
+  );
+  if (Number(rows[0]?.n ?? "0") > 0) return { ok: false, reason: "grant_already_exists" };
+  return { ok: true };
+}
+
+/**
+ * `iam.revokeRoleGrant` — refuse when the grant is gone, or when it is MANAGED.
+ *
+ * The managed check is the one that matters: revoking a position- or service-managed grant would be
+ * undone by the reconciler on its next pass, so an approval that "succeeded" would leave the access
+ * standing. Refusing names the real fix (change the position) instead of producing a silent no-op.
+ */
+async function revokeGrantPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const grantId = typeof args?.grantId === "string" ? args.grantId : "";
+  if (!grantId) return { ok: false, reason: "missing_grant_id" };
+
+  const { rows } = await client.query<{ managed_by: string | null; managed_by_position: string | null }>(
+    `SELECT managed_by, managed_by_position FROM user_roles WHERE id = $1`,
+    [grantId],
+  );
+  const row = rows[0];
+  // ALREADY LANDED: a retry after a lost response, or a human who revoked it in the UI meanwhile.
+  if (!row) return { ok: false, reason: "grant_not_found" };
+  if (row.managed_by_position !== null) return { ok: false, reason: "managed_by_position_not_revocable" };
+  if (row.managed_by !== null) return { ok: false, reason: "managed_by_service_not_revocable" };
+  return { ok: true };
+}
+
+/** `iam.assignPosition` — refuse a stale seat, and refuse a placement that already landed. */
+async function assignPositionPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const positionId = typeof args?.positionId === "string" ? args.positionId : "";
+  const userId = typeof args?.userId === "string" ? args.userId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!positionId || !userId || !tenantId) return { ok: false, reason: "missing_assign_args" };
+
+  const pos = await client.query<{ status: string }>(
+    `SELECT status FROM positions WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, positionId],
+  );
+  if (!pos.rows[0]) return { ok: false, reason: "position_not_found" };
+  // A seat retired or orphaned while the approval sat in the inbox must not be filled. `orphaned` is
+  // included deliberately: its unit is gone from the org chart, so the reconciler has FROZEN grants
+  // there and a new placement would inherit that frozen state rather than conferring access.
+  if (pos.rows[0].status !== "active") return { ok: false, reason: "position_not_active" };
+
+  const held = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM position_assignments
+      WHERE tenant_id = $1 AND position_id = $2 AND user_id = $3 AND valid_to IS NULL`,
+    [tenantId, positionId, userId],
+  );
+  if (Number(held.rows[0]?.n ?? "0") > 0) return { ok: false, reason: "already_assigned" };
+  return { ok: true };
+}
+
+/** `iam.unassignPosition` — refuse when there is no open placement left to close. */
+async function unassignPositionPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const positionId = typeof args?.positionId === "string" ? args.positionId : "";
+  const userId = typeof args?.userId === "string" ? args.userId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!positionId || !userId || !tenantId) return { ok: false, reason: "missing_assign_args" };
+
+  const { rows } = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM position_assignments
+      WHERE tenant_id = $1 AND position_id = $2 AND user_id = $3 AND valid_to IS NULL`,
+    [tenantId, positionId, userId],
+  );
+  // ALREADY LANDED. Re-running would be harmless against the seat but NOT against the audit trail: a
+  // second "removed from seat" entry reads as a second decision nobody made.
+  if (Number(rows[0]?.n ?? "0") === 0) return { ok: false, reason: "not_assigned" };
+  return { ok: true };
+}
+
+/**
+ * Registers the four. Exported for the same reason the other bootstraps are: a suite that calls
+ * `resetExecutableApprovals()` restores exactly these without re-deriving their locks.
+ *
+ * NOTE: no `preconditionModules`. Every table these read (`user_roles`, `positions`,
+ * `position_assignments`) is CORE with a plain tenant policy — `user_roles` is global outright. Adding
+ * a scope here would be cargo-culted from the JML entries, which need `hr` because `employees` sits
+ * behind that module's wall.
+ */
+export function registerIamExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "iam.grantRole",
+    lockKey: (args) => iamLockKey(args, "iam.grantRole"),
+    precondition: grantRolePrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "iam.revokeRoleGrant",
+    lockKey: (args) => iamLockKey(args, "iam.revokeRoleGrant"),
+    precondition: revokeGrantPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "iam.assignPosition",
+    lockKey: (args) => iamLockKey(args, "iam.assignPosition"),
+    precondition: assignPositionPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "iam.unassignPosition",
+    lockKey: (args) => iamLockKey(args, "iam.unassignPosition"),
+    precondition: unassignPositionPrecondition,
+  });
+}
+
+registerIamExecutableApprovals();
