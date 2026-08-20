@@ -62,6 +62,13 @@ import { registerProvider } from "./modules/search/providers/registry";
 // from config, so the platform boots normally with Postiz unreachable and the publisher-touching
 // capabilities degrade to typed 503s. See that file's header.
 import { wireSocialPublisher } from "./modules/social/publisher/boot";
+// SMM-38/38b — token custody's own boot wiring: registers `purgeOAuthTokens` into SMM-36's
+// `registerRetentionPurger('oauth_tokens', ...)` seam (inbox-retention-job.ts). Opens no socket and
+// registers no TokenRefresher for any network — 38b ships zero refreshers by design (no OAuth client
+// exists yet for LinkedIn/YouTube). See oauth-tokens.ts's header for what this call does and does not
+// do, and why `direct` itself is deliberately NOT registered here (unlike this purger hook, that
+// would change resolvePublisher's empty-registry heuristic — see boot.ts's own header).
+import { wireOAuthTokenCustody } from "./modules/social/publisher/oauth-tokens";
 // SM-49 AC 9 (tracker §6u; design addendum §A10.4) — the repointed-base-URL boot guard. Lives outside
 // config.ts (SM-48 owns it this wave) and outside modules/search (it isn't itself an egress file — see
 // its own header). registerProvider above already makes the simulate/live branches structurally
@@ -391,6 +398,11 @@ async function bootstrap(): Promise<void> {
   // home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC address, which
   // means the containment perimeter moved (addendum §A4l §2/§3). No network call is made here.
   wireSocialPublisher();
+  // SMM-38/38b — token custody's purger registration, alongside the publisher-driver wiring above
+  // (its own ticket asked for exactly this placement — "at module boot, alongside wherever 38b
+  // registers its publisher driver"). Pure in-process registration, no network call, no schedule of
+  // its own: it rides SMM-36's existing inbox-retention sweep and cadence.
+  wireOAuthTokenCustody();
   // SMM-10/D-22 — install the dispatch-side creator-info verifier. Unconditional: it is a pure,
   // in-process registration (`setCreatorInfoVerifier`), never a network call, so there is no boot
   // condition to gate it on. Its own doc states the steady state THIS makes correct: with no

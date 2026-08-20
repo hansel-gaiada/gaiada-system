@@ -61,12 +61,13 @@
 import type { Network, QuotaSnapshot } from "../media-rules";
 
 // SMM-38/D-20 — 'direct' is the second SocialPublisher implementation (owner decision D-20): a
-// second, free, in-house driver switched in per capability alongside the Postiz incumbent, so the
-// AGPL zone, both fork exceptions and the P2 inbox gap can all be removed without forking Postiz.
-// Note what did NOT change: 0105's `social_publisher_orgs.driver` CHECK constraint still admits only
-// `'postiz'`/`'mixpost'` — 'direct' is never written to that column in 38a (and is not expected to
-// be until an owner/db decision widens it). It reaches a live call ONLY through the per-capability
-// switch (registry.ts's `resolvePublisherForCapability`), which lives in config, not in the row.
+// second, free, in-house driver switched in per (network, capability) alongside the Postiz incumbent,
+// so the AGPL zone, both fork exceptions and the P2 inbox gap can all be removed without forking
+// Postiz. Note what did NOT change: 0105's `social_publisher_orgs.driver` CHECK constraint still
+// admits only `'postiz'`/`'mixpost'` — 'direct' is never written to that column in 38a/38b (and is
+// not expected to be until an owner/db decision widens it). It reaches a live call ONLY through the
+// per-(network, capability) switch (registry.ts's `resolvePublisherForCapability`), which lives in
+// config, not in the row.
 export type PublisherKey = "postiz" | "mixpost" | "direct";
 
 /** What a driver can do AT ALL. A capability the driver does not advertise is refused fail-closed
