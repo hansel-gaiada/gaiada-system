@@ -435,15 +435,18 @@ export const socialModule: ModuleContract = {
     // exist is a lie the hub publishes to every agent in the estate, and a publish tool is the
     // worst possible instance of it.
     // SMM-09 — the publish GATE's read surface (agentic criterion 1: tool parity, same authorize()
-    // call as the endpoint). Note what is still ABSENT and why: `social.publishPost` itself is NOT
-    // declared here. It is registered in the D14 executable-approval registry
-    // (core/approval-executables.ts, SMM-09 section) with `write:true, impact:"high"` semantics
-    // pinned as `SOCIAL_PUBLISH_TOOL_CLASSIFICATION`, but the dispatch endpoint it would front —
-    // approval-execution → `schedulePost` + the transactional stamp — is SMM-10's. This file's own
-    // header states the rule that keeps it out until then: "a declared MCP tool whose endpoint does
-    // not exist is a lie the hub will happily publish to every agent in the estate", and a publish
-    // tool is the worst possible instance of it. `social.publishPostMetered` is barred outright and
-    // must never appear here at all.
+    // call as the endpoint).
+    //
+    // ⚠ CORRECTED 2026-08-20 (SMM-24). This comment used to say `social.publishPost` was NOT
+    // declared here, which was true when SMM-09 wrote it and stopped being true ~40 lines below when
+    // SMM-10 built the dispatch endpoint and declared the tool. The stale text cost real time: a
+    // later seat grepped for the literal `"social.publishPost"`, found nothing (the declaration uses
+    // the `SOCIAL_PUBLISH_TOOL` constant, deliberately, so the name is never retyped), read this
+    // comment, and reported the tool as undeclared. A comment that contradicts the code 40 lines
+    // away is worse than no comment.
+    //
+    // `social.publishPostMetered` genuinely IS barred outright and must never appear here — that
+    // half was and remains correct.
     {
       name: "social.checkPublishPreconditions",
       description:

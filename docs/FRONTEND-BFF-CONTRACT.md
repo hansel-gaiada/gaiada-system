@@ -2972,12 +2972,20 @@ same `authorize()` calls as their HTTP twins above), and SMM-05's `social.listAc
 `social.getPublisherStatus` (reads, `low`), `social.provisionPublisherOrg` (write, impact
 **`medium`** — it is the tenant-mapping row whose corruption is the wrong-account-publish nightmare)
 and `social.syncConnectorRegistry` (write, impact `low` — mirrored state only, nothing public), plus
-SMM-09's `social.checkPublishPreconditions` (read, `low`). The publish, inbox, report and ledger
-tools are deliberately NOT declared yet: their endpoints do not exist, and a tool the hub publishes
-to every agent without a handler behind it is this program's "frontend-first drift" bug pointed at
-automation instead of a console. **`social.publishPost` is registered in the D14 executable-approval
-registry but is NOT declared as an MCP tool** until SMM-10 builds the dispatch endpoint it would
-front; `social.publishPostMetered` is BARRED and must never be declared at all.
+SMM-09's `social.checkPublishPreconditions` (read, `low`). The inbox, report and ledger tools are
+deliberately NOT declared yet: their endpoints do not exist, and a tool the hub publishes to every
+agent without a handler behind it is this program's "frontend-first drift" bug pointed at automation
+instead of a console.
+
+⚠ **CORRECTED 2026-08-20 (SMM-24).** This paragraph used to say `social.publishPost` was registered
+in the D14 registry but **not** declared as an MCP tool "until SMM-10 builds the dispatch endpoint".
+SMM-10 landed on 2026-08-19 and **declared it** — `modules/social/index.ts`, `name:
+SOCIAL_PUBLISH_TOOL`, `POST /api/:tenantId/modules/social/variants/:variantId/publish`, classification
+spread from `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` so the `write:true, impact:"high"` pair is never
+retyped. The stale sentence was believed over the code by a later seat, which is exactly the failure
+mode the top of this file warns about. **`social.publishPost` IS declared.**
+
+`social.publishPostMetered` is BARRED and must never be declared at all — that has not changed.
 
 **The publish gate (SMM-09) — BUILT.** Cerbos kind `social_post`. This is the D14
 executable-approval spine SMM-10/17/22/31 consume. Design: addendum D-14 (publish executes on

@@ -277,9 +277,9 @@ any single capability is real, that phase decides how `direct` gets registered a
 | SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ⬜ | |
 | SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ⬜ | widens SMM-09's budget stage |
 | SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ⬜ | |
-| SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | 🟡 partial | runbook + MODULES/CHANGELOG done; **AGPL footer + toolkit entry outstanding** |
+| SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | 🟡 partial | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20. **Outstanding: the AGPL source-offer — see the gap below** |
 | SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
-| SMM-33 | Capability inventory + eval register | 🟡 partial | golden-case table landed in SMM-14 |
+| SMM-33 | Capability inventory + eval register | 🟡 partial | golden-case table landed in SMM-14. **Outstanding: the per-capability inventory row set** (endpoint · tool · impact class · refusal · `work_activity`) — 17 MCP tools enumerated, table not yet written |
 
 ## P4 — agents + assistant ⬜
 
@@ -303,6 +303,7 @@ any single capability is real, that phase decides how `direct` gets registered a
 
 | Item | Owner / when |
 |---|---|
+| **AGPL §13 source-offer has nowhere to live.** Postiz is AGPL-3.0 and §13 requires offering its modified source to users who interact with it over a network. The **staff console has no footer surface at all** (`departments/[deptId]/layout.tsx`, `DeptShellFrame.tsx`); the only footer is in `PortalShell.tsx`, which is client-facing and the wrong audience. Needs a deliberate placement decision, not an invented component | owner + senior-uiux |
 | Platform-app reviews — **Meta first**, its Business Verification is the only serial prerequisite | **staging** (D-23) |
 | Google SSO on Postiz login: does `DISABLE_REGISTRATION` block a *first-time* sign-in? | staging checklist — **do not test on the live instance** |
 | Postiz OAuth finalization route — "reasoned from source, not yet driven" | whoever first holds a live app credential |
@@ -357,6 +358,13 @@ be read via `adminPool()` and `config.mail.enabled` flipped in-test.
 nine of its DB tests silently skipped for want of `DATABASE_URL_TEST` — and shipped a purge job that
 was dead on a type-inference bug. **Any seat touching migrations or DB-backed jobs gets the test-DB
 URL, and the acceptance-critical suites get re-run at merge.**
+
+**4b. A stale comment beats the code, if you let it.** `index.ts` carried an SMM-09 comment saying
+`social.publishPost` was NOT declared as an MCP tool. SMM-10 declared it ~40 lines below, using the
+`SOCIAL_PUBLISH_TOOL` constant so the name is never retyped. A later seat grepped for the literal
+string, found nothing, read the comment, and reported the tool undeclared — and `FRONTEND-BFF-CONTRACT.md`
+said the same stale thing. Both corrected 2026-08-20. **Grep for the constant, not the literal, and
+trust the code over the prose.**
 
 **5. In-process tests are silent about bundling.** `demoSocial.ts` mutated a plain module array; Next
 bundles the `"use server"` action graph and the RSC read graph separately, so the write and the read
