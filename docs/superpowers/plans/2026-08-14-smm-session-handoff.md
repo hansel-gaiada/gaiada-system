@@ -231,3 +231,42 @@ These answer §5a/5b/5c and supersede the recommendations recorded above.
 | **D-21 (§5b)** | **Fork exception GRANTED, once, with both items in scope:** TikTok `creator_info` exposure and the Instagram live-quota probe. ~15 additive lines in one Postiz file, behind the same missing decorator. | Bridges compliance until SMM-38 covers those networks. The §06 containment budget is amended to permit exactly these two additions; anything further needs a new exception. The AGPL source-offer obligation now definitely applies (SMM-24). |
 | **D-22 (§5c)** | **The composer's explicit selections ARE the consent, and `creator_info` is re-verified at dispatch.** If the creator's live settings changed between approval and dispatch such that the chosen selections are no longer permitted, dispatch **refuses** with a typed refusal and does not auto-retry. | Scheduled TikTok stays sellable. Carries app-review risk, which the dossier must state plainly rather than paper over. SMM-09's precondition and SMM-10's dispatch chain both gain the re-verify step; the refusal is a golden case (agentic criterion 5). |
 | **—** | **The Postiz org ceremony stays with the owner.** Not taken. | **SMM-07 remains blocked.** Everything else proceeds. |
+
+---
+
+## 11. Owner decision 2026-08-20 — platform-app reviews DEFERRED TO STAGING
+
+| # | Decision |
+|---|---|
+| **D-23** | **The platform-app reviews (Meta, LinkedIn, TikTok, YouTube — OQ-1) are deferred to the staging phase.** They are not a P1 blocker and are not to be treated as one. |
+
+**What this changes.** Every platform app credential inside Postiz is empty — verified on the live
+engine 2026-08-19: `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET`, `LINKEDIN_CLIENT_ID`,
+`LINKEDIN_CLIENT_SECRET`, `TIKTOK_CLIENT_ID`, `YOUTUBE_CLIENT_ID`, all length 0. OAuth cannot begin
+without a registered app's client id, so **no account can be connected on any network, including our
+own brand.** That was previously written up as the thing blocking SMM-07 and SMM-14.
+
+Under D-23 it is no longer a blocker but a **phase boundary**:
+
+- **P1's exit bar is the spine, not a live post.** DEV-VERIFIED means: compose → per-network variants
+  → validation → `args_sha256` → approval → the SMM-09 gate → SMM-10 dispatch → transactional stamp →
+  reconcile → SMM-13 events, all against the **mock driver**, plus every refusal path rendering as
+  itself. That is a complete and honest claim. It is not "publishing works".
+- **`platform_app_not_registered` is the correct steady state today**, not a defect. SMM-07 was built
+  so every network refuses honestly rather than dead-ending in a Postiz error page, and that refusal
+  is what a console should show until staging.
+- **The status word is "deferred", not "blocked".** MODULES.md and CHANGELOG should say live network
+  publishing is deferred to staging — a scheduling fact, not an impediment.
+- **The dossier keeps its value** (`docs/blueprints/smm-app-review-dossier.md`, 902 lines). Nothing in
+  it is invalidated; it is simply consumed later. Its one durable warning still stands: **Meta's
+  Business Verification is the only serial prerequisite in the fleet** and blocks App Review entirely,
+  so it is the first thing to start when staging work begins — not the first thing to start now.
+
+**What is still genuinely open, and unrelated to D-23:**
+- **Google SSO on the Postiz login page.** `DISABLE_REGISTRATION=true` is verified to block the local
+  signup path. Whether it blocks a **first-time Google sign-in** is UNVERIFIED. If it does not,
+  containment invariant 5 has a second door, and that matters before any client account exists —
+  which is a staging concern, so it belongs on the staging checklist. Do not test it against the live
+  instance.
+- The Postiz-side OAuth finalization route (§A4j) remains "reasoned from source, not yet driven".
+  SMM-07 deliberately did not invent its shape. Whoever first holds a live app credential drives it.
