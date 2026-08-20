@@ -61,25 +61,32 @@ export function resetCoreTools(): void {
 // complete at all) would make the natural agent path for "an agent notices a placement is needed"
 // dead-end silently. Filing a request is the LOW-impact action; granting is the high one.
 //
-// ── WHAT IS DELIBERATELY NOT HERE, AND WHY IT IS AN OWNER DECISION ───────────────────────────────
-// `POST :tenantId/role-grants` (grant a role), `DELETE :tenantId/role-grants/:grantId`, and
-// positions' direct `assign`/`unassign` are NOT declared. This is not the "no executor yet" reason
-// that held the JML writes back last release — that one is now solved and the pattern is worked
-// (`registerJmlExecutableApprovals`). This is a different objection, and a bigger one:
+// ── THE FOUR DIRECT WRITES: DECIDED BY THE OWNER 2026-08-20, WITH AN EXPIRY ──────────────────────
+// `iam.grantRole`, `iam.revokeRoleGrant`, `iam.assignPosition` and `iam.unassignPosition` are declared
+// below. They were withheld until today, and the objection is kept on the record rather than deleted,
+// because it was not answered — it was OUTRANKED by a fact about the data:
 //
-//   A tool that grants a role is a PRIVILEGE-ESCALATION surface. Adding it makes "an agent asks, a
-//   human clicks approve" a path to arbitrary role assignment, and the approver sees a tool name and
-//   an args blob rather than the ceiling arithmetic `grant-write.service.ts` performs. The
-//   ceiling itself still applies (the re-drive runs as the original filing principal, so an agent
-//   cannot exceed what that principal holds) — but the estate has an unresolved gap the program
-//   already recorded: audit attribution says "Alice", not "Alice's agent"
-//   [agent-attribution-gate]. Granting rights through a surface whose attribution is known to be
-//   wrong is exactly the combination worth refusing until someone decides it on purpose.
+//   A tool that grants a role is a PRIVILEGE-ESCALATION surface. "An agent asks, a human clicks
+//   approve" becomes a path to arbitrary role assignment, and the approver sees a tool name and an args
+//   blob rather than the ceiling arithmetic `grant-write.service.ts` performs. The ceiling itself still
+//   applies — the re-drive runs as the ORIGINAL FILING PRINCIPAL, so an agent can never exceed what the
+//   human behind it holds — but audit attribution still says "Alice", not "Alice's agent"
+//   ([agent-attribution-gate]).
 //
-// The proposal endpoints give an agent the useful 90% (notice, propose, justify) with no escalation:
-// a filed request that a human executes. If the owner later wants direct grant tools, the work is
-// three D14 entries plus `resource_mcp_tool.yaml` allow-list names — small, and blocked on the
-// decision rather than on the code.
+// The owner ruled to proceed on the basis that every employee on the estate is seed/mock data except
+// their own account. That was VERIFIED before shipping, not taken on trust: 23 `kind='employee'`
+// memberships, every one a `.test` address except `hansel@gaiada.com` (the only account that can log in)
+// and one `@gaiada.com` address with no login.
+//
+// ⚠ THE BASIS EXPIRES WHEN THE DATA DOES. The attribution gap is unchanged, and the moment real
+// employee accounts exist these four become a genuine escalation surface with an audit trail that
+// cannot say who used them. Closing [agent-attribution-gate] is a PRE-STAGING requirement, and this
+// block is why it is not optional. See `core/approval-executables.ts`'s owner-decision block for what
+// still bounds these regardless: one writer, the ceiling, the sensitive gate, the self-target DENY, and
+// a human decision on every one of them because medium/high writes suspend.
+//
+// The PROPOSAL tools stay, and stay `low`: an agent that only needs to say "this person should be
+// placed" should not have to reach for the write that can also do something else.
 const IAM_CORE_TOOLS: McpToolDef[] = [
   {
     name: "iam.listPositions",
@@ -176,6 +183,93 @@ const IAM_CORE_TOOLS: McpToolDef[] = [
         justification: { type: "string" },
       },
       required: ["tenantId", "userId", "roleId", "justification"],
+    },
+  },
+
+  // ── the four direct writes (owner decision 2026-08-20) ─────────────────────────────────────────
+  {
+    name: "iam.grantRole",
+    description:
+      "Grant a role directly. Bounded by the granter's own ceiling, the ui_grantable allow-list and the sensitive gate — a grant above the ceiling is refused, and iam.requestOverride is the path for it.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/role-grants",
+    write: true,
+    // HIGH: the one tool here that can WIDEN somebody's authority. Impact drives urgency and the
+    // notification tier, not whether a human is asked — medium and high both suspend.
+    impact: "high",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        userId: { type: "string" },
+        roleId: { type: "string" },
+        scopeType: { type: "string", enum: ["company", "org_unit"], default: "company" },
+        scopeId: { type: "string", description: "required when scopeType is org_unit" },
+        temporary: { type: "boolean" },
+        expiresInDays: { type: "integer" },
+        reason: { type: "string" },
+      },
+      required: ["tenantId", "userId", "roleId"],
+    },
+  },
+  {
+    name: "iam.revokeRoleGrant",
+    description:
+      "Revoke a manual role grant. Position- and service-managed grants are refused: the reconciler would restore them, so the fix is to change the position instead.",
+    minAssurance: "verified",
+    method: "DELETE",
+    pathTemplate: "/api/:tenantId/role-grants/:grantId",
+    write: true,
+    // MEDIUM, not high: taking access away cannot escalate anyone. It can still break somebody's day,
+    // which is why it suspends rather than running unattended.
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, grantId: { type: "string" } },
+      required: ["tenantId", "grantId"],
+    },
+  },
+  {
+    name: "iam.assignPosition",
+    description:
+      "Place a person in an existing seat; their access then follows that seat's role-set. This cannot confer anything the seat does not already carry.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/positions/:positionId/assign",
+    write: true,
+    // MEDIUM rather than high, for a structural reason: a placement can only confer what the position's
+    // role-set already carries, and that role-set was authored by a human through a surface with its own
+    // allow-list. The escalation ceiling is the position registry, not the caller's imagination.
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        positionId: { type: "string" },
+        userId: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["tenantId", "positionId", "userId"],
+    },
+  },
+  {
+    name: "iam.unassignPosition",
+    description:
+      "Remove a person from a seat. Grants that only that seat justified are revoked; one a second seat also justifies survives with its reference count decremented.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/positions/:positionId/unassign",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        positionId: { type: "string" },
+        userId: { type: "string" },
+      },
+      required: ["tenantId", "positionId", "userId"],
     },
   },
 ];

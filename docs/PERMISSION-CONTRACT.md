@@ -867,3 +867,89 @@ such a user, and the backfill does not reason further than the engine that will 
   run would read, to the operator, as "adoption did nothing".
 * Every apply prints the before/after `user_roles` count, so the claim the run is making is visible
   rather than trusted from an exit code.
+
+---
+
+## 14. The four direct IAM writes become agent-reachable (owner decision, 2026-08-20)
+
+`iam.grantRole` · `iam.revokeRoleGrant` · `iam.assignPosition` · `iam.unassignPosition` are declared in
+`src/core/core-tools.ts`, each with a D14 executable-approval entry
+(`registerIamExecutableApprovals`) and each named in `resource_mcp_tool.yaml`'s executable allow-list.
+
+### 14.1 What the decision rested on, and why that matters
+
+§13 and `core-tools.ts` previously withheld these, and the objection was **not** "no executor exists" —
+it was that a role-granting tool is a privilege-escalation surface while this estate's audit attribution
+still records *"Alice"* rather than *"Alice's agent"* ([agent-attribution-gate]).
+
+The owner ruled to proceed on the basis that **every employee on the estate is seed/mock data except
+their own account**. That was verified against the live database before shipping, not taken on trust:
+
+| Category | Count | Note |
+|---|---|---|
+| `kind='employee'` memberships | 23 | all `.test` addresses except the two below |
+| `hansel@gaiada.com` | 2 (both companies) | the ONLY account with a verified login |
+| `@gaiada.com`, no login | 1 | real-looking address, cannot authenticate |
+| `kind='service'` (bots) | 17 | correctly kinded — none appeared as an employee |
+
+🔴 **THE BASIS EXPIRES WHEN THE DATA DOES.** The attribution gap is unchanged. At the moment real
+employee accounts exist, these four are a genuine escalation surface with an audit trail that cannot say
+who used them. **Closing [agent-attribution-gate] is therefore a hard pre-staging requirement**, not a
+nice-to-have, and the code comments say so at both sites. Read this section as the objection being
+*outranked by a fact about the data*, never as the objection being answered.
+
+### 14.2 What still bounds these, independently of the decision
+
+Nothing below was relaxed, and none of it depends on the data being mock:
+
+* the executor re-drives as the **original filing principal**, so an agent can never exceed what the
+  human behind it holds (`approval-execute.ts` invariant 1);
+* `GrantWriteService` remains the only writer of `user_roles`, so the ceiling arithmetic, the
+  `ui_grantable` allow-list, the sensitive gate and the self-target DENY all still apply;
+* Cerbos still decides `role_grant · create/revoke` and `position · assign/unassign`;
+* all four are medium/high writes, so every one **suspends for a human decision** — what these entries
+  add is that the approval, once given, actually completes instead of landing `not_applicable`.
+
+### 14.3 Impact tiers, and the one structural argument
+
+| Tool | Impact | Why |
+|---|---|---|
+| `iam.grantRole` | **high** | the only one that can WIDEN authority |
+| `iam.revokeRoleGrant` | medium | taking access away cannot escalate anyone; it can still break a day |
+| `iam.assignPosition` | medium | **structural**: a placement can only confer what the seat's role-set already carries, and that role-set was authored by a human through a surface with its own allow-list. The escalation ceiling is the position registry. |
+| `iam.unassignPosition` | medium | removal only |
+
+Impact drives urgency and the notification tier, **not** whether a human is asked — medium and high both
+suspend.
+
+### 14.4 The preconditions, and the one that is a security property
+
+Each entry detects a first attempt that already landed, which is what makes auto-retry safe (none sets
+`neverAutoRetry`):
+
+| Tool | Landed / stale detection |
+|---|---|
+| `grantRole` | `grant_already_exists` — the exact (user, role, scope) triple. The same role at a different scope is a different artifact and stays grantable. |
+| `revokeRoleGrant` | `grant_not_found`, plus 🔴 **`managed_by_position_not_revocable`** |
+| `assignPosition` | `already_assigned`; `position_not_active` for retired **and orphaned** seats |
+| `unassignPosition` | `not_assigned` |
+
+🔴 **`managed_by_position_not_revocable` is a security property, not housekeeping.** The reconciler would
+restore a position-managed grant on its next pass, so an approval that "succeeded" would leave the access
+standing while a human believed they had removed it. Refusing names the real fix — change the position.
+
+**`position_not_active` covers `orphaned` deliberately.** An orphaned seat's unit is gone from the org
+chart, so the reconciler has FROZEN grants there; placing someone into it would inherit that frozen state
+rather than conferring access, and the approval would appear to work and change nothing.
+
+**No `preconditionModules`.** Every table these read is core (`user_roles` is global outright), unlike
+JML's `employees` which sits behind the HR module's third wall. Cargo-culting `["hr"]` here would be
+harmless but would tell a reader something false about where these tables live.
+
+### 14.5 A contract widening this required
+
+`McpToolDef.method` gained `DELETE` (and `mcp-hub`'s mirroring `RemoteToolDef.method` with it), because
+`iam.revokeRoleGrant`'s endpoint is a real DELETE. The hub needed no behavioural change — `callPlatform`
+already passed `def.method` straight to `fetch`, so the transport always supported it and only the two
+type declarations were narrower than reality. A def arriving over the wire is `JSON.parse`d, so the old
+type never rejected anything at runtime; it just described it wrongly.

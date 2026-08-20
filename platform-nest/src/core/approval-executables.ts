@@ -994,3 +994,198 @@ export function registerJmlExecutableApprovals(): void {
 }
 
 registerJmlExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// OWNER DECISION 2026-08-20 — the four DIRECT IAM writes become agent-reachable.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `iam.grantRole`, `iam.revokeRoleGrant`, `iam.assignPosition`, `iam.unassignPosition`. Until today
+// `src/core/core-tools.ts` deliberately shipped only reads plus two low-impact PROPOSAL tools, and its
+// comment recorded why: a role-granting tool is a privilege-escalation surface, and this estate's audit
+// attribution still records "Alice" rather than "Alice's agent".
+//
+// ── WHAT THE OWNER DECIDED, AND ON WHAT BASIS ────────────────────────────────────────────────────
+// The owner ruled to proceed on 2026-08-20, on the basis that every employee on the estate is seed/mock
+// data except their own account — verified before shipping this: 23 `kind='employee'` memberships, all
+// `.test` addresses except `hansel@gaiada.com` (the only account that can log in) and one
+// `@gaiada.com` address with no login. The blast radius of an escalation here is therefore mock data.
+//
+// ⚠ THAT REASONING HAS AN EXPIRY, and it is not the reasoning the original objection raised. The
+// attribution gap is unchanged: an agent-origin grant is still indistinguishable in the audit trail from
+// one the human made themselves. That was already recorded as pre-staging work
+// ([agent-attribution-gate]); it must be closed BEFORE real employee accounts exist, because at that
+// point "the data is mock" stops being true and these four tools become a real escalation surface with
+// an audit trail that cannot say who used them. Do not read this registration as the objection being
+// answered — it is the objection being outranked, temporarily, by a fact about the data.
+//
+// ── WHAT STILL BOUNDS THESE, INDEPENDENTLY OF THE DECISION ───────────────────────────────────────
+// None of the following is relaxed, and none of it depends on the data being mock:
+//   * the executor re-drives as the ORIGINAL FILING PRINCIPAL, so an agent can never exceed what the
+//     human behind it holds (approval-execute.ts invariant 1);
+//   * `GrantWriteService` remains the only writer, so the ceiling arithmetic, the `ui_grantable`
+//     allow-list, the sensitive gate and the self-target DENY all still apply;
+//   * Cerbos still decides `role_grant · create/revoke` and `position · assign/unassign`;
+//   * every one of these is a medium/high write, so it SUSPENDS for a human decision either way — what
+//     these entries add is that the approval, once given, actually completes.
+//
+// ── LOCK SCOPE: THE TARGET PERSON ────────────────────────────────────────────────────────────────
+// Same reasoning as JML's: every one of these is about one human's authority, and two approvals for the
+// same person must serialize while two for different people must not. Keying on the tenant would
+// serialize the whole estate (nearly one tenant); keying on the approval id is what the single-use claim
+// already does. Grant/revoke additionally namespace by the GRANT so two different roles for one person
+// do not block each other unnecessarily — a revoke is about one artifact, not about the person's whole
+// authority.
+
+/** One unit of consistency per (tool, person) — see the LOCK SCOPE note. */
+function iamLockKey(toolArgs: Record<string, unknown>, tool: string): string {
+  const person =
+    (typeof toolArgs?.userId === "string" && toolArgs.userId) ||
+    (typeof toolArgs?.targetUserId === "string" && toolArgs.targetUserId) ||
+    "";
+  // A grant id narrows further for the revoke path, where the artifact IS the unit of work.
+  const grant = typeof toolArgs?.grantId === "string" ? toolArgs.grantId : "";
+  const key = grant || person;
+  return key ? `iam:${tool}:${key}` : `iam:${tool}:malformed:${JSON.stringify(toolArgs ?? {})}`;
+}
+
+/**
+ * `iam.grantRole` — refuse when the exact grant ALREADY EXISTS.
+ *
+ * This is the landed-detection that makes auto-retry safe (no `neverAutoRetry`): a retry after a lost
+ * response re-reads `user_roles` and stops. It deliberately does NOT re-check the ceiling — that is
+ * `GrantWriteService`'s job at the actual write, and duplicating the arithmetic here would create a
+ * second implementation of the estate's most security-sensitive rule.
+ */
+async function grantRolePrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const userId = typeof args?.userId === "string" ? args.userId : "";
+  const roleId = typeof args?.roleId === "string" ? args.roleId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!userId || !roleId || !tenantId) return { ok: false, reason: "missing_grant_args" };
+
+  const scopeType = typeof args?.scopeType === "string" ? args.scopeType : "company";
+  // `company` scope stores the TENANT as scope_id (0100's shape), which is what the surface itself does.
+  const scopeId = scopeType === "company" ? tenantId : typeof args?.scopeId === "string" ? args.scopeId : null;
+  if (scopeType === "org_unit" && !scopeId) return { ok: false, reason: "missing_scope_id" };
+
+  const { rows } = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM user_roles
+      WHERE user_id = $1 AND role_id = $2 AND scope_type = $3
+        AND (scope_id = $4 OR ($4 IS NULL AND scope_id IS NULL))`,
+    [userId, roleId, scopeType, scopeId],
+  );
+  if (Number(rows[0]?.n ?? "0") > 0) return { ok: false, reason: "grant_already_exists" };
+  return { ok: true };
+}
+
+/**
+ * `iam.revokeRoleGrant` — refuse when the grant is gone, or when it is MANAGED.
+ *
+ * The managed check is the one that matters: revoking a position- or service-managed grant would be
+ * undone by the reconciler on its next pass, so an approval that "succeeded" would leave the access
+ * standing. Refusing names the real fix (change the position) instead of producing a silent no-op.
+ */
+async function revokeGrantPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const grantId = typeof args?.grantId === "string" ? args.grantId : "";
+  if (!grantId) return { ok: false, reason: "missing_grant_id" };
+
+  const { rows } = await client.query<{ managed_by: string | null; managed_by_position: string | null }>(
+    `SELECT managed_by, managed_by_position FROM user_roles WHERE id = $1`,
+    [grantId],
+  );
+  const row = rows[0];
+  // ALREADY LANDED: a retry after a lost response, or a human who revoked it in the UI meanwhile.
+  if (!row) return { ok: false, reason: "grant_not_found" };
+  if (row.managed_by_position !== null) return { ok: false, reason: "managed_by_position_not_revocable" };
+  if (row.managed_by !== null) return { ok: false, reason: "managed_by_service_not_revocable" };
+  return { ok: true };
+}
+
+/** `iam.assignPosition` — refuse a stale seat, and refuse a placement that already landed. */
+async function assignPositionPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const positionId = typeof args?.positionId === "string" ? args.positionId : "";
+  const userId = typeof args?.userId === "string" ? args.userId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!positionId || !userId || !tenantId) return { ok: false, reason: "missing_assign_args" };
+
+  const pos = await client.query<{ status: string }>(
+    `SELECT status FROM positions WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, positionId],
+  );
+  if (!pos.rows[0]) return { ok: false, reason: "position_not_found" };
+  // A seat retired or orphaned while the approval sat in the inbox must not be filled. `orphaned` is
+  // included deliberately: its unit is gone from the org chart, so the reconciler has FROZEN grants
+  // there and a new placement would inherit that frozen state rather than conferring access.
+  if (pos.rows[0].status !== "active") return { ok: false, reason: "position_not_active" };
+
+  const held = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM position_assignments
+      WHERE tenant_id = $1 AND position_id = $2 AND user_id = $3 AND valid_to IS NULL`,
+    [tenantId, positionId, userId],
+  );
+  if (Number(held.rows[0]?.n ?? "0") > 0) return { ok: false, reason: "already_assigned" };
+  return { ok: true };
+}
+
+/** `iam.unassignPosition` — refuse when there is no open placement left to close. */
+async function unassignPositionPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const positionId = typeof args?.positionId === "string" ? args.positionId : "";
+  const userId = typeof args?.userId === "string" ? args.userId : "";
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  if (!positionId || !userId || !tenantId) return { ok: false, reason: "missing_assign_args" };
+
+  const { rows } = await client.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM position_assignments
+      WHERE tenant_id = $1 AND position_id = $2 AND user_id = $3 AND valid_to IS NULL`,
+    [tenantId, positionId, userId],
+  );
+  // ALREADY LANDED. Re-running would be harmless against the seat but NOT against the audit trail: a
+  // second "removed from seat" entry reads as a second decision nobody made.
+  if (Number(rows[0]?.n ?? "0") === 0) return { ok: false, reason: "not_assigned" };
+  return { ok: true };
+}
+
+/**
+ * Registers the four. Exported for the same reason the other bootstraps are: a suite that calls
+ * `resetExecutableApprovals()` restores exactly these without re-deriving their locks.
+ *
+ * NOTE: no `preconditionModules`. Every table these read (`user_roles`, `positions`,
+ * `position_assignments`) is CORE with a plain tenant policy — `user_roles` is global outright. Adding
+ * a scope here would be cargo-culted from the JML entries, which need `hr` because `employees` sits
+ * behind that module's wall.
+ */
+export function registerIamExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "iam.grantRole",
+    lockKey: (args) => iamLockKey(args, "iam.grantRole"),
+    precondition: grantRolePrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "iam.revokeRoleGrant",
+    lockKey: (args) => iamLockKey(args, "iam.revokeRoleGrant"),
+    precondition: revokeGrantPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "iam.assignPosition",
+    lockKey: (args) => iamLockKey(args, "iam.assignPosition"),
+    precondition: assignPositionPrecondition,
+  });
+  registerExecutableApproval({
+    toolName: "iam.unassignPosition",
+    lockKey: (args) => iamLockKey(args, "iam.unassignPosition"),
+    precondition: unassignPositionPrecondition,
+  });
+}
+
+registerIamExecutableApprovals();

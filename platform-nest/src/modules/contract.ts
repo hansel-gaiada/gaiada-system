@@ -28,8 +28,13 @@ export interface McpToolDef {
   /** HTTP mapping so the MCP hub can front this tool generically (WS2 §6 aggregation).
    *  `pathTemplate` uses :param tokens filled from the tool's args (e.g.
    *  "/api/:tenantId/modules/agency/campaigns"); remaining args become the request body for
-   *  POST/PATCH. Omit method/pathTemplate for a purely-informational def. */
-  method?: "GET" | "POST" | "PATCH";
+   *  POST/PATCH/DELETE. Omit method/pathTemplate for a purely-informational def.
+   *
+   *  `DELETE` was added 2026-08-20 for `iam.revokeRoleGrant`, whose endpoint is a real DELETE. The hub
+   *  needed no change — `module-tools.ts` reads `def.method` and passes it straight to `fetch`, so this
+   *  union was the only thing narrower than the transport. Every param a DELETE needs is in its path,
+   *  so the body it sends is an empty object and the handler ignores it. */
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   pathTemplate?: string;
   /** Mutating tool (drives the hub's D14 automation write gate). */
   write?: boolean;

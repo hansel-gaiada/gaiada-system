@@ -147,4 +147,11 @@ resourcePolicy:
                                                     // at the door — the loop would close on paper and
                                                     // fail in practice.
                                                     "hr.hireEmployee", "hr.transferEmployee",
-                                                    "hr.terminateEmployee"])))
+                                                    "hr.terminateEmployee",
+                                                    // Owner decision 2026-08-20: the four direct IAM
+                                                    // writes. See approval-executables.ts's own block
+                                                    // for what the decision rested on and what still
+                                                    // bounds them — the ceiling, the single writer and
+                                                    // the self-target DENY are all unchanged.
+                                                    "iam.grantRole", "iam.revokeRoleGrant",
+                                                    "iam.assignPosition", "iam.unassignPosition"])))

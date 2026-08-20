@@ -53,7 +53,12 @@ export interface RemoteToolDef {
   description: string;
   minAssurance: "low" | "verified";
   inputSchema: Record<string, unknown>;
-  method?: "GET" | "POST" | "PATCH";
+  // Mirrors platform-nest's `McpToolDef.method`. DELETE added 2026-08-20 with `iam.revokeRoleGrant`:
+  // `callPlatform` already passed this straight to `fetch`, so the transport always supported it and
+  // only these two type declarations were narrower than reality. A def arriving over the wire is
+  // JSON.parse'd, so the old type never rejected anything at runtime — it just described it wrongly,
+  // which is the kind of lie that survives until someone trusts it.
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   pathTemplate?: string;
   write?: boolean;
   impact?: Impact;

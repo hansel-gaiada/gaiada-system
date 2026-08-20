@@ -19,6 +19,12 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "iam.listRoleGrants",
       "iam.requestAssignment",
       "iam.requestOverride",
+      // Added by owner decision 2026-08-20. This list moving is the point of the test, not a nuisance:
+      // it is the one place a tool appearing on the agent surface shows up in a diff.
+      "iam.grantRole",
+      "iam.revokeRoleGrant",
+      "iam.assignPosition",
+      "iam.unassignPosition",
     ]);
   });
 
@@ -107,14 +113,23 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
     expect(override.properties.scopeType.enum).toEqual(["company", "org_unit"]);
   });
 
-  it("🔴 the DIRECT grant/assign writes are absent — an owner decision, not an oversight", () => {
-    // Recorded as a test so the absence is a stated position rather than a hole someone fills by
-    // accident. A tool that grants a role is a privilege-escalation surface, and the estate's audit
-    // attribution currently says "Alice" rather than "Alice's agent" — granting rights through a
-    // surface whose attribution is known to be wrong is the combination worth refusing on purpose.
-    // The proposal tools above give an agent notice-and-propose with no escalation.
-    for (const absent of ["iam.grantRole", "iam.revokeRoleGrant", "iam.assignPosition", "iam.unassignPosition"]) {
-      expect(byName.has(absent), `${absent} must not be declared without an owner decision`).toBe(false);
+  it("🔴 the DIRECT writes are present, and each one carries a D14 executor", () => {
+    // ── THIS TEST INVERTED ON 2026-08-20, AND THE HISTORY IS THE POINT ────────────────────────────
+    // It used to assert these four were ABSENT, and it went red the moment they were declared — which
+    // is exactly what it was for. The absence was a stated owner decision, not a gap, so a test guarded
+    // it rather than a comment.
+    //
+    // The owner then made the opposite call, on the basis that every employee on the estate is mock data
+    // except their own account (verified: 23 `kind='employee'` memberships, all `.test` addresses bar
+    // `hansel@gaiada.com` and one login-less `@gaiada.com`). So the assertion flips to the thing that
+    // must be true now: declared AND executable, never declared alone.
+    //
+    // ⚠ What did NOT change is the attribution gap that motivated the original refusal. See
+    // `core-tools.ts`'s own block: closing [agent-attribution-gate] is pre-staging work precisely
+    // because this decision's basis expires when the mock data does.
+    for (const name of ["iam.grantRole", "iam.revokeRoleGrant", "iam.assignPosition", "iam.unassignPosition"]) {
+      expect(byName.has(name), `${name} must be declared`).toBe(true);
+      expect(!!getExecutable(name), `${name} must have a D14 executor`).toBe(true);
     }
   });
 });
