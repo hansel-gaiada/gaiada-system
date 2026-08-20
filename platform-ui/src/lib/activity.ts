@@ -90,10 +90,20 @@ function capitalize(s: string): string {
   return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+// Kinds whose humanised form the generic rule gets wrong. `pm_task` came out as "Pm task", which
+// is a machine identifier wearing sentence case — the reader calls it a task. Anything not listed
+// falls through to the generic underscore-to-space + capitalise.
+const KIND_LABEL: Record<string, string> = {
+  pm_task: "Task",
+  pm_project: "Project",
+  qa_check: "QA check",
+  ai_run: "AI run",
+};
+
 // e.g. "Task: Fix login redirect" — matches the ActivityFeed contract's own
 // doc example (`objectLabel: "Task: Fix login redirect"`).
 export function objectLabel(row: Pick<WorkActivityRow, "objectKind" | "title" | "objectRef">): string {
-  const kind = capitalize(row.objectKind.replace(/_/g, " "));
+  const kind = KIND_LABEL[row.objectKind] ?? capitalize(row.objectKind.replace(/_/g, " "));
   return `${kind}: ${row.title ?? row.objectRef}`;
 }
 

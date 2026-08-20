@@ -44,13 +44,107 @@
    columns are fixed-width and the board scrolls inside its own container
    instead of squeezing/clipping the page. */
 .pm-board-scroll { overflow-x: auto; padding-bottom: 4px; }
-.pm-board { display: flex; gap: 14px; align-items: start; min-width: min-content; }
+/* The frame does not scroll; it exists to hold the edge fade. A pseudo-element on the SCROLLER is
+   positioned against the scrolled content, so it slid out of view as soon as you scrolled — measured,
+   not guessed. `--more` is set by `Board` from scrollWidth vs clientWidth (CSS cannot compare them),
+   remeasured on scroll and on resize, so the fade appears only while a column really is out there. */
+.pm-board-frame { position: relative; }
+.pm-board-frame--more::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 4px;               /* clears the scroller's own padding-bottom */
+  width: 28px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--pm-surface-page));
+}
+/* `flex-start`, not `start`: on a FLEX container the bare `start` keyword has patchy support and
+   autoprefixer warns on it at build time. The grid containers elsewhere in the app keep `start`,
+   which is well supported there. */
+.pm-board { display: flex; gap: 14px; align-items: flex-start; min-width: min-content; }
 .pm-col { flex: 0 0 280px; width: 280px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); min-height: 120px; display: flex; flex-direction: column; overflow: hidden; }
 .pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--pm-line-soft); position: sticky; top: 0; background: var(--pm-surface-card); z-index: 1; }
 .pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim); }
 .pm-col__count { font: 700 10px var(--font-body); color: var(--pm-text-faint); }
 .pm-col__body { padding: 10px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; transition: background 0.2s var(--erp-ease); }
 .pm-col__body--drop { background: color-mix(in srgb, var(--pm-accent) 10%, transparent); }
+
+/* ---- board control strip ------------------------------------------------- */
+/* One row: label · Focus/Group-by · Filters · the two outbound links. It replaced three stacked
+   full-width blocks that pushed the first column to y=564 on a 1100px viewport. `align-items:
+   flex-end` so the selects' baselines line up with the buttons beside them, and `flex-wrap` so it
+   folds to two rows on a phone instead of overflowing. */
+.pm-boardbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 18px;
+  padding: 12px 0 14px;
+  margin-bottom: 14px;
+  border-bottom: 0.5px solid var(--pm-line);
+}
+/* The label sits on the selects' baseline, not above them — it names the strip, it is not a field. */
+.pm-boardbar__label { align-self: flex-end; padding-bottom: 7px; color: var(--pm-text-dim); font-size: 10px; }
+.pm-boardbar__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0; }
+.pm-boardbar__field { display: flex; flex-direction: column; gap: 5px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-boardbar__field select {
+  border: none;
+  border-bottom: 0.5px solid var(--line-control);
+  background: transparent;
+  outline: none;
+  padding: 6px 2px;
+  /* Narrower than `lux-filters`' 150px: in a single strip the two selects plus Filters plus two
+     buttons have to share one row, and "Whole dept"/"Status" are short strings. */
+  min-width: 118px;
+  font: 400 13px var(--font-body);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-primary);
+}
+.pm-boardbar__field select:focus-visible { border-bottom-color: var(--erp-accent); }
+/* Pushed to the far end: these two leave the board entirely, so they are not part of the control
+   sequence that shapes it. */
+.pm-boardbar__links { display: flex; gap: 8px; margin-left: auto; }
+/* The bare (Card-less) facet panel, sitting in the strip. `min-width: 0` so a long chip row shrinks
+   rather than forcing the strip wider than the page. */
+.pm-facets-bare { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+/* ---- empty column: a strip, not a 280px void ----------------------------- */
+/* An empty column carried the same 280px as a staffed one to say "nothing here". On the department
+   board that put an empty Backlog first in reading order — a phone user swiped a blank column before
+   reaching any work. Collapsed, five columns also fit where four used to.
+   The head rotates so the label stays readable, and the count stays on it (a strip with no number
+   would be a mystery). It un-collapses while a drag is in progress — see `.pm-board--dragging`
+   below — because a 34px target is not one anybody can hit. */
+.pm-col--empty {
+  flex: 0 0 34px;
+  width: 34px;
+  min-height: 120px;
+  transition: flex-basis 0.15s var(--erp-ease), width 0.15s var(--erp-ease);
+}
+.pm-col--empty .pm-col__head {
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-start;
+  padding: 11px 0;
+  border-bottom: none;
+  height: 100%;
+  position: static;
+}
+.pm-col--empty .pm-col__title {
+  writing-mode: vertical-rl;
+  /* Bottom-to-top: the convention for a vertical label in Latin script, and it keeps the label
+     starting at the head of the strip rather than hanging off the bottom. */
+  transform: rotate(180deg);
+  white-space: nowrap;
+}
+.pm-col--empty .pm-col__body { display: none; }
+/* Mid-drag every column is a target again, so the strips open back up. */
+.pm-board--dragging .pm-col--empty { flex-basis: 280px; width: 280px; }
+.pm-board--dragging .pm-col--empty .pm-col__head { flex-direction: row; justify-content: space-between; padding: 11px 13px; height: auto; border-bottom: 0.5px solid var(--pm-line-soft); }
+.pm-board--dragging .pm-col--empty .pm-col__title { writing-mode: horizontal-tb; transform: none; }
+.pm-board--dragging .pm-col--empty .pm-col__body { display: flex; }
 .pm-card { border: 0.5px solid var(--pm-line); border-left-width: 2px; border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; cursor: grab; text-decoration: none; transition: background 0.2s var(--erp-ease), opacity 0.15s var(--erp-ease); }
 .pm-card:hover { background: color-mix(in srgb, var(--pm-accent) 6%, transparent); }
 .pm-card--dragging { opacity: 0.4; }
@@ -399,6 +493,51 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-facets__summary::-webkit-details-marker { display: none; }
 .pm-facets__summary:hover, .pm-facets__summary:focus-visible { color: var(--pm-accent); }
 .pm-facets__body { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 10px; border-top: 0.5px solid var(--pm-line-soft); }
+
+/* ---- floating variant (`bare` callers: the board control strip) ------------ */
+/* Inline, opening this disclosure grew the strip by ~200px and pushed the whole board down the page
+   — the panel is a temporary question, not part of the layout. Floated, the strip keeps its height
+   and the board does not move. Still the same native `<details>`: no JS, no new mechanism, keyboard
+   and screen-reader behaviour unchanged.
+   A floating layer is the one place this design system permits a shadow (`--elev-overlay`), the same
+   rule the swatch popover and the launcher tooltip already follow. */
+.pm-facets--float { position: relative; }
+.pm-facets--float .pm-facets__body {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  /* Wide enough for the longest facet row ("Responsible" plus a full name), capped so it never runs
+     past the viewport on a laptop. */
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - 40px));
+  width: max-content;
+  /* A department with 30 tags must scroll the panel, not the page. */
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--pm-surface-raised);
+  border: 0.5px solid var(--pm-line);
+  border-top: 0.5px solid var(--pm-line);
+  border-radius: var(--pm-radius-lg);
+  box-shadow: var(--elev-overlay);
+}
+/* Open state gets a mark, because a floating panel gives no other clue that the trigger is a
+   toggle — and the `<details>` marker is suppressed above. */
+.pm-facets--float .pm-facets__summary::after { content: " ▾"; color: var(--pm-text-faint); }
+.pm-facets--float[open] .pm-facets__summary::after { content: " ▴"; }
+/* Below the strip's wrap point the panel goes back to expanding inline: the trigger can end up near
+   the right edge on a phone, where a left-anchored floating panel would hang off screen, and pushing
+   content down is the normal, expected behaviour on a narrow layout. */
+@media (max-width: 520px) {
+  .pm-facets--float .pm-facets__body {
+    position: static;
+    max-width: none;
+    width: auto;
+    box-shadow: none;
+    border-radius: var(--pm-radius);
+  }
+}
 .pm-facets__chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
 .pm-facets__chip {
   display: inline-flex; align-items: center; gap: 5px; font: 600 11px var(--font-body); line-height: 1.4;

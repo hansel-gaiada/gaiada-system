@@ -58,95 +58,303 @@
 /* ── KPI strip — Active / Due soon / Blocked / Progress (decision #12) ──── */
 .dept-kpi-strip {
   display: grid;
-  gap: 14px;
+  gap: var(--card-gap);
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
+/* Explicit rows (label · value · bar · caption) rather than a flex column: the four tiles are read
+   ACROSS, so their captions have to land on one baseline whether or not a tile has a bar or a
+   caption to show. Flex let each tile stack to its own height and Progress' caption dropped a
+   line below the other three. */
 .dept-kpi {
   background: var(--surface-card);
   border: 0.5px solid var(--erp-hairline);
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding: var(--space-20);
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
+  gap: var(--space-10);
 }
 /* The hint button must NOT live inside this element: `opacity < 1` creates a stacking context, so
    a popover nested in here is (a) trapped below the sticky rail no matter its z-index and (b)
    dimmed to 0.6 along with the label. The row wrapper keeps them siblings instead. */
 .dept-kpi__labelrow { display: flex; align-items: center; }
-.dept-kpi__label { opacity: 0.6; font-size: 10px; }
-.dept-kpi__value { font-family: var(--font-display); font-weight: 700; font-size: 32px; line-height: 1; color: var(--text-primary); }
+/* Ink comes from the ramp, never an ad-hoc alpha (colors.css rule 3) — `opacity: 0.6` on top of
+   an inherited ink was exactly the compounding the ramp exists to prevent. */
+.dept-kpi__label { color: var(--ink-subtle); font-size: 10px; }
+/* Body face + lining tabular figures. See the KpiStrip.tsx header for why the display face lost
+   this one: its "1" reads as a capital I at this size. */
+.dept-kpi__value {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--text-primary);
+}
 .dept-kpi__value--attention { color: var(--dept-risk); }
-.dept-kpi__foot { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.dept-kpi__unit { font-size: 0.58em; font-weight: 400; color: var(--ink-muted); margin-left: 2px; }
+/* min-height holds the row open when a caller passes no caption, so an absent caption cannot
+   shorten one tile and re-break the shared baseline. */
+.dept-kpi__foot { font: 400 12px/18px var(--font-body); color: var(--erp-ink-50); min-height: 18px; }
 .dept-kpi__bar { height: 3px; background: var(--erp-hairline-soft); }
+.dept-kpi__bar--empty { visibility: hidden; }
 .dept-kpi__bar span { display: block; height: 100%; background: var(--dept-positive); transition: width 0.4s var(--erp-ease); }
 
+/* The hint is an aside, not a datum. Boxed, it carried the same visual weight as the label it
+   annotates — four bordered squares in the row that is supposed to be four numbers. Strip the box
+   here only; every other InfoHint in the app keeps hint.css's default. */
+.dept-kpi .erp-hint__btn {
+  width: auto;
+  height: auto;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  /* hint.css dims the boxed variant to 0.55; without the box that alpha compounds with the ink
+     token and drops the glyph below AA. The ramp does the quietening here instead. */
+  opacity: 1;
+  color: var(--ink-subtle);
+}
+.dept-kpi .erp-hint__btn:hover,
+.dept-kpi .erp-hint__btn:focus-visible { opacity: 1; color: var(--text-primary); }
+/* Coarse pointers still need the 44px target hint.css gives them — restore it without the box. */
+@media (pointer: coarse) {
+  .dept-kpi .erp-hint__btn { width: 44px; height: 44px; margin: -12px 0; }
+}
+
 /* ── Health ring cards — one per owned project ──────────────────────────── */
+/* The cap belongs on the TRACK, not on the card. Capping the card inside a `1fr` track left the
+   leftover width sitting between the cards — the track stretched, the card did not, and the pair
+   drifted ~90px apart. Bounded tracks keep the cards adjacent and push the slack to the end of the
+   row instead (`justify-content: start`). auto-FIT, not auto-fill, so an unused track collapses
+   rather than standing as a phantom empty column beside two projects. 340 is the widest cap that
+   still fits two columns in the 738px grid the rail leaves behind. */
 .dept-ring-grid {
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--card-gap);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 340px));
+  justify-content: start;
 }
+/* Laptop width, rail still mounted: the main column is ~578px, two 340 tracks need 700, and the
+   grid drops to one column with 240px of dead space beside it. A tighter cap keeps the pair
+   side by side — the caption wraps to a second line at this size, which is what a caption is for. */
+@media (max-width: 1340px) {
+  .dept-ring-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 278px)); }
+}
+/* gap: 0, and every gap set deliberately below. A uniform gap spaced four things that are not
+   peers: the title, the figure, the figure's own caption, and the ring block. Grouping is the
+   whole point — the figure and its caption are ONE object and sit tight together; the ring block
+   is a second object and gets real air. */
 .dept-ring-card {
   background: var(--surface-card);
   border: 0.5px solid var(--erp-hairline);
-  padding: 20px;
+  padding: var(--space-20);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0;
 }
-.dept-ring-card--risk { border-color: var(--dept-risk); }
-.dept-ring-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+/* At risk is a rule down the leading edge, not a rust box around the whole card. Same idiom, same
+   meaning, as `.dept-rail__item--waiting` — "this one needs you" — and it leaves the card's own
+   hairline intact so a grid of cards still reads as one grid. */
+.dept-ring-card--risk { border-left: 2px solid var(--dept-risk); padding-left: 18px; }
+.dept-ring-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
 .dept-ring-card__name { font: 700 14px var(--font-body); color: var(--text-primary); text-decoration: none; }
 a.dept-ring-card__name:hover { opacity: 0.6; }
 .dept-ring-card__risk-badge { color: var(--dept-risk); }
 .dept-ring-card__risk-badge .lux-badge__dot { background: var(--dept-risk); }
-.dept-ring-card__body { display: flex; align-items: center; gap: 18px; }
+
+/* Lead figure — the count you act on. Body face + lining tabular figures for the same reason the
+   KPI strip uses them: the display face's "1" reads as a capital I at this size. */
+.dept-ring-card__lead { margin: 0 0 4px; display: flex; align-items: baseline; gap: 6px; }
+.dept-ring-card__lead-value {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--text-primary);
+}
+.dept-ring-card__lead-unit { font: 400 13px var(--font-body); color: var(--ink-muted); }
+.dept-ring-card__lead-caption { margin: 0; font: 400 12px/18px var(--font-body); color: var(--erp-ink-50); min-height: 18px; }
+.dept-ring-card__date { white-space: nowrap; }
+
+.dept-ring-card__body { display: flex; align-items: center; gap: 18px; margin-top: 20px; }
 .dept-ring-wrap { position: relative; width: 96px; height: 96px; flex: 0 0 96px; }
 .dept-ring { transform: rotate(-90deg); }
-.dept-ring__track { fill: none; stroke: var(--dept-ring-track); stroke-width: 6; }
-.dept-ring__value { fill: none; stroke: var(--dept-positive); stroke-width: 6; stroke-linecap: butt; transition: stroke-dashoffset 0.5s var(--erp-ease), stroke 0.3s var(--erp-ease); }
-.dept-ring-card--risk .dept-ring__value { stroke: var(--dept-risk); }
-.dept-ring__label { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 18px; }
-.dept-ring-card__stats { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.dept-ring-card__stat { display: flex; flex-direction: column; gap: 2px; }
-.dept-ring-card__stat dt { opacity: 0.5; font-size: 10px; }
-.dept-ring-card__stat dd { margin: 0; font: 400 13px var(--font-body); color: var(--text-primary); }
-.dept-ring-card__reason { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk); }
+/* Thicker than the old 6: at 6 a segment worth one task out of nine is a hairline, and the ring
+   has to read as slices before it reads as anything. */
+.dept-ring__track { fill: none; stroke: var(--dept-ring-track); stroke-width: 11; }
+.dept-ring__seg { fill: none; stroke-width: 11; stroke-linecap: butt; transition: stroke-dashoffset 0.5s var(--erp-ease); }
+/* Each segment takes the status token that ALREADY means it, so no new colour enters the system
+   and dark mode follows for free. The ring is the only polychrome object on the card. */
+.dept-ring__seg--done    { stroke: var(--status-ok); }
+.dept-ring__seg--blocked { stroke: var(--status-critical); }
+.dept-ring__seg--overdue { stroke: var(--status-warning); }
+/* On-track work is deliberately the ONLY achromatic segment: `--status-neutral` already means
+   "not-yet-due". Its first draft used --status-progress (bronze), which sat a few degrees from
+   amber overdue at 11px and made the two unseparable — and spending saturation on the work that
+   needs nothing is backwards. The ring's colour goes to what wants attention. */
+.dept-ring__seg--onTrack { stroke: var(--status-neutral); }
 
-/* ── Activity feed ───────────────────────────────────────────────────────── */
-.dept-activity { list-style: none; margin: 0; padding: 0; }
-.dept-activity__group { display: flex; flex-direction: column; }
-.dept-activity__day { display: block; opacity: 0.5; font-size: 10px; margin: 18px 0 8px; }
-.dept-activity__group:first-child .dept-activity__day { margin-top: 0; }
-.dept-activity__item {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 9px 0;
-  border-bottom: 0.5px solid var(--erp-hairline-soft);
-  text-decoration: none;
-  color: inherit;
+/* Legend — what makes the ring legible. Counts, not percentages: the denominators here are single
+   digits, and "62% done" of eight tasks is precision the data does not have. Swatches are squares,
+   not dots: ui.css calls the badge dot "the system's one sanctioned circle" and this ring is the
+   sanctioned second — a third would spend a budget that is already fully spent. */
+.dept-ring-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dept-ring-legend__row { display: flex; align-items: center; gap: 8px; font: 400 12px var(--font-body); }
+.dept-ring-legend__swatch { width: 8px; height: 8px; flex: 0 0 8px; }
+.dept-ring-legend__swatch--done    { background: var(--status-ok); }
+.dept-ring-legend__swatch--blocked { background: var(--status-critical); }
+.dept-ring-legend__swatch--overdue { background: var(--status-warning); }
+.dept-ring-legend__swatch--onTrack { background: var(--status-neutral); }
+.dept-ring-legend__count {
+  font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: lining-nums tabular-nums;
+  min-width: 1.4em; text-align: right;
 }
-.dept-activity__item--link { transition: opacity 0.2s var(--erp-ease); }
-.dept-activity__item--link:hover { opacity: 0.6; }
-.dept-activity__chip {
-  flex: 0 0 auto;
-  font: 700 9px var(--font-body);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--erp-ink-50);
-  border: 0.5px solid var(--erp-hairline);
-  padding: 2px 6px;
+.dept-ring-legend__label { color: var(--ink-muted); }
+
+.dept-ring-card__reason { margin: 16px 0 0; font: 400 12px var(--font-body); color: var(--dept-risk); }
+
+/* ── Activity feed — the console's one time axis ──────────────────────────── */
+/* The date is the structure. Each day group is a two-column grid: the day's number set large in the
+   display face on a left axis, its rows to the right. That axis is the only vertical alignment in
+   the block, which is the whole point — the version before it had four competing left edges (day
+   eyebrow, spine, source column, sentence) and needed a vertical hairline, a per-row node, and a
+   58px provenance column to look organised. All three are gone.
+   Two rules remain, and the hierarchy is legible because there are only two:
+     day break → --erp-hairline,      spans BOTH columns (the axis's own boundary)
+     row break → --erp-hairline-soft, spans the rows column only
+   The date column is `--dept-axis` wide, and it is a variable because three rules depend on it:
+   the grid, the mobile collapse, and nothing else may guess at it. */
+.dept-activity { --dept-axis: 58px; display: flex; flex-direction: column; }
+.dept-activity__day-group { display: grid; grid-template-columns: var(--dept-axis) minmax(0, 1fr); column-gap: 18px; }
+.dept-activity__day-group + .dept-activity__day-group { border-top: 0.5px solid var(--erp-hairline); padding-top: 18px; margin-top: 18px; }
+
+/* The axis. `align-content: start` so a one-row day keeps its date at the top rather than centring
+   it against a single line, and `padding-top` lines the numeral's cap height up with the first
+   row's sentence instead of its box. */
+.dept-activity__date {
+  margin: 0;
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  padding-top: 4px;
+  font-weight: 400;
 }
+/* The one place this component spends the display face. Cormorant's numerals are what make the axis
+   read as a date rather than as a list marker; at 400 they stay quiet enough that the sentences
+   beside them are still the loudest thing in the card.
+   `lining-nums` is not a refinement, it is required: Cormorant defaults to OLDSTYLE figures, whose
+   1 has no cap and whose 9 drops below the baseline, so "19" rendered as "I9" and "21" as "2I".
+   `tabular-nums` keeps "1" and "22" the same width so the axis does not wobble down the column. */
+.dept-activity__date-num {
+  font: 400 26px/1 var(--font-display);
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--text-primary);
+  letter-spacing: 0;
+}
+/* The signature eyebrow's 0.30em tracking is for words; on a three-letter month it pulls "JUL" into
+   "J U L" past the column's width. Narrower tracking here only. */
+.dept-activity__date-month {
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: var(--track-wide);
+  color: var(--ink-subtle);
+}
+/* "Today"/"Yesterday" replace the numeral, so they take its size — but in the body face and one
+   step down: the display face at 26px cannot hold nine letters in a 58px column, and shrinking the
+   numeral to match would make every dated day quieter to accommodate two special ones. */
+.dept-activity__date-rel { font: 400 13px/1.2 var(--font-body); color: var(--text-primary); }
+.dept-activity__age { margin-top: 4px; font: 400 10px var(--font-body); color: var(--erp-ink-50); }
+
+.dept-activity__list { list-style: none; margin: 0; padding: 0; }
+.dept-activity__item { display: block; }
+/* Consecutive rows only — the first row's boundary is the day break above it. Full width of the
+   rows column now that no gutter has to be kept clear for a spine. */
+.dept-activity__item + .dept-activity__item { border-top: 0.5px solid var(--erp-hairline-soft); }
+
+.dept-activity__row { display: flex; align-items: baseline; gap: 16px; min-width: 0; padding: 8px 0; text-decoration: none; color: inherit; }
+.dept-activity__row--link { transition: opacity 0.2s var(--erp-ease); }
+.dept-activity__row--link:hover { opacity: 0.6; }
+/* `1 1 auto` so the sentence takes the row and pushes the annotations right; `min-width: 0` so a
+   long object title wraps instead of shoving them off the card. */
 .dept-activity__text { flex: 1 1 auto; min-width: 0; font: 400 13px var(--font-body); color: var(--text-primary); }
 .dept-activity__object { color: var(--erp-ink-60); }
-.dept-activity__time { flex: 0 0 auto; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+/* The annotations, right-aligned as one cluster: clock (recent days only), the machine mark, then
+   the source. Provenance sits here rather than in front of the sentence — as a leading column it
+   held "PM" in a well sized for "PIPELINE" and put a gap between the marker and the name it
+   belonged to, while right-aligned it still stacks into a scannable column. */
+.dept-activity__meta { flex: 0 0 auto; margin-left: auto; display: flex; align-items: baseline; gap: 10px; }
+.dept-activity__time { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.dept-activity__source {
+  text-transform: uppercase;
+  font: 700 9px var(--font-body);
+  letter-spacing: 0.08em;
+  /* --ink-subtle, not --ink-faint: colors.css reserves faint (3.3:1) for glyphs that carry no
+     meaning alone, and this one names where the event came from. */
+  color: var(--ink-subtle);
+}
+/* The machine mark — the only thing left of the node, kept because it is the only thing the
+   sentence cannot say: `actorLabel` hands a scheduler a name, so without it a cron reads as a
+   colleague. A hollow square, matching the ring legend's swatch; the system's circles are already
+   spent (ui.css's badge dot, then the health ring). 1px, not the usual hairline: at 6px a 0.5px
+   outline closes up on a non-retina screen and the hollow square reads as a filled one. */
+.dept-activity__auto {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--erp-ink-50);
+}
+/* A machine row is a tier quieter throughout — including the actor-less sentence itself. */
+.dept-activity__item--machine .dept-activity__text,
+.dept-activity__item--machine .dept-activity__object { color: var(--ink-muted); }
+
+/* Every string on this console that comes from the BACKEND can be one unbroken token — a tool id
+   ("it.devices.disable"), a URL, a repo path, an email, a project code. A token wider than its
+   column sets the grid's min-content width, which is how a phone ends up scrolled sideways with
+   dead space on the right: nothing here is "too wide" until real data arrives. `anywhere` (not
+   `break-word`) so the break also counts toward intrinsic sizing, which is the half that fixes the
+   overflow rather than just the clipping. */
+.dept-activity__text,
+.dept-activity__object,
+.dept-rail__item-title,
+.dept-rail__item-project,
+.dept-team__name,
+.dept-ring-card__name,
+.dept-ring-card__lead-caption,
+.dept-launcher-icon__tip-name,
+.dept-launcher-icon__tip-detail { overflow-wrap: anywhere; }
+
+/* Narrow: the axis stops being a column and becomes a line above its rows. Below ~420px a 58px
+   column plus an 18px gap leaves too little for the sentence, and the date wrapping mid-word is
+   worse than the axis giving up its alignment. */
+@media (max-width: 520px) {
+  .dept-activity__day-group { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
+  .dept-activity__date { grid-auto-flow: column; align-items: baseline; justify-content: start; gap: 8px; padding: 0 0 8px; }
+  .dept-activity__date-num { font-size: 20px; }
+  .dept-activity__date-month, .dept-activity__age { margin-top: 0; }
+}
+
+.dept-activity__more { margin: 16px 0 0; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
 
 /* ── My-work rail (persistent, decision #10) ────────────────────────────── */
 .dept-rail { display: flex; flex-direction: column; gap: 0; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); }
 .dept-rail__section { padding: 20px 22px; }
 .dept-rail__section + .dept-rail__section { border-top: 0.5px solid var(--erp-hairline); }
-.dept-rail__heading { display: block; opacity: 0.6; font-size: 10px; margin-bottom: 14px; }
+.dept-rail__heading { display: flex; align-items: baseline; gap: 8px; opacity: 0.6; font-size: 10px; margin-bottom: 14px; }
+/* Count beside the heading — the number a person wants before reading a single row. Not in the
+   eyebrow's tracking: 0.30em on a digit is spacing with nothing to separate. */
+.dept-rail__count { font: 700 10px var(--font-body); letter-spacing: 0; color: var(--erp-ink-60); }
+/* An empty section is ONE row: heading left, verdict right, nothing under it. Three sections each
+   spending a heading plus a full sentence on "nothing here" gave the absence of work more of the
+   rail than the work itself. */
+.dept-rail__section--clear { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 12px 22px; }
+.dept-rail__heading--inline { margin-bottom: 0; }
+.dept-rail__clear { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 .dept-rail__empty { margin: 0; font: 400 13px var(--font-body); color: var(--erp-ink-50); }
 .dept-rail__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .dept-rail__item + .dept-rail__item { border-top: 0.5px solid var(--erp-hairline-soft); }
@@ -163,34 +371,215 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
 .dept-rail__due--quiet { color: var(--erp-ink-50); }
 .dept-rail__priority { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dept-risk); }
 .dept-rail__kind { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-60); }
-/* "Waiting on me" rows carry an accent bar — the only place the rail signals
-   "this needs you", vs. "My work today" which is informational-neutral. */
-.dept-rail__item--waiting { border-left: 2px solid var(--dept-risk); padding-left: 10px; margin-left: -12px; }
+/* Title line of a waiting row: title left, age right. */
+.dept-rail__item-head { display: flex; align-items: baseline; gap: 10px; }
+.dept-rail__item-head .dept-rail__item-title { flex: 1 1 auto; min-width: 0; }
+/* Age is the rank. It is the only urgency an approval has, so it is set in the same tabular figures
+   the console uses for numbers — a column of ages has to be comparable at a glance. */
+.dept-rail__age {
+  flex: 0 0 auto;
+  font: 700 10px var(--font-body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--erp-ink-50);
+}
+/* The rust bar marks the rows to act on first — the rail's one "this needs you" signal, and it only
+   works while most rows do not have it (it used to sit on every waiting row, which marked none).
+   The gutter is reserved on EVERY row via a transparent border, so a marked row does not shift its
+   title 2px left of its unmarked neighbours: the first build did exactly that and the column
+   visibly wobbled. A marked row's age takes the same colour, so bar and number say one thing. */
+.dept-rail__section--waiting .dept-rail__item {
+  border-left: 2px solid transparent;
+  padding-left: 10px;
+  margin-left: -12px;
+}
+/* Selector deliberately as specific as the transparent-gutter rule above it. Written as the bare
+   `.dept-rail__item--stale`, the shorthand `border-left: 2px solid transparent` in that rule wins on
+   specificity and the bar silently never paints — which is exactly what the first build did. */
+.dept-rail__section--waiting .dept-rail__item--stale { border-left-color: var(--dept-risk); }
+.dept-rail__item--stale .dept-rail__age { color: var(--dept-risk); }
 
 /* ── Launcher row (Build Tools merged into Home, decision #10/Q4) ──────── */
-.dept-launcher-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 2px; }
-.dept-launcher-chip {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border: 0.5px solid var(--erp-hairline);
-  background: var(--surface-card);
+/* Icons only, names on hover/focus (see LauncherRow.tsx). `wrap`, not `overflow-x: auto`: the row
+   scrolled sideways before, which both cut the last tool in half and clipped any tooltip that tried
+   to leave the box — a scroll container cannot host a floating layer. Wrapping removes the
+   scrollbar the labelled version needed and the clipping in one move. */
+.dept-launcher-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.dept-launcher-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* 36px, not the 28px glyph box the cards used: this is now the whole hit target, and 36 is the
+     smallest square that still lands under a thumb. */
+  width: 36px;
+  height: 36px;
+  font-size: 17px;
+  line-height: 1;
   text-decoration: none;
-  color: var(--text-primary);
-  transition: border-color 0.15s ease;
-  white-space: nowrap;
+  /* Ink, not the accent. Six accent-coloured marks in a row read as six warnings; the accent is
+     reserved for the one under the pointer. Applies to the typographic glyphs; the vendored SVGs
+     carry their own colour and are handled below. */
+  color: var(--ink-muted);
+  transition: color 0.15s var(--erp-ease);
 }
-.dept-launcher-chip:hover { border-color: var(--erp-accent); }
-.dept-launcher-chip__glyph {
-  display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px;
-  font-size: 15px; border: 0.5px solid var(--erp-hairline); color: var(--erp-accent);
+.dept-launcher-icon:hover,
+.dept-launcher-icon:focus-visible { color: var(--erp-accent); }
+.dept-launcher-icon__mark { display: block; }
+/* Vendored brand marks (toolIcons.tsx) render in the vendor's OWN colours, untouched — owner
+   decision 2026-08-19: a desaturated GitHub or Figma stops being the mark a person recognises, and
+   recognition is the entire job of an icon-only row. So these marks are the one place on the surface
+   that is exempt from the ink-plus-one-accent rule, and the exemption is deliberate.
+   Hover is therefore opacity, not colour (the system's own convention) — a coloured mark has no
+   accent state left to take. */
+.dept-launcher-icon__mark--svg {
+  width: 19px;
+  height: 19px;
+  transition: opacity 0.15s var(--erp-ease);
 }
-.dept-launcher-chip__body { display: flex; flex-direction: column; min-width: 0; }
-.dept-launcher-chip__label { font: 700 12px var(--font-body); }
-.dept-launcher-chip__seat { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
-.dept-launcher-chip__seat--unmapped { color: var(--dept-risk); }
+.dept-launcher-icon__mark--svg svg { display: block; width: 100%; height: 100%; }
+.dept-launcher-icon:hover .dept-launcher-icon__mark--svg,
+.dept-launcher-icon:focus-visible .dept-launcher-icon__mark--svg { opacity: 0.6; }
+/* An unmapped seat is the one state the row must show WITHOUT a hover, because it is the reason a
+   click will not do what the person expects. A mark in the corner, not a recoloured glyph: tinting
+   the icon itself would collide with the hover state. */
+.dept-launcher-icon--unmapped::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 4px;
+  height: 4px;
+  background: var(--dept-risk);
+}
+
+/* The tooltip. A floating layer, so `--elev-overlay` is legal here (globals.css bans box-shadow
+   everywhere else). Hidden with visibility+opacity rather than `display: none` so it can transition
+   and so it never takes part in layout. */
+.dept-launcher-icon__tip {
+  position: absolute;
+  /* BELOW the icon, and LEFT-aligned to it — both learned from the built page. Above, it covered
+     the card's own "Build tools" heading, because this row is the first thing in the card. Centred
+     (`left: 50%; translateX(-50%)`), the first icon's tooltip hung off the card's left edge; anchored
+     to the icon's left it cannot, and the row is short enough that the right edge is never at risk. */
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  /* Wide enough for "opens as hansel@gaiada.com" on one line, capped so a long description wraps
+     instead of running off the card. */
+  max-width: 240px;
+  width: max-content;
+  background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline);
+  box-shadow: var(--elev-overlay);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s var(--erp-ease), visibility 0.12s var(--erp-ease);
+  pointer-events: none;
+  text-align: left;
+}
+/* Focus-visible too, not hover alone — a keyboard user tabbing the row would otherwise reach six
+   unlabelled squares. */
+.dept-launcher-icon:hover .dept-launcher-icon__tip,
+.dept-launcher-icon:focus-visible .dept-launcher-icon__tip { opacity: 1; visibility: visible; }
+.dept-launcher-icon__tip-name { font: 700 12px var(--font-body); color: var(--text-primary); white-space: nowrap; }
+.dept-launcher-icon__tip-detail { font: 400 11px/1.35 var(--font-body); color: var(--erp-ink-50); }
+.dept-launcher-icon__tip-detail--unmapped { color: var(--dept-risk); }
+
+/* On a phone the tooltip is anchored to the ROW, not to its icon. Anchored per icon, the sixth
+   icon's 190px panel ran to x=428 in a 390px viewport — off the screen, measured on an iPhone 13.
+   Dropping `position: relative` from the icon makes the row the containing block, so every tooltip
+   opens from the same left edge and is width-capped to the card. The hover/focus selectors are
+   unchanged: they are descendant rules, not positional ones. */
+@media (max-width: 520px) {
+  .dept-launcher-row { position: relative; }
+  .dept-launcher-icon { position: static; }
+  .dept-launcher-icon__tip { top: calc(100% + 6px); left: 0; right: 0; max-width: none; width: auto; }
+  /* The name can no longer refuse to wrap once the panel is viewport-width. */
+  .dept-launcher-icon__tip-name { white-space: normal; }
+  /* The unmapped-seat corner mark is positioned against the icon, which is no longer the containing
+     block — it would otherwise jump to the row's corner and label the wrong tool. */
+  .dept-launcher-icon--unmapped { position: relative; }
+}
+
+/* ── Department projects list (the Projects tab) ─────────────────────────── */
+/* Still a HairlineTable — this is a list to COMPARE rows in, and a table is right for that. What
+   changed is what each cell holds: six columns became four, because "Tasks here" + "Done" were one
+   fact split in two, and "Status" printed the same word on every row while repeating what the Risk
+   column already said. Status and the task date-span moved under the project's name, where a label
+   and a caption belong. */
+.dept-proj__total { font: 700 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
+/* `HairlineTable` is an fr-column grid with no stacked mode, so below ~640px its four headers
+   overlap and every cell wraps mid-phrase. The min-width keeps the columns intact and the wrapper
+   takes the scroll; on any desktop width the table is narrower than the card and nothing scrolls. */
+.dept-proj__scroll { overflow-x: auto; }
+.dept-proj__scroll .lux-table { min-width: 640px; }
+.dept-proj__cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.dept-proj__name { font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; overflow-wrap: anywhere; }
+a.dept-proj__name:hover { opacity: 0.6; }
+.dept-proj__sub { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+/* The task-derived span, in the caption tier: it is context for the name, not a measure being
+   compared down the column — which is exactly why it stopped being its own right-aligned column. */
+.dept-proj__span { font: 400 11px var(--font-body); color: var(--erp-ink-50); font-variant-numeric: tabular-nums; }
+.dept-proj__work { font: 400 12px var(--font-body); color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.dept-proj__none { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+/* Target: the date, then how it stands relative to today. The date alone was the whole cell, so a
+   target 30 days gone read as neutral on a row already flagged at risk. */
+.dept-proj__target { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.dept-proj__target-date { font: 400 12px var(--font-body); color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dept-proj__target-note { font: 400 11px var(--font-body); color: var(--erp-ink-50); white-space: nowrap; }
+/* `--pm-urgency-overdue-fg`, NOT `--dept-risk`: the Risk column on the same row already paints its
+   overdue chip in the urgency red, and two different reds in one row read as two different claims.
+   One hue per meaning, even across folder sheets. */
+.dept-proj__target-note--late { font-weight: 700; color: var(--pm-urgency-overdue-fg); }
+
+/* ── Team roster (Home's Team card) ─────────────────────────────────────── */
+/* Same left-axis structure as the activity feed, deliberately: two blocks on Home, one idiom. The
+   axis is wider here because a division name is a word, not a two-digit day ("NO DIVISION" at the
+   eyebrow's tracking needs ~96px), and it is a variable because the grid and the mobile collapse
+   below both depend on it. */
+.dept-team { --dept-team-axis: 104px; display: flex; flex-direction: column; }
+.dept-team__group { display: grid; grid-template-columns: var(--dept-team-axis) minmax(0, 1fr); column-gap: 18px; }
+.dept-team__group + .dept-team__group { border-top: 0.5px solid var(--erp-hairline); padding-top: 14px; margin-top: 14px; }
+/* `align-content: start` so a group with one person keeps its label on the first row instead of
+   centring against it; `padding-top` lines the eyebrow's cap height up with that row's name. */
+.dept-team__axis { margin: 0; display: grid; align-content: start; justify-items: start; padding-top: 9px; font-weight: 400; }
+/* The eyebrow's 0.30em tracking is the signature, and a division label is exactly the kind of short
+   word it was designed for — kept at full tracking here, unlike the feed's date. */
+.dept-team__axis .type-eyebrow { font-size: 10px; color: var(--ink-subtle); }
+
+.dept-team__empty { margin: 0; padding: 8px 0; font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+.dept-team__list { list-style: none; margin: 0; padding: 0; }
+.dept-team__item + .dept-team__item { border-top: 0.5px solid var(--erp-hairline-soft); }
+.dept-team__row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0;
+  text-decoration: none;
+  color: inherit;
+}
+.dept-team__row--link { transition: opacity 0.2s var(--erp-ease); }
+.dept-team__row--link:hover { opacity: 0.6; }
+.dept-team__name { flex: 1 1 auto; min-width: 0; font: 400 13px var(--font-body); color: var(--text-primary); }
+.dept-team__load { flex: 0 0 auto; display: flex; align-items: baseline; gap: 8px; }
+.dept-team__open { font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+/* A person with nothing open is stated, not left blank — and stated a tier quieter than a number,
+   because it is the state that needs no action. */
+.dept-team__clear { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+/* The only colour in the card, and it is the same rust the health rings and the rail spend on
+   "this needs you". */
+.dept-team__blocked { display: flex; align-items: baseline; gap: 4px; font: 700 11px var(--font-body); color: var(--dept-risk); }
+.dept-team__blocked-mark { align-self: center; width: 5px; height: 5px; background: var(--dept-risk); }
+
+/* Narrow: the axis becomes a line above its people, matching the feed's collapse. */
+@media (max-width: 520px) {
+  .dept-team__group { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
+  .dept-team__axis { padding: 0 0 6px; }
+}
 
 /* ── Shared "teach" empty-state (Connect X pattern) ─────────────────────── */
 /* Warmer than systems/EmptyNote (which is one quiet caption for "connected but

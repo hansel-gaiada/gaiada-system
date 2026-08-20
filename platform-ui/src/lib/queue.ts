@@ -57,14 +57,44 @@ function fromApproval(a: ApprovalItem, decidable: boolean): QueueItem {
   };
 }
 
+// `tool_name` is a machine identifier — "it.devices.disable", "pm.tasks.bulkUpdate". It was being
+// printed as the item's TITLE, so the approval queue asked people to decide on things named like
+// permission keys. Read as: last segment is the verb, the segment before it the object, the first
+// the owning domain (kept as the `meta` prefix, where a namespace belongs).
+//   "it.devices.disable"   -> "Disable devices"
+//   "pm.tasks.bulkUpdate"  -> "Bulk update tasks"
+//   "deploy"               -> "Deploy"
+// An identifier that does not fit the shape is returned as-is rather than mangled: a name we cannot
+// parse is still better than a wrong sentence.
+export function humanizeToolName(tool: string): string {
+  const parts = tool.split(".").filter(Boolean);
+  if (parts.length === 0) return tool;
+  const words = (s: string) => s.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+  const verb = words(parts[parts.length - 1]);
+  const object = parts.length >= 2 ? words(parts[parts.length - 2]) : "";
+  const phrase = object ? `${verb} ${object}` : verb;
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+}
+
+/** Domain segment of a tool id ("it.devices.disable" -> "IT"), or null when there is none. */
+function toolDomain(tool: string): string | null {
+  const parts = tool.split(".").filter(Boolean);
+  return parts.length >= 3 ? parts[0].toUpperCase() : null;
+}
+
 function fromAutomation(a: AutomationApproval, company: { id: string; name: string }, decidable: boolean): QueueItem {
+  const domain = toolDomain(a.tool_name);
   return {
     id: `automation:${a.id}`,
     type: "approval",
     origin: "automation",
     originId: a.id,
-    title: a.tool_name,
-    meta: a.reason ?? (a.origin === "agent" ? (a.agent_name ?? "Agent") : "Automation"),
+    title: humanizeToolName(a.tool_name),
+    // Domain first, then why. The namespace still has to be visible — "Disable devices" is not the
+    // same decision under IT as under HR — it just belongs in the caption, not in the title.
+    meta: [domain, a.reason ?? (a.origin === "agent" ? (a.agent_name ?? "Agent") : "Automation")]
+      .filter(Boolean)
+      .join(" · "),
     companyId: company.id,
     company: company.name,
     createdAt: a.created_at,

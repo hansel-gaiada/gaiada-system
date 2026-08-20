@@ -33,6 +33,34 @@ describe("Board", () => {
     expect(screen.getByText("Task one")).toBeInTheDocument();
   });
 
+  it("collapses a column with no cards and leaves staffed ones alone", () => {
+    // An empty column used to spend the same 280px as a staffed one to say "nothing here" — on the
+    // department board that put an empty Backlog first in reading order.
+    const { container } = render(
+      <Board columns={statusColumns([task({ id: "t1", title: "Only one" })])} move={vi.fn()} />
+    );
+    const cols = container.querySelectorAll(".pm-col");
+    expect(cols[0]).not.toHaveClass("pm-col--empty");   // To do holds the task
+    expect(cols[1]).toHaveClass("pm-col--empty");        // In progress is empty
+    // Collapsed or not, the column stays a drop target in the DOM and keeps its label and count.
+    expect(screen.getByLabelText("In progress")).toBeInTheDocument();
+  });
+
+  it("prints a priority chip only when the priority is high or urgent", () => {
+    // "NORMAL" on every ordinary card takes the same weight as HIGH and says only that nothing is
+    // unusual — the same rule MyWorkRail already follows.
+    const { container, unmount } = render(
+      <Board columns={statusColumns([task({ id: "t1", title: "Ordinary", priority: "normal" })])} move={vi.fn()} />
+    );
+    expect(container.querySelector(".pm-chip")).toBeNull();
+    unmount();
+
+    const loud = render(
+      <Board columns={statusColumns([task({ id: "t2", title: "Loud", priority: "urgent" })])} move={vi.fn()} />
+    );
+    expect(loud.container.querySelector(".pm-chip")).toHaveTextContent("urgent");
+  });
+
   it("shows subtask count and a blocked chip on the card (P1-02 card anatomy)", () => {
     const t = task({
       id: "t1", title: "Has extras", dueDate: "2020-01-01",

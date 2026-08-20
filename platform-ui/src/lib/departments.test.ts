@@ -6,6 +6,7 @@ import {
   priorityColumns, assigneeColumns, divisionColumns, divisionStatusGrid, assigneeStatusGrid,
   ballColumns, ballKey, responsibleKey, filterTasksByBall, filterTasksByResponsible,
   ballFacetOptions, responsibleFacetOptions,
+  computeTeamRoster, NO_DIVISION_GROUP_ID,
   type DeptDivision,
 } from "./departments";
 import { DEFAULT_STATUSES } from "./pm";
@@ -56,10 +57,20 @@ describe("computeDeptKpis", () => {
       task({ id: "d", status: "done", dueDate: "2026-07-01" }), // done -> excluded everywhere
     ];
     const kpis = computeDeptKpis(tasks, [40, 60], NOW);
-    expect(kpis).toEqual({ active: 2, dueSoon: 2, blocked: 1, progressPct: 50 });
+    expect(kpis).toEqual({ active: 2, dueSoon: 2, blocked: 1, progressPct: 50, blockedProjects: 1 });
   });
   it("progressPct is 0 with no owned projects", () => {
     expect(computeDeptKpis([], [], NOW).progressPct).toBe(0);
+  });
+  it("counts blockedProjects as DISTINCT projects, not blocked tasks", () => {
+    const tasks = [
+      task({ id: "a", projectId: "p1", status: "blocked" }),
+      task({ id: "b", projectId: "p1", status: "blocked" }),
+      task({ id: "c", projectId: "p2", status: "blocked" }),
+    ];
+    const kpis = computeDeptKpis(tasks, [10], NOW);
+    expect(kpis.blocked).toBe(3);
+    expect(kpis.blockedProjects).toBe(2);
   });
   it("counts a RENAMED custom isDone/isBlocked status by FLAG, not id (P2-05)", () => {
     const tasks = [
@@ -68,7 +79,7 @@ describe("computeDeptKpis", () => {
       task({ id: "c", projectId: "pc", status: "s-ship", dueDate: "2026-07-01" }),  // done -> excluded
     ];
     const kpis = computeDeptKpis(tasks, [80], NOW, CUSTOM_STATUSES);
-    expect(kpis).toEqual({ active: 1, dueSoon: 1, blocked: 1, progressPct: 80 });
+    expect(kpis).toEqual({ active: 1, dueSoon: 1, blocked: 1, progressPct: 80, blockedProjects: 1 });
   });
 });
 
@@ -112,6 +123,49 @@ describe("computeProjectHealth", () => {
     expect(health.openCount).toBe(2);
     expect(health.atRisk).toBe(true);
     expect(health.atRiskReason).toBe("1 overdue · 1 blocked");
+  });
+
+  describe("composition (the ring's segments)", () => {
+    it("partitions every task into exactly one bucket, summing to total", () => {
+      const tasks = [
+        task({ id: "a", status: "done" }),
+        task({ id: "b", status: "done" }),
+        task({ id: "c", status: "blocked", dueDate: "2026-08-01" }),
+        task({ id: "d", status: "in_progress", dueDate: "2026-07-01" }), // overdue
+        task({ id: "e", status: "in_progress", dueDate: "2026-08-30" }), // on track
+      ];
+      const c = computeProjectHealth(tasks, [], NOW).composition;
+      expect(c).toEqual({ done: 2, blocked: 1, overdue: 1, onTrack: 1, total: 5 });
+      expect(c.done + c.blocked + c.overdue + c.onTrack).toBe(c.total);
+    });
+
+    it("counts a blocked AND overdue task once, as blocked", () => {
+      // The overlap that makes a composition ring lie: `atRiskReason` counts this task twice
+      // (once per condition) and is right to — a partition cannot.
+      const tasks = [task({ id: "a", status: "blocked", dueDate: "2026-07-01" })];
+      const health = computeProjectHealth(tasks, [], NOW);
+      expect(health.composition).toEqual({ done: 0, blocked: 1, overdue: 0, onTrack: 0, total: 1 });
+      expect(health.atRiskReason).toBe("1 overdue · 1 blocked");
+    });
+
+    it("never counts a done task as overdue, however old its due date", () => {
+      const tasks = [task({ id: "a", status: "done", dueDate: "2020-01-01" })];
+      expect(computeProjectHealth(tasks, [], NOW).composition).toEqual({ done: 1, blocked: 0, overdue: 0, onTrack: 0, total: 1 });
+    });
+
+    it("is all zeroes for a project with no tasks", () => {
+      expect(computeProjectHealth([], [], NOW).composition).toEqual({ done: 0, blocked: 0, overdue: 0, onTrack: 0, total: 0 });
+    });
+
+    it("partitions by FLAG under a renamed custom status set (P2-05)", () => {
+      const tasks = [
+        task({ id: "a", status: "s-doing", dueDate: "2026-07-01" }),
+        task({ id: "b", status: "s-stuck", dueDate: "2026-08-01" }),
+        task({ id: "c", status: "s-ship" }),
+      ];
+      const c = computeProjectHealth(tasks, [], NOW, [DOING, STUCK, SHIPPED]).composition;
+      expect(c).toEqual({ done: 1, blocked: 1, overdue: 1, onTrack: 0, total: 3 });
+    });
   });
 });
 
@@ -420,5 +474,91 @@ describe("priorityColumns", () => {
     expect(cols.map((c) => c.key)).toEqual(["low", "normal", "high", "urgent"]);
     expect(cols.find((c) => c.key === "urgent")?.tasks.map((t) => t.id)).toEqual(["a", "c"]);
     expect(cols.every((c) => c.people === undefined)).toBe(true);
+  });
+});
+
+describe("computeTeamRoster", () => {
+  const person = (id: string, name: string) => ({ id, name });
+  const assignedTo = (id: string, responsibleId: string, status: string, projectId = "p") =>
+    task({ id, projectId, status, assignee: { kind: "person", refId: responsibleId, refName: "X", responsibleId, responsibleName: "X" } });
+
+  it("counts open work per person and treats blocked as a subset of it", () => {
+    const groups = computeTeamRoster(
+      [{ id: "d1", name: "Frontend", people: [person("u1", "Made Putra")] }],
+      [person("u1", "Made Putra")],
+      [
+        assignedTo("a", "u1", "todo"),
+        assignedTo("b", "u1", "in_progress"),
+        assignedTo("c", "u1", "blocked"),
+        assignedTo("d", "u1", "done"),
+      ],
+    );
+    const [me] = groups[0].people;
+    // 3 not-done, one of which is blocked — NOT 3 open plus 1 more.
+    expect(me.openCount).toBe(3);
+    expect(me.blockedCount).toBe(1);
+  });
+
+  it("keeps people placed in the department itself, even when divisions exist", () => {
+    // The regression this replaced: `page.tsx` rendered unbucketed people ONLY when
+    // `divisions.length === 0`, so one division made them disappear from the card entirely.
+    const groups = computeTeamRoster(
+      [{ id: "d1", name: "Frontend", people: [person("u1", "A")] }],
+      [person("u1", "A"), person("u2", "B")],
+      [],
+    );
+    expect(groups.map((g) => g.label)).toEqual(["Frontend", "No division"]);
+    expect(groups[1].id).toBe(NO_DIVISION_GROUP_ID);
+    expect(groups[1].people.map((p) => p.id)).toEqual(["u2"]);
+  });
+
+  it("adds no 'No division' group when every person sits in one", () => {
+    const groups = computeTeamRoster(
+      [{ id: "d1", name: "Frontend", people: [person("u1", "A")] }],
+      [person("u1", "A")],
+      [],
+    );
+    expect(groups).toHaveLength(1);
+  });
+
+  it("keeps an unstaffed division as its own group rather than dropping it", () => {
+    const groups = computeTeamRoster(
+      [
+        { id: "d1", name: "Frontend", people: [person("u1", "A")] },
+        { id: "d2", name: "Backend", people: [] },
+      ],
+      [person("u1", "A")],
+      [],
+    );
+    expect(groups.map((g) => [g.label, g.people.length])).toEqual([["Frontend", 1], ["Backend", 0]]);
+  });
+
+  it("resolves done/blocked through the project's OWN status registry", () => {
+    const groups = computeTeamRoster(
+      [{ id: "d1", name: "Frontend", people: [person("u1", "A")] }],
+      [person("u1", "A")],
+      [
+        assignedTo("a", "u1", "s-ship", "pc"),
+        assignedTo("b", "u1", "s-stuck", "pc"),
+        assignedTo("c", "u1", "s-doing", "pc"),
+      ],
+      CUSTOM_STATUSES,
+    );
+    // "Shipped" is done and "Stuck" is blocked, though neither id is a legacy one.
+    expect(groups[0].people[0]).toMatchObject({ openCount: 2, blockedCount: 1 });
+  });
+
+  it("ignores tasks whose responsible is someone else, and the ball-holder axis", () => {
+    const ballOnly = task({
+      id: "x",
+      status: "todo",
+      assignee: { kind: "person", refId: "u1", refName: "A", responsibleId: "u2", responsibleName: "B" },
+    });
+    const groups = computeTeamRoster(
+      [{ id: "d1", name: "Frontend", people: [person("u1", "A")] }],
+      [person("u1", "A")],
+      [ballOnly],
+    );
+    expect(groups[0].people[0].openCount).toBe(0);
   });
 });

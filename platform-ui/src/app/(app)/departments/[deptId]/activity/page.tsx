@@ -50,6 +50,7 @@ export default async function DepartmentActivityPage({ params, searchParams }: {
   const items: ActivityItem[] = feed.map((row) => ({
     id: row.id,
     actor: actorLabel(row, Object.fromEntries(nameById)),
+    automated: !row.actorUserId,
     verb: humanizeVerb(row.verb),
     objectLabel: objectLabel(row),
     href: activityHref(row),
@@ -89,6 +90,7 @@ export default async function DepartmentActivityPage({ params, searchParams }: {
       <Card title="Activity">
         <ActivityFeed
           items={items}
+          nowIso={new Date().toISOString()}
           emptyTitle={projectId || personId ? "No activity matches these filters" : undefined}
           emptyBody={projectId || personId ? "Try a broader project or person, or reset the filters above." : undefined}
         />

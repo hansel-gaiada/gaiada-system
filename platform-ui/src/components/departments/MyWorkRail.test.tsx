@@ -3,12 +3,55 @@ import { describe, it, expect } from "vitest";
 import { MyWorkRail } from "./MyWorkRail";
 
 describe("MyWorkRail", () => {
-  it("renders empty copy for both sections when there is nothing to show", () => {
-    render(<MyWorkRail today={[]} waiting={[]} />);
+  it("collapses an empty section to its heading plus a one-word verdict", () => {
+    const { container } = render(<MyWorkRail today={[]} waiting={[]} />);
     expect(screen.getByText("My work today")).toBeInTheDocument();
-    expect(screen.getByText("Nothing due — a clear day.")).toBeInTheDocument();
     expect(screen.getByText("Waiting on me")).toBeInTheDocument();
-    expect(screen.getByText("Nothing waiting on you.")).toBeInTheDocument();
+    // Two sections, two verdicts, no body sentences: an idle rail must not out-weigh a busy one.
+    expect(container.querySelectorAll(".dept-rail__section--clear")).toHaveLength(2);
+    expect(container.querySelectorAll(".dept-rail__clear")).toHaveLength(2);
+    expect(container.querySelector(".dept-rail__list")).toBeNull();
+  });
+
+  it("puts a count on every non-empty section heading", () => {
+    const { container } = render(
+      <MyWorkRail
+        today={[{ id: "t1", title: "A" }, { id: "t2", title: "B" }]}
+        waiting={[{ id: "w1", title: "C", kind: "approval" }]}
+      />
+    );
+    expect([...container.querySelectorAll(".dept-rail__count")].map((n) => n.textContent)).toEqual(["2", "1"]);
+  });
+
+  it("prints the kind on a waiting row only when the list is mixed", () => {
+    const approvalsOnly = render(
+      <MyWorkRail today={[]} waiting={[{ id: "w1", title: "A", kind: "approval" }, { id: "w2", title: "B", kind: "approval" }]} />
+    );
+    // Uniform list: the heading already said what these are, so five identical "APPROVAL" labels
+    // down one column are dropped.
+    expect(approvalsOnly.container.querySelector(".dept-rail__kind")).toBeNull();
+    approvalsOnly.unmount();
+
+    const mixed = render(
+      <MyWorkRail today={[]} waiting={[{ id: "w1", title: "A", kind: "approval" }, { id: "w2", title: "B", kind: "blocked_task" }]} />
+    );
+    expect([...mixed.container.querySelectorAll(".dept-rail__kind")].map((n) => n.textContent)).toEqual(["Approval", "Blocked"]);
+  });
+
+  it("shows the caller's wait age and marks only the stale rows", () => {
+    const { container } = render(
+      <MyWorkRail
+        today={[]}
+        waiting={[
+          { id: "w1", title: "Ad spend increase", kind: "approval", age: "8d", stale: true },
+          { id: "w2", title: "PM review", kind: "approval", age: "2d" },
+        ]}
+      />
+    );
+    expect(screen.getByText("8d")).toBeInTheDocument();
+    expect(screen.getByText("2d")).toBeInTheDocument();
+    // The rust bar only means "this needs you" while most rows do not carry it.
+    expect(container.querySelectorAll(".dept-rail__item--stale")).toHaveLength(1);
   });
 
   it("badges an overdue task and labels an approval waiting item", () => {
@@ -27,7 +70,9 @@ describe("MyWorkRail", () => {
     // reasoning as UrgencyChip.test.tsx / Board.test.tsx.
     expect(container.querySelector(".pm-urg--overdue")).toBeTruthy();
     expect(screen.getByText("high")).toBeInTheDocument();
-    expect(screen.getByText("Approval")).toBeInTheDocument();
+    // One kind in the list, so the row prints no "Approval" label — the section heading is the
+    // label. The caption survives, because it is the part that differs per row.
+    expect(container.querySelector(".dept-rail__kind")).toBeNull();
     expect(screen.getByText("Client review")).toBeInTheDocument();
   });
 
@@ -50,9 +95,9 @@ describe("MyWorkRail", () => {
   });
 
   it("shows the ball empty state when the caller supplies an empty array", () => {
-    render(<MyWorkRail today={[]} waiting={[]} ball={[]} />);
+    const { container } = render(<MyWorkRail today={[]} waiting={[]} ball={[]} />);
     expect(screen.getByText("Ball is with you")).toBeInTheDocument();
-    expect(screen.getByText("Nothing on your ball right now.")).toBeInTheDocument();
+    expect(container.querySelectorAll(".dept-rail__section--clear")).toHaveLength(3);
   });
 
   it("renders ball items with readiness and a precomputed urgency tier, never deriving either", () => {
@@ -75,7 +120,7 @@ describe("MyWorkRail", () => {
   });
 
   it("renders a custom ball empty-state message when supplied", () => {
-    render(<MyWorkRail today={[]} waiting={[]} ball={[]} ballEmptyText="Nobody's turn — all clear." />);
-    expect(screen.getByText("Nobody's turn — all clear.")).toBeInTheDocument();
+    render(<MyWorkRail today={[]} waiting={[]} ball={[]} ballEmptyText="nobody's turn" />);
+    expect(screen.getByText("nobody's turn")).toBeInTheDocument();
   });
 });

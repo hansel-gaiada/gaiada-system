@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui";
+import { DetailsDismiss } from "./DetailsDismiss";
 import "./pm.css";
 
 // Shared facet-filter panel — replaces the bare checkbox lists that used to be hand-rolled
@@ -51,12 +52,18 @@ function buildHref(basePath: string, hidden: Record<string, string | undefined>,
 }
 
 export function FacetFilters({
-  basePath, hidden, groups, formLabel = "Filters",
+  basePath, hidden, groups, formLabel = "Filters", bare = false,
 }: {
   basePath: string;
   hidden: Record<string, string | undefined>;
   groups: FacetGroupSpec[];
   formLabel?: string;
+  /** Render without the surrounding `Card`, for a caller that is placing this INSIDE a control
+   *  strip of its own. Collapsed, the Card version is a full-width bordered box whose only visible
+   *  content is the word "Filters" — on the department board that was the third stacked container
+   *  before the first column, and the board began past the fold. Default keeps every existing call
+   *  site pixel-identical. */
+  bare?: boolean;
 }) {
   const visibleGroups = groups.filter((g) => g.options.length > 0);
   if (visibleGroups.length === 0) return null;
@@ -70,8 +77,12 @@ export function FacetFilters({
     );
   const clearedValues = (): Record<string, string[]> => Object.fromEntries(visibleGroups.map((g) => [g.key, []]));
 
+  const Shell = bare
+    ? ({ children }: { children: ReactNode }) => <div className="pm-facets-bare">{children}</div>
+    : ({ children }: { children: ReactNode }) => <Card style={{ marginBottom: 16 }}>{children}</Card>;
+
   return (
-    <Card style={{ marginBottom: 16 }}>
+    <Shell>
       {activeCount > 0 && (
         <div className="pm-facets__chips">
           {visibleGroups.flatMap((g) =>
@@ -95,7 +106,13 @@ export function FacetFilters({
         </div>
       )}
 
-      <details className="pm-facets" open={activeCount > 0 || undefined}>
+      {/* `bare` callers place this in a control strip, where an inline-expanding disclosure pushed the
+          whole board down the page every time it opened. In that mode the body floats over the page
+          instead (see `.pm-facets--float`); the Card-wrapped callers keep the inline behaviour. */}
+      <details className={`pm-facets${bare ? " pm-facets--float" : ""}`} open={activeCount > 0 || undefined}>
+        {/* Only the floating variant needs dismissing: the inline one is part of the page, and a
+            click-outside that collapsed it would fight the reader. */}
+        {bare && <DetailsDismiss />}
         <summary className="pm-facets__summary">
           {formLabel}{activeCount > 0 ? ` (${activeCount})` : ""}
         </summary>
@@ -120,6 +137,6 @@ export function FacetFilters({
           </div>
         </form>
       </details>
-    </Card>
+    </Shell>
   );
 }

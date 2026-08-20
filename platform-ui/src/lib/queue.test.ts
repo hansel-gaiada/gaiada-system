@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getMyWorkQueue, projectQueueForCompany, getPmHomeData, getPmCounters, isoDaysAgo, homeWindowLabel } from "./queue";
+import { getMyWorkQueue, projectQueueForCompany, getPmHomeData, getPmCounters, isoDaysAgo, homeWindowLabel, humanizeToolName } from "./queue";
 import type { Me } from "./platform";
 import type { QueueItem } from "./queueUrgency";
 import type { Envelope } from "./envelope";
@@ -295,5 +295,26 @@ describe("getPmCounters — P4-A9", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "not enabled" }), { status: 404 })));
     const counters = await getPmCounters("u1", "co-a", "u1", today);
     expect(counters).toEqual({ ball: 0, responsible: 0, reactions: null, overdue: 0 });
+  });
+});
+
+describe("humanizeToolName", () => {
+  it("reads a dotted tool id as verb + object, dropping the domain", () => {
+    // These were being printed as the approval's TITLE, so the queue asked people to decide on
+    // things named like permission keys ("it.devices.disable").
+    expect(humanizeToolName("it.devices.disable")).toBe("Disable devices");
+    expect(humanizeToolName("pm.tasks.bulkUpdate")).toBe("Bulk update tasks");
+    expect(humanizeToolName("hr.payroll.export_csv")).toBe("Export csv payroll");
+  });
+
+  it("handles a bare or two-part id without inventing an object", () => {
+    expect(humanizeToolName("deploy")).toBe("Deploy");
+    expect(humanizeToolName("devices.disable")).toBe("Disable devices");
+  });
+
+  it("returns an unparseable id untouched rather than mangling it", () => {
+    // A name we cannot read is still better than a confident wrong sentence.
+    expect(humanizeToolName("")).toBe("");
+    expect(humanizeToolName("...")).toBe("...");
   });
 });
