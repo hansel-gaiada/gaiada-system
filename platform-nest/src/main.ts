@@ -92,6 +92,10 @@ import { runWorkActivityBackfill } from "./core/work-activity-backfill";
 import { startBurndownSnapshotLoop } from "./modules/pm/burndown-job";
 import { startStaleReaperLoop } from "./modules/it/discovery.service";
 import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-job";
+// SMM-21 — the nightly metrics sweep. Registered here rather than by the authoring seat because
+// three tickets were in flight over this file at once; the seat handed up the line instead of
+// editing it, which is what kept the collision from happening.
+import { startMetricsPullLoop, socialMetricsPullEnabled, socialMetricsPullIntervalMs } from "./modules/social/metrics-job";
 // SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
@@ -432,6 +436,11 @@ async function bootstrap(): Promise<void> {
       registerPositionEventHandlers();
       // eslint-disable-next-line no-console
       console.log(`position reconciler on: streams [${POSITION_STREAMS.join(", ")}]`);
+    }
+    if (socialMetricsPullEnabled()) {
+      startMetricsPullLoop(socialMetricsPullIntervalMs());
+      // eslint-disable-next-line no-console
+      console.log(`social metrics pull on: every ${socialMetricsPullIntervalMs()}ms`);
     }
     startConsumerLoop([
       "deliverable",

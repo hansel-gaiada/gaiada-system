@@ -54,7 +54,7 @@ resourcePolicy:
     - actions: ["read", "provision", "reconcile"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # The in-tenant elevated tier: company_admin and manager get the full surface (a staff human
     # provisioning a site for one of their own runs, or reading/reconciling the mirror table).
     - actions: ["read", "provision", "reconcile"]

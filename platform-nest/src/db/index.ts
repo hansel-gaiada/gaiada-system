@@ -65,6 +65,21 @@ export async function closePool(): Promise<void> {
 /** Time-ordered UUID v7 (spec §2: index locality + sync ordering). */
 export const newId = (): string => uuidv7();
 
+/** MON-00b. Thrown when a tenant set spans two root company trees without an explicit, reasoned
+ *  `crossRoot` opt-in. A thrown error is correct here rather than a silent narrowing: quietly
+ *  dropping the foreign ids would turn a boundary violation into a confusing empty result, which is
+ *  exactly the zero-row trap this estate keeps relearning. */
+export class CrossRootTenantSetError extends Error {
+  constructor(tenantCount: number, rootCount: number) {
+    super(
+      `cross-root tenant set refused: ${tenantCount} tenant id(s) span ${rootCount} root companies. ` +
+        `A single request must not combine data from two roots. If this call is genuinely the ` +
+        `operator's rather than a tenant's, pass { crossRoot: { reason } } and say why.`,
+    );
+    this.name = "CrossRootTenantSetError";
+  }
+}
+
 export interface WithTenantsOptions {
   /** WSD-4 (HR design §2.4 / ORG-3): module keys this request DECLARES it is operating
    *  inside, set as the second GUC `app.scopes` (CSV). Module-owned tables compose their
@@ -74,6 +89,15 @@ export interface WithTenantsOptions {
    *  ZERO rows even with a correct tenant set (fail-closed by construction). Core (non-
    *  module-owned) tables have no such predicate and are unaffected either way. */
   modules?: string[];
+
+  /** MON-00b (Wall 1). Permits a tenant array that SPANS TWO ROOT COMPANY TREES. Refused by default,
+   *  because both cross-root leak chains found in the 2026-08-20 audit were the same shape — a caller
+   *  widening the GUC — and reviewing handlers one at a time does not survive the next handler.
+   *
+   *  Set this ONLY for work that is genuinely the operator's rather than a tenant's, and say why at
+   *  the call site. Ratified today: the principal-less background relay, and the operator's own
+   *  vendor-spend ceiling. "The query needs more rows" is not a reason. */
+  crossRoot?: { reason: string };
 }
 
 /** Run `fn` in a transaction authorized for exactly `tenantIds` (the authorized-tenant-set).
@@ -88,6 +112,21 @@ export async function withTenants<T>(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // MON-00b · WALL 1. The GUC is the single point of failure for the root boundary: RLS never
+    // crosses roots on its own, it only honours whatever tenant set arrives here. So the refusal
+    // lives at the one place the set is ever established, rather than in each handler.
+    //
+    // Runs INSIDE the transaction but BEFORE set_config, so a refusal cannot leave a widened context
+    // behind. Uses this same client (not withGlobal) to avoid a second pool checkout per request.
+    if (!opts?.crossRoot && tenantIds.length > 1) {
+      const { rows } = await client.query<{ roots: string }>(
+        `SELECT count(DISTINCT root_company_id)::text AS roots FROM companies WHERE id = ANY($1::uuid[])`,
+        [tenantIds],
+      );
+      if (Number(rows[0]?.roots ?? 0) > 1) {
+        throw new CrossRootTenantSetError(tenantIds.length, Number(rows[0].roots));
+      }
+    }
     await client.query("SELECT set_config('app.current_tenant_ids', $1, true)", [tenantIds.join(",")]);
     if (opts?.modules?.length) {
       await client.query("SELECT set_config('app.scopes', $1, true)", [opts.modules.join(",")]);

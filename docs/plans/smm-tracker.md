@@ -32,7 +32,7 @@ not afterwards.
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
-| P3 content ops | 1 (+2 partial) | 8 |
+| P3 content ops | **2** (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
@@ -40,7 +40,8 @@ Module: `social-media 0.5.5 · IN PROGRESS` — publish loop **DEV-VERIFIED agai
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
-SAME running process.
+SAME running process; metrics (SMM-21) **DEV-VERIFIED** — `pullMetrics` nightly ingest + the
+Analytics tab, driven in a real browser, `main.ts` registration pending merge.
 
 ---
 
@@ -274,12 +275,95 @@ any single capability is real, that phase decides how `direct` gets registered a
 |---|---|---|---|
 | SMM-19 | Brand-voice RAG + AI drafting, cross-client leak test | ✅ | |
 | SMM-20 | Asset attach only; `ai.imageGen` ships inert and names why | ⬜ | |
-| SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ⬜ | |
+| SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ✅ **merged** | backend + frontend DEV-VERIFIED, evidence below; `main.ts` registration still pending merge |
 | SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ⬜ | widens SMM-09's budget stage |
 | SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ⬜ | |
 | SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | 🟡 partial | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20. **Outstanding: the AGPL source-offer — see the gap below** |
 | SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
 | SMM-33 | Capability inventory + eval register | 🟡 partial | golden-case table landed in SMM-14. **Outstanding: the per-capability inventory row set** (endpoint · tool · impact class · refusal · `work_activity`) — 17 MCP tools enumerated, table not yet written |
+
+**SMM-21 evidence (2026-08-20, medior).** Schema already in place (`0105`'s `social_metrics_daily`/
+`social_post_metrics`) — no migration, no Cerbos change. Built:
+
+- **`platform-nest/src/modules/social/metrics-job.ts`** (new) — the nightly `pullMetrics` sweep,
+  shaped exactly like `inbox-retention-job.ts` (SMM-36) / `post-status-sync-job.ts` (SMM-10):
+  `withGlobal` for the tenant list, then per tenant a declared-module-scope READ, the driver call
+  OUTSIDE any transaction (network I/O never belongs inside one), then a declared-module-scope
+  WRITE. Two independent halves, one failing does not starve the other: (A) one `getAccountMetrics`
+  call per connected account, upserted into `social_metrics_daily` on `UNIQUE(account_id, date)`;
+  (B) one `getPostMetrics` call per (publisher org, batch of published `provider_post_id`s, 30-day
+  lookback — an operational job parameter, not a business/quota constant), APPENDED into
+  `social_post_metrics` (0105 designs it as an append-only snapshot history — a re-pull is a new
+  row, never an overwrite). Per-tenant and per-account/org failures logged and swallowed.
+- **The module GUC, the ticket's own named risk, addressed the same way every prior job in this
+  module addressed it**: `applyAccountDailyMetrics`/`appendPostMetrics` each declare their own
+  `declareSocialModuleScope` before touching a row. `metrics-job.test.ts`'s (T1)/(T5) call these
+  functions exactly as written — no `{modules:['social']}` at the call site — and assert a REAL row
+  exists afterward; delete either declaration and the assertion fails with "written: 0" instead of a
+  real write, the precise "0 rows synced, looks perfectly healthy" shape the brief warned about.
+- **No invented numbers, proven at three layers.** `DailyMetrics`/`PostMetrics` (the
+  `SocialPublisher` port) have every field OPTIONAL; an absent field is SQL NULL end to end, never
+  coerced to 0 — (T2)/(T6) in `metrics-job.test.ts` re-read the DB directly and assert `null`,
+  `metrics-endpoints.test.ts` asserts the same over HTTP, and the browser pass below confirms the
+  Analytics tab renders it as an em dash.
+- **Dark by default.** `socialMetricsPullEnabled()`/`socialMetricsPullIntervalMs()` read
+  `SOCIAL_METRICS_PULL_ENABLED`/`SOCIAL_METRICS_PULL_INTERVAL_MS` directly from `process.env` —
+  deliberately NOT through `config.ts`, which (along with `main.ts`) SMM-38a's parallel worktree
+  held for this ticket's whole duration. `startMetricsPullLoop` is written, exported, and tested,
+  but **not wired into `main.ts`** — that one-line registration (`import { startMetricsPullLoop,
+  socialMetricsPullEnabled, socialMetricsPullIntervalMs } from "./modules/social/metrics-job";` plus
+  `if (socialMetricsPullEnabled()) { startMetricsPullLoop(socialMetricsPullIntervalMs()); }`,
+  mirroring the `inboxRetention`/`reconcile` blocks already there) is handed to the merge
+  orchestrator rather than applied here.
+- **Two new read-only BFF routes** on `social.controller.ts`, `social_account`/`read` (the same
+  permission `GET accounts` already uses): `GET metrics/daily` (per-account daily series, optional
+  `accountId`/`from`/`to`, 400 `missing_field` without `engagementId` — accounts are client-scoped,
+  not engagement-scoped, so there is no other way to know which client's rows to read) and
+  `GET metrics/posts` (the LATEST `social_post_metrics` snapshot per published variant via
+  `DISTINCT ON (variant_id) ... ORDER BY fetched_at DESC`). The `date` column is selected via
+  `::text`, not handed back as a raw JS `Date` — the SAME node-pg timezone-shift trap
+  `pm.controller.ts`/`document-builder.ts` already guard every date column against; caught live by
+  `metrics-endpoints.test.ts` (a seeded `2026-08-15` row came back `2026-08-14` on this host's local
+  timezone before the cast was added) rather than shipped silently wrong.
+- **Frontend**: `lib/socialShared.ts`'s `DailyMetricRow`/`PostMetricRow` (all-optional per field,
+  mirroring the port), `lib/social.ts#listDailyMetrics`/`listPostMetrics`,
+  `components/social/AnalyticsPanel.tsx` (a pure server component — no `globalThis` mutation trap
+  applies, this is read-only — with `fmtMetric` as the ONE place a number becomes text, so there is
+  exactly one place to audit for "never fabricate a 0"), and `departments/[deptId]/analytics/
+  page.tsx` now renders real per-account/per-post tables with an engagement filter (mirroring
+  `calendar/page.tsx`'s own filter pattern) instead of the `BackendPending` placeholder.
+- **DEMO_MODE** (`demoSocial.ts`): `dailyMetrics`/`postMetrics` seeded onto the SAME
+  `globalThis`-pinned `SocialStore` (no new mutation-bundling risk — both new routes are pure
+  reads), deliberately partial: one daily row seeded WITHOUT `reach`/`engagements`/`linkClicks`/
+  `videoViews`, one post-metrics row seeded WITHOUT `saves`/`videoViews`/`clicks` — so "absent
+  counter renders as unknown, never zero" is drivable live, not only asserted in a unit test.
+
+**Driven in a real browser** (`DEMO_MODE=1 npm run dev`, Playwright, headless Chromium; `next build`
+NOT re-run per this ticket's own "don't run it repeatedly" instruction): logged in, switched the
+active-tenant cookie to the agency company, opened Social Media → Analytics. Confirmed: the
+per-account daily table renders real numbers for followers (4,180) and impressions (6,200) on the
+earliest seeded day while reach/engagements/link clicks/video views render as **em dashes** on that
+SAME row (never `0`), then full real numbers on the following two days; the published-posts table
+renders one row with `saves` as an em dash while impressions/likes/comments/shares are real numbers;
+the engagement filter switches between both seeded engagements and both correctly show the SAME
+account-level series (proving the join runs through the engagement's `client_id`, not a fabricated
+per-engagement slice — accounts are client-scoped by design). A column-spacing defect found in the
+same pass (`.lux-table`'s grid gap lives on `.lux-table__head`/`.lux-table__row`, not on the `.lux-
+table` wrapper, which is only a flex column) was caught by this same browser pass and fixed before
+merge, not left for a later polish ticket.
+
+Test counts: **337 / 0 / 0** `platform-nest` (baseline 318/0/0, +19: `metrics-job.test.ts` 13,
+`metrics-endpoints.test.ts` 6). **2399 / 0 / 0** `platform-ui` (baseline 2392/0/0, +7:
+`social-metrics.test.ts`). `tsc --noEmit` clean on both sides.
+
+**Anything the spec did not answer, named rather than guessed:** (1) no MCP tool/agentic-surface
+entry for the two new read routes — the ticket brief named `pullMetrics` + the tables + the nightly
+flow + the Analytics tab, not an agent-facing tool; (2) the post-metrics lookback window (30 days)
+and the daily-pull window (3 days back) are operational job parameters, not business/quota
+constants — the "no invented numbers" rule is about values a caller could mistake for something the
+engine reported, which these are not, but naming the choice here rather than silently picking it;
+(3) `main.ts` registration is NOT applied — handed to the merge orchestrator (exact line above)
+since `main.ts`/`config.ts` were off-limits for this ticket's duration.
 
 ## P4 — agents + assistant ⬜
 
@@ -303,6 +387,7 @@ any single capability is real, that phase decides how `direct` gets registered a
 
 | Item | Owner / when |
 |---|---|
+| **`metrics-job.ts` reads `process.env` directly rather than `config.ts`** — the seat was held out of `config.ts` to avoid a three-way collision, so `SOCIAL_METRICS_PULL_ENABLED`/`_INTERVAL_MS` are the only social knobs not visible where an operator greps for them. Harmless today, drift tomorrow | small cleanup |
 | **AGPL §13 source-offer has nowhere to live.** Postiz is AGPL-3.0 and §13 requires offering its modified source to users who interact with it over a network. The **staff console has no footer surface at all** (`departments/[deptId]/layout.tsx`, `DeptShellFrame.tsx`); the only footer is in `PortalShell.tsx`, which is client-facing and the wrong audience. Needs a deliberate placement decision, not an invented component | owner + senior-uiux |
 | Platform-app reviews — **Meta first**, its Business Verification is the only serial prerequisite | **staging** (D-23) |
 | Google SSO on Postiz login: does `DISABLE_REGISTRATION` block a *first-time* sign-in? | staging checklist — **do not test on the live instance** |

@@ -27,15 +27,33 @@ const live = process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const T1 = "cccccccc-tp4-0000-0000-000000000001"; // the company company_admin/manager administer
 const T2 = "cccccccc-tp4-0000-0000-000000000002"; // a DIFFERENT company — not administered by them
 
-function principal(roles: RoleGrant[], companies: string[]): Principal {
-  return { userId: "p-1", assurance: "high", companies, roles, sessionVersion: 1 };
+// MON-00c: `rootCompanies` defaults to `companies` because in a single-root fixture world the
+// principal's root subtree IS the companies under test. It must be passed EXPLICITLY for a
+// principal with no memberships (a global group_executive) — that is the case the boundary
+// exists for, and an empty set denies by design.
+function principal(roles: RoleGrant[], companies: string[], rootCompanies: string[] = companies): Principal {
+  return { userId: "p-1", assurance: "high", companies, roles, rootCompanies, sessionVersion: 1 };
 }
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
 // The pure cross-company exec shape: a `group_executive` grant at GLOBAL scope, and — the whole
 // point — ZERO company memberships. This is not a contrived edge case; it is what every real
 // `group_executive` holder looks like (the role has no company-scoped grant path at all).
-const execNoMemberships = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], []);
+// MON-00c (2026-08-20) — `rootCompanies: [T1]` added. The "zero memberships" half of this fixture is
+// UNCHANGED and still the point of the file; what changed is that reach is no longer unbounded. A real
+// exec belongs to a holding even with no membership row, and `users.home_company_id` (MON-00a) is
+// where that employment is recorded — precisely because memberships cannot express it for this role.
+// Passing [] here would now DENY everything, which is the boundary working, not a broken fixture.
+const execNoMemberships = principal(
+  [{ role: "group_executive", scopeType: "global", scopeId: null }], [], [T1],
+);
+
+// The same exec, anchored to a DIFFERENT root. Added with the boundary: before MON-00c there was no
+// fixture that could express "an exec of another holding", because reach did not depend on which
+// holding you belonged to — which is exactly why the leak went unnoticed.
+const execForeignRoot = principal(
+  [{ role: "group_executive", scopeType: "global", scopeId: null }], [], [T2],
+);
 
 // A company_admin/manager grant scoped to T1, tested against a T2 resource — isolates "does the
 // split still gate company_admin/manager on inTenant" from "is T2 even in the authorized set"
@@ -121,4 +139,33 @@ describe("IAM-TRAP4 — role-permission-bundles.json already carried these grant
     const meta = (bundles as unknown as { _meta: { counts: { perRole: Record<string, number> } } })._meta.counts;
     expect(gePerms.length).toBe(meta.perRole.group_executive);
   });
+});
+
+// ── MON-00c · the other half of the split ────────────────────────────────────────────────────────
+// This file's original claim was "the exec ALLOWs with zero company memberships". True, and still
+// pinned above. But it was silent on WHICH companies, and the answer was "any of them" — a global
+// grant plus a condition of `notLow` alone matches every tenantId in the database. With one holding
+// that was invisible; with two it is a cross-customer read. Both halves now have teeth.
+describe("MON-00c — the exec's reach STOPS at its own root", () => {
+  const KINDS: { kind: string; actions: string[]; resourceAttrs?: Record<string, unknown> }[] = [
+    { kind: "automation_approval", actions: ["read", "decide", "retry"], resourceAttrs: { module: "other" } },
+    { kind: "pipeline_gate", actions: ["read", "decide"] },
+    { kind: "pipeline_run", actions: ["read"] },
+    { kind: "pipeline_stage", actions: ["read", "update"] },
+    { kind: "scope_signoff", actions: ["read", "create"] },
+  ];
+
+  for (const k of KINDS) {
+    for (const action of k.actions) {
+      it(`${k.kind}.${action}: ALLOW inside its root, DENY on a foreign root`, async () => {
+        const resource = { kind: k.kind, id: `${k.kind}-1`, tenantId: T1, ...(k.resourceAttrs ?? {}) };
+
+        // Positive control FIRST. Without it a bug that denies everything would read as a pass.
+        expect(await allow(execNoMemberships, resource as never, action)).toBe(true);
+
+        // An exec of a different holding must not reach this tenant at all.
+        expect(await allow(execForeignRoot, resource as never, action)).toBe(false);
+      });
+    }
+  }
 });

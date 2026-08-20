@@ -13,7 +13,7 @@ resourcePolicy:
     - actions: ["read", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Any in-tenant member may read the org chart.
     - actions: ["read"]
       effect: EFFECT_ALLOW

@@ -10,8 +10,12 @@ const T1 = "aaaaaaaa-0000-0000-0000-000000000001";
 const T2 = "aaaaaaaa-0000-0000-0000-000000000002";
 const PROJ = "bbbbbbbb-0000-0000-0000-000000000001";
 
-function principal(roles: RoleGrant[], companies: string[] = [T1], assurance: Principal["assurance"] = "high"): Principal {
-  return { userId: "u1", assurance, companies, roles, sessionVersion: 1 };
+// MON-00c: `rootCompanies` defaults to `companies` because in a single-root fixture world the
+// principal's root subtree IS the companies under test. It must be passed EXPLICITLY for a
+// principal with no memberships (a global group_executive) — that is the case the boundary
+// exists for, and an empty set denies by design.
+function principal(roles: RoleGrant[], companies: string[] = [T1], assurance: Principal["assurance"] = "high", rootCompanies: string[] = companies): Principal {
+  return { userId: "u1", assurance, companies, roles, rootCompanies, sessionVersion: 1 };
 }
 const project: Resource = { kind: "project", id: PROJ, tenantId: T1, ownerId: "owner-x" };
 const taskInProj: Resource = { kind: "task", tenantId: T1, projectId: PROJ };

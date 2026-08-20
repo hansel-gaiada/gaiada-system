@@ -108,7 +108,7 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # Dept lead tier — COARSE company-scoped gate only (see file header on the known
     # approximation); appraisals.controller.ts narrows read (to the caller's own assigned

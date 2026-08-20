@@ -411,6 +411,53 @@ export function describeQuota(network: SocialNetwork, quota: AccountQuota | unde
   return { status: "not_modeled", label: "Not tracked — no live quota probe is modeled for this network" };
 }
 
+// ── Analytics tab (SMM-21) — `GET metrics/daily` / `GET metrics/posts` ────────────────────────────
+//
+// Mirrors `social_metrics_daily`/`social_post_metrics` (0105) and `metrics-job.ts#pullMetrics`
+// (platform-nest) exactly: every counter is OPTIONAL, never defaulted to 0 on this side either. A
+// field the engine never reported comes back `null` over the wire (the controller selects the raw
+// nullable column, no COALESCE) — render it as an explicit "not fetched", the same "unknown is
+// never zero" discipline `describeQuota`/`QUOTA_UNKNOWN_RULE` already hold the quota strip to.
+// There is deliberately NO synthesized zero anywhere between the DB and the component that renders
+// this — see `AnalyticsPanel.tsx`'s own header.
+
+/** One account's one day. `date` is `YYYY-MM-DD` text (the controller casts the SQL `date` column
+ *  to text specifically so no client-side timezone shift can move it a day either way). */
+export interface DailyMetricRow {
+  accountId: string;
+  network: SocialNetwork;
+  handle: string;
+  displayName: string | null;
+  date: string;
+  followers: number | null;
+  impressions: number | null;
+  reach: number | null;
+  engagements: number | null;
+  linkClicks: number | null;
+  videoViews: number | null;
+}
+
+/** The LATEST known snapshot for one published variant — `social_post_metrics` is an APPEND-ONLY
+ *  history (0105), and the controller already picks the most recent `fetchedAt` row per variant;
+ *  this type carries no `fetchedAt` history, only that one snapshot plus enough of the post/variant
+ *  identity to render a row without a second lookup. */
+export interface PostMetricRow {
+  variantId: string;
+  postId: string;
+  accountId: string;
+  network: SocialNetwork;
+  publishedAt: string | null;
+  publishedUrl: string | null;
+  impressions: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  videoViews: number | null;
+  clicks: number | null;
+  fetchedAt: string;
+}
+
 /** True only on a genuine Cerbos 403. Never true for a 404 (module dark / entity absent) — see
  *  `lib/social.ts`'s header for the full "403 must never fold into an empty state" rule this
  *  shape exists to carry. */

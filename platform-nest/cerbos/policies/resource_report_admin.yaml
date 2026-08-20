@@ -51,7 +51,7 @@ resourcePolicy:
     - actions: ["recompute"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # The company's own admin may re-derive its own company's facts (ops path: an n8n nightly flow
     # runs under a company_admin service principal). Bounded to that tenant, and never low-assurance
     # — a chat-session principal must not be able to trigger a window recompute.

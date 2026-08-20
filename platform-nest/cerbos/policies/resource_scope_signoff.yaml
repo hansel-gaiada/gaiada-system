@@ -32,7 +32,7 @@ resourcePolicy:
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
@@ -41,7 +41,7 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # ══════════ IAM-04-B4 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-
     # for-byte unchanged. Mirrors ONLY the company_admin/manager `inTenant && notLow` reach above

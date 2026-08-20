@@ -1526,6 +1526,95 @@ export class SocialController {
     return { accounts: rows };
   }
 
+  // ================================================================== ANALYTICS (SMM-21) =====
+  // Pure reads against `social_metrics_daily`/`social_post_metrics` — 0105's own design comment
+  // calls `social_metrics_daily` THE CACHE (D-4: analytics pulls are $0, so nothing is cached
+  // outside a tenant row). These endpoints never call the publisher; they answer with whatever
+  // `metrics-job.ts#pullMetrics` has already written. A row that was never pulled is simply ABSENT
+  // from the response — never a fabricated zero (the same "unknown is not zero" discipline
+  // `quota_unknown` already holds the quota strip to). Consult `GET accounts` for each account's
+  // `capabilities.analytics` flag and `GET publisher/status` for the deployment-level
+  // `account_metrics`/`post_metrics` capability before reading an empty series as "nothing to show"
+  // versus "this engine/account cannot report analytics at all".
+
+  /** Per-account daily series for one engagement's client, scoped by date. `engagementId` is
+   *  required — accounts are client-scoped, not engagement-scoped (0105), so this is how the
+   *  console names which client's accounts to read. Empty when no metrics have ever been pulled
+   *  for that window, which is a legitimate steady state, not an error. */
+  @Get("metrics/daily")
+  async listDailyMetrics(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Query("engagementId") engagementId?: string, @Query("accountId") accountId?: string,
+    @Query("from") from?: string, @Query("to") to?: string,
+  ) {
+    if (!engagementId) refuse("missing_field");
+    if (!UUID_RE.test(engagementId)) refuse("invalid_id");
+    if (accountId && !UUID_RE.test(accountId)) refuse("invalid_id");
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    const params: unknown[] = [engagementId];
+    const where: string[] = ["e.id = $1", "a.deleted_at IS NULL"];
+    if (accountId) { params.push(accountId); where.push(`a.id = $${params.length}`); }
+    if (from) { params.push(from); where.push(`m.date >= $${params.length}::date`); }
+    if (to) { params.push(to); where.push(`m.date <= $${params.length}::date`); }
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        // Every counter is nullable end to end (DailyMetrics's own fields are optional) — an
+        // absent field the engine never reported stays SQL NULL through this SELECT, never
+        // coalesced to 0, so the console can render "not fetched" honestly.
+        // `date` is a plain SQL DATE column — cast to text (not handed back as a JS Date) so a
+        // local timezone offset can never shift it a day either way on its way to JSON, the same
+        // trap `pm.controller.ts`/`document-builder.ts` already guard every date column against.
+        `SELECT m.account_id AS "accountId", a.network, a.handle, a.display_name AS "displayName",
+                m.date::text AS date, m.followers, m.impressions, m.reach, m.engagements,
+                m.link_clicks AS "linkClicks", m.video_views AS "videoViews"
+           FROM social_metrics_daily m
+           JOIN social_accounts a ON a.id = m.account_id AND a.tenant_id = m.tenant_id
+           JOIN social_engagements e ON e.client_id = a.client_id AND e.tenant_id = a.tenant_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY a.network, a.handle, m.date`,
+        params,
+      ),
+      { modules: ["social"] },
+    );
+    return { series: rows };
+  }
+
+  /** Latest known metrics snapshot per published variant in one engagement. `social_post_metrics`
+   *  is APPEND-ONLY (0105) — this reads the most recent `fetched_at` row per variant, never an
+   *  aggregate across snapshots (that would blend counters taken at different times as if they
+   *  were one reading). A published post with no row here has simply never been pulled yet — it
+   *  is omitted, never rendered as zero engagement. */
+  @Get("metrics/posts")
+  async listPostMetrics(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Query("engagementId") engagementId?: string,
+  ) {
+    if (!engagementId) refuse("missing_field");
+    if (!UUID_RE.test(engagementId)) refuse("invalid_id");
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT DISTINCT ON (pm.variant_id)
+                pm.variant_id AS "variantId", v.post_id AS "postId", v.account_id AS "accountId",
+                a.network, v.published_at AS "publishedAt", v.published_url AS "publishedUrl",
+                pm.impressions, pm.likes, pm.comments, pm.shares, pm.saves,
+                pm.video_views AS "videoViews", pm.clicks, pm.fetched_at AS "fetchedAt"
+           FROM social_post_metrics pm
+           JOIN social_post_variants v ON v.id = pm.variant_id AND v.tenant_id = pm.tenant_id
+           JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+           JOIN social_accounts a ON a.id = v.account_id AND a.tenant_id = v.tenant_id
+          WHERE p.engagement_id = $1 AND v.deleted_at IS NULL
+          ORDER BY pm.variant_id, pm.fetched_at DESC
+          LIMIT 500`,
+        [engagementId],
+      ),
+      { modules: ["social"] },
+    );
+    return { posts: rows };
+  }
+
   /** Provision the (tenant, client) → publisher-org mapping. Idempotent. See provisioning.ts for
    *  why the org id is an INPUT rather than something we mint (there is no org-creation route on
    *  the engine's public API; an org is a human runbook ceremony on the licence-zone host). */

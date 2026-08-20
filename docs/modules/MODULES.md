@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.32.0` | IN PROGRESS | WS1 | 2026-08-20 |
-| platform-ui | `0.28.3` | IN PROGRESS | WS5 | 2026-08-20 |
+| platform-ui | `0.28.4` | IN PROGRESS | WS5 | 2026-08-20 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.11.0` | PROTOTYPED | WS2 | 2026-08-20 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.5` | IN PROGRESS | Social Media | 2026-08-20 |
+| social-media | `0.5.6` | IN PROGRESS | Social Media | 2026-08-20 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,86 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.5` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.6` · IN PROGRESS
+
+**0.5.6 (2026-08-20, SMM-21 — metrics: `pullMetrics` nightly ingest + Analytics tab):** P3's first
+ticket. Schema (`social_metrics_daily`/`social_post_metrics`) was already in 0105 — no migration.
+`platform-nest/src/modules/social/metrics-job.ts` (new): the nightly sweep, shaped exactly like
+`inbox-retention-job.ts`/`post-status-sync-job.ts` — `withGlobal` for the tenant list, then per-tenant
+reads (own declared module scope) → the driver call OUTSIDE any transaction → writes (own declared
+module scope again). Two independent halves so one failing does not starve the other: (A) one
+`getAccountMetrics` call per connected account, upserted into `social_metrics_daily` on its own
+`UNIQUE(account_id, date)`; (B) one `getPostMetrics` call per (publisher org, batch of published
+`provider_post_id`s, 30-day lookback), APPENDED into `social_post_metrics` (0105 designs that table
+as an append-only snapshot history, never upserted). Dark by default: `socialMetricsPullEnabled()`/
+`socialMetricsPullIntervalMs()` read `SOCIAL_METRICS_PULL_ENABLED`/`SOCIAL_METRICS_PULL_INTERVAL_MS`
+from `process.env` directly rather than through `config.ts` — that file (and `main.ts`) were held by
+SMM-38a's parallel worktree for this ticket's whole duration; `startMetricsPullLoop` is written and
+exported but its `main.ts` registration line is handed to the merge orchestrator rather than wired
+here (see `docs/plans/smm-tracker.md`'s SMM-21 evidence for the exact line).
+
+**The module GUC, again — the ticket's own named risk.** Every `social_*` read/write in
+`metrics-job.ts` runs inside `applyAccountDailyMetrics`/`appendPostMetrics`, each of which declares
+its own `declareSocialModuleScope` before touching a row — exactly like
+`applyPostStatuses`/`purgeTenantInboxRetention`. `metrics-job.test.ts`'s (T1)/(T5) regression tests
+call these functions exactly as written (no `{modules:['social']}` at the call site) and assert a
+REAL row exists afterward — delete either declaration and the assertion fails with "written: 0"
+instead, the precise "0 rows synced, looks perfectly healthy" failure shape the brief warned about.
+
+**No invented numbers.** `DailyMetrics`/`PostMetrics` (the `SocialPublisher` port) are all-optional
+fields; a field the engine never reported is written as SQL NULL end to end — never coerced to 0.
+Proven with a direct DB re-read (`metrics-job.test.ts` (T2)/(T6)), through the new controller reads
+(`metrics-endpoints.test.ts`), and in the browser (the Analytics tab's `AnalyticsPanel.tsx` renders
+an absent counter as an em dash, never `0` — the same discipline `quota_unknown` already holds the
+quota strip to).
+
+Two new READ-ONLY BFF routes on `social.controller.ts` (`social_account`/`read`, same permission
+`GET accounts` already uses — accounts are client-scoped, not engagement-scoped, so both require
+`engagementId` and 400 `missing_field` without it): `GET metrics/daily` (per-account daily series,
+optional `accountId`/`from`/`to`) and `GET metrics/posts` (latest `social_post_metrics` snapshot per
+published variant, via `DISTINCT ON (variant_id) ... ORDER BY fetched_at DESC`). The `date` column is
+selected via `::text`, not handed back as a JS `Date` — the same timezone-shift trap
+`pm.controller.ts`/`document-builder.ts` already guard every date column against (found live: an
+unqualified `date` column round-tripped through node-pg's `Date` parser and `res.json()` shifted a
+day backward under this host's local timezone, caught by `metrics-endpoints.test.ts` before it
+shipped).
+
+Frontend: `lib/socialShared.ts`'s `DailyMetricRow`/`PostMetricRow` (all-optional per field, mirroring
+the port exactly), `lib/social.ts#listDailyMetrics`/`listPostMetrics`, `components/social/
+AnalyticsPanel.tsx` (the one place a number becomes text — `fmtMetric` — so there is exactly one
+place to audit for the "never a fabricated 0" rule), and `departments/[deptId]/analytics/page.tsx`
+now renders real tables instead of `BackendPending`, with an engagement filter mirroring
+`calendar/page.tsx`'s own pattern. DEMO_MODE (`demoSocial.ts`): `dailyMetrics`/`postMetrics` seeded
+onto the SAME `globalThis`-pinned `SocialStore` (read-only routes, so no write-path bundling trap
+applies, but seeded consistently with the rest of the file regardless), deliberately partial — one
+daily row is missing four of six counters, one post-metrics row is missing three — so the "unknown,
+never zero" rendering is drivable live, not just asserted in a unit test.
+
+**Driven in a real browser** (`DEMO_MODE=1 npm run dev`, Playwright/headless Chromium; `next build`
+not re-run, per this ticket's own instruction): logged in, switched to the agency tenant, opened
+Social Media → Analytics, and confirmed the per-account daily table renders real numbers for
+followers/impressions on the earliest seeded day while reach/engagements/link-clicks/video-views
+render as em dashes (never `0`) for that same day, then full numbers on the following two days; the
+published-posts table renders one row with `saves` as an em dash while every other counter is a real
+number; the engagement filter switches between both seeded engagements (both correctly show the SAME
+account-level series, since accounts are client-scoped, not engagement-scoped — proving the join is
+through the engagement's `client_id`, not a fabricated per-engagement slice).
+
+**Anything the spec did not answer, named rather than guessed:** (1) no MCP tool/agentic-surface
+entry was added for these two read routes — the ticket brief named `pullMetrics` + the two tables +
+the nightly flow + the Analytics tab, not an agent-facing read tool, and inventing one was out of
+scope; (2) the post-metrics lookback (30 days) and the daily-pull window (3 days back) are OPERATIONAL
+job parameters, not business/quota constants, so the module's "no invented numbers" rule (about
+values a caller could mistake for something the engine reported) does not constrain them — flagged
+here rather than silently picked; (3) the pull cadence/registration is NOT wired into `main.ts` —
+handed to the merge orchestrator per this ticket's own instruction (SMM-38a held that file and
+`config.ts` for the ticket's duration).
+
+Test counts: **337 / 0 / 0** `platform-nest` (baseline 318/0/0 + 19 new: `metrics-job.test.ts` 13,
+`metrics-endpoints.test.ts` 6); **2399 / 0 / 0** `platform-ui` (baseline 2392/0/0 + 7 new:
+`social-metrics.test.ts`). `tsc --noEmit` clean on both sides.
+
+Full detail: `docs/plans/smm-tracker.md`'s SMM-21 evidence block.
 
 **0.5.5 (2026-08-20, SMM-38 phase 38a — the `direct` driver skeleton + the per-capability switch,
 design addendum §PD, owner decision D-20):** the first move against the free-only build: a second

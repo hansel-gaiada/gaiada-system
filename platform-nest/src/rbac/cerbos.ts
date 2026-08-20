@@ -72,6 +72,10 @@ export function principalPayload(p: Principal) {
     attr: {
       assurance: p.assurance,
       companies: p.companies,
+      // MON-00c (Wall 2). `variables.inRoot` reads this. `?? []` is the fail-closed default: a
+      // principal assembled before this field existed (or by a test fixture that omits it) denies
+      // cross-root access rather than permitting it, which is the direction an omission must fail.
+      rootCompanies: p.rootCompanies ?? [],
       grants: p.roles.map((g) => ({ role: g.role, scopeType: g.scopeType, scopeId: g.scopeId ?? "" })),
       // IAM-04a: additive alongside `grants` — the resolved (permission key, scope) pairs IAM-03a's
       // `assemblePrincipal()` expands through `role_permissions` (0094). `p.perms` is optional on

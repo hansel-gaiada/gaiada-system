@@ -75,7 +75,7 @@ resourcePolicy:
     - actions: ["read", "excuse"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # ═══════════ §8's "HR-appraisal role" column — SPLIT BY TR-25 (finding ②) ═══════════
     # TR-09 expressed this tier as `module_staff`/`module_manager` + `module == "hr"`, which resolves
