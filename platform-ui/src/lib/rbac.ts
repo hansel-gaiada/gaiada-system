@@ -196,6 +196,18 @@ export const CAPABILITIES = [
   // Cerbos will 403 — a dead button, the safe-but-wrong direction this file's own discipline (Gap-3)
   // still flags rather than accepts by default.
   "social.post.delete",  // delete an unpublished post/variant (Cerbos social_post `delete`) — manager-tier only
+  // ── client review (SMM-31/32, D-16) — Cerbos kind `social_client_review`, migration `0106`.
+  // Verified directly against 0106's `role_permission` seed rows (not inferred): `read`/`request` are
+  // held by BOTH social_staff and social_manager (staff may ask the client and see the state);
+  // `withdraw` is manager-tier ONLY (`0106` never seeds it for `social_staff`) — same staff/manager
+  // split `social.post.delete` already draws for the identical reason ("staff author, the manager is
+  // who can take it back down"). The CLIENT's own decision is `portal.approve_post` (a `portal.*`
+  // permission, not `social.*` — DR-4/D-16) and is enforced purely server-side on the portal BFF;
+  // this file has no capability for it because the portal surface does not gate writes through
+  // `can()` at all (its own scope resolver is the authority, mirroring `lib/portal-data.ts`'s header).
+  "social.client_review.read",     // view client sign-off state on a variant (Cerbos `read`)
+  "social.client_review.request",  // ask the client to sign off, or re-ask after changes (Cerbos `request`)
+  "social.client_review.withdraw", // retract a pending ask (Cerbos `withdraw`) — manager-tier only
   // ─────────── TR-25: the tracker/reporting program (§8's matrix). Mirrors, never decides. ───────────
   // ⚠ READ THIS BEFORE USING ANY `reports.*` CAPABILITY FOR ANYTHING BUT RENDERING.
   // These capabilities answer "should the UI OFFER this?", never "may this user SEE this person?". The
@@ -255,6 +267,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // permission social_manager holds, company_admin holds identically — same Cerbos rule lists
     // company_admin alongside module_manager on every social_engagement/social_post action).
     "social.view", "social.manage", "social.scope.write", "social.post.delete",
+    // client-review (SMM-31/32) — 0106 seeds company_admin all three, same manager-tier bundle.
+    "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
     // company-grain / seal / recompute rows read "exec"; resource_report_period.yaml's header
     // establishes that §6.2's "lead" there means the COMPANY's lead, not a per-department manager).
@@ -315,6 +329,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // manager's bundle matches company_admin's on every social.* permission this file cites — same
     // Cerbos rule (`company_admin, manager` on both social_engagement and social_post), verified.
     "social.view", "social.manage", "social.scope.write", "social.post.delete",
+    // client-review (SMM-31/32) — 0106 seeds manager all three, same manager-tier bundle.
+    "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
@@ -404,12 +420,19 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // `social.post.delete` and `social.scope.write` are NOT — the manager/staff split IS the publish
   // line (resource_social_post.yaml's own header). DR-7 precedent — `people.directory` added on the
   // identical `module_staff` tenant-directory baseline rule search_staff/hr_staff already cite.
-  social_staff: ["social.view", "social.manage", "people.directory"],
+  // client-review (SMM-31/32): 0106 seeds social_staff `read`+`request` only, NOT `withdraw` —
+  // verified directly against the migration's role_permission rows, same staff/manager split
+  // `social.post.delete` already draws.
+  social_staff: ["social.view", "social.manage", "people.directory", "social.client_review.read", "social.client_review.request"],
   // social_manager = Cerbos module_manager: every social_staff permission PLUS
   // social.engagement.create/update/delete/set_scope and social.post.delete/publish/cancel/
   // delete_published (32-permission bundle). `social.scope.write` and `social.post.delete` are
-  // this role's OWN tier — deliberately excluded from social_staff above.
-  social_manager: ["social.view", "social.manage", "social.scope.write", "social.post.delete"],
+  // this role's OWN tier — deliberately excluded from social_staff above. client-review `withdraw`
+  // is the identical split (0106 seeds social_manager all three, social_staff only two).
+  social_manager: [
+    "social.view", "social.manage", "social.scope.write", "social.post.delete",
+    "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
+  ],
   // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
   // — §8's person-grain cell for this column ("only persons acting under the assignment, via the
   // provider view") is NOT enforceable, because no endpoint can bound a person read that way, so

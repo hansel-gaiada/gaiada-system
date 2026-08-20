@@ -15,7 +15,10 @@ import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
-import type { ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult, PublishPreconditionResult } from "./socialShared";
+import type {
+  ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult, PublishPreconditionResult,
+  ClientReviewStatus,
+} from "./socialShared";
 
 async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
   const userId = await getSessionUserId();
@@ -303,5 +306,53 @@ export async function rescheduleVariants(
     }
     revalidatePath(`/departments`, "layout");
     return { variants };
+  });
+}
+
+// ── client review (SMM-31/32, D-16) — the STAFF side of the two-sided seam: ask + retract. The
+// CLIENT's own decision lives on the portal (`lib/portalActions.ts`'s `portalDecideSocialReview`),
+// never here — same split the backend's own two controllers enforce.
+
+export interface RequestClientReviewResult { id: string; status: "pending"; alreadyPending: boolean }
+
+/** `social.client_review.request` — ask the client to sign off. **Idempotent upsert**: 0105's
+ *  `UNIQUE(variant_id)` means one review row per variant forever, so re-asking from ANY prior state
+ *  (including after `withdrawn`/`changes_requested`, or after an edit staled a prior `approved`)
+ *  resets the SAME row to `pending` rather than filing a second one. A repeat call while already
+ *  `pending` is a no-op (`alreadyPending:true`, no duplicate notification on the backend). */
+export async function requestClientReview(tenantId: string, variantId: string): Promise<ActionResult<RequestClientReviewResult>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.client_review.request", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.client_review.request permission." };
+  }
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<RequestClientReviewResult>(`${base(c.tenant)}/variants/${variantId}/client-review`, c.userId, {
+      method: "POST",
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+export interface WithdrawClientReviewResult { id: string; status: ClientReviewStatus }
+
+/** `social.client_review.withdraw` — **manager-tier**, unlike `request`/`read` which `social_staff`
+ *  also holds (mirrors `social.post.delete`'s own staff/manager split). Retract a PENDING ask.
+ *  Idempotent: withdrawing an already-withdrawn review is a 200 no-op on the backend, never an
+ *  error. Refuses `client_review_not_pending` (400) if the review is already `approved`/
+ *  `changes_requested` — re-ask instead via `requestClientReview`, which resets the same row. */
+export async function withdrawClientReview(tenantId: string, variantId: string): Promise<ActionResult<WithdrawClientReviewResult>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.client_review.withdraw", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.client_review.withdraw permission." };
+  }
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<WithdrawClientReviewResult>(`${base(c.tenant)}/variants/${variantId}/client-review/withdraw`, c.userId, {
+      method: "POST",
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
   });
 }

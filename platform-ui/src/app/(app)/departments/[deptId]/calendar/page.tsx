@@ -9,7 +9,9 @@ import { Card } from "@/components/ui";
 import { TeachState } from "@/components/departments/TeachState";
 import { AccessDenied } from "@/components/social/AccessDenied";
 import { CalendarGrid, type CalendarGridDay } from "@/components/social/CalendarGrid";
-import { listPosts, listEngagements, type SocialPost } from "@/lib/social";
+import {
+  listPosts, listEngagements, getEngagementScope, getClientReview, type SocialPost, type ClientReviewStatus,
+} from "@/lib/social";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -91,6 +93,22 @@ export default async function DepartmentCalendarPage({ params, searchParams }: {
     );
   }
 
+  // SMM-31/32 — client-review chips. Bounded fetch, not an N+1 over every variant in view:
+  // 1. Which of the ENGAGEMENTS in view actually require client sign-off (a handful of calls, not
+  //    one per post) — `SocialEngagement` (the list shape) carries no `toolScope`, only
+  //    `getEngagementScope`'s detail read does.
+  // 2. Only THEN fetch each variant's own review under a requiring engagement — the rest default to
+  //    "not requested" without a call, since that IS the steady state for them.
+  const engagementIds = [...new Set(posts.data.map((p) => p.engagementId))];
+  const scopes = await Promise.all(engagementIds.map((id) => getEngagementScope(userId, tenant, id)));
+  const requiresClientOkByEngagement = new Map(engagementIds.map((id, i) => [id, scopes[i].data.toolScope.posting.requiresClientOk]));
+  const variantIdsNeedingReview = posts.data
+    .filter((p) => requiresClientOkByEngagement.get(p.engagementId))
+    .flatMap((p) => p.variants.map((v) => v.id));
+  const reviews = await Promise.all(variantIdsNeedingReview.map((id) => getClientReview(userId, tenant, id)));
+  const reviewByVariantId: Record<string, ClientReviewStatus> = {};
+  variantIdsNeedingReview.forEach((id, i) => { reviewByVariantId[id] = reviews[i].data.status; });
+
   // A plain object, not a Map — `CalendarGrid` is a client component, and props crossing the
   // server/client boundary must be plain serializable values.
   const byDay: Record<string, SocialPost[]> = {};
@@ -146,7 +164,7 @@ export default async function DepartmentCalendarPage({ params, searchParams }: {
       ) : (
         <CalendarGrid
           tenantId={tenant} deptId={deptId} gridDays={gridDays} byDay={byDay}
-          unscheduled={unscheduled} canReschedule={canReschedule}
+          unscheduled={unscheduled} canReschedule={canReschedule} reviewByVariantId={reviewByVariantId}
         />
       )}
     </Card>

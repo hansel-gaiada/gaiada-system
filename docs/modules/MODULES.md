@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.31.0` | IN PROGRESS | WS1 | 2026-08-20 |
-| platform-ui | `0.27.0` | IN PROGRESS | WS5 | 2026-08-20 |
+| platform-ui | `0.28.0` | IN PROGRESS | WS5 | 2026-08-20 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.10.3` | PROTOTYPED | WS2 | 2026-08-20 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.3` | IN PROGRESS | Social Media | 2026-08-20 |
+| social-media | `0.5.4` | IN PROGRESS | Social Media | 2026-08-20 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,79 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.3` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.4` · IN PROGRESS
+
+**0.5.4 (2026-08-20, SMM-32 — client-review portal UI + composer/calendar reflection):** the other
+half of P2's first ticket. `platform-ui` only — no migration, no Cerbos change, no new backend
+route; every endpoint this pass consumes already shipped in SMM-31.
+
+Portal (`(portal)/portal/social-reviews{,/[reviewId]}/page.tsx`): a list (pending sign-offs first,
+decided ones under "Past reviews") and a detail page rendering the exact post content the client is
+deciding against, plus the approve/request-changes decision itself (`PortalSocialReviewDecideForm`,
+`useActionState`, not the void gate-decide shape — a genuine 409 must be SEEN, not swallowed). New
+`lib/portal.ts` types (`PortalSocialReview`, `socialReviewStatusLabel`, `describeSocialReviewError`),
+`portal-data.ts` readers (list + a derived single-review lookup — §16h has no dedicated GET),
+`portalActions.ts#portalDecideSocialReview`. New un-badged "Post reviews" portal tab (a real count
+would need a new always-on fetch every portal page load or a backend extension SMM-31 did not make
+— flagged as a follow-up, not silently invented).
+
+Staff (Composer + Calendar): `socialShared.ts` mirrors `CLIENT_REVIEW_REFUSAL`'s 5 tokens by hand
+(same reasoning `PUBLISH_PRECONDITION_STAGES`'s own copy gives) plus a new `evaluateClientReviewState`
+— a client-safe re-implementation of `evaluateClientReviewPrecondition` (same 5-way branch, same
+staleness check against the LIVE `argsSha256`) — and widens `PublishPreconditionResult.stage` to
+accept `"client_review"`, which the EXISTING "Check now" preview button already renders correctly
+once the type/labels exist (zero new UI on that path). `VariantCard.tsx`'s new `ClientReviewPanel`
+(ask / re-ask / withdraw, gated on new `social.client_review.{request,withdraw}` capabilities) and
+`CalendarGrid.tsx`'s per-variant chips (RAW status only — `listPosts`'s roll-up carries no
+`argsSha256`, so the calendar cannot and does not claim `stale`; only the Composer does). Three new
+`rbac.ts` capabilities, verified against `role-permission-bundles.json` (not inferred): `social_staff`
+read+request only, `social_manager`/`company_admin`/`manager`/`platform_admin` all three,
+`group_executive` read only (wholesale-excepted from the parity guard like every other `social.*`
+capability for that role) — `rbac-capability-map.ts` entries added so the 742-case parity suite
+covers the three new grantable permissions rather than silently missing them.
+
+**A real, PRE-EXISTING DEMO_MODE gap found and closed** (not introduced by this ticket):
+`demoSocial.ts` had no `GET engagements/:id/scope` route at all, so `lib/social.ts`'s
+`getEngagementScope` silently degraded to `readGuarded`'s `EMPTY_SCOPE` fallback
+(`requiresClientOk: false`) everywhere in DEMO_MODE — invisible for the Composer's panel (renders
+regardless of the toggle) but it fully defeated the Calendar's chip feature, which gates its
+per-variant fetch on that exact flag. Also silently affected the pre-existing (unrelated)
+engagement-scope editor page the whole time. Closed with one new `GET` route — a fixture gap, not a
+contract change.
+
+DEMO_MODE state added, `globalThis`-pinned FROM THE START (this file's own 2026-08-20 lesson,
+applied rather than repeated): a `clientReviews` array on the SAME shared `SocialStore`, a SECOND
+engagement (`soc-eng-2`, `requiresClientOk: true` — kept separate from `soc-eng-1` so SMM-12's own
+healthy-dry-run demo scenario stays undisturbed) with four variants spanning
+`pending`/`approved-but-stale`/`changes_requested`/`not_requested`, and a second dispatch function
+(`socialClientReviewPortalDemo`, wired into `demoFixtures.ts`) answering the portal's
+`/api/:t/portal/social-reviews[...]` routes off the IDENTICAL store — a staff "ask" and a client
+"decide" in two separate browser sessions agree on the one row.
+
+**Driven in a real browser** (`DEMO_MODE=1 npm run dev`, Playwright/headless Chromium — `next build`
+deliberately not re-run this pass, per this ticket's own "don't run it repeatedly" instruction):
+all 5 `CLIENT_REVIEW_REFUSAL` tokens rendered as themselves in the Composer (including
+`client_review_stale`'s exact honesty framing — "the client approved this, but the content has
+changed since... ask again before this can publish"); the full staff request→pending→withdraw→
+re-request loop on a live `not_requested` seed; the EXISTING "Check now" preview correctly rendering
+the widened `client_review` stage with zero new rendering code; calendar chips showing the raw
+status only (confirmed the STALE post's chip reads `approved`, never `stale`); the portal list +
+decide flow as `demo-client`; and — the ticket's own idempotent-decision requirement, proven as a
+genuine two-tab race rather than merely asserted — two tabs opened the same pending review, tab 1
+approved it, tab 2 (stale, unrefreshed) submitted a DIFFERENT decision and received the honest 409
+conflict message ("This was already decided, and it doesn't match what you just submitted —
+refresh the page to see the current status"), never a crash; reloading tab 2 showed `Approved` with
+**no decide control anywhere on the page**. Cross-session consistency was also proven: after the
+portal decision, a SEPARATE staff session's Composer card showed "The client approved this exact
+content on 8/20/2026" and the precondition preview correctly advanced past the client-review gate to
+the next real blocker (`variant_not_approved`) — the gate composition holds across two independent
+sessions against one shared store.
+
+Test counts: **2392 / 0 / 0** `platform-ui` (baseline 2329/0/0, +63); `tsc --noEmit` clean;
+`rbac-capability-parity.test.ts` 742/742 including the three new capability pairs.
+
+Full detail: `docs/plans/smm-tracker.md`'s SMM-32 evidence block, `docs/FRONTEND-BFF-CONTRACT.md`
+§16h/§19.
 
 **0.5.3 (2026-08-20, SMM-31 — client-review stage backend, D-16):** P2's first ticket. Backend only
 — the portal UI (SMM-32) is next.

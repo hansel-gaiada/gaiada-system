@@ -77,6 +77,45 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-20 — SMM-32**, `social-media 0.5.3 -> 0.5.4`, `platform-ui 0.27.0 -> 0.28.0` (IN
+  PROGRESS). Client-review portal UI + composer/calendar reflection (D-16) — the other half of
+  SMM-31, `platform-ui` only, no migration/Cerbos/backend-route change. Portal:
+  `(portal)/portal/social-reviews{,/[reviewId]}` (list + detail/decide,
+  `PortalSocialReviewDecideForm` via `useActionState` so a genuine 409 is SEEN, not swallowed), new
+  `lib/portal.ts`/`portal-data.ts`/`portalActions.ts` members, an un-badged "Post reviews" tab
+  (a real pending count would need a new always-on fetch — flagged, not invented). Staff:
+  `socialShared.ts` mirrors `CLIENT_REVIEW_REFUSAL` (5 tokens) by hand plus a new
+  `evaluateClientReviewState` (client-safe re-implementation of
+  `evaluateClientReviewPrecondition`, including the staleness check against the LIVE
+  `argsSha256`), widens `PublishPreconditionResult.stage` to accept `"client_review"` (the
+  EXISTING "Check now" preview button renders it with zero new code once the type/labels exist),
+  `VariantCard.tsx`'s new `ClientReviewPanel` (ask/re-ask/withdraw), `CalendarGrid.tsx`'s
+  per-variant chips (RAW status only — the roll-up carries no `argsSha256`, so the calendar never
+  claims `stale`; only the Composer does). Three new `rbac.ts` capabilities
+  (`social.client_review.{read,request,withdraw}`), verified against
+  `role-permission-bundles.json` (`social_staff` read+request only, `social_manager`/
+  `company_admin`/`manager`/`platform_admin` all three), plus matching `rbac-capability-map.ts`
+  entries so the 742-case parity suite covers them. **Found and closed a real, pre-existing
+  DEMO_MODE gap** (not introduced by this ticket): `demoSocial.ts` had no `GET
+  engagements/:id/scope` route, so `getEngagementScope` silently degraded to the `EMPTY_SCOPE`
+  fallback everywhere in DEMO_MODE — invisible for the Composer's own panel but it fully defeated
+  the Calendar's chip feature (gated on that exact flag) and silently affected the pre-existing
+  engagement-scope editor page too. DEMO_MODE state added `globalThis`-pinned from the start (a
+  `clientReviews` array on the shared `SocialStore`, a second `requiresClientOk:true` engagement
+  kept separate from SMM-12's own demo engagement, and a new `socialClientReviewPortalDemo`
+  dispatcher answering the portal's routes off the SAME store). **Driven in a real browser**
+  (`DEMO_MODE=1 npm run dev`, Playwright): all 5 refusal tokens rendered as themselves in the
+  Composer; the full staff request→pending→withdraw→re-request loop; the portal list+decide flow
+  as `demo-client`; and the idempotent-decision guarantee proven as a genuine two-tab race (tab 1
+  approves, tab 2's stale submit of a DIFFERENT decision gets the honest 409 conflict message,
+  never a crash; reload shows no decide control anywhere on the page) plus cross-session
+  consistency (a separate staff session's Composer immediately reflected the portal decision, and
+  the precondition preview correctly advanced past the client-review gate to the next real
+  blocker). **2392 / 0 / 0** `platform-ui` (was 2329/0/0, +63), `tsc --noEmit` clean.
+  `next build` deliberately not re-run this pass. Full detail: `docs/plans/smm-tracker.md`'s
+  SMM-32 evidence block, `docs/modules/MODULES.md`'s social-media 0.5.4 entry,
+  `docs/FRONTEND-BFF-CONTRACT.md` §16h/§19.
+
 - **2026-08-20 — SMM-31**, `social-media 0.5.2 -> 0.5.3` (IN PROGRESS). Client-review stage backend
   (D-16): `social_post_client_reviews` (already schema'd by `0105`, plain-tenant-wall — see that
   migration's own header for why, restated in `modules/social/client-review.ts`'s header). No

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SOCIAL_NETWORKS, EMPTY_TOOL_SCOPE, QUOTA_UNKNOWN_RULE, IMAGE_GENERATION_UNAVAILABLE_WARNING,
   describeRefusal, describeQuota, PUBLISH_PRECONDITION_STAGES,
+  CLIENT_REVIEW_REFUSAL, evaluateClientReviewState,
 } from "./socialShared";
 
 // Pure-helper tests only — no network. `readGuarded`/`platformFetch` (the networked half of
@@ -88,6 +89,66 @@ describe("describeRefusal", () => {
 describe("PUBLISH_PRECONDITION_STAGES", () => {
   it("mirrors publish-precondition.ts's stage order exactly (scope → quota → hash → unconsumed → budget → creator_info)", () => {
     expect(PUBLISH_PRECONDITION_STAGES).toEqual(["scope", "quota", "hash", "unconsumed", "budget", "creator_info"]);
+  });
+});
+
+describe("CLIENT_REVIEW_REFUSAL (SMM-31/32, D-16)", () => {
+  it("mirrors client-review.ts's five tokens exactly", () => {
+    expect(CLIENT_REVIEW_REFUSAL).toEqual({
+      clientReviewNotRequested: "client_review_not_requested",
+      clientReviewPending: "client_review_pending",
+      clientReviewChangesRequested: "client_review_changes_requested",
+      clientReviewWithdrawn: "client_review_withdrawn",
+      clientReviewStale: "client_review_stale",
+    });
+  });
+
+  // Every token this file's own vocabulary defines must render as ITSELF (criterion 5) — same
+  // discipline the PUBLISH_REFUSAL case above pins.
+  it("names every client-review refusal token — none falls back to the raw token", () => {
+    for (const token of Object.values(CLIENT_REVIEW_REFUSAL)) {
+      expect(describeRefusal(token)).not.toBe(token);
+      expect(describeRefusal(token).length).toBeGreaterThan(10);
+    }
+  });
+});
+
+describe("evaluateClientReviewState — the client-safe mirror of evaluateClientReviewPrecondition", () => {
+  it("not_requested — no row at all", () => {
+    expect(evaluateClientReviewState({ status: "not_requested" }, "sha-live")).toEqual({
+      ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewNotRequested,
+    });
+  });
+  it("pending — asked, not yet decided", () => {
+    expect(evaluateClientReviewState({ status: "pending" }, "sha-live")).toEqual({
+      ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewPending,
+    });
+  });
+  it("withdrawn — staff retracted the ask, nobody has asked since", () => {
+    expect(evaluateClientReviewState({ status: "withdrawn" }, "sha-live")).toEqual({
+      ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewWithdrawn,
+    });
+  });
+  it("changes_requested — the client asked for changes", () => {
+    expect(evaluateClientReviewState({ status: "changes_requested" }, "sha-live")).toEqual({
+      ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewChangesRequested,
+    });
+  });
+  it("approved AND the reviewed hash matches the live hash — a genuine pass", () => {
+    expect(evaluateClientReviewState({ status: "approved", reviewedArgsSha256: "sha-live" }, "sha-live")).toEqual({ ok: true });
+  });
+  // The exact case D-15/D-16 exist for: staff edited the content after the client approved it. A
+  // client who approved something that then changed has not approved the NEW thing — this must
+  // read as `client_review_stale`, never as a silent pass.
+  it("approved BUT the content changed since (reviewedArgsSha256 !== live argsSha256) — stale", () => {
+    expect(evaluateClientReviewState({ status: "approved", reviewedArgsSha256: "sha-old" }, "sha-live")).toEqual({
+      ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewStale,
+    });
+  });
+  it("approved with no reviewedArgsSha256 at all (defensive — should not happen, but never a false pass)", () => {
+    expect(evaluateClientReviewState({ status: "approved" }, "sha-live")).toEqual({
+      ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewStale,
+    });
   });
 });
 

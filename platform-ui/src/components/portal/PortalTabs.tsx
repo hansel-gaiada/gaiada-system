@@ -17,6 +17,12 @@ const TABS: Array<{ href: string; label: string; badge?: "pending" }> = [
   { href: "/portal/deliverables", label: "Deliverables" },
   { href: "/portal/requests", label: "Requests" },
   { href: "/portal/approvals", label: "Approvals", badge: "pending" },
+  // SMM-31/32 — social-post sign-off. Its own tab rather than folded into "Approvals": that tab's
+  // pending count comes from `portal/overview`'s `needsYou` (gates + unsigned contracts), which
+  // SMM-31's backend never extended — this tab deliberately carries NO badge rather than costing
+  // every portal page load a second always-on fetch just to produce one, or claiming an unverified
+  // number. The list page itself surfaces its own pending count once opened.
+  { href: "/portal/social-reviews", label: "Post reviews" },
   { href: "/portal/invoices", label: "Invoices" },
   { href: "/portal/contracts", label: "Agreements" },
   { href: "/portal/profile", label: "Profile" },

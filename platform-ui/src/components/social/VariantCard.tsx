@@ -11,15 +11,18 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, StatusBadge } from "@/components/ui";
-import { updateVariant, deleteVariant, checkPublishPreconditions } from "@/lib/socialActions";
 import {
-  describeRefusal, describeQuota, type SocialPostVariant, type SocialAccount,
-  type PublishPreconditionResult,
+  updateVariant, deleteVariant, checkPublishPreconditions, requestClientReview, withdrawClientReview,
+} from "@/lib/socialActions";
+import {
+  describeRefusal, describeQuota, evaluateClientReviewState, type SocialPostVariant,
+  type SocialAccount, type PublishPreconditionResult, type ClientReviewState,
 } from "@/lib/socialShared";
 import { ValidationList } from "./ValidationList";
 
 export function VariantCard({
-  tenantId, variant, canDelete, account, accountsForbidden,
+  tenantId, variant, canDelete, account, accountsForbidden, clientReview, requiresClientOk,
+  canRequestReview, canWithdrawReview,
 }: {
   tenantId: string;
   variant: SocialPostVariant;
@@ -35,6 +38,20 @@ export function VariantCard({
    *  account" so a denial never reads as "nothing to report" (the same rule `AccessDenied.tsx`
    *  states for a whole-page read). */
   accountsForbidden?: boolean;
+  /** SMM-31/32 — this variant's client sign-off row, read server-side (`lib/social.ts`'s
+   *  `getClientReview`) so the client component only ever receives a plain, already-resolved
+   *  object across the server/client boundary. */
+  clientReview: ClientReviewState;
+  /** `toolScope.posting.requiresClientOk` on the POST's own engagement — one value shared by every
+   *  variant of the same post, so the composer page fetches it once and passes it down rather than
+   *  each card re-reading the engagement. Purely informational here: staff may ask for sign-off
+   *  regardless of this flag; it only changes whether the note says "required before this can
+   *  publish" or "optional — nothing requires it, but you can still ask". */
+  requiresClientOk: boolean;
+  /** `social.client_review.request` — held by both social_staff and social_manager tiers. */
+  canRequestReview: boolean;
+  /** `social.client_review.withdraw` — manager-tier only, same split as `canDelete`. */
+  canWithdrawReview: boolean;
 }) {
   const router = useRouter();
   const [body, setBody] = useState(variant.body);
@@ -47,6 +64,9 @@ export function VariantCard({
   const [preview, setPreview] = useState<PublishPreconditionResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewPending, startPreviewTransition] = useTransition();
+  const [review, setReview] = useState(clientReview);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewPending, startReviewTransition] = useTransition();
 
   function runPreview() {
     setPreviewError(null);
@@ -54,6 +74,28 @@ export function VariantCard({
       const res = await checkPublishPreconditions(tenantId, variant.id);
       if (!res.ok) { setPreviewError(res.error); setPreview(null); return; }
       setPreview(res.verdict);
+    });
+  }
+
+  // SMM-32 — ask / re-ask / withdraw the client's sign-off. `requestClientReview` is the SAME
+  // idempotent upsert whether this is the first ask, a re-ask after `changes_requested`/`withdrawn`,
+  // or a re-ask after an edit staled a prior `approved` — one row, forever (0105's `UNIQUE(variant_id)`).
+  function requestReview() {
+    setReviewError(null);
+    startReviewTransition(async () => {
+      const res = await requestClientReview(tenantId, variant.id);
+      if (!res.ok) { setReviewError(res.error); return; }
+      setReview({ status: "pending" });
+      router.refresh();
+    });
+  }
+  function withdrawReview() {
+    setReviewError(null);
+    startReviewTransition(async () => {
+      const res = await withdrawClientReview(tenantId, variant.id);
+      if (!res.ok) { setReviewError(res.error); return; }
+      setReview({ status: "withdrawn" });
+      router.refresh();
     });
   }
 
@@ -187,6 +229,12 @@ export function VariantCard({
         </div>
       </div>
 
+      <ClientReviewPanel
+        review={review} liveArgsSha256={variant.argsSha256} requiresClientOk={requiresClientOk}
+        canRequest={canRequestReview} canWithdraw={canWithdrawReview} pending={reviewPending}
+        error={reviewError} onRequest={requestReview} onWithdraw={withdrawReview}
+      />
+
       {variant.estimatedCostUsd > 0 && (
         <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>
           Estimated metered cost: ${variant.estimatedCostUsd.toFixed(3)}
@@ -255,6 +303,81 @@ function QuotaStrip({
         </div>
       )}
       <span style={{ font: "400 11px var(--font-body)", color }}>{info.label}</span>
+    </div>
+  );
+}
+
+/** SMM-31/32 — the client sign-off panel. `evaluateClientReviewState` mirrors the backend's
+ *  `evaluateClientReviewPrecondition` exactly (same five-way branch plus the "approved but the
+ *  content changed since" stale check against the variant's LIVE `argsSha256`), so this renders the
+ *  IDENTICAL verdict the D14 executor/dispatch would reach right now — the same "same evaluator, not
+ *  a re-derived guess" property the publish-preconditions preview above already carries.
+ *
+ *  Once a review is resolved (`approved`/`changes_requested`/`withdrawn`), no decide control renders
+ *  here at all — that control lives on the CLIENT's own portal page, never here (this is the staff
+ *  ask/read/withdraw half only) — so there is no second-decision affordance for THIS panel to guard
+ *  against; what it does guard is offering "ask again" only where re-asking is the correct next
+ *  action, and never a stale "waiting" message once the client has actually decided. */
+function ClientReviewPanel({
+  review, liveArgsSha256, requiresClientOk, canRequest, canWithdraw, pending, error, onRequest, onWithdraw,
+}: {
+  review: ClientReviewState;
+  liveArgsSha256: string;
+  requiresClientOk: boolean;
+  canRequest: boolean;
+  canWithdraw: boolean;
+  pending: boolean;
+  error: string | null;
+  onRequest: () => void;
+  onWithdraw: () => void;
+}) {
+  const verdict = evaluateClientReviewState(review, liveArgsSha256);
+  return (
+    <div style={{ borderTop: "0.5px solid var(--erp-hairline-soft)", paddingTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ font: "600 11px var(--font-body)", letterSpacing: "0.04em", color: "var(--erp-ink-60)" }}>
+          Client sign-off
+        </span>
+        <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
+          {requiresClientOk ? "Required before this can publish" : "Optional — not required by this engagement, but you can still ask"}
+        </span>
+      </div>
+
+      <div style={{ marginTop: 6 }}>
+        {verdict.ok ? (
+          <p style={{ margin: 0, font: "600 12px var(--font-body)", color: "var(--status-positive-fg, #1a7f37)" }}>
+            The client approved this exact content{review.decidedAt ? ` on ${new Date(review.decidedAt).toLocaleDateString()}` : ""}.
+          </p>
+        ) : (
+          <p style={{ margin: 0, font: "400 12px/1.5 var(--font-body)", color: review.status === "pending" ? "var(--status-caution-fg, #9a6700)" : "var(--status-critical-fg, #b3261e)" }}>
+            <code style={{ font: "700 10px var(--font-mono, monospace)", background: "var(--tint-hover)", border: `0.5px solid ${review.status === "pending" ? "var(--status-caution-fg, #9a6700)" : "var(--status-critical-fg, #b3261e)"}`, padding: "1px 5px", marginRight: 6 }}>
+              client_review
+            </code>
+            {describeRefusal(verdict.reason)}
+          </p>
+        )}
+        {review.comment && review.status === "changes_requested" && (
+          <p style={{ margin: "4px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>
+            &ldquo;{review.comment}&rdquo;
+          </p>
+        )}
+      </div>
+
+      <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+        {/* not_requested / changes_requested / withdrawn / stale all resolve to the SAME next
+            action — ask (or re-ask), which is always the idempotent upsert onto the one row. */}
+        {(review.status === "not_requested" || review.status === "changes_requested" || review.status === "withdrawn" || (review.status === "approved" && !verdict.ok)) && canRequest && (
+          <Button variant="ghost" size="sm" onClick={onRequest} disabled={pending}>
+            {pending ? "Asking…" : review.status === "not_requested" ? "Ask client to review" : "Ask again"}
+          </Button>
+        )}
+        {review.status === "pending" && canWithdraw && (
+          <Button variant="ghost" size="sm" onClick={onWithdraw} disabled={pending}>
+            {pending ? "Withdrawing…" : "Withdraw request"}
+          </Button>
+        )}
+        {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>{error}</span>}
+      </div>
     </div>
   );
 }

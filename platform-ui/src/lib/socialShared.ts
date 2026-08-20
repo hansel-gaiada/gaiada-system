@@ -296,14 +296,82 @@ export type PublishPreconditionStage = (typeof PUBLISH_PRECONDITION_STAGES)[numb
 
 /** `GET .../variants/:variantId/publish-preconditions` — a DRY RUN, returned as DATA with a 200.
  *  `ok: false` names the exact stage and token that stopped it; never render this as an empty list
- *  or a generic failure (criterion 5). */
+ *  or a generic failure (criterion 5).
+ *
+ *  `stage` is widened to include `"client_review"` (SMM-31/D-16): `evaluatePublishPreconditionWithClientReview`
+ *  composes the client-review gate IN FRONT of the six pinned stages, never as a 7th entry in
+ *  `PUBLISH_PRECONDITION_STAGES` (that array stays exactly six, verbatim, per the backend's own
+ *  pinned contract test) — but the dry-run response's `stage` field can genuinely read
+ *  `"client_review"` when a variant's engagement requires client sign-off and it hasn't cleared. A
+ *  console must render that stage/reason pair exactly like any of the six, not treat it as an
+ *  unrecognised value. */
 export interface PublishPreconditionResult {
   ok: boolean;
-  stage?: PublishPreconditionStage;
+  stage?: PublishPreconditionStage | "client_review";
   reason?: string;
   stages: readonly PublishPreconditionStage[];
   tool: string;
   meteredTool: string;
+}
+
+// ── the client-review stage (SMM-31/SMM-32, D-16) ──────────────────────────────────────────────────
+//
+// Mirrors `platform-nest/src/modules/social/client-review.ts`'s `CLIENT_REVIEW_REFUSAL` verbatim —
+// pinned here by hand rather than imported, same reasoning `PUBLISH_PRECONDITION_STAGES`'s own copy
+// gives (`platform-ui`/`platform-nest` are separate projects, no shared package layer). Every one of
+// these five tokens must render as ITSELF (criterion 5) — see `REFUSAL_LABELS` below and
+// `socialShared.test.ts`'s "names every client-review refusal token" case.
+export const CLIENT_REVIEW_REFUSAL = {
+  clientReviewNotRequested: "client_review_not_requested",
+  clientReviewPending: "client_review_pending",
+  clientReviewChangesRequested: "client_review_changes_requested",
+  clientReviewWithdrawn: "client_review_withdrawn",
+  clientReviewStale: "client_review_stale",
+} as const;
+export type ClientReviewRefusalReason = (typeof CLIENT_REVIEW_REFUSAL)[keyof typeof CLIENT_REVIEW_REFUSAL];
+
+/** `GET variants/:variantId/client-review`'s exact response shape (social.controller.ts). A variant
+ *  that never had a review asked reads `{status:'not_requested'}` — data, not a 404 (a legitimate
+ *  steady state, same doctrine `PublishPreconditionResult` follows for a passing dry run). */
+export type ClientReviewStatus = "not_requested" | "pending" | "approved" | "changes_requested" | "withdrawn";
+export interface ClientReviewState {
+  status: ClientReviewStatus;
+  id?: string;
+  comment?: string | null;
+  reviewedArgsSha256?: string | null;
+  requestedAt?: string;
+  decidedBy?: string | null;
+  decidedAt?: string | null;
+}
+export const NOT_REQUESTED_REVIEW: ClientReviewState = { status: "not_requested" };
+
+export type ClientReviewVerdict = { ok: true } | { ok: false; reason: ClientReviewRefusalReason };
+
+/** A client-safe MIRROR of the backend's `evaluateClientReviewPrecondition` (client-review.ts) — same
+ *  five-way branch, same "approved-but-`reviewedArgsSha256` no longer matches the LIVE `argsSha256`
+ *  is `stale`" rule (D-15 restated for the client's side). Used by the Composer's per-variant panel
+ *  to decide which of the five tokens — or a genuine pass — to render. The calendar's rollup lacks
+ *  `argsSha256` (see `CalendarGrid.tsx`'s own comment on that gap), so it renders the raw `status`
+ *  only and never claims staleness. Never re-derives "not requested"/"pending"/etc. from scratch; it
+ *  only adds the ONE thing the raw status alone cannot answer (staleness), which needs the variant's
+ *  live hash as an input the review response itself does not carry. */
+export function evaluateClientReviewState(review: ClientReviewState, liveArgsSha256: string): ClientReviewVerdict {
+  switch (review.status) {
+    case "not_requested":
+      return { ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewNotRequested };
+    case "pending":
+      return { ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewPending };
+    case "withdrawn":
+      return { ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewWithdrawn };
+    case "changes_requested":
+      return { ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewChangesRequested };
+    case "approved":
+      return review.reviewedArgsSha256 === liveArgsSha256
+        ? { ok: true }
+        : { ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewStale };
+    default:
+      return { ok: false, reason: CLIENT_REVIEW_REFUSAL.clientReviewNotRequested };
+  }
 }
 
 // ── quota strips ────────────────────────────────────────────────────────────────────────────────
@@ -393,6 +461,15 @@ const REFUSAL_LABELS: Record<string, string> = {
   budget_exceeded: "This would exceed the engagement's metered budget for the current period.",
   creator_info_unverified: "TikTok requires the creator's live settings to be re-checked immediately before publishing, and that check isn't available yet — refused until it is.",
   creator_selection_no_longer_permitted: "The creator's live settings no longer allow what was approved (privacy, comments, duet/stitch, etc. changed since approval).",
+
+  // ── CLIENT_REVIEW_REFUSAL (SMM-31/32, D-16) — the client sign-off gate, composed IN FRONT of the
+  // six-stage chain above (never a 7th stage in it). Reported as `stage:"client_review"` on the same
+  // dry-run/dispatch surfaces; every token below renders as itself, same criterion-5 discipline.
+  client_review_not_requested: "This engagement requires the client's sign-off before this can publish, and nobody has asked the client yet.",
+  client_review_pending: "Waiting on the client — they haven't decided yet.",
+  client_review_changes_requested: "The client asked for changes. Address their feedback, then ask again — asking again resets the same review rather than filing a new one.",
+  client_review_withdrawn: "The request for the client's sign-off was withdrawn, and nobody has asked again since.",
+  client_review_stale: "The client approved this, but the content has changed since — their approval no longer matches what's here now. Ask again before this can publish.",
 };
 
 /** Maps a controller refusal TOKEN to a short, human sentence. Falls back to the raw token

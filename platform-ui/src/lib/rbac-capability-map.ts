@@ -464,6 +464,23 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ── client review (SMM-31/32, D-16) — verified directly against role-permission-bundles.json:
+  // social_staff holds read+request only; social_manager/company_admin/manager/platform_admin hold
+  // all three; group_executive holds read only (wholesale-excepted from this file's per-pair loop
+  // below, same as every other social.* capability's `ALL`-derived reach for that role).
+  "social.client_review.read": {
+    permissions: ["social.client_review.read"],
+    semantics: "all",
+  },
+  "social.client_review.request": {
+    permissions: ["social.client_review.request"],
+    semantics: "all",
+  },
+  "social.client_review.withdraw": {
+    permissions: ["social.client_review.withdraw"],
+    semantics: "all",
+  },
+
   // ─────────────── TR-25: reports / check-in / appraisal (§8's matrix, mirrors never decides) ────
   // Every entry in this block cites an exact Cerbos action name in rbac.ts's own comment — this is
   // the most precisely-documented block in the whole file despite nine of its twelve members being

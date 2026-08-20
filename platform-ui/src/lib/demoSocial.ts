@@ -1,4 +1,5 @@
 import "server-only";
+import { evaluateClientReviewState, type ClientReviewState, type ClientReviewStatus } from "./socialShared";
 // SMM-14 — DEMO_MODE fixtures for the Social Media department (calendar + composer, SMM-12).
 // Mirrors demoPipeline.ts's STATEFUL in-memory-store convention exactly (module-level arrays
 // mutate across requests within one running dev-server process; resets on restart). Before this
@@ -122,6 +123,28 @@ const ENGAGEMENT: DemoEngagement = {
     reporting: { cadence: "monthly" },
   },
 };
+// ── a SECOND engagement, requiring client sign-off (SMM-31/32, D-16) ────────────────────────────
+// Deliberately separate from `ENGAGEMENT` above rather than flipping that one's own
+// `requiresClientOk` — SMM-12's own demo already relies on `ENGAGEMENT`'s dry-run passing `ok:true`
+// for a healthy variant with `requiresClientOk:false`; flipping it would have quietly broken that
+// scenario for an unrelated ticket. Same client (`cl-1`, Northwind Traders) so the ONE demo-client
+// portal login (`demo-client`) can review posts filed under either engagement.
+const CLIENT_REVIEWED_ENGAGEMENT: DemoEngagement = {
+  id: "soc-eng-2", clientId: "cl-1", projectId: null, name: "Northwind Traders — Client-Reviewed Campaign",
+  status: "active", usageBudgetUsd: 80, ownerId: "u-pm", startsOn: "2026-08-01", endsOn: null,
+  customFields: {}, createdAt: "2026-08-01T09:00:00Z", updatedAt: "2026-08-01T09:00:00Z",
+  toolScope: {
+    networks: {
+      instagram: true, facebook: false, tiktok: false, linkedin: false, x: false,
+      youtube: false, threads: false, pinterest: false, bluesky: false, mastodon: false,
+    },
+    posting: { cadencePerWeek: 2, requiresClientOk: true },
+    inbox: { enabled: false, slaMinutes: 240, dm: false },
+    ai: { drafting: true, cloudPolish: false, imageGen: false },
+    reporting: { cadence: "monthly" },
+  },
+};
+
 // ── WHY THESE STORES ARE PINNED TO globalThis (SMM-14 QA, 2026-08-20) ───────────────────────────
 // A plain module-level array does NOT survive here, and the symptom is a convincing lie. Next bundles
 // the `"use server"` action graph and the page's RSC read graph as SEPARATE module instances, so a
@@ -141,9 +164,17 @@ const ENGAGEMENT: DemoEngagement = {
 // Demo-only state, so one process-wide store is the intended lifetime, and it survives dev HMR where
 // a module-level `const` silently does not.
 const STORE = Symbol.for("gaiada.demoSocial.store");
-type SocialStore = { engagements: DemoEngagement[]; accounts: DemoAccount[]; posts: DemoPost[]; seq: number };
+interface DemoClientReview {
+  id: string; variantId: string; clientId: string; status: ClientReviewStatus;
+  comment: string | null; reviewedArgsSha256: string | null;
+  requestedAt: string; decidedBy: string | null; decidedAt: string | null; updatedAt: string;
+}
+type SocialStore = {
+  engagements: DemoEngagement[]; accounts: DemoAccount[]; posts: DemoPost[]; seq: number;
+  clientReviews: DemoClientReview[];
+};
 
-const ENGAGEMENTS_SEED: DemoEngagement[] = [ENGAGEMENT];
+const ENGAGEMENTS_SEED: DemoEngagement[] = [ENGAGEMENT, CLIENT_REVIEWED_ENGAGEMENT];
 
 // ── accounts (SMM-05 registry) — a deliberate mix per the ticket's own requirement: at least one
 // connected instagram account with a LIVE known quota, at least one connected account with NO live
@@ -303,6 +334,103 @@ const POSTS_SEED: DemoPost[] = [
       },
     ],
   },
+  // ── soc-eng-2 (requiresClientOk: true) — the client-review state machine, drivable end to end.
+  // Four variants, four different steady states, so every one of the five CLIENT_REVIEW_REFUSAL
+  // tokens is reachable by simply opening the composer (no live action needed to SEE each state),
+  // while soc-var-10 stays `not_requested` so the request → pending → withdraw → re-request loop is
+  // still drivable live, starting from a clean slate.
+  {
+    id: "soc-post-6", engagementId: "soc-eng-2", campaignId: null,
+    title: "Client sign-off needed: Autumn drop", brief: "Awaiting the client's decision.",
+    source: "human", status: "in_review", scheduledAt: "2026-08-24T09:00:00Z", customFields: {},
+    createdBy: "u-pm", createdAt: "2026-08-18T09:00:00Z", updatedAt: "2026-08-18T09:00:00Z",
+    variants: [
+      {
+        id: "soc-var-7", accountId: "soc-acc-ig-1", network: "instagram", handle: "northwindtraders",
+        body: "The autumn drop is almost here — first look this Friday.", firstComment: null,
+        media: [{ kind: "image", fileId: "demo-file-autumn-1", alt: "Autumn drop teaser" }],
+        settings: {}, validation: PASS, argsSha256: "sha256-demo-0007",
+        approvalId: null, nativeImport: false, scheduledAt: "2026-08-24T09:00:00Z", status: "in_review",
+        publishedUrl: null, publishedAt: null, lastError: null, estimatedCostUsd: 0,
+      },
+    ],
+  },
+  {
+    id: "soc-post-7", engagementId: "soc-eng-2", campaignId: null,
+    title: "Approved, then edited — now stale", brief: "The client signed off on an earlier draft.",
+    source: "human", status: "draft", scheduledAt: "2026-08-26T09:00:00Z", customFields: {},
+    createdBy: "u-pm", createdAt: "2026-08-15T09:00:00Z", updatedAt: "2026-08-19T11:00:00Z",
+    variants: [
+      {
+        // `client_review_stale` — the client approved `sha256-demo-old-0008` (see the client-review
+        // seed below); this variant's LIVE hash has since moved to `sha256-demo-0008` (staff edited
+        // the copy after the client signed off) — a client who approved something that then changed
+        // has not approved the NEW thing, and this must render as `client_review_stale`, never a
+        // silent pass, honouring the ticket brief's own framing verbatim.
+        id: "soc-var-8", accountId: "soc-acc-ig-1", network: "instagram", handle: "northwindtraders",
+        body: "Autumn drop — now with free shipping on launch day.", firstComment: null, media: [],
+        settings: {}, validation: PASS, argsSha256: "sha256-demo-0008",
+        approvalId: null, nativeImport: false, scheduledAt: "2026-08-26T09:00:00Z", status: "draft",
+        publishedUrl: null, publishedAt: null, lastError: null, estimatedCostUsd: 0,
+      },
+    ],
+  },
+  {
+    id: "soc-post-8", engagementId: "soc-eng-2", campaignId: null,
+    title: "Client asked for changes — carousel copy", brief: null,
+    source: "human", status: "draft", scheduledAt: null, customFields: {},
+    createdBy: "u-pm", createdAt: "2026-08-16T09:00:00Z", updatedAt: "2026-08-17T10:00:00Z",
+    variants: [
+      {
+        id: "soc-var-9", accountId: "soc-acc-ig-1", network: "instagram", handle: "northwindtraders",
+        body: "Rotating weekly offer — 15% off storewide.", firstComment: null, media: [],
+        settings: {}, validation: PASS, argsSha256: "sha256-demo-0009",
+        approvalId: null, nativeImport: false, scheduledAt: null, status: "draft",
+        publishedUrl: null, publishedAt: null, lastError: null, estimatedCostUsd: 0,
+      },
+    ],
+  },
+  {
+    id: "soc-post-9", engagementId: "soc-eng-2", campaignId: null,
+    title: "Never asked yet — awaiting client outreach", brief: null,
+    source: "human", status: "draft", scheduledAt: null, customFields: {},
+    createdBy: "u-pm", createdAt: "2026-08-19T09:00:00Z", updatedAt: "2026-08-19T09:00:00Z",
+    variants: [
+      {
+        // `not_requested` — no `clientReviews` row exists for this one at all. Left this way on
+        // purpose so the request -> pending -> withdraw -> re-request loop is drivable live from a
+        // clean slate, rather than only observable as a static seed.
+        id: "soc-var-10", accountId: "soc-acc-ig-1", network: "instagram", handle: "northwindtraders",
+        body: "Draft: end-of-month clearance teaser.", firstComment: null, media: [],
+        settings: {}, validation: PASS, argsSha256: "sha256-demo-0010",
+        approvalId: null, nativeImport: false, scheduledAt: null, status: "draft",
+        publishedUrl: null, publishedAt: null, lastError: null, estimatedCostUsd: 0,
+      },
+    ],
+  },
+];
+
+const CLIENT_REVIEWS_SEED: DemoClientReview[] = [
+  {
+    id: "cr-1", variantId: "soc-var-7", clientId: "cl-1", status: "pending",
+    comment: null, reviewedArgsSha256: null,
+    requestedAt: "2026-08-18T09:05:00Z", decidedBy: null, decidedAt: null, updatedAt: "2026-08-18T09:05:00Z",
+  },
+  {
+    // Approved against an OLDER hash than soc-var-8 carries today — see that variant's own comment.
+    id: "cr-2", variantId: "soc-var-8", clientId: "cl-1", status: "approved",
+    comment: null, reviewedArgsSha256: "sha256-demo-old-0008",
+    requestedAt: "2026-08-15T09:10:00Z", decidedBy: "demo-client", decidedAt: "2026-08-15T14:00:00Z",
+    updatedAt: "2026-08-15T14:00:00Z",
+  },
+  {
+    id: "cr-3", variantId: "soc-var-9", clientId: "cl-1", status: "changes_requested",
+    comment: "Please swap the second photo for the new packaging shot before we go out with this.",
+    reviewedArgsSha256: null,
+    requestedAt: "2026-08-16T09:15:00Z", decidedBy: "demo-client", decidedAt: "2026-08-17T10:00:00Z",
+    updatedAt: "2026-08-17T10:00:00Z",
+  },
+  // soc-var-10 has NO row — `not_requested` is the absence of a row, not a seeded one.
 ];
 
 // One store, shared by every module copy. Seeded once, on first touch.
@@ -311,6 +439,7 @@ const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   accounts: ACCOUNTS_SEED,
   posts: POSTS_SEED,
   seq: 900,
+  clientReviews: CLIENT_REVIEWS_SEED,
 }) as SocialStore;
 
 // Live views. Every read and every mutation below goes through these, so the action graph and the RSC
@@ -318,8 +447,20 @@ const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
 const ENGAGEMENTS = store.engagements;
 const ACCOUNTS = store.accounts;
 const POSTS = store.posts;
+const CLIENT_REVIEWS = store.clientReviews;
 const nid = (p: string) => `${p}-${++store.seq}`;
 const now = () => new Date().toISOString();
+
+function reviewByVariantId(variantId: string): DemoClientReview | undefined {
+  return CLIENT_REVIEWS.find((r) => r.variantId === variantId);
+}
+function reviewToClientState(r: DemoClientReview | undefined): ClientReviewState {
+  if (!r) return { status: "not_requested" };
+  return {
+    status: r.status, id: r.id, comment: r.comment, reviewedArgsSha256: r.reviewedArgsSha256,
+    requestedAt: r.requestedAt, decidedBy: r.decidedBy, decidedAt: r.decidedAt,
+  };
+}
 
 const LIVE_VARIANT_STATUSES = ["queued", "publishing", "published", "partially_published"];
 const EDITABLE_VARIANT_STATUSES = ["draft", "in_review", "approved"];
@@ -369,8 +510,17 @@ const PUBLISH_METERED_TOOL = "social.publish.metered";
 // is reflected the next time this is read, exactly like the real dry run's own "computed fresh,
 // not the stored column" rule (`lib/social.ts`'s header on `getVariantValidation`, same principle
 // applied here to the precondition read).
-function computePrecondition(v: DemoVariant, account: DemoAccount | undefined) {
+// SMM-31/32 — mirrors `evaluatePublishPreconditionWithClientReview`'s own composition exactly: the
+// client-review gate is checked FIRST, in front of the six-stage chain, never as a 7th stage inside
+// it (`PRECONDITION_STAGES` above stays six, unchanged). `evaluateClientReviewState` is the SAME
+// pure function `VariantCard.tsx`'s composer panel calls — one evaluator, not a second copy that
+// could drift from it.
+function computePrecondition(v: DemoVariant, account: DemoAccount | undefined, engagement: DemoEngagement | undefined) {
   const base = { stages: PRECONDITION_STAGES, tool: PUBLISH_TOOL, meteredTool: PUBLISH_METERED_TOOL };
+  if (engagement?.toolScope.posting.requiresClientOk) {
+    const verdict = evaluateClientReviewState(reviewToClientState(reviewByVariantId(v.id)), v.argsSha256);
+    if (!verdict.ok) return { ...base, ok: false, stage: "client_review" as const, reason: verdict.reason };
+  }
   if (!account) return { ...base, ok: false, stage: "scope" as const, reason: "account_not_connected" };
   if (account.status !== "connected") return { ...base, ok: false, stage: "scope" as const, reason: "account_not_connected" };
   const q = account.quota.igPosts24h as { used: number; cap: number } | undefined;
@@ -406,6 +556,18 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     const eng = ENGAGEMENTS.find((e) => e.id === engDetailM[1]);
     if (!eng) return err(404, "not found");
     return ok({ ...eng, tone: {}, hashtagStrategy: {}, knowledgeSourceIds: [] });
+  }
+  // `GET engagements/:id/scope` — a PRE-EXISTING gap this pass found and closed: `lib/social.ts`'s
+  // `getEngagementScope` had NO demo route at all, so it silently fell through to `readGuarded`'s
+  // `EMPTY_SCOPE` fallback (`requiresClientOk: false`) — invisible for the Composer's client-review
+  // panel (which shows regardless of the toggle, only using it for one line of copy) but it fully
+  // defeated the CALENDAR's chip feature, which gates its per-variant review fetch on this exact
+  // flag. Also the (pre-existing, unrelated to this ticket) engagement-scope editor page's own read.
+  const engScopeM = tail.match(/^engagements\/([^/]+)\/scope$/);
+  if (engScopeM && m === "GET") {
+    const eng = ENGAGEMENTS.find((e) => e.id === engScopeM[1]);
+    if (!eng) return err(404, "not found");
+    return ok({ toolScope: eng.toolScope, usageBudgetUsd: eng.usageBudgetUsd });
   }
 
   // ── accounts (SMM-05 registry — the quota strips' data source) ─────────────────────────────────
@@ -541,8 +703,122 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
   if (preconditionsM && m === "GET") {
     const found = findPostByVariantId(preconditionsM[1]);
     if (!found) return err(404, "not found");
-    const { variant } = found;
-    return ok(computePrecondition(variant, accountById(variant.accountId)));
+    const { post, variant } = found;
+    const engagement = ENGAGEMENTS.find((e) => e.id === post.engagementId);
+    return ok(computePrecondition(variant, accountById(variant.accountId), engagement));
+  }
+
+  // ── client review (SMM-31/32, D-16) — the STAFF side: ask / read / withdraw ────────────────────
+  const clientReviewM = tail.match(/^variants\/([^/]+)\/client-review$/);
+  if (clientReviewM && m === "POST") {
+    const variantId = clientReviewM[1];
+    const found = findPostByVariantId(variantId);
+    if (!found) return err(404, "not found");
+    const existing = reviewByVariantId(variantId);
+    const alreadyPending = existing?.status === "pending";
+    if (existing) {
+      // ONE ROW PER VARIANT, FOREVER (0105's UNIQUE(variant_id)) — re-request is an UPSERT back to
+      // pending, never a second row, from ANY prior state.
+      existing.status = "pending";
+      existing.comment = null;
+      existing.reviewedArgsSha256 = null;
+      existing.decidedBy = null;
+      existing.decidedAt = null;
+      existing.requestedAt = now();
+      existing.updatedAt = now();
+      return { status: 201, json: { id: existing.id, status: "pending", alreadyPending } };
+    }
+    const id = nid("cr");
+    CLIENT_REVIEWS.push({
+      id, variantId, clientId: "cl-1", status: "pending", comment: null, reviewedArgsSha256: null,
+      requestedAt: now(), decidedBy: null, decidedAt: null, updatedAt: now(),
+    });
+    return { status: 201, json: { id, status: "pending", alreadyPending: false } };
+  }
+  if (clientReviewM && m === "GET") {
+    const review = reviewByVariantId(clientReviewM[1]);
+    if (!review) return ok({ status: "not_requested" });
+    return ok({
+      id: review.id, status: review.status, comment: review.comment,
+      reviewedArgsSha256: review.reviewedArgsSha256, requestedAt: review.requestedAt,
+      decidedBy: review.decidedBy, decidedAt: review.decidedAt,
+    });
+  }
+  const withdrawM = tail.match(/^variants\/([^/]+)\/client-review\/withdraw$/);
+  if (withdrawM && m === "POST") {
+    const review = reviewByVariantId(withdrawM[1]);
+    if (!review) return err(404, "no client review requested for this variant");
+    if (review.status === "withdrawn") return ok({ id: review.id, status: "withdrawn" }); // idempotent no-op
+    if (review.status !== "pending") return err(400, "client_review_not_pending");
+    review.status = "withdrawn";
+    review.decidedBy = DEMO_MANAGER_ID;
+    review.decidedAt = now();
+    review.updatedAt = now();
+    return ok({ id: review.id, status: "withdrawn" });
+  }
+
+  return null;
+}
+
+// ── PORTAL side (SMM-31/32, D-16) — `/api/:t/portal/social-reviews[...]`. A SEPARATE dispatch
+// function (not folded into `socialDemo` above, which only ever matches `/modules/social/*`) but
+// reading/writing the SAME globalThis-pinned `CLIENT_REVIEWS` store, so a staff request and a
+// client decide agree on the one row's state — exactly the property this file's own header names
+// as the trap ("the write and the read saw different copies"). Identity-aware like
+// `demoPortal.ts`'s `portalDashboardDemo`: only `demo-client` may decide/list, matching the real
+// portal scope resolver's own behaviour (a staff caller gets a genuine 403, never an empty list).
+const DEMO_CLIENT_USER = "demo-client";
+const DEMO_CLIENT_ID = "cl-1"; // Northwind Traders — the client `demo-client` represents
+
+export function socialClientReviewPortalDemo(method: string, p: string, userId: string, body?: string): DemoResult | null {
+  const match = p.match(/^\/api\/[^/]+\/portal\/social-reviews(?:\/([^/]+)\/decide)?$/);
+  if (!match) return null;
+  if (userId !== DEMO_CLIENT_USER) return err(403, "not a portal client");
+  const m = method.toUpperCase();
+
+  if (!match[1] && m === "GET") {
+    const status = new URL(p, "http://demo").searchParams.get("status");
+    const rows = CLIENT_REVIEWS
+      .filter((r) => r.clientId === DEMO_CLIENT_ID && (!status || r.status === status))
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+      .map((r) => {
+        const found = findPostByVariantId(r.variantId);
+        return {
+          id: r.id, status: r.status, comment: r.comment,
+          requestedAt: r.requestedAt, decidedAt: r.decidedAt,
+          variantId: r.variantId,
+          body: found?.variant.body ?? "", media: found?.variant.media ?? [],
+          settings: found?.variant.settings ?? {}, scheduledAt: found?.variant.scheduledAt ?? null,
+          network: found?.variant.network ?? "instagram", postTitle: found?.post.title ?? "",
+        };
+      });
+    return ok(rows);
+  }
+
+  if (match[1] && m === "POST") {
+    const reviewId = match[1];
+    const review = CLIENT_REVIEWS.find((r) => r.id === reviewId && r.clientId === DEMO_CLIENT_ID);
+    if (!review) return err(404, "review not found");
+    const parsed: { decision?: string; comment?: string } = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+    const decision = parsed.decision;
+    if (decision !== "approved" && decision !== "changes_requested") {
+      return { status: 400, json: { error: "decision must be approved|changes_requested" } };
+    }
+    if (review.status !== "pending") {
+      // IDEMPOTENT: the same decision replayed is a 200 no-op; a DIFFERENT one is a genuine 409 —
+      // never a silent flip, mirroring `social-client-review-portal.controller.ts`'s own decide().
+      if (review.status === decision) return ok({ id: review.id, status: review.status, alreadyDecided: true });
+      return { status: 409, json: { error: "client_review_already_decided" } };
+    }
+    const found = findPostByVariantId(review.variantId);
+    review.status = decision;
+    review.comment = parsed.comment ?? review.comment;
+    // Stamps the variant's LIVE hash at the moment of decision — a later edit is detectably stale.
+    review.reviewedArgsSha256 = found?.variant.argsSha256 ?? null;
+    review.decidedBy = DEMO_CLIENT_USER;
+    review.decidedAt = now();
+    review.updatedAt = now();
+    return ok({ id: review.id, status: decision });
   }
 
   return null;

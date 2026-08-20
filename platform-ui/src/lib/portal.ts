@@ -243,9 +243,77 @@ export interface PortalProfile {
 
 /** Topics the live stream can name. Mirrors platform-nest src/core/portal-live.service.ts's
  *  `PortalTopic` — the two lists must agree, and this one is the browser's copy.
- *  `requests` (MI-02/MI-03) — a webdev change request submitted/triaged/converted. */
+ *  `requests` (MI-02/MI-03) — a webdev change request submitted/triaged/converted.
+ *
+ *  ⚠ SMM-32 does NOT add a `"social_reviews"` member here: `portal-live.service.ts`'s own
+ *  `PortalTopic` union was not touched by SMM-31's backend work, so no SSE frame is ever emitted
+ *  naming this surface — inventing a client-side topic string with nothing on the wire to match it
+ *  would be exactly the kind of confident-but-wrong drift this file's own header warns against. The
+ *  social-reviews pages render `<PortalLive />` with no `topics` filter instead, so they still
+ *  refresh on the unconditional idle poll (and on any OTHER topic's frame) — see that component's
+ *  own header for why the poll is never purely a fallback. */
 export type PortalTopic = "approvals" | "projects" | "deliverables" | "invoices" | "contracts" | "profile" | "requests";
 export interface PortalLiveFrame { topic: PortalTopic; at: string }
+
+// ── SMM-31/32 — the client's own review of a drafted social post (D-16) ───────────────────────────
+//
+// Mirrors `social-client-review-portal.controller.ts`'s exact response shape (docs/FRONTEND-BFF-
+// CONTRACT.md §16h). Only two statuses are ever DECIDED by the client (`approved`/
+// `changes_requested`); `pending`/`withdrawn` are states the client can only ever READ, never post
+// as a decision — `SocialReviewDecision` names the narrower set the decide form may submit.
+export type SocialReviewStatus = "pending" | "approved" | "changes_requested" | "withdrawn";
+export type SocialReviewDecision = "approved" | "changes_requested";
+
+export interface PortalSocialReview {
+  id: string;
+  status: SocialReviewStatus;
+  comment: string | null;
+  requestedAt: string;
+  decidedAt: string | null;
+  variantId: string;
+  body: string;
+  media: unknown[];
+  settings: Record<string, unknown>;
+  scheduledAt: string | null;
+  network: string;
+  postTitle: string;
+}
+
+const SOCIAL_REVIEW_STATUS_WORDS: Record<SocialReviewStatus, string> = {
+  pending: "Awaiting your decision",
+  approved: "Approved",
+  changes_requested: "Changes requested",
+  withdrawn: "Withdrawn by the team",
+};
+/** Plain-language label for a review's own status — CLIENT vocabulary, not `clientStatus`'s (that
+ *  map has no entries for `changes_requested`/`withdrawn` in this review-specific sense and would
+ *  fall through to a mechanical underscore-replace; this one is deliberate and full-coverage). */
+export function socialReviewStatusLabel(status: SocialReviewStatus): string {
+  return SOCIAL_REVIEW_STATUS_WORDS[status] ?? status.replace(/_/g, " ");
+}
+
+export function socialReviewStatusTone(status: SocialReviewStatus): PortalTone {
+  switch (status) {
+    case "approved": return "success";
+    case "pending": return "warning";
+    case "changes_requested": return "info";
+    case "withdrawn": return "neutral";
+    default: return "neutral";
+  }
+}
+
+/** The one token the portal decide action can receive back that ISN'T plain prose: a genuine
+ *  conflict (this review was already decided differently — see `social-client-review-portal.
+ *  controller.ts`'s idempotent-decision doctrine). Every other error the decide call can throw
+ *  (404 "review not found", a validation 400) is plain English already and is surfaced verbatim by
+ *  `portalActions.ts`'s `fail()`, matching that file's own "the backend's own message is written
+ *  for a client to read" rule — this map exists ONLY for the one snake_case token among them. */
+const SOCIAL_REVIEW_ERROR_WORDS: Record<string, string> = {
+  client_review_already_decided: "This was already decided, and it doesn't match what you just submitted — refresh the page to see the current status.",
+};
+export function describeSocialReviewError(message: string): string {
+  return SOCIAL_REVIEW_ERROR_WORDS[message] ?? message;
+}
 
 // ── MI-04 — maintenance intake (webdev change requests) ───────────────────────────────────────────
 //

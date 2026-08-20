@@ -8,7 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
-import { socialDemo } from "./demoSocial";
+import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { monitoringDemo } from "./demoMonitoring";
@@ -1866,6 +1866,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // null for anything it does not own so the runs/gates routes still reach `portalDemo` below. Both
   // are identity-aware (a staff user gets the real BFF's 403), which is what keeps the staff
   // teach-state on /portal reachable.
+  // SMM-31/32 — client portal's social-post review (D-16), stateful store shared with
+  // `demoSocial.ts`'s staff-side routes above (same `globalThis`-pinned `CLIENT_REVIEWS`, so a
+  // staff "ask" and a client "decide" agree on the one row).
+  const socialReviewPortal = socialClientReviewPortalDemo(method, p, userId, body);
+  if (socialReviewPortal) return socialReviewPortal;
+
   const portalDash = portalDashboardDemo(method, p, userId, body);
   if (portalDash) return portalDash;
 

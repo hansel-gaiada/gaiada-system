@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
+import { describeSocialReviewError } from "./portal";
 
 // Client-portal WRITE actions: the client signs their gates and contracts, records a payment against
 // their own invoice, updates their own profile, and asks for a change to their company record.
@@ -59,7 +60,8 @@ function fail(e: unknown): PortalActionResult {
  *  concrete path — so dynamic detail pages take their own explicit call from the caller. */
 function revalidatePortal(): void {
   for (const p of ["/portal", "/portal/projects", "/portal/timeline", "/portal/deliverables",
-    "/portal/approvals", "/portal/invoices", "/portal/contracts", "/portal/profile", "/portal/requests"]) {
+    "/portal/approvals", "/portal/invoices", "/portal/contracts", "/portal/profile", "/portal/requests",
+    "/portal/social-reviews"]) {
     revalidatePath(p);
   }
 }
@@ -263,3 +265,47 @@ export async function portalSubmitChangeRequest(_prev: PortalActionResult | null
     return fail(e);
   }
 }
+
+// ── SMM-31/32: social post client-review decision (D-16) ──────────────────────────────────────────
+
+/** The client's own decision on a drafted social post — approve, or ask for changes.
+ *
+ *  `useActionState` (not the void `portalDecideGate` form-action shape), for the identical reason
+ *  `portalSignContract` gives: the server refuses for reasons the client must SEE, and this decision
+ *  is one-shot. `social-client-review-portal.controller.ts`'s `decide()` is IDEMPOTENT — the SAME
+ *  decision replayed is a 200 no-op — but a DIFFERENT decision after the review already resolved is
+ *  a genuine 409 (`client_review_already_decided`), which `describeSocialReviewError` turns into a
+ *  sentence rather than a raw token. In ordinary use this 409 is unreachable from the UI at all: the
+ *  detail page only ever renders the decide form while `review.status === 'pending'` (server-read,
+ *  fresh on every page load), so once a decision is recorded the buttons themselves disappear on the
+ *  next render — the SAME "no second-decision affordance" guarantee `PortalGateActions.tsx` already
+ *  relies on for gate decisions. The 409 branch below exists only for a genuine race (two tabs, or a
+ *  replay after the page went stale) and is answered honestly rather than crashing. */
+export async function portalDecideSocialReview(_prev: PortalActionResult | null, formData: FormData): Promise<PortalActionResult> {
+  const c = await ctx();
+  if (!c) return { ok: false, error: "Your session has expired — please sign in again." };
+  const reviewId = String(formData.get("reviewId") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  const comment = String(formData.get("comment") ?? "").trim();
+  if (!reviewId) return { ok: false, error: "Missing review." };
+  if (decision !== "approved" && decision !== "changes_requested") {
+    return { ok: false, error: "Choose approve or request changes.", field: "decision" };
+  }
+  try {
+    const r = await platformFetch<{ id: string; status: string; alreadyDecided?: boolean }>(
+      `/api/${c.tenant}/portal/social-reviews/${reviewId}/decide`, c.userId,
+      { method: "POST", body: JSON.stringify({ decision, comment: comment || undefined }) },
+    );
+    revalidatePortal();
+    revalidatePath(`/portal/social-reviews/${reviewId}`);
+    return { ok: true, id: r.id };
+  } catch (e) {
+    // `fail()` (this file's own helper, above) surfaces `e.message` verbatim — correct for every
+    // OTHER portal error, which is already client-facing prose. The one 409 token this surface can
+    // throw is NOT prose (`client_review_already_decided`), so it goes through `lib/portal.ts`'s
+    // `describeSocialReviewError` instead of `fail()`'s generic pass-through.
+    if (e instanceof PlatformError) return { ok: false, error: describeSocialReviewError(e.message), field: e.field };
+    throw e;
+  }
+}
+
