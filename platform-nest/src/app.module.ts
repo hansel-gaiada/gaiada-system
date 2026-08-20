@@ -35,6 +35,9 @@ import { PortalStreamController } from "./core/portal-stream.controller";
 // per the CP-2..CP-5 split precedent above: a distinct subject, a distinct risk profile (the second
 // external-party WRITE surface after commerce), same `api` prefix, no route collision.
 import { WebdevChangeRequestsPortalController } from "./core/webdev-change-requests-portal.controller";
+// SMM-31 (D-16) — the portal's client-review decide surface for social posts. Same CP-2..CP-5 split
+// precedent: a distinct subject (social's client-review stage), same `api` prefix, no route collision.
+import { SocialClientReviewPortalController } from "./core/social-client-review-portal.controller";
 // CP-19: the STAFF half of the portal's commerce surface — contract authoring/send/countersign and
 // payment confirmation. Without it the portal's contracts section is permanently empty and a
 // client-recorded payment can never leave `pending`, so it ships in the same change.
@@ -104,7 +107,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,

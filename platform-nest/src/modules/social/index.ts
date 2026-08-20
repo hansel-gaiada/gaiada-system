@@ -27,7 +27,11 @@ import type { ModuleContract, RollupProvider } from "../contract";
 // module contract's own header for why a declared tool needs a real endpoint before it exists here.
 import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "./publish-precondition";
 // SMM-13 — event handlers for social post notifications and mail routing
-import { handlePostDispatched, handlePostPublished, handlePostFailed } from "./event-handlers";
+// SMM-31 — the client-review stage's own two events, same routing table
+import {
+  handlePostDispatched, handlePostPublished, handlePostFailed,
+  handleClientReviewRequested, handleClientReviewDecided,
+} from "./event-handlers";
 
 const socialRollups: RollupProvider = {
   metrics: [
@@ -126,6 +130,14 @@ export const socialModule: ModuleContract = {
     // first ticket to actually declare it on the module contract, because it is the first ticket
     // whose endpoint honours it.
     { key: "social.post.publish", description: "Decide that approved content is published to a client's live social account." },
+    // SMM-31 (D-16) — the STAFF side of the client-review stage. Already catalog rows + Cerbos
+    // actions (0106 / resource_social_client_review.yaml) from SMM-30's forward-looking seed; this
+    // is the first ticket whose endpoints (`social.controller.ts`'s client-review trio) honour them.
+    // The CLIENT's own decision rides `portal.approve_post` — a `portal.*` key, not `social.*`, so it
+    // is never declared here (portal is core, not a registered module).
+    { key: "social.client_review.read", description: "View client sign-off state on social posts" },
+    { key: "social.client_review.request", description: "Send a social post to the client for sign-off" },
+    { key: "social.client_review.withdraw", description: "Withdraw a pending client sign-off request" },
   ],
   customFieldTargets: ["social_engagement", "social_campaign", "social_post"],
   // Agentic-bar criterion 1 (tool parity): everything this ticket's UI can do is reachable as a
@@ -600,6 +612,10 @@ export const socialModule: ModuleContract = {
     "social.post.dispatched": handlePostDispatched,
     "social.post.published": handlePostPublished,
     "social.post.failed": handlePostFailed,
+    // SMM-31 — both ride the already-drained "social_post_variant" stream (see event-handlers.ts's
+    // own header for why that is deliberate, not an oversight).
+    "social.client_review.requested": handleClientReviewRequested,
+    "social.client_review.decided": handleClientReviewDecided,
   },
 };
 

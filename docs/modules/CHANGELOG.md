@@ -77,6 +77,38 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-20 — SMM-31**, `social-media 0.5.2 -> 0.5.3` (IN PROGRESS). Client-review stage backend
+  (D-16): `social_post_client_reviews` (already schema'd by `0105`, plain-tenant-wall — see that
+  migration's own header for why, restated in `modules/social/client-review.ts`'s header). No
+  migration and no Cerbos change — `0106` already seeded `social.client_review.{read,request,
+  withdraw}` + `portal.approve_post`, and `resource_social_client_review.yaml` /
+  `resource_portal.yaml` already carried the actions. STAFF side (`social.controller.ts`):
+  `POST/GET/POST .../variants/:id/client-review[/withdraw]`, idempotent request-as-upsert (one row
+  per variant, forever — 0105's `UNIQUE(variant_id)`), manager-tier withdraw. PORTAL side (new
+  `SocialClientReviewPortalController`, modelled on `PortalController.decideGate`):
+  `GET/POST .../portal/social-reviews[/:id/decide]`, ownership resolved before the guarded
+  `UPDATE ... WHERE status='pending'` (idempotent: a retry with the SAME decision is a 200 no-op, a
+  DIFFERENT decision is a 409, never a silent flip). The submission precondition
+  (`evaluateClientReviewPrecondition` + the composed `evaluatePublishPreconditionWithClientReview`)
+  is a NEW, SEPARATE gate — NOT a 7th stage in SMM-09's pinned six-stage chain
+  (`PUBLISH_PRECONDITION_STAGES` stays `[scope,quota,hash,unconsumed,budget,creator_info]`, unchanged
+  and untested-into) — composed in FRONT of it at all three real choke points: the D14 executor's
+  precondition, SMM-10's dispatch re-check, and the dry-run endpoint staff actually consult before
+  filing a WS4 approval (there is no separate "submit" endpoint in this codebase as of P1). New
+  refusal vocabulary `CLIENT_REVIEW_REFUSAL` (5 tokens: `client_review_not_requested/_pending/
+  _changes_requested/_withdrawn/_stale`), kept apart from `PUBLISH_REFUSAL` — same separation
+  `dispatch.ts`'s own `DISPATCH_REFUSAL` keeps. Notifications ride the ALREADY-DRAINED
+  `"social_post_variant"` consumer stream (two new `event-handlers.ts` routes,
+  `social.client_review.requested` → client portal contacts, `.decided` → the engagement owner) —
+  no `main.ts` change needed, avoiding this module's own most-repeated "registered but never
+  invoked" defect. 318/318 in `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` +
+  the new portal controller test (was 289/289), 0 skipped; two of the new tests were driven to FAIL
+  first by temporarily deleting the `declareSocialModuleScope` call each new code path needs, then
+  restored — the module-GUC regression class, proven rather than asserted. `tsc --noEmit` clean;
+  `lint:withtenants`, `lint:migration-rls`, `lint:migration-names` all green; IAM chain-alignment
+  suite green. No migration. SMM-32 (portal UI) is next; full detail in `MODULES.md`'s social-media
+  0.5.3 entry.
+
 - **2026-08-19 — SMM-39**, `social-media 0.5.0 -> 0.5.1` (IN PROGRESS). `dispatch.ts` actually calls
   `SocialPublisher.uploadMedia` now — SMM-05 built the port method and SMM-10's own "KNOWN
   LIMITATION" comment named the gap by name (`toDispatchMedia` mapped `fileId` onto the engine ref
