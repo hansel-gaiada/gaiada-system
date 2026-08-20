@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.6` | IN PROGRESS | Social Media | 2026-08-20 |
+| social-media | `0.5.7` | IN PROGRESS | Social Media | 2026-08-20 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,111 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.6` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.7` · IN PROGRESS
+
+**0.5.7 (2026-08-20, SMM-23 — reports: snapshot + AI narrative → approve → render → files + Drive +
+deliverable, medior).** `social_reports` was already in 0105 and its Cerbos policy
+(`resource_social_report.yaml`) + catalog rows already in 0106, both from SMM-30's forward-looking
+seed, with that yaml's own note that "no real handler for social_report exists anywhere in the tree
+yet" — this ticket is that handler. No migration, no Cerbos change.
+
+Built: `social-reports.ts` (new, pure) — `buildSocialReportSnapshot`/`buildSocialReportDocument`,
+reading SMM-21's `social_metrics_daily`/`social_post_metrics` and freezing the result into
+`social_reports.metrics` at creation time (never recomputed on a later read — the same "frozen
+snapshot" contract `search_reports` uses). **No invented numbers, the ticket's own named
+highest-stakes instance of this rule**: `sumKnown`/`latestKnown` return `null`, never `0`, when a
+metric was never pulled for the period, and the corresponding `ReportKpi` is OMITTED from the array
+entirely rather than rendered as zero; a real, own-row count (posts published this period) is the
+one exception, since a real zero there is a known fact, not an absent counter. Proven directly:
+seeded one day with `impressions` pulled and one day without, and asserted the KPI sums only the
+known day while a metric never pulled all period (`reach_period`) is absent from the array, and a
+post's `likes` (never fetched) renders `null` in the `top_posts` table, never `0`.
+
+**The narrative rides SMM-19's own gateway path — no second route to ai-gateway-go.**
+`ai-drafts.ts` gained `buildReportNarrativePrompt`/`parseReportNarrativeDraft` (fail-soft, same
+shape as `buildCaptionPrompt`/`parseCaptionDraft`): the prompt hands the model ONLY the
+already-computed, already-filtered KPI numbers and instructs it never to state one it wasn't
+given; a gateway hiccup or unparsable response falls back to a deterministic template built from
+those same numbers, and which one happened is frozen alongside the snapshot
+(`FrozenSocialReportMetrics.narrativeSource`) so a later read never claims an AI narrative that
+didn't happen. **Named limitation, not silently solved**: unlike the hashtag cap (a bounded,
+mechanically-enforceable property), there is no runtime guard that can strip a hallucinated number
+out of free-form narrative prose — the prompt instructs against it, but `parseReportNarrativeDraft`
+validates JSON shape, not numeric provenance.
+
+**The cross-client leak test** (`social-reports.test.ts`), same shape SMM-19's own file uses: a
+fake WS8 server holding both clients' ingested corpora proves a report for client A's engagement
+grounds its narrative ONLY in client A's excerpts (`social-brand:{tenantId}:{clientA}`) — never
+client B's, and the same in reverse — with the request scope derived from the report's own
+engagement→client join, never a request field.
+
+**Approval — read both existing surfaces, reused neither.** SMM-09's D14 registry is for a write
+that must EXECUTE the instant a human approves it; nothing here dispatches on approval, so
+registering it would suspend an ordinary sign-off into WS4 for no reason. SMM-31's client-review
+stage is the CLIENT's sign-off on a POST before publish, a different resource and a different
+audience (`resource_social_report.yaml`'s own invariant: "`client` appears NOWHERE"). What actually
+fits, verbatim from `smm-design.md` §07: "Low-impact artifacts (reports, campaign plans) approve
+in-console via module permissions." `social-reports.controller.ts` builds exactly that:
+`social.report.{create,read,update,approve,deliver}`, mirroring `search-reports.controller.ts`'s
+own `draft → in_review → approved → delivered` state law (compare-and-swap UPDATE guards, same
+idiom).
+
+**Render reuses TR-21's sidecar, invents nothing.** `deliverReport` shapes the frozen snapshot +
+narrative into a `ReportDocument` (the reports module's own contract) and calls the SAME
+`mintPrintJobToken`/`renderPdfViaSidecar` (`reports/report-pdf-export.ts`) the 4-grain tracker's PDF
+export uses — no new renderer, no new print route. `header.grain` is pinned to `"company"` (the
+closest of the four existing grains to a client engagement; adding a fifth grain would touch
+`report-document.ts`/`platform-ui/src/lib/reports.ts`, both out of this ticket's file surface) — a
+named limitation: the print page's per-grain `GrainCharts` composition (`CompanyCharts`) doesn't
+know this document's own series/table keys, so today only the KPI wall, highlights and narrative
+render on the PDF; the series/tables are present in the JSON `ReportDocument` (the console read
+surface, and any future chart wiring) but not yet on the rendered PDF page. Proven with a REAL
+sidecar round trip (a stand-in HTTP server that itself fetches the real
+`/internal/reports/print-payload/:jobToken` route, same technique
+`reports.controller.export.pdf.db.test.ts` uses) — not a mocked render call. `files` row written
+(`target_entity_type='social_report'`), Drive mirror is WS11's existing job (out of this ticket's
+scope, per `search-reports.controller.ts`'s own precedent comment), `deliverables` link best-effort
+when the engagement carries a `project_id`. Delivering twice is refused (compare-and-swap), and
+approving from any status but `in_review` is refused.
+
+**Absent metric on a rendered report:** never a `0` — the KPI is missing from the wall entirely,
+the `top_posts` row shows the column blank (`null`), and the narrative names it as "not yet
+fetched" rather than implying zero.
+
+**Cross-session hazard hit directly**: this worktree was cut BEFORE SMM-21's merge reached `main`
+(`metrics-job.ts`, the two `GET metrics/*` routes) — `git merge main` (clean, no conflicts outside
+the additive `app.module.ts`/`index.ts` lines this ticket itself was writing) pulled it in before
+any snapshot code was written, per this file's own standing cross-session-hazards note.
+
+6 new MCP tools (`social.draftReport`, `social.listReports`, `social.getReport`,
+`social.editReport`, `social.approveReport`, `social.deliverReport`;
+`deliverReport` is `impact:'medium'`, matching `search.deliverReport`'s own ratified
+"outward-facing and unretractable" widening, the rest `impact:'low'`), 5 new `social.report.*`
+permissions declared on the module contract (already-catalogued rows; `delete` stays undeclared —
+no endpoint honours it yet, matching `search.report.*`'s own precedent).
+
+Test counts: **370 / 0 / 0** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline 365/0/0, +5: `social-reports.test.ts`
+— no-invented-numbers, module-GUC regression, the cross-client leak test both directions folded into
+one case, idempotent create, and the full draft→in_review→approved→delivered lifecycle against a
+REAL report-renderer sidecar round trip). `tsc --noEmit` clean. `lint:withtenants` green (349 files
+scanned). `test:iam-chain-alignment` green (25/25, unaffected). `role-permission-bundles.db.test.ts`/
+`role-bundle-completeness.db.test.ts`/`role-catalog-drift.db.test.ts` green (15/15, unaffected — no
+catalog/Cerbos change this pass).
+
+**Anything the spec did not answer, named rather than guessed:** (1) `header.grain: "company"` is a
+repurposing, not a real fifth grain — see the render section above; (2) the narrative's "no invented
+numbers" guarantee is prompt-level only, not a runtime numeric-provenance guard (see above); (3) a
+report's `period` for `kind='campaign'/'adhoc'` with no explicit period falls back to a trailing
+30-day window (mirrors `search/reports.ts#periodDateRange`'s identical fallback) — not specified by
+the ticket, named as a deliberate choice rather than silently picked; (4) KPI-vs-target rendering
+(`social_kpi_targets`) is included in the frozen snapshot as its own table when targets exist, but
+is not wired into the narrative prompt — a report with targets set gets no AI commentary on
+over/under-target, left for a later pass; (5) no delivery notification/mail routing was added for
+`social.report.delivered` (the event is emitted; no handler consumes it yet) — lower urgency than
+SMM-31's client-review notifications, and adding a handler with no reviewed recipient list felt like
+guessing at UX the ticket didn't specify. Full detail: `docs/plans/smm-tracker.md`'s SMM-23 evidence
+block.
 
 **Docs-only, 2026-08-20 (SMM-33 + the outstanding half of SMM-24) — no module version change.**
 Closes SMM-33's capability inventory + eval register and the remaining BFF-docs/AGPL-gap half of

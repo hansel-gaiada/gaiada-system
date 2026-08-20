@@ -32,11 +32,11 @@ not afterwards.
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
-| P3 content ops | **4** (+1 partial) | 8 |
+| P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.6 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+Module: `social-media 0.5.7 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
@@ -279,7 +279,7 @@ any single capability is real, that phase decides how `direct` gets registered a
 | SMM-20 | Asset attach only; `ai.imageGen` ships inert and names why | ⬜ | |
 | SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ✅ **merged** | backend + frontend DEV-VERIFIED, evidence below; `main.ts` registration **CONFIRMED landed** 2026-08-20 by the SMM-33/24 docs pass (this row previously said "still pending merge" — stale, corrected: `main.ts` now imports and calls `startMetricsPullLoop`) |
 | SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ⬜ | widens SMM-09's budget stage |
-| SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ⬜ | |
+| SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ✅ | backend DEV-VERIFIED against live Postgres + Redis + a real sidecar round trip, evidence below |
 | SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | ✅ **docs closed** 2026-08-20 | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20; `docs/FRONTEND-BFF-CONTRACT.md` §19 gained the missing dispatch-endpoint row, the webhook-intake row, and the two SMM-21 metrics rows, each verified against the controller code read directly. **The AGPL source-offer itself is NOT built** — confirmed (no footer surface anywhere in the staff console; `DeptShellFrame.tsx`/`departments/[deptId]/layout.tsx` carry none, `PortalShell.tsx`'s is client-facing) and a placement recommended (see the gap entry below, updated) — remains a tracked gap for the owner/senior-uiux to action, not a build this ticket's docs scope covers |
 | SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
 | SMM-33 | Capability inventory + eval register | ✅ **docs closed** 2026-08-20 | golden-case table (SMM-14, proof of P1) stands; **the companion registry now exists**: `docs/modules/social-capability-inventory.md` — every capability across P0–P3-merged, endpoint · MCP tool · impact class · refusal vocabulary · `work_activity` row, built from the controllers/index.ts/approval-executables.ts directly. **18 MCP tools**, not 17 (this row's own prior estimate, corrected by counting `name:` occurrences in `index.ts`). Two structural gaps found and stated plainly, not filled with a plausible guess: the entire client-review capability group (request/read/withdraw/decide) has no MCP tool, and the post-status webhook callback writes no `work_activity` row with no stated reason (unlike the purge/metrics jobs, which name theirs) |
@@ -380,6 +380,120 @@ engine reported, which these are not, but naming the choice here rather than sil
 (3) `main.ts` registration is NOT applied — handed to the merge orchestrator (exact line above)
 since `main.ts`/`config.ts` were off-limits for this ticket's duration.
 
+**SMM-23 evidence (2026-08-20, medior).** Schema/IAM already in place (`0105`'s `social_reports`,
+`0106`'s catalog rows + `resource_social_report.yaml` — SMM-30's forward-looking seed, whose own
+yaml note says "no real handler for social_report exists anywhere in the tree yet"). This ticket is
+that handler. No migration, no Cerbos change.
+
+**Cross-session hazard, hit directly.** This worktree was cut BEFORE SMM-21's merge (`9a5a8f5`)
+reached `main` — `metrics-job.ts` and the two `GET metrics/*` routes were entirely absent
+(`social.controller.ts` had 89 fewer lines than the merged version). `git merge main` (clean, no
+conflicts — SMM-21's diff touched only `social.controller.ts`+new files, never `index.ts`/
+`app.module.ts`, which is where this ticket's own edits landed) pulled it in before the snapshot
+builder was written against a tree that would have been missing the tables' read source entirely.
+Re-verified `365/0/0` on the merged baseline before adding anything.
+
+Built: `platform-nest/src/modules/social/reports.ts` (new, pure) —
+`buildSocialReportSnapshot`/`buildSocialReportDocument`, freezing the metrics snapshot into
+`social_reports.metrics` at creation (never recomputed on a later read, mirroring
+`search_reports`'s own "read VERBATIM from the frozen column" rule). `social-reports.controller.ts`
+(new, its own controller class sharing `SocialController`'s route prefix, for the same reason
+`search-reports.controller.ts` gives — three other seats hold `social.controller.ts` this wave):
+`POST engagements/:id/reports` (snapshot + AI narrative, idempotent on a caller id), `GET reports`
+/ `GET reports/:id` (list/detail, the latter a full `ReportDocument`), `PATCH reports/:id`
+(edit/submit/send-back), `POST reports/:id/approve`, `POST reports/:id/deliver`.
+
+**No invented numbers — proven, not asserted.** `sumKnown`/`latestKnown` (`reports.ts`) return
+`null`, never `0`, when a metric was never pulled for the period; the corresponding `ReportKpi` is
+OMITTED from the array, never rendered as zero. A real own-row count (posts published this period)
+is the one deliberate exception — a genuine zero there is a known fact, not an absent counter.
+`social-reports.test.ts` seeds one day with `impressions` pulled and one without, and asserts the
+KPI sums only the known day while `reach_period` (never pulled all period) is absent from the array
+entirely; a post's `likes` (never fetched) renders `null` in the `top_posts` table.
+
+**The narrative rides SMM-19's gateway path — no second route to `ai-gateway-go`.** `ai-drafts.ts`
+gained `buildReportNarrativePrompt`/`parseReportNarrativeDraft` (fail-soft, same shape as the
+caption/idea pair already there): the prompt hands the model ONLY the already-filtered real
+numbers and instructs it never to state one it wasn't given; a gateway failure or unparsable
+response falls back to a deterministic template built from those same numbers, and which one
+happened is frozen (`narrativeSource`) so a later read never claims an AI narrative that a fallback
+actually produced. **Named limitation**: unlike the hashtag cap (mechanically enforceable), no
+runtime guard strips a hallucinated number out of free-form prose — the prompt instructs against
+it; the parser validates JSON shape only.
+
+**The cross-client leak test** (`social-reports.test.ts`), same fake-WS8-server technique
+`social-ai-drafts.test.ts` uses (a store holding BOTH clients' corpora, reimplementing the real
+`scope = ANY(acl)` predicate): a report for engagement A's client grounds its narrative ONLY in
+client A's ingested excerpt (asserted on the actual prompt text AND on the WS8 request's own
+`scope` field) — never client B's — and the same in reverse. The scope is derived from the report's
+own engagement→client join, never a request field.
+
+**Approval mechanism — read both existing surfaces, reused neither, and said why.** SMM-09's D14
+registry re-executes a suspended write the instant a human approves it; nothing here dispatches on
+approval — `deliver` is its own later, separately-gated step — so registering it would suspend an
+ordinary sign-off into the automation-approvals inbox for no reason. SMM-31's client-review stage is
+the CLIENT's sign-off on a POST before publish: a different table, a different wall (plain tenant
+wall per D-16/Δ8, not the third wall), and `resource_social_report.yaml`'s own invariant comment
+("`client` appears NOWHERE") rules it out on its face. What fits, verbatim from `smm-design.md` §07:
+"Low-impact artifacts (reports, campaign plans) approve in-console via module permissions." Built
+exactly that, mirroring `search-reports.controller.ts`'s own `draft → in_review → approved →
+delivered` state law byte-for-byte (compare-and-swap UPDATE guards against the status the handler
+itself read, same idiom).
+
+**Render reuses TR-21's sidecar — invents nothing.** `deliverReport` shapes the frozen snapshot +
+narrative into a `ReportDocument` (the reports module's own contract,
+`platform-nest/src/modules/reports/report-document.ts`) and calls the SAME
+`mintPrintJobToken`/`renderPdfViaSidecar` (`reports/report-pdf-export.ts`) TR-21 built for the
+4-grain tracker's own PDF export — no new renderer, no new print route, no new sidecar client.
+`header.grain` is pinned to `"company"` (the closest of the four existing grains to a client
+engagement — adding a fifth is out of this ticket's file surface, since `report-document.ts` and
+its FE mirror `platform-ui/src/lib/reports.ts` are both off-limits). **Named limitation**: the print
+page's per-grain `GrainCharts` composition (`CompanyCharts`) doesn't know this document's own
+series/table keys, so today only the KPI wall, highlights and narrative render on the PDF; the
+series/tables ARE present in the JSON `ReportDocument` (available to a future console read or chart
+wiring) but not yet on the rendered page. Proven with a REAL sidecar round trip — a stand-in HTTP
+server that itself fetches the real `/internal/reports/print-payload/:jobToken` route over an
+actual socket (same technique `reports.controller.export.pdf.db.test.ts` uses), not a mocked call.
+`files` row written (`target_entity_type='social_report'`); the Drive mirror is WS11's existing job
+(out of this ticket's scope, per `search-reports.controller.ts`'s own precedent comment);
+`deliverables` link best-effort when the engagement carries a `project_id`. Re-delivering an
+already-delivered report is refused (compare-and-swap); approving from any status but `in_review`
+is refused.
+
+**Absent metric on a rendered report:** never a `0` — the KPI is missing from the wall entirely, the
+`top_posts` row shows the column blank, and the narrative names it as "not yet fetched."
+
+6 new MCP tools (`social.draftReport`/`listReports`/`getReport`/`editReport`/`approveReport`/
+`deliverReport`; `deliverReport` is `impact:'medium'` — outward-facing and unretractable, the same
+ratified ground `search.deliverReport` uses; the rest `impact:'low'`), 5 new `social.report.*`
+permissions declared on the module contract (already-catalogued rows from SMM-30's seed; `delete`
+stays undeclared — no endpoint honours it yet, matching `search.report.*`'s own precedent).
+
+Test counts: **370 / 0 / 0** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline 365/0/0, +5: `social-reports.test.ts`
+— no-invented-numbers, module-GUC regression [pinned by asserting a real row is readable through
+every `{modules:["social"]}`-declared query path — the exact shape that reads zero rows silently if
+the declaration is dropped], the cross-client leak test in both directions, idempotent create [no
+second gateway call on a retry], and the full lifecycle against a REAL report-renderer sidecar
+round trip). `tsc --noEmit` clean. `lint:withtenants` green (349 files). `test:iam-chain-alignment`
+green (25/25, unaffected). `role-permission-bundles.db.test.ts`/`role-bundle-completeness.db.test.ts`/
+`role-catalog-drift.db.test.ts` green (15/15, unaffected — no catalog/Cerbos change this pass).
+
+**Anything the spec did not answer, named rather than guessed:** (1) `header.grain: "company"` is a
+repurposing, not a real fifth grain (see the render section above); (2) the narrative's "no invented
+numbers" guarantee is prompt-level only, not a runtime numeric-provenance guard (see above); (3) a
+report's `period` for `kind='campaign'/'adhoc'` with no explicit value falls back to a trailing
+30-day window, mirroring `search/reports.ts#periodDateRange`'s identical fallback — not specified by
+the ticket, named as a deliberate choice; (4) `social_kpi_targets` vs. actual is included in the
+frozen snapshot as its own table when targets exist, but is not wired into the narrative prompt — a
+report with targets set gets no AI commentary on over/under-target, left for a later pass; (5) no
+delivery notification/mail routing was added for `social.report.delivered` (the event is emitted;
+no handler consumes it yet — lower urgency than SMM-31's client-review notifications, and adding a
+handler with no reviewer/recipient list specified would have been guessing at UX the ticket didn't
+name); (6) `docs/FRONTEND-BFF-CONTRACT.md`/`docs/MAP.md` were off-limits this pass — the six new
+endpoints and one new controller are not yet reflected there, same standing gap SMM-24's own docs
+pass named for SMM-21's routes before it closed them.
+
 ## P4 — agents + assistant ⬜
 
 | # | Ticket | State |
@@ -440,7 +554,12 @@ and idempotently, exactly like `evaluatePublishPrecondition`) and the new portal
 `decide()` (declares explicitly, since portal controllers carry no `{modules}` option by
 convention) — both regression-pinned by temporarily deleting the call and watching the
 corresponding test fail (`client-review.test.ts`'s "(R1) REGRESSION", 
-`social-client-review-portal.controller.test.ts`'s header note).
+`social-client-review-portal.controller.test.ts`'s header note). SMM-23's `social-reports.controller.ts`
+uses the SAME `withTenants([tenantId], fn, { modules: ["social"] })` shape every other route in this
+file uses (never `declareSocialModuleScope` inline, since every query runs through that one option
+at the `withTenants` call site) — pinned the same way as the module's other endpoint-level GUC calls:
+by asserting a real, readable row after create/list/detail/deliver, the shape that would silently
+regress to "zero rows, looks perfectly healthy" if the option were dropped from any one query.
 
 **2. Registered but never invoked (one occurrence).** `main.ts`'s `startConsumerLoop([...])` omitted
 `"social_post_variant"`, so SMM-13's handlers existed, were registered, and were never reached. Its

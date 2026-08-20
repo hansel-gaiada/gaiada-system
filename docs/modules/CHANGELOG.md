@@ -5825,6 +5825,40 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - 26 tickets P0–P3 + 2 committed P4 (design §12).
 
 ## social-media
+### [0.5.7] — 2026-08-20 · IN PROGRESS
+- **SMM-23 — client-facing engagement reports: snapshot + AI narrative → approve → render → files +
+  Drive + deliverable.** `social_reports` (0105) + its Cerbos policy/catalog rows (0106) already
+  existed from SMM-30's forward-looking seed; this ticket is the first handler. No migration, no
+  Cerbos change. New `social-reports.ts` (pure snapshot/document builder) +
+  `social-reports.controller.ts` (own controller class, same route prefix as `SocialController`).
+  - **No invented numbers**, reading SMM-21's `social_metrics_daily`/`social_post_metrics`: a metric
+    never pulled for the period is OMITTED from the frozen KPI array, never rendered as `0`; a real
+    own-row count (posts published) is the one legitimate real zero.
+  - **Narrative rides SMM-19's gateway path** (`ai-drafts.ts`'s new
+    `buildReportNarrativePrompt`/`parseReportNarrativeDraft`, fail-soft): the prompt hands the model
+    ONLY the already-filtered real numbers; a gateway failure falls back to a deterministic
+    template built from the same numbers. **The cross-client leak test** (`social-reports.test.ts`)
+    proves a report's narrative is grounded ONLY in its own engagement's client corpus, never the
+    other client's, in both directions — same fake-WS8-server technique SMM-19's own test uses.
+  - **Approval reuses neither existing surface** — not SMM-09's D14 registry (nothing here
+    executes on approval) and not SMM-31's client-review stage (different resource, different
+    audience) — but the in-console module-permission approval `smm-design.md` §07 specifies for
+    low-impact artifacts, mirroring `search_report`'s own `draft → in_review → approved →
+    delivered` state law.
+  - **Render reuses TR-21's report-renderer sidecar** (`mintPrintJobToken`/`renderPdfViaSidecar`) —
+    no second renderer. `header.grain` is pinned to `"company"` (no fifth "client engagement" grain
+    exists; adding one is out of this ticket's file surface), so the print page's per-grain chart
+    composition doesn't render this document's own series/tables today — a named limitation, not a
+    silent gap. Proven with a REAL sidecar round trip (a stand-in server that itself fetches the
+    real internal print-payload route), not a mocked call.
+  - 6 new MCP tools (`social.draftReport`/`listReports`/`getReport`/`editReport`/`approveReport`/
+    `deliverReport`; `deliverReport` is `impact:'medium'` — outward-facing and unretractable, the
+    same ratified ground `search.deliverReport` uses), 5 new `social.report.*` permissions declared
+    on the module contract (already-catalogued; `delete` stays undeclared, no endpoint yet).
+  - Test counts **370/0/0** (baseline 365/0/0, +5). `tsc --noEmit` clean. IAM/bundle alignment
+    suites green, unaffected (no catalog/Cerbos change). Full detail: `MODULES.md`'s social-media
+    `0.5.7` entry + `docs/plans/smm-tracker.md`'s SMM-23 evidence block.
+
 ### [0.4.0] — 2026-08-13 · IN PROGRESS
 - **SMM-19 — brand-voice RAG + AI drafting, DEV-VERIFIED against live Postgres + Cerbos-stubbed
   HTTP.** Three new endpoints, all through `ai-gateway-go` (zero direct vendor calls — asserted
