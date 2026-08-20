@@ -116,10 +116,20 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
     expect(rows.find((r) => r.name === "viceroybali.com")?.clientName).toBe("Viceroy Bali");
   });
 
-  it("uptime is NULL, not 0 — 'not computed' must never render as 'down all day'", async () => {
+  it("uptime distinguishes 'measured 0%' from 'never measured' (MON-12d)", async () => {
+    // The distinction the whole figure rests on. Both rows below would be `0` under a naive
+    // aggregate, and one of them would then be a fabricated claim of a total outage.
     const res = await app.inject({ method: "GET", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff) });
-    const row = (res.json() as { name: string; uptime24h: number | null }[]).find((r) => r.name === "viceroybali.com");
-    expect(row?.uptime24h).toBeNull();
+    const rows = res.json() as { name: string; uptime24h: number | null; uptime30d: number | null }[];
+
+    // Has exactly one result row, status 'down' -> genuinely 0% over the window. A real measurement.
+    const measured = rows.find((r) => r.name === "viceroybali.com");
+    expect(measured?.uptime24h).toBe(0);
+
+    // Has NO result rows at all -> null, which the UI prints as "—". Never 0, never 100%.
+    const unmeasured = rows.find((r) => r.name === "nightly sweep");
+    expect(unmeasured?.uptime24h).toBeNull();
+    expect(unmeasured?.uptime30d).toBeNull();
   });
 
   it("a tenant WITHOUT the module gets 404, not an empty green summary", async () => {

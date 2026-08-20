@@ -672,6 +672,17 @@ services:
       # x is metered (OQ-2/D-14 keeps the publish path $0), youtube and tiktok are audit-locked.
       SOCIAL_NETWORKS_ENABLED: ${SOCIAL_NETWORKS_ENABLED:-instagram,facebook,linkedin}
       SOCIAL_DEFAULT_USAGE_BUDGET_USD: ${SOCIAL_DEFAULT_USAGE_BUDGET_USD:-10}
+
+      # MON-12c — the Plane B sweep loop. Absent/anything-but-"1" means the runner never starts, and
+      # that default is deliberate: this loop DIALS CLIENT WEBSITES, so probing a third party must be
+      # a decision someone made and not a consequence of a container booting. Until this line existed
+      # the flag could not be switched on at all — setting it in `.env` did nothing, because a var
+      # absent from this block is simply not in the process environment.
+      MONITORING_RUNNER_ENABLED: ${MONITORING_RUNNER_ENABLED:-}
+      # `:-}` supplies an EMPTY STRING when unset, and `Number("")` is 0. config.ts parses this with
+      # readIntervalMs() (floor 1s) precisely so an empty passthrough cannot become a 0 ms busy loop
+      # hammering client sites. Do not "simplify" that parse back to `Number(x ?? 60_000)`.
+      MONITORING_RUNNER_INTERVAL_MS: ${MONITORING_RUNNER_INTERVAL_MS:-}
     volumes:
       - platform-files:/data/files
     # SM-45: gives depends_on: condition: service_healthy something to attach to. GET /health is

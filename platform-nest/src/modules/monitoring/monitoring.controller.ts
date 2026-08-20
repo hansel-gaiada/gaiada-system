@@ -52,16 +52,48 @@ interface MonitorRow {
   domain_expires_at: Date | null;
   open_incident_id: string | null;
   tags: string[];
+  uptime_24h: string | null;
+  uptime_30d: string | null;
 }
+
+// MON-12d — uptime, computed on read rather than stored.
+//
+// There is nothing to "backfill": `monitors` carries no uptime columns, so a stored figure would be a
+// cache with its own staleness problem. This aggregates `monitor_results` over the window instead,
+// riding ix_monitor_results_monitor (tenant_id, monitor_id, checked_at DESC).
+//
+// THE SEMANTICS ARE uptimeRatio()'s IN runner.ts, RESTATED IN SQL — and that duplication is the risk
+// here, so `monitoring.uptime-parity.test.ts` runs both over one shared fixture and fails if they ever
+// disagree. Three rules that are easy to get wrong and each of which flatters or defames a client:
+//   · maintenance and unknown leave BOTH numerator and denominator — a window we did not measure is
+//     not a window we were up, nor one we were down.
+//   · degraded counts AGAINST uptime (denominator only) — it is a failed check, not a soft pass.
+//   · an empty window is NULL, never 1 and never 0. The UI prints "—"; 100% would be a fabricated
+//     claim about a period that was never observed.
+const UPTIME_RATIO_SQL = `
+           CASE WHEN count(*) FILTER (WHERE r.status NOT IN ('maintenance','unknown')) = 0 THEN NULL
+                ELSE count(*) FILTER (WHERE r.status = 'up')::numeric
+                     / count(*) FILTER (WHERE r.status NOT IN ('maintenance','unknown'))
+           END`;
 
 const MONITOR_SELECT = `
   SELECT m.id, m.name, m.kind, m.status, m.client_id, c.name AS client_name, m.property_id,
          m.target, m.severity, m.enabled, m.interval_sec, m.last_checked_at, m.last_latency_ms,
          m.cert_expires_at, m.domain_expires_at, m.tags,
          (SELECT i.id FROM monitor_incidents i
-           WHERE i.monitor_id = m.id AND i.closed_at IS NULL LIMIT 1) AS open_incident_id
+           WHERE i.monitor_id = m.id AND i.closed_at IS NULL LIMIT 1) AS open_incident_id,
+         u24.ratio AS uptime_24h,
+         u30.ratio AS uptime_30d
     FROM monitors m
     LEFT JOIN clients c ON c.id = m.client_id
+    LEFT JOIN LATERAL (SELECT ${UPTIME_RATIO_SQL} AS ratio
+                         FROM monitor_results r
+                        WHERE r.tenant_id = m.tenant_id AND r.monitor_id = m.id
+                          AND r.checked_at >= now() - interval '24 hours') u24 ON true
+    LEFT JOIN LATERAL (SELECT ${UPTIME_RATIO_SQL} AS ratio
+                         FROM monitor_results r
+                        WHERE r.tenant_id = m.tenant_id AND r.monitor_id = m.id
+                          AND r.checked_at >= now() - interval '30 days') u30 ON true
    WHERE m.deleted_at IS NULL`;
 
 /** ISO or null. Never a fabricated "now" — a null timestamp is what makes the UI print "never". */
@@ -86,11 +118,11 @@ function mapMonitor(r: MonitorRow) {
     domainExpiresAt: iso(r.domain_expires_at),
     openIncidentId: r.open_incident_id,
     tags: r.tags ?? [],
-    // uptime24h/30d are intentionally ABSENT rather than 0: the UI renders null as "—" and 0 as
-    // "0.00%", and "we have not computed this yet" must not read as "this was down all day".
-    // MON-12's runner populates them from monitor_results.
-    uptime24h: null,
-    uptime30d: null,
+    // NULL stays NULL by design: the UI renders null as "—" and 0 as "0.00%", so "no observations in
+    // this window" must never read as "down all day". `numeric` arrives from pg as a string — Number()
+    // it, but only after the null check, because Number(null) is 0 and that is the exact lie above.
+    uptime24h: r.uptime_24h === null ? null : Number(r.uptime_24h),
+    uptime30d: r.uptime_30d === null ? null : Number(r.uptime_30d),
   };
 }
 

@@ -201,6 +201,18 @@ function positiveIntFromEnv(name: string, fallback: number): number {
   return n;
 }
 
+/**
+ * Parse a millisecond interval from the environment, falling back on anything that is not a usable
+ * number. Exported so the empty-string case — the one `??` cannot catch and the one compose actually
+ * produces — is pinned by a test rather than by a comment.
+ */
+export function readIntervalMs(raw: string | undefined, fallback: number, floor: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < floor) return fallback;
+  return n;
+}
+
 const configBase = {
   port: Number(process.env.PLATFORM_PORT ?? 3004),
   host: process.env.HOST ?? "0.0.0.0",
@@ -372,7 +384,14 @@ const configBase = {
   // own interval_sec decides whether it is actually probed.
   monitoring: {
     runnerEnabled: process.env.MONITORING_RUNNER_ENABLED === "1",
-    runnerIntervalMs: Number(process.env.MONITORING_RUNNER_INTERVAL_MS ?? 60_000),
+    // NOT `Number(x ?? 60_000)`. `??` only catches null/undefined, and compose's ubiquitous
+    // `${VAR:-}` idiom passes an EMPTY STRING when the var is absent from `.env` — `Number("")` is 0,
+    // so that spelling yields a 0 ms sweep interval: a busy loop that dials CLIENT WEBSITES as fast
+    // as the event loop allows. This estate has already had exactly that bug (46% CPU) from the same
+    // `${VAR:-}` + `??` pairing elsewhere; here the blast radius is third-party hosts, not our CPU.
+    // Empty, non-numeric, zero and negative all fall back. The 1s floor exists because no sane sweep
+    // is sub-second and a typo'd `10` must not become a stampede.
+    runnerIntervalMs: readIntervalMs(process.env.MONITORING_RUNNER_INTERVAL_MS, 60_000, 1_000),
   },
   observability: {
     prometheusUrl: process.env.PROMETHEUS_URL ?? "",
