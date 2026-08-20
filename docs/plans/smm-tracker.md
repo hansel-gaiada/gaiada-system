@@ -32,16 +32,18 @@ not afterwards.
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
-| P3 content ops | **2** (+2 partial) | 8 |
+| P3 content ops | **4** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.5 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+Module: `social-media 0.5.6 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
 SAME running process; metrics (SMM-21) **DEV-VERIFIED** — `pullMetrics` nightly ingest + the
-Analytics tab, driven in a real browser, `main.ts` registration pending merge.
+Analytics tab, driven in a real browser, `main.ts` registration **confirmed landed**; the SMM-33
+capability inventory + SMM-24 docs closure (this pass) found the entire client-review capability
+group has no MCP tool and named it plainly rather than papering over it.
 
 ---
 
@@ -275,12 +277,25 @@ any single capability is real, that phase decides how `direct` gets registered a
 |---|---|---|---|
 | SMM-19 | Brand-voice RAG + AI drafting, cross-client leak test | ✅ | |
 | SMM-20 | Asset attach only; `ai.imageGen` ships inert and names why | ⬜ | |
-| SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ✅ **merged** | backend + frontend DEV-VERIFIED, evidence below; `main.ts` registration still pending merge |
+| SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ✅ **merged** | backend + frontend DEV-VERIFIED, evidence below; `main.ts` registration **CONFIRMED landed** 2026-08-20 by the SMM-33/24 docs pass (this row previously said "still pending merge" — stale, corrected: `main.ts` now imports and calls `startMetricsPullLoop`) |
 | SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ⬜ | widens SMM-09's budget stage |
 | SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ⬜ | |
-| SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | 🟡 partial | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20. **Outstanding: the AGPL source-offer — see the gap below** |
+| SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | ✅ **docs closed** 2026-08-20 | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20; `docs/FRONTEND-BFF-CONTRACT.md` §19 gained the missing dispatch-endpoint row, the webhook-intake row, and the two SMM-21 metrics rows, each verified against the controller code read directly. **The AGPL source-offer itself is NOT built** — confirmed (no footer surface anywhere in the staff console; `DeptShellFrame.tsx`/`departments/[deptId]/layout.tsx` carry none, `PortalShell.tsx`'s is client-facing) and a placement recommended (see the gap entry below, updated) — remains a tracked gap for the owner/senior-uiux to action, not a build this ticket's docs scope covers |
 | SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
-| SMM-33 | Capability inventory + eval register | 🟡 partial | golden-case table landed in SMM-14. **Outstanding: the per-capability inventory row set** (endpoint · tool · impact class · refusal · `work_activity`) — 17 MCP tools enumerated, table not yet written |
+| SMM-33 | Capability inventory + eval register | ✅ **docs closed** 2026-08-20 | golden-case table (SMM-14, proof of P1) stands; **the companion registry now exists**: `docs/modules/social-capability-inventory.md` — every capability across P0–P3-merged, endpoint · MCP tool · impact class · refusal vocabulary · `work_activity` row, built from the controllers/index.ts/approval-executables.ts directly. **18 MCP tools**, not 17 (this row's own prior estimate, corrected by counting `name:` occurrences in `index.ts`). Two structural gaps found and stated plainly, not filled with a plausible guess: the entire client-review capability group (request/read/withdraw/decide) has no MCP tool, and the post-status webhook callback writes no `work_activity` row with no stated reason (unlike the purge/metrics jobs, which name theirs) |
+
+**SMM-33 + SMM-24 evidence (2026-08-20, medior, docs-only pass).** Started from a worktree cut before
+`main` had SMM-21's merge (`9a5a8f5`); confirmed a clean fast-forward (`git merge-base --is-ancestor
+HEAD main`) and took it before reading any code, per this file's own "worktrees can be cut before a
+commit made in the same turn" hazard — otherwise this pass would have built the inventory against a
+tree missing `metrics-job.ts` entirely. Full inventory, its gaps, and how it was built:
+`docs/modules/social-capability-inventory.md`. `docs/FRONTEND-BFF-CONTRACT.md` §19 changes: the
+dispatch endpoint row (`POST variants/:variantId/publish`, previously prose-only), the webhook
+intake row (`POST webhooks/post-status`), the two SMM-21 metrics rows (`GET metrics/daily`,
+`GET metrics/posts`) — every row added was checked against the controller source read directly in
+this pass, not carried over from a prior claim. No product code touched (out of this ticket's
+surface); every gap found where a doc claim would have required a code change to be true is reported
+above and in the inventory file, not invented around.
 
 **SMM-21 evidence (2026-08-20, medior).** Schema already in place (`0105`'s `social_metrics_daily`/
 `social_post_metrics`) — no migration, no Cerbos change. Built:
@@ -388,7 +403,7 @@ since `main.ts`/`config.ts` were off-limits for this ticket's duration.
 | Item | Owner / when |
 |---|---|
 | **`metrics-job.ts` reads `process.env` directly rather than `config.ts`** — the seat was held out of `config.ts` to avoid a three-way collision, so `SOCIAL_METRICS_PULL_ENABLED`/`_INTERVAL_MS` are the only social knobs not visible where an operator greps for them. Harmless today, drift tomorrow | small cleanup |
-| **AGPL §13 source-offer has nowhere to live.** Postiz is AGPL-3.0 and §13 requires offering its modified source to users who interact with it over a network. The **staff console has no footer surface at all** (`departments/[deptId]/layout.tsx`, `DeptShellFrame.tsx`); the only footer is in `PortalShell.tsx`, which is client-facing and the wrong audience. Needs a deliberate placement decision, not an invented component | owner + senior-uiux |
+| **AGPL §13 source-offer has nowhere to live — CONFIRMED again 2026-08-20 (SMM-33/24 docs pass), not rebuilt.** Postiz is AGPL-3.0 and §13 requires offering its modified source to users who interact with it over a network. Re-checked directly: `departments/[deptId]/layout.tsx` and `DeptShellFrame.tsx` carry no footer element at all; `PortalShell.tsx`'s `<footer className="cp-foot">` is the only footer in the codebase and it addresses the CLIENT portal, the wrong audience (§13's obligation is triggered by the STAFF console's requests reaching Postiz, not by a client viewing a published post on the open social network). **Recommendation, not built:** a one-line footer in `platform-ui/src/app/(app)/layout.tsx` — the shell wrapping every staff page, the direct staff-side analogue of `PortalShell.tsx`'s own footer — rather than scoping it to the social department alone, so it survives future routing changes without anyone having to remember which pages touch Postiz. Needs a deliberate placement decision from the owner + senior-uiux, not an invented component | owner + senior-uiux |
 | Platform-app reviews — **Meta first**, its Business Verification is the only serial prerequisite | **staging** (D-23) |
 | Google SSO on Postiz login: does `DISABLE_REGISTRATION` block a *first-time* sign-in? | staging checklist — **do not test on the live instance** |
 | Postiz OAuth finalization route — "reasoned from source, not yet driven" | whoever first holds a live app credential |

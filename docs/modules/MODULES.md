@@ -1248,6 +1248,31 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 ## social-media — SMM · Organic Publishing · `0.5.6` · IN PROGRESS
 
+**Docs-only, 2026-08-20 (SMM-33 + the outstanding half of SMM-24) — no module version change.**
+Closes SMM-33's capability inventory + eval register and the remaining BFF-docs/AGPL-gap half of
+SMM-24. Built from the code, not the design docs: `docs/modules/social-capability-inventory.md`
+(new) — one row per capability (endpoint · MCP tool · D14 impact class · typed refusal vocabulary ·
+`work_activity` row) across P0 through the merged half of P3, companion to SMM-14's golden-case
+table rather than a duplicate of it. Two structural gaps found and stated plainly: the entire
+client-review capability group (request/read/withdraw/decide, SMM-31/32) has no MCP tool, and the
+post-status webhook callback (SMM-10) writes no `work_activity` row with no stated reason (unlike
+the retention purge and metrics pull, which each name theirs). Corrected a stale count along the
+way: 18 MCP tools are declared, not 17. `docs/FRONTEND-BFF-CONTRACT.md` §19 gained three rows that
+existed only in prose or not at all — the dispatch endpoint (`POST variants/:variantId/publish`),
+the reconcile webhook intake (`POST webhooks/post-status`), and SMM-21's two metrics reads (`GET
+metrics/daily`, `GET metrics/posts`) — each checked against the controller source read directly this
+pass. The AGPL §13 source-offer gap (Postiz is AGPL-3.0; the staff console has no footer surface at
+all) was RE-CONFIRMED, not rebuilt: `departments/[deptId]/layout.tsx`/`DeptShellFrame.tsx` still
+carry no footer, `PortalShell.tsx`'s is client-facing (the wrong audience — §13's obligation follows
+the STAFF requests that reach Postiz). Recommendation left for the owner/senior-uiux: a one-line
+footer on `platform-ui/src/app/(app)/layout.tsx`, the staff-side analogue of `PortalShell.tsx`'s own
+footer, not a social-department-scoped component. This worktree also fast-forwarded onto `main`
+before any of the above was written (`git merge-base --is-ancestor HEAD main` was true — a clean
+fast-forward, no divergent commits) to pick up SMM-21's merge, which had landed on `main` but not
+yet reached this worktree's cut point; without it this pass would have built the inventory against a
+tree missing `metrics-job.ts` and the two `GET metrics/*` routes entirely. Full detail:
+`docs/plans/smm-tracker.md`'s SMM-33/SMM-24 evidence block.
+
 **0.5.6 (2026-08-20, SMM-21 — metrics: `pullMetrics` nightly ingest + Analytics tab):** P3's first
 ticket. Schema (`social_metrics_daily`/`social_post_metrics`) was already in 0105 — no migration.
 `platform-nest/src/modules/social/metrics-job.ts` (new): the nightly sweep, shaped exactly like
