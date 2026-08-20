@@ -159,6 +159,26 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.056.0111a` - 2026-08-20 - an agent can grant, and the reason it may is written down
+
+Manifest (counter +2, 0109 -> 0111): `platform-nest 0.30.0 -> 0.31.0`, `mcp-hub 0.10.2 -> 0.10.3`.
+No migration.
+
+The owner's call on the question the last three releases kept deferring: the four direct IAM writes
+become agent-reachable. What makes this cut worth reading is not the tools — they are four registry
+entries and a widened allow-list — but that the reasoning is recorded at both code sites rather than
+implied by the diff.
+
+The original objection stands unrefuted: audit attribution still says "Alice", not "Alice's agent". It was
+outranked by a verified fact about the data (23 employee memberships, all mock but the owner's own), and
+that fact has an expiry date. Closing [agent-attribution-gate] moved from "pre-staging work" to "the
+thing that must happen before a real employee account exists", and the code says so where somebody
+adding the fifth tool will read it.
+
+Also in this window, on the live estate: **P2-15's employee backfill was applied** — 23 records across two
+companies, `user_roles` 53 before and 53 after in both runs, `hire_date` NULL on every row (never
+invented), and zero records belonging to a bot. Verified independently of the script's own report.
+
 ### `Alpha 01.055.0109a` - 2026-08-20 - a department head can run their own department
 
 Manifest (counter +2, 0107 -> 0109): `platform-ui 0.26.0 -> 0.27.0`, `monitoring -> 0.2.0` (another
@@ -2002,6 +2022,46 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.31.0] - 2026-08-20 - IN PROGRESS (owner decision: the four direct IAM writes go agent-reachable)
+- **`iam.grantRole` / `iam.revokeRoleGrant` / `iam.assignPosition` / `iam.unassignPosition`** are
+  declared, each with a D14 entry (`registerIamExecutableApprovals`) and each named in
+  `resource_mcp_tool.yaml`'s executable allow-list. Full contract: PERMISSION-CONTRACT §14.
+- 🔴 **THE OBJECTION WAS NOT ANSWERED, IT WAS OUTRANKED — and both code sites say so.** These were
+  withheld because a role-granting tool is a privilege-escalation surface while audit attribution still
+  records "Alice" rather than "Alice's agent". The owner ruled to proceed on the basis that every employee
+  on the estate is mock data except their own account. **That was verified against the live database
+  before shipping:** 23 `kind='employee'` memberships, all `.test` addresses bar `hansel@gaiada.com` (the
+  only verified login) and one login-less `@gaiada.com`; 17 bots, all correctly `kind='service'`.
+  **The basis expires when the data does** — closing [agent-attribution-gate] is now a hard pre-staging
+  requirement, and the comments in `core-tools.ts` and `approval-executables.ts` exist to make that
+  unmissable.
+- **What did NOT change:** the executor still re-drives as the ORIGINAL FILING PRINCIPAL (an agent cannot
+  exceed the human behind it), `GrantWriteService` is still the only writer of `user_roles`, the ceiling
+  and sensitive gate and self-target DENY all still apply, and all four suspend for a human decision
+  because medium/high writes do. These entries only make the approval COMPLETE instead of landing
+  `not_applicable`.
+- **Impact tiers with a structural argument, not a vibe:** `grantRole` is HIGH — the only one that widens
+  authority. `assignPosition` is MEDIUM because a placement can confer only what the seat's role-set
+  already carries, and that role-set was authored by a human through a surface with its own allow-list;
+  the escalation ceiling is the position registry.
+- 🔴 **Two preconditions are security properties rather than housekeeping.**
+  `managed_by_position_not_revocable`: the reconciler would restore a position-managed grant on its next
+  pass, so an approval that "succeeded" would leave the access standing while a human believed it was
+  gone. And `position_not_active` deliberately covers **orphaned** seats — their unit is gone from the org
+  chart and grants there are FROZEN, so a placement would appear to work and confer nothing.
+- **No `preconditionModules`**, unlike the JML entries: every table these read is core (`user_roles` is
+  global outright). Cargo-culting `["hr"]` would be harmless and would tell a reader something false.
+- **Two pins I wrote earlier went RED, which is what they were for.** `core-tools.test.ts`'s exact
+  tool-name list, and its test asserting these four were ABSENT. The second was inverted rather than
+  deleted, keeping the history in the comment — a test guarded the absence precisely because it was a
+  stated decision rather than a gap.
+- **`McpToolDef.method` gained `DELETE`** (`iam.revokeRoleGrant`'s endpoint is one). The transport always
+  supported it — `callPlatform` passes `def.method` straight to `fetch` — so only the type was narrower
+  than reality, and since defs arrive as parsed JSON it never rejected anything at runtime; it just
+  described it wrongly.
+- Gates: `d14-iam-direct-registry.test.ts` 26/26 (new); affected pins 18/18; `src/core` + `src/admin` +
+  `src/rbac` regression green; all four lints and `tsc --noEmit` clean; Cerbos restarted and the widened
+  policy compiled before the run.
 ### [0.30.0] - 2026-08-19 - IN PROGRESS (P2-16 the three-mode battery; P2-17 contract sync)
 - **P2-16 — the mover criterion proven in ALL THREE operating modes** (`iam-phase2-three-mode-battery.test.ts`,
   8 cases). Design §5.2's four-part criterion — (a) zero grants tagged to the closed assignment, (b) the
@@ -3679,6 +3739,12 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Known risk:** docker build unverified. **Next:** verify container build, OpenBao creds, media DLP.
 
 ## mcp-hub
+### [0.10.3] - 2026-08-20 - PROTOTYPED (the tool-def type was narrower than the transport)
+- **`RemoteToolDef.method` gained `DELETE`**, mirroring platform-nest's `McpToolDef.method`, for
+  `iam.revokeRoleGrant`. No behavioural change: `callPlatform` already read `def.method` and handed it to
+  `fetch`, so DELETE always worked on the wire. A def arriving over HTTP is `JSON.parse`d, so the narrow
+  union never rejected anything at runtime — it simply described the transport incorrectly, which is the
+  kind of inaccuracy that survives until somebody trusts it.
 ### [0.10.2] - 2026-08-19 - PROTOTYPED (Cerbos was silently not authoritative for the tool list)
 - 🔴 **A LIVE DEFECT, found by reading cerbos's own logs on the box — not by a test and not by an
   alert.** Cerbos rejects a `CheckResources` request carrying more resources than its configured batch
