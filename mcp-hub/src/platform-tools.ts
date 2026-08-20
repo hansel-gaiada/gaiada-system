@@ -2,15 +2,14 @@
 // caller's OBO envelope; the platform mints the principal, applies RBAC + RLS, and the
 // hub returns whatever the platform allowed — no DB access, no authz logic duplicated.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import { registerTool } from "./registry";
 import type { Principal } from "./principal";
 
 async function platformGet(path: string, principal: Principal): Promise<string> {
   const res = await fetch(`${config.platformUrl}${path}`, {
     headers: {
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
   });
   if (res.status === 401 || res.status === 403) {
@@ -194,9 +193,7 @@ export function registerPlatformTools(): void {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${config.knowledgeToken}`,
-          "x-obo-provider": principal.provider,
-          "x-obo-external-id": principal.externalId,
+          ...oboHeaders(principal, config.knowledgeToken),
         },
         body: JSON.stringify({
           query: String(args.query ?? ""),
@@ -228,9 +225,7 @@ export function registerPlatformTools(): void {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${config.knowledgeToken}`,
-          "x-obo-provider": principal.provider,
-          "x-obo-external-id": principal.externalId,
+          ...oboHeaders(principal, config.knowledgeToken),
         },
         body: JSON.stringify({ startKey: String(args.startKey ?? ""), scope: String(args.scope ?? ""), rel: args.rel, maxDepth: args.maxDepth }),
       });
@@ -259,9 +254,7 @@ export function registerPlatformTools(): void {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${config.knowledgeToken}`,
-          "x-obo-provider": principal.provider,
-          "x-obo-external-id": principal.externalId,
+          ...oboHeaders(principal, config.knowledgeToken),
         },
         body: JSON.stringify({ runId: String(args.runId ?? ""), rating: args.rating, note: args.note }),
       });

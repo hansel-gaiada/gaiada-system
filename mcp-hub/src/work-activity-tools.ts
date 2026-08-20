@@ -6,15 +6,14 @@
 // ⚠ `activity.feed` (registered in platform-tools.ts) reads the LEGACY flat `activities` audit
 // table, NOT work_activity — it does NOT serve digests. Do not wire wd-digests/wd-stale-nag to it.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import { registerTool } from "./registry";
 import type { Principal } from "./principal";
 
 async function platformGet(path: string, principal: Principal): Promise<string> {
   const res = await fetch(`${config.platformUrl}${path}`, {
     headers: {
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
   });
   if (res.status === 401 || res.status === 403) {
@@ -30,9 +29,7 @@ async function platformSend(method: "POST" | "PATCH", path: string, body: unknow
     method,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
     body: JSON.stringify(body),
   });

@@ -57,6 +57,38 @@ export interface Principal {
    *  once those call sites are updated — not this one's remit. */
   perms?: PermissionGrant[];
   sessionVersion: number; // D11
+
+  /**
+   * ── THE CO-AUTHOR (2026-08-20) — the interim half of [agent-attribution-gate] ──────────────────
+   *
+   * The channel this request arrived on, and the agent driving it if any. Until now `Principal`
+   * carried userId · assurance · companies · roles · sessionVersion and NOTHING about the channel, so
+   * every `activities` row, `work_activity` fact and ledger entry recorded "Alice did X" when the
+   * truth was "Alice's agent did X" — unrecoverably. That was not a dropped log line: it was
+   * information with nowhere to live.
+   *
+   * The owner's framing settles the design as git's `Co-Authored-By`:
+   *   AUTHOR    = the human (authority, permission, accountability — Cerbos still decides on THEM,
+   *               and an agent can never do what its principal could not);
+   *   CO-AUTHOR = the agent (mechanism, recorded ALONGSIDE, never INSTEAD).
+   *
+   * That makes this additive and AUTHORIZATION-NEUTRAL: no new rights are minted, so no policy needs
+   * re-reasoning. Nothing in `can()`/Cerbos reads it. It exists to be stamped onto writes.
+   *
+   * OPTIONAL for the same reason `perms` is: ~dozens of test files hand-construct `Principal`
+   * literals, and this ticket has no business touching them. `assemblePrincipal` does not set it —
+   * the AuthGuard does, because the channel is a property of the REQUEST, not of the user.
+   *
+   * This is step 1 of 2. Step 2 (a real persona per department with its own `users` row, roles and
+   * lifecycle) depends on the `users.kind` migration and is deliberately not here.
+   */
+  via?: {
+    /** `whatsapp` · `platform` · `n8n` · … — the OBO envelope's provider, or `session` for a cookie. */
+    provider: string;
+    externalId: string;
+    /** Present only when an AGENT drove the call. Its absence is the meaningful case: a human did it. */
+    agent?: string;
+  };
 }
 
 export const ANONYMOUS: Principal = {

@@ -98,6 +98,9 @@ async function callTool(name: string, args: Record<string, unknown>, envelope: E
       Authorization: `Bearer ${hubToken()}`,
       "x-obo-provider": envelope.provider,
       "x-obo-external-id": envelope.externalId,
+      // [agent-attribution-gate] — the co-author. Omitted entirely when absent so a non-agent caller
+      // sends byte-identical headers to before this existed.
+      ...(envelope.agent ? { "x-obo-agent": envelope.agent } : {}),
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
   });

@@ -128,10 +128,33 @@ resourcePolicy:
               # Automation callers: in-scope AND (read/probe OR a low-impact write OR a write whose
               # exact call carries a verified execution grant AND whose tool is an approved
               # executable). See the D14-13 header block above before touching this expression.
+              # ── 2026-08-20: the workflow-scope conjunct, still n8n-only ─────────────────────────
+              # An agent has no `wf:*` id, so an allow-list lookup keyed on `externalId` was never
+              # about it and must not start applying to it. This stays on `isAutomation`.
               - expr: >
                   !request.principal.attr.isAutomation ||
-                  (request.resource.attr.name in request.principal.attr.automationScope &&
-                   (!request.resource.attr.write ||
+                  request.resource.attr.name in request.principal.attr.automationScope
+              # ── THE IMPACT GATE — re-keyed from isAutomation to isUnattended ────────────────────
+              # 🔴 THE DEFECT THIS CLOSES WAS LIVE. This conjunct used to be fused to the one above,
+              # so the whole thing was gated on `isAutomation` == `provider == "n8n"`. But `runAgent`
+              # sends the requesting HUMAN's OBO envelope verbatim — deliberately, so an agent can
+              # never out-rank the person it serves — so an agent-driven call arrived with
+              # `provider: "whatsapp"`, `isAutomation: false`, and this entire expression
+              # short-circuited to ALLOW. An n8n workflow calling a high-impact write suspended for
+              # approval; an agent calling the SAME tool ran it unattended. Cerbos is authoritative
+              # whenever CERBOS_URL is set, so this file — not just the hub's in-code fallback — is
+              # where the hole actually lived.
+              #
+              # `isUnattended` = n8n OR agent-driven (mcp-hub/src/principal.ts). A human on an
+              # interactive surface is attended by definition: they are the human, and the write they
+              # just asked for does not need their own approval.
+              #
+              # Splitting the two conjuncts is what makes this correct rather than merely different:
+              # scope stays an n8n question, impact becomes an attendance question, and neither
+              # borrows the other's predicate.
+              - expr: >
+                  !request.principal.attr.isUnattended ||
+                  ((!request.resource.attr.write ||
                     request.resource.attr.impact == "low" ||
                     (has(request.resource.attr.approvalId) &&
                      type(request.resource.attr.approvalId) == string &&

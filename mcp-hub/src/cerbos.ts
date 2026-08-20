@@ -7,6 +7,7 @@ import { config } from "./config";
 import type { Principal } from "./principal";
 import type { HubTool } from "./registry";
 import { isAutomation, workflowScope } from "./automation-policy";
+import { isUnattended } from "./principal";
 import { grantAuthorizesTool, type VerifiedExecutionGrant } from "./approval-grant";
 
 export function cerbosEnabled(): boolean {
@@ -23,6 +24,21 @@ function principalPayload(p: Principal) {
       provider: p.provider,
       isAutomation: automation,
       automationScope: automation ? [...workflowScope(p.externalId)] : [],
+      // ── 2026-08-20: the attribute the impact gate actually needs ─────────────────────────────────
+      // `isAutomation` is `provider === "n8n"`, and the policy's impact conjunct was keyed on it. An
+      // agent-driven call arrives under the requesting HUMAN's envelope (runAgent sends it verbatim so
+      // an agent can never out-rank the person it serves), so `isAutomation` was false and the
+      // medium/high suspend never fired — in the policy as well as in code. Cerbos is authoritative
+      // whenever CERBOS_URL is set, so fixing only the in-code branch would have left the live
+      // deployment wide open.
+      //
+      // `isUnattended` = n8n OR agent-driven. `isAutomation` is KEPT because the workflow-scope
+      // conjunct is genuinely n8n-specific and must not start applying to agents, which have no
+      // `wf:*` id and would therefore fail an allow-list lookup that was never about them.
+      isUnattended: isUnattended(p),
+      // The co-author, for policy authors who want to reason about a specific agent later. Empty
+      // string rather than absent so a CEL expression can compare it without a `has()` guard.
+      agent: p.agent ?? "",
     },
   };
 }

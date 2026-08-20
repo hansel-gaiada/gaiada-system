@@ -114,6 +114,7 @@ import { startMailSenderLoop } from "./mail/sender";
 // URL-scoped raw-body hook rather than a global parser change.
 import type { FastifyInstance } from "fastify";
 import { registerInboundRawBodyCapture } from "./mail/inbound/raw-body";
+import { registerRequestContext } from "./core/request-context";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -173,6 +174,11 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // mail well below the documented `MAIL_INBOUND_MAX_BYTES` cap. URL-scoped, so no other route's
   // parsing behaviour changes — see src/mail/inbound/raw-body.ts for the full rationale.
   registerInboundRawBodyCapture(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
+  // [agent-attribution-gate] interim — wrap every request in an AsyncLocalStorage box so
+  // `writeActivity` can record WHICH CHANNEL (and which agent) drove a write without threading a
+  // parameter through 263 call sites. See src/core/request-context.ts for why ambient beats explicit
+  // here: an opt-in audit field is forgotten exactly where it mattered, and nothing fails when it is.
+  registerRequestContext(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
   await app.init();
   return app;
 }

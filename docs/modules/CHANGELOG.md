@@ -191,6 +191,32 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.057.0114a` - 2026-08-20 - the platform can finally tell a human from their agent
+
+Manifest (counter +3, 0111 -> 0114): `platform-nest 0.31.0 -> 0.32.0`, `mcp-hub 0.10.3 -> 0.11.0`,
+`ai-agents 0.7.1 -> 0.7.2`. No migration.
+
+[agent-attribution-gate], the interim half — and a live authorization hole that was hiding inside it.
+
+**The hole first, because it made yesterday's release notes false.** The D14 impact gate was keyed on
+`isAutomation`, which is `provider === "n8n"`. `runAgent` sends the requesting human's envelope verbatim,
+so an agent-driven call never matched it: an n8n workflow calling a high-impact write suspended for
+approval, and an agent calling the SAME tool ran it unattended. `0111a` shipped `iam.grantRole` (high)
+on the stated basis that all four direct IAM writes suspend for a human. That was true for n8n only.
+Fixed in both the in-code engine and the Cerbos policy — the latter mattering more, since Cerbos is
+authoritative live. PERMISSION-CONTRACT §15 records the correction rather than quietly restating it.
+
+**Then attribution itself:** author = the human, co-author = the agent, `actor_id` untouched. The agent
+names itself from its own definition, the marker rides `x-obo-agent` through the hub's now-single
+envelope builder, and `writeActivity` stamps it ambiently across all 263 call sites — because an opt-in
+audit field is missing precisely where it mattered.
+
+**Also fixed properly rather than worked around:** `REGEN-NO-DIFF` compared bytes while git's autocrlf
+gave the working tree CRLF, so it could never pass on Windows. `.gitattributes` already carried
+`eol=lf` for `*.sh` and `*.go`, added for exactly this class of bug; the generated rbac artifacts now
+join them. Yesterday I diagnosed this correctly and then restored the file, which left the test red
+forever — a diagnosis is not a fix.
+
 ### `Alpha 01.056.0111a` - 2026-08-20 - an agent can grant, and the reason it may is written down
 
 Manifest (counter +2, 0109 -> 0111): `platform-nest 0.30.0 -> 0.31.0`, `mcp-hub 0.10.2 -> 0.10.3`.
@@ -2054,6 +2080,33 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.32.0] - 2026-08-20 - IN PROGRESS ([agent-attribution-gate] interim: writes name the agent, not only the human)
+- **`Principal.via = {provider, externalId, agent?}`.** Until now `Principal` carried
+  userId · assurance · companies · roles · sessionVersion and NOTHING about the channel, so every
+  `activities` row recorded "Alice did X" when the truth was "Alice's agent did X". That was not a
+  dropped log line — it was information with nowhere to live.
+- **The owner's `Co-Authored-By` framing, implemented literally.** AUTHOR = the human (`actor_id`
+  unchanged; Cerbos still decides on them; an agent can never do what its principal could not).
+  CO-AUTHOR = the agent, in `metadata.via`, recorded ALONGSIDE and never INSTEAD. Additive and
+  authorization-neutral: nothing in `can()`/Cerbos reads it, so no policy needed re-reasoning.
+- 🔴 **AMBIENT, NOT A SEVENTH PARAMETER — and that is the whole design decision.** `writeActivity` has
+  **263 call sites**, 229 of which pass `req.principal.userId` and nothing else. Threading `via` would
+  have been ~229 mechanical edits AND would have made attribution OPT-IN, whose failure mode is that the
+  one site somebody forgets is the site that mattered, with nothing failing when they forget. Ambient
+  context inverts that: a write is attributed unless something actively strips it. `AsyncLocalStorage`
+  is an established idiom here, not a new one — `search/providers/types.ts`'s `withActualCostCapture`
+  uses it for the same reason (parallel in-flight work would clobber a shared field).
+- **Fail-silent by construction:** outside a request scope (a sweep, a consumer, the D14 executor)
+  `currentVia()` is undefined and the row is written exactly as it always was. An attribution mechanism
+  must never be able to break a write; the most it may do is add nothing. A caller's OWN `metadata.via`
+  wins, because the executor re-driving an approved write knows the ORIGINAL filing channel — better
+  provenance than the channel of the retry.
+- **`x-obo-agent` is trusted, and only here:** the OBO block already requires the service token, so the
+  caller is the hub or another first-party service. The value is authorization-neutral, so a client that
+  lies gains nothing and incriminates an agent that did not act.
+- Gates: `request-context.test.ts` 10/10 (new) — including concurrent scopes not leaking, the
+  actor-still-the-human assertion, and the no-scope no-`via` case; `src/core` + `src/admin` + `src/auth` +
+  `src/rbac` regression **1972/1972 across 120 files**; all five lints and `tsc` clean.
 ### [0.31.0] - 2026-08-20 - IN PROGRESS (owner decision: the four direct IAM writes go agent-reachable)
 - **`iam.grantRole` / `iam.revokeRoleGrant` / `iam.assignPosition` / `iam.unassignPosition`** are
   declared, each with a D14 entry (`registerIamExecutableApprovals`) and each named in
@@ -3771,6 +3824,37 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
 - **Known risk:** docker build unverified. **Next:** verify container build, OpenBao creds, media DLP.
 
 ## mcp-hub
+### [0.11.0] - 2026-08-20 - PROTOTYPED (🔴 the D14 impact gate never fired for an agent)
+- 🔴 **A LIVE AUTHORIZATION HOLE, and it made yesterday's release notes false.** `isAutomation(provider)`
+  is literally `provider === "n8n"`, and the medium/high impact-suspend branch sat INSIDE it. But
+  `runAgent` sends the requesting HUMAN's OBO envelope verbatim — deliberately, so an agent can never act
+  with more authority than the person it serves — so an agent-driven call arrived as
+  `provider: "whatsapp"`, the check was false, and the branch was skipped entirely.
+  **An n8n workflow calling a HIGH-impact write suspended for approval; an agent calling the same tool
+  ran it unattended.** `Alpha 01.056.0111a` shipped `iam.grantRole` (high) claiming all four direct IAM
+  writes suspend for a human. True for n8n, false for an agent. Corrected in PERMISSION-CONTRACT §15.
+- **Fixed by SPLITTING two conjuncts that were never the same question.** Workflow scope stays keyed on
+  `isAutomation` — a `wf:*` allow-list lookup is an n8n concept, and applying it to agents would deny
+  every agent read for a reason that was never about them. The impact gate moves to a new
+  `isUnattended` = n8n OR agent-driven: attendance, not identity. A human on an interactive surface is
+  attended by definition and does not approve their own click.
+- **Fixed in BOTH engines.** The hub now sends `isUnattended` and `agent` as Cerbos principal attributes,
+  and `resource_mcp_tool.yaml`'s impact conjunct is re-keyed. Fixing only the in-code fallback would have
+  left the live deployment open, because Cerbos is authoritative whenever `CERBOS_URL` is set — the hole
+  actually lived in the policy file.
+- **`Principal.agent`** carries the co-author, minted from `x-obo-agent`. Omitted (not `undefined`) when
+  absent, so a non-agent principal is byte-identical to before — every rate-limit key and audit ref keeps
+  its shape. An anonymous principal KEEPS the marker: an unauthenticated agent-driven call is still
+  agent-driven, and that is the shape that deserves the gate most.
+- **`src/obo-headers.ts` is now the ONE place the outbound envelope is built**, replacing 14 hand-built
+  header objects across 8 files. Adding a header to 14 sites guarantees the 15th omits it and silently
+  drops attribution for whichever tool group comes next — a bug that looks like "that one tool's audit
+  rows don't name the agent" and is noticed only when someone needs it. One site was typed structurally
+  as `{provider, externalId}` and would have dropped the field regardless of the header, so the type was
+  widened to `OboSubject`.
+- Gates: `agent-impact-gate.test.ts` 17/17 (new), **verified red-then-green** — reverting `isUnattended`
+  to the old predicate fails 5 cases including "an agent calling a HIGH-impact write SUSPENDS"; full hub
+  suite 268/268; `cerbos compile` clean.
 ### [0.10.3] - 2026-08-20 - PROTOTYPED (the tool-def type was narrower than the transport)
 - **`RemoteToolDef.method` gained `DELETE`**, mirroring platform-nest's `McpToolDef.method`, for
   `iam.revokeRoleGrant`. No behavioural change: `callPlatform` already read `def.method` and handed it to
@@ -4414,6 +4498,13 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Blocked:** infra (OpenBao/Gemini/WAHA) + legal Gate 1 before real ingestion.
 
 ## ai-agents
+### [0.7.2] - 2026-08-20 - PROTOTYPED (the agent names itself on every tool call)
+- **`Envelope.agent`**, sent as `x-obo-agent`. `runAgent` fills it from the agent's OWN definition
+  (`agent:${def.name}`) rather than from its callers — who correctly pass the requesting human's envelope
+  and would have to remember. An attribution field that depends on every call site remembering it is one
+  that will be missing exactly where it matters.
+- Omitted entirely when absent, so a non-agent caller sends byte-identical headers to before.
+- Gates: full suite 186/186 (45 skipped, unchanged).
 ### [0.7.1] - 2026-08-07 - PROTOTYPED (known near-miss tool names resolve; reads only)
 - Follow-up to the recoverable-refusal loop, not a replacement - that stays as the net for everything
   not in the map. **Root cause moved the design:** the live `pm.listTasks` failure never reached

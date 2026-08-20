@@ -6,6 +6,7 @@
 import type { Principal, Assurance } from "./principal";
 import { allTools, getTool, type HubTool } from "./registry";
 import { isAutomation, workflowScope } from "./automation-policy";
+import { isUnattended } from "./principal";
 import { cerbosEnabled, cerbosAllowedTools, cerbosAllowsTool } from "./cerbos";
 import { grantAuthorizesTool, type VerifiedExecutionGrant } from "./approval-grant";
 
@@ -44,22 +45,38 @@ export function authorize(principal: Principal, toolName: string, grant?: Verifi
       reason: `denied: ${toolName} requires ${tool.minAssurance} assurance; caller has ${principal.assurance} (step up on a verified surface)`,
     };
   }
+  // n8n-SPECIFIC: the workflow allow-list. Stays keyed on `isAutomation` because a per-workflow scope
+  // is exactly an n8n concept — an agent has no `wf:*` id to look up.
   if (isAutomation(principal.provider)) {
     if (!workflowScope(principal.externalId).includes(tool.name)) {
       return { allow: false, reason: `denied: workflow ${principal.externalId} is not scoped for ${toolName}` };
     }
-    // Write gate (§3 / D14): unattended automation runs LOW-impact writes only; medium/high and
-    // unclassified writes suspend for human approval — the workflow surfaces this as a pending approval.
-    // D14-04: a verified execution grant for THIS tool means a human already lifted that gate for
-    // exactly this call, so the write is no longer unattended and this branch (and ONLY this branch)
-    // is skipped. Everything above and below is evaluated identically with or without a grant.
-    if (tool.write && tool.impact !== "low" && !grantAuthorizesTool(grant, toolName)) {
-      const tier = tool.impact ?? "unclassified";
-      return {
-        allow: false,
-        reason: `suspend: ${toolName} is a ${tier}-impact write; automation requires human approval (only low-impact writes run unattended)`,
-      };
-    }
+  }
+
+  // ── THE IMPACT GATE (§3 / D14) — 2026-08-20: MOVED OUT OF THE isAutomation BLOCK ────────────────
+  //
+  // Unattended callers run LOW-impact writes only; medium/high and unclassified writes suspend for
+  // human approval. D14-04: a verified execution grant for THIS tool means a human already lifted the
+  // gate for exactly this call, so the write is no longer unattended and this branch (and ONLY this
+  // branch) is skipped.
+  //
+  // ⚠ THE DEFECT THIS FIXES, and it was live. This branch used to sit INSIDE
+  // `if (isAutomation(principal.provider))`, i.e. inside `provider === "n8n"`. But `runAgent` sends the
+  // requesting HUMAN's envelope verbatim — deliberately, so an agent can never out-rank the person it
+  // serves — so an agent-driven call arrived as `provider: "whatsapp"` and skipped the gate entirely.
+  // An n8n workflow calling a HIGH-impact write suspended for approval; an agent calling the SAME tool
+  // ran it unattended. The tier-based protection was unenforceable against precisely the caller D14
+  // exists for, and the shipping of `iam.grantRole` (high) made that concrete.
+  //
+  // `isUnattended` is the right predicate: n8n OR agent-driven. A human on an interactive surface is
+  // attended by definition and does not need their own approval to do what they just asked for.
+  if (isUnattended(principal) && tool.write && tool.impact !== "low" && !grantAuthorizesTool(grant, toolName)) {
+    const tier = tool.impact ?? "unclassified";
+    const who = principal.agent ? `agent ${principal.agent}` : "automation";
+    return {
+      allow: false,
+      reason: `suspend: ${toolName} is a ${tier}-impact write; ${who} requires human approval (only low-impact writes run unattended)`,
+    };
   }
   return { allow: true, tool };
 }

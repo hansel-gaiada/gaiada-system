@@ -8,3 +8,14 @@
 # which causes gofmt to flag them as needing formatting. This entry ensures committed LF is
 # preserved in the working tree (preventing CRLF conversion).
 *.go text eol=lf
+
+# Generated artifacts whose tests compare them BYTE-FOR-BYTE against a fresh generator run
+# (`role-permission-bundles.db.test.ts`'s REGEN-NO-DIFF, and the catalog's parity suites). The
+# generators write LF; Windows autocrlf gives the working tree CRLF; the comparison then fails on
+# `{\n` vs `{\r\n` with a diff that shows IDENTICAL content — which reads as "the artifact is stale"
+# and invites regenerating and committing whitespace churn across ~1174 pairs.
+#
+# Same class of bug as the *.sh and *.go entries above, same fix. Diagnosed 2026-08-19 when
+# REGEN-NO-DIFF failed locally while passing in CI (Linux, LF) — the giveaway that it was the
+# checkout and not the content.
+platform-nest/src/rbac/*.json text eol=lf

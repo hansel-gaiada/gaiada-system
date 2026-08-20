@@ -4,6 +4,7 @@
 // hub holds no DB access and duplicates no authz logic. `authz.check` is a non-mutating
 // probe the surface uses before asking a user to confirm.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import { registerTool } from "./registry";
 import type { Principal } from "./principal";
 
@@ -17,9 +18,7 @@ async function platformSend(
     method,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${config.platformToken}`,
-      "x-obo-provider": principal.provider,
-      "x-obo-external-id": principal.externalId,
+      ...oboHeaders(principal, config.platformToken),
     },
     body: JSON.stringify(body),
   });

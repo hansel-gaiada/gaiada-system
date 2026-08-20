@@ -125,6 +125,22 @@ export interface AgentDef {
 export interface Envelope {
   provider: string;
   externalId: string;
+  /**
+   * [agent-attribution-gate] — the AGENT driving this call, when one is.
+   *
+   * `provider`/`externalId` name the HUMAN and are sent verbatim on purpose: an agent must never act
+   * with more authority than the person it serves. The consequence, unnoticed until 2026-08-20, was
+   * that the hub could not TELL — it saw `provider: "whatsapp"` for an agent-driven call, so the D14
+   * medium/high impact gate (keyed on `provider === "n8n"`) never fired, and every audit row recorded
+   * the human alone.
+   *
+   * This field is what makes the caller legible. It is authorization-neutral in the widening direction:
+   * downstream it can only ADD the impact gate and ADD audit provenance, never grant anything.
+   *
+   * `runAgent` fills it in from the agent's own definition, so no caller has to remember it — the one
+   * thing an attribution field must not depend on.
+   */
+  agent?: string;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -460,7 +476,10 @@ export async function runAgent(
     if (toolCalls >= def.maxToolCalls) throw new BudgetExhaustedError("toolCalls", steps);
     toolCalls++;
     try {
-      const result = await deps.callTool(tool, action.args ?? {}, envelope);
+      // The co-author is stamped HERE, from the agent's own definition, rather than trusted from the
+      // caller: `runAgent`'s callers pass the human's envelope (correctly), and an attribution field
+      // that depends on every call site remembering it is one that will be missing where it matters.
+      const result = await deps.callTool(tool, action.args ?? {}, { ...envelope, agent: `agent:${def.name}` });
       steps.push({ kind: "tool", detail: `${tool} ok` });
       transcript.push(`TOOL ${tool}(${JSON.stringify(action.args ?? {})}) => ${result.slice(0, 2000)}`);
     } catch (err) {

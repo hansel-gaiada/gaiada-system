@@ -907,7 +907,9 @@ Nothing below was relaxed, and none of it depends on the data being mock:
 * `GrantWriteService` remains the only writer of `user_roles`, so the ceiling arithmetic, the
   `ui_grantable` allow-list, the sensitive gate and the self-target DENY all still apply;
 * Cerbos still decides `role_grant · create/revoke` and `position · assign/unassign`;
-* all four are medium/high writes, so every one **suspends for a human decision** — what these entries
+* all four are medium/high writes, so every one **suspends for a human decision** ⚠ — see §15: this was
+  TRUE for n8n and FALSE for an agent when §14 shipped, because the impact gate was keyed on
+  `isAutomation` (n8n only). Fixed 2026-08-20; the claim now holds as written. What these entries
   add is that the approval, once given, actually completes instead of landing `not_applicable`.
 
 ### 14.3 Impact tiers, and the one structural argument
@@ -953,3 +955,85 @@ harmless but would tell a reader something false about where these tables live.
 already passed `def.method` straight to `fetch`, so the transport always supported it and only the two
 type declarations were narrower than reality. A def arriving over the wire is `JSON.parse`d, so the old
 type never rejected anything at runtime; it just described it wrongly.
+
+---
+
+## 15. 🔴 CORRECTION to §14, and the two defects behind it (2026-08-20)
+
+§14 claimed, of the four direct IAM writes: *"all four are medium/high writes, so every one **suspends
+for a human decision**"*. **That was true for n8n and FALSE for an agent** at the moment §14 shipped.
+Both halves of [agent-attribution-gate] are now fixed; this section records what was wrong and why it
+was easy to state confidently.
+
+### 15.1 The impact gate never fired for an agent
+
+`mcp-hub`'s `isAutomation(provider)` is literally `provider === "n8n"`, and the medium/high suspend
+branch sat **inside** it — in the in-code engine *and* in `resource_mcp_tool.yaml`'s impact conjunct.
+
+`runAgent` sends the requesting **human's** OBO envelope verbatim, deliberately, so an agent can never
+act with more authority than the person it serves. The unfollowed consequence: an agent-driven call
+arrived as `provider: "whatsapp"`, `isAutomation` was false, and the whole conjunct short-circuited to
+ALLOW. So an n8n workflow calling a high-impact write suspended for approval, and **an agent calling the
+same tool ran it unattended** — the tier protection was unenforceable against precisely the caller D14
+exists for.
+
+**Fixed by splitting the two conjuncts**, because they were never the same question:
+
+| Conjunct | Predicate | Why |
+|---|---|---|
+| workflow scope | `isAutomation` (n8n only) | a `wf:*` allow-list lookup; an agent has no workflow id, so applying it would deny every agent read for a reason that was never about agents |
+| **impact gate** | **`isUnattended`** = n8n **OR** agent-driven | attendance, not identity. A human on an interactive surface is attended by definition and does not approve their own click |
+
+Fixed in **both** engines. Fixing only the in-code fallback would have left the live deployment open,
+because Cerbos is authoritative whenever `CERBOS_URL` is set — the hole actually lived in the policy
+file. The hub now sends `isUnattended` and `agent` as principal attributes; `isAutomation` is kept, and
+still means only n8n.
+
+Proven red-then-green: reverting `isUnattended` to the old predicate fails 5 of the 17 cases in
+`mcp-hub/src/agent-impact-gate.test.ts`, including *"an agent calling a HIGH-impact write SUSPENDS"*.
+
+### 15.2 Every audit row named the human alone
+
+`Principal` (platform) carried `userId · assurance · companies · roles · sessionVersion` and **nothing
+about the channel**, so the information had nowhere to live. Every `activities` row recorded "Alice did
+X" when the truth was "Alice's agent did X", unrecoverably.
+
+Implemented as the owner's `Co-Authored-By` framing — **author = the human, co-author = the agent,
+recorded alongside and never instead**, which makes it additive and authorization-neutral: nothing in
+`can()`/Cerbos reads it, so no policy needed re-reasoning.
+
+The chain, end to end:
+
+1. `runAgent` stamps `agent: "agent:<def.name>"` onto the envelope **from the agent's own definition** —
+   not from callers, who correctly pass the human's envelope and would forget.
+2. `ai-agents` sends `x-obo-agent`; the hub's `mintPrincipal` carries it onto `Principal.agent`.
+3. `mcp-hub/src/obo-headers.ts` is now the ONE place the outbound envelope is built — it replaced 14
+   hand-built header objects across 8 files, because adding a header to 14 sites guarantees the 15th
+   omits it and silently drops attribution for whichever tool group comes next.
+4. The platform's `AuthGuard` reads `x-obo-agent` into `Principal.via` **and** into request context.
+5. `writeActivity` stamps `metadata.via`. **`actor_id` still names the human.**
+
+**Why ambient (`AsyncLocalStorage`) and not a seventh parameter:** `writeActivity` has **263 call
+sites**, 229 of which pass `req.principal.userId` and nothing else. Threading it would have been ~229
+mechanical edits *and* would have made attribution opt-in — and the failure mode of an opt-in audit
+field is that the site somebody forgets is the site that mattered, with nothing failing when they
+forget. Same idiom, same reasoning as the search module's `withActualCostCapture`.
+
+**Fail-silent by design:** outside a request scope (a sweep, a consumer, the D14 executor) `via` is
+absent and the row is written exactly as it always was. A caller's own `metadata.via` wins, because the
+executor re-driving an approved write knows the *original* filing channel — better provenance than the
+channel of the retry.
+
+### 15.3 What this does and does not settle
+
+**Does:** an agent-driven medium/high write now suspends, and every attributable write says which agent
+drove it. §14's claim is now true as written.
+
+**Does not:** this is step 1 of 2. Step 2 — a real persona per department with its own `users` row, roles
+and lifecycle — depends on the `users.kind` migration and is not built. `via.agent` is a string the
+first-party caller asserts; it is trustworthy because that block already requires the service token and
+because the value is authorization-neutral (a lie gains nothing and incriminates an agent that did not
+act), but it is not yet an identity Cerbos can authorize as itself.
+
+**The staging gate therefore stands, narrowed:** the four direct tools are now gated and attributed, so
+the remaining pre-staging requirement is the persona work, not the attribution hole.

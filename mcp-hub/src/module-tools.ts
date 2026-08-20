@@ -13,6 +13,7 @@
 // restart. moduleToolsStatus() makes the state observable (server.ts /health + WS9 metrics) so a
 // persistent zero-tools state is never silent again.
 import { config } from "./config";
+import { oboHeaders } from "./obo-headers";
 import { registerTool, type Impact } from "./registry";
 import type { Principal } from "./principal";
 
@@ -80,9 +81,7 @@ async function callPlatform(def: RemoteToolDef, args: Record<string, unknown>, p
   const method = def.method ?? "GET";
   const { path, used } = fillPath(def.pathTemplate as string, args);
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${config.platformToken}`,
-    "x-obo-provider": principal.provider,
-    "x-obo-external-id": principal.externalId,
+    ...oboHeaders(principal, config.platformToken),
   };
   let body: string | undefined;
   if (method !== "GET") {
