@@ -77,6 +77,27 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-20**, `social-media 0.5.5 -> 0.5.6` (IN PROGRESS). Asset attach only —
+  files / Drive-mirrored files / Studio-graded `creative_assets` into a variant's media, **AMENDED
+  by D-17: generation removed** (no generative-image backend exists in the estate). New:
+  `GET engagements/:id/asset-library` (reads `files` client-scoped + `creative_assets` tenant-wide,
+  neither through the module GUC — they carry no `app_module_allowed('social')` wall) and
+  `POST variants/:id/media/attach` (writes ONE descriptor into `social_post_variants.media`, never
+  `uploaded_media` — D-15's separation, unaffected; `dispatch.ts` unedited). A Studio asset attach
+  materializes exactly one `files` row reusing the graded bytes' own storage key — zero duplicated
+  bytes, idempotent on repeat attach. The `ai.imageGen` toggle's inert D-17 warning now has a real
+  UI home: `VariantCard.tsx`'s asset panel renders a permanently-disabled "Generate with AI"
+  control naming why, next to the working attach-from-library flow. No migration, no Cerbos change.
+  **352 / 0 / 0** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` +
+  `social-client-review-portal.controller.test.ts` (+27 new, this ticket's own SMM-20 describe
+  block in `social.test.ts`; the 346/0/0 baseline this ticket started from had already moved under
+  concurrent sessions' own landed work in this shared checkout — see `docs/plans/smm-tracker.md`'s
+  SMM-20 evidence for the exact reading). **2437 / 0 / 0**
+  `platform-ui` full suite (+27: `socialShared.test.ts`). `tsc --noEmit` clean both sides.
+  `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps` green.
+  `test:iam-chain-alignment` green (25/25, unaffected). Full detail: `docs/modules/MODULES.md`'s
+  social-media 0.5.6 entry, `docs/plans/smm-tracker.md`'s SMM-20 row.
+
 - **2026-08-20 — SMM-38 phase 38a**, `social-media 0.5.4 -> 0.5.5` (IN PROGRESS). D-20's `direct`
   `SocialPublisher` driver — the skeleton + the per-capability switch, design addendum §PD. **This
   phase is deliberately INERT: every capability still resolves to `postiz`, and nothing in the

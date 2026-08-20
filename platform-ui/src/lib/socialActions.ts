@@ -17,7 +17,7 @@ import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
 import type {
   ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult, PublishPreconditionResult,
-  ClientReviewStatus,
+  ClientReviewStatus, AttachMediaResult,
 } from "./socialShared";
 
 async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
@@ -237,6 +237,24 @@ export async function deleteVariant(tenantId: string, variantId: string): Promis
     await platformFetch(`${base(c.tenant)}/variants/${variantId}`, c.userId, { method: "DELETE" });
     revalidatePath(`/departments`, "layout");
     return {};
+  });
+}
+
+// ── asset library attach (SMM-20, AMENDED by D-17 — attach only, generation removed) ──────────────
+//
+// Attaches ONE library asset (an existing `files` row or a Studio-graded `creative_assets` row)
+// onto a variant's `media`. Same "edit invalidates approval" contract `updateVariant` carries —
+// `approvalInvalidated` must be rendered immediately, never discovered on the next load.
+export async function attachVariantMedia(
+  tenantId: string, variantId: string,
+  body: { source: "file" | "creative_asset"; assetId: string; alt?: string; kind?: "image" | "video"; format?: string },
+): Promise<ActionResult<AttachMediaResult>> {
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<AttachMediaResult>(`${base(c.tenant)}/variants/${variantId}/media/attach`, c.userId, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
   });
 }
 

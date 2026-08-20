@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.5` | IN PROGRESS | Social Media | 2026-08-20 |
+| social-media | `0.5.6` | IN PROGRESS | Social Media | 2026-08-21 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,68 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.5` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.6` · IN PROGRESS
+
+**0.5.6 (2026-08-21, SMM-20 — asset attach only, AMENDED by D-17: generation removed, medior):**
+files / Drive-mirrored files / Studio-graded `creative_assets` into a variant's media, as an
+attach-ONLY library. No migration (`uploaded_media`/`media` both already existed), no Cerbos
+policy change.
+
+`social.controller.ts` (new section): `GET engagements/:engagementId/asset-library` reads `files`
+rows attached to the engagement's CLIENT (`target_entity_type='client'`) plus every tenant-wide
+Studio-graded `creative_assets` row; `POST variants/:variantId/media/attach` writes ONE descriptor
+(`{fileId, kind, alt, format}`) into `social_post_variants.media` — the SAME column
+`updateVariant` already writes, never `uploaded_media` (D-15's separation, `dispatch.ts`'s own
+header explains why: `media` rides inside `args_sha256`, `uploaded_media` deliberately does not,
+so this endpoint recomputes `args_sha256` exactly like `updateVariant` and never touches
+`uploaded_media` at all — SMM-39's engine-upload path, `dispatch.ts`, is unedited and unaffected).
+Attaching a Studio-graded `creative_assets` row materializes ONE `files` row reusing the SAME
+`graded_key` as the new row's `storage_key` — zero duplicated bytes, and idempotent by
+construction (a repeat attach of the same asset reuses the same `files` row, matched on
+`storage_key`, rather than growing a duplicate).
+
+**The module-GUC boundary, drawn deliberately.** `files`/`creative_assets` carry the plain tenant
+wall only — no `{modules:["social"]}` on any query against them. `social_engagements`/
+`social_post_variants` ARE `social_*` tables and every query against them carries
+`{modules:["social"]}`. Getting this backwards in either direction is the exact trap the ticket
+named: the new tests assert REAL state through the endpoint (a `files` row materialized exactly
+once, `args_sha256` changed, an approved variant dropped to `draft`) — removing the declaration on
+the social side would make those assertions fail loudly (zero rows), never pass vacuously.
+
+`ai.imageGen` ships **inert and names why**, in the surface this ticket built rather than only in
+the backend's pre-existing `validateScopePatch` warning: the asset-library panel
+(`VariantCard.tsx`'s new `MediaPanel`) renders a permanently-disabled "Generate with AI" button
+next to the library, with the exact D-17 sentence — no generative-image backend exists anywhere in
+the estate (`ai-gateway-go`: `/complete`, `/complete/stream`, `/media`, `/embed` — nothing
+generative; the Creative render gateway is `0.0.0 PLANNED`) — never conditioned on the engagement's
+own toggle value, because there is no capability to turn on regardless of it.
+
+New refusal tokens (`socialShared.ts`): `unsupported_asset_source`, `asset_not_found` — both
+rendered as themselves via `REFUSAL_LABELS`, never a generic error.
+
+Frontend: `lib/social.ts#getAssetLibrary`, `lib/socialActions.ts#attachVariantMedia`,
+`socialShared.ts`'s `AssetLibrary`/`AssetLibraryFile`/`AssetLibraryStudioAsset`/
+`AttachMediaResult`/`MediaDescriptor` types, the composer page's one-per-post library fetch
+(mirrors the existing `requiresClientOk` single-fetch pattern), and `VariantCard.tsx`'s `MediaPanel`
+(attach from the library, detach via the pre-existing `updateVariant` PATCH — no second backend
+route needed for removal, since sending the filtered `media` array is itself a legal edit).
+DEMO_MODE (`demoSocial.ts`): a static, read-only `LIBRARY_FILES`/`LIBRARY_STUDIO_ASSETS` fixture
+(including one Drive-mirrored, byte-less reference) plus the `asset-library`/`media/attach` demo
+routes, reading/writing the SAME `globalThis`-pinned `SocialStore` every other social fixture uses.
+
+Driven in a real browser (`DEMO_MODE=1 npm run dev`, headless Chromium, `SESSION_SECRET` set):
+logged in, switched to the agency tenant, opened a composer post with two already-approved
+variants, opened the library, attached a Studio-graded asset (rendered as
+`image (webp): demo-file-from-demo-studio-1`, confirming content-type-derived kind/format),
+detached it again (back to one entry), and confirmed the disabled "Generate with AI" control with
+its full explanatory sentence renders next to the library, always, never clickable.
+
+Test counts: **352 / 0 / 0** `platform-nest` across `src/modules/social` +
+`d14-smm-09-social-publish-registry.test.ts` + `social-client-review-portal.controller.test.ts`
+(+27 new: the SMM-20 describe block in `social.test.ts`). **2437 / 0 / 0** `platform-ui` full
+suite (+27 new: `socialShared.test.ts`'s new SMM-20 cases). `tsc --noEmit` clean both sides.
+`lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps` green.
+`test:iam-chain-alignment` green (25/25, unaffected — no IAM/Cerbos touched).
 
 **0.5.5 (2026-08-20, SMM-38 phase 38a — the `direct` driver skeleton + the per-capability switch,
 design addendum §PD, owner decision D-20):** the first move against the free-only build: a second

@@ -40,6 +40,8 @@
 //   POST          posts/import-native                       -> {id,created}            (bookkeeping only; never settable via POST posts)
 //   GET           accounts                                   -> {accounts: SocialAccount[]} (SMM-05; ?clientId=&status=) — the connector registry, incl. live `quota`
 //   GET           variants/:id/publish-preconditions          -> PublishPreconditionResult (SMM-09 dry run; verdict is DATA on a 200, never thrown)
+//   GET           engagements/:id/asset-library                -> AssetLibrary            (SMM-20 — files/Drive/Studio creative_assets, attach-only)
+//   POST          variants/:id/media/attach                    -> AttachMediaResult        (SMM-20; edit invalidates approval, same as PATCH variants/:id)
 //
 // ── CONTRACT DISCREPANCIES FOUND WHILE BUILDING THIS (backend wins; §19 is reconciled here) ──────
 // 1. §19 documents `PATCH engagements/:id/scope` as returning `{toolScope, usageBudgetUsd,
@@ -60,11 +62,12 @@
 //    `composer/[postId]/page.tsx`'s `BackendPending` stands; only the READ side of the gap closes
 //    here.
 import { platformFetch, PlatformError } from "./platform";
-import { EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW } from "./socialShared";
+import { EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY } from "./socialShared";
 import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
   SocialCampaign, SocialKpiTarget, SocialPost, SocialPostStatus, SocialPostDetail,
   VariantValidationResult, SocialAccount, PublishPreconditionResult, ClientReviewState,
+  AssetLibrary,
 } from "./socialShared";
 
 export * from "./socialShared";
@@ -217,4 +220,19 @@ export const getPublishPreconditions = async (
 export const getClientReview = async (u: string, t: string, variantId: string): Promise<Guarded<ClientReviewState>> => {
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/client-review`, u), NOT_REQUESTED_REVIEW);
   return { ...r, data: asObject<ClientReviewState>(r.data) ?? NOT_REQUESTED_REVIEW };
+};
+
+// ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ─────────────────
+//
+// `GET engagements/:id/asset-library` — read-tier (`social_engagement`/`read`), same as every
+// other engagement-scoped read on this page. A 403 here (genuinely denied) is distinct from an
+// engagement with an empty library — `readGuarded`'s `forbidden` flag carries that distinction,
+// same discipline every other reader in this file follows.
+export const getAssetLibrary = async (u: string, t: string, engagementId: string): Promise<Guarded<AssetLibrary>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/engagements/${engagementId}/asset-library`, u), EMPTY_ASSET_LIBRARY);
+  const obj = asObject<AssetLibrary>(r.data);
+  return {
+    ...r,
+    data: obj ? { files: asArray(obj.files), studioAssets: asArray(obj.studioAssets) } : EMPTY_ASSET_LIBRARY,
+  };
 };

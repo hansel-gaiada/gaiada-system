@@ -1,28 +1,32 @@
 "use client";
 // SMM-11 — edits ONE existing per-network variant's body/first-comment/settings, renders its
 // validation result inline (errors block, warnings never do — ValidationList.tsx's own contract),
-// and offers delete. Does NOT offer media attach/upload — that is SMM-20's job ("Asset attach
-// only", still unbuilt per the addendum's own ticket table); an existing variant's attached media
-// is shown read-only here.
+// and offers delete. SMM-20 (AMENDED by D-17: generation removed) adds the media panel below:
+// attach from the asset library (files / Drive-mirrored files / Studio-graded `creative_assets`)
+// and detach — attach-ONLY, never a generate control that actually calls anything, per the
+// inert `ai.imageGen` affordance rendered at the bottom of the panel.
 //
-// Refusal tokens the update/delete calls can answer with (`variant_native_import_immutable`,
-// `variant_not_editable`, `variant_is_live`) are rendered via `describeRefusal`, never re-worded
-// inline — same "the token is the contract" rule the validation issues follow.
+// Refusal tokens the update/delete/attach calls can answer with (`variant_native_import_immutable`,
+// `variant_not_editable`, `variant_is_live`, `asset_not_found`, `unsupported_asset_source`) are
+// rendered via `describeRefusal`, never re-worded inline — same "the token is the contract" rule
+// the validation issues follow.
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, StatusBadge } from "@/components/ui";
 import {
   updateVariant, deleteVariant, checkPublishPreconditions, requestClientReview, withdrawClientReview,
+  attachVariantMedia,
 } from "@/lib/socialActions";
 import {
   describeRefusal, describeQuota, evaluateClientReviewState, type SocialPostVariant,
   type SocialAccount, type PublishPreconditionResult, type ClientReviewState,
+  type AssetLibrary, type MediaDescriptor,
 } from "@/lib/socialShared";
 import { ValidationList } from "./ValidationList";
 
 export function VariantCard({
   tenantId, variant, canDelete, account, accountsForbidden, clientReview, requiresClientOk,
-  canRequestReview, canWithdrawReview,
+  canRequestReview, canWithdrawReview, assetLibrary, assetLibraryForbidden,
 }: {
   tenantId: string;
   variant: SocialPostVariant;
@@ -52,6 +56,13 @@ export function VariantCard({
   canRequestReview: boolean;
   /** `social.client_review.withdraw` — manager-tier only, same split as `canDelete`. */
   canWithdrawReview: boolean;
+  /** SMM-20 — files/Drive/Studio assets attachable to THIS post's engagement (one client, shared
+   *  by every variant of the post — the composer page reads it once, same pattern as
+   *  `requiresClientOk`). */
+  assetLibrary: AssetLibrary;
+  /** True only on a genuine 403 reading the library — rendered distinctly from "the library is
+   *  empty", same honesty rule every other guarded read on this card already follows. */
+  assetLibraryForbidden?: boolean;
 }) {
   const router = useRouter();
   const [body, setBody] = useState(variant.body);
@@ -67,6 +78,10 @@ export function VariantCard({
   const [review, setReview] = useState(clientReview);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewPending, startReviewTransition] = useTransition();
+  const [media, setMedia] = useState<MediaDescriptor[]>(variant.media);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [mediaPending, startMediaTransition] = useTransition();
 
   function runPreview() {
     setPreviewError(null);
@@ -100,6 +115,38 @@ export function VariantCard({
   }
 
   const locked = variant.nativeImport || !["draft", "in_review", "approved"].includes(variant.status);
+
+  // SMM-20 — attach ONE library asset. Same "edit invalidates approval" contract `save()` carries
+  // below: a successful attach against an approved/in-review variant answers `approvalInvalidated`
+  // and this renders it immediately, never lets the operator discover it on the next load.
+  function attach(source: "file" | "creative_asset", assetId: string) {
+    setMediaError(null);
+    startMediaTransition(async () => {
+      const res = await attachVariantMedia(tenantId, variant.id, { source, assetId });
+      if (!res.ok) { setMediaError(describeRefusal(res.error)); return; }
+      setMedia(res.media);
+      setValidation(res.validation);
+      if (res.approvalInvalidated) setApprovalInvalidated(true);
+      router.refresh();
+    });
+  }
+
+  // Detach reuses the SAME general `updateVariant` PATCH the body/settings save below calls —
+  // no separate backend endpoint exists (or is needed) for removing an entry: sending the
+  // filtered `media` array is itself a legal edit, and the backend's own edit-invalidates-approval
+  // law applies identically either way.
+  function detach(fileId: string | undefined, index: number) {
+    setMediaError(null);
+    const next = media.filter((_, i) => i !== index);
+    startMediaTransition(async () => {
+      const res = await updateVariant(tenantId, variant.id, { media: next });
+      if (!res.ok) { setMediaError(describeRefusal(res.error)); return; }
+      setMedia(next);
+      setValidation(res.validation);
+      if (res.approvalInvalidated) setApprovalInvalidated(true);
+      router.refresh();
+    });
+  }
 
   function save() {
     setError(null);
@@ -170,18 +217,12 @@ export function VariantCard({
         />
       </label>
 
-      {variant.media.length > 0 && (
-        <div>
-          <span style={{ font: "600 11px var(--font-body)", color: "var(--erp-ink-60)" }}>Attached media (read-only — SMM-20)</span>
-          <ul style={{ margin: "6px 0 0", padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {variant.media.map((m, i) => (
-              <li key={i} style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)", border: "0.5px solid var(--erp-hairline-soft)", padding: "2px 6px" }}>
-                {m.kind ?? "file"}: {m.fileId ?? "?"}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <MediaPanel
+        media={media} locked={locked} pending={mediaPending} error={mediaError}
+        showLibrary={showLibrary} onToggleLibrary={() => setShowLibrary((s) => !s)}
+        assetLibrary={assetLibrary} assetLibraryForbidden={assetLibraryForbidden}
+        onAttach={attach} onDetach={detach}
+      />
 
       <div>
         <span style={{ font: "600 11px var(--font-body)", letterSpacing: "0.04em", color: "var(--erp-ink-60)" }}>Validation</span>
@@ -378,6 +419,139 @@ function ClientReviewPanel({
         )}
         {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>{error}</span>}
       </div>
+    </div>
+  );
+}
+
+/** SMM-20 (AMENDED by D-17 — generation removed). The variant's media, editable: attach from the
+ *  library (files / Drive-mirrored files / Studio-graded `creative_assets`) or detach one entry.
+ *  Never uploads anything to the publisher — that is SMM-39's dispatch-time job, entirely
+ *  untouched by this panel, which only ever writes the composer-side descriptor.
+ *
+ *  The inert "Generate with AI" row at the bottom is the D-17 requirement rendered literally: no
+ *  generative-image backend exists anywhere in the estate (`ai-gateway-go` exposes `/complete`,
+ *  `/complete/stream`, `/media` (vision) and `/embed` — nothing generative; the Creative render
+ *  gateway is `0.0.0 PLANNED`). This is NOT conditioned on the engagement's own `ai.imageGen`
+ *  scope toggle — flipping that toggle changes nothing here or on the backend beyond a named
+ *  warning at scope-patch time (`social.controller.ts`'s `validateScopePatch`), because there is
+ *  no generation capability to turn on regardless of the flag's value. A disabled control that
+ *  explains itself, always, is the same pattern this module already ships for TikTok/YouTube/X at
+ *  the deployment level — never a control that silently does nothing. */
+function MediaPanel({
+  media, locked, pending, error, showLibrary, onToggleLibrary, assetLibrary, assetLibraryForbidden,
+  onAttach, onDetach,
+}: {
+  media: MediaDescriptor[];
+  locked: boolean;
+  pending: boolean;
+  error: string | null;
+  showLibrary: boolean;
+  onToggleLibrary: () => void;
+  assetLibrary: AssetLibrary;
+  assetLibraryForbidden?: boolean;
+  onAttach: (source: "file" | "creative_asset", assetId: string) => void;
+  onDetach: (fileId: string | undefined, index: number) => void;
+}) {
+  return (
+    <div style={{ borderTop: "0.5px solid var(--erp-hairline-soft)", paddingTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <span style={{ font: "600 11px var(--font-body)", letterSpacing: "0.04em", color: "var(--erp-ink-60)" }}>
+          Attached media
+        </span>
+        {!locked && (
+          <Button variant="ghost" size="sm" onClick={onToggleLibrary} disabled={pending}>
+            {showLibrary ? "Close library" : "Attach from library"}
+          </Button>
+        )}
+      </div>
+
+      {media.length === 0 ? (
+        <p style={{ margin: "6px 0 0", font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>
+          No attachments yet.
+        </p>
+      ) : (
+        <ul style={{ margin: "6px 0 0", padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {media.map((m, i) => (
+            <li key={i} style={{
+              font: "400 11px var(--font-body)", color: "var(--erp-ink-50)",
+              border: "0.5px solid var(--erp-hairline-soft)", padding: "2px 6px",
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <span>{m.kind ?? "file"}{m.format ? ` (${m.format})` : ""}: {m.fileId ?? "?"}</span>
+              {!locked && (
+                <button
+                  type="button" onClick={() => onDetach(m.fileId, i)} disabled={pending}
+                  aria-label={`Remove ${m.fileId ?? "attachment"}`}
+                  style={{ border: "none", background: "none", color: "var(--status-critical-fg, #b3261e)", font: "700 11px var(--font-body)", cursor: "pointer", padding: 0 }}
+                >
+                  ×
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error && (
+        <p style={{ margin: "6px 0 0", font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>{error}</p>
+      )}
+
+      {showLibrary && !locked && (
+        <div style={{ marginTop: 8, border: "0.5px solid var(--erp-hairline-soft)", padding: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+          {assetLibraryForbidden && (
+            <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>
+              Access denied reading the asset library (403) — not the same as an empty one.
+            </p>
+          )}
+          {!assetLibraryForbidden && assetLibrary.files.length === 0 && assetLibrary.studioAssets.length === 0 && (
+            <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>
+              Nothing in the library yet for this client — attach a file to the client record, or grade one in the Creative Studio.
+            </p>
+          )}
+          {assetLibrary.files.length > 0 && (
+            <div>
+              <span style={{ font: "600 11px var(--font-body)", color: "var(--erp-ink-60)" }}>Files &amp; Drive</span>
+              <ul style={{ margin: "6px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                {assetLibrary.files.map((f) => (
+                  <li key={f.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, font: "400 12px var(--font-body)" }}>
+                    <span>
+                      {f.filename}
+                      <span style={{ marginLeft: 6, font: "400 10px var(--font-body)", color: "var(--erp-ink-50)" }}>
+                        {f.source === "drive" ? "drive reference — no bytes of ours" : "uploaded"}
+                      </span>
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={() => onAttach("file", f.id)} disabled={pending}>Attach</Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {assetLibrary.studioAssets.length > 0 && (
+            <div>
+              <span style={{ font: "600 11px var(--font-body)", color: "var(--erp-ink-60)" }}>Studio-graded</span>
+              <ul style={{ margin: "6px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                {assetLibrary.studioAssets.map((a) => (
+                  <li key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, font: "400 12px var(--font-body)" }}>
+                    <span>{a.name}{a.presetId ? ` (${a.presetId})` : ""}</span>
+                    <Button variant="ghost" size="sm" onClick={() => onAttach("creative_asset", a.id)} disabled={pending}>Attach</Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* ── D-17: the inert AI-generate affordance ──────────────────────────────────────────
+              Deliberately un-clickable — no `onClick`, no server call. Naming why is the point:
+              a control that silently does nothing is worse than an absent one. */}
+          <div style={{ borderTop: "0.5px dashed var(--erp-hairline-soft)", paddingTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+            <Button variant="ghost" size="sm" disabled>Generate with AI</Button>
+            <span style={{ font: "400 11px/1.4 var(--font-body)", color: "var(--erp-ink-50)" }}>
+              Unavailable — no generative-image backend exists in the estate yet (the Creative
+              render gateway is still 0.0.0 PLANNED). Attach an existing asset above instead.
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
