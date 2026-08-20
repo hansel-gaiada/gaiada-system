@@ -40,6 +40,8 @@
 //   POST          posts/import-native                       -> {id,created}            (bookkeeping only; never settable via POST posts)
 //   GET           accounts                                   -> {accounts: SocialAccount[]} (SMM-05; ?clientId=&status=) — the connector registry, incl. live `quota`
 //   GET           variants/:id/publish-preconditions          -> PublishPreconditionResult (SMM-09 dry run; verdict is DATA on a 200, never thrown)
+//   GET           metrics/daily                                -> {series: DailyMetricRow[]}  (SMM-21; engagementId REQUIRED, ?accountId=&from=&to=)
+//   GET           metrics/posts                                -> {posts: PostMetricRow[]}    (SMM-21; engagementId REQUIRED; latest snapshot per variant)
 //
 // ── CONTRACT DISCREPANCIES FOUND WHILE BUILDING THIS (backend wins; §19 is reconciled here) ──────
 // 1. §19 documents `PATCH engagements/:id/scope` as returning `{toolScope, usageBudgetUsd,
@@ -65,6 +67,7 @@ import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
   SocialCampaign, SocialKpiTarget, SocialPost, SocialPostStatus, SocialPostDetail,
   VariantValidationResult, SocialAccount, PublishPreconditionResult, ClientReviewState,
+  DailyMetricRow, PostMetricRow,
 } from "./socialShared";
 
 export * from "./socialShared";
@@ -217,4 +220,33 @@ export const getPublishPreconditions = async (
 export const getClientReview = async (u: string, t: string, variantId: string): Promise<Guarded<ClientReviewState>> => {
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/client-review`, u), NOT_REQUESTED_REVIEW);
   return { ...r, data: asObject<ClientReviewState>(r.data) ?? NOT_REQUESTED_REVIEW };
+};
+
+// ── analytics (SMM-21) ──────────────────────────────────────────────────────────────────────────
+//
+// `GET metrics/daily` / `GET metrics/posts` — both REQUIRE `engagementId` (accounts are
+// client-scoped, not engagement-scoped; there is no other way for the backend to know which
+// client's rows to read — social.controller.ts's own `missing_field` refusal on an omitted one).
+// Both wrap their array (`{series:[...]}` / `{posts:[...]}`), matching `listAccounts`' own
+// `{accounts:[...]}` shape rather than a bare array.
+
+export const listDailyMetrics = async (
+  u: string, t: string, engagementId: string, params?: { accountId?: string; from?: string; to?: string },
+): Promise<Guarded<DailyMetricRow[]>> => {
+  const qs = new URLSearchParams({ engagementId });
+  if (params?.accountId) qs.set("accountId", params.accountId);
+  if (params?.from) qs.set("from", params.from);
+  if (params?.to) qs.set("to", params.to);
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/metrics/daily?${qs.toString()}`, u), { series: [] });
+  const obj = asObject<{ series: unknown }>(r.data);
+  return { ...r, data: asArray<DailyMetricRow>(obj?.series) };
+};
+
+export const listPostMetrics = async (
+  u: string, t: string, engagementId: string,
+): Promise<Guarded<PostMetricRow[]>> => {
+  const qs = new URLSearchParams({ engagementId });
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/metrics/posts?${qs.toString()}`, u), { posts: [] });
+  const obj = asObject<{ posts: unknown }>(r.data);
+  return { ...r, data: asArray<PostMetricRow>(obj?.posts) };
 };
