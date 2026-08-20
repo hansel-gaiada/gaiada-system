@@ -49,6 +49,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 | MON-13 | `heartbeat` driver (the inverse check — silence is the signal) | DEV-VERIFIED |
 | — | Controller: 6 read endpoints + unauthenticated heartbeat ingest | **DEV-VERIFIED** — 11/11 against live Postgres RLS + live Cerbos; the suite found a real prod bug (see 0119) |
 | MON-12 | Runner: pure decisions + DB shell, allowlist from **verified** properties only | DEV-VERIFIED (decisions mutation-probed) |
+| — | **Shipped in `alpha-01.055.0109a`** (2026-08-20): `0119` + the IAM completion migration applied to production; boot healthy, so the migrations' self-checks passed against live data. Live totals match the catalog exactly: 298/106/283/15, 69 monitoring bundle pairs. CI green on all 10 jobs | DEV-VERIFIED |
 | MON-12c | Runner LOOP, chained `setTimeout`, **dark by default** (`MONITORING_RUNNER_ENABLED=1`) | DEV-VERIFIED (tsc + 69 tests; not yet switched on anywhere) |
 
 ---
@@ -62,8 +63,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 
 | MON-12d | Backfill `monitors.uptime24h/30d` from `monitor_results` | Board shows `—` today. Deliberate (null ≠ 0), but it is a gap. |
 | MON-12b | Persist egress audit decisions | Currently a documented no-op rather than a log nobody reads. |
-| — | **Enable the module for a company** | **Corrected 2026-08-19:** the Plane B backend IS live (releases 047–054 shipped the controller, drivers, runner and `0116`/`0117`; the heartbeat route answers on the box). What is missing is that **no company has `monitoring` in `enabled_modules`**, so `app_module_allowed()` filters every row and the guard returns 404 — correctly, fail-closed. `/monitoring` saying "backend not connected" is the module being off, not the code being absent. Turning it on for a real company is an owner decision, not a code change. |
-| — | **Deploy** | Still needed for the completion migration + `0119`; neither is in a tag yet. |
+| — | **Enable the module for a company** | **Corrected 2026-08-19:** the Plane B backend IS live (releases 047–054 shipped the controller, drivers, runner and `0116`/`0117`; the heartbeat route answers on the box). What is missing is that **no company has `monitoring` in `enabled_modules`**, so `app_module_allowed()` filters every row and the guard returns 404 — correctly, fail-closed. `/monitoring` saying "backend not connected" is the module being off, not the code being absent. Turning it on for a real company is an owner decision, not a code change. **Blocked on the owner** — the `PATCH /api/:t/company/modules` call needs an SSO session. |
 | — | Cerbos **permission arm** (`perm_monitoring_*`) | A principal holding only a fine-grained `monitoring.*` grant is DENIED until it lands. Fail-closed. Needs 9 scope-cascade blocks in a 2,000-line security file + the parity suites. |
 
 ### Plane B feature work
