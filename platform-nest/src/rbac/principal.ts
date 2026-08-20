@@ -41,6 +41,26 @@ export interface Principal {
   userId: string | null; // null = unknown external identity
   assurance: Assurance;
   companies: string[]; // authorized tenant set (active memberships)
+  /** MON-00c (Wall 2). Every company sharing this principal's ROOT company tree, from
+   *  users.home_company_id. Cerbos's `inRoot` variable tests `resource.tenantId in rootCompanies`,
+   *  which needs no handler change because tenantId is already on every resource.
+   *
+   *  Deliberately NOT derived from memberships: `group_executive` is a global grant whose holders
+   *  have ZERO membership rows (IAM-TRAP4), so a membership-derived set would be empty for exactly
+   *  the role that can otherwise read every company in the database.
+   *
+   *  EMPTY MEANS DENY, WITH NO EXCEPTION. A null home company yields the empty set and therefore
+   *  denies, including on the principal's own data. That is deliberate and it is the correction of a
+   *  first attempt at this field which read "null => operator staff => every company": the very
+   *  principal that leaks (a customer's group_executive) has no memberships and so lands on exactly
+   *  that null, which would have handed it the whole estate while looking like a safe default.
+   *
+   *  Operator reach is therefore NOT expressed here. It comes from `platform_admin`, whose rules are
+   *  not root-gated — an explicit grant rather than the absence of a value.
+   *
+   *  OPTIONAL only so existing fixtures need not be rewritten; omitting it is SAFE because
+   *  cerbos.ts sends `?? []`, and the empty set denies. */
+  rootCompanies?: string[];
   roles: RoleGrant[];
   /** IAM-03a: STRICTLY ADDITIVE alongside `roles` — every existing call site that only reads
    *  `roles` is unaffected. Resolved from `role_permissions` (IAM-02a); NEVER contains a
@@ -95,6 +115,7 @@ export const ANONYMOUS: Principal = {
   userId: null,
   assurance: "low",
   companies: [],
+  rootCompanies: [],
   roles: [],
   perms: [],
   sessionVersion: 0,
@@ -225,10 +246,41 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
     }
   });
 
+  // MON-00c. Resolved from the user's home company, NOT from memberships — see the field's comment.
+  // A user with no home company is operator staff and gets every company; a user whose home company
+  // exists but resolves to no root gets the empty set, which denies rather than allows.
+  const rootCompanies = await withGlobal(async (c) => {
+    const { rows } = await c.query<{ id: string }>(
+      // Anchor precedence: the explicit home company first, then the roots of any ACTIVE membership.
+      //
+      // The membership fallback is safe and is not the membership-derived scheme rejected in the
+      // header: it cannot help the principal being fenced in (a global group_executive has no
+      // memberships, so it contributes nothing and the set stays empty -> denied), while a principal
+      // that genuinely belongs somewhere is anchored by where it demonstrably belongs. Without it,
+      // every ordinary member would be denied until a backfill reached them, which is a fail-closed
+      // outage rather than a boundary.
+      `WITH anchors AS (
+         SELECT home.root_company_id
+           FROM users u JOIN companies home ON home.id = u.home_company_id
+          WHERE u.id = $1
+         UNION
+         SELECT c.root_company_id
+           FROM company_memberships m JOIN companies c ON c.id = m.tenant_id
+          WHERE m.user_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL
+       )
+       SELECT co.id FROM companies co
+        WHERE co.deleted_at IS NULL
+          AND co.root_company_id IN (SELECT root_company_id FROM anchors)`,
+      [userId],
+    );
+    return rows.map((r) => r.id);
+  });
+
   return {
     userId,
     assurance,
     companies: companies.rows.map((r) => r.tenant_id),
+    rootCompanies,
     roles,
     perms,
     sessionVersion: user.rows[0].session_version,

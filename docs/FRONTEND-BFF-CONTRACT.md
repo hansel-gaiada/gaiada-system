@@ -2996,6 +2996,16 @@ is re-verified at dispatch).
 | Method + path | Permission | Notes |
 |---|---|---|
 | `GET variants/:variantId/publish-preconditions` | `social.post.read` | **A dry run of the D14 execution precondition — it publishes nothing, consumes no approval and makes no network call.** Runs the EXACT function the approval executor runs, so a console's "why can't this publish" cannot drift from what execution will actually say. Returns `{ok, stage?, reason?, stages[], tool, meteredTool}`. A refusal is DATA with a **200** (it is a successful answer to the question asked); an unknown variant is a **404**; a principal with no social grant is a **403**, never `ok:false`. Read-tier on purpose: asking whether a publish would be allowed is not publishing, and `social.post.publish` stays manager-tier. |
+| `POST variants/:variantId/publish` | **`social.post.publish`** (manager-tier — the act itself, not the dry run) | **BUILT (SMM-10), added to this table 2026-08-20 — it existed only in prose above until this pass.** The dispatch endpoint `SOCIAL_PUBLISH_TOOL` fronts (`modules/social/index.ts`). Re-runs the precondition under `APPROVAL_EXEC_LOCK_NS`'s lock (never trusts the payload the human saw), then `dispatch.ts` makes the real network call and stamps `approval_id`+`provider_post_id` in one transaction. A refusal answers `409 {message: "<token>"}` — deliberately `message`, not `error` (`HttpErrorFilter` renames it on the way out; see the trap noted below). Ordinarily reachable only through the D14 executor's re-drive (`social.publishPost` is `write:true, impact:'high'`, so a direct agent call always suspends into WS4 first) — the OBO-resolved principal is the ORIGINAL FILING principal, never the approver. |
+
+**Dispatch-stage refusals (`DISPATCH_REFUSAL`, `dispatch.ts`) — reached only AFTER every precondition
+above has already passed, so these are the failures that happen with a real network call in
+flight:** `approval_not_resolvable` (the approval id on the row does not resolve to exactly one
+approved grant — refuses closed rather than guessing which one) · `dispatch_stamp_race_lost` (a
+concurrent dispatch already claimed the transactional stamp) · `dispatch_error` (the publisher call
+itself failed or its outcome is unknown — lands `failed`, never auto-retried) · `media_upload_failed`
+(an attachment's real upload failed BEFORE `schedulePost` is called, so a post is never published
+partially-attached).
 
 **The refusal vocabulary — a CONTRACT, not log text.** The same snake_case tokens appear in this
 endpoint's `reason` and in `automation_approvals.execution_error` after the `precondition_failed: `
@@ -3074,6 +3084,27 @@ preview button (the `stage`/`reason` pair is data either way). `CalendarGrid.tsx
 the RAW status (never `stale`) — `listPosts`'s roll-up carries no `argsSha256` to compare against,
 so the calendar cannot detect staleness without a fabricated field; only the Composer (which reads
 the full variant) renders `client_review_stale`.
+
+**Reconcile webhook intake (SMM-10) — added to this table 2026-08-20, existed only as a code comment
+until this pass.** Cerbos kind: none — this is machine-to-machine, not a principal-carrying route.
+
+| Method + path | Gate | Notes |
+|---|---|---|
+| `POST webhooks/post-status` | `AuthGuard`'s platform SERVICE TOKEN **plus** a second factor, `x-social-webhook-secret` header matched against `config.social.webhookSecret` | **BUILT (SMM-10).** Body `{providerPostId}` — the ONLY field read; anything else the caller sends is discarded unread. Re-fetches authoritative state itself via `SocialPublisher.getPostStatus` before writing anything, so a malicious/buggy caller can at most trigger an early honest re-check, never inject a fabricated outcome. An unconfigured secret refuses every request. **No `work_activity` row is written on this path** (`reconcileOneProviderPost`, `post-status-sync-job.ts` — confirmed by reading it, not assumed): unlike the retention purge and metrics pull, which the golden-case table explicitly excuses as "no user attribution to attach an activity row to", this endpoint's own absence of that reasoning has never been written down anywhere. Named as a gap in `docs/modules/social-capability-inventory.md`, not silently matched to the purge job's excuse. |
+
+**Metrics (SMM-21) — read-only, added to this table 2026-08-20; existed in the SMM-21 evidence block
+but never reached this contract file.** Cerbos permission `social.account.read` (the same grant
+`GET accounts` uses — accounts are client-scoped, not engagement-scoped).
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `GET metrics/daily?accountId=&from=&to=` | `social.account.read` | **BUILT (SMM-21).** Per-account daily series from `social_metrics_daily`, populated by the nightly `pullMetrics` sweep (`metrics-job.ts`). 400 `missing_field` without `engagementId` — there is no other way to know which client's rows to read. Every metric field is OPTIONAL and stays SQL `NULL` end to end when the driver never reported it — **never coerced to 0**; the `date` column is cast `::text` server-side to dodge the node-pg timezone-shift trap `pm.controller.ts` already guards against. **No MCP tool** — the SMM-21 ticket named `pullMetrics` + the tables + the Analytics tab, not an agent-facing tool; see `docs/modules/social-capability-inventory.md`. |
+| `GET metrics/posts?variantIds=` | `social.account.read` | **BUILT (SMM-21).** Latest `social_post_metrics` snapshot per published variant (`DISTINCT ON (variant_id) ... ORDER BY fetched_at DESC`) — the table is append-only, so this is the newest row, never an aggregate. Same optional-field/never-a-fabricated-zero rule as above. **No MCP tool**, same reason. |
+
+`main.ts` registration for the nightly sweep itself (`startMetricsPullLoop`, gated by
+`SOCIAL_METRICS_PULL_ENABLED`) landed with the SMM-21 merge to `main` (verified: `main.ts` now
+imports and calls it) — the "pending merge" caveat in this program's earlier SMM-21 evidence is
+resolved as of this pass.
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,

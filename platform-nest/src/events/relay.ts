@@ -30,12 +30,18 @@ export async function relayBatch(limit = 100): Promise<number> {
   ).rows.map((r) => r.id);
   if (tenantIds.length === 0) return 0;
 
+  // MON-00b: genuinely cross-root and deliberately so. The relay runs with NO principal, drains the
+  // outbox for every tenant that has pending events, and forwards them to per-tenant streams. It
+  // never returns rows to a caller, so there is no audience for a cross-root read — the boundary it
+  // must respect is that each event is re-scoped to its OWN tenant before any consumer sees it,
+  // which the per-row withTenants([row.tenant_id]) below does.
   const rows = await withTenants(tenantIds, (c) =>
     c.query<UnrelayedRow>(
       `SELECT id, tenant_id, entity_type, entity_id, event_type, payload, origin_site, schema_version, created_at
        FROM outbox_events WHERE relayed_at IS NULL ORDER BY created_at LIMIT $1`,
       [limit],
     ),
+    { crossRoot: { reason: "principal-less outbox drain; each event is re-scoped to its own tenant before any consumer reads it" } },
   ).then((r) => r.rows);
 
   for (const row of rows) {

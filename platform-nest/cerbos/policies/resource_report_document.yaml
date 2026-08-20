@@ -75,7 +75,7 @@ resourcePolicy:
     - actions: ["read_person", "read_project", "read_department", "read_company"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # The tenant's own admin: every grain incl. company. §8 restricts the company-grain row against
     # dept-lead/HR/served-dept, not against the company's own administrator.

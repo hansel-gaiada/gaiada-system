@@ -19,7 +19,7 @@ resourcePolicy:
     - actions: ["read", "create", "update", "delete", "run"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Search staff / manager (served-company grant) + the served company's own admin: baseline set
     # INCLUDING running $0 audit/crawl jobs (design §08: no elevated gate on 🟢 actions).
     - actions: ["read", "create", "update", "run"]

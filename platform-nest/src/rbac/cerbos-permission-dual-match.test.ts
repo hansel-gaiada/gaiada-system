@@ -19,13 +19,18 @@ const live = process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const T1 = "aaaaaaaa-0000-0000-0000-000000000001";
 const T2 = "aaaaaaaa-0000-0000-0000-000000000002";
 
+// MON-00c: `rootCompanies` defaults to `companies` because in a single-root fixture world the
+// principal's root subtree IS the companies under test. Pass it explicitly for a principal with no
+// memberships (a global group_executive, or a global permission holder) — an empty set denies, which
+// is the boundary working rather than a broken fixture.
 function principal(
   roles: RoleGrant[],
   perms: PermissionGrant[],
   companies: string[] = [T1],
   assurance: Principal["assurance"] = "high",
+  rootCompanies: string[] = companies,
 ): Principal {
-  return { userId: "u1", assurance, companies, roles, perms, sessionVersion: 1 };
+  return { userId: "u1", assurance, companies, roles, perms, rootCompanies, sessionVersion: 1 };
 }
 
 const pmTask: Resource = { kind: "pm_task", id: "task-1", tenantId: T1 };

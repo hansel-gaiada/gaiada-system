@@ -39,7 +39,7 @@ resourcePolicy:
     - actions: ["read", "create", "update", "revoke"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
     # is byte-for-byte unchanged. group_executive's own notLow-only rule above is DELIBERATELY not

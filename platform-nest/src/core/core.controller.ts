@@ -329,7 +329,34 @@ export class CoreController {
   async rollups(@Req() req: FastifyRequest, @Query("period") period?: string) {
     await authorize(req.principal, { kind: "rollup" }, "read");
     const p = period ?? new Date().toISOString().slice(0, 10);
-    const companies = await withGlobal((c) => c.query<{ id: string }>(`SELECT id FROM companies WHERE deleted_at IS NULL`));
+    // MON-00b. This previously selected EVERY company in the database and handed the lot to
+    // withTenants — the one request in the estate that touched all roots at once. Harmless while a
+    // single holding existed; a cross-customer read the moment a second root does. Now bounded to the
+    // caller's own root, derived from users.home_company_id (MON-00a).
+    //
+    // A global platform_admin — the SaaS operator — keeps the estate-wide view on purpose; that is the
+    // one principal class entitled to it. Everyone else is confined to their own root, and a caller
+    // whose home company cannot be resolved gets NOTHING rather than everything: an unresolvable
+    // anchor must fail closed, since the failure mode of the other choice is a cross-customer read.
+    // The operator is identified by an EXPLICIT global platform_admin grant — never by a missing
+    // home company. Inferring "operator" from a null anchor would grant the whole estate to any
+    // principal that simply has no memberships, which is the shape of the leak being closed here.
+    const isOperator = req.principal.roles.some(
+      (g) => g.role === "platform_admin" && g.scopeType === "global",
+    );
+    const companies = await withGlobal((c) =>
+      isOperator
+        ? c.query<{ id: string }>(`SELECT id FROM companies WHERE deleted_at IS NULL`)
+        : c.query<{ id: string }>(
+            `SELECT co.id FROM companies co
+              WHERE co.deleted_at IS NULL
+                AND co.root_company_id = (
+                  SELECT c2.root_company_id FROM users u
+                    JOIN companies c2 ON c2.id = u.home_company_id
+                   WHERE u.id = $1)`,
+            [req.principal.userId],
+          ),
+    );
     const all = companies.rows.map((r) => r.id);
     if (all.length === 0) return [];
     const rows = await withTenants(all, (c) =>

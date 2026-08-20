@@ -30,7 +30,7 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Deciding (approve/reject) is a human governance action — company admins and owners only.
     #
     # D14-06 adds `retry`: re-running the EXECUTION of an already-approved row (D14-07's endpoint)
@@ -51,7 +51,7 @@ resourcePolicy:
     - actions: ["decide", "retry"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # WSD-2: hr-origin approvals (leave). Rows carry resource.attr.module == "hr". Both sides of
     # the shared-service relationship can unblock people: the served company's admin (via the
     # company_admin rules above) AND the PROVIDING unit's hr_manager (module_manager here). Scoped
@@ -93,7 +93,7 @@ resourcePolicy:
     - actions: ["decide_leave"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     - actions: ["decide_leave"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager"]
@@ -174,7 +174,7 @@ resourcePolicy:
     - actions: ["decide_override"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     #
     # ══════════ REQUESTER ≠ DECIDER — structural, deny-overrides ══════════════════════════════════
     # Copies resource_invoice.yaml's IAM-GAP-02 maker/checker pattern verbatim, for the same reason:
@@ -219,7 +219,7 @@ resourcePolicy:
     - actions: ["decide_assignment"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     #
     # The SAME structural requester-not-decider DENY as decide_override, restated for this action
     # rather than shared: a DENY that silently covered two actions would be one edit away from

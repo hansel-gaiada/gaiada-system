@@ -20,7 +20,7 @@ resourcePolicy:
     - actions: ["read", "create", "update", "delete", "export", "cancel"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # HR staff / manager (served-company grant) + the served company's own admin: full working set.
     - actions: ["read", "create", "update"]
       effect: EFFECT_ALLOW

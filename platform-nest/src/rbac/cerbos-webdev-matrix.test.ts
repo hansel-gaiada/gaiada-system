@@ -20,7 +20,8 @@ const ME = "user-self";
 const OTHER_USER = "user-other";
 
 function principal(role: string, scopeType: RoleGrant["scopeType"], scopeId: string | null, userId = ME): Principal {
-  return { userId, assurance: "high", companies: [T1], roles: [{ role, scopeType, scopeId }], sessionVersion: 1 };
+  // MON-00c: rootCompanies mirrors the fixture's single-root world.
+  return { userId, assurance: "high", companies: [T1], rootCompanies: [T1], roles: [{ role, scopeType, scopeId }], sessionVersion: 1 };
 }
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
@@ -59,7 +60,7 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — work_activity (member/manager/co
     // matched no rule. The policy now carries the same explicit exec carve-out as the sibling
     // resource_integration_connection.yaml, so the correct expectation is read=true. Ingest stays
     // company_admin-only — exec is an oversight role, not a service principal.
-    const p: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    const p: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     expect(await allow(p, wa, "read")).toBe(true);
     expect(await allow(p, wa, "create")).toBe(false);
   });
@@ -113,7 +114,7 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — integration_connection (own/othe
   });
 
   it("exec (group_executive, global): explicit carve-out — full CRUD on ANY tenant's rows, gated only by assurance", async () => {
-    const execP: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     for (const action of ["read", "create", "update", "delete"]) {
       expect(await allow(execP, companyRow, action)).toBe(true);
       expect(await allow(execP, otherUserRow, action)).toBe(true);
@@ -123,7 +124,7 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — integration_connection (own/othe
   });
 
   it("exec at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {
-    const execLow: Principal = { userId: ME, assurance: "low", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    const execLow: Principal = { userId: ME, assurance: "low", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     expect(await allow(execLow, companyRow, "read")).toBe(false);
   });
 
@@ -194,7 +195,7 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier v
 
   it("group_executive (global, gated on notLow ONLY): read AND create/update/revoke succeed even " +
      "CROSS-COMPANY — for a tenant the exec is not a member of at all", async () => {
-    const execP: Principal = { userId: ME, assurance: "high", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     // Not a member of T1 or T2 (companies: []) — proves the rule truly does not depend on inTenant.
     for (const action of ["read", "create", "update", "revoke"]) {
       expect(await allow(execP, cc, action)).toBe(true);
@@ -203,7 +204,7 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier v
   });
 
   it("group_executive at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {
-    const execLow: Principal = { userId: ME, assurance: "low", companies: [], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    const execLow: Principal = { userId: ME, assurance: "low", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     expect(await allow(execLow, cc, "read")).toBe(false);
     expect(await allow(execLow, cc, "create")).toBe(false);
   });

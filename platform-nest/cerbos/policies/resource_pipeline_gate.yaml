@@ -29,7 +29,7 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Deciding a gate (approve / request-changes / reject / sign) is a human governance action.
     # NOTE: client-side gates (prd_sign, customer_feedback, scope_signoff) will be decided by the
     # client principal through the portal BFF (WS11 build item 4); this rule covers staff decisions
@@ -42,7 +42,7 @@ resourcePolicy:
     - actions: ["decide"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # ══════════ IAM-04-B4 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-
     # for-byte unchanged. Mirrors ONLY the company_admin/manager/member `inTenant && notLow` reach

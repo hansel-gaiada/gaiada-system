@@ -30,7 +30,7 @@ resourcePolicy:
     - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # company.manage tier: company-owned rows + reading/managing OTHERS' user rows. Manager+ within
     # the tenant. (The controller only routes ownerId="" here — see the policy header.)
     - actions: ["read", "create", "update", "delete"]

@@ -41,7 +41,7 @@ resourcePolicy:
     - actions: ["propose", "accept", "revoke", "suspend", "resume", "relink", "reconcile", "read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Company admin, in-tenant on whichever side the controller names as resource.attr.tenantId.
     # Deliberately EXCLUDES "reconcile" (ORG-7: admin/global-only, see header note).
     - actions: ["propose", "accept", "revoke", "suspend", "resume", "relink", "read"]

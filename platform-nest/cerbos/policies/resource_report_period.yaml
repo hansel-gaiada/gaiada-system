@@ -43,7 +43,7 @@ resourcePolicy:
     - actions: ["view", "seal", "amend", "pin"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
 
     # The tenant's own admin ("lead" in §6.2's shorthand — see header note): view + seal + amend +
     # pin, bounded to its own company.

@@ -25,6 +25,11 @@ import { evaluateClientReviewState, type ClientReviewState, type ClientReviewSta
 // UI consumer under Social Media yet (no ScopeEditor-equivalent component exists for this
 // department), so they are deliberately NOT seeded here; add them alongside whichever ticket wires
 // their first reader, per that same rule.
+//
+// SMM-21 added `metrics/daily`/`metrics/posts` (read-only — the Analytics tab has no write path)
+// with `dailyMetrics`/`postMetrics` seeded onto the SAME globalThis-pinned store, deliberately
+// partial (see their own seed comments below) so "an absent counter renders as unknown, never
+// zero" is drivable in a real browser, not just asserted in a unit test.
 
 export type DemoSocialNetwork =
   | "instagram" | "facebook" | "tiktok" | "linkedin" | "x"
@@ -169,9 +174,26 @@ interface DemoClientReview {
   comment: string | null; reviewedArgsSha256: string | null;
   requestedAt: string; decidedBy: string | null; decidedAt: string | null; updatedAt: string;
 }
+// SMM-21 — one account's one day. Every counter OPTIONAL, exactly like the real
+// `social_metrics_daily` row/`DailyMetrics` port type — a field simply absent from a seed object
+// below IS the "never fetched/never reported" fixture, not an omission to fill in later.
+interface DemoDailyMetric {
+  accountId: string; date: string;
+  followers?: number; impressions?: number; reach?: number; engagements?: number;
+  linkClicks?: number; videoViews?: number;
+}
+// The latest snapshot for one published variant — mirrors `social_post_metrics`'s append-only
+// shape, but the demo only ever keeps the ONE row the "latest snapshot per variant" read needs.
+interface DemoPostMetric {
+  variantId: string;
+  impressions?: number; likes?: number; comments?: number; shares?: number; saves?: number;
+  videoViews?: number; clicks?: number;
+  fetchedAt: string;
+}
 type SocialStore = {
   engagements: DemoEngagement[]; accounts: DemoAccount[]; posts: DemoPost[]; seq: number;
   clientReviews: DemoClientReview[];
+  dailyMetrics: DemoDailyMetric[]; postMetrics: DemoPostMetric[];
 };
 
 const ENGAGEMENTS_SEED: DemoEngagement[] = [ENGAGEMENT, CLIENT_REVIEWED_ENGAGEMENT];
@@ -433,6 +455,36 @@ const CLIENT_REVIEWS_SEED: DemoClientReview[] = [
   // soc-var-10 has NO row — `not_requested` is the absence of a row, not a seeded one.
 ];
 
+// ── SMM-21 — Analytics tab fixtures ─────────────────────────────────────────────────────────────
+// `soc-acc-ig-1` (northwindtraders): three days seeded, the EARLIEST deliberately missing
+// `reach`/`engagements`/`linkClicks`/`videoViews` — the engine reported followers+impressions that
+// day and nothing else, which is a real, honest partial pull, not a fixture oversight. The other
+// two days are complete. `soc-acc-ig-2` gets NO rows at all — this account's metrics have simply
+// never been pulled, which the Analytics tab must render as "not fetched", never a zeroed table.
+const DAILY_METRICS_SEED: DemoDailyMetric[] = [
+  { accountId: "soc-acc-ig-1", date: "2026-08-14", followers: 4180, impressions: 6200 },
+  {
+    accountId: "soc-acc-ig-1", date: "2026-08-15",
+    followers: 4192, impressions: 6410, reach: 4800, engagements: 312, linkClicks: 41, videoViews: 980,
+  },
+  {
+    accountId: "soc-acc-ig-1", date: "2026-08-16",
+    followers: 4201, impressions: 5990, reach: 4550, engagements: 288, linkClicks: 35, videoViews: 860,
+  },
+];
+
+// `soc-var-6` is the one PUBLISHED variant in the seed (soc-post-5). No row exists for any other
+// variant — a post that has never been published has no business having a metrics row at all, and
+// this fixture does not manufacture one.
+const POST_METRICS_SEED: DemoPostMetric[] = [
+  {
+    variantId: "soc-var-6", impressions: 5230, likes: 214, comments: 18, shares: 9,
+    // `saves`/`videoViews`/`clicks` deliberately absent — Instagram's own metrics surface did not
+    // report them for this post, and the Analytics tab must show that as "—", never "0".
+    fetchedAt: "2026-08-19T02:00:00Z",
+  },
+];
+
 // One store, shared by every module copy. Seeded once, on first touch.
 const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   engagements: ENGAGEMENTS_SEED,
@@ -440,6 +492,8 @@ const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   posts: POSTS_SEED,
   seq: 900,
   clientReviews: CLIENT_REVIEWS_SEED,
+  dailyMetrics: DAILY_METRICS_SEED,
+  postMetrics: POST_METRICS_SEED,
 }) as SocialStore;
 
 // Live views. Every read and every mutation below goes through these, so the action graph and the RSC
@@ -448,6 +502,8 @@ const ENGAGEMENTS = store.engagements;
 const ACCOUNTS = store.accounts;
 const POSTS = store.posts;
 const CLIENT_REVIEWS = store.clientReviews;
+const DAILY_METRICS = store.dailyMetrics;
+const POST_METRICS = store.postMetrics;
 const nid = (p: string) => `${p}-${++store.seq}`;
 const now = () => new Date().toISOString();
 
@@ -706,6 +762,56 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     const { post, variant } = found;
     const engagement = ENGAGEMENTS.find((e) => e.id === post.engagementId);
     return ok(computePrecondition(variant, accountById(variant.accountId), engagement));
+  }
+
+  // ── analytics (SMM-21) — accounts are CLIENT-scoped, not engagement-scoped (0105's real shape),
+  // so both routes resolve the engagement's clientId first and filter accounts/variants by it —
+  // mirrors `social.controller.ts`'s own join through `social_accounts.client_id`. ──────────────
+  if (tail === "metrics/daily" && m === "GET") {
+    const engagementId = params.get("engagementId");
+    if (!engagementId) return err(400, "missing_field");
+    const eng = ENGAGEMENTS.find((e) => e.id === engagementId);
+    if (!eng) return ok({ series: [] }); // an unknown engagementId reads as "nothing to show", same as the real endpoint
+    const accountIdFilter = params.get("accountId");
+    const from = params.get("from");
+    const to = params.get("to");
+    const clientAccountIds = new Set(ACCOUNTS.filter((a) => a.clientId === eng.clientId).map((a) => a.id));
+    let rows = DAILY_METRICS.filter((r) => clientAccountIds.has(r.accountId));
+    if (accountIdFilter) rows = rows.filter((r) => r.accountId === accountIdFilter);
+    if (from) rows = rows.filter((r) => r.date >= from);
+    if (to) rows = rows.filter((r) => r.date <= to);
+    const series = rows.map((r) => {
+      const account = ACCOUNTS.find((a) => a.id === r.accountId);
+      return {
+        accountId: r.accountId, network: account?.network ?? "instagram", handle: account?.handle ?? "",
+        displayName: account?.displayName ?? null, date: r.date,
+        followers: r.followers ?? null, impressions: r.impressions ?? null, reach: r.reach ?? null,
+        engagements: r.engagements ?? null, linkClicks: r.linkClicks ?? null, videoViews: r.videoViews ?? null,
+      };
+    });
+    return ok({ series });
+  }
+  if (tail === "metrics/posts" && m === "GET") {
+    const engagementId = params.get("engagementId");
+    if (!engagementId) return err(400, "missing_field");
+    const postsForEngagement = POSTS.filter((p) => p.engagementId === engagementId);
+    const rows = postsForEngagement.flatMap((post) =>
+      post.variants
+        .filter((v) => v.status === "published")
+        .map((v) => {
+          const m2 = POST_METRICS.find((pm) => pm.variantId === v.id);
+          if (!m2) return null; // never pulled yet — omitted, never a fabricated zero row
+          return {
+            variantId: v.id, postId: post.id, accountId: v.accountId, network: v.network,
+            publishedAt: v.publishedAt, publishedUrl: v.publishedUrl,
+            impressions: m2.impressions ?? null, likes: m2.likes ?? null, comments: m2.comments ?? null,
+            shares: m2.shares ?? null, saves: m2.saves ?? null, videoViews: m2.videoViews ?? null,
+            clicks: m2.clicks ?? null, fetchedAt: m2.fetchedAt,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null),
+    );
+    return ok({ posts: rows });
   }
 
   // ── client review (SMM-31/32, D-16) — the STAFF side: ask / read / withdraw ────────────────────

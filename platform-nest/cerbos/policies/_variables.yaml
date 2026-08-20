@@ -7,5 +7,26 @@ exportVariables:
     inTenant: request.resource.attr.tenantId in request.principal.attr.companies
     # Assurance ceiling (D4): low-assurance chat sessions get NO company data.
     notLow: request.principal.attr.assurance != "low"
+    # MON-00c · ROOT GATE. The resource's company must sit in the principal's own root company tree.
+    #
+    # This exists because `inTenant` cannot do the job for GLOBAL grants. `group_executive` holders
+    # have zero company_memberships by design, so inTenant is permanently false for them and folding
+    # them into a membership-gated rule would produce a grant that never works (IAM-TRAP4). The
+    # answer there was to gate them on `notLow` ALONE — which, with a second root in the database,
+    # means a client-chosen :tenantId is allowed outright.
+    #
+    # `rootCompanies` is anchored on users.home_company_id (MON-00a), not on memberships, precisely
+    # so it is non-empty for those principals. An EMPTY set denies everything: an unresolvable
+    # anchor must fail closed, because the other direction is a cross-customer read.
+    # `has()` guard is not cosmetic. Without it, a principal assembled by an OLDER build — or by any
+    # test fixture that constructs the object directly — has no `rootCompanies` key at all, and CEL
+    # raises "no such key" instead of evaluating. The effect is still a deny (a rule whose condition
+    # errors does not match), so it is fail-closed either way; but the error form is invisible unless
+    # someone reads Cerbos' logs, and it makes every such denial look like a policy bug.
+    #
+    # THIS IS ALSO A DEPLOY-ORDERING NOTE: the policy and the platform build that sends the attribute
+    # must land together. Policy first, alone, denies every group_executive in the estate.
+    inRoot: has(request.principal.attr.rootCompanies)
+            && request.resource.attr.tenantId in request.principal.attr.rootCompanies
     # Does the principal own this resource?
     owns: has(request.resource.attr.ownerId) && request.resource.attr.ownerId == request.principal.id

@@ -191,6 +191,31 @@ mergeable and each leaves the Postiz driver as the live default until its capabi
 | **38d** | **YouTube**: OAuth grant, resumable upload, quota accounting against the 3-bucket regime SMM-37 models, `pullComments` via `youtube.force-ssl` | Own-brand upload + comment read, with quota measured not assumed |
 | **38e** | Flip LinkedIn + YouTube publishing to `direct` in config; Postiz retained for IG/FB/TikTok | Capability inventory (SMM-33) records which driver serves each capability |
 
+**⚠ SWITCH KEY CORRECTED 2026-08-20 — the key is `(network, capability)`, not `capability`.**
+
+§PD originally said "switched **per capability**", and 38a built literally that. The 38a seat then
+flagged the contradiction rather than reinterpreting it silently: 38e's own exit criterion is
+"**flip LinkedIn + YouTube publishing to `direct`; Postiz retained for IG/FB/TikTok**" — which is a
+per-NETWORK split, and cannot be expressed by a capability-only key.
+
+Both halves are real, and that is why the key needs both components:
+- **Per-network** is what 38c/38d/38e actually deliver: LinkedIn and YouTube move to `direct`
+  because their app registrations are ours; IG/FB stay on Postiz behind Meta's Business
+  Verification, and TikTok stays behind its own audit.
+- **Per-capability** is what the P2 inbox needs: `pullComments` must come from `direct` on a network
+  whose *publishing* may still be served by Postiz. A capability-only key cannot say "LinkedIn
+  comments via `direct`, LinkedIn publish via `postiz`" — and that intermediate state is the whole
+  point of shipping 38c before 38e.
+
+**38b owns widening `resolvePublisherForCapability` to `(network, capability)`**, keeping 38a's
+inertness property intact: absent config still falls through to `resolvePublisher(orgDriver)`, so the
+default still computes nothing new. The resolution order when both are configured must be **most
+specific wins** — `(network, capability)` over `(network, *)` over `(*, capability)` — and an override
+naming an unregistered driver must keep refusing `unknown_publisher` rather than falling back.
+
+This was a spec defect on my side, not an implementation error. 38a is correct against what it was
+given and needs no rework beyond the widening above.
+
 **Custody note — this is the security-relevant half.** D-5 put client tokens INSIDE Postiz precisely
 so we never held them. 38b reverses that for the networks the direct driver serves. It is a
 deliberate trade the owner accepted with D-20, and it means **SMM-36 stops being a LinkedIn

@@ -17,7 +17,7 @@ resourcePolicy:
     - actions: ["read", "admin"]
       effect: EFFECT_ALLOW
       derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow" } }
+      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Search staff / manager (served-company grant) + the served company's own admin: read-only.
     - actions: ["read"]
       effect: EFFECT_ALLOW
