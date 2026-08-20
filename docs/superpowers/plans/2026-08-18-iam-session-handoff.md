@@ -554,3 +554,82 @@ P2-15 backfill piece on the live estate.
 have no catalog entries, no bundle rows, no `permissions` rows. `cerbos-catalog-alignment` is where CI
 stops. Adding them means deciding which roles get monitoring permissions and which keys are sensitive —
 that ticket's design call, so it stays reported rather than guessed.
+
+---
+
+# 2026-08-19 continuation (part 4) — the three UI surfaces ship; Phase 2's wave is complete
+
+**`Alpha 01.055.0108a`** — `platform-ui 0.26.0 → 0.27.0`. P2-10, P2-11, P2-12-FE.
+
+With these, every ticket in this wave (P2-01 … P2-17) is closed. What remains of the IAM program is
+Phase 3 and full Phase 4, both explicitly scoped OUT of this wave by design §11.
+
+## 26. The shared layer, and why it is shared
+
+`lib/iam.ts` (readers) · `lib/iamActions.ts` (every write + ONE translation of the typed refusal
+vocabulary) · `components/iam/IamAction.tsx` (one control, three outcomes).
+
+All three surfaces write the same endpoints. A per-page `actions.ts` would be three chances to read
+`ceiling_exceeded` differently, and that vocabulary IS the contract. If a fourth surface appears, extend
+these rather than copying them.
+
+## 27. 🔴 THE REFUSALS ARE THE FEATURE — the pattern to copy
+
+Two server refusals are **not failures** and must never render red:
+
+| Token | What the server is saying | What the UI does |
+|---|---|---|
+| `assignment_request_required` | "You are a dept head — propose, don't place" | Renders a **Propose instead** control, same person prefilled, pointed at `assignment-requests` |
+| `ceiling_exceeded` / `override_required` | "That grant is above your ceiling — ask someone who can" | Renders **Request override**, prefilled; also available standalone so nobody has to hit the wall to find the door |
+
+`IamAction` has three outcome styles for this reason: `ok`, `error`, and `guide`. `guide` is deliberately
+not red, and its message is not announced with `role="alert"` — interrupting a screen-reader user to tell
+them what to do next misrepresents what happened. Colouring guidance as failure teaches an operator the
+system is broken when it is working exactly as designed.
+
+## 28. Three decisions in these pages that the obvious implementation gets wrong
+
+1. **The composer never filters.** `attachable-roles` returns unattachable roles WITH a reason; they
+   render disabled-with-reason. Three layers bound a role-set and the server owns all three.
+2. **`scope: "subtree"` is a warning, not a label.** It means the server narrowed the list to the
+   caller's lead units. Both pages banner it. Rendering a narrowed list as the whole company tells a
+   department head that seats they cannot see do not exist.
+3. **`revocable: false` gets NO revoke control** — not a disabled one. The reconciler would restore the
+   grant and the operator would conclude the UI lied. The row shows `source` instead.
+
+Plus: **effective access is scope-level only, and the page says so in words.** IAM-05c's caveat is real —
+the scope-level answer cannot say whether someone may edit THIS document. A page implying otherwise would
+be confidently wrong some of the time.
+
+## 29. P2-10's two honest states
+
+* **`/hr/people`** gains an Employment column reading **"No record"** rather than a blank, and counts the
+  gap. The directory is platform MEMBERSHIPS; `employees` is the HR record; a member without one is
+  ordinary. That gap is exactly what P2-15's backfill closes, so making it visible is the point.
+* **Hiring without a position is allowed and confers nothing.** The success message says which of the two
+  happened, because "recorded" and "recorded and placed" are different facts and an operator who assumes
+  the second has a silent problem.
+* **Terminate requires a reason and a confirmation that states what will happen** — seats closed, grants
+  revoked, login disabled *unless they are still a member of another company*. The endpoint accepts a
+  bare call; the least reversible action in the product should not be one click from a table row.
+* The transfer result reports grants added **and** removed. "Granted 2" alone reads as a promotion.
+
+## 30. Nav gating: why these are NOT behind `admin.access`
+
+A department head's authority comes from **holding a lead position whose role-set carries
+`org_unit_lead`**. That is not a capability in `me.roles` that `lib/rbac.ts` can test. Gating the nav on
+`admin.access` would hide both pages from exactly the person this wave was built for. They are listed for
+anyone with `people.directory`, and the PAGES render the server's own refusal — which is the real
+boundary either way.
+
+## 31. Process note: the version cut was deliberately split from the code
+
+A concurrent session held uncommitted edits to `docs/modules/CHANGELOG.md` and `MODULES.md` (their
+monitoring `0.2.0` notes — they were closing the catalog drift and had found `0117` was five actions short
+of its own policies). Staging those files to cut my version would have committed their in-progress work.
+
+So `0fb5e16` shipped the source with **no version bump** and said so in its own message, and the cut
+followed as a separate commit once theirs landed. Worth copying: in this checkout, `VERSION`,
+`MODULES.md` and `CHANGELOG.md` are the three files two sessions collide on, and `git status` on them
+before a release cut is cheaper than untangling a mixed commit. Reverting my own hunks with a targeted
+`sed`/script — never `git checkout --` — is what kept their row intact.

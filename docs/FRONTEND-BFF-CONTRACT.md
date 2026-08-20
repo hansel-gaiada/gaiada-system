@@ -3118,9 +3118,12 @@ Design: `docs/superpowers/plans/2026-08-13-iam-phase2-design.md` §4–§5. Back
    `hr_staff` caller still gets **201 on a record-only hire and 403 the moment `positionId` is
    present**. Gate the placement fields on `position.assign` reach (via the IAM-05c effective-permission
    endpoint), never on "is this user in HR" — the two are not the same set.
-   ⚠ A dept head's assignment is slated to become a REQUEST rather than a direct write once P2-08
-   part B ships; direct assign still works today. Do not build the dept-head UI around direct assign
-   being permanent.
+   ⚠ ~~A dept head's assignment is slated to become a REQUEST rather than a direct write~~ — **SHIPPED,
+   and P2-11/P2-12-FE are built around it (2026-08-19).** A dept head calling `assign` gets
+   `assignment_request_required`; the UI treats that as GUIDANCE, not an error, and renders a "Propose
+   instead" control aimed at `POST /positions/:id/assignment-requests` with the same person prefilled.
+   Anyone building another placement surface must do the same: the refusal is the mechanism telling the
+   operator what to do, and rendering it red teaches them the system is broken when it is working.
 2. **No future-dated JML.** `startDate`/`effectiveDate`/`lastDay` in the future ⇒ 400. The reconciler
    resolves on `valid_to IS NULL` with no as-of axis, so a future date would apply *now* while the
    record claimed otherwise. Scheduled JML is deferred, not silently approximated.
@@ -3140,8 +3143,20 @@ response reflects committed reality rather than an eventual one.
 ## IAM Phase 2 — positions + role grants (P2-12 backend, P2-08 part A, 2026-08-18)
 
 **Status:** PROTOTYPED / DEV-VERIFIED (`positions-controller.test.ts` 11/11,
-`role-grants-controller.test.ts` 14/14, both via `app.inject()` against real Postgres + Cerbos). No UI
-consumer yet — P2-11 (dept-head access page) and P2-12 (positions admin) are the intended ones.
+`role-grants-controller.test.ts` 14/14, both via `app.inject()` against real Postgres + Cerbos).
+**CONSUMED as of 2026-08-19** by P2-11 (`/organization/access`) and P2-12-FE (`/organization/positions`).
+
+Three things a future consumer of these endpoints must copy rather than re-decide, because each one is a
+place the obvious implementation is wrong:
+
+1. **`attachable-roles` is never filtered.** Unattachable roles come back WITH a reason and must render
+   disabled-with-reason. The server owns the allow-list; a UI that drops the refusals turns a stated
+   boundary into an invisible one and leaves "why can't I attach that role?" unanswerable.
+2. **`scope: "subtree"` is not a label, it is a warning.** It means the server narrowed the list to the
+   caller's own lead units. Render it as the whole company and you have told a department head that seats
+   they cannot see do not exist. Both pages show a banner.
+3. **A grant with `revocable: false` gets NO revoke control at all** — not a disabled one. The reconciler
+   would restore it, and the operator would conclude the UI lied. Show its `source` instead.
 
 ### Positions — `platform-nest/src/admin/positions.controller.ts`
 
@@ -3215,8 +3230,12 @@ Contract notes:
 ## IAM Phase 2 — the routed override (P2-08 part B, 2026-08-19)
 
 **Status:** PROTOTYPED / DEV-VERIFIED (`override-request-decide.test.ts` 16/16 through `app.inject()`
-against real Postgres + a restarted Cerbos). Migration `0115`. No UI consumer yet — P2-11 (dept-head
-access page) is the intended one.
+against real Postgres + a restarted Cerbos). Migration `0115`. **CONSUMED as of 2026-08-19 by P2-11**
+(`platform-ui/src/app/(app)/organization/access/page.tsx` + `components/iam/PersonAccess.tsx`). The
+override request is offered TWO ways there, deliberately: attached to a refused direct grant (the server
+returns `ceiling_exceeded`/`override_required` and the UI renders the follow-up rather than an error), and
+standalone — somebody who already knows the grant is above their ceiling should not have to trip over the
+wall to find the door.
 
 | Method + path | Cerbos | Notes |
 |---|---|---|
@@ -3283,8 +3302,8 @@ A stale request whose position was retired before approval fails at decide time 
 
 **Status:** PROTOTYPED / DEV-VERIFIED (`it-accounts.test.ts` 25/25 — 8 pure-judgement cases plus 17 via
 `app.inject()` against real Postgres + Cerbos, with Keycloak stubbed at the `fetch` boundary so the real
-admin client and its token cache are exercised). The intended consumer is **P2-14** (`/it/accounts`),
-not built.
+admin client and its token cache are exercised). The consumer is **P2-14** (`/it/accounts`), BUILT
+2026-08-19 (`Alpha 01.054.0107a`).
 
 ### `platform-nest/src/admin/it-accounts.controller.ts`
 
