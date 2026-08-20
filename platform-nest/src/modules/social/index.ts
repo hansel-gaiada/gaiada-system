@@ -138,6 +138,18 @@ export const socialModule: ModuleContract = {
     { key: "social.client_review.read", description: "View client sign-off state on social posts" },
     { key: "social.client_review.request", description: "Send a social post to the client for sign-off" },
     { key: "social.client_review.withdraw", description: "Withdraw a pending client sign-off request" },
+    // SMM-23 — the client-facing engagement report lifecycle. Already catalog rows + Cerbos actions
+    // (0106 / resource_social_report.yaml) from SMM-30's forward-looking seed ("no real handler for
+    // social_report exists anywhere in the tree yet" — that yaml's own note); this is the first
+    // ticket whose endpoints (`social-reports.controller.ts`) honour them. `delete` is catalogued
+    // but no endpoint exists yet (matching `search.report.*`'s own precedent — search-reports.
+    // controller.ts has no delete route either), so it stays undeclared here per this file's own
+    // rule against declaring a permission before the endpoint that honours it.
+    { key: "social.report.create", description: "Draft a client-facing engagement report (snapshot + AI narrative)" },
+    { key: "social.report.read", description: "View social-media engagement reports" },
+    { key: "social.report.update", description: "Edit a report's narrative, submit it for review, or send it back" },
+    { key: "social.report.approve", description: "Approve a reviewed engagement report (delivery gate)" },
+    { key: "social.report.deliver", description: "Deliver an approved engagement report to the client" },
   ],
   customFieldTargets: ["social_engagement", "social_campaign", "social_post"],
   // Agentic-bar criterion 1 (tool parity): everything this ticket's UI can do is reachable as a
@@ -602,6 +614,130 @@ export const socialModule: ModuleContract = {
           clientId: { type: "string", description: "The client whose registry to refresh." },
         },
         required: ["tenantId", "clientId"],
+      },
+    },
+    // ── SMM-23: report snapshot -> AI narrative -> approve -> render -> deliver ────────────────
+    // Tool parity for the whole lifecycle, same authorize() calls the endpoints run
+    // (social-reports.controller.ts). `draftReport`/`editReport`/`approveReport` are write+impact
+    // 'low': each persists a draft/edit/internal sign-off and none can put anything in front of a
+    // client. `deliverReport` is 'medium', not 'low' — matching `search.deliverReport`'s own
+    // ratified widening ("outward-facing and unretractable" as a medium-impact ground alongside
+    // spending money and live-account mutation): once delivered, a client can read the document,
+    // and this module has no way to un-send it.
+    {
+      name: "social.draftReport",
+      description:
+        "Build a client-facing engagement report: a frozen metrics snapshot from social_metrics_daily/"
+        + "social_post_metrics (never a fabricated number — an unfetched metric is omitted, never "
+        + "zero) plus an AI-drafted narrative grounded in the client's own brand-voice corpus. Writes "
+        + "status='draft' only. Idempotent: pass a stable `id` and a repeat call returns the existing "
+        + "report instead of re-snapshotting.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/reports",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement this report covers." },
+          kind: { type: "string", enum: ["monthly", "campaign", "adhoc"], description: "Defaults to 'monthly'." },
+          period: { type: "string", description: "'YYYY-MM' for a monthly report; omit for a trailing 30-day window." },
+          id: { type: "string", description: "Optional caller-supplied uuid — the idempotency key for a retry." },
+        },
+        required: ["tenantId", "engagementId"],
+      },
+    },
+    {
+      name: "social.listReports",
+      description: "List a company's client-facing engagement reports with their status and period.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/reports",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "Optional: only this engagement's reports." },
+          status: { type: "string", enum: ["draft", "in_review", "approved", "delivered"], description: "Optional status filter." },
+        },
+        required: ["tenantId"],
+      },
+    },
+    {
+      name: "social.getReport",
+      description:
+        "Read one report as a full ReportDocument (the SAME contract platform-nest's reports module "
+        + "and the print pipeline render) — kpis/series/tables/highlights/narrative. Read-only; makes "
+        + "no status or file write.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/reports/:id",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." }, id: { type: "string", description: "The report." } },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "social.editReport",
+      description:
+        "Edit a report's narrative and/or submit it for review (draft->in_review) or send it back "
+        + "(in_review->draft). Cerbos update action.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/social/reports/:id",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          id: { type: "string", description: "The report." },
+          narrativeMd: { type: "string", description: "Replace the narrative text." },
+          status: { type: "string", enum: ["draft", "in_review"], description: "Submit for review or send back." },
+        },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "social.approveReport",
+      description:
+        "Approve a report in review (in_review->approved, stamps approved_by/approved_at) — the "
+        + "in-console module-permission approval base smm-design.md §07 specifies for low-impact "
+        + "artifacts, not the D14 registry (nothing here re-executes a suspended write) and not "
+        + "SMM-31's client-review stage (a report is staff-authored and staff-approved; a client "
+        + "never touches this kind). Cerbos approve action, module_manager and up.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/reports/:id/approve",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." }, id: { type: "string", description: "The report." } },
+        required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "social.deliverReport",
+      description:
+        "Deliver an approved report (approved->delivered): renders it to PDF via the report-renderer "
+        + "sidecar (the same print-payload pipeline the reports module's own PDF export uses — no "
+        + "second renderer), persists it as a files row (mirrored to Shared Drive), best-effort links "
+        + "a deliverable when the engagement carries a project, and emits social.report.delivered. "
+        + "impact:'medium' — outward-facing and unretractable, the same classification ground "
+        + "search.deliverReport uses. Cerbos deliver action, module_manager and up.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/reports/:id/deliver",
+      inputSchema: {
+        type: "object",
+        properties: { tenantId: { type: "string", description: "Company id (route scope)." }, id: { type: "string", description: "The report." } },
+        required: ["tenantId", "id"],
       },
     },
   ],
