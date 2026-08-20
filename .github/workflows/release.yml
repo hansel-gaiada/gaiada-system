@@ -81,6 +81,22 @@ jobs:
           tags: ${{ env.IMAGE }}:${{ env.TAG }}
           provenance: false # we attach a richer SLSA attestation below
           sbom: false # we generate + attest the SBOM explicitly below
+          # MON-09o-b: this build previously had NO cache-from/cache-to at all, so consecutive
+          # release tags shared almost no layers on the VPS (measured: ~13 GB of app images for two
+          # tags, because a diet-only fix caps a single image's size but does nothing about a
+          # rebuild-from-scratch cost every tag). Registry cache, keyed PER COMPONENT: the cache ref
+          # must be under `${{ env.IMAGE }}` (which already embeds `matrix.component`), never a
+          # single shared `:buildcache` tag for the whole matrix — a shared ref would have every
+          # component in this 9-way matrix overwrite the same cache manifest in parallel and each
+          # job would mostly cache-miss against whichever sibling wrote last (or fail the OCI cache
+          # export outright on the concurrent write). `mode=max` caches every intermediate layer
+          # (not just the final stage), which is what makes an unchanged component's next tag a
+          # near-zero-cost push instead of its full rebuild. `type=registry` (not `gha`) because the
+          # cache must be visible to a manual `workflow_dispatch` re-run and to any future build,
+          # not scoped to the Actions run/branch cache. This does not change what gets built, signed
+          # or pushed — cache-from/to only affect layer reuse during the build step above cosign.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
