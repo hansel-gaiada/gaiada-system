@@ -34,7 +34,7 @@ import { createHash } from "node:crypto";
 import { Pool } from "pg";
 import { expect } from "vitest";
 import { config } from "../config";
-import { setPool, closePool } from "../db";
+import { setPool, closePool, attachPoolErrorHandler } from "../db";
 import { migrate } from "../db/migrate";
 
 export const TEST_URL = process.env.DATABASE_URL_TEST ?? "";
@@ -84,6 +84,7 @@ export async function initTestDb(): Promise<void> {
   // suite (unlike the shared-DB `pg_terminate_backend` attempt this ticket rules out — that one
   // targeted the database every suite shared, so it killed concurrently-running suites too).
   const maintenance = new Pool({ connectionString: TEST_URL, max: 1 });
+  attachPoolErrorHandler(maintenance);
   try {
     await maintenance.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
     await maintenance.query(`CREATE DATABASE ${dbName}`);
@@ -93,6 +94,7 @@ export async function initTestDb(): Promise<void> {
 
   const dbUrl = urlWithDb(TEST_URL, dbName);
   const localAdmin = new Pool({ connectionString: dbUrl });
+  attachPoolErrorHandler(localAdmin);
 
   try {
     // Run migrations as the admin (owner), then hand the app a least-privilege role.
