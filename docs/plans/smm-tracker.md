@@ -31,12 +31,12 @@ not afterwards.
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
-| PD `direct` driver (SMM-38) | 0 | 5 phases |
+| PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
 | P3 content ops | 1 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.4 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+Module: `social-media 0.5.5 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
@@ -221,7 +221,7 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 
 | Phase | Scope | State |
 |---|---|---|
-| 38a | Driver skeleton + per-capability switch (defaults to `postiz`) + shared contract suite | ⬜ |
+| 38a | Driver skeleton + per-capability switch (defaults to `postiz`) + shared contract suite | ✅ **merged** |
 | 38b | **Token custody** — encrypted at rest on the tenant wall, refresh-ahead, revocation fails closed | ⬜ |
 | 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | ⬜ depends on SMM-36 ✅ |
 | 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | ⬜ |
@@ -229,6 +229,44 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 
 ⚠ 38b reverses D-5 (client tokens deliberately live *inside* Postiz so we never hold them). That is a
 security decision the owner accepted with D-20, not a convenience.
+
+**38a evidence (2026-08-20, senior-integrator):** no migration, no Cerbos change, no `main.ts`
+change — **verified inert**: every capability still resolves to `postiz`. Built:
+`publisher/direct.ts` (the skeleton — every port member refuses `capability_unsupported` naming the
+op and the phase; `capabilities` is an EMPTY `Set`; `listComments`/`sendReply` stay ABSENT, matching
+Postiz's own "absent, not throwing" discipline for its zero-inbox gap); `publisher/registry.ts`'s
+new `resolvePublisherForCapability(orgDriver, capability)` (the per-capability switch, a NEW
+dimension on `resolvePublisher`'s existing per-org resolution — falls through to
+`resolvePublisher(orgDriver)` when `config.social.publisher.capabilityDrivers` has no entry for that
+capability, which is the entire inertness argument: no flag, just an empty map producing the exact
+call every caller already makes); `config.ts`'s new `capabilityDrivers` (parsed from
+`SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, empty by default); `types.ts`'s `PublisherKey` widened to
+admit `'direct'` (type-level only — 0105's `driver` CHECK constraint still admits only
+`'postiz'`/`'mixpost'`, so `'direct'` never enters that column in this phase, by design: the switch
+lives in config, not the row). `publisher-contract.ts` (new): the port's behavioural contract
+pulled out of one driver's test file into `runPublisherContractSuite(label, {build, integration?})`,
+run against `postiz`, the mock, and `direct` — a capability gap asserts the typed refusal, never a
+skip (the ticket's own instruction, applied literally).
+
+**Deliberately NOT done, and why:** `direct` is not registered in `main.ts`/`boot.ts`. Registering
+it unconditionally would make the driver registry non-empty even with `SOCIAL_POSTIZ_BASE_URL`
+unset, silently flipping `resolvePublisher`'s refusal from `publisher_not_configured` to
+`unknown_publisher` for every org in an otherwise-unconfigured deployment — a live-behaviour change
+this phase's own acceptance bar forbids. Left to 38b+, whichever phase first gives `direct` a real
+capability worth reaching; that phase also owns revisiting `resolvePublisher`'s empty-registry
+heuristic if it needs to.
+
+Test counts: **346 / 0 / 0** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (was 318/0/0, +28: `direct.test.ts` new, 12;
+`publisher.test.ts` +16 — the shared suite against `postiz`/mock, 6 each, plus 4 for the switch).
+`tsc --noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/
+`lint:migration-names` green. `test:iam-chain-alignment` green (25/25, unaffected — no IAM/Cerbos
+touched). Full detail: `docs/modules/MODULES.md`'s social-media 0.5.5 entry.
+
+**What 38b must build against what 38a left:** a token table on the tenant wall (senior-db's call,
+per this ticket's own DO-NOT-DO list) plus the encryption/refresh-ahead/revocation machinery; once
+any single capability is real, that phase decides how `direct` gets registered at boot and whether
+`resolvePublisher`'s `publishers.size === 0` heuristic still means what it means today.
 
 ## P3 — content ops ⬜
 

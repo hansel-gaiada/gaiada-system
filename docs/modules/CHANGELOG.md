@@ -77,6 +77,37 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-20 — SMM-38 phase 38a**, `social-media 0.5.4 -> 0.5.5` (IN PROGRESS). D-20's `direct`
+  `SocialPublisher` driver — the skeleton + the per-capability switch, design addendum §PD. **This
+  phase is deliberately INERT: every capability still resolves to `postiz`, and nothing in the
+  running system's behaviour changed.** `publisher/direct.ts` (new) implements the port's full shape
+  and refuses every member with a typed `capability_unsupported` — no OAuth, no token storage, no
+  media upload, no network call (38b/38c/38d's job); its `capabilities` set is EMPTY, matching the
+  "absent, not throwing" discipline the port already uses for `listComments`/`sendReply`.
+  `publisher/registry.ts`'s new `resolvePublisherForCapability(orgDriver, capability)` is a NEW
+  dimension laid on top of `resolvePublisher`'s existing per-ORG resolution
+  (`social_publisher_orgs.driver`, unchanged, still CHECK-constrained to `'postiz'`/`'mixpost'` — no
+  migration): with no entry in the new `config.social.publisher.capabilityDrivers` override map
+  (parsed from `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, empty by default) it falls straight through to
+  `resolvePublisher(orgDriver)`, the exact call every existing caller already makes — that
+  fallthrough IS the inertness. An override naming an unregistered driver still REFUSES
+  (`unknown_publisher`), preserving `resolvePublisher`'s own honor-or-refuse property at the new
+  dimension. `types.ts`'s `PublisherKey` widens to admit `'direct'` (a type-level change only; the
+  DB column does not admit it). `direct` is deliberately **not** registered in `main.ts`/`boot.ts`
+  this phase — see `direct.ts`'s header: registering it unconditionally would make the registry
+  non-empty even with Postiz unconfigured, silently changing `resolvePublisher`'s refusal from
+  `publisher_not_configured` to `unknown_publisher` for every org, which is exactly the live-
+  behaviour change this phase forbids. `publisher-contract.ts` (new) pulls the port's behavioural
+  contract out of `publisher.test.ts` into a parameterized `runPublisherContractSuite`, run against
+  `postiz`, the mock, and `direct` — a capability gap asserts the typed refusal, never a skip.
+  `publisher.test.ts` gained the two non-`direct` suite runs plus 4 tests for the switch itself;
+  `direct.test.ts` (new) adds 6 driver-specific tests plus its own contract-suite run. **346 / 0 / 0**
+  across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` +
+  `social-client-review-portal.controller.test.ts` (was 318/0/0, +28 new tests). `tsc --noEmit`
+  clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names` green.
+  `test:iam-chain-alignment` green (25/25, unaffected — no IAM/Cerbos touched). Full detail:
+  `docs/modules/MODULES.md`'s social-media 0.5.5 entry, `docs/plans/smm-tracker.md`'s PD row.
+
 - **2026-08-20 — SMM-32**, `social-media 0.5.3 -> 0.5.4`, `platform-ui 0.27.0 -> 0.28.0` (IN
   PROGRESS). Client-review portal UI + composer/calendar reflection (D-16) — the other half of
   SMM-31, `platform-ui` only, no migration/Cerbos/backend-route change. Portal:

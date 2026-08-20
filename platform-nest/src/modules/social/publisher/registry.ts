@@ -14,7 +14,8 @@
 // incident. `invokePublisher` wraps ANY driver, so the contract is a property of the PORT rather
 // than of one implementation — and callers get the refusal-to-status mapping for free too.
 import { trace, SpanStatusCode, type Attributes } from "@opentelemetry/api";
-import type { OrgHandle, PublisherKey, SocialPublisher } from "./types";
+import { config } from "../../../config";
+import type { OrgHandle, PublisherCapability, PublisherKey, SocialPublisher } from "./types";
 import { SocialPublisherError } from "./types";
 
 const publishers = new Map<PublisherKey, SocialPublisher>();
@@ -48,6 +49,49 @@ export function resolvePublisher(driver: string): SocialPublisher {
       );
     }
     throw new SocialPublisherError("unknown_publisher", `social publisher driver '${driver}' is not registered`);
+  }
+  return p;
+}
+
+/** SMM-38/38a (design addendum §PD) — the per-capability switch. A NEW dimension laid ON TOP of
+ *  `resolvePublisher`'s existing per-ORG resolution; it does not replace it.
+ *
+ *  ── WHY THIS IS INERT BY CONSTRUCTION ────────────────────────────────────────────────────────────
+ *  `config.social.publisher.capabilityDrivers` is a per-capability override map, EMPTY by default.
+ *  With no entry for `capability`, this function falls straight through to `resolvePublisher(orgDriver)`
+ *  — the EXACT call every existing caller already makes via `provisioning.ts`'s `openOrg`. So until an
+ *  operator sets an override, `resolvePublisherForCapability(org.driver, cap)` and
+ *  `resolvePublisher(org.driver)` return the identical driver for the identical reason, for every
+ *  capability, for every org, in every deployment. That equivalence — not an "if disabled, skip"
+ *  branch — is what makes 38a a no-op: there is no flag guarding this function off, because with the
+ *  shipped default config it computes nothing a caller could not already reach.
+ *
+ *  ── THE PER-ORG REFUSAL PROPERTY IS PRESERVED AT BOTH DIMENSIONS ────────────────────────────────
+ *  `resolvePublisher`'s own header names the rule: a name that does not resolve REFUSES rather than
+ *  quietly substituting a different engine. That rule is untouched (this function does not change
+ *  `resolvePublisher` at all) and it is repeated at the new dimension: an override that names a
+ *  driver this deployment does not run throws `unknown_publisher` — it never falls back to the org's
+ *  own driver, which would be exactly the silent-substitution `resolvePublisher` was written to
+ *  forbid, just moved one layer up.
+ *
+ *  ── NOT YET CALLED FROM ANY LIVE PATH ───────────────────────────────────────────────────────────
+ *  `provisioning.ts`'s `openOrg` still calls `resolvePublisher(org.driver)` directly — a single
+ *  driver resolved once per call site and reused across whichever capabilities that call site
+ *  happens to exercise (e.g. `syncConnectorRegistry` calls `listIntegrations` then `getQuota` on the
+ *  SAME resolved driver). Routing different capabilities of ONE call to different drivers is real
+ *  surgery on those call sites — 38b+'s job, once `direct` has a capability worth routing to. 38a
+ *  ships the switch itself, proven correct in isolation by the shared contract suite and by the
+ *  tests directly below, without touching a live call path. */
+export function resolvePublisherForCapability(orgDriver: string, capability: PublisherCapability): SocialPublisher {
+  const override = config.social.publisher.capabilityDrivers[capability];
+  if (!override) return resolvePublisher(orgDriver);
+  const p = publishers.get(override as PublisherKey);
+  if (!p) {
+    throw new SocialPublisherError(
+      "unknown_publisher",
+      `social publisher driver '${override}' (configured for capability '${capability}' via `
+      + "SOCIAL_PUBLISHER_CAPABILITY_DRIVERS) is not registered",
+    );
   }
   return p;
 }

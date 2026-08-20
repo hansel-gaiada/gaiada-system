@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.4` | IN PROGRESS | Social Media | 2026-08-20 |
+| social-media | `0.5.5` | IN PROGRESS | Social Media | 2026-08-20 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,73 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.4` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.5` · IN PROGRESS
+
+**0.5.5 (2026-08-20, SMM-38 phase 38a — the `direct` driver skeleton + the per-capability switch,
+design addendum §PD, owner decision D-20):** the first move against the free-only build: a second
+`SocialPublisher` implementation alongside Postiz, switched in per capability. **This phase is
+deliberately INERT — nothing about the running system's behaviour changed.** No migration, no
+Cerbos change, no `main.ts`/`boot.ts` change.
+
+Why it exists: Postiz has zero inbound engagement surface for any network (verified from its live
+OpenAPI and provider sources — the P2 finding SMM-15/16/17/18 have been blocked on since SMM-05). D-20
+chose building a second, free, in-house driver over forking Postiz or paying for Mixpost Pro. `direct`
+ships in five phases (`docs/plans/smm-tracker.md`'s PD table); 38a is the skeleton and the switch only.
+
+`publisher/direct.ts` (new): implements every `SocialPublisher` port member, refusing each one with a
+typed `capability_unsupported` naming the exact op and the phase that will bring it. `capabilities` is
+an EMPTY `Set` — the honest answer for "nothing is built yet", and the one that makes every existing
+capability-gated call site (`capabilities.ts`, `provisioning.ts`'s `driver.capabilities.has(...)`
+guards) already get the right answer without reaching a method. `listComments`/`sendReply` stay
+ABSENT rather than defined-but-throwing, matching the Postiz driver's own "absent, not throwing"
+discipline for the same gap.
+
+`publisher/registry.ts`'s new `resolvePublisherForCapability(orgDriver, capability)`: a NEW dimension
+laid ON TOP of `resolvePublisher`'s existing per-ORG resolution (0105's `social_publisher_orgs.driver`
+column, untouched — still CHECK-constrained to `'postiz'`/`'mixpost'`; `'direct'` is a type-level
+addition to `PublisherKey` only, and reaches a live call solely through this new config-driven switch,
+never through the DB column). With no entry in `config.social.publisher.capabilityDrivers` (parsed
+from `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, empty by default) for a given capability, resolution falls
+straight through to `resolvePublisher(orgDriver)` — the identical call every existing caller already
+makes. That fallthrough, not a feature flag, is what makes 38a a no-op. An override naming an
+unregistered driver still REFUSES (`unknown_publisher`) rather than silently substituting the org's
+own driver — `resolvePublisher`'s own honor-or-refuse property, preserved at the new dimension rather
+than bypassed by it.
+
+`direct` is deliberately **not registered in `main.ts`/`boot.ts` this phase.** Registering it
+unconditionally would make the driver registry non-empty even when `SOCIAL_POSTIZ_BASE_URL` is unset,
+which would silently change `resolvePublisher`'s refusal from `publisher_not_configured` to
+`unknown_publisher` for every org in an otherwise-unconfigured deployment — a live-behaviour change
+this phase's own acceptance bar forbids. Registering `direct` (and, if needed, revisiting
+`resolvePublisher`'s empty-registry heuristic) is left to whichever phase first gives it a real
+capability to reach (38b at the earliest).
+
+`publisher-contract.ts` (new): the port's own behavioural contract, pulled out of `publisher.test.ts`
+into a parameterized `runPublisherContractSuite(label, { build, integration? })` — mirroring
+`invokePublisher`'s own "the port owns it, not one driver" reasoning for instrumentation. Each case
+reads the driver's OWN `capabilities` set before deciding what "correct" means for THAT driver: a
+capability gap asserts the typed refusal (never a skip), a capability present asserts the real
+contract (e.g. `schedulePost` refuses `approval_required` before any network call). Run against
+`postiz` (a generic 200 stub, no real socket), the mock, and — in `direct.test.ts` — `direct` itself.
+
+Tests: `direct.test.ts` (new, 12: 6 driver-specific + the 6-case shared suite run under label
+`direct`); `publisher.test.ts` gained 16 (the shared suite run against `postiz` and the mock, 6 each,
+plus 4 for the switch itself: inert-by-default equivalence, an honoured override leaving other
+capabilities untouched, refusing an unregistered override, and the per-org refusal property still
+reachable through the new entry point).
+
+**346 / 0 / 0** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` +
+`social-client-review-portal.controller.test.ts` (was 318/0/0). `tsc --noEmit` clean.
+`lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names` green.
+`test:iam-chain-alignment` green (25/25, unaffected).
+
+**What 38a leaves for 38b+:** 38b must add token custody (encrypted-at-rest, refresh-ahead,
+revocation) before `direct` can advertise a single real capability, and per §PD's custody note this
+also promotes SMM-36's retention job from a LinkedIn compliance nicety to load-bearing custody work.
+38c/38d build LinkedIn/YouTube against the now-empty `DIRECT_CAPABILITIES` array (grow it exactly once
+per landed, verified capability — never ahead of what is built). 38e is the only phase expected to
+touch `config.social.publisher.capabilityDrivers` with a real value, and to decide how/whether
+`direct` gets registered in `main.ts` at that point.
 
 **0.5.4 (2026-08-20, SMM-32 — client-review portal UI + composer/calendar reflection):** the other
 half of P2's first ticket. `platform-ui` only — no migration, no Cerbos change, no new backend

@@ -5,7 +5,7 @@
 // or the real Postiz driver over an injected `fetchImpl`, which also means the transport assertions
 // are made at the wire — the only place a claim like "the API key never leaves the Authorization
 // header" can actually be proved.
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { inspect } from "node:util";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,8 +19,13 @@ import {
   X_POST_USD, X_POST_WITH_LINK_USD,
 } from "./postiz";
 import { createMockPublisher, newMockPublisherState } from "./mock-driver";
-import { registerPublisher, resetPublishers, resolvePublisher, invokePublisher } from "./registry";
+import {
+  registerPublisher, resetPublishers, resolvePublisher, resolvePublisherForCapability, invokePublisher,
+} from "./registry";
 import { assertPublisherBaseUrlIsPrivate, PublicPublisherBaseUrlError } from "./boot";
+import { createDirectDriver } from "./direct";
+import { runPublisherContractSuite } from "./publisher-contract";
+import { config } from "../../../config";
 
 const KEY = "s3cr3t-org-key-do-not-log";
 const handle = (): OrgHandle => new OrgHandle("row-1", "org-abc", KEY);
@@ -417,5 +422,76 @@ describe("SMM-05 · containment, asserted inside the suite as well as in CI", ()
     const specifiers = [...src.matchAll(/\bfrom\s+["']([^"']+)["']/g)].map((m) => m[1]);
     expect(specifiers.length).toBeGreaterThan(0);
     expect(specifiers.every((s) => s.startsWith("."))).toBe(true);
+  });
+});
+
+// ── SMM-38/38a — the port's own contract suite, run against every driver ─────────────────────────
+//
+// Before this ticket, "the contract" meant whatever this file asserted against Postiz and the mock.
+// `runPublisherContractSuite` is that behaviour pulled out into a function the PORT owns (mirroring
+// `invokePublisher`'s own "the port owns it, not one driver" reasoning), and it is run here against
+// BOTH drivers this file already knew about — `direct.test.ts` runs the identical suite against the
+// new skeleton. A generic 200 `[]`/`{}` stub is enough for Postiz here: every case that resolves
+// without a throw is accepted by the suite, and every case Postiz's normalizers turn into a typed
+// `publisher_http_error` (an id-less create, an empty upload response) is exactly the "typed, never
+// untyped" property the suite checks for — the SAME normalizer behaviour publisher.test.ts's own
+// wire-level tests above already pin, just exercised through the port's general contract too.
+function genericSuccessStub(): typeof fetch {
+  return (async () => new Response(JSON.stringify([]), {
+    status: 200, headers: { "Content-Type": "application/json" },
+  })) as unknown as typeof fetch;
+}
+
+runPublisherContractSuite("postiz", { build: () => driverWithFetch(genericSuccessStub()) });
+runPublisherContractSuite("mock", { build: () => createMockPublisher(newMockPublisherState()) });
+
+describe("SMM-38/38a · the per-capability switch — a new dimension, defaulting to the org's own driver", () => {
+  afterEach(() => {
+    config.social.publisher.capabilityDrivers = {};
+    resetPublishers();
+  });
+
+  it("INERT by default: with no override configured, it resolves EXACTLY what resolvePublisher(orgDriver) already returns", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    config.social.publisher.capabilityDrivers = {};
+    expect(resolvePublisherForCapability("postiz", "schedule")).toBe(resolvePublisher("postiz"));
+    expect(resolvePublisherForCapability("postiz", "quota_probe")).toBe(resolvePublisher("postiz"));
+  });
+
+  it("honours a configured override for the ONE capability it names, leaving every other capability untouched", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    registerPublisher(createDirectDriver());
+    config.social.publisher.capabilityDrivers = { schedule: "direct" };
+    expect(resolvePublisherForCapability("postiz", "schedule").key).toBe("direct");
+    // No override for quota_probe: still falls through to the org's own driver, unchanged.
+    expect(resolvePublisherForCapability("postiz", "quota_probe").key).toBe("postiz");
+  });
+
+  it("refuses — never silently substitutes — when the override names a driver this deployment does not run", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    config.social.publisher.capabilityDrivers = { schedule: "direct" }; // 'direct' never registered here
+    expect(() => resolvePublisherForCapability("postiz", "schedule")).toThrowError(/is not registered/);
+    try {
+      resolvePublisherForCapability("postiz", "schedule");
+    } catch (e) {
+      expect((e as SocialPublisherError).code).toBe("unknown_publisher");
+    }
+  });
+
+  it("still honours resolvePublisher's own per-org refusal when there is no override at all", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    config.social.publisher.capabilityDrivers = {};
+    // The org row names a driver this deployment does not run — same refusal as resolvePublisher's
+    // own test above, reached through the capability-aware entry point this time.
+    expect(() => resolvePublisherForCapability("mixpost", "schedule")).toThrowError(/is not registered|not registered/);
+    try {
+      resolvePublisherForCapability("mixpost", "schedule");
+    } catch (e) {
+      expect((e as SocialPublisherError).code).toBe("unknown_publisher");
+    }
   });
 });
