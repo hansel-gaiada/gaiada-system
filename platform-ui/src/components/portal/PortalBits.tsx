@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Eyebrow } from "@/components/ui";
-import { clientStatus, statusTone, type PortalTone } from "@/lib/portal";
+import { clientStatus, statusTone, socialReviewStatusLabel, socialReviewStatusTone, type PortalTone, type SocialReviewStatus } from "@/lib/portal";
 
 // Small presentational pieces shared by every portal page. Server components (no "use client"): they
 // render text and links and hold no state, so shipping them to the browser would be pure cost.
@@ -49,6 +49,31 @@ export function PortalStatus({ status, tone }: { status: string | null | undefin
         style={{ width: 7, height: 7, borderRadius: "50%", background: `var(--status-${t})` }}
       />
       {clientStatus(status)}
+    </span>
+  );
+}
+
+/** SMM-31/32 — the SAME pill `PortalStatus` draws, but labelled from `socialReviewStatusLabel`
+ *  instead of `clientStatus`: the general map has no entry for `changes_requested`/`withdrawn` in
+ *  this review-specific sense, and its `pending` entry ("Not started") is actively wrong here — a
+ *  review that is `pending` is waiting on the CLIENT'S OWN decision, not unstarted work. A second,
+ *  small component rather than teaching `PortalStatus`/`clientStatus` a status vocabulary that only
+ *  makes sense for this one BFF surface. */
+export function PortalSocialReviewStatus({ status }: { status: SocialReviewStatus }) {
+  const t = socialReviewStatusTone(status);
+  return (
+    <span
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        font: "500 12px/1 var(--font-body)", whiteSpace: "nowrap",
+        color: `var(--status-${t}-fg)`,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{ width: 7, height: 7, borderRadius: "50%", background: `var(--status-${t})` }}
+      />
+      {socialReviewStatusLabel(status)}
     </span>
   );
 }

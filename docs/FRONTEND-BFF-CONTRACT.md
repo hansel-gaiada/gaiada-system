@@ -1535,7 +1535,7 @@ Portal view for client-submitted change requests + staff triage queue.
 | ⛔ | GET | `/api/:t/modules/webdev/provisioned-sites/:id` | `SiteDto` (single row). Authz: `webdev_provisioned_site` read. |
 | ⛔ | POST | `/api/:t/modules/webdev/provisioned-sites/:id/reconcile` | `{} → SiteDto`. Re-drive the poller synchronously; same logic as `POST /provision` detached poll but on-demand and blocking. Authz: `webdev_provisioned_site` reconcile (different action, can cause egress). |
 
-### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend, NO UI yet (SMM-32 next)**
+### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend; portal UI IN PROGRESS (SMM-32)**
 
 The client's own decide half of §19's client-review stage; the staff ask/read/withdraw half lives on
 `modules/social/social.controller.ts` (§19). Modelled on §16's own gate-decide pattern
@@ -1554,6 +1554,19 @@ recording a payment.
 
 Not a signing act: `approve_post` carries no `requireSigner()` gate, matching `request_change`'s own
 ratified reasoning (§16f) — do not add one "for consistency" with `sign`/`pay`.
+
+**UI consumer (SMM-32, this pass):** `platform-ui/src/lib/portal.ts` (`PortalSocialReview` +
+`socialReviewStatusLabel`/`describeSocialReviewError`), `portal-data.ts`
+(`listPortalSocialReviews`/`getPortalSocialReview` — the latter derived from the list read, since
+this surface has no dedicated single-review GET), `portalActions.ts`
+(`portalDecideSocialReview`, `useActionState` shape, not the void gate-decide shape — the client
+must see a genuine 409 if a race lands a different decision after the review already resolved).
+Pages: `(portal)/portal/social-reviews/page.tsx` (list, pending-first) +
+`[reviewId]/page.tsx` (detail + decide, rendering `PortalSocialReviewDecideForm` ONLY while
+`status === 'pending'` — a decided review has no decide control anywhere on the page). No `topics`
+entry was added to `PortalTopic`/`PortalLive` for this surface — `portal-live.service.ts` was not
+touched by SMM-31, so there is no SSE frame to filter on; the pages rely on `PortalLive`'s own
+unconditional idle poll instead of inventing a topic string nothing emits.
 
 ---
 
@@ -3018,7 +3031,8 @@ scope) is **BARRED**: it is absent from the executable registry and from
 `execution_status='not_applicable'` forever. Belt and braces, the free tool's own precondition
 refuses a metered-network variant with `metered_network_requires_metered_tool` rather than spending.
 
-**Client review stage (SMM-31, D-16) — BUILT, backend only.** Cerbos kind `social_client_review`
+**Client review stage (SMM-31/32, D-16) — BUILT, staff side now consumed by the Composer/Calendar
+(SMM-32).** Cerbos kind `social_client_review`
 (staff side) / `portal` action `approve_post` (client side — see §16g). NOT a 7th stage in the table
 above: `PUBLISH_PRECONDITION_STAGES` is unchanged and pinned. When the caller's variant resolves to
 an engagement with `toolScope.posting.requiresClientOk` set, `GET .../publish-preconditions` (and
@@ -3038,6 +3052,20 @@ paths above): `client_review_not_requested` (requiresClientOk is set, nobody has
 `client_review_stale` (the client approved, but the content changed since — `reviewedArgsSha256` no
 longer matches the variant's live `argsSha256`; D-15's edit-invalidates-approval rule, restated for
 the client's own side of the same content).
+
+**UI consumer (SMM-32, this pass):** `platform-ui/src/lib/socialShared.ts` mirrors
+`CLIENT_REVIEW_REFUSAL` by hand (same reasoning `PUBLISH_PRECONDITION_STAGES`'s own copy gives) plus
+`evaluateClientReviewState` — a client-safe re-implementation of `evaluateClientReviewPrecondition`
+(same five-way branch, same staleness check against the variant's live `argsSha256`), all five
+tokens rendered via `REFUSAL_LABELS`/`describeRefusal`. `lib/social.ts#getClientReview` reads the
+staff endpoint; `lib/socialActions.ts#requestClientReview`/`withdrawClientReview` write it.
+`components/social/VariantCard.tsx`'s new `ClientReviewPanel` renders the current state per variant
+(ask / re-ask / withdraw, gated on the `social.client_review.{request,withdraw}` capability mirror)
+and doubles as the honest renderer for `stage:"client_review"` on the EXISTING publish-preconditions
+preview button (the `stage`/`reason` pair is data either way). `CalendarGrid.tsx`'s chips show only
+the RAW status (never `stale`) — `listPosts`'s roll-up carries no `argsSha256` to compare against,
+so the calendar cannot detect staleness without a fabricated field; only the Composer (which reads
+the full variant) renders `client_review_stale`.
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,

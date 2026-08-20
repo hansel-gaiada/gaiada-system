@@ -60,11 +60,11 @@
 //    `composer/[postId]/page.tsx`'s `BackendPending` stands; only the READ side of the gap closes
 //    here.
 import { platformFetch, PlatformError } from "./platform";
-import { EMPTY_TOOL_SCOPE } from "./socialShared";
+import { EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW } from "./socialShared";
 import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
   SocialCampaign, SocialKpiTarget, SocialPost, SocialPostStatus, SocialPostDetail,
-  VariantValidationResult, SocialAccount, PublishPreconditionResult,
+  VariantValidationResult, SocialAccount, PublishPreconditionResult, ClientReviewState,
 } from "./socialShared";
 
 export * from "./socialShared";
@@ -205,4 +205,16 @@ export const getPublishPreconditions = async (
 ): Promise<Guarded<PublishPreconditionResult | null>> => {
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/publish-preconditions`, u), null);
   return { ...r, data: asObject<PublishPreconditionResult>(r.data) };
+};
+
+// ── client review (SMM-31/32, D-16) — staff side read, `social.client_review.read` ─────────────────
+//
+// `GET variants/:variantId/client-review` answers `{status:'not_requested'}` (data, not a 404) when
+// nobody has ever asked — `readGuarded`'s own 404 fallback would ALSO be `not_requested`-shaped, but
+// the real endpoint never actually 404s for a valid variant id, so this exists mainly to give a 403
+// (module-staff denied `social.client_review.read`, though every current bundle grants it) or a
+// dead/absent variant id the same honest `forbidden`/fallback treatment every other reader here uses.
+export const getClientReview = async (u: string, t: string, variantId: string): Promise<Guarded<ClientReviewState>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/client-review`, u), NOT_REQUESTED_REVIEW);
+  return { ...r, data: asObject<ClientReviewState>(r.data) ?? NOT_REQUESTED_REVIEW };
 };

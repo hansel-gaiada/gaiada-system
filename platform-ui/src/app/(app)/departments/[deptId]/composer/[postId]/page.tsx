@@ -9,7 +9,7 @@ import { AccessDenied } from "@/components/social/AccessDenied";
 import { PostFieldsForm } from "@/components/social/PostFieldsForm";
 import { VariantCard } from "@/components/social/VariantCard";
 import { BackendPending } from "@/components/BackendPending";
-import { getPost, listAccounts } from "@/lib/social";
+import { getPost, listAccounts, getEngagementScope, getClientReview } from "@/lib/social";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string; postId: string }>;
@@ -46,6 +46,10 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
   const post = result.data;
 
   const canDeletePost = can(me, "social.post.delete", tenant);
+  // SMM-31/32 — the client sign-off gate. `request`/`withdraw` are UI hints only; Cerbos is the
+  // real boundary (same discipline every other `can()` gate on this page already follows).
+  const canRequestReview = can(me, "social.client_review.request", tenant);
+  const canWithdrawReview = can(me, "social.client_review.withdraw", tenant);
 
   // Quota strips (SMM-12) read the SMM-05 connector registry so each variant can show its own
   // account's live quota probe. A 403 here is rendered per-variant (QuotaStrip's own honesty
@@ -53,6 +57,18 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
   // being told plainly that the quota figure is unavailable, never a fabricated zero.
   const accounts = await listAccounts(userId, tenant);
   const accountById = new Map(accounts.data.map((a) => [a.id, a]));
+
+  // `toolScope.posting.requiresClientOk` — ONE value for the whole post (it lives on the
+  // engagement, not per-variant), read once here rather than once per VariantCard.
+  const scope = await getEngagementScope(userId, tenant, post.engagementId);
+  const requiresClientOk = scope.data.toolScope.posting.requiresClientOk;
+
+  // Client-review state per variant (SMM-31/32) — a real endpoint read per variant (never a
+  // fabricated rollup field; the BFF's `getPost` does not join this table at all), bounded by
+  // this one post's own variant count, same N-calls-per-post shape the account lookup above
+  // already accepts for quota strips.
+  const clientReviews = await Promise.all(post.variants.map((v) => getClientReview(userId, tenant, v.id)));
+  const reviewByVariantId = new Map(post.variants.map((v, i) => [v.id, clientReviews[i].data]));
 
   return (
     <>
@@ -71,6 +87,8 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
               <VariantCard
                 key={v.id} tenantId={tenant} variant={v} canDelete={canDeletePost}
                 account={accountById.get(v.accountId)} accountsForbidden={accounts.forbidden}
+                clientReview={reviewByVariantId.get(v.id)!} requiresClientOk={requiresClientOk}
+                canRequestReview={canRequestReview} canWithdrawReview={canWithdrawReview}
               />
             ))}
           </div>

@@ -32,7 +32,22 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { StatusBadge } from "@/components/ui";
 import { rescheduleVariants, type RescheduleVariantOutcome } from "@/lib/socialActions";
-import { describeRefusal, type SocialPost } from "@/lib/socialShared";
+import { describeRefusal, type SocialPost, type ClientReviewStatus } from "@/lib/socialShared";
+
+// SMM-31/32 — the client sign-off state per variant, in words a staff member reads at a glance. Only
+// the RAW status (never "stale") is rendered here: `listPosts`'s roll-up (`SocialPostVariantSummary`)
+// carries no `argsSha256`, so this component has no live hash to compare `reviewedArgsSha256`
+// against — the same gap this file's own header already names for `network`. Claiming staleness
+// without that comparison would be exactly the "confident wrong answer" the root guide's
+// frontend-first-drift trap warns against; the Composer's `VariantCard` (which HAS the live hash)
+// is the one place that correctly renders `client_review_stale`. Only rendered for a status that
+// isn't the default steady state — a "not requested" badge on every chip would be noise.
+const CLIENT_REVIEW_CHIP_LABEL: Partial<Record<ClientReviewStatus, string>> = {
+  pending: "Client: pending",
+  approved: "Client: approved",
+  changes_requested: "Client: changes requested",
+  withdrawn: "Client: withdrawn",
+};
 
 export interface CalendarGridDay {
   key: string;
@@ -41,7 +56,7 @@ export interface CalendarGridDay {
 }
 
 export function CalendarGrid({
-  tenantId, deptId, gridDays, byDay, unscheduled, canReschedule,
+  tenantId, deptId, gridDays, byDay, unscheduled, canReschedule, reviewByVariantId,
 }: {
   tenantId: string;
   deptId: string;
@@ -52,6 +67,10 @@ export function CalendarGrid({
    *  Dragging IS an edit (it calls `updateVariant`/`updatePost`), so it rides the identical
    *  capability rather than inventing a `social.reschedule` key the catalog does not define. */
   canReschedule: boolean;
+  /** SMM-31/32 — client review status per variant id, for variants whose engagement requires
+   *  client sign-off (the page only bothers fetching this bounded subset — see its own header).
+   *  Absent entries (including every "not_requested" one) render no chip at all. */
+  reviewByVariantId: Record<string, ClientReviewStatus>;
 }) {
   const router = useRouter();
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -155,6 +174,7 @@ export function CalendarGrid({
                 <PostChip
                   key={p.id} post={p} deptId={deptId} draggable={canReschedule && !pending}
                   onDragStart={() => setDraggingId(p.id)} onDragEnd={() => setDraggingId(null)}
+                  reviewByVariantId={reviewByVariantId}
                 />
               ))}
             </div>
@@ -173,6 +193,7 @@ export function CalendarGrid({
                 <PostChip
                   post={p} deptId={deptId} draggable={canReschedule && !pending} inline
                   onDragStart={() => setDraggingId(p.id)} onDragEnd={() => setDraggingId(null)}
+                  reviewByVariantId={reviewByVariantId}
                 />
               </li>
             ))}
@@ -189,7 +210,7 @@ function dateKeyOf(iso: string): string {
 }
 
 function PostChip({
-  post, deptId, draggable, inline, onDragStart, onDragEnd,
+  post, deptId, draggable, inline, onDragStart, onDragEnd, reviewByVariantId,
 }: {
   post: SocialPost;
   deptId: string;
@@ -197,8 +218,13 @@ function PostChip({
   inline?: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
+  reviewByVariantId: Record<string, ClientReviewStatus>;
 }) {
   const approvedCount = post.variants.filter((v) => v.status === "approved").length;
+  // SMM-31/32 — the distinct client-review states across this post's variants (usually one, but a
+  // multi-network post can have several), de-duplicated so two instagram+facebook variants both
+  // "pending" render ONE chip, not two identical ones.
+  const reviewStates = [...new Set(post.variants.map((v) => reviewByVariantId[v.id]).filter((s): s is ClientReviewStatus => Boolean(s) && s in CLIENT_REVIEW_CHIP_LABEL))];
   return (
     <Link
       href={`/departments/${deptId}/composer/${post.id}`}
@@ -222,6 +248,22 @@ function PostChip({
           post.variants.map((v) => <StatusBadge key={v.id} label={v.status} />)
         )}
       </span>
+      {reviewStates.length > 0 && (
+        <span style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+          {reviewStates.map((s) => (
+            <span
+              key={s}
+              style={{
+                font: "600 10px var(--font-body)", padding: "1px 5px",
+                color: s === "approved" ? "var(--status-positive-fg, #1a7f37)" : s === "pending" ? "var(--status-caution-fg, #9a6700)" : "var(--status-critical-fg, #b3261e)",
+                border: `0.5px solid ${s === "approved" ? "var(--status-positive-fg, #1a7f37)" : s === "pending" ? "var(--status-caution-fg, #9a6700)" : "var(--status-critical-fg, #b3261e)"}`,
+              }}
+            >
+              {CLIENT_REVIEW_CHIP_LABEL[s]}
+            </span>
+          ))}
+        </span>
+      )}
     </Link>
   );
 }

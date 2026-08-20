@@ -380,6 +380,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal/projects`
 - `/portal/projects/[projectId]`
 - `/portal/requests`
+- `/portal/social-reviews`
+- `/portal/social-reviews/[reviewId]`
 - `/portal/timeline`
 - `/print/reports/[jobToken]`
 - `/project-management`

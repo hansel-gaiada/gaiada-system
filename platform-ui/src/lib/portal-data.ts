@@ -21,7 +21,7 @@ import { platformFetch, PlatformError } from "./platform";
 import type {
   PortalChangeRequest, PortalContract, PortalContractDetail, PortalDeliverable, PortalInvoice,
   PortalInvoiceDetail, PortalMilestone, PortalOverview, PortalProfile, PortalProject, PortalProjectDetail,
-  PortalRun, PortalRunDetail, PortalTimelineEvent,
+  PortalRun, PortalRunDetail, PortalSocialReview, PortalTimelineEvent,
 } from "./portal";
 
 /** Degrade "not found"/"not yours" to a fallback; let everything else propagate. NOT extended to 403:
@@ -150,4 +150,44 @@ export async function getPortalChangeRequest(
   id: string,
 ): Promise<PortalChangeRequest | null> {
   return safe(platformFetch<PortalChangeRequest>(`/api/${tenant}/portal/change-requests/${id}`, userId), null);
+}
+
+// ── SMM-31/32: social post client-review (D-16) ────────────────────────────────────────────────────
+
+/** The caller's own social-post reviews (own client's, via `resolvePortalScope` — never re-derived
+ *  here), plus WHY the list is empty when it is — same shape as `listPortalRuns`/
+ *  `listPortalChangeRequests` above, so a staff member browsing `/portal/social-reviews` gets the
+ *  teach-state rather than a silently empty list that reads as "no client has ever been asked to
+ *  review a post." `status` is optional and forwarded verbatim (the BFF's own `?status=` filter). */
+export async function listPortalSocialReviews(
+  userId: string,
+  tenant: string,
+  status?: string,
+): Promise<{ reviews: PortalSocialReview[]; isPortalClient: boolean }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  try {
+    return {
+      reviews: await platformFetch<PortalSocialReview[]>(`/api/${tenant}/portal/social-reviews${qs}`, userId),
+      isPortalClient: true,
+    };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 403) return { reviews: [], isPortalClient: false };
+    if (e instanceof PlatformError && e.status === 404) return { reviews: [], isPortalClient: true };
+    throw e;
+  }
+}
+
+/** One review, by id. The BFF has no dedicated single-review GET (§16h's own contract: list + decide
+ *  only, same minimal surface `PortalController.decideGate`'s own kind uses elsewhere) — the list is
+ *  capped at 200 and scoped to the caller's own clients already, so finding one row in it is the
+ *  correct read rather than inventing an endpoint the backend does not have. Returns `null` for an
+ *  id outside the caller's own scope, identical in shape to a 404 on every other portal detail
+ *  read — never distinguishing "not yours" from "does not exist" (0075's rule, restated in §16h). */
+export async function getPortalSocialReview(
+  userId: string,
+  tenant: string,
+  id: string,
+): Promise<PortalSocialReview | null> {
+  const { reviews } = await listPortalSocialReviews(userId, tenant);
+  return reviews.find((r) => r.id === id) ?? null;
 }

@@ -30,15 +30,17 @@ not afterwards.
 |---|---|---|
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
-| P2 inbox + client approval | **1** | 6 |
+| P2 inbox + client approval | **2** | 6 |
 | PD `direct` driver (SMM-38) | 0 | 5 phases |
 | P3 content ops | 1 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.3 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
-live network publishing **deferred to staging** (D-23); client-review stage **backend DEV-VERIFIED**,
-UI not started (SMM-32).
+Module: `social-media 0.5.4 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
+end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
+via the portal driven in a real browser and observed landing correctly in the staff Composer in the
+SAME running process.
 
 ---
 
@@ -77,7 +79,7 @@ UI not started (SMM-32).
 | # | Ticket | State | Gate |
 |---|---|---|---|
 | SMM-31 | Client review backend: `social_post_client_reviews` state machine, portal decide, `portal.approve_post`, idempotent decision | ✅ **merged** | backend DEV-VERIFIED; **318 / 0 / 0** re-run on `main` by the orchestrator, `tsc` clean. UI is SMM-32's, tracked separately |
-| SMM-32 | Client review portal UI: preview + approve / request-changes | ⬜ | SMM-31 |
+| SMM-32 | Client review portal UI: preview + approve / request-changes | ✅ **merged** | UI DEV-VERIFIED — 2392 / 0 / 0 platform-ui, `tsc` clean; browser-driven (see evidence below) |
 | SMM-15 | Inbox sync (`pullInbox`, idempotent upsert) | ⬜ | **SMM-38** — Postiz has ZERO inbound surface (OQ-4) |
 | SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ⬜ | SMM-15 |
 | SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ⬜ | SMM-15; should set `neverAutoRetry` |
@@ -100,6 +102,117 @@ deleted and the corresponding test failed exactly as predicted, then restored. *
 (was 289/0/0). `tsc --noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`
 green. `test:iam-chain-alignment` green (25/25, unaffected). Full detail:
 `docs/modules/MODULES.md`'s social-media 0.5.3 entry, `docs/FRONTEND-BFF-CONTRACT.md` §19/§16h.
+
+**SMM-32 evidence (2026-08-20, senior-fe).** Worktree started at the merge-base BEFORE SMM-31 landed
+on `main` (a cut-before-commit hazard, per this file's own cross-session-hazards section) —
+`git merge main` (fast-forward, clean) pulled the real backend contract in before any UI code was
+written; flagged here rather than silently worked around, since guessing at an unmerged contract is
+exactly the "frontend-first drift" this program keeps naming.
+
+Portal: `lib/portal.ts` (`PortalSocialReview`, `socialReviewStatusLabel`, `describeSocialReviewError`),
+`portal-data.ts` (`listPortalSocialReviews`/`getPortalSocialReview` — the latter derived from the list,
+since §16h has no single-review GET), `portalActions.ts` (`portalDecideSocialReview`,
+`useActionState` shape — NOT the void gate-decide shape, because a genuine 409 must be shown, not
+swallowed), `PortalSocialReviewDecideForm.tsx`, `PortalBits.tsx`'s new `PortalSocialReviewStatus`, and
+two new routes: `/portal/social-reviews` (list, pending-first) + `/portal/social-reviews/[reviewId]`
+(detail + decide). New "Post reviews" portal tab, deliberately un-badged (the count would need a new
+always-on fetch on every portal page load; `portal/overview`'s `needsYou` was not extended for this
+surface by SMM-31).
+
+Staff (composer + calendar): `socialShared.ts` mirrors `CLIENT_REVIEW_REFUSAL` (5 tokens) by hand plus
+a NEW `evaluateClientReviewState` — a client-safe re-implementation of
+`evaluateClientReviewPrecondition` (same 5-way branch + the staleness check against the live
+`argsSha256`) — and widens `PublishPreconditionResult.stage` to accept `"client_review"` (the REAL dry
+-run response can carry it; this is data the EXISTING "Check now" preview button already renders once
+the type/labels exist — no new UI needed for that path). `lib/social.ts#getClientReview` +
+`lib/socialActions.ts#requestClientReview`/`withdrawClientReview`. `VariantCard.tsx`'s new
+`ClientReviewPanel`: ask / re-ask / withdraw, gated on `social.client_review.{request,withdraw}`.
+`CalendarGrid.tsx`'s chips show the RAW status only (never `stale` — the rollup carries no
+`argsSha256` to compare against; only the Composer, which reads the full variant, renders that token).
+Three new `rbac.ts` capabilities (`social.client_review.{read,request,withdraw}`), verified against
+`role-permission-bundles.json` (not inferred): `social_staff` read+request only, `social_manager`/
+`company_admin`/`manager`/`platform_admin` all three, `group_executive` read only (wholesale-excepted
+from the per-pair parity guard, same as every other `social.*` cap for that role) — `rbac-capability-map.ts`
+entries added so `rbac-capability-parity.test.ts` (742 cases) stays green rather than silently
+un-covering three new grantable permissions.
+
+**A real, pre-existing DEMO_MODE gap found and closed, not introduced by this ticket**:
+`lib/demoSocial.ts` never had a `GET engagements/:id/scope` route at all — `lib/social.ts`'s
+`getEngagementScope` silently fell through every dispatcher to `readGuarded`'s `EMPTY_SCOPE`
+fallback (`requiresClientOk: false`). Invisible for the Composer's own panel (renders regardless of
+the toggle, using it only for one line of copy) but it fully defeated the Calendar's chip feature,
+which gates its per-variant review fetch on that exact flag — and, unrelated to this ticket, the
+pre-existing engagement-scope editor page (`departments/[deptId]/engagements/[engagementId]`) was
+silently reading the same fallback the whole time. Closed with one `GET` route; not a migration, not
+a contract change — a fixture gap.
+
+DEMO_MODE state added, `globalThis`-pinned from the start (learned the hard way by `demoSocial.ts`
+itself on 2026-08-20, restated in this pass rather than repeated): a `clientReviews` array on the
+SAME `SocialStore` the existing engagements/accounts/posts already share, plus a second engagement
+(`soc-eng-2`, `requiresClientOk: true`, kept SEPARATE from the original `soc-eng-1` specifically so
+SMM-12's own "healthy dry run passes ok:true" demo scenario was not disturbed) with four new
+variants seeded across `pending`/`approved-but-stale`/`changes_requested`/`not_requested` — every
+one of the five refusal tokens is reachable by simply opening the Composer, and the
+request→pending→withdraw→re-request loop is drivable live starting from the one `not_requested`
+seed. A second dispatch function, `socialClientReviewPortalDemo` (new export, wired into
+`demoFixtures.ts` before `portalDashboardDemo`), answers `/api/:t/portal/social-reviews[...]`,
+reading/writing the IDENTICAL store — never a second copy — so a staff "ask" and a client "decide" in
+two separate browser sessions against the SAME running dev server agree on the one row.
+
+**Driven in a real browser (`DEMO_MODE=1 npm run dev`, Playwright, headless Chromium; `next build`
+NOT re-run this pass per the ticket's own "don't run it repeatedly" instruction — `tsc`+vitest are
+the gate here):**
+- **Composer, all 5 tokens as themselves.** `pending` → *"Waiting on the client — they haven't
+  decided yet."* · `changes_requested` → the token's sentence PLUS the client's own comment
+  ("Please swap the second photo…") · `client_review_stale` → *"The client approved this, but the
+  content has changed since — their approval no longer matches what's here now. Ask again before
+  this can publish."* (the exact "approved something that then changed" honesty the ticket brief
+  named). `not_requested` → "Ask client to review" button.
+- **The full staff request → pending → withdraw → withdrawn → re-request → pending loop**, driven
+  live on one variant (`soc-var-10`): each click's resulting state read back correctly, proving the
+  idempotent upsert reuses the SAME row rather than creating a second one.
+- **The EXISTING "Check now" publish-precondition preview** (unmodified UI, only the type/label
+  widening) correctly renders `stage: "client_review"` with the honest sentence — proving the
+  widened `PublishPreconditionResult.stage` union and the new `REFUSAL_LABELS` entries reach that
+  pre-existing code path with zero new rendering logic.
+- **Calendar chips** show `Client: pending` / `Client: approved` / `Client: changes requested` next
+  to the ordinary status badges, on both scheduled and unscheduled posts — confirmed the chip on the
+  STALE post reads `Client: approved` (the raw status), never `stale`, exactly matching the
+  documented "the calendar cannot detect staleness" limitation.
+- **Portal: list + decide, both directions.** `/portal/social-reviews` (logged in as
+  `dana@northwind.example` → `demo-client`) showed the one pending review first and the two
+  resolved ones under "Past reviews" with the correct labels ("Awaiting your decision" /
+  "Changes requested" / "Approved"). Approved the pending one via the real decide form.
+- **The idempotent-decision / no-second-decision guarantee, driven as a genuine two-tab race**, not
+  merely asserted: two browser tabs opened the SAME pending review; tab 1 approved it; tab 2 (still
+  holding the now-stale pending form, never told to refresh) submitted `changes_requested` against
+  the ALREADY-approved review and received the honest conflict message — *"This was already decided,
+  and it doesn't match what you just submitted — refresh the page to see the current status."* —
+  never a crash, never a silent flip. Reloading tab 2 afterwards showed `Approved`, `Decided 20 Aug
+  2026`, and **no decide buttons anywhere on the page** — the resolved-review-prevents-a-second-
+  decision property, proven by removing the control from the DOM entirely, not just by disabling it.
+- **Cross-session consistency, end to end.** After the portal decision above, re-opening the SAME
+  variant's Composer card (a SEPARATE staff browser session, same running dev server) showed *"The
+  client approved this exact content on 8/20/2026"* in green, and the "Check now" preview correctly
+  advanced PAST the client-review gate to the next real blocker (`unconsumed` / `variant_not_approved`
+  — the variant still needs a staff-side WS4 approval before it can actually publish) — proving the
+  gate composition (client-review FIRST, then the six-stage chain) holds together across two
+  independent sessions against one shared store, not just within one page's local state.
+
+Test counts: **2392 / 0 / 0** `platform-ui` (baseline 2329/0/0, +63: `socialShared.test.ts`'s new
+`CLIENT_REVIEW_REFUSAL`/`evaluateClientReviewState` cases, `rbac.test.ts` unaffected,
+`rbac-capability-parity.test.ts` 742/742 including the three new capability pairs). `tsc --noEmit`
+clean. `next build` was **not** re-run this pass (see above); `DEMO_MODE=1 npm run dev` was used for
+all browser verification instead.
+
+**Anything the spec did not answer, left as follow-ups, not silently decided:** (1) the portal's
+"Post reviews" tab carries no pending-count badge — would need a new always-on fetch every portal
+page load, or a `portal/overview` backend extension SMM-31 did not make; (2) no SSE topic exists for
+this surface (`portal-live.service.ts`'s `PortalTopic` untouched), so the page relies on `PortalLive`'s
+own unconditional idle poll rather than a pushed refresh; (3) the calendar's per-variant review fetch
+is bounded by "which distinct engagements in view require client-ok" but is still an extra N reads
+per page load beyond the existing account-lookup N — acceptable at this data scale, flagged as a real
+(if minor) cost the same way this file already flags the roll-up's missing `network` field.
 
 ## PD — the `direct` driver (D-20) ⬜
 
@@ -157,7 +270,7 @@ security decision the owner accepted with D-20, not a convenience.
 | Postiz OAuth finalization route — "reasoned from source, not yet driven" | whoever first holds a live app credential |
 | AGPL counsel sign-off before any client account connects (OQ-3) | owner |
 | Fork exception **D-21 granted but not applied** — TikTok `creator_info` + IG quota probe (~15 lines) | unscheduled |
-| rbac artifact CRLF: 4 files carry CRLF in the index, REGEN guards fail locally | own small ticket, when no IAM session is live |
+| ~~rbac artifact CRLF~~ — **CLOSED 2026-08-19 by another session**: `.gitattributes` now pins `platform-nest/src/rbac/*.json` to `eol=lf`, same fix as the `*.sh`/`*.go` entries | done |
 
 ## Owner decisions — do not relitigate
 
