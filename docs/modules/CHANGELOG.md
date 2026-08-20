@@ -77,6 +77,24 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-20 — SMM-33 + SMM-24 (docs half)**, `social-media 0.5.6` (docs-only, no version change).
+  Capability inventory + eval register (SMM-33) and the outstanding BFF-rows/AGPL-gap half of
+  SMM-24. New `docs/modules/social-capability-inventory.md`: one row per capability (endpoint · MCP
+  tool · D14 impact class · typed refusal vocabulary · `work_activity` row) across P0 through the
+  merged half of P3, built from `social.controller.ts` / `social-client-review-portal.controller.ts`
+  / `modules/social/index.ts` / `approval-executables.ts` directly, companion to SMM-14's proven
+  golden-case table rather than a duplicate. Two structural gaps stated plainly rather than smoothed
+  over: the entire client-review capability group has no MCP tool, and the post-status webhook
+  callback writes no `work_activity` row with no stated reason. Corrected the MCP tool count (18,
+  not the 17 the tracker had estimated). `docs/FRONTEND-BFF-CONTRACT.md` §19: added the dispatch
+  endpoint row, the webhook-intake row, and SMM-21's two metrics-read rows — each verified against
+  the controller source read directly this pass, none carried over from a prior claim. The AGPL §13
+  source-offer gap was RE-CONFIRMED (staff console has no footer surface anywhere) and a placement
+  recommended (`platform-ui/src/app/(app)/layout.tsx`, mirroring `PortalShell.tsx`'s own footer) —
+  not built; left for the owner + senior-uiux. This worktree fast-forwarded onto `main` first
+  (clean, no divergent commits) to pick up SMM-21's already-merged commit before reading any code —
+  otherwise this pass would have inventoried a tree missing `metrics-job.ts` entirely. Full detail:
+  `docs/plans/smm-tracker.md`'s SMM-33/SMM-24 evidence block.
 - **2026-08-20 — SMM-21**, `social-media 0.5.5 -> 0.5.6`, `platform-ui 0.28.3 -> 0.28.4` (IN
   PROGRESS). Metrics: `pullMetrics` nightly ingest + the Analytics tab. Schema (`social_metrics_daily`/
   `social_post_metrics`) was already in `0105` — no migration. New
