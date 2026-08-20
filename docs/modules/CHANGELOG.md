@@ -159,6 +159,23 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.055.0109a` - 2026-08-20 - a department head can run their own department
+
+Manifest (counter +2, 0107 -> 0109): `platform-ui 0.26.0 -> 0.27.0`, `monitoring -> 0.2.0` (another
+session's catalog completion, in this cut's window — its migration
+`202608191417_iam_monitoring_permissions_completion.sql` is the FIRST file to use the timestamp naming the
+scheme moved to yesterday).
+
+P2-10, P2-11 and P2-12-FE. With these every ticket in the IAM Phase 2 wave (P2-01 … P2-17) is closed;
+what remains of the program is Phase 3 and full Phase 4, both scoped out of this wave by design §11.
+
+The owner requirement that started the wave was "the department head handles permissions for their own
+department". `/organization/access` is that surface, and the interesting part is not the roster — it is
+that the two things a dept head is NOT allowed to do now come with the mechanism for doing them properly.
+Placing someone directly is refused with `assignment_request_required`, and the UI answers with "Propose
+instead". Granting above their ceiling is refused, and the UI answers with "Request override". Both were
+already built server-side; until now nothing surfaced them, so the refusal was a wall rather than a door.
+
 ### `Alpha 01.054.0107a` - 2026-08-19 - IT can see who still needs a login
 
 Manifest (counter +1, 0106 -> 0107): `platform-ui 0.25.1 -> 0.26.0`. No migration.
@@ -2900,6 +2917,43 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.27.0] - 2026-08-20 - IN PROGRESS (P2-10 / P2-11 / P2-12-FE: the three Phase 2 surfaces)
+Shared layer first, because all three write the same endpoints: `lib/iam.ts` (readers),
+`lib/iamActions.ts` (every write plus ONE translation of the typed refusal vocabulary),
+`components/iam/IamAction.tsx` (one control, three outcomes). A per-page copy of "POST, then humanize the
+refusal" is three chances to read `ceiling_exceeded` differently, and that vocabulary IS the contract.
+- 🔴 **THE REFUSALS ARE THE FEATURE.** `assignment_request_required` and `ceiling_exceeded` /
+  `override_required` are not failures — they are the server telling the operator what to do instead. Both
+  render as GUIDANCE with the follow-up control attached ("Propose instead", "Request override",
+  prefilled), in a third outcome style that is deliberately not red and deliberately not announced with
+  `role="alert"`. Colouring guidance as failure teaches an operator the system is broken while it is
+  working exactly as designed. The override is also reachable standalone: someone who already knows the
+  grant is above their ceiling should not have to trip over the wall to find the door.
+- **P2-12-FE `/organization/positions`** — the composer NEVER filters: `attachable-roles` returns
+  unattachable roles WITH a reason and they render disabled-with-reason. Orphaned seats sort FIRST (their
+  holders' access is FROZEN — escalation, not a fix), vacant next; a seat with no role-set says "confers
+  no access" in the row, because that state looks finished in a list.
+- **P2-11 `/organization/access`** — subtree roster, seats, and per-person grants with PROVENANCE. A grant
+  with `revocable: false` gets NO revoke control at all rather than a disabled one: the reconciler would
+  restore it and the operator would conclude the UI lied. Effective access is scope-level and the page
+  says so in words — IAM-05c's caveat is real, and a page implying it could answer "may they edit THIS
+  document" would be confidently wrong some of the time.
+- **`scope: "subtree"` is surfaced as a banner on both pages.** It means the server narrowed the list to
+  the caller's lead units; rendering it as the whole company tells a department head that seats they
+  cannot see do not exist.
+- **P2-10** — hire (position optional; the message says which of the two happened, because a record with
+  no seat confers nothing and no login), transfer (reports grants added AND removed — "granted 2" alone
+  reads as a promotion), terminate (requires a reason and a confirmation that states what will actually
+  happen; the endpoint accepts a bare call, but the least reversible action in the product should not be
+  one click from a table row). `/hr/people` gains an Employment column reading **"No record"** rather than
+  a blank, and counts the gap — that gap is exactly what P2-15's backfill closes.
+- **Nav lists both new pages for `people.directory`, NOT `admin.access`.** A department head's authority
+  comes from holding a lead position, which is not a capability `lib/rbac.ts` can test; gating there would
+  hide the surface from exactly the person this wave was built for. The pages render the server's refusal,
+  which is the real boundary.
+- Gates: `iam.test.ts` 10/10 (ordering and degradation — the two decisions that go invisible once they
+  work); full UI suite **2329/2329** over 148 files; `next build` clean with all four routes in the table;
+  `tsc --noEmit` clean.
 ### [0.26.0] - 2026-08-19 - IN PROGRESS (P2-14: the IT accounts console)
 - **`/it/accounts`** — the worklist ("who still needs a login, whose leaver login is still enabled") plus
   provision / disable / enable / reset-password, against P2-13's real endpoints. Default view is
