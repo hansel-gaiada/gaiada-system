@@ -17,6 +17,30 @@ export { taskDateEnvelope } from "@/lib/pm";
 // disagreed with the Urgency column next to it (which already resolved done-ness via
 // `isDoneStatus` against each task's OWN project's registry) the moment a project renamed or
 // added a done status.
+// Whole days between two "YYYY-MM-DD" dates, positive when `date` is in the PAST. Both are parsed
+// at UTC noon so no zone or DST edge can shift the answer by one, and `today` is always the
+// caller-resolved value — this module never reads a clock (same rule as the rail's `age`).
+//
+// Exists because the Target column printed "Target 20 Jul 2026" for a target 30 days gone and said
+// nothing about it: the row was already flagged at risk, and the one date that explained why read
+// as neutral. Returns null on a missing or unparseable date rather than 0 — "no target" and "due
+// today" are different facts.
+export function daysPast(date: string | null | undefined, today: string): number | null {
+  if (!date) return null;
+  const a = Date.parse(`${date.slice(0, 10)}T12:00:00Z`);
+  const b = Date.parse(`${today.slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** "30d past" / "in 9d" / "today" — the Target column's caption. Null when there is no date. */
+export function targetNote(date: string | null | undefined, today: string): { text: string; late: boolean } | null {
+  const d = daysPast(date, today);
+  if (d === null) return null;
+  if (d === 0) return { text: "today", late: false };
+  return d > 0 ? { text: `${d}d past`, late: true } : { text: `in ${-d}d`, late: false };
+}
+
 export function tallyProjectTasks(
   tasks: { projectId: string; status: string }[],
   statusesByProject: Record<string, ProjectStatus[]>,

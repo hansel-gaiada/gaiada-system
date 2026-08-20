@@ -22,6 +22,7 @@
 // everywhere it appears. The group's `key` ("work") and every tab's `path` are unchanged —
 // only the label moved, see PM_RENAMES in pmVocabulary.ts.
 import type { IconName } from "@/components/shell/icons";
+import type { ToolIconName } from "@/components/departments/toolIcons";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 
 export interface DeptTab {
@@ -51,8 +52,14 @@ export interface DeptLauncher {
   desc: string;
   /** Where the button opens (new tab). External tool / deep link. */
   url: string;
-  /** Small brand glyph shown on the launcher card. */
+  /** Small brand glyph — the fallback, and still what a tool with no vendored mark renders. */
   glyph: string;
+  /** Vendored brand SVG (`components/departments/toolIcons.tsx`). Omit when the icon set has no
+   *  mark for this tool: it then renders `glyph`, which is honest, rather than a near-miss logo.
+   *  Two launchers MAY share a mark (owner decision 2026-08-19: the Claude products all wear the
+   *  sunburst, as they do everywhere else) — the tooltip is then the only thing that separates
+   *  them, which is accepted for products of one family. */
+  icon?: ToolIconName;
 }
 
 export interface DeptToolkit {
@@ -138,12 +145,14 @@ const WEB_DEV: DeptToolkit = {
     CONNECTIONS_GROUP,
   ],
   launchers: [
-    { key: "claude-code", label: "Claude Code", desc: "Agentic coding in the terminal / IDE.", url: "https://claude.ai/code", glyph: "⌘" },
-    { key: "claude", label: "Claude", desc: "Chat, reason, and draft with Claude.", url: "https://claude.ai/new", glyph: "✳" },
-    { key: "claude-design", label: "Claude Design", desc: "Generate UI mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆" },
-    { key: "github", label: "GitHub", desc: "Repositories, PRs, and CI.", url: "https://github.com", glyph: "⎇" },
-    { key: "figma", label: "Figma", desc: "Design files and prototypes.", url: "https://www.figma.com", glyph: "△" },
-    { key: "vscode", label: "VS Code", desc: "Open the editor on this machine.", url: "vscode://", glyph: "‹›" },
+    // Claude Code wears the Anthropic mark; Claude and Claude Design both wear the sunburst (owner
+    // decision — it is the mark those products actually carry, and the tooltip separates them).
+    { key: "claude-code", label: "Claude Code", desc: "Agentic coding in the terminal / IDE.", url: "https://claude.ai/code", glyph: "⌘", icon: "anthropic" },
+    { key: "claude", label: "Claude", desc: "Chat, reason, and draft with Claude.", url: "https://claude.ai/new", glyph: "✳", icon: "claude" },
+    { key: "claude-design", label: "Claude Design", desc: "Generate UI mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆", icon: "claude" },
+    { key: "github", label: "GitHub", desc: "Repositories, PRs, and CI.", url: "https://github.com", glyph: "⎇", icon: "github" },
+    { key: "figma", label: "Figma", desc: "Design files and prototypes.", url: "https://www.figma.com", glyph: "△", icon: "figma" },
+    { key: "vscode", label: "VS Code", desc: "Open the editor on this machine.", url: "vscode://", glyph: "‹›", icon: "vscode" },
   ],
 };
 
@@ -171,9 +180,9 @@ const CREATIVES: DeptToolkit = {
     CONNECTIONS_GROUP,
   ],
   launchers: [
-    { key: "figma", label: "Figma", desc: "Design files and prototypes.", url: "https://www.figma.com", glyph: "△" },
+    { key: "figma", label: "Figma", desc: "Design files and prototypes.", url: "https://www.figma.com", glyph: "△", icon: "figma" },
     { key: "photopea", label: "Photopea", desc: "In-browser pixel editing.", url: "https://www.photopea.com", glyph: "◨" },
-    { key: "claude-design", label: "Claude Design", desc: "Generate mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆" },
+    { key: "claude-design", label: "Claude Design", desc: "Generate mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆", icon: "claude" },
     { key: "drive", label: "Shared Drive", desc: "Brand assets and deliverables.", url: "https://drive.google.com", glyph: "▲" },
   ],
 };
@@ -234,11 +243,14 @@ const SEO: DeptToolkit = {
     CONNECTIONS_GROUP,
   ],
   launchers: [
-    { key: "gsc", label: "Search Console", desc: "Impressions, clicks, and indexing.", url: "https://search.google.com/search-console", glyph: "◎" },
-    { key: "ga4", label: "Analytics (GA4)", desc: "Traffic and conversions.", url: "https://analytics.google.com", glyph: "▨" },
+    // Four Google properties, one Google mark in the set: Search Console takes it (it is the one
+    // whose subject IS Google search), Analytics has its own, and Ads/Looker keep their glyphs —
+    // four identical G's would be four launchers a reader cannot tell apart.
+    { key: "gsc", label: "Search Console", desc: "Impressions, clicks, and indexing.", url: "https://search.google.com/search-console", glyph: "◎", icon: "google" },
+    { key: "ga4", label: "Analytics (GA4)", desc: "Traffic and conversions.", url: "https://analytics.google.com", glyph: "▨", icon: "analytics" },
     { key: "google-ads", label: "Google Ads", desc: "Campaigns, budgets, and search terms.", url: "https://ads.google.com", glyph: "◈" },
     { key: "looker", label: "Looker Studio", desc: "Client-facing dashboards.", url: "https://lookerstudio.google.com", glyph: "▤" },
-    { key: "claude", label: "Claude", desc: "Draft copy, briefs, and narratives.", url: "https://claude.ai/new", glyph: "✳" },
+    { key: "claude", label: "Claude", desc: "Draft copy, briefs, and narratives.", url: "https://claude.ai/new", glyph: "✳", icon: "claude" },
   ],
 };
 
@@ -280,8 +292,8 @@ const SOCIAL_MEDIA: DeptToolkit = {
     CONNECTIONS_GROUP,
   ],
   launchers: [
-    { key: "claude", label: "Claude", desc: "Draft captions, hashtags, and reply copy.", url: "https://claude.ai/new", glyph: "✳" },
-    { key: "claude-design", label: "Claude Design", desc: "Generate creative mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆" },
+    { key: "claude", label: "Claude", desc: "Draft captions, hashtags, and reply copy.", url: "https://claude.ai/new", glyph: "✳", icon: "claude" },
+    { key: "claude-design", label: "Claude Design", desc: "Generate creative mockups & artifacts.", url: "https://claude.ai/new", glyph: "◆", icon: "claude" },
     { key: "drive", label: "Shared Drive", desc: "Brand assets and approved creative.", url: "https://drive.google.com", glyph: "▲" },
   ],
 };

@@ -223,6 +223,10 @@ export interface DeptKpis {
   dueSoon: number;
   blocked: number;
   progressPct: number;
+  /** How many distinct projects the blocked tasks are spread across. The strip's Blocked
+   *  caption states the actual shape of the problem ("1 task, 1 project") instead of telling
+   *  the reader to look at a number they are already looking at. */
+  blockedProjects: number;
 }
 
 // KpiStrip's four numbers (decision #12): Active/Due soon/Blocked come from
@@ -244,11 +248,29 @@ export function computeDeptKpis(
   const flags = (t: PmTask) => statusFlags(t.status, statusesByProject[t.projectId]);
   const active = tasks.filter((t) => { const f = flags(t); return !f.isDone && !f.isBlocked; }).length;
   const dueSoon = tasks.filter((t) => !flags(t).isDone && isDueSoon(t.dueDate, now)).length;
-  const blocked = tasks.filter((t) => flags(t).isBlocked).length;
+  const blockedTasks = tasks.filter((t) => flags(t).isBlocked);
+  const blocked = blockedTasks.length;
+  const blockedProjects = new Set(blockedTasks.map((t) => t.projectId)).size;
   const progressPct = projectProgressPcts.length === 0
     ? 0
     : Math.round(projectProgressPcts.reduce((a, b) => a + b, 0) / projectProgressPcts.length);
-  return { active, dueSoon, blocked, progressPct };
+  return { active, dueSoon, blocked, progressPct, blockedProjects };
+}
+
+// The ring's segments. These buckets are MUTUALLY EXCLUSIVE and sum to `total` — a ring that
+// shows a composition is lying the moment its slices double-count, and a task can be both
+// blocked and overdue. Priority is done > blocked > overdue > on track: a blocked task's problem
+// is that it cannot move, which outranks the fact that its date has also passed.
+//
+// Deliberately NOT reusing `openCount`/`atRiskReason`'s counts below: those are overlapping by
+// design (`blockedCount` there counts blocked tasks whether or not they are done, and drives the
+// atRisk flag from decision #12). Changing them to partition would move the at-risk line.
+export interface ProjectComposition {
+  done: number;
+  blocked: number;
+  overdue: number;
+  onTrack: number;
+  total: number;
 }
 
 export interface ProjectHealth {
@@ -257,6 +279,7 @@ export interface ProjectHealth {
   nextMilestone: { label: string; dueDate: string } | null;
   atRisk: boolean;
   atRiskReason?: string;
+  composition: ProjectComposition;
 }
 
 // One owned project's `HealthRingCard` data. atRisk = overdue>0 || blocked>0
@@ -283,13 +306,79 @@ export function computeProjectHealth(
   const upcoming = milestones
     .filter((m) => m.dueDate && m.status !== "done")
     .sort((a, b) => (a.dueDate as string).localeCompare(b.dueDate as string))[0];
+  const composition = tasks.reduce<ProjectComposition>((acc, t) => {
+    const f = flags(t);
+    if (f.isDone) acc.done += 1;
+    else if (f.isBlocked) acc.blocked += 1;
+    else if (isOverdue(t.dueDate, now)) acc.overdue += 1;
+    else acc.onTrack += 1;
+    acc.total += 1;
+    return acc;
+  }, { done: 0, blocked: 0, overdue: 0, onTrack: 0, total: 0 });
   return {
     progressPct,
     openCount,
+    composition,
     nextMilestone: upcoming ? { label: upcoming.name, dueDate: upcoming.dueDate as string } : null,
     atRisk,
     atRiskReason: atRisk ? reasonParts.join(" · ") : undefined,
   };
+}
+
+// ---------------- Team roster (Home's Team card) ----------------
+// The card used to print names and nothing else, which said LESS than the org chart it duplicates.
+// The load numbers here come from `dept.tasks`, already fetched on the same page for the KPI strip.
+//
+// `openCount` is "not done" (same definition as `computeProjectHealth`'s openCount), and
+// `blockedCount` is a SUBSET of it, not an addition — a blocked task is also open, so
+// "4 open · 1 blocked" means one of those four cannot move, never five tasks.
+//
+// Person axis is `assignee.responsibleId`, matching `myOpenTasks`/`myBlockedTasks` below. NOT
+// `assignee.refId`: that is who holds the ball right now (a unit, often), which is a different
+// question and would drop every task assigned to a division.
+export interface TeamMember {
+  id: string;
+  name: string;
+  openCount: number;
+  blockedCount: number;
+}
+export interface TeamGroup {
+  id: string;
+  label: string;
+  people: TeamMember[];
+}
+
+/** Sentinel group id for people placed in the department itself rather than in one of its
+ *  divisions. They were previously rendered ONLY when the department had no divisions at all
+ *  (`page.tsx`), so adding a single division made every unbucketed person disappear from the card. */
+export const NO_DIVISION_GROUP_ID = "__no-division";
+
+export function computeTeamRoster(
+  divisions: DeptDivision[],
+  people: DeptPerson[],
+  tasks: PmTask[],
+  statusesByProject: Record<string, ProjectStatus[]> = {},
+): TeamGroup[] {
+  const load = (personId: string) => {
+    let openCount = 0;
+    let blockedCount = 0;
+    for (const t of tasks) {
+      if (t.assignee?.responsibleId !== personId) continue;
+      const f = statusFlags(t.status, statusesByProject[t.projectId]);
+      if (f.isDone) continue;
+      openCount += 1;
+      if (f.isBlocked) blockedCount += 1;
+    }
+    return { openCount, blockedCount };
+  };
+  const member = (p: DeptPerson): TeamMember => ({ id: p.id, name: p.name, ...load(p.id) });
+  const groups: TeamGroup[] = divisions.map((d) => ({ id: d.id, label: d.name, people: d.people.map(member) }));
+  const placed = new Set(divisions.flatMap((d) => d.people.map((p) => p.id)));
+  const loose = people.filter((p) => !placed.has(p.id));
+  // Only when there is something in it — a department whose every person sits in a division should
+  // not grow an empty "No division" row to prove it.
+  if (loose.length > 0) groups.push({ id: NO_DIVISION_GROUP_ID, label: "No division", people: loose.map(member) });
+  return groups;
 }
 
 // ---------------- My-work rail data (P1-07, decision #12) ----------------

@@ -82,14 +82,44 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
     urgencyTier: taskUrgency({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, dept.statusesByProject[t.projectId]) }, railToday),
   }));
 
-  const waiting: RailWaitingItem[] = [
-    ...waitingFromQueue.map((i): RailWaitingItem => ({
-      id: i.id,
-      title: i.title,
-      href: i.href,
+  // How long a thing has been waiting is the ONLY urgency an approval carries — `fromApproval`,
+  // `fromAutomation` and `fromGate` all set `urgencyScore: 0`, so `rankByUrgency` leaves this
+  // section in whatever order the endpoints answered in. Age is resolved HERE (same rule as
+  // `urgencyTier`: the rail never touches a clock) and the list is sorted oldest-first.
+  const STALE_AFTER_DAYS = 5;
+  // …and at most this many rows carry the mark. The threshold alone is not enough: a queue nobody
+  // has touched for a month puts every row past it, and five rust bars mark nothing. Capped, the
+  // bar answers "start here" instead of "everything is late", which the ages already say.
+  const STALE_MARK_LIMIT = 2;
+  const railNowMs = Date.parse(`${railToday}T00:00:00Z`);
+  const waitAge = (createdAt?: string | null) => {
+    if (!createdAt) return { days: null as number | null };
+    const t = Date.parse(createdAt);
+    if (Number.isNaN(t)) return { days: null as number | null };
+    // Floor, not round: something raised 30 hours ago has been waiting "1d", never "2d".
+    return { days: Math.max(0, Math.floor((railNowMs - t) / 86_400_000)) };
+  };
+  const ageLabel = (days: number | null) => (days === null ? undefined : days === 0 ? "today" : `${days}d`);
+
+  const waitingFromQueueRows: RailWaitingItem[] = waitingFromQueue
+    .map((i) => ({ item: i, days: waitAge(i.createdAt).days }))
+    // Oldest first. `null` (no timestamp) sorts last: an unknown age cannot claim to be the oldest.
+    .sort((a, b) => (b.days ?? -1) - (a.days ?? -1))
+    .map(({ item, days }, rank): RailWaitingItem => ({
+      id: item.id,
+      title: item.title,
+      href: item.href,
       kind: "approval",
-      waitingOn: i.meta,
-    })),
+      waitingOn: item.meta,
+      age: ageLabel(days),
+      // Oldest-first order means `rank` IS the priority, so the cap takes the top rows.
+      stale: days !== null && days >= STALE_AFTER_DAYS && rank < STALE_MARK_LIMIT,
+    }));
+
+  const waiting: RailWaitingItem[] = [
+    ...waitingFromQueueRows,
+    // Blocked tasks keep their place after the approvals: they are not waiting on a DECISION from
+    // this person, and `pm_tasks` carries no "blocked since" to age them by.
     ...myBlockedTasks(dept.tasks, userId, dept.statusesByProject).map((t): RailWaitingItem => ({
       id: t.id,
       title: titleWithRecurrenceGlyph(t),

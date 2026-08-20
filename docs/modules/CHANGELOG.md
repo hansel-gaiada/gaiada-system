@@ -46,6 +46,89 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-14 — activity feed gets a time axis, and a working-zone clock**,
+  `platform-ui 0.25.3 -> 0.25.4` (IN PROGRESS). **Fixed, and this is the reason to read the
+  entry**: `ActivityFeed` formatted every timestamp with `toLocale*(undefined, …)` and it renders
+  on the SERVER, so the clock beside each row was the container's UTC — eight hours off the
+  working day, silently. Locale and zone are now pinned (`en-GB` / `Asia/Makassar`, the
+  `me/inbox` precedent, 24-hour like it), and day GROUPING is pinned to the same zone, so an event
+  at 23:30Z lands on the next local day instead of splitting the reader's day in two. `new Date()`
+  inside render is gone: "now" is passed in as `nowIso` by the caller (same contract as
+  `MyWorkRail`'s precomputed `urgencyTier`), because "Today" decided by the server's clock
+  labelled today's rows "Yesterday" for the first eight hours of each local day. Omitting the prop
+  drops the relative labels rather than guessing. Also: the day heading was rendered INSIDE the
+  first `<li>` of its run, so a screen reader announced "22 Jul" as part of the first entry —
+  each day is now its own `<section>` + `<ol>`. **Design**: the feed is Home's only chronological
+  block, so it is the only one that can carry a spine — day markers hang off a hairline and each
+  entry is a node on it, replacing the per-row bottom border that doubled against the day rules.
+  Day markers state their age ("22 Jul · 23 days ago"); the header says 14 August and nothing used
+  to bridge the three weeks. Human and machine rows no longer look identical: a cron sat at the
+  same weight as a colleague's decision, so rows with no `actorUserId` get a hollow node, no bold
+  actor and muted ink — carried by a new explicit `automated` prop, since `actorLabel()` falls
+  back to `actorExternal` and a scheduler arrives wearing a name. The repeated per-row source chip
+  ("PM" eight times down one column) is gone; the source is on the node (`role="img"` + label).
+  The source tag returns for machine rows ONLY, set beside the sentence: tone alone (hollow node,
+  muted ink, unbolded actor) still read as "a slightly faint human row", and on a person's row a
+  source is a label repeated down the column while on a machine's it is the only thing naming
+  which machine acted. Its hollow node went to a 1px border — at 7px a 0.5px outline closes up and
+  reads filled, i.e. as a person. Clock times only for today/yesterday. Truncated previews now say
+  so. Copy: `objectLabel` turned
+  `pm_task` into "Pm task" — a column name in sentence case — so the kinds the generic rule gets
+  wrong are mapped ("Task", "QA check", "AI run"). DEV-VERIFIED by driving `/departments/dept-1`
+  in both themes; 146 files/2318 tests green, `tsc` clean, `DEMO_MODE=1 next build` exit 0 — all
+  run in a throwaway git worktree, because building in the shared checkout overwrites the `.next`
+  another session's dev server is live on (it did, once, and cost a `__webpack_modules__ is not a
+  function`).
+- **2026-08-14 — project-health ring becomes a composition**, `platform-ui 0.25.2 -> 0.25.3`
+  (IN PROGRESS). `HealthRingCard` drew a single progress arc that turned rust when the project was
+  at risk, so "43% complete" was rendered in the alarm colour — recolouring progress to carry a
+  fact progress does not hold. The ring now shows the work's **composition**: every task lands in
+  exactly one segment (done · blocked · overdue · on track) via a new
+  `ProjectHealth.composition` (`lib/departments.ts`), so risk is a slice of the work rather than a
+  stain on the figure. Buckets are a genuine partition — a task that is both blocked and overdue
+  counts once, as blocked — deliberately NOT reusing `atRiskReason`'s overlapping counts, which
+  are right to double-count and drive decision #12's at-risk line. Segments take the status token
+  that already means them (`--status-ok/-critical/-warning`), so no colour enters the system and
+  both dark blocks follow for free; on-track work takes `--status-neutral` because its first draft
+  in bronze was unseparable from amber overdue at 11px, and because saturation spent on the work
+  that needs nothing is backwards. A legend in **counts, not percentages** (single-digit
+  denominators) makes the ring readable, and it replaces the `dl` that sat beside the ring saying
+  nothing about it. Card leads with the open count instead of the project name; at-risk is now a
+  rust rule down the leading edge — the `.dept-rail__item--waiting` idiom, same meaning — and the
+  reason line is dropped where the legend states it more precisely (kept as the fallback for a
+  caller that passes no composition). **Fixed**: `toLocaleDateString(undefined, …)` on the
+  milestone date, the hydration-divergence trap CLAUDE.md names, now pinned to en-GB/UTC like
+  `charts/chartHover.ts::fmtDate`; the milestone date is one nowrap token, because the caption
+  broke between "20" and "Jul" at laptop width. **Spacing**: the card's uniform 10px gap spaced
+  four things that are not peers — title / figure / the figure's caption / the ring block — so the
+  gaps are now set per relationship (figure and its caption tight at 4px, the ring block given 20).
+  And the grid's width cap moved from the CARD to the TRACK: a `max-width` card inside a stretching
+  `1fr` track left the leftover width sitting *between* the two cards, drifting them ~90px apart.
+  Tracks are `auto-fit minmax(260px, 340px)` (auto-FIT so an unused track collapses instead of
+  standing as a phantom empty column) with a tighter 278px cap under 1340px viewport, where the
+  rail leaves a 578px main column that two 340s cannot share. DEV-VERIFIED by driving
+  `/departments/dept-1` in `DEMO_MODE=1` at 1280/1440/1680 and in **both** themes, reading the
+  rendered rings: 146 files/2313 tests green, `tsc` clean, `DEMO_MODE=1 next build` exit 0.
+- **2026-08-14 — department-console KPI strip craft pass**, `platform-ui 0.25.1 -> 0.25.2`
+  (IN PROGRESS). Four defects in `components/departments/KpiStrip.tsx` + `departments.css`, all
+  visible on `/departments/[deptId]`: (1) KPI numerals were set in the display face, whose `1` is a
+  flagless vertical stroke and rendered as a capital **I** at 32px — in the one component whose job
+  is stating counts. Numerals move to the body face with `lining-nums tabular-nums`; the display
+  face keeps headings. (2) Only the Progress tile owned a bar, so its caption sat a line below the
+  other three; every tile now reserves the bar slot (`.dept-kpi__bar--empty`) and the tile is an
+  explicit 4-row grid, so the four captions share one baseline whether or not a caption is passed.
+  (3) The four boxed `?` hints carried the same visual weight as the labels they annotate — the box
+  is dropped **in this scope only** (`hint.css` defaults untouched elsewhere), with hint.css's 0.55
+  opacity overridden so the unboxed glyph does not compound below AA, and the 44px coarse-pointer
+  target restored. (4) `.dept-kpi__label` used `opacity: 0.6` over an inherited ink, the ad-hoc
+  alpha `colors.css` rule 3 forbids → `--ink-subtle`; padding `22px`/gap `14px` → `--space-20`/
+  `--card-gap`, per spacing.css's no-arbitrary-numbers rule. Copy: Blocked's caption said "needs a
+  look" — it now states the shape of the problem ("1 task, 1 project"), fed by a new
+  `DeptKpis.blockedProjects` (distinct projects the blocked tasks span, `lib/departments.ts`);
+  callers that pass no spread keep the generic line rather than a guessed count. DEV-VERIFIED by
+  driving `/departments/dept-1` in `DEMO_MODE=1` and reading the rendered strip, not only the
+  suite: 146 files/2304 tests green, `tsc` clean for everything touched, `DEMO_MODE=1 next build`
+  exit 0.
 - **2026-08-13 — SMM-05**, `social-media 0.4.1 -> 0.5.0` (IN PROGRESS). The `SocialPublisher` port,
   its Postiz HTTP+JSON driver, `social_publisher_orgs` provisioning, connector-registry sync and the
   cross-client dispatch-chain check land in `platform-nest/src/modules/social/publisher/`. **This is

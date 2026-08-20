@@ -10,13 +10,21 @@ describe("humanizeVerb", () => {
 });
 
 describe("objectLabel", () => {
-  it("capitalizes objectKind and prefers title over objectRef", () => {
+  it("names a kind the way the reader does, not the way the column is spelled", () => {
+    // The generic rule turned `pm_task` into "Pm task" — a machine identifier in sentence case.
     expect(objectLabel({ objectKind: "pm_task", title: "Fix login redirect", objectRef: "t-1" })).toBe(
-      "Pm task: Fix login redirect",
+      "Task: Fix login redirect",
     );
+    expect(objectLabel({ objectKind: "qa_check", title: "Checkout flow", objectRef: "q-1" })).toBe(
+      "QA check: Checkout flow",
+    );
+  });
+
+  it("falls back to capitalising an unmapped kind, and prefers title over objectRef", () => {
     expect(objectLabel({ objectKind: "task", title: "Fix login redirect", objectRef: "t-1" })).toBe(
       "Task: Fix login redirect",
     );
+    expect(objectLabel({ objectKind: "design_review", title: "Hero", objectRef: "d-1" })).toBe("Design review: Hero");
     expect(objectLabel({ objectKind: "doc", title: null, objectRef: "doc-9" })).toBe("Doc: doc-9");
   });
 });

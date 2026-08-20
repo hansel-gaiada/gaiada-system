@@ -10,7 +10,10 @@ import { formatDate } from "@/lib/format";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { UrgencyChip } from "@/components/pm/UrgencyChip";
-import { taskDateEnvelope, tallyProjectTasks } from "./page-helpers";
+import { taskDateEnvelope, tallyProjectTasks, targetNote } from "./page-helpers";
+// The `.dept-proj__*` classes live in the console sheet. `[deptId]/layout.tsx` already imports it,
+// so this is belt-and-braces — but a page that owns classes should say where they come from.
+import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
 
@@ -49,22 +52,23 @@ export default async function DepartmentProjectsPage({ params }: { params: Param
 
   // P4-G5: project-grain urgency roll-up (worst tier + counts) — the roll-up half of the ticket,
   // "glance many projects without opening any of them". `today` resolved ONCE for this render.
-  // Scoped to the SAME task subset this page's "Tasks here"/"Done" columns already use (work
-  // routed into this department, not necessarily every task the project owns — see the comment
-  // on `byProject` above) so the three columns never disagree about which tasks they're counting.
-  // The project's own authored `due_date` is folded in via `projectDueDate` so an owned project
-  // that has itself slipped reads as overdue even when every remaining task looks fine. Its
-  // own isDone check is now `isDoneStatus`, not a literal string, for the same reason as the
-  // "Done" column fix above — a project itself can sit on a custom done status.
+  // Scoped to the SAME task subset the "Work routed here" column counts (work routed into this
+  // department, not necessarily every task the project owns — see the comment on `byProject`
+  // above) so the two columns never disagree about which tasks they mean. done-ness resolves via
+  // `isDoneStatus` against each project's OWN registry, not a literal "done".
   const today = new Date().toISOString().slice(0, 10);
   const projectStatusesByProject = dept.statusesByProject;
   const projectUrgencyById = new Map(
     owned.map((p) => {
       const tasksHere = tasksByProject.get(p.id) ?? [];
+      // `projectDueDate` is deliberately NOT folded in here any more. `projectUrgency` pushes it
+      // into the same tier array as the tasks, so its counts included the project itself: a row
+      // reading "Tasks here 3" carried a chip reading "4 Overdue", and the fourth was not a task.
+      // The project's own slipped target is a different fact and now has its own column (Target,
+      // via `targetNote`), where it can say "30d past" instead of inflating a task count.
       const roll = projectUrgency(
         tasksHere.map((t) => ({ dueDate: t.dueDate, isDone: isDoneStatus(t.status, projectStatusesByProject[p.id]) })),
         today,
-        { projectDueDate: p.due_date, projectIsDone: isDoneStatus(p.status, projectStatusesByProject[p.id]) },
       );
       return [p.id, roll] as const;
     }),
@@ -78,36 +82,65 @@ export default async function DepartmentProjectsPage({ params }: { params: Param
   return (
     <Card
       title="Department projects"
-      headerRight={<span className="dash-pending-chip">{owned.length}</span>}
+      // A bare "2" in the corner names nothing. The word costs three characters.
+      headerRight={<span className="dept-proj__total">{owned.length} owned</span>}
     >
       {owned.length === 0 ? (
         <EmptyNote>No projects owned by this department yet. Create one from Projects and set its owning department, or assign work here from a shared project — it appears on the Board tab.</EmptyNote>
       ) : (
+        /* Four columns, not six. "Tasks here"/"Done" were two columns holding one fact and one
+           denominator; "Status" printed the same word on every row and repeated what Urgency
+           already said, so it moved under the project's name where a label belongs.
+           The scroller is not decoration: `HairlineTable` is a CSS grid with fr columns and no
+           stacked mode, so on a 390px screen the four headers collided into
+           "WORK ROUTEDRISK TARGET" and every cell wrapped mid-phrase. Swiping a table whose columns
+           survive beats reading one that has folded in on itself — the same idiom the board, the
+           Gantt and the connections table already use. */
+        <div className="dept-proj__scroll erp-scroll">
         <HairlineTable
-          columns={[{ label: "Project" }, { label: "Tasks here" }, { label: "Done" }, { label: "Urgency" }, { label: "Range", align: "right" }, { label: "Status", align: "right" }]}
-          tcols="2fr 1fr 1fr 1.3fr 1.6fr 1fr"
+          columns={[
+            { label: "Project" },
+            // NOT "Tasks here" — the header has to admit it is a subset. This page counts the work
+            // ROUTED INTO this department, while Home's ring counts everything the project owns, and
+            // the two numbers differ on the same project (3 vs 5 in the demo). A reader comparing
+            // them needs the header to say which is which.
+            { label: "Work routed here" },
+            { label: "Risk" },
+            { label: "Target", align: "right" },
+          ]}
+          tcols="2.4fr 1.3fr 1fr 1fr"
           rows={owned.map((p) => {
             const c = byProject[p.id] ?? { total: 0, done: 0 };
             const roll = projectUrgencyById.get(p.id);
             const env = rangeById.get(p.id) ?? { start: null, end: null };
+            const note = targetNote(p.due_date, today);
             return [
-              <Link key={p.id} href={`/departments/${deptId}/projects/${p.id}`} style={{ color: "var(--text-primary)", textDecoration: "none" }}>{p.name}</Link>,
-              String(c.total),
-              String(c.done),
-              roll ? <UrgencyChip key="u" tier={roll.tier} variant="chip" count={roll.counts[roll.tier] || undefined} /> : "—",
-              <span
-                key="r"
-                style={{ display: "inline-flex", flexDirection: "column", gap: 2, alignItems: "flex-end", font: "400 12px var(--font-body)" }}
-              >
-                <span>Target {p.due_date ? formatDate(p.due_date) : "—"}</span>
-                <span style={{ color: "var(--erp-ink-50)" }}>
-                  Tasks {env.start || env.end ? `${env.start ? formatDate(env.start) : "—"} → ${env.end ? formatDate(env.end) : "—"}` : "—"}
+              <span key={p.id} className="dept-proj__cell">
+                <Link href={`/departments/${deptId}/projects/${p.id}`} className="dept-proj__name">{p.name}</Link>
+                <span className="dept-proj__sub">
+                  <StatusBadge label={p.status} />
+                  {/* The task-derived envelope, on one line and in the cell it belongs to. As its
+                      own right-aligned column it was two lines and five dates wide, and the
+                      reader still had to hold the target from the next column to use it. */}
+                  {(env.start || env.end) && (
+                    <span className="dept-proj__span">
+                      {env.start ? formatDate(env.start) : "—"} → {env.end ? formatDate(env.end) : "—"}
+                    </span>
+                  )}
                 </span>
               </span>,
-              <StatusBadge key="s" label={p.status} />,
+              c.total === 0
+                ? <span key="w" className="dept-proj__none">none routed yet</span>
+                : <span key="w" className="dept-proj__work">{c.total} task{c.total === 1 ? "" : "s"} · {c.done} done</span>,
+              roll ? <UrgencyChip key="u" tier={roll.tier} variant="chip" count={roll.counts[roll.tier] || undefined} /> : "—",
+              <span key="t" className="dept-proj__target">
+                <span className="dept-proj__target-date">{p.due_date ? formatDate(p.due_date) : "no target"}</span>
+                {note && <span className={`dept-proj__target-note${note.late ? " dept-proj__target-note--late" : ""}`}>{note.text}</span>}
+              </span>,
             ];
           })}
         />
+        </div>
       )}
     </Card>
   );

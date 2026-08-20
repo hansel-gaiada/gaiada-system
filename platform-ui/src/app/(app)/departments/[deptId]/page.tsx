@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getDepartment, getServicedCompanies, computeDeptKpis, computeProjectHealth } from "@/lib/departments";
+import { getDepartment, getServicedCompanies, computeDeptKpis, computeProjectHealth, computeTeamRoster } from "@/lib/departments";
 import { listProjects, listMembers } from "@/lib/entities";
 import { listPmTasks, listMilestones, listProjectStatuses } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
@@ -16,6 +16,7 @@ import { KpiStrip } from "@/components/departments/KpiStrip";
 import { HealthRingCard } from "@/components/departments/HealthRingCard";
 import { ActivityFeed, type ActivityItem } from "@/components/departments/ActivityFeed";
 import { LauncherRow } from "@/components/departments/LauncherRow";
+import { TeamRoster } from "@/components/departments/TeamRoster";
 import { TeachState } from "@/components/departments/TeachState";
 import "@/components/departments/departments.css";
 
@@ -51,7 +52,10 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   const [serviced, allProjects, feed, members, mySeats] = await Promise.all([
     getServicedCompanies(userId, tenant, deptId),
     listProjects(userId, tenant).catch(() => []),
-    listWorkActivity(userId, tenant, { deptId, limit: ACTIVITY_PREVIEW_LIMIT }),
+    // One over the preview limit: the extra row is never rendered, it only tells the feed whether
+    // there is more history behind it, so the card can say "Last 8 shown" instead of implying the
+    // department has only ever done eight things. There is no count endpoint to ask instead.
+    listWorkActivity(userId, tenant, { deptId, limit: ACTIVITY_PREVIEW_LIMIT + 1 }),
     listMembers(userId, tenant).catch(() => []),
     listClaudeSeats(userId, tenant, "me"),
   ]);
@@ -66,7 +70,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   const CLAUDE_LAUNCHER_KEYS = new Set(["claude-code", "claude", "claude-design"]);
   const { launchers } = toolkitFor(dept.name);
   const launcherItems = launchers.map((l) => ({
-    key: l.key, label: l.label, desc: l.desc, href: l.url, glyph: l.glyph,
+    key: l.key, label: l.label, desc: l.desc, href: l.url, glyph: l.glyph, icon: l.icon,
     ...(CLAUDE_LAUNCHER_KEYS.has(l.key) ? seatProps : {}),
   }));
   // Ownership (department_id === deptId, P1-01) is real. Each owned project's
@@ -85,9 +89,13 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   const kpis = computeDeptKpis(dept.tasks, health.map((h) => h.progressPct), undefined, dept.statusesByProject);
 
   const nameById = new Map(members.map((mm) => [mm.user_id, mm.name]));
-  const activityItems: ActivityItem[] = feed.map((row) => ({
+  const activityTruncated = feed.length > ACTIVITY_PREVIEW_LIMIT;
+  const activityItems: ActivityItem[] = feed.slice(0, ACTIVITY_PREVIEW_LIMIT).map((row) => ({
     id: row.id,
     actor: actorLabel(row, Object.fromEntries(nameById)),
+    // No platform person behind it. `actorLabel` falls back to `actorExternal`, so "scheduler"
+    // arrives looking like a colleague unless the caller says otherwise.
+    automated: !row.actorUserId,
     verb: humanizeVerb(row.verb),
     objectLabel: objectLabel(row),
     href: activityHref(row),
@@ -102,6 +110,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         dueSoon={kpis.dueSoon}
         blocked={kpis.blocked}
         progressPct={kpis.progressPct}
+        blockedProjects={kpis.blockedProjects}
         totalTasksFoot={dept.tasks.length ? `of ${dept.tasks.length} total` : undefined}
         totalProjectsFoot={owned.length ? `across ${owned.length} project${owned.length === 1 ? "" : "s"}` : undefined}
       />
@@ -127,6 +136,7 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
                 nextMilestone={health[i].nextMilestone}
                 atRisk={health[i].atRisk}
                 atRiskReason={health[i].atRiskReason}
+                composition={health[i].composition}
               />
             ))}
           </div>
@@ -137,7 +147,9 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         title="Recent activity"
         headerRight={<Link href={`/departments/${deptId}/activity`} className="lux-btn lux-btn--ghost lux-btn--sm">View all →</Link>}
       >
-        <ActivityFeed items={activityItems} />
+        {/* "Now" is resolved here and handed down so the feed stays pure — see its `nowIso` doc
+            for why deciding "Today" inside the component was wrong. */}
+        <ActivityFeed items={activityItems} nowIso={new Date().toISOString()} truncated={activityTruncated} />
       </Card>
 
       <Card title="Build tools">
@@ -151,21 +163,13 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         {dept.divisions.length === 0 && dept.people.length === 0 ? (
           <EmptyNote>No divisions or people placed yet — add them in the org structure editor.</EmptyNote>
         ) : (
-          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-            {dept.divisions.map((v) => (
-              <div key={v.id} style={{ border: "0.5px solid var(--erp-hairline)", padding: 14 }}>
-                <div style={{ font: "700 10px var(--font-body)", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--erp-ink-60)", borderLeft: "2px solid var(--erp-hairline)", paddingLeft: 8, marginBottom: 10 }}>{v.name}</div>
-                {v.people.length === 0 ? (
-                  <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)" }}>No one placed yet.</span>
-                ) : v.people.map((p) => (
-                  <Link key={p.id} href={`/people/${p.id}`} style={{ display: "block", font: "400 13px var(--font-body)", color: "var(--text-primary)", textDecoration: "none", padding: "3px 0" }}>{p.name}</Link>
-                ))}
-              </div>
-            ))}
-            {dept.divisions.length === 0 && dept.people.map((p) => (
-              <Link key={p.id} href={`/people/${p.id}`} style={{ font: "400 14px var(--font-body)", color: "var(--text-primary)", textDecoration: "none" }}>{p.name}</Link>
-            ))}
-          </div>
+          /* `computeTeamRoster` owns the bucketing, including the "No division" group — the block
+             this replaced rendered unbucketed people ONLY when the department had no divisions, so
+             one division was enough to make them vanish from the card. */
+          <TeamRoster
+            groups={computeTeamRoster(dept.divisions, dept.people, dept.tasks, dept.statusesByProject)}
+            personHref={(id) => `/people/${id}`}
+          />
         )}
       </Card>
 

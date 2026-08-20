@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AxisColumn, PmTask, Tag, UrgencyTier } from "@/lib/pm";
@@ -84,6 +84,29 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
   const [moveMenu, setMoveMenu] = useState<MoveMenu | null>(null);
   const [pending, setPending] = useState<PendingPick<K> | null>(null);
   const moveBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // Does the board run past its right edge, and is there still something out there? A board of five
+  // columns clipped the last one with no sign it existed. This cannot be done in CSS — nothing in a
+  // stylesheet can compare scrollWidth to clientWidth — and this component is already client-side,
+  // so it measures and lets CSS draw the edge.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const measureOverflow = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // 2px of slack: sub-pixel layout leaves a scrollWidth a hair over clientWidth on boards that
+    // actually fit, and a permanent fade on a board with nothing hidden is a lie.
+    setHasMore(el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+  }, []);
+  useEffect(() => {
+    measureOverflow();
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measureOverflow);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // `columns` so adding/removing a column (a filter change, a drag) re-measures.
+  }, [measureOverflow, columns]);
 
   function findTask(id: string): PmTask | undefined {
     for (const c of columns) {
@@ -176,14 +199,29 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
   }
 
   return (
-    <div className="pm-board-scroll erp-scroll">
+    /* The fade lives on this NON-scrolling frame, not on the scroller itself: a pseudo-element inside
+       an overflow container is positioned against the scrolled content, so it slides out of view the
+       moment you scroll (tried it — the edge was invisible at every position but 0). */
+    <div className={`pm-board-frame${hasMore ? " pm-board-frame--more" : ""}`}>
+    <div
+      ref={scrollRef}
+      className="pm-board-scroll erp-scroll"
+      onScroll={measureOverflow}
+    >
       {toast && <p className="pm-board__toast" role="alert">{toast}</p>}
       <div aria-live="polite" className="pm-sr-only">{live}</div>
-      <div className="pm-board">
+      {/* `--dragging` un-collapses the empty columns for the duration of a drag: a 34px strip is not
+          a drop target anyone can hit, and "move this to Backlog" has to stay possible by drag, not
+          only through the ⇅ Move menu. */}
+      <div className={`pm-board${draggingId ? " pm-board--dragging" : ""}`}>
         {columns.map((col) => (
           <section
             key={col.key}
-            className="pm-col"
+            /* An empty column collapses to a labelled strip. At full width it spends 280px — the
+               same as a staffed one — to say "nothing here", and on the department board that put an
+               empty Backlog first in reading order, so a phone user swiped past a blank column
+               before reaching any work. */
+            className={`pm-col${col.tasks.length === 0 ? " pm-col--empty" : ""}`}
             aria-label={col.label}
             onDragOver={(e) => { e.preventDefault(); setDropCol(col.key); }}
             onDragLeave={() => setDropCol((s) => (s === col.key ? null : s))}
@@ -262,6 +300,7 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
           </label>
         </Popover>
       )}
+    </div>
     </div>
   );
 }
@@ -605,7 +644,13 @@ function Card({
         {task.progress > 0 && task.progress < 100 && <ProgressBar value={task.progress} />}
         <div className="pm-card__meta">
           <span className="pm-who">{who}</span>
-          {unitTag ? <span className="pm-chip">{unitTag}</span> : <span className="pm-chip">{task.priority}</span>}
+          {/* A "NORMAL" chip on every ordinary card is a label with no reader: it takes the same
+              weight as HIGH/URGENT and says only that nothing is unusual. Same rule the rail already
+              follows (`MyWorkRail` prints a priority only at high/critical). The unit tag still wins
+              when there is one — it names WHO holds the work, which no other line on the card says. */}
+          {unitTag
+            ? <span className="pm-chip">{unitTag}</span>
+            : (task.priority === "high" || task.priority === "urgent") && <span className="pm-chip">{task.priority}</span>}
         </div>
         <div className="pm-card__meta">
           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>

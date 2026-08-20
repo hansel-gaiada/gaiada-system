@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tallyProjectTasks, taskDateEnvelope } from "./page-helpers";
+import { tallyProjectTasks, taskDateEnvelope, daysPast, targetNote } from "./page-helpers";
 import type { ProjectStatus } from "@/lib/pm";
 
 // P4-H3 inherited-bug fix (found during P4-G5, deliberately not fixed then): this page's
@@ -60,5 +60,34 @@ describe("taskDateEnvelope", () => {
   it("returns nulls for an empty or fully-undated task list", () => {
     expect(taskDateEnvelope([])).toEqual({ start: null, end: null });
     expect(taskDateEnvelope([{ startDate: null, dueDate: null }])).toEqual({ start: null, end: null });
+  });
+});
+
+describe("daysPast / targetNote", () => {
+  const TODAY = "2026-08-19";
+
+  it("counts whole days, positive into the past", () => {
+    expect(daysPast("2026-07-20", TODAY)).toBe(30);
+    expect(daysPast("2026-08-19", TODAY)).toBe(0);
+    expect(daysPast("2026-08-28", TODAY)).toBe(-9);
+  });
+
+  it("returns null for a missing or unparseable date rather than 0", () => {
+    // "no target" and "due today" are different facts, and 0 would render as "today".
+    expect(daysPast(null, TODAY)).toBeNull();
+    expect(daysPast(undefined, TODAY)).toBeNull();
+    expect(daysPast("not-a-date", TODAY)).toBeNull();
+  });
+
+  it("tolerates a full timestamp on either side", () => {
+    expect(daysPast("2026-07-20T09:00:00Z", TODAY)).toBe(30);
+    expect(daysPast("2026-07-20", "2026-08-19T23:30:00Z")).toBe(30);
+  });
+
+  it("words the note and flags only the late side", () => {
+    expect(targetNote("2026-07-20", TODAY)).toEqual({ text: "30d past", late: true });
+    expect(targetNote("2026-08-19", TODAY)).toEqual({ text: "today", late: false });
+    expect(targetNote("2026-08-28", TODAY)).toEqual({ text: "in 9d", late: false });
+    expect(targetNote(null, TODAY)).toBeNull();
   });
 });

@@ -144,17 +144,15 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
-        <div style={{ font: "700 10px var(--font-body)", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>Work board</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/pipeline" className="lux-btn lux-btn--ghost lux-btn--sm">Delivery Pipeline</Link>
-          <Link href="/projects" className="lux-btn lux-btn--ghost lux-btn--sm">All projects</Link>
-        </div>
-      </div>
-
-      <Card style={{ marginBottom: 16 }}>
-        <form className="lux-filters" method="get" aria-label="Board focus">
-          <label className="lux-filters__field">
+      {/* ONE control strip. This was three stacked full-width blocks — an eyebrow row with two
+          buttons, a Card holding Focus/Group-by, and a third Card holding the (collapsed, so
+          effectively empty-looking) Filters disclosure. Measured on the built page, the first column
+          began at y=564 of a 1100px viewport, and below the fold entirely on a phone. Same controls,
+          same GET-form contract, one row. */}
+      <div className="pm-boardbar">
+        <span className="type-eyebrow pm-boardbar__label">Work board</span>
+        <form className="pm-boardbar__form" method="get" aria-label="Board focus">
+          <label className="pm-boardbar__field">
             <span>Focus</span>
             <select name="focus" defaultValue={encodeBoardFocus(focus)}>
               <option value="dept">Whole dept</option>
@@ -164,7 +162,7 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
               <option value="me">Just me</option>
             </select>
           </label>
-          <label className="lux-filters__field">
+          <label className="pm-boardbar__field">
             <span>Group by</span>
             <select name="swimlane" defaultValue={swimlane}>
               {SWIMLANES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -173,18 +171,16 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
           {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
           {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
           {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-          <div className="lux-filters__actions">
-            <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-            {(focus.mode !== "dept" || swimlane !== "status") && (
-              <a href={`/departments/${deptId}/board`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-            )}
-          </div>
+          <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+          {(focus.mode !== "dept" || swimlane !== "status") && (
+            <a href={`/departments/${deptId}/board`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+          )}
         </form>
-      </Card>
-
-      {/* Tag/Ball/Responsible filters: ONE shared, findable/clearable panel (components/pm/
-          FacetFilters.tsx) — replaces what used to be two separate always-open checkbox Cards. */}
-      <FacetFilters
+        {/* Tag/Ball/Responsible filters: ONE shared, findable/clearable panel (components/pm/
+          FacetFilters.tsx) — replaces what used to be two separate always-open checkbox Cards.
+          `bare` because it now sits in the strip above rather than in a Card of its own. */}
+        <FacetFilters
+        bare
         basePath={`/departments/${deptId}/board`}
         hidden={{ focus: encodeBoardFocus(focus), swimlane }}
         groups={[
@@ -198,7 +194,13 @@ export default async function DepartmentBoardPage({ params, searchParams }: { pa
           { key: "ball", label: PM_TERMS.ball, selected: selectedBallIds, options: ballOptions },
           { key: "responsible", label: PM_TERMS.responsible, selected: selectedResponsibleIds, options: responsibleOptions },
         ]}
-      />
+        />
+
+        <div className="pm-boardbar__links">
+          <Link href="/pipeline" className="lux-btn lux-btn--ghost lux-btn--sm">Delivery Pipeline</Link>
+          <Link href="/projects" className="lux-btn lux-btn--ghost lux-btn--sm">All projects</Link>
+        </div>
+      </div>
 
       {facetFilteredTasks.length === 0 ? (
         <EmptyNote>
