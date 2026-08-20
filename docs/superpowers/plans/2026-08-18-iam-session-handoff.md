@@ -633,3 +633,53 @@ followed as a separate commit once theirs landed. Worth copying: in this checkou
 `MODULES.md` and `CHANGELOG.md` are the three files two sessions collide on, and `git status` on them
 before a release cut is cheaper than untangling a mixed commit. Reverting my own hunks with a targeted
 `sed`/script — never `git checkout --` — is what kept their row intact.
+
+---
+
+## 32. 🔴 I committed another session's in-flight work, and how I unpicked it
+
+The section above congratulates itself for keeping a collision out of a release cut. Two commits
+later I did the exact thing it warns about, one level down — **inside a single file** instead of
+across three.
+
+**What happened.** `MON-13` needed a `pg` pool `error` listener in `platform-nest/src/db/index.ts`
+(without one, an idle client's error is an *uncaught exception*, so a Postgres blip restarts the ERP —
+see the function's own comment). My change was ~40 lines. I ran
+`git add platform-nest/src/db/index.ts`. The file also held **39 uncommitted lines of another
+session's MON-00b cross-root wall** — `CrossRootTenantSetError`, `withTenants`'s `crossRoot` option,
+a `root_company_id` count query. `c593709` shipped all of it.
+
+**Why it broke `main`, which is the part worth internalising.** I shipped **half** a change. The
+wall's callers — `src/events/relay.ts` passing `crossRoot` — were still uncommitted in *their* tree.
+So `main` received a wall no caller invoked, plus a `WithTenantsOptions` that `relay.ts` could not
+typecheck against. CI: **16 failed test files**, every one
+`GlobalCeilingUnavailableError: search-provider dispatch refused: the global ceiling is unavailable` —
+the new refusal firing on paths where no caller had yet declared cross-root intent. A cross-session
+half-commit fails in the *confusing* direction, not the obvious one.
+
+**Why `git revert` would have been the wrong repair.** A revert undoes the commit's diff, which would
+also have stripped MON-00b from the *working tree* — deleting a colleague's live, unfinished work.
+What the situation needed was to separate the two concerns again:
+
+1. `git show 20fff0d:platform-nest/src/db/index.ts` — the pre-commit base (107 lines, no wall).
+2. Reassemble **base + my listener only**, lifting my hunk verbatim so its reasoning comment survived
+   byte-for-byte.
+3. **Prove it before committing:** `diff <(git show 20fff0d:<file>) <file>` showed only
+   `attachPoolErrorHandler` and its two call sites. That command is the gate I should have run
+   *before* `c593709`, not after.
+4. Commit the correction (`1628c60`), then **copy the original file back into the working tree**, so
+   MON-00b returns to being uncommitted work in its author's tree. When it lands is their call.
+
+**A detail that nearly bit twice:** the push was rejected (remote had moved, as always here), so the
+rebase needed a `git stash` — which briefly removed *their* 56 in-flight files. Popped it immediately
+and re-verified both halves (`wall=3 listener=3` in the tree, `wall=0` in `HEAD`) before pushing.
+Holding another session's work in a stash is not a state to leave sitting.
+
+**A second finding, free.** The base commit `20fff0d` was *already* red — and its summary read
+`Test Files 356 passed · Tests 5275 passed · Errors 2 errors`, exit 1. Every test green, and still a
+failure: precisely the unhandled idle-client exception the listener exists to fix. So the listener was
+independently justified, and "all tests passed" is not the same claim as "CI passed".
+
+**Rule, now a memory ([[git-add-file-takes-the-whole-file]]):** never `git add <file>` on a file this
+session did not create. Read `git diff <file>` first, treat any hunk I don't recognise as someone
+else's, stage selectively, and diff against the base before committing.
