@@ -31,7 +31,7 @@ not afterwards.
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
-| PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
+| PD `direct` driver (SMM-38) | **2 (38a, 38b)** | 5 phases |
 | P3 content ops | **4** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
@@ -225,13 +225,62 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 | Phase | Scope | State |
 |---|---|---|
 | 38a | Driver skeleton + per-capability switch (defaults to `postiz`) + shared contract suite | ✅ **merged** |
-| 38b | **Token custody** — encrypted at rest on the tenant wall, refresh-ahead, revocation fails closed | ⬜ |
-| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | ⬜ depends on SMM-36 ✅ |
-| 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | ⬜ |
+| 38b | **Token custody** — encrypted at rest on the tenant wall, refresh-ahead, revocation fails closed | ✅ **merged** |
+| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | ⬜ depends on SMM-36 ✅, 38b ✅ |
+| 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | ⬜ depends on 38b ✅ |
 | 38e | Flip LinkedIn + YouTube to `direct`; Postiz retained for IG/FB/TikTok | ⬜ |
 
 ⚠ 38b reverses D-5 (client tokens deliberately live *inside* Postiz so we never hold them). That is a
 security decision the owner accepted with D-20, not a convenience.
+
+**38b evidence (2026-08-20, senior-db).** Migration `202608201518_social_oauth_tokens.sql` (UTC
+timestamp scheme — sequential numbering is closed above 0118): new table `social_oauth_tokens`,
+THIRD RLS wall (`app_module_allowed('social')`, same as every social_* table except the portal-written
+`social_post_client_reviews` — this table's writers are all social-module code, never the portal, so
+the third wall is the correct, consistent choice, not the D-16 exception). Reuses `core/secret-box.ts`
+(WSUX-14's AES-256-GCM app-layer vault, `enc:v1:` format) byte-for-byte — the SAME mechanism that
+already seals `integration_connections.{access,refresh}_token_enc` (0033) — rather than inventing a
+second scheme; the wa-chat-bot two-axis (subject × entity) OpenBao Transit crypto-shred
+(`docs/runbooks/key-custody.md`) is a DIFFERENT service's answer to a different question (message
+content PII) and is not wired into platform-nest at all. The shred (revocation AND expiry) NULLs both
+ciphertext columns in the same statement — mirroring `core/integrations.service.ts`'s
+`revokeConnection` exactly — and a new structural CHECK (`sot_shred_contract`) makes a revoked/expired
+row physically incapable of holding ciphertext, not merely a convention. `resolveActiveAccessToken`
+fails closed on `revoked`/`expired`/`not_found` with typed refusals, never a stale token; the
+decrypted value is wrapped in a `ResolvedAccessToken` handle (mirrors `types.ts`'s `OrgHandle`
+redaction — `toJSON`/`util.inspect` both emit `[redacted]`).
+
+Refresh-ahead ships as machinery, not a live capability (this phase's own DO-NOT-DO forbids a network
+call): `registerTokenRefresher(network, fn)` is an empty per-network registry 38c/38d populate;
+`purgeOAuthTokens` — registered into SMM-36's seam as `registerRetentionPurger('oauth_tokens', ...)`
+(`wireOAuthTokenCustody()`, called from `main.ts` alongside `wireSocialPublisher()`) — attempts a
+refresh for anything due soon (no-op today, zero refreshers registered) and shreds anything that
+reaches `expires_at` unrefreshed to `status='expired'`. No new job, no new schedule: it rides SMM-36's
+existing per-tenant sweep and cadence. `direct` itself is still NOT registered at boot — 38b adds zero
+capabilities to it (`DIRECT_CAPABILITIES` stays the empty set 38a shipped), so registering it would
+only flip `resolvePublisher`'s empty-registry heuristic (`publisher_not_configured` →
+`unknown_publisher`) for no behavioural gain; that distinction is preserved exactly, not revisited,
+until 38c/38d give `direct` a real capability.
+
+**The switch correction (38a's key widened to (network, capability)).** `resolvePublisherForCapability`
+now takes `(orgDriver, network, capability)`; `config.social.publisher.capabilityDrivers` keys are
+`network:capability` / `network:*` / `*:capability`, most-specific-wins, checked in that order. 38a's
+capability-only key could not express 38e's per-network split or the P2 inbox's per-capability-within-
+a-network need and is corrected before it was ever set in a real deployment (still empty by default —
+still a no-op). `publisher.test.ts`'s switch suite rewritten (4 → 8 cases) to cover the exact and both
+wildcard forms and their precedence.
+
+Test counts: **367 / 0 / 0** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline measured directly by stashing this
+change: **346 / 0 / 0**, matching this file's own 38a row — the ticket brief's stated 365 baseline did
+not match what this worktree actually had). `tsc --noEmit` clean. `lint:postiz-deps`/
+`lint:withtenants`/`lint:migration-rls`/`lint:migration-names` all green.
+
+**Blockers/follow-ups for 38c/38d:** neither `storeOAuthGrant` nor any OAuth callback route exists yet
+— 38c/38d each build their own network's OAuth grant flow and call `storeOAuthGrant` at the end of it,
+then `registerTokenRefresher(network, fn)` with their own token-endpoint client. Both also decide (and
+this phase deliberately did not) how/when `direct` first gets registered into `publisher/registry.ts`
+and whether `resolvePublisher`'s empty-registry heuristic still means what it means once it is.
 
 **38a evidence (2026-08-20, senior-integrator):** no migration, no Cerbos change, no `main.ts`
 change — **verified inert**: every capability still resolves to `postiz`. Built:
@@ -440,7 +489,15 @@ and idempotently, exactly like `evaluatePublishPrecondition`) and the new portal
 `decide()` (declares explicitly, since portal controllers carry no `{modules}` option by
 convention) — both regression-pinned by temporarily deleting the call and watching the
 corresponding test fail (`client-review.test.ts`'s "(R1) REGRESSION", 
-`social-client-review-portal.controller.test.ts`'s header note).
+`social-client-review-portal.controller.test.ts`'s header note). SMM-38/38b added three more:
+`storeOAuthGrant`/`resolveActiveAccessToken`/`revokeOAuthGrant` (`oauth-tokens.ts`) each self-declare
+the same way, each pinned by a test that opens the transaction with NO `{modules:['social']}` option
+(`oauth-tokens.test.ts`'s "(1) THE MODULE-GUC REGRESSION" block) — a token table silently reading
+zero rows would mean "no grant found" for an account that plainly has one, or worse, "nothing to
+refresh, all clean" forever while a grant sits unrefreshed. The ONE function in that file that does
+**not** self-declare, `purgeOAuthTokens`, is deliberate (it runs inside the already-scoped
+transaction `purgeTenantInboxRetention` opens, per SMM-36's own purger contract) and is pinned by the
+inverse test: calling it directly on an unscoped transaction must read zero rows.
 
 **2. Registered but never invoked (one occurrence).** `main.ts`'s `startConsumerLoop([...])` omitted
 `"social_post_variant"`, so SMM-13's handlers existed, were registered, and were never reached. Its

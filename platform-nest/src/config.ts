@@ -9,15 +9,29 @@ function preferenceList(envVar: string | undefined, fallback: string[]): string[
   return parsed.length > 0 ? parsed : fallback;
 }
 
-// SMM-38/38a (design addendum §PD) — parse the per-capability driver-override switch
+// SMM-38/38a→38b (design addendum §PD) — parse the per-(network, capability) driver-override switch
 // (`SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`), a NEW dimension on top of `social_publisher_orgs.driver`
-// (the existing per-ORG column): "capability=driverKey,capability2=driverKey2". Unset or malformed
-// pairs are dropped from the map rather than throwing at boot — an operator typo here degrades to
-// "no override for that capability" (the SAME fallthrough an absent env var already produces), not
-// a boot crash, because a bad NAME is caught loudly downstream at the one place that matters: the
-// registry's `resolvePublisherForCapability`, which honors-or-refuses exactly like `resolvePublisher`
-// already does for the per-org column. The default (unset) parses to `{}`, which is what makes the
-// switch INERT out of the box — every capability falls through to the org's own driver, unchanged.
+// (the existing per-ORG column): "key=driverKey,key2=driverKey2" where each `key` is ONE of three
+// shapes registry.ts's `resolvePublisherForCapability` checks in order (most specific wins):
+//   `network:capability`  — exact, e.g. `linkedin:schedule=direct`
+//   `network:*`           — every capability on one network, e.g. `linkedin:*=direct`
+//   `*:capability`        — one capability across every network, e.g. `*:inbox_read=direct`
+// 38b's correction to 38a: the key was capability-only ("schedule=driverKey") until this pass. That
+// could not express either 38e's per-NETWORK flip or the P2 inbox's per-capability-within-a-network
+// need ("LinkedIn comments via direct, LinkedIn publish via postiz"), so the key gains the network
+// dimension before this switch is ever set in a real deployment (it has not been — the tracker's own
+// record: `resolvePublisherForCapability` has never been called from a live path). This function's
+// own logic is UNCHANGED by that correction — it stores whatever string is on the left of `=` as an
+// opaque map key and lets the registry interpret its shape; only the shape callers are expected to
+// write changed.
+//
+// Unset or malformed pairs are dropped from the map rather than throwing at boot — an operator typo
+// here degrades to "no override for that key" (the SAME fallthrough an absent env var already
+// produces), not a boot crash, because a bad driver NAME is caught loudly downstream at the one place
+// that matters: the registry's `resolvePublisherForCapability`, which honors-or-refuses exactly like
+// `resolvePublisher` already does for the per-org column. The default (unset) parses to `{}`, which
+// is what makes the switch INERT out of the box — every (network, capability) pair falls through to
+// the org's own driver, unchanged.
 function parseCapabilityDriverOverrides(raw: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!raw) return out;
@@ -622,13 +636,16 @@ const configBase = {
       // "have we cleared client connects" and it does not vary by tenant.
       ownBrandClientIds: (process.env.SOCIAL_OWN_BRAND_CLIENT_IDS ?? "")
         .split(",").map((s) => s.trim()).filter(Boolean),
-      // SMM-38/38a (§PD) — the per-capability driver switch. EMPTY BY DEFAULT, and the emptiness is
-      // what makes 38a inert: `registry.ts`'s `resolvePublisherForCapability` falls through to the
-      // org's own named driver (0105's `social_publisher_orgs.driver`, still 'postiz' for every row
-      // today) for any capability with no entry here. Setting `schedule=direct` here is the ONLY
-      // thing 38e's flip does — see that ticket's own exit criterion ("flip ... in config").
-      // Deliberately keyed by capability, not by network: the switch this ticket adds is a NEW
-      // dimension on top of the per-org column, not a replacement for it.
+      // SMM-38/38a→38b (§PD) — the per-(network, capability) driver switch. EMPTY BY DEFAULT, and
+      // the emptiness is what keeps 38b inert: `registry.ts`'s `resolvePublisherForCapability` falls
+      // through to the org's own named driver (0105's `social_publisher_orgs.driver`, still 'postiz'
+      // for every row today) for any (network, capability) pair with no entry here. Setting
+      // `linkedin:schedule=direct` here is the ONLY thing 38e's flip does — see that ticket's own
+      // exit criterion ("flip ... in config"). Keys are `network:capability` / `network:*` /
+      // `*:capability` (most specific wins — see registry.ts); a bare `capability=driver` key from
+      // 38a's original (capability-only) shape is simply an unmatched string here, which resolves to
+      // "no override" rather than a crash — the same forgiving-typo posture `parseCapabilityDriverOverrides`
+      // already documents.
       capabilityDrivers: parseCapabilityDriverOverrides(process.env.SOCIAL_PUBLISHER_CAPABILITY_DRIVERS),
     },
     // SMM-10 — the dispatch/reconcile pair's own knobs.

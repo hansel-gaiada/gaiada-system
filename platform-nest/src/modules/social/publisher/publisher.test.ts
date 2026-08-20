@@ -445,7 +445,7 @@ function genericSuccessStub(): typeof fetch {
 runPublisherContractSuite("postiz", { build: () => driverWithFetch(genericSuccessStub()) });
 runPublisherContractSuite("mock", { build: () => createMockPublisher(newMockPublisherState()) });
 
-describe("SMM-38/38a · the per-capability switch — a new dimension, defaulting to the org's own driver", () => {
+describe("SMM-38/38a→38b · the per-(network, capability) switch — a new dimension, defaulting to the org's own driver", () => {
   afterEach(() => {
     config.social.publisher.capabilityDrivers = {};
     resetPublishers();
@@ -455,27 +455,74 @@ describe("SMM-38/38a · the per-capability switch — a new dimension, defaultin
     resetPublishers();
     registerPublisher(createMockPublisher(newMockPublisherState()));
     config.social.publisher.capabilityDrivers = {};
-    expect(resolvePublisherForCapability("postiz", "schedule")).toBe(resolvePublisher("postiz"));
-    expect(resolvePublisherForCapability("postiz", "quota_probe")).toBe(resolvePublisher("postiz"));
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule")).toBe(resolvePublisher("postiz"));
+    expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe")).toBe(resolvePublisher("postiz"));
   });
 
-  it("honours a configured override for the ONE capability it names, leaving every other capability untouched", () => {
+  it("honours an EXACT (network, capability) override, leaving every other network and every other capability untouched", () => {
     resetPublishers();
     registerPublisher(createMockPublisher(newMockPublisherState()));
     registerPublisher(createDirectDriver());
-    config.social.publisher.capabilityDrivers = { schedule: "direct" };
-    expect(resolvePublisherForCapability("postiz", "schedule").key).toBe("direct");
-    // No override for quota_probe: still falls through to the org's own driver, unchanged.
-    expect(resolvePublisherForCapability("postiz", "quota_probe").key).toBe("postiz");
+    config.social.publisher.capabilityDrivers = { "linkedin:schedule": "direct" };
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
+    // Same capability, a DIFFERENT network: no match, falls through unchanged.
+    expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("postiz");
+    // Same network, a DIFFERENT capability: no match, falls through unchanged.
+    expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe").key).toBe("postiz");
+  });
+
+  it("a network wildcard (`network:*`) applies to every capability on that one network, and no other network", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    registerPublisher(createDirectDriver());
+    config.social.publisher.capabilityDrivers = { "linkedin:*": "direct" };
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("postiz");
+  });
+
+  it("a capability wildcard (`*:capability`) applies across every network for that one capability", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    registerPublisher(createDirectDriver());
+    config.social.publisher.capabilityDrivers = { "*:schedule": "direct" };
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe").key).toBe("postiz");
+  });
+
+  it("most-specific-wins: an exact (network,capability) entry beats BOTH a network wildcard and a capability wildcard set at the same time", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState())); // key 'postiz'
+    registerPublisher(createDirectDriver()); // key 'direct'
+    registerPublisher({ ...createDirectDriver(), key: "mixpost" }); // a third, distinct key
+    config.social.publisher.capabilityDrivers = {
+      "linkedin:schedule": "mixpost", // exact — must win
+      "linkedin:*": "direct",         // network wildcard — must lose to the exact entry
+      "*:schedule": "direct",         // capability wildcard — must lose to the exact entry
+    };
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("mixpost");
+  });
+
+  it("with no exact entry, a network wildcard outranks a capability wildcard", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    registerPublisher(createDirectDriver());
+    registerPublisher({ ...createDirectDriver(), key: "mixpost" });
+    config.social.publisher.capabilityDrivers = { "linkedin:*": "direct", "*:schedule": "mixpost" };
+    // linkedin matches its own network wildcard first.
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
+    // youtube has no network wildcard entry, so the capability wildcard applies instead.
+    expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("mixpost");
   });
 
   it("refuses — never silently substitutes — when the override names a driver this deployment does not run", () => {
     resetPublishers();
     registerPublisher(createMockPublisher(newMockPublisherState()));
-    config.social.publisher.capabilityDrivers = { schedule: "direct" }; // 'direct' never registered here
-    expect(() => resolvePublisherForCapability("postiz", "schedule")).toThrowError(/is not registered/);
+    config.social.publisher.capabilityDrivers = { "linkedin:schedule": "direct" }; // 'direct' never registered here
+    expect(() => resolvePublisherForCapability("postiz", "linkedin", "schedule")).toThrowError(/is not registered/);
     try {
-      resolvePublisherForCapability("postiz", "schedule");
+      resolvePublisherForCapability("postiz", "linkedin", "schedule");
     } catch (e) {
       expect((e as SocialPublisherError).code).toBe("unknown_publisher");
     }
@@ -487,9 +534,9 @@ describe("SMM-38/38a · the per-capability switch — a new dimension, defaultin
     config.social.publisher.capabilityDrivers = {};
     // The org row names a driver this deployment does not run — same refusal as resolvePublisher's
     // own test above, reached through the capability-aware entry point this time.
-    expect(() => resolvePublisherForCapability("mixpost", "schedule")).toThrowError(/is not registered|not registered/);
+    expect(() => resolvePublisherForCapability("mixpost", "linkedin", "schedule")).toThrowError(/is not registered|not registered/);
     try {
-      resolvePublisherForCapability("mixpost", "schedule");
+      resolvePublisherForCapability("mixpost", "linkedin", "schedule");
     } catch (e) {
       expect((e as SocialPublisherError).code).toBe("unknown_publisher");
     }

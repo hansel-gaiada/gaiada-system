@@ -96,6 +96,8 @@ export const socialModule: ModuleContract = {
     "0114_social_creator_info_snapshot.sql",
     // SMM-39 — `uploaded_media` column (already-uploaded engine media refs, kept out of args_sha256).
     "0118_social_variant_uploaded_media.sql",
+    // SMM-38/38b — `social_oauth_tokens`, the `direct` driver's in-house token custody table.
+    "202608201518_social_oauth_tokens.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
