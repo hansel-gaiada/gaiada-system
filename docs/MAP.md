@@ -212,6 +212,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-workspace.controller.ts` |
 | `/api` | `platform-nest/src/core/portal.controller.ts` |
+| `/api` | `platform-nest/src/core/social-client-review-portal.controller.ts` |
 | `/api` | `platform-nest/src/core/tasks-mine.controller.ts` |
 | `/api` | `platform-nest/src/core/webdev-change-requests-portal.controller.ts` |
 | `/api` | `platform-nest/src/core/webdev-change-requests.controller.ts` |

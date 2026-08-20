@@ -30,14 +30,15 @@ not afterwards.
 |---|---|---|
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
-| P2 inbox + client approval | 0 | 6 |
+| P2 inbox + client approval | **1** | 6 |
 | PD `direct` driver (SMM-38) | 0 | 5 phases |
 | P3 content ops | 1 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.2 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
-live network publishing **deferred to staging** (D-23).
+Module: `social-media 0.5.3 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+live network publishing **deferred to staging** (D-23); client-review stage **backend DEV-VERIFIED**,
+UI not started (SMM-32).
 
 ---
 
@@ -75,12 +76,30 @@ live network publishing **deferred to staging** (D-23).
 
 | # | Ticket | State | Gate |
 |---|---|---|---|
-| SMM-31 | Client review backend: `social_post_client_reviews` state machine, portal decide, `portal.approve_post`, idempotent decision | 🔵 **IN FLIGHT** | none — buildable now |
+| SMM-31 | Client review backend: `social_post_client_reviews` state machine, portal decide, `portal.approve_post`, idempotent decision | ✅ **merged** | backend DEV-VERIFIED; **318 / 0 / 0** re-run on `main` by the orchestrator, `tsc` clean. UI is SMM-32's, tracked separately |
 | SMM-32 | Client review portal UI: preview + approve / request-changes | ⬜ | SMM-31 |
 | SMM-15 | Inbox sync (`pullInbox`, idempotent upsert) | ⬜ | **SMM-38** — Postiz has ZERO inbound surface (OQ-4) |
 | SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ⬜ | SMM-15 |
 | SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ⬜ | SMM-15; should set `neverAutoRetry` |
 | SMM-18 | Inbox tab UI: triage queue, thread view, SLA timers | ⬜ | SMM-15/16/17 |
+
+**SMM-31 evidence (2026-08-20, senior-be):** schema/IAM already seeded (0105/0106) — no migration, no
+Cerbos change this pass. Built: staff request/read/withdraw (`social.controller.ts`, idempotent
+upsert on 0105's `UNIQUE(variant_id)`), the portal decide endpoint (new
+`SocialClientReviewPortalController`, modelled on `PortalController.decideGate`, guarded
+single-row UPDATE, no advisory lock needed), the submission precondition
+(`evaluateClientReviewPrecondition` + `evaluatePublishPreconditionWithClientReview` — composed IN
+FRONT of SMM-09's pinned six-stage chain, never folded into it), a new small refusal vocabulary
+(`CLIENT_REVIEW_REFUSAL`, 5 tokens, kept apart from `PUBLISH_REFUSAL` the same way `DISPATCH_REFUSAL`
+is), and notifications riding the already-drained `"social_post_variant"` consumer stream (two new
+`event-handlers.ts` routes). Idempotent decision proven with an assertion (`decided_at` unchanged,
+exactly one outbox row after two identical decide calls), not merely asserted. Two regression tests
+were driven RED first — the `declareSocialModuleScope` call each new code path needs was temporarily
+deleted and the corresponding test failed exactly as predicted, then restored. **318 / 0 / 0** across
+`src/modules/social` + `d14-smm-09-social-publish-registry.test.ts` + the new portal controller test
+(was 289/0/0). `tsc --noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`
+green. `test:iam-chain-alignment` green (25/25, unaffected). Full detail:
+`docs/modules/MODULES.md`'s social-media 0.5.3 entry, `docs/FRONTEND-BFF-CONTRACT.md` §19/§16h.
 
 ## PD — the `direct` driver (D-20) ⬜
 
@@ -163,11 +182,20 @@ security decision the owner accepted with D-20, not a convenience.
 `declareSocialModuleScope`, queries read **zero rows and raise nothing**. It produced: a gate that
 would refuse every healthy publish · a purge job reporting "0 purged, all clean" forever · a status
 sync applying nothing · event handlers routing nothing. **Every new `social_*` query path needs a
-regression test that fails if the declaration is removed.**
+regression test that fails if the declaration is removed.** SMM-31 added a fifth and sixth
+occurrence deliberately-tested-around: `evaluateClientReviewPrecondition` (self-declares, additively
+and idempotently, exactly like `evaluatePublishPrecondition`) and the new portal controller's
+`decide()` (declares explicitly, since portal controllers carry no `{modules}` option by
+convention) — both regression-pinned by temporarily deleting the call and watching the
+corresponding test fail (`client-review.test.ts`'s "(R1) REGRESSION", 
+`social-client-review-portal.controller.test.ts`'s header note).
 
 **2. Registered but never invoked (one occurrence).** `main.ts`'s `startConsumerLoop([...])` omitted
 `"social_post_variant"`, so SMM-13's handlers existed, were registered, and were never reached. Its
 own suite was green because it called them directly. **Verify the caller, not just the callee.**
+SMM-31's two new event routes (`social.client_review.requested`/`.decided`) deliberately ride the
+SAME already-drained `"social_post_variant"` stream rather than adding a new entity-type name, to
+avoid ever needing to remember a `main.ts` change for them.
 
 **3. Tests that pass while the feature is dead.** Two shipped this week: `.resolves.not.toThrow()`
 assertions that survive deleting the function body, and reads through `withTenants([])` — an empty
@@ -200,5 +228,8 @@ expects a specific status.**
 - **The compose set on `gda-aicenter` is three files** (`vps` + `hostdata` + `observability`). Read it
   off the running container's own labels rather than guessing.
 - **Worktrees can be cut before a commit made in the same turn.** Commit design docs a turn earlier,
-  and restate binding constraints in the ticket body.
+  and restate binding constraints in the ticket body. **This bit SMM-31 directly**: the senior-be
+  seat's worktree had no `docs/plans/smm-tracker.md` at all (it existed only in the shared checkout,
+  uncommitted at worktree-cut time) — reconstructed from the shared checkout's content before adding
+  this ticket's own row.
 - **`docs/MAP.md` conflicts on almost every parallel merge** — regenerate, never hand-merge.

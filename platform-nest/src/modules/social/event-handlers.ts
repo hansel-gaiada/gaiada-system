@@ -1,15 +1,26 @@
 // SMM-13 — notification and mail routing for social post events.
+// SMM-31 extends the same routing table with the client-review stage's two events.
 //
 // Routing:
 // - `social.post.dispatched` → notifications only (routine success)
 // - `social.post.published` → notifications only (routine success)
 // - `social.post.failed` → notifications + mail (risk warning)
+// - `social.client_review.requested` → notifies the CLIENT (portal contacts) that a post awaits them
+// - `social.client_review.decided` → notifies STAFF (the engagement owner) of the client's decision
 //
 // Event payload contains: network, engagementId, providerPostId, reason (for failed)
 // We query the engagement to find the owner and notify them of the outcome.
+//
+// Both new handlers ride the ALREADY-DRAINED "social_post_variant" entity-type stream
+// (main.ts#startConsumerLoop) — deliberately, rather than a new stream name, because that list is
+// the ONE thing deciding whether a Redis stream is ever read at all (this file's own SMM-14 fix,
+// documented at the call site in main.ts): a new stream name here with no corresponding addition
+// there would be exactly the "registered but never invoked" defect this module has already shipped
+// once. Both events are emitted with `entityId = variantId`, matching the other three.
 import { withTenants } from "../../db";
 import { declareSocialModuleScope } from "./publish-precondition";
 import { notify } from "../../core/http";
+import { resolveClientRecipients, notifyBestEffort } from "../../core/client-notify";
 import { enqueueMail } from "../../mail/queue";
 import type { OutboxEvent } from "../../events/types";
 
@@ -152,5 +163,72 @@ export async function handlePostFailed(event: OutboxEvent): Promise<void> {
     entityType: "social_post_variant",
     entityId: event.entityId,
     payload: mailPayload,
+  });
+}
+
+interface ClientReviewRequestedPayload {
+  reviewId?: string;
+  clientId?: string;
+  projectId?: string | null;
+  postTitle?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Handle `social.client_review.requested` (SMM-31). Notifies the CLIENT — every active portal
+ * contact in scope, signer or viewer alike (`kind: 'general'`, matching `resource_portal.yaml`'s
+ * own comment on `approve_post`: this is not a signing act and must reach the same audience
+ * `request_change` already does). `client_contacts` is a CORE table, so this read needs no module
+ * scope; only `postTitle` came pre-resolved from the write path's own third-walled join
+ * (`social.controller.ts#requestClientReview`) — re-deriving it here would be a second copy of that
+ * join, exactly the drift risk `loadEngagementOwner`'s reuse below avoids for the decided event.
+ */
+export async function handleClientReviewRequested(event: OutboxEvent): Promise<void> {
+  const payload = event.payload as ClientReviewRequestedPayload;
+  if (!payload.reviewId || !payload.clientId) return;
+
+  const recipients = await withTenants([event.tenantId], (c) =>
+    resolveClientRecipients(c, { clientId: payload.clientId!, projectId: payload.projectId ?? null, kind: "general" }),
+  );
+  if (!recipients.length) return;
+
+  await notifyBestEffort(event.tenantId, null, recipients, "social.client_review.requested", {
+    title: `A post is ready for your review${payload.postTitle ? `: ${payload.postTitle}` : ""}`,
+    href: "/portal/social-reviews",
+    entityType: "social_post_client_review",
+    entityId: payload.reviewId,
+    severity: "info",
+  });
+}
+
+interface ClientReviewDecidedPayload {
+  reviewId?: string;
+  decision?: string;
+  engagementId?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Handle `social.client_review.decided` (SMM-31). Notifies STAFF — the engagement owner, reusing
+ * `loadEngagementOwner` (this file's own SMM-13 helper, module-scope-declared) rather than a second
+ * copy of that read. Bell only, no mail: unlike a publish `failed`, a client's decision (either
+ * direction) is a routine workflow step, not a customer-visible incident.
+ */
+export async function handleClientReviewDecided(event: OutboxEvent): Promise<void> {
+  const payload = event.payload as ClientReviewDecidedPayload;
+  if (!payload.engagementId) return;
+
+  const engagement = await loadEngagementOwner(event.tenantId, payload.engagementId);
+  if (!engagement || !engagement.owner_id) return;
+
+  const changesRequested = payload.decision === "changes_requested";
+  await notify(event.tenantId, engagement.owner_id, null, "social.client_review.decided", {
+    title: changesRequested
+      ? `Client requested changes on a post${engagement.name ? ` for ${engagement.name}` : ""}`
+      : `Client approved a post${engagement.name ? ` for ${engagement.name}` : ""}`,
+    severity: changesRequested ? "warning" : "info",
+    entityType: "social_post_client_review",
+    entityId: payload.reviewId ?? event.entityId,
+    href: `/departments/social-media/posts`,
   });
 }

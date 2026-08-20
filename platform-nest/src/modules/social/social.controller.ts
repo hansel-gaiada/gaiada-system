@@ -44,9 +44,12 @@ import { variantArgsSha256, variantPublishArgs } from "./canonical-args";
 // SMM-09 — the publish gate. The controller imports the SAME evaluator the D14 registry entry runs
 // (core/approval-executables.ts), never a UI-friendly second copy of the rules.
 import {
-  evaluatePublishPrecondition, PUBLISH_PRECONDITION_STAGES,
+  PUBLISH_PRECONDITION_STAGES,
   SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL,
 } from "./publish-precondition";
+// SMM-31 — the client-review gate (composed IN FRONT of the six-stage chain, never inside it — see
+// client-review.ts's header) and the staff-side state machine for `social_post_client_reviews`.
+import { evaluatePublishPreconditionWithClientReview } from "./client-review";
 // SMM-10 — the dispatch endpoint `social.publishPost`'s `pathTemplate` fronts, and the webhook
 // intake for the reconcile flow. Both are thin: the domain logic (the transactional stamp, the
 // idempotent apply) lives in `dispatch.ts`/`post-status-sync-job.ts`, never re-implemented here.
@@ -1071,7 +1074,11 @@ export class SocialController {
         });
         return {
           found: true as const,
-          verdict: await evaluatePublishPrecondition(
+          // SMM-31: the client-review gate runs FIRST here too — this dry run is the one surface
+          // staff actually consult before filing a WS4 request, so it is the practical "would this
+          // even be submittable" answer in an architecture with no separate submit endpoint (see
+          // client-review.ts's header).
+          verdict: await evaluatePublishPreconditionWithClientReview(
             c, args as unknown as Record<string, unknown>, SOCIAL_PUBLISH_TOOL,
           ),
         };
@@ -1092,6 +1099,149 @@ export class SocialController {
       tool: SOCIAL_PUBLISH_TOOL,
       meteredTool: SOCIAL_PUBLISH_METERED_TOOL,
     };
+  }
+
+  // ==================================================== CLIENT REVIEW (SMM-31, D-16) ==========
+  //
+  // The STAFF side of the two-sided seam: ask (`request`), look (`read`), retract (`withdraw`).
+  // The CLIENT's own decision lives on the PORTAL surface (`social-client-review-portal.controller.ts`,
+  // action `approve_post`) — never here; `resource_social_client_review.yaml`'s own header states the
+  // invariant that `client` never appears in THIS kind's policy.
+  //
+  // `social_post_client_reviews` is the ONE plain-tenant-wall table in this module (D-16 / 0088's
+  // D-2a lesson — see client-review.ts's header). Reading/writing it from inside this controller's
+  // usual `{modules:['social']}` transaction is still correct: the plain wall's policy only checks
+  // `tenant_id`, so an ADDITIONAL `app.scopes` declaration is inert for it and load-bearing for the
+  // social_post_variants/social_posts/social_engagements joins these three endpoints also need.
+  //
+  // ONE ROW PER VARIANT, FOREVER (0105's `UNIQUE (variant_id)`) — "request" is therefore an UPSERT
+  // back to `pending`, never a second INSERT: re-asking after `changes_requested`/`withdrawn`, or
+  // even after `approved` (an edit invalidated the prior sign-off), all resolve to the same row.
+
+  @Post("variants/:variantId/client-review")
+  @HttpCode(201)
+  async requestClientReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "request");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        // Everything `event-handlers.ts#handleClientReviewRequested` needs to resolve and notify the
+        // client, gathered in ONE query — a second read in the handler would need this exact same
+        // third-walled join, which is how a copy of it drifts.
+        const { rows } = await c.query<{ client_id: string; project_id: string | null; title: string }>(
+          `SELECT e.client_id, e.project_id, p.title
+             FROM social_post_variants v
+             JOIN social_posts p       ON p.id = v.post_id       AND p.tenant_id = v.tenant_id
+             JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = v.tenant_id
+            WHERE v.id = $1 AND v.deleted_at IS NULL`,
+          [variantId],
+        );
+        if (!rows[0]) return { kind: "not_found" as const };
+        const { client_id: clientId, project_id: projectId, title } = rows[0];
+
+        // Lock the row (if any) so a concurrent double-click cannot race the "was it already
+        // pending" read against the upsert below.
+        const existing = await c.query<{ status: string }>(
+          `SELECT status FROM social_post_client_reviews WHERE variant_id = $1 FOR UPDATE`,
+          [variantId],
+        );
+        const alreadyPending = existing.rows[0]?.status === "pending";
+        const id = newId();
+        const upsert = await c.query<{ id: string }>(
+          `INSERT INTO social_post_client_reviews
+             (id, tenant_id, variant_id, client_id, status, requested_at, updated_at, origin_site)
+           VALUES ($1, $2, $3, $4, 'pending', now(), now(), $5)
+           ON CONFLICT (variant_id) DO UPDATE SET
+             status = 'pending', comment = NULL, reviewed_args_sha256 = NULL,
+             decided_by = NULL, decided_at = NULL, requested_at = now(), updated_at = now()
+           RETURNING id`,
+          [id, tenantId, variantId, clientId, config.originSite],
+        );
+        const reviewId = upsert.rows[0].id;
+        if (!alreadyPending) {
+          // Rides the ALREADY-DRAINED "social_post_variant" stream (main.ts's startConsumerLoop) —
+          // deliberately, so this event reaches `event-handlers.ts`'s consumer without touching
+          // main.ts (defect class #2: "registered but never invoked"). Not emitted on a no-op
+          // re-request: a double-click must not re-notify the client of the same ask.
+          await emitEvent(c, tenantId, "social_post_variant", variantId, "social.client_review.requested", {
+            reviewId, clientId, projectId, postTitle: title,
+          });
+        }
+        return { kind: "ok" as const, reviewId, alreadyPending };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("post variant not found");
+    await writeActivity(tenantId, req.principal.userId, "requested", "social_post_client_review", result.reviewId, {
+      variantId, alreadyPending: result.alreadyPending,
+    });
+    return { id: result.reviewId, status: "pending", alreadyPending: result.alreadyPending };
+  }
+
+  @Get("variants/:variantId/client-review")
+  async getClientReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "read");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `SELECT id, status, comment, reviewed_args_sha256 AS "reviewedArgsSha256",
+                requested_at AS "requestedAt", decided_by AS "decidedBy", decided_at AS "decidedAt"
+           FROM social_post_client_reviews WHERE variant_id = $1`,
+        [variantId],
+      ),
+      { modules: ["social"] },
+    );
+    // A variant that never needed client sign-off (or has not been asked for one yet) has no row —
+    // a legitimate steady state, answered as data rather than a 404 (matching the publish-gate
+    // dry-run's own "the verdict is data" doctrine above).
+    if (!rows[0]) return { status: "not_requested" };
+    return rows[0];
+  }
+
+  @Post("variants/:variantId/client-review/withdraw")
+  @HttpCode(200)
+  async withdrawClientReview(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_client_review", id: variantId, tenantId, module: "social" }, "withdraw");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const upd = await c.query<{ id: string }>(
+          `UPDATE social_post_client_reviews
+              SET status = 'withdrawn', decided_by = $2, decided_at = now(), updated_at = now()
+            WHERE variant_id = $1 AND status = 'pending'
+            RETURNING id`,
+          [variantId, req.principal.userId],
+        );
+        if (upd.rowCount) {
+          await emitEvent(c, tenantId, "social_post_variant", variantId, "social.client_review.withdrawn", {
+            reviewId: upd.rows[0].id,
+          });
+          return { kind: "ok" as const, reviewId: upd.rows[0].id };
+        }
+        const existing = await c.query<{ id: string; status: string }>(
+          `SELECT id, status FROM social_post_client_reviews WHERE variant_id = $1`,
+          [variantId],
+        );
+        if (!existing.rows[0]) return { kind: "not_found" as const };
+        // IDEMPOTENT: a retry after an already-withdrawn review is a no-op success, not an error —
+        // deciding (or, here, retracting) twice must not double-apply.
+        if (existing.rows[0].status === "withdrawn") return { kind: "already_withdrawn" as const, reviewId: existing.rows[0].id };
+        return { kind: "conflict" as const, status: existing.rows[0].status };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("no client review requested for this variant");
+    if (result.kind === "conflict") refuse("client_review_not_pending");
+    if (result.kind === "ok") {
+      await writeActivity(tenantId, req.principal.userId, "withdrawn", "social_post_client_review", result.reviewId, { variantId });
+    }
+    return { id: result.reviewId, status: "withdrawn" };
   }
 
   // ==================================================== THE DISPATCH ENDPOINT (SMM-10) ========

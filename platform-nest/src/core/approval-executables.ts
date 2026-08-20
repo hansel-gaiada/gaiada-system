@@ -34,8 +34,10 @@ import {
   SOCIAL_PUBLISH_TOOL,
   SOCIAL_PUBLISH_METERED_TOOL,
   publishLockKey,
-  evaluatePublishPrecondition,
 } from "../modules/social/publish-precondition";
+// SMM-31 — the client-review gate, composed IN FRONT of the six-stage chain (never inside it — see
+// that file's header for why `PUBLISH_PRECONDITION_STAGES` stays untouched).
+import { evaluatePublishPreconditionWithClientReview } from "../modules/social/client-review";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -797,12 +799,18 @@ function socialPublishLockKey(toolArgs: Record<string, unknown>): string {
 /** Adapts the module's richer `{ok, stage, reason}` verdict onto the registry's `PreconditionVerdict`.
  *  The STAGE is dropped on this path deliberately: `execution_error` carries one typed token and
  *  `PUBLISH_REFUSAL_STAGE` maps it back to its stage for anyone who wants it, so putting both in the
- *  string would give the estate two spellings of one refusal. */
+ *  string would give the estate two spellings of one refusal.
+ *
+ *  SMM-31: runs the client-review gate FIRST (composed by `evaluatePublishPreconditionWithClientReview`,
+ *  never folded into the six-stage chain — see `modules/social/client-review.ts`'s header), so an
+ *  engagement with `tool_scope.posting.requiresClientOk` set refuses here before ever reaching the
+ *  hash/budget/creator-info stages, and re-derives on every execution attempt exactly like the rest
+ *  of this gate. */
 async function socialPublishPrecondition(
   client: PoolClient,
   toolArgs: Record<string, unknown>,
 ): Promise<PreconditionVerdict> {
-  const verdict = await evaluatePublishPrecondition(client, toolArgs, SOCIAL_PUBLISH_TOOL);
+  const verdict = await evaluatePublishPreconditionWithClientReview(client, toolArgs, SOCIAL_PUBLISH_TOOL);
   if (verdict.ok) return { ok: true };
   return { ok: false, reason: verdict.reason };
 }

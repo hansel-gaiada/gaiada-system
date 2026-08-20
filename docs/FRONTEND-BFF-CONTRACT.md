@@ -1535,6 +1535,26 @@ Portal view for client-submitted change requests + staff triage queue.
 | ⛔ | GET | `/api/:t/modules/webdev/provisioned-sites/:id` | `SiteDto` (single row). Authz: `webdev_provisioned_site` read. |
 | ⛔ | POST | `/api/:t/modules/webdev/provisioned-sites/:id/reconcile` | `{} → SiteDto`. Re-drive the poller synchronously; same logic as `POST /provision` detached poll but on-demand and blocking. Authz: `webdev_provisioned_site` reconcile (different action, can cause egress). |
 
+### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend, NO UI yet (SMM-32 next)**
+
+The client's own decide half of §19's client-review stage; the staff ask/read/withdraw half lives on
+`modules/social/social.controller.ts` (§19). Modelled on §16's own gate-decide pattern
+(`PortalController.decideGate`) — addressed by the REVIEW's own id, ownership resolved before a
+guarded UPDATE. `social_post_client_reviews` is the ONE plain-tenant-wall table in the social
+module (D-16 restates 0088's D-2a lesson: a third-walled table here would read as zero rows on
+every portal query, since portal controllers declare no module scope). Available to every ACTIVE
+contact regardless of `capability` (signer or viewer) — same ratified reasoning `request_change` and
+`update_profile` already carry: approving a draft post is weaker than signing a scope agreement or
+recording a payment.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | GET | `/api/:t/portal/social-reviews?status=` | `{id, status, comment, requestedAt, decidedAt, variantId, body, media, settings, scheduledAt, network, postTitle}[]`. Caller's own client's reviews only, newest-first, capped 200. Authz: `portal` read. |
+| ✅ | POST | `/api/:t/portal/social-reviews/:id/decide` | `{decision:'approved'\|'changes_requested', comment?}` → `{id, status, alreadyDecided?}`. Stamps `reviewedArgsSha256` from the variant's LIVE hash at the moment of decision (so a later edit is detectably `stale`, D-15 restated for the client's side). **Idempotent**: the SAME decision replayed is a 200 no-op (`alreadyDecided:true`, no duplicate event/notification); a DIFFERENT decision after the review is already resolved is a genuine **409** (`client_review_already_decided`), never a silent flip. Unknown/out-of-scope review id is a **404** (existence-oracle-safe — never distinguishes "not yours" from "does not exist"). Authz: `portal` `approve_post`. Emits `social.client_review.decided`, notifying the engagement owner. |
+
+Not a signing act: `approve_post` carries no `requireSigner()` gate, matching `request_change`'s own
+ratified reasoning (§16f) — do not add one "for consistency" with `sign`/`pay`.
+
 ---
 
 ## 17. Mail subsystem (MAIL-* program, 2026-08-04) — `src/mail/` — **STATUS: IN PROGRESS**
@@ -2749,7 +2769,7 @@ therefore reuses T3b's existing confirm-chip machinery end to end rather than ad
 
 ---
 
-## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05/09 backend built; NO UI yet)**
+## 19. Social-media module — SMM · Organic Publishing (SMM-* program, 2026-08-13) — `modules/social/social.controller.ts` — **STATUS: IN PROGRESS (SMM-02/08/19/05/09/10/31 backend built; NO UI yet)**
 
 Design: `blueprints/smm-design.md` as amended by **`blueprints/smm-design-addendum-2026-08-12.md`
 (binding)**. Schema `migrations/0105_module_social.sql`; IAM registration `0106` + eight
@@ -2997,6 +3017,27 @@ scope) is **BARRED**: it is absent from the executable registry and from
 `cerbos/policies/resource_mcp_tool.yaml`'s executable-tool list, so an approved row for it stays
 `execution_status='not_applicable'` forever. Belt and braces, the free tool's own precondition
 refuses a metered-network variant with `metered_network_requires_metered_tool` rather than spending.
+
+**Client review stage (SMM-31, D-16) — BUILT, backend only.** Cerbos kind `social_client_review`
+(staff side) / `portal` action `approve_post` (client side — see §16g). NOT a 7th stage in the table
+above: `PUBLISH_PRECONDITION_STAGES` is unchanged and pinned. When the caller's variant resolves to
+an engagement with `toolScope.posting.requiresClientOk` set, `GET .../publish-preconditions` (and
+the D14 executor, and SMM-10's dispatch) now check client sign-off FIRST, reporting
+`stage:"client_review"` with its own small vocabulary — kept apart from the table above the same way
+`DISPATCH_REFUSAL` is kept apart from it.
+
+| Method + path | Permission | Notes |
+|---|---|---|
+| `POST variants/:variantId/client-review` | `social.client_review.request` | Ask the client to sign off. **Idempotent upsert** — 0105's `UNIQUE(variant_id)` means one review row per variant forever; re-asking from ANY prior state (including after `withdrawn`/`changes_requested`, or after an edit staled a prior `approved`) resets the SAME row to `pending`. A repeat call while already `pending` is a no-op (`alreadyPending:true`, no duplicate event/notification). Returns `{id, status:'pending', alreadyPending}`. |
+| `GET variants/:variantId/client-review` | `social.client_review.read` | `{status:'not_requested'}` when nobody has ever asked — data, not a 404 (a variant that never needed sign-off is a legitimate steady state). Otherwise `{id, status, comment, reviewedArgsSha256, requestedAt, decidedBy, decidedAt}`. |
+| `POST variants/:variantId/client-review/withdraw` | `social.client_review.withdraw` (**manager-tier**) | Retract a pending ask. Idempotent: withdrawing an already-withdrawn review is a 200 no-op, never an error. 404 if no review was ever requested; 400 `client_review_not_pending` if it is already `approved`/`changes_requested` (use `request` to re-ask instead of trying to withdraw a decision). |
+
+Refusal tokens (`CLIENT_REVIEW_REFUSAL`, reported as `stage:"client_review"` on the dry-run/dispatch
+paths above): `client_review_not_requested` (requiresClientOk is set, nobody has ever asked) ·
+`client_review_pending` · `client_review_changes_requested` · `client_review_withdrawn` ·
+`client_review_stale` (the client approved, but the content changed since — `reviewedArgsSha256` no
+longer matches the variant's live `argsSha256`; D-15's edit-invalidates-approval rule, restated for
+the client's own side of the same content).
 
 **Rollup metrics** (D12): `social.engagements.active`, `social.accounts.connected`,
 `social.posts.published.month`, `social.approvals.pending`, `social.inbox.open`,

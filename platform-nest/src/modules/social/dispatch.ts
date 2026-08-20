@@ -60,10 +60,15 @@ import {
   CONSENT_AT_UPLOAD_NETWORKS,
   PUBLISH_REFUSAL,
   declareSocialModuleScope,
-  evaluatePublishPrecondition,
   type PublishPreconditionStage,
   type PublishRefusalReason,
 } from "./publish-precondition";
+// SMM-31 — the client-review gate, composed IN FRONT of the six-stage chain (never inside it — see
+// client-review.ts's header). Re-run here for the SAME reason this file re-runs the six-stage chain
+// itself (see this file's own "WHY THIS FILE RE-RUNS THE PRECONDITION A SECOND TIME" note): a
+// concurrent withdrawal or a fresh edit racing the network hop must still refuse at this hop, not
+// only at the executor's.
+import { evaluatePublishPreconditionWithClientReview, type ClientReviewRefusalReason } from "./client-review";
 import { variantPublishArgs, type VariantPublishArgs } from "./canonical-args";
 import { assertDispatchChain, openOrg, type DispatchChain } from "./publisher/provisioning";
 import { invokePublisher } from "./publisher/registry";
@@ -104,7 +109,14 @@ export type DispatchRefusalReason = (typeof DISPATCH_REFUSAL)[keyof typeof DISPA
 
 export type DispatchVerdict =
   | { ok: true; providerPostId: string; network: string }
-  | { ok: false; stage: PublishPreconditionStage | "dispatch"; reason: PublishRefusalReason | DispatchRefusalReason; critical?: boolean };
+  | {
+      ok: false;
+      // SMM-31: "client_review" is a LOCAL widening of this union, here only — it does not touch
+      // `PublishPreconditionStage` (pinned by `d14-smm-09-social-publish-registry.test.ts`).
+      stage: PublishPreconditionStage | "client_review" | "dispatch";
+      reason: PublishRefusalReason | ClientReviewRefusalReason | DispatchRefusalReason;
+      critical?: boolean;
+    };
 
 // ── SMM-39 — resolving the composer's `{fileId}` descriptors to uploaded engine media ─────────────
 //
@@ -321,7 +333,7 @@ interface PreconditionClaim {
 
 type PreconditionOutcome =
   | { kind: "ok"; claim: PreconditionClaim }
-  | { kind: "refused"; stage: PublishPreconditionStage; reason: PublishRefusalReason }
+  | { kind: "refused"; stage: PublishPreconditionStage | "client_review"; reason: PublishRefusalReason | ClientReviewRefusalReason }
   | { kind: "unresolved" }
   | { kind: "not_found" };
 
@@ -346,7 +358,11 @@ async function checkPreconditionAndResolveApproval(tenantId: string, variantId: 
       firstComment: variant.first_comment, media: variant.media, settings: variant.settings,
       scheduledAt: variant.scheduled_at,
     });
-    const verdict = await evaluatePublishPrecondition(c, args as unknown as Record<string, unknown>, SOCIAL_PUBLISH_TOOL);
+    // SMM-31: the client-review gate re-runs HERE too, under the SAME lock and on the SAME
+    // connection — see this file's own header for why the whole precondition re-runs a second time,
+    // and client-review.ts's header for why this call is composed rather than folded into the
+    // six-stage chain.
+    const verdict = await evaluatePublishPreconditionWithClientReview(c, args as unknown as Record<string, unknown>, SOCIAL_PUBLISH_TOOL);
     if (!verdict.ok) return { kind: "refused" as const, stage: verdict.stage, reason: verdict.reason };
 
     const approvalId = await resolveExecutingApprovalId(c, tenantId, variantId);

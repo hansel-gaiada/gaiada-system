@@ -5,7 +5,10 @@ import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/s
 import { config } from "../../config";
 import { createCompany, createUser, addMembership } from "../../testing/fixtures";
 import type { OutboxEvent } from "../../events/types";
-import { handlePostDispatched, handlePostPublished, handlePostFailed } from "./event-handlers";
+import {
+  handlePostDispatched, handlePostPublished, handlePostFailed,
+  handleClientReviewRequested, handleClientReviewDecided,
+} from "./event-handlers";
 
 let seq = 0;
 const uniq = (label: string): string => `smm13-event-${label}-${++seq}`;
@@ -15,6 +18,8 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
   let engagementId: string;
   let variantId: string;
   let ownerUserId: string;
+  let clientId: string;
+  let clientContactUserId: string;
   let MODULES: { modules: string[] };
 
   // `config.mail.enabled` is the master gate: with it off, enqueueMail returns {skipped} WITHOUT
@@ -38,11 +43,22 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
       ));
 
     // Create a client
-    const clientId = newId();
+    clientId = newId();
     await withTenants([tenantId], (c) =>
       c.query(
         `INSERT INTO clients (id, tenant_id, name, origin_site) VALUES ($1, $2, $3, 'central')`,
         [clientId, tenantId, uniq("client")],
+      ));
+
+    // SMM-31 — an active, client-wide portal contact for handleClientReviewRequested's recipient
+    // resolution (resolveClientRecipients reads client_contacts directly; no client role grant is
+    // needed here since the handler never goes through Cerbos, only through the notify() write path).
+    clientContactUserId = await createUser(uniq("portal-contact@client.test"));
+    await withTenants([tenantId], (c) =>
+      c.query(
+        `INSERT INTO client_contacts (id, tenant_id, client_id, user_id, capability, status, origin_site)
+         VALUES ($1, $2, $3, $4, 'viewer', 'active', 'central')`,
+        [newId(), tenantId, clientId, clientContactUserId],
       ));
 
     // Create an engagement with the user as owner
@@ -280,5 +296,115 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
 
     // Should not throw
     await handlePostDispatched(event);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // SMM-31 — the client-review stage's two events. Both ride the SAME "social_post_variant" stream
+  // (event-wiring.test.ts's static pin already covers reachability); these test the handler BODIES,
+  // called directly, matching this file's own established idiom.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  it("handleClientReviewRequested notifies the client (portal contact), not staff", async () => {
+    const reviewId = newId();
+    const event: OutboxEvent = {
+      id: newId(),
+      tenantId,
+      entityType: "social_post_variant",
+      entityId: variantId,
+      eventType: "social.client_review.requested",
+      payload: { reviewId, clientId, projectId: null, postTitle: "Autumn launch teaser" },
+      originSite: "central",
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+
+    await handleClientReviewRequested(event);
+
+    const { rows } = await withTenants([tenantId], (c) =>
+      c.query(
+        `SELECT type, payload FROM notifications WHERE user_id = $1 AND type = 'social.client_review.requested' ORDER BY created_at DESC LIMIT 1`,
+        [clientContactUserId],
+      ));
+    expect(rows).toHaveLength(1);
+    const payload = rows[0].payload as Record<string, unknown>;
+    expect(payload.title).toContain("Autumn launch teaser");
+    expect(payload.entityType).toBe("social_post_client_review");
+    expect(payload.entityId).toBe(reviewId);
+
+    // Never notifies staff — this event is the client's ask, not the internal side's.
+    const staffNotif = await withTenants([tenantId], (c) =>
+      c.query(`SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND type = 'social.client_review.requested'`, [ownerUserId]));
+    expect(Number(staffNotif.rows[0].n)).toBe(0);
+  });
+
+  it("handleClientReviewRequested is a no-op with no recipients (no client_id / no active contact)", async () => {
+    const event: OutboxEvent = {
+      id: newId(),
+      tenantId,
+      entityType: "social_post_variant",
+      entityId: variantId,
+      eventType: "social.client_review.requested",
+      payload: {}, // no reviewId/clientId
+      originSite: "central",
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+    await handleClientReviewRequested(event); // must not throw
+  });
+
+  it("handleClientReviewDecided(approved) notifies the engagement owner at info severity", async () => {
+    const reviewId = newId();
+    const event: OutboxEvent = {
+      id: newId(),
+      tenantId,
+      entityType: "social_post_variant",
+      entityId: variantId,
+      eventType: "social.client_review.decided",
+      payload: { reviewId, decision: "approved", engagementId },
+      originSite: "central",
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+
+    await handleClientReviewDecided(event);
+
+    const { rows } = await withTenants([tenantId], (c) =>
+      c.query(
+        `SELECT type, payload FROM notifications WHERE user_id = $1 AND type = 'social.client_review.decided' ORDER BY created_at DESC LIMIT 1`,
+        [ownerUserId],
+      ));
+    expect(rows).toHaveLength(1);
+    const payload = rows[0].payload as Record<string, unknown>;
+    expect(payload.severity).toBe("info");
+    expect(payload.title).toContain("approved");
+    expect(payload.entityId).toBe(reviewId);
+  });
+
+  it("handleClientReviewDecided(changes_requested) notifies at WARNING severity", async () => {
+    const reviewId = newId();
+    const event: OutboxEvent = {
+      id: newId(),
+      tenantId,
+      entityType: "social_post_variant",
+      entityId: variantId,
+      eventType: "social.client_review.decided",
+      payload: { reviewId, decision: "changes_requested", engagementId },
+      originSite: "central",
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+
+    await handleClientReviewDecided(event);
+
+    const { rows } = await withTenants([tenantId], (c) =>
+      c.query(
+        `SELECT payload FROM notifications WHERE user_id = $1 AND type = 'social.client_review.decided'
+          AND payload->>'entityId' = $2`,
+        [ownerUserId, reviewId],
+      ));
+    expect(rows).toHaveLength(1);
+    const payload = rows[0].payload as Record<string, unknown>;
+    expect(payload.severity).toBe("warning");
+    expect(payload.title).toContain("requested changes");
   });
 });
