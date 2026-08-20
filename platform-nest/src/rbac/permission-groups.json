@@ -3,15 +3,15 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (267 grantable permissions, IAM Phase 2 P2-02 2026-08-13)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (283 grantable permissions, MON-10b 2026-08-19)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 85,
-      "grantablePermissionsInCatalog": 269,
-      "permissionsCoveredByGroups": 247,
+      "groups": 92,
+      "grantablePermissionsInCatalog": 283,
+      "permissionsCoveredByGroups": 261,
       "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 49
+      "sensitiveGroups": 52
     }
   },
   "groups": [
@@ -1027,6 +1027,83 @@
       "description": "Approve, or request changes to, social posts drafted for your brand before they are published.",
       "permissions": [
         "portal.approve_post"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "monitoring_view",
+      "name": "View Monitoring",
+      "domain": "monitoring",
+      "description": "See monitors, their check results, incidents, uptime, scheduled maintenance windows, notification channels and status-page configuration. Read-only.",
+      "permissions": [
+        "monitoring.monitor.read",
+        "monitoring.incident.read",
+        "monitoring.maintenance.read",
+        "monitoring.channel.read",
+        "monitoring.status_page.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "monitoring_author_monitors",
+      "name": "Create & Edit Monitors",
+      "domain": "monitoring",
+      "description": "Create monitors and edit their target, assertions, interval and severity. Creating a monitor is the standing authorization for the platform to probe that target on a schedule — and nothing more.",
+      "permissions": [
+        "monitoring.monitor.create",
+        "monitoring.monitor.update"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "monitoring_delete_monitors",
+      "name": "Delete Monitors",
+      "domain": "monitoring",
+      "description": "Delete monitors and their check history. Destructive and unrecoverable, so it is a separate group from ordinary editing — though not catalog-sensitive, since it destroys our own records rather than reaching outside the ERP or concealing an outage.",
+      "permissions": [
+        "monitoring.monitor.delete"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "monitoring_acknowledge_incidents",
+      "name": "Acknowledge Incidents",
+      "domain": "monitoring",
+      "description": "Acknowledge an open monitoring incident — the accountability record that a named person has seen it. Deliberately not an edit.",
+      "permissions": [
+        "monitoring.incident.acknowledge"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "monitoring_maintenance",
+      "name": "Schedule Maintenance Windows",
+      "domain": "monitoring",
+      "description": "Schedule and cancel maintenance windows. A window suppresses BOTH notification and SLA math for its duration, so it can hide a real outage and flatter an uptime figure.",
+      "permissions": [
+        "monitoring.maintenance.create",
+        "monitoring.maintenance.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "monitoring_manage_channels",
+      "name": "Manage Notification Channels",
+      "domain": "monitoring",
+      "description": "Create, edit and test notification channels and routing rules. Channels carry secret references and deliver outward; a test sends a real notification.",
+      "permissions": [
+        "monitoring.channel.manage"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "monitoring_status_pages",
+      "name": "Publish Client Status Pages",
+      "domain": "monitoring",
+      "description": "Edit and publish client status pages. This is the only path that moves tenant monitoring state onto the ERP's one unauthenticated read surface.",
+      "permissions": [
+        "monitoring.status_page.update",
+        "monitoring.status_page.publish"
       ],
       "sensitive": true
     }

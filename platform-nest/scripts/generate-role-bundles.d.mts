@@ -5,11 +5,12 @@
 // of an implicit `any`, per IAM-FIX-TYPES.
 //
 // Shape mirrors the script's actual exports (scripts/generate-role-bundles.mjs):
-//   - `REAL_ROLES`: the 22 real, nameable Cerbos roles, as a readonly tuple so importers get
+//   - `REAL_ROLES`: the 24 real, nameable Cerbos roles, as a readonly tuple so importers get
 //     literal-typed elements (role-permission-parity.db.test.ts derives
 //     `type RealRole = (typeof REAL_ROLES)[number]` from it). HIER-2/0102 added `org_unit_lead`
 //     (20 -> 21); HIER-3 (2026-08-11) retired `team_lead` (21 -> 20); SMM-30 (2026-08-12) added
-//     `social_staff`/`social_manager` (20 -> 22) — keep this tuple in lockstep
+//     `social_staff`/`social_manager` (20 -> 22); MON-10b (2026-08-19) added
+//     `monitoring_staff`/`monitoring_manager` (22 -> 24) — keep this tuple in lockstep
 //     with the .mjs's own REAL_ROLES array; a mismatch here is a TS error at every importer, not a
 //     silent drift, which is the point of hand-writing it rather than inferring `string[]`.
 //   - `generate()`: builds the full role-permission-bundles.json document in memory.
@@ -25,6 +26,7 @@ export const REAL_ROLES: readonly [
   "reports_staff", "reports_manager",
   "webdev_staff", "webdev_manager",
   "social_staff", "social_manager",
+  "monitoring_staff", "monitoring_manager",
 ];
 
 export interface RoleBundleDoc {

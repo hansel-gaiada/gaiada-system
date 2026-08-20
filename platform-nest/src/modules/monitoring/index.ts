@@ -21,19 +21,26 @@ export const monitoringModule: ModuleContract = {
     "0116_module_monitoring.sql",
     "0117_iam_monitoring_permissions.sql",
     "0119_monitoring_heartbeat_touch.sql",
+    "202608191417_iam_monitoring_permissions_completion.sql",
   ],
 
-  // Mirrors 0117 exactly. Staff/manager split lives in the migration's bundles; this list is the
-  // module's declared surface, not a grant.
+  // All 14 actions the resource_monitor*/status_page policies name — 0117 seeded 9 and the
+  // completion migration adds the other 5. The staff/manager split lives in the migrations'
+  // bundles; this list is the module's declared surface, not a grant.
   permissions: [
     { key: "monitoring.monitor.read", description: "View monitors, results, incidents and uptime" },
     { key: "monitoring.monitor.create", description: "Create monitors (authorizes scheduled probing only)" },
     { key: "monitoring.monitor.update", description: "Edit monitors, assertions, interval and severity" },
     { key: "monitoring.monitor.delete", description: "Delete monitors and their history" },
+    { key: "monitoring.incident.read", description: "View monitoring incidents, open and closed" },
     { key: "monitoring.incident.acknowledge", description: "Acknowledge an open monitoring incident" },
+    { key: "monitoring.maintenance.read", description: "View scheduled maintenance windows" },
     { key: "monitoring.maintenance.create", description: "Schedule maintenance windows (suppresses alerts and SLA impact)" },
+    { key: "monitoring.maintenance.delete", description: "Cancel a maintenance window (ends suppression early)" },
     { key: "monitoring.channel.read", description: "View notification channels and routing rules" },
     { key: "monitoring.channel.manage", description: "Manage and test notification channels and routes" },
+    { key: "monitoring.status_page.read", description: "View status-page configuration inside the ERP" },
+    { key: "monitoring.status_page.update", description: "Edit a status page, including which monitors it exposes" },
     { key: "monitoring.status_page.publish", description: "Publish a client status page (readable WITHOUT authentication)" },
   ],
 

@@ -393,6 +393,12 @@ const EXPECTED_MODULE_ROLE_NAMES = new Set([
   // module key is `social`. Seeded by migration 0106.
   "social_staff",
   "social_manager",
+  // MON-10b, 2026-08-19 — the monitoring module's tiers, derived the same way (module key
+  // `monitoring`, so `monitoring_staff`/`monitoring_manager` are the only names Cerbos composes).
+  // Seeded by migration 0117; its 5 resource policies carry the module_staff/module_manager rules
+  // this derivation reads.
+  "monitoring_staff",
+  "monitoring_manager",
   "agency_approver",
 ]);
 

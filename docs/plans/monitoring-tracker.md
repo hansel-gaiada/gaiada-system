@@ -3,6 +3,11 @@
 **Updated:** 2026-08-19 · **Status vocabulary:** PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED
 (nothing here is production). Design: [`monitoring-program.md`](../blueprints/monitoring-program.md).
 
+⚠ **CI cannot see half of this module's guards.** Every `*.db.test.ts` is `describe.skipIf(!TEST_URL)` and
+the `platform-nest` CI job has no test database, so the DB-side alignment suites SKIP there. The 9-row
+catalog drift below was green in CI for four releases and only appeared on a local run with
+`DATABASE_URL_TEST` set. Run the DB suites locally before believing a green pipeline.
+
 Two planes, and they never merge. **Plane A** = our own infrastructure (staff-only, not sellable).
 **Plane B** = the tenant's clients' websites (tenant-scoped, Cerbos-gated, sellable).
 
@@ -36,6 +41,7 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 | — | UI: `/monitoring` board, detail, editor, channels + `lib/monitoring.ts` + demo fixtures + nav + contract §20 | PROTOTYPED (browser-driven) |
 | MON-10 | Schema `0116`: 9 tables, FORCE RLS on all, `monitor_results` partitioned | DEV-VERIFIED (applied to a throwaway DB) |
 | MON-10b | IAM `0117`: 9 permissions, 2 roles, 32 bundles + module contract + boot registration | DEV-VERIFIED (idempotency proven) |
+| MON-10c | **IAM catalog completion** — `0117` was half a seed. 5 policy actions had no catalog row (2 of them authorized by code already in production); `manager` and `group_executive` had **zero** bundle rows though every policy names them; the `permissions` table had drifted 9 rows ahead of the catalog. Plus 7 permission groups, the generator/parity/drift registrations, and the shared-service seam | **DEV-VERIFIED** — 796/796 on `src/rbac` + `src/modules/monitoring`, live RLS + live Cerbos, **zero skips** |
 | — | Cerbos policies for 5 resource kinds (role arms) | **DEV-VERIFIED** — loaded into live Cerbos and **12/12 decisions probed**, incl. every staff/manager boundary |
 | MON-11a | Driver registry: absent-not-inert, no default branch, registration pin | DEV-VERIFIED |
 | MON-11b | SSRF egress floor + **closed an IP-literal bypass** found by probing Node | DEV-VERIFIED (mutation-probed) |
@@ -56,7 +62,8 @@ Two planes, and they never merge. **Plane A** = our own infrastructure (staff-on
 
 | MON-12d | Backfill `monitors.uptime24h/30d` from `monitor_results` | Board shows `—` today. Deliberate (null ≠ 0), but it is a gap. |
 | MON-12b | Persist egress audit decisions | Currently a documented no-op rather than a log nobody reads. |
-| — | **Deploy** | None of the Plane B backend is live. `/monitoring` renders "backend not connected" in production. |
+| — | **Enable the module for a company** | **Corrected 2026-08-19:** the Plane B backend IS live (releases 047–054 shipped the controller, drivers, runner and `0116`/`0117`; the heartbeat route answers on the box). What is missing is that **no company has `monitoring` in `enabled_modules`**, so `app_module_allowed()` filters every row and the guard returns 404 — correctly, fail-closed. `/monitoring` saying "backend not connected" is the module being off, not the code being absent. Turning it on for a real company is an owner decision, not a code change. |
+| — | **Deploy** | Still needed for the completion migration + `0119`; neither is in a tag yet. |
 | — | Cerbos **permission arm** (`perm_monitoring_*`) | A principal holding only a fine-grained `monitoring.*` grant is DENIED until it lands. Fail-closed. Needs 9 scope-cascade blocks in a 2,000-line security file + the parity suites. |
 
 ### Plane B feature work

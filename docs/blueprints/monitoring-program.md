@@ -529,9 +529,10 @@ must ship together — because the failure mode is **boot**, not a red test.
 |---|---|
 | `monitoring.monitor.read` | The broad grant. Everything on the board is visible to it — which is why `monitor_channels.config` and `monitor_results.detail` hold no secrets and no public-page content. |
 | `monitoring.monitor.create` / `.update` / `.delete` | Authoring a monitor. Per §4.3 this IS the standing authorization to probe on a schedule, and is NOT authorization to act on the target. |
-| `monitoring.incident.acknowledge` | Deliberately separate from `.update`: acknowledging is an accountability record, not an edit. |
-| `monitoring.maintenance.create` | K7. Suppresses alerting *and* SLA math, so it is a real grant, not a convenience. |
-| `monitoring.status_page.publish` | **`sensitive: true`.** It moves tenant data onto the ERP's only unauthenticated read surface. |
+| `monitoring.incident.read` / `.acknowledge` | Acknowledging is deliberately separate from `.update`: it is an accountability record, not an edit. |
+| `monitoring.maintenance.read` / `.create` / `.delete` | K7. `create` suppresses alerting *and* SLA math (`sensitive: true`), so it is a real grant, not a convenience. `delete` ends suppression early and is therefore **not** sensitive — the concealing direction is the sensitive one. |
+| `monitoring.channel.read` / `.manage` | **`manage` is `sensitive: true`.** Channels carry secret references and deliver outward; a test send is a real notification. |
+| `monitoring.status_page.read` / `.update` / `.publish` | **`update` and `publish` are `sensitive: true`.** Both move tenant data onto the ERP's only unauthenticated read surface — on an already-published page, changing the selection needs no second publish. |
 
 ### Order of work
 
@@ -554,25 +555,49 @@ guard — every probe dials a customer-named target, so that guard is mandatory,
 highest value per unit of effort and needs no vendor credential: it closes a class of failure that has
 silently bitten this estate twice.
 
-### 13.1 Cerbos policies landed; the permission arm has one subtlety waiting
+### 13.1 Cerbos policies landed; the catalog was half-seeded (RULING REVERSED 2026-08-19)
 
 Five resource policies exist (`monitor`, `monitor_incident`, `monitor_maintenance`, `monitor_channel`,
-`status_page`), role-arm only. Verified: every one of the 9 catalogued `(cerbos_kind, cerbos_action)`
-pairs from 0117 is governed by a policy rule.
+`status_page`), role-arm only, and **12/12 decisions have been probed against live Cerbos**.
 
-**The subtlety for whoever wires `perm_monitoring_*`:** five policy actions have no catalog permission
-of their own — `monitor_incident/read`, `monitor_maintenance/read`, `monitor_maintenance/delete`,
-`status_page/read`, `status_page/update`. That is **not** five missing permissions. The reads are
-covered conceptually by `monitoring.monitor.read` ("view monitors, results, incidents and uptime"),
-and a Cerbos derived role is not bound to one resource — so the arm should reference the SAME
-`perm_monitoring_monitor_read` from several resource policies rather than minting redundant keys.
-Minting `monitoring.incident.read`, `monitoring.maintenance.read` etc. would fragment a grant a human
-thinks of as one thing, and every role bundle would then need all of them to produce the board.
+**⚠ THIS SECTION PREVIOUSLY SAID THE OPPOSITE OF WHAT FOLLOWS.** It recorded that the five policy
+actions without a catalog row — `monitor_incident/read`, `monitor_maintenance/read`,
+`monitor_maintenance/delete`, `status_page/read`, `status_page/update` — were **not** five missing
+permissions, on the reasoning that the reads are covered conceptually by `monitoring.monitor.read` and
+that minting separate keys would "fragment a grant a human thinks of as one thing". That reasoning was
+wrong on the mechanics and is now reversed. All 14 are catalogued.
 
-`monitor_maintenance/delete` and `status_page/update` are the genuine gaps: they are manager-tier
-role-only today and need a deliberate decision — either a catalog key each, or fold them under
-`maintenance.create` / `status_page.publish` respectively on the grounds that whoever may open a
-window may close it, and whoever may publish may edit what they published.
+**Why it was wrong.** The catalog is not a list of things humans grant; it is a 1:1 mirror of concrete
+`(cerbosKind, cerbosAction)` pairs, and `cerbos-catalog-alignment.test.ts` enforces exactly that in
+both directions. A policy action with no pair is drift *by that guard's definition*, no matter how a
+future permission arm chooses to reference it — so "the arm can point several resources at one
+`perm_monitoring_monitor_read`" does not remove the need for the rows. Two independent facts settle it:
+
+- **Two of the five are authorized by code already running in production.**
+  `monitoring.controller.ts` asks Cerbos for `monitor_incident::read` (the incidents list) and
+  `monitor_maintenance::read` (the detail route's window lookup). The live platform was deciding
+  against pairs the catalog did not describe.
+- **The row-count invariant was broken.** `0093` seeds the catalog and every later module migration
+  adds to *both* sides; `0117` moved only one. The table sat 9 rows ahead of the file (293/284,
+  sensitive 105/102). Restored to 298/298 and 106/106.
+
+**And the fragmentation worry was aimed at the wrong layer.** Keeping a grant coherent for humans is
+what `permission-groups.json` is for — that is the whole point of the two-layer model. One
+`monitoring_view` group now carries all five reads, so nobody hand-assembles a board; and each action
+that is destructive, reaches outside the ERP, or conceals an outage is its own withholdable group.
+The catalog stays mechanical; the human-facing shape lives in the groups.
+
+**A second, larger gap surfaced in the same pass.** `manager` and `group_executive` held **zero**
+monitoring bundle rows, although every monitoring policy names them — Cerbos allowed a plain manager
+all 14 actions while the DB mirror recorded none. `role-permission-parity.db.test.ts` found it by
+deriving each role's reach from the live policy. 19 rows added (manager: all 14; group_executive: the
+5 reads, and reads only, since its rule is not `inTenant`-gated).
+
+**For whoever wires `perm_monitoring_*`:** the arm is still unbuilt, and every one of the 14 pairs now
+has a catalog key to reference. `maintenance.delete` and `status_page.update` — flagged here as
+needing "a deliberate decision" — got one: each is its own key, because folding `delete` under
+`create` would make cancelling a window require the grant that can hide an outage, and folding
+`update` under `publish` would hide that editing a live page is itself an exposure path.
 
 ### 13.2 Cerbos decisions PROBED against a live server (2026-08-19)
 

@@ -81,6 +81,10 @@ const REAL_ROLES = [
   // design's own "smm_manager/smm_staff" wording predates this constraint and is wrong; corrected in
   // the 2026-08-12 addendum.) Seeded by migration 0106.
   "social_staff", "social_manager",
+  // MON-10b: the monitoring department's module tiers, seeded by 0117. Same string-composition
+  // constraint as the social pair above — `monitoring` + `_staff`/`_manager` are the only names
+  // Cerbos will ever look for.
+  "monitoring_staff", "monitoring_manager",
 ];
 
 const SEARCH_KINDS = new Set([
@@ -107,6 +111,14 @@ const SEARCH_KINDS = new Set([
 const SOCIAL_KINDS = new Set([
   "social_engagement", "social_account", "social_post", "social_inbox",
   "social_report", "social_ledger", "social_client_review",
+]);
+
+
+// MON-10b — the five module-tiered monitoring kinds (0117 + the completion migration). BARE names,
+// like the social/hr/webdev sets above. The module key is `monitoring`, so `module_staff`/
+// `module_manager` string-compose to exactly `monitoring_staff`/`monitoring_manager` and nothing else.
+const MONITORING_KINDS = new Set([
+  "monitor", "monitor_incident", "monitor_maintenance", "monitor_channel", "status_page",
 ]);
 
 const NO_ROLE_SEEDED_KINDS = new Set([]);
@@ -139,8 +151,9 @@ function moduleStaffTargets(kind, cond) {
     return ["webdev_staff"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
+  if (MONITORING_KINDS.has(kind)) return ["monitoring_staff"];
   if (kind === "service_assignment" || kind === "member") {
-    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff", "social_staff"];
+    return ["hr_staff", "search_staff", "reports_staff", "webdev_staff", "social_staff", "monitoring_staff"];
   }
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(
@@ -164,8 +177,9 @@ function moduleManagerTargets(kind, cond) {
     return ["webdev_manager"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];
+  if (MONITORING_KINDS.has(kind)) return ["monitoring_manager"];
   if (kind === "service_assignment") {
-    return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager"];
+    return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager", "monitoring_manager"];
   }
   if (NO_ROLE_SEEDED_KINDS.has(kind)) return [];
   throw new Error(

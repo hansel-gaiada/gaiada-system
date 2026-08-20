@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### monitoring `0.2.0` — 2026-08-19 — the IAM catalog was only half-seeded
+
+**Fixed**
+- **Five Cerbos actions had a policy rule and no catalog row**: `monitor_incident::read`,
+  `monitor_maintenance::read`, `monitor_maintenance::delete`, `status_page::read`,
+  `status_page::update`. Two of them — the incident list and the detail route's maintenance lookup —
+  are authorized by code that is **already in production**, so the running platform was deciding
+  against pairs the catalog did not describe. Added to `permission-catalog.json`, to the DB, and to
+  the module contract (9 → 14 declared permissions).
+- **`manager` and `group_executive` held zero monitoring bundle rows** while every monitoring policy
+  names them, so Cerbos allowed a plain manager all 14 actions with the DB mirror recording none.
+  Found by `role-permission-parity.db.test.ts`; 19 rows added (manager 14, group_executive 5 reads).
+- **The `permissions` table had drifted 9 rows ahead of the catalog** (293/284, sensitive 105/102),
+  breaking the row-count invariant `0093` establishes. Restored to 298/298 and 106/106.
+- **Heartbeat ingest could never have worked** (`0119`): being unauthenticated by design it has no
+  tenant context, so FORCE RLS filtered every row and the endpoint returned 200 having matched
+  nothing. Now a `SECURITY DEFINER` function with a pinned `search_path`, matching on the token
+  hash's unique index.
+
+**Added**
+- Seven `monitoring_*` permission groups, giving all 14 keys an authoring path; each action that is
+  destructive, reaches outside the ERP, or conceals an outage is its own withholdable group.
+- `monitoring_staff`/`monitoring_manager` registered in the role-bundle generator, the parity
+  suite's independent resolver, and the role-catalog drift baseline — three places that each
+  silently skip a role they do not know about.
+- The shared-service seam (`core.member.read` / `core.service_assignment.read`), mirroring `social`.
+
+**Verified**
+- 796/796 across `src/rbac` + `src/modules/monitoring` against live Postgres RLS and live Cerbos,
+  with **zero skips** — the DB-backed half of this drift is invisible to CI, which has no test DB.
+
 ### platform-nest `0.22.0` — 2026-08-13 — IAM authorization hardening
 
 **Fixed**

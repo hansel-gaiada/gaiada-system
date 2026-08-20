@@ -101,8 +101,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
     // as a literal here only because rewriting these three suites' fixed-input style is its own
     // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
-    expect(catalog.length).toBe(284);
-    expect(catalogKindSet.size).toBe(72);
+    expect(catalog.length).toBe(298);
+    expect(catalogKindSet.size).toBe(77);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

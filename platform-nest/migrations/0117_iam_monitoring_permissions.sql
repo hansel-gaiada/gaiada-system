@@ -158,8 +158,10 @@ DECLARE
   n_bundle integer;
 BEGIN
   SELECT count(*) INTO n_perms FROM permissions WHERE module_key = 'monitoring' AND class = 'grantable';
-  IF n_perms <> 9 THEN
-    RAISE EXCEPTION 'monitoring: expected 9 grantable catalog permissions, found %', n_perms;
+  -- FLOOR, not equality. A later migration legitimately completing this catalog (the 5 actions the
+  -- Cerbos policies name that this file missed) must not make a manual re-run of this file raise.
+  IF n_perms < 9 THEN
+    RAISE EXCEPTION 'monitoring: expected at least 9 grantable catalog permissions, found %', n_perms;
   END IF;
 
   SELECT count(*) INTO n_roles FROM roles WHERE company_id IS NULL AND name IN ('monitoring_staff','monitoring_manager');
@@ -171,8 +173,8 @@ BEGIN
   FROM role_permissions rp
   JOIN permissions p ON p.id = rp.permission_id
   WHERE p.module_key = 'monitoring';
-  IF n_bundle <> 32 THEN
-    RAISE EXCEPTION 'monitoring: expected 32 role->permission pairs, found %', n_bundle;
+  IF n_bundle < 32 THEN
+    RAISE EXCEPTION 'monitoring: expected at least 32 role->permission pairs, found %', n_bundle;
   END IF;
 
   RAISE NOTICE 'monitoring IAM seed OK: % permissions, % roles, % bundle pairs', n_perms, n_roles, n_bundle;
