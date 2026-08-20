@@ -569,54 +569,6 @@
       "uiGrantable": true
     },
     {
-      "key": "core.client_contact.create",
-      "domain": "core",
-      "resource": "client_contact",
-      "action": "create",
-      "description": "Create external client contacts (portal identities).",
-      "cerbosKind": "client_contact",
-      "cerbosAction": "create",
-      "class": "grantable",
-      "sensitive": true,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.client_contact.read",
-      "domain": "core",
-      "resource": "client_contact",
-      "action": "read",
-      "description": "View external client contacts (portal identities).",
-      "cerbosKind": "client_contact",
-      "cerbosAction": "read",
-      "class": "grantable",
-      "sensitive": false,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.client_contact.revoke",
-      "domain": "core",
-      "resource": "client_contact",
-      "action": "revoke",
-      "description": "Revoke an external client contact's portal access.",
-      "cerbosKind": "client_contact",
-      "cerbosAction": "revoke",
-      "class": "grantable",
-      "sensitive": true,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.client_contact.update",
-      "domain": "core",
-      "resource": "client_contact",
-      "action": "update",
-      "description": "Edit external client contacts (portal identities).",
-      "cerbosKind": "client_contact",
-      "cerbosAction": "update",
-      "class": "grantable",
-      "sensitive": true,
-      "uiGrantable": true
-    },
-    {
       "key": "core.client.create",
       "domain": "core",
       "resource": "client",
@@ -662,6 +614,54 @@
       "cerbosAction": "update",
       "class": "grantable",
       "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client_contact.create",
+      "domain": "core",
+      "resource": "client_contact",
+      "action": "create",
+      "description": "Create external client contacts (portal identities).",
+      "cerbosKind": "client_contact",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client_contact.read",
+      "domain": "core",
+      "resource": "client_contact",
+      "action": "read",
+      "description": "View external client contacts (portal identities).",
+      "cerbosKind": "client_contact",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client_contact.revoke",
+      "domain": "core",
+      "resource": "client_contact",
+      "action": "revoke",
+      "description": "Revoke an external client contact's portal access.",
+      "cerbosKind": "client_contact",
+      "cerbosAction": "revoke",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client_contact.update",
+      "domain": "core",
+      "resource": "client_contact",
+      "action": "update",
+      "description": "Edit external client contacts (portal identities).",
+      "cerbosKind": "client_contact",
+      "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true,
       "uiGrantable": true
     },
     {
@@ -1470,18 +1470,6 @@
       "uiGrantable": true
     },
     {
-      "key": "core.rollup_recompute.create",
-      "domain": "core",
-      "resource": "rollup_recompute",
-      "action": "create",
-      "description": "Trigger a rollup recompute for the tenant.",
-      "cerbosKind": "rollup_recompute",
-      "cerbosAction": "create",
-      "class": "grantable",
-      "sensitive": false,
-      "uiGrantable": true
-    },
-    {
       "key": "core.rollup.read",
       "domain": "core",
       "resource": "rollup",
@@ -1489,6 +1477,18 @@
       "description": "Read cross-company metric rollups (the only cross-company read path, D12).",
       "cerbosKind": "rollup",
       "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.rollup_recompute.create",
+      "domain": "core",
+      "resource": "rollup_recompute",
+      "action": "create",
+      "description": "Trigger a rollup recompute for the tenant.",
+      "cerbosKind": "rollup_recompute",
+      "cerbosAction": "create",
       "class": "grantable",
       "sensitive": false,
       "uiGrantable": true
