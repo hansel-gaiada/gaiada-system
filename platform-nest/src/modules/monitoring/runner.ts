@@ -15,7 +15,8 @@
 // 2. There is a UNIQUE index allowing ONE open incident per monitor. The transition logic here must
 //    therefore be idempotent — a second consecutive `down` must NOT try to open a second incident.
 import type { PoolClient } from "pg";
-import { withGlobal } from "../../db";
+import { withGlobal, withTenants } from "../../db";
+import { isModuleEnabled } from "../registry";
 import { getDriver, hasDriver, parseKind, type MonitorStatus, type ProbeCtx, type ProbeResult } from "./drivers/registry";
 import type { HeartbeatProbeCtx } from "./drivers/heartbeat";
 
@@ -160,12 +161,24 @@ interface DueRow {
  * possibility of the two schedules drifting apart.
  */
 export async function ensureResultPartitions(c: PoolClient, now = new Date()): Promise<void> {
-  for (const p of partitionSpecs(now)) {
-    await c.query(
-      `CREATE TABLE IF NOT EXISTS ${p.name} PARTITION OF monitor_results FOR VALUES FROM ($1) TO ($2)`,
-      [p.from, p.to],
-    );
-  }
+  // Delegates to a SECURITY DEFINER function (migration 202608210218) rather than issuing DDL here.
+  //
+  // TWO reasons, both verified rather than assumed. First, Postgres does not accept bind parameters
+  // in DDL, and this was written as `FOR VALUES FROM ($1) TO ($2)` — so it threw on every call and
+  // had never created a partition; the ones that exist came from migration 0116. Second, and
+  // decisive: `platform_app` has no CREATE on schema `public` in production
+  // (`has_schema_privilege` returns false), so no amount of fixing the SQL would let the runtime role
+  // execute it. DDL rights sit with the owner/migrator role by design and that separation is worth
+  // keeping for one monthly maintenance task.
+  //
+  // Why this mattered: `monitor_results` is RANGE-partitioned with no default partition, so a dead
+  // roll-forward is a DATED failure — the first insert past the last existing bound fails outright
+  // and results stop being recorded, rather than degrading.
+  //
+  // `now` is intentionally unused: the function derives its own bounds from now() inside the
+  // database, so there is no argument through which a caller can influence the DDL it builds.
+  void now;
+  await c.query(`SELECT monitoring_ensure_result_partitions(3)`);
 }
 
 /**
@@ -204,17 +217,38 @@ export interface SweepResult {
 }
 
 /**
- * One sweep. `withGlobal` with an explicit justification: this is a platform-wide background job with
- * no request principal, and it must see every tenant's monitors. It compensates by scoping every
- * WRITE to the monitor's own tenant_id/client_id, taken from the row it just read — never from
- * anything a caller supplied.
+ * One sweep, run ONCE PER TENANT.
+ *
+ * ── WHY NOT `withGlobal` (it was, and it read NOTHING) ───────────────────────────────────────────
+ * This function used to wrap the whole sweep in `withGlobal`, justified as "a platform-wide
+ * background job that must see every tenant's monitors". That justification described the intent
+ * exactly, and the code did the opposite: `monitors` composes its RLS policy as
+ * `tenant_id = ANY(app_current_tenants()) AND app_module_allowed('monitoring')`, `withGlobal` sets
+ * NEITHER guc, and the app role is NOBYPASSRLS. So the due-select matched ZERO ROWS, reported
+ * success, and the runner logged healthy sweeps while probing nothing.
+ *
+ * It could not be caught by observation either: the only tenant with the module enabled has no
+ * monitors yet, so an empty result is indistinguishable from a correct one. This is the same
+ * zero-row trap that made the heartbeat ingest answer 200 while matching nothing (0119).
+ *
+ * ── WHY PER-TENANT AND NOT ONE WIDE `withTenants` ────────────────────────────────────────────────
+ * Passing every tenant id at once would ALSO be refused, by MON-00b's cross-root wall — correctly,
+ * since a single transaction spanning two customers' data is the thing that wall exists to stop.
+ * Sweeping one tenant per transaction is both the compliant shape and the better one: a tenant whose
+ * probe throws cannot abort every other tenant's sweep.
+ *
+ * Companies without the module simply yield zero rows here (`app_module_allowed` is false), so the
+ * enumeration deliberately does not re-implement `isModuleEnabled`'s OR-clause — the third wall
+ * already answers that question, in the one place it is allowed to be answered.
  */
 export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<SweepResult> {
   const out: SweepResult = { considered: 0, probed: 0, skippedNoDriver: 0, incidentsOpened: 0, incidentsClosed: 0 };
 
-  await withGlobal(async (c) => {
-    await ensureResultPartitions(c, now);
+  // Partition roll-forward is DDL on a shared table and is NOT tenant-scoped, so it stays global and
+  // runs once per sweep rather than once per tenant.
+  await withGlobal((c) => ensureResultPartitions(c, now));
 
+  const sweepTenant = async (c: PoolClient) => {
     const due = await c.query<DueRow>(DUE_SELECT);
     const windows = await c.query<{ starts_at: Date; ends_at: Date; monitor_id: string | null }>(
       `SELECT starts_at, ends_at, monitor_id FROM monitor_maintenance WHERE ends_at > now() AND starts_at <= now()`,
@@ -306,7 +340,33 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
         out.incidentsClosed += upd.rows.length;
       }
     }
-  });
+  };
+
+  // `companies` is a core table with no RLS predicate, so it IS readable without tenant context —
+  // which is what makes the enumeration possible at all.
+  const companies = await withGlobal((c) =>
+    c.query<{ id: string }>(`SELECT id FROM companies WHERE deleted_at IS NULL ORDER BY id`),
+  );
+
+  for (const row of companies.rows) {
+    // MUST gate on isModuleEnabled, and the reason is subtle enough that the first cut of this loop
+    // got it wrong and swept a company that had monitoring switched OFF.
+    //
+    // `app_module_allowed('monitoring')` — the third wall — answers "did this REQUEST declare the
+    // monitoring scope", not "has this TENANT enabled the module". Declaring the scope is exactly
+    // what `{ modules: ["monitoring"] }` does, so passing it for every company makes the wall assent
+    // for every company. Tenant enablement is enforced at the HTTP edge by ModuleEnabledGuard, which
+    // a background job never passes through — so the runner has to ask the question itself.
+    //
+    // isModuleEnabled() is that question's single home: it is true when the key is in the company's
+    // own enabled_modules OR an active service_assignment serves it (the shared-service path). A
+    // hand-written `enabled_modules @> ARRAY['monitoring']` here would silently skip every SERVED
+    // tenant — provisioned at one layer, invisible at the next.
+    if (!(await isModuleEnabled(row.id, "monitoring"))) continue;
+
+    // One tenant per transaction: never spans roots, and one tenant's failure does not abort the rest.
+    await withTenants([row.id], sweepTenant, { modules: ["monitoring"] });
+  }
 
   return out;
 }

@@ -207,7 +207,15 @@ export async function sumGlobalMonthToDate(simulated = false): Promise<number> {
   const ids = companies.rows.map((r) => r.id);
   let value = 0;
   if (ids.length > 0) {
-    const r = await withTenants(ids, (c) => c.query<{ n: string }>(GLOBAL_MTD_QUERY_SQL, [simulated]), { modules: ["search"] });
+    const r = await withTenants(ids, (c) => c.query<{ n: string }>(GLOBAL_MTD_QUERY_SQL, [simulated]), {
+      modules: ["search"],
+      // MON-00b: genuinely and correctly cross-root. This is the OPERATOR's vendor-spend
+      // ceiling — one wallet paying one provider — so the sum must span every root or the cap
+      // is not a cap. It returns a single scalar to us, never tenant rows to a caller, so there
+      // is no audience for a cross-root read. Ratified in the 2026-08-20 boundary rulings
+      // alongside the principal-less event relay; those two are the only opt-ins.
+      crossRoot: { reason: "operator vendor-spend ceiling: one wallet, one provider, must sum across all roots" },
+    });
     value = Number(r.rows[0].n);
   }
   globalMtdCache.set(simulated, { value, expiresAt: now + GLOBAL_MTD_CACHE_TTL_MS });
@@ -277,7 +285,13 @@ export async function sumProviderMonthToDate(providerKey: string, simulated = fa
     const r = await withTenants(
       companyIds,
       (c) => c.query<{ n: string }>(PROVIDER_MTD_QUERY_SQL, [simulated, providerKey]),
-      { modules: ["search"] },
+      {
+        modules: ["search"],
+        // MON-00b: same ratification as sumGlobalMonthToDate above, for the same reason — this is the
+        // operator's per-PROVIDER spend against one vendor account, so a sum that stopped at a root
+        // boundary would under-report the cap and let real spend past it. Returns a scalar, not rows.
+        crossRoot: { reason: "operator per-provider spend ceiling: one vendor account, must sum across all roots" },
+      },
     );
     value = Number(r.rows[0].n);
   }
