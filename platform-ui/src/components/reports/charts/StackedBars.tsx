@@ -3,6 +3,7 @@ import { useState } from "react";
 import { normalizeBars, type BarsInput } from "./barData";
 import { ChartDataFallback } from "./ChartDataFallback";
 import "./charts.css";
+import { formatNumber } from "@/lib/format";
 
 const SERIES_COLORS = [
   "var(--rc-series-1)", "var(--rc-series-2)", "var(--rc-series-3)", "var(--rc-series-4)",
@@ -17,7 +18,7 @@ function fmtVal(v: number | null, unit: string): string {
   if (v === null) return "—";
   if (unit === "percent") return `${Math.round(v * 100)}%`;
   if (unit === "minutes") return `${Math.round(v)}m`;
-  return v.toLocaleString();
+  return formatNumber(v);
 }
 
 // One column per category, segments stacked bottom-up (part-to-whole over

@@ -18,6 +18,10 @@
 // file does not import anything from lib/reports.ts for that reason, even though `CohortBandDatum`
 // below looks similar to a `ReportKpi`.
 
+// Pinned-locale number formatting — a bare `toLocaleString()` here rendered differently on server
+// and client and broke hydration on the appraisal cohort strip (see lib/format.ts::formatNumber).
+import { formatNumber } from "./format";
+
 export type AppraisalAxis = "delivery" | "quality" | "effort" | "collaboration";
 
 export type AppraisalStatus = "draft" | "submitted" | "acknowledged" | "disputed" | "finalized";
@@ -234,5 +238,5 @@ export function checkSubmitReadiness(scores: Record<AppraisalAxis, AppraisalAxis
 export function formatCohortValue(v: number, unit: CohortBandDatum["unit"]): string {
   if (unit === "percent") return `${Math.round(v * 100)}%`;
   if (unit === "minutes") return `${Math.round(v)}m`;
-  return v.toLocaleString();
+  return formatNumber(v);
 }

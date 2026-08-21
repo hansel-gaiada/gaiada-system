@@ -6,6 +6,7 @@ import { groupRollups } from "@/lib/rollups";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { RecomputeButton } from "@/components/RecomputeButton";
+import { formatNumber } from "@/lib/format";
 
 export default async function RollupsPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
   const userId = await getSessionUserId();
@@ -91,6 +92,6 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
 }
 
 function formatMetric(value: number, currency: string | null): string {
-  const formatted = value.toLocaleString();
+  const formatted = formatNumber(value);
   return currency ? `${currency} ${formatted}` : formatted;
 }

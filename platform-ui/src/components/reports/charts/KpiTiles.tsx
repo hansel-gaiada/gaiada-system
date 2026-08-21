@@ -2,6 +2,7 @@ import "./charts.css";
 import type { ReportKpi } from "@/lib/reports";
 import { DeltaChip } from "./DeltaChip";
 import { ChartDataFallback } from "./ChartDataFallback";
+import { formatNumber } from "@/lib/format";
 
 // KpiTiles takes `ReportKpi[]` directly — the document's own kpi list, no
 // adapter. Every tile that carries a numerator/denominator shows it (§5.2
@@ -45,12 +46,12 @@ function classLabel(k: ReportKpi): string {
 function formatValue(k: ReportKpi): string {
   if (k.unit === "percent") return `${Math.round(k.value * 100)}%`;
   if (k.unit === "minutes") return `${Math.round(k.value)}m`;
-  return k.value.toLocaleString();
+  return formatNumber(k.value);
 }
 
 function KpiTile({ kpi, comparisonLabel }: { kpi: ReportKpi; comparisonLabel?: string | null }) {
   const ratio = kpi.numerator !== undefined && kpi.denominator !== undefined
-    ? `${kpi.numerator.toLocaleString()}/${kpi.denominator.toLocaleString()}`
+    ? `${formatNumber(kpi.numerator)}/${formatNumber(kpi.denominator)}`
     : null;
   return (
     <div className="rc-kpi">

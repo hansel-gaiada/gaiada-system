@@ -6,6 +6,7 @@ import { bucketSeriesWithParts, type BucketedSeriesDetailed } from "@/lib/report
 import { ChartDataFallback } from "./ChartDataFallback";
 import { nearestIndex, pointerPct, fmtDate } from "./chartHover";
 import "./charts.css";
+import { formatNumber } from "@/lib/format";
 
 const SERIES_COLORS = [
   "var(--rc-series-1)", "var(--rc-series-2)", "var(--rc-series-3)", "var(--rc-series-4)",
@@ -170,5 +171,5 @@ export function TrendLine({
 function formatVal(v: number, unit: ReportSeries["unit"]): string {
   if (unit === "percent") return `${Math.round(v * 100)}%`;
   if (unit === "minutes") return `${Math.round(v)}m`;
-  return v.toLocaleString();
+  return formatNumber(v);
 }

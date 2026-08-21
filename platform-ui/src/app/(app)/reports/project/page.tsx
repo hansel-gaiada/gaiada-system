@@ -12,6 +12,7 @@ import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportRangeError } from "@/components/reports/ReportRangeError";
 import { ReportPageClient } from "@/components/reports/ReportPageClient";
 import { ProjectCharts } from "@/components/reports/GrainCharts";
+import { formatNumber } from "@/lib/format";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -27,8 +28,8 @@ function scopeHref(periodKind: string, start: string, end: string, scopeRef: str
 // than a raw fraction or an unlabelled minute count.
 function formatKpiValue(unit: string, value: number): string {
   if (unit === "percent") return `${Math.round(value * 100)}%`;
-  if (unit === "minutes") return `${Math.round(value).toLocaleString()}m`;
-  return value.toLocaleString();
+  if (unit === "minutes") return `${formatNumber(Math.round(value))}m`;
+  return formatNumber(value);
 }
 
 // Project-grain report. No single scopeRef is implied by "which project" the way person defaults

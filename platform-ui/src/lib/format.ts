@@ -71,3 +71,19 @@ export function hoursFromMinutes(minutes: number | null | undefined): string {
   if (!minutes) return "0h";
   return `${(minutes / 60).toFixed(1)}h`;
 }
+
+/**
+ * A plain number for display, pinned to LOCALE for exactly the reason the date helpers above are.
+ *
+ * `Number.prototype.toLocaleString()` with NO argument resolves against the runtime's own ICU
+ * default, and the two runtimes disagree: Node renders 5040 as "5,040" while a browser set to
+ * id-ID renders "5.040". React then throws hydration error #418 and discards the server HTML for
+ * that subtree — observed live on the company report's KPI deltas (charts/DeltaChip.tsx).
+ *
+ * It is deliberately strict about taking a `number`: every call site in the charts kit already
+ * resolves its own null/empty case to "—" before formatting, and swallowing null here would
+ * silently move that decision out of the component that owns it.
+ */
+export function formatNumber(value: number): string {
+  return value.toLocaleString(LOCALE);
+}

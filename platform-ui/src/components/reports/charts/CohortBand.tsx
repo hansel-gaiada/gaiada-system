@@ -1,6 +1,7 @@
 import { formatCohortValue, type CohortBandDatum } from "@/lib/appraisals";
 import { ChartDataFallback } from "./ChartDataFallback";
 import "./charts.css";
+import { formatNumber } from "@/lib/format";
 
 // Appraisal: a subject marker on a role-cohort distribution strip (§5.2's anti-gaming design —
 // "cohort banding, not absolute scores").
@@ -23,7 +24,7 @@ import "./charts.css";
 export function CohortBand({ data, subjectLabel = "You" }: { data: CohortBandDatum; subjectLabel?: string }) {
   const noBand = data.band === null;
   const ratio = data.numerator !== undefined && data.denominator !== undefined
-    ? `${data.numerator.toLocaleString()}/${data.denominator.toLocaleString()}`
+    ? `${formatNumber(data.numerator)}/${formatNumber(data.denominator)}`
     : null;
   return (
     <div className="rc-viz">

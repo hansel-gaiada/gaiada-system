@@ -1,5 +1,6 @@
 import "./charts.css";
 import type { ReportKpi } from "@/lib/reports";
+import { formatNumber } from "@/lib/format";
 
 // A signed delta vs a NAMED comparison period (never a bare arrow with no
 // context — the caller supplies `comparisonLabel`, e.g. "vs 16 Jun – 4 Jul",
@@ -19,7 +20,7 @@ export function DeltaChip({ delta, direction, unit, comparisonLabel }: {
     direction === "neutral" || flat ? "neutral" : direction === "down_good" ? (up ? "down-bad" : "up-good") : (up ? "up-good" : "down-bad");
   const arrow = flat ? "•" : up ? "▲" : "▼";
   const suffix = unit === "percent" ? "pp" : unit === "minutes" ? "m" : "";
-  const magnitude = `${Math.abs(delta).toLocaleString()}${suffix}`;
+  const magnitude = `${formatNumber(Math.abs(delta))}${suffix}`;
   return (
     <span className={`rc-delta rc-delta--${goodDirection}`}>
       <span aria-hidden>{arrow}</span>

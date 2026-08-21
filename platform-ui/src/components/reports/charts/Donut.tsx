@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { ReportDistribution } from "@/lib/reports";
 import { ChartDataFallback } from "./ChartDataFallback";
 import "./charts.css";
+import { formatNumber } from "@/lib/format";
 
 const SERIES_COLORS = [
   "var(--rc-series-1)", "var(--rc-series-2)", "var(--rc-series-3)", "var(--rc-series-4)",
@@ -81,17 +82,17 @@ export function Donut({ distribution, title }: { distribution: ReportDistributio
                 onFocus={() => setHoverI(a.i)}
                 onBlur={() => setHoverI(null)}
                 tabIndex={0}
-                aria-label={`${a.label}: ${a.value.toLocaleString()} (${a.pct}%)`}
+                aria-label={`${a.label}: ${formatNumber(a.value)} (${a.pct}%)`}
               />
             ))}
           </g>
           <text x={50} y={47} textAnchor="middle" className="rc-donut__center-label">Total</text>
-          <text x={50} y={60} textAnchor="middle" className="rc-donut__center-value">{total.toLocaleString()}</text>
+          <text x={50} y={60} textAnchor="middle" className="rc-donut__center-value">{formatNumber(total)}</text>
         </svg>
       </div>
       {hoverI !== null && (
         <div className="rc-kpi__foot" role="status">
-          <strong>{arcs[hoverI].label}</strong>: {arcs[hoverI].value.toLocaleString()} ({arcs[hoverI].pct}%)
+          <strong>{arcs[hoverI].label}</strong>: {formatNumber(arcs[hoverI].value)} ({arcs[hoverI].pct}%)
         </div>
       )}
       <ChartDataFallback
