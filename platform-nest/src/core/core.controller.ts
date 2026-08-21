@@ -344,7 +344,44 @@ export class CoreController {
 
   @Get("rollups")
   async rollups(@Req() req: FastifyRequest, @Query("period") period?: string) {
-    await authorize(req.principal, { kind: "rollup" }, "read");
+    // ⚠ MON-00c FOLLOW-UP: THIS AUTHORIZE CALL MUST CARRY A TENANT, and until now it did not.
+    //
+    // `resource_rollup.yaml`'s group_executive rule is gated on `variables.inRoot`, which evaluates
+    // `request.resource.attr.tenantId in request.principal.attr.rootCompanies`. This endpoint passed
+    // `{ kind: "rollup" }` with NO tenantId, so that expression had no attribute to read, the
+    // condition could not evaluate, and the rule never matched — a group_executive was denied
+    // outright on the one endpoint that exists to serve them. The symptom was not a clean 403 either:
+    // callers received an error object where they expected an array (agency.test.ts's
+    // "rows.find is not a function").
+    //
+    // The tenant is the caller's OWN ROOT COMPANY. That is the right anchor for a listing that spans
+    // several companies: `rootCompanies` is the expanded set of every company in the caller's root
+    // subtree (rbac/principal.ts), and a root company's own `root_company_id` is itself, so the root
+    // id is always a member of that set. `inRoot` therefore holds exactly when the caller is reading
+    // the root they belong to, and fails for any other — which is the guarantee this endpoint needs
+    // now that more than one company, under more than one root, uses the platform.
+    //
+    // Resolved BEFORE the authorize call rather than reusing the SQL below, because a decision must
+    // not depend on data the decision is supposed to gate.
+    //
+    // The alternative — relaxing the policy to allow when no tenantId is present — was rejected. It
+    // would make "omit the attribute" a way to skip a boundary check, and that shape becomes a leak
+    // the first time another caller authorizes this kind without a tenant.
+    const rootId = (
+      await withGlobal((c) =>
+        c.query<{ id: string | null }>(
+          `SELECT c2.root_company_id AS id
+             FROM users u JOIN companies c2 ON c2.id = u.home_company_id
+            WHERE u.id = $1`,
+          [req.principal.userId],
+        ),
+      )
+    ).rows[0]?.id;
+    // A caller with no resolvable root passes no tenant, which only the UNCONDITIONAL platform_admin
+    // rule can satisfy — the SaaS operator, who legitimately spans every root and has no single one
+    // of their own. Every other principal is denied, which is the correct direction: an unresolvable
+    // anchor must fail closed, exactly as the company-scoping below already does.
+    await authorize(req.principal, { kind: "rollup", tenantId: rootId ?? undefined }, "read");
     const p = period ?? new Date().toISOString().slice(0, 10);
     // MON-00b. This previously selected EVERY company in the database and handed the lot to
     // withTenants — the one request in the estate that touched all roots at once. Harmless while a
