@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.13` | IN PROGRESS | Social Media | 2026-08-21 |
+| social-media | `0.5.14` | IN PROGRESS | Social Media | 2026-08-21 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,69 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.13` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.14` · IN PROGRESS
+
+**0.5.14 (2026-08-21, senior-be) — SMM-17: the inbox reply flow, draft → WS4 → send, its own D14
+registry entry built by REUSING SMM-09's pattern rather than reinventing it.** Worktree started nine
+seats behind (`git log --oneline -1` did not match `main`'s tip — SMM-15/16 plus an unrelated
+monitoring ticket had landed); `git merge main` (fast-forward, clean) pulled `inbox-sync-job.ts`,
+`inbox-triage-job.ts` and the `202608211200_social_inbox_triage.sql` migration in before any of this
+ticket's own code was written.
+
+**No migration.** 0105's own `social_inbox_messages` schema — `direction`/`status`
+(`draft|in_review|approved|sent|failed`)/`approval_id`/`args_sha256`/`external_id`, the
+`sim_sent_reply_has_approval` CHECK and the partial `ux_social_inbox_messages_approval` unique index —
+already anticipated this exact flow ("outbound replies are one-shot-gated exactly like publishes",
+0105's own header). The one new dial, `tool_scope.inbox.reply`, is additive jsonb.
+
+**The registry entry, reused not reinvented.** New `reply-precondition.ts` mirrors
+`publish-precondition.ts` structurally: `SOCIAL_REPLY_TOOL = "social.sendReply"`,
+`SOCIAL_REPLY_TOOL_CLASSIFICATION = {...SOCIAL_PUBLISH_TOOL_CLASSIFICATION}` (spread, never retyped),
+its own `REPLY_REFUSAL` vocabulary (10 tokens, kept apart from `PUBLISH_REFUSAL`), a four-stage chain
+(`scope → hash → unconsumed → retention`, replacing publish's `quota`/`budget`/`creator_info` with the
+one stage a text reply actually needs), and `replyLockKey` (the messageId). New `reply-dispatch.ts`
+mirrors `dispatch.ts`'s two-phase shape (lock + precondition re-run, network call outside any
+transaction, ONE guarded UPDATE stamping `approval_id`+`external_id`+`status='sent'` together).
+`core/approval-executables.ts`'s new SMM-17 section registers `social.sendReply` with
+**`neverAutoRetry: true`**, independently re-derived: a reply's landed-or-not is unobservable in the
+ambiguous window (`hub_unreachable`/`tool_error`), the exact property that makes publish opt out too.
+`cerbos/policies/resource_mcp_tool.yaml`'s executable-tool list gets `social.sendReply` alongside
+`social.publishPost` (D14-13's both-halves-move-together doctrine; no metered twin, since D-14's
+money split is publish-specific).
+
+**Retention — this ticket's own named design question, answered.** A draft reply that quotes/embeds
+the comment it answers is subject to LinkedIn's SAME 48h activity-content cap, and free text cannot
+be reliably inspected for a quote — so the answer mirrors D-22's TikTok doctrine: FAIL CLOSED ON
+UNKNOWN. The `retention` stage refuses `source_content_purged` the instant the THREAD's
+`activity_content_purged_at` is set, regardless of whether the reply's own text happens to quote
+anything, reusing the EXISTING column SMM-36's purger maintains — no new column, no second job.
+
+**A real, pre-existing defect found and fixed in SMM-36's purger, not introduced by this ticket.**
+`inbox-retention-job.ts`'s two per-message purge UPDATEs matched ANY message row past the age
+threshold with no `direction` filter — correct while every row was inbound, wrong the instant an
+outbound reply row exists on the same table (our own authored text is not a member's social-activity
+content LinkedIn's cap is about, and wiping an ALREADY-SENT reply would destroy our own historical
+record). Fixed with `m.direction = 'in'` on both UPDATEs; proven with a 60h-old outbound 'sent' reply
+surviving untouched alongside a same-age inbound message that purges normally.
+
+**Endpoints + Cerbos split.** Six new routes under `/api/:tenantId/modules/social/threads/:threadId/
+messages*` (create draft, edit, approve, dry-run preconditions, send, list) + five new MCP tools.
+Matches `resource_social_inbox.yaml`'s (SMM-30) own documented split verbatim: drafting/editing/
+approving rides `assign` ("a draft is a row in our DB... never [the reply] action"), sending rides
+`reply` — and BOTH `social_staff` and `social_manager` hold both, unlike publish's manager-only tier
+(the inbox is the agency's working surface). Proven end to end over real HTTP with a staff persona
+completing the full draft→edit→approve→send loop against the mock driver (D-23: no live LinkedIn
+credential exists).
+
+Test counts: **559 / 0 / 5** across the SMM-16 baseline's own four-file set (**522 / 0 / 5**; +37 new,
+exact arithmetic, cross-checked by two independent clean runs). Baseline was ATTEMPTED via a live
+`git stash -u` (it was NOT refused this time, unlike SMM-16's own experience) but the stashed-tree
+re-run hit a phantom failure unrelated to this ticket's code (`publisher/provisioning.test.ts`'s
+`buildApp()` failed in `beforeAll` on the UNMODIFIED tree) — read as the shared-test-Postgres/
+loaded-machine phantom-failure class this program names by name, not a real regression; the stash was
+popped back immediately rather than re-fought, and SMM-16's own previously-measured baseline is used
+instead, corroborated by the exact +37 arithmetic. `tsc --noEmit` clean; all four migration/withTenants
+linters green (no migration — still 129 files). Full detail: `docs/plans/smm-tracker.md`'s P2 row.
 
 **0.5.13 (2026-08-21, SMM-16, medior) — AI triage over SMM-15's inbox rows: sentiment/category/
 urgency classification, spike detection, SLA guard flows.** Worktree started behind (`git log

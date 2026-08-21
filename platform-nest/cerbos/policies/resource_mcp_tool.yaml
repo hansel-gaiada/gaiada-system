@@ -72,6 +72,16 @@
 # drift direction is safe: a registry entry without a policy entry is a Cerbos deny and a visible
 # `failed` row, never a silent allow.
 #
+# SMM-17 (2026-08-21) — `social.sendReply` added, built by REUSING SMM-09's pattern rather than
+# reinventing it. Same shape, same reason: `write:true`/`impact:"high"` (spread from the SAME
+# classification `social.publishPost` uses — an outbound reply carries the SAME irreversibility a
+# publish does), so an `origin='automation'`/`'agent'` re-drive needs the SAME grant-lift disjunct,
+# and its registry entry (platform-nest/src/core/approval-executables.ts, SMM-17 section) re-derives
+# scope -> hash -> unconsumed -> retention under the approval-exec lock at execution time, trusting
+# no approval-time state. No metered twin exists for replies (D-14's money split is specific to
+# publishing; nothing in the addendum proposes a metered reply path), so there is no barred name to
+# keep out of this list, unlike `social.publishPostMetered`.
+#
 # D14-17 (2026-08-06) — Assistant write-tool entries evaluated, ZERO NET-NEW ENTRIES, so this list is
 # UNCHANGED by that ticket. Full evidence in platform-nest/src/core/approval-executables.ts's own
 # D14-17 section; summary: the assistant broker's ENTIRE tool universe (`ASSISTANT_AGENT_TOOLS` in
@@ -165,6 +175,8 @@ resourcePolicy:
               #
               # WHY EACH NAME IS LISTED (the notes that were inline, preserved):
               #  • `social.publishPost` — SMM-09's D14 executable, write:true/impact:high.
+              #  • `social.sendReply` — SMM-17's D14 executable, write:true/impact:high, built by
+              #    reusing SMM-09's own pattern (see this file's SMM-17 note above).
               #  • `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee` — P2-07's JML
               #    writes. Listed because D14-13's impact conjunct is what lets the EXECUTOR's
               #    branded approvalId call re-enter the hub for a medium/high tool. An entry in
@@ -183,7 +195,7 @@ resourcePolicy:
                      type(request.resource.attr.approvalId) == string &&
                      request.resource.attr.approvalId != "" &&
                      request.resource.attr.name in ["deploy.staging", "deploy.production", "webdev.provisionSite",
-                                                    "social.publishPost",
+                                                    "social.publishPost", "social.sendReply",
                                                     "hr.hireEmployee", "hr.transferEmployee",
                                                     "hr.terminateEmployee",
                                                     "iam.grantRole", "iam.revokeRoleGrant",

@@ -6193,6 +6193,31 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - 26 tickets P0–P3 + 2 committed P4 (design §12).
 
 ## social-media
+### [0.5.14] — 2026-08-21 · IN PROGRESS
+- **SMM-17 — the inbox reply flow: draft → WS4 → send, its own D14 registry entry, built by reusing
+  SMM-09's pattern rather than reinventing it.** No migration — 0105's own `social_inbox_messages`
+  schema (`direction`/`status`/`approval_id`/`args_sha256`/`external_id`, the
+  `sim_sent_reply_has_approval` CHECK) already anticipated this flow; the one new dial is
+  `tool_scope.inbox.reply` (jsonb, additive). New `reply-precondition.ts` (own `REPLY_REFUSAL`
+  vocabulary, four stages `scope → hash → unconsumed → retention`) and `reply-dispatch.ts` (the
+  transactional stamp, mirroring `dispatch.ts`). `core/approval-executables.ts` registers
+  `social.sendReply` with **`neverAutoRetry: true`** — a reply is an outbound public write whose
+  landed-or-not is unobservable in the ambiguous window, the same property that makes publish opt out.
+- **Retention, answered:** a draft reply that quotes/embeds the comment it answers inherits
+  LinkedIn's 48h cap; the precondition's `retention` stage fails closed (`source_content_purged`) the
+  instant the thread's `activity_content_purged_at` is set — reusing the EXISTING column SMM-36's
+  purger maintains, no new column, no second job.
+- **A real defect found and fixed in SMM-36's purger**: its two per-message purge UPDATEs matched ANY
+  message row with no `direction` filter — correct while every row was inbound, wrong now that
+  outbound reply rows share the table. Fixed with `m.direction = 'in'` on both UPDATEs.
+- Five new endpoints (create/edit/approve draft, dry-run, send) + list, all under
+  `/api/:tenantId/modules/social/threads/:threadId/messages*`; five new MCP tools. Cerbos split
+  matches `resource_social_inbox.yaml`'s own documented `assign` (drafting) vs `reply` (sending).
+- **559 / 0 / 5** across the SMM-16 baseline's own four-file set (**522 / 0 / 5**; +37 new, exact
+  arithmetic, cross-checked by two independent runs). `tsc` clean; all four migration/withTenants
+  linters green (no migration). `cerbos/policies/resource_mcp_tool.yaml`'s executable-tool list gets
+  `social.sendReply` alongside `social.publishPost` (D14-13's both-halves-move-together doctrine).
+
 ### [0.5.13] — 2026-08-21 · IN PROGRESS
 - **SMM-16 — AI triage over the engagement inbox: sentiment/category/urgency classification, spike
   detection, SLA guard flows.** New migration `202608211200_social_inbox_triage.sql` (category/

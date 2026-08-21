@@ -38,6 +38,9 @@ import {
 // SMM-31 — the client-review gate, composed IN FRONT of the six-stage chain (never inside it — see
 // that file's header for why `PUBLISH_PRECONDITION_STAGES` stays untouched).
 import { evaluatePublishPreconditionWithClientReview } from "../modules/social/client-review";
+// SMM-17 — the reply gate, built by reusing SMM-09's pattern rather than reinventing it. See this
+// file's own SMM-17 section, below the SMM-09 one, for the full reasoning.
+import { SOCIAL_REPLY_TOOL, replyLockKey, evaluateReplyPrecondition } from "../modules/social/reply-precondition";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -277,14 +280,16 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * prior test run in the same process.
  *
  * NOTE for callers: this also clears the D14-05 `deploy.staging`/`deploy.production` entries, the
- * D14-15 `pm.createTask`/`pm.createDoc` entries, the PRV-03 `webdev.provisionSite` entry AND the
- * SMM-09 `social.publishPost` entry + its `social.publishPostMetered` BAR registered below (they
- * are all plain calls to `registerExecutableApproval`/`registerBarredExecutable`, no different from
- * a test fixture, once the module has loaded). A test file that needs the deploy pair back after
- * resetting calls `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
+ * D14-15 `pm.createTask`/`pm.createDoc` entries, the PRV-03 `webdev.provisionSite` entry, the
+ * SMM-09 `social.publishPost` entry + its `social.publishPostMetered` BAR, AND the SMM-17
+ * `social.sendReply` entry registered below (they are all plain calls to
+ * `registerExecutableApproval`/`registerBarredExecutable`, no different from a test fixture, once
+ * the module has loaded). A test file that needs the deploy pair back after resetting calls
+ * `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
  * `registerPmExecutableApprovals()`; the webdev entry, `registerWebdevExecutableApprovals()`; the
- * social entry AND its bar, `registerSocialExecutableApprovals()` — either way, do not hand-roll a
- * second copy of their lock/precondition.
+ * social publish entry AND its bar, `registerSocialExecutableApprovals()`; the social reply entry,
+ * `registerSocialReplyExecutableApprovals()` — either way, do not hand-roll a second copy of their
+ * lock/precondition.
  *
  * ⚠ It clears the BARRED map too. That is the right direction for a test seam (a leftover bar would
  * make an unrelated suite's registration throw), and it is safe because the bar's real enforcement
@@ -839,6 +844,99 @@ export function registerSocialExecutableApprovals(): void {
 }
 
 registerSocialExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// SMM-17 — `social.sendReply`: the reply gate's registry entry, built by REUSING SMM-09's pattern.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/blueprints/smm-design-addendum-2026-08-12.md, SMM-17 row, as AMENDED by D-14's own
+// extension: "a reply is an outbound public write, so it takes the same discipline as a publish:
+// draft -> WS4 approval -> send, with its own executable-approval registry entry and its own
+// precondition." The precondition body lives in `modules/social/reply-precondition.ts` — SAME siting
+// decision as SMM-09's `evaluatePublishPrecondition`, and for the same reason: the domain rules
+// belong to the module, this file stays a thin, auditable binding of (lockKey, precondition, retry
+// policy) to a tool name.
+//
+// ── THIS IS SMM-09's PATTERN, REUSED, NOT REINVENTED ────────────────────────────────────────────
+//   * `SOCIAL_REPLY_TOOL_CLASSIFICATION` is `{...SOCIAL_PUBLISH_TOOL_CLASSIFICATION}` — SPREAD, never
+//     retyped (reply-precondition.ts's own doc). A reply and a publish are both outbound public
+//     writes with the same irreversibility, so they share one classification literal, not two that
+//     could drift.
+//   * The lock key is the MESSAGE id (the unit of the outbound act), mirroring `publishLockKey`'s
+//     variant-id reasoning exactly — never the thread, never the tenant.
+//   * `neverAutoRetry: true` — SEE BELOW for why this is not merely copied from publish but
+//     independently re-derived and still lands on the same answer.
+//
+// ── WHY `neverAutoRetry: true` ───────────────────────────────────────────────────────────────────
+// The SAME reasoning `approval-executables.ts`'s own doc gives for `neverAutoRetry` on the FIELD
+// definition applies here word for word: a reply is an OUTBOUND PUBLIC action. A `hub_unreachable`
+// (no verdict obtained) or a `tool_error` (may have partially applied) on a send means the reply MAY
+// ALREADY BE VISIBLE on a client's public thread while our row says nothing landed. There is no
+// server-side observation this precondition could make to tell "definitely didn't land" from
+// "landed, but the response was lost" — `SocialPublisher.sendReply`'s contract (types.ts) returns
+// only `{externalId}` on success; there is no idempotency key a retry could probe first (unlike
+// `deploy.*`, which can re-read a pipeline stage's own `done` status before deciding whether a retry
+// is safe). So the one thing that must never happen is an unattended second attempt: the message
+// surfaces `failed` for a HUMAN to look at, and D14-07's retry endpoint (a fresh lock + a fresh
+// precondition re-run) is the only way forward — never an automatic one. This is IDENTICAL to why
+// `social.publishPost` sets it, and independently justified rather than copied on the assumption that
+// "publish does it so reply should too": both share the exact property (irreversible, unattended,
+// unobservable landed-or-not) that the field exists to name.
+//
+// ── LOCK KEY: THE MESSAGE, NOT THE THREAD AND NOT THE TENANT ────────────────────────────────────
+// `tool_args.messageId`. A message is one reply on one thread — the actual unit of the outbound act,
+// and the unit two approvals contend over. Keying on the THREAD would serialize unrelated replies on
+// the same thread behind each other for no correctness gain (0105's own unique partial index,
+// `ux_social_inbox_messages_approval`, already makes one message's grant one-shot on its own).
+//
+// ── NO PIPELINE CO-LOCK, NO CREATOR-INFO STAGE ───────────────────────────────────────────────────
+// Nothing in the reply path reads `pipeline_runs`/`pipeline_stages`, and no network in v1 requires
+// upload-time consent re-verification for a TEXT reply the way TikTok does for a publish — so
+// neither of SMM-09's own extra machinery (the pipeline lock, `CreatorInfoVerifier`) has an analogue
+// here. `reply-precondition.ts`'s four stages (scope -> hash -> unconsumed -> retention) are the
+// complete chain; see that file's own header for why `retention` replaces `budget`/`creator_info`
+// rather than sitting alongside them.
+//
+// ── THE CERBOS HALF ──────────────────────────────────────────────────────────────────────────────
+// `social.sendReply` is `write:true, impact:"high"` at the hub (spread from the SAME classification
+// publish uses), so an `origin='automation'`/`'agent'` re-drive also needs the tool name in
+// `cerbos/policies/resource_mcp_tool.yaml`'s executable-tool list (D14-13) — added alongside
+// `social.publishPost` in this ticket's own pass. Both halves of the D14-13 mirror move together, per
+// that file's own doctrine.
+//
+// ── WHAT THIS TICKET DELIBERATELY DOES NOT DO ────────────────────────────────────────────────────
+// It declares the `McpToolDef` in `modules/social/index.ts` (unlike SMM-09's split across two
+// tickets) because the dispatch endpoint (`social.controller.ts#sendReply` -> `reply-dispatch.ts`)
+// ships in this SAME ticket — there is no "declare later" gap to leave open here.
+
+function socialReplyLockKey(toolArgs: Record<string, unknown>): string {
+  return replyLockKey(toolArgs, SOCIAL_REPLY_TOOL);
+}
+
+async function socialReplyPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const verdict = await evaluateReplyPrecondition(client, toolArgs);
+  if (verdict.ok) return { ok: true };
+  return { ok: false, reason: verdict.reason };
+}
+
+/**
+ * Registers `social.sendReply`. Exported for the same reason `registerSocialExecutableApprovals` is:
+ * a test file that calls `resetExecutableApprovals()` and wants this entry back afterward should call
+ * this rather than hand-roll a second copy of the lock/precondition.
+ */
+export function registerSocialReplyExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: SOCIAL_REPLY_TOOL,
+    lockKey: socialReplyLockKey,
+    precondition: socialReplyPrecondition,
+    neverAutoRetry: true,
+  });
+}
+
+registerSocialReplyExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // P2-07 — `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee`: JML's registry entries.

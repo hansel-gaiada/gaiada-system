@@ -96,12 +96,21 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
       );
       counts.threadsProfile += threads.rowCount ?? 0;
 
+      // SMM-17's own finding: this UPDATE matched ANY message row past the age threshold, with no
+      // `direction` filter — correct while every row was inbound (all SMM-15/16 ever wrote), but
+      // wrong the instant an OUTBOUND reply row exists on the same table (0105's own design,
+      // "outbound replies are one-shot-gated exactly like publishes"). `m.direction = 'in'` fixes it
+      // at the source: our own authored reply text is not a member's social-activity content
+      // LinkedIn's cap is about, and wiping it — including on an ALREADY-SENT reply, which is our
+      // own historical record — would be an over-broad application of a rule about someone else's
+      // data. See `reply-precondition.ts`'s header for the retention question this ticket actually
+      // needed to answer (a thread-level check, unaffected by this fix either way).
       const messages = await c.query(
         `UPDATE social_inbox_messages m
             SET author_handle = NULL, profile_data_purged_at = $3
            FROM social_inbox_threads t
           WHERE m.thread_id = t.id AND t.tenant_id = $1 AND t.network = $2
-            AND m.tenant_id = $1 AND m.profile_data_purged_at IS NULL
+            AND m.tenant_id = $1 AND m.direction = 'in' AND m.profile_data_purged_at IS NULL
             AND m.created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.profileDataMaxHours],
       );
@@ -128,12 +137,16 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
       );
       counts.threadsActivity += threads.rowCount ?? 0;
 
+      // SMM-17's own finding — see the profile-purge UPDATE just above for the full explanation.
+      // `m.direction = 'in'` here as well: an outbound reply's own body is never subject to
+      // LinkedIn's activity-content cap, and an ALREADY-SENT reply is our own historical record of
+      // what we said, never eligible for this purge either way.
       const messages = await c.query(
         `UPDATE social_inbox_messages m
             SET body = '', activity_content_purged_at = $3
            FROM social_inbox_threads t
           WHERE m.thread_id = t.id AND t.tenant_id = $1 AND t.network = $2
-            AND m.tenant_id = $1 AND m.activity_content_purged_at IS NULL
+            AND m.tenant_id = $1 AND m.direction = 'in' AND m.activity_content_purged_at IS NULL
             AND m.created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.activityContentMaxHours],
       );

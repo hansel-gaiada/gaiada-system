@@ -26,6 +26,10 @@ import type { ModuleContract, RollupProvider } from "../contract";
 // this ticket's own AC requires. `social.publishPostMetered` stays undeclared and barred — see the
 // module contract's own header for why a declared tool needs a real endpoint before it exists here.
 import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "./publish-precondition";
+// SMM-17 — the reply gate's own tool, built by reusing SMM-09's pattern (see
+// reply-precondition.ts's header). `SOCIAL_REPLY_TOOL_CLASSIFICATION` is
+// `{...SOCIAL_PUBLISH_TOOL_CLASSIFICATION}` — spread, never retyped, same reasoning as above.
+import { SOCIAL_REPLY_TOOL, SOCIAL_REPLY_TOOL_CLASSIFICATION } from "./reply-precondition";
 // SMM-13 — event handlers for social post notifications and mail routing
 // SMM-31 — the client-review stage's own two events, same routing table
 // SMM-16 — the inbox SLA guard's breach event + the spike detector's event, same routing table
@@ -627,6 +631,128 @@ export const socialModule: ModuleContract = {
           scheduledAt: { type: "string" },
         },
         required: ["tenantId", "variantId"],
+      },
+    },
+    // ── SMM-17: THE INBOX REPLY FLOW — draft -> WS4 -> send, reusing SMM-09's pattern ────────────
+    // `social.createReplyDraft`/`social.updateReplyDraft`/`social.approveReplyDraft` are plain,
+    // low-impact writes on OUR OWN row (never network-visible) — mirrors `social.addPostVariant`'s
+    // own `write:true, impact:"low"` shape. `social.checkReplySendPreconditions` is a read, mirroring
+    // `social.checkPublishPreconditions`. `social.sendReply` is the one high-impact write, spread
+    // from the SAME classification publish uses (see the import comment above) — never called
+    // directly by a human or an agent in the ordinary flow, exactly like `social.publishPost`.
+    {
+      name: "social.createReplyDraft",
+      description:
+        "Draft an outbound reply on an engagement-inbox thread. A draft is our own row, never sent "
+        + "and never visible on the network — sending is a SEPARATE, WS4-gated act (social.sendReply). "
+        + "Returns the args hash the draft was created with, the same anchor an edit or an approval "
+        + "re-checks.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/threads/:threadId/messages",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          threadId: { type: "string", description: "The engagement-inbox thread to reply on." },
+          body: { type: "string", description: "The reply text." },
+        },
+        required: ["tenantId", "threadId", "body"],
+      },
+    },
+    {
+      name: "social.updateReplyDraft",
+      description:
+        "Edit a draft reply (draft/in_review/approved/failed — anything short of already sent). "
+        + "EDIT INVALIDATES APPROVAL (D-15): the args hash moves, and any grant already spent on the "
+        + "old content is dropped in the same statement, reverting the message to draft.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "PATCH",
+      pathTemplate: "/api/:tenantId/modules/social/threads/:threadId/messages/:messageId",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          threadId: { type: "string", description: "The thread the message belongs to." },
+          messageId: { type: "string", description: "The draft reply to edit." },
+          body: { type: "string", description: "The replacement reply text." },
+        },
+        required: ["tenantId", "threadId", "messageId", "body"],
+      },
+    },
+    {
+      name: "social.approveReplyDraft",
+      description:
+        "Mark a draft reply approved — the staff sign-off BEFORE a send is ever proposed. Bookkeeping "
+        + "on our own row, not the outbound act itself. Idempotent: approving an already-approved "
+        + "message is a no-op, never an error.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          threadId: { type: "string", description: "The thread the message belongs to." },
+          messageId: { type: "string", description: "The draft reply to approve." },
+        },
+        required: ["tenantId", "threadId", "messageId"],
+      },
+    },
+    {
+      name: "social.checkReplySendPreconditions",
+      description:
+        "Dry-run the reply gate for one draft: would an approved send of it actually execute right "
+        + "now, and if not, which gate stopped it and why. Runs the EXACT server-side precondition "
+        + "the D14 approval executor runs (scope -> hash -> unconsumed -> retention), so the answer "
+        + "cannot drift from the one execution will give. Sends nothing and consumes no approval. "
+        + "`reason` is a snake_case token (e.g. 'reply_not_in_scope', 'args_hash_mismatch', "
+        + "'already_sent', 'source_content_purged') — the SAME vocabulary that lands in an approval's "
+        + "execution_error after the 'precondition_failed: ' prefix.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send-preconditions",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          threadId: { type: "string", description: "The thread the message belongs to." },
+          messageId: { type: "string", description: "The draft reply to check." },
+        },
+        required: ["tenantId", "threadId", "messageId"],
+      },
+    },
+    {
+      name: SOCIAL_REPLY_TOOL,
+      description:
+        "Send an APPROVED reply to its live thread, under the client's own connected account. Never "
+        + "called directly by a human or an agent in the ordinary flow — it is registered in the D14 "
+        + "executable-approval registry and executes automatically the moment a human approves the "
+        + "suspended write. Re-verifies scope, the args hash, single-use consumption and (this "
+        + "ticket's own retention answer) whether the comment it answers has since been purged off "
+        + "the retention clock, immediately before dispatching — refusing with the SAME typed token "
+        + "vocabulary social.checkReplySendPreconditions reports.",
+      minAssurance: "low",
+      // Spread, never retyped — see the import comment above for why.
+      ...SOCIAL_REPLY_TOOL_CLASSIFICATION,
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          threadId: { type: "string", description: "The thread the message belongs to." },
+          messageId: { type: "string", description: "The approved reply to send." },
+          accountId: { type: "string", description: "Attribution only — the account actually dispatched to comes from the live row, never the caller." },
+          body: { type: "string", description: "The approved reply text — the args-hash anchor the grant is bound to." },
+        },
+        required: ["tenantId", "threadId", "messageId"],
       },
     },
     {

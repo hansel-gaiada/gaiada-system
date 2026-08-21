@@ -180,6 +180,36 @@ describe.skipIf(!TEST_URL)("SMM-36 · inbox retention purge (module GUC, per-net
     expect(thread.activity_content_purged_at).toBeNull();
   });
 
+  // ══ (2b) SMM-17's own finding — an OUTBOUND reply's own text is never subject to this purge ════
+  it("SMM-17 fix: an OUTBOUND (direction='out') reply, however old, keeps its own body and author_handle — only INBOUND rows are in scope", async () => {
+    const { threadId } = await makeThreadWithMessage(A, liAccount, "linkedin", 60); // past BOTH windows
+    const replyId = newId();
+    await withTenants([A], (c) =>
+      c.query(
+        `INSERT INTO social_inbox_messages
+           (id, tenant_id, thread_id, direction, external_id, body, author_handle, posted_at,
+            source, created_at, origin_site)
+         VALUES ($1,$2,$3,'out',$4,'thanks for the comment!','@our-handle', now() - make_interval(hours => 60),
+                 'reply', now() - make_interval(hours => 60),'central')`,
+        [replyId, A, threadId, `ext-outreply-${replyId}`],
+      ), MODULES);
+
+    await withTenants([A], (c) => purgeTenantInboxRetention(c, A, new Date()));
+
+    // The THREAD's own activity content still purges on schedule (unaffected by this fix — a
+    // thread-level fact, not a per-message one).
+    const thread = await readThread(A, threadId);
+    expect(thread.activity_content_purged_at).not.toBeNull();
+
+    // But the OUTBOUND message — our own authored reply, never a member's social-activity content
+    // LinkedIn's cap is about — survives completely untouched.
+    const reply = await readMessage(A, replyId);
+    expect(reply.body).toBe("thanks for the comment!");
+    expect(reply.author_handle).toBe("@our-handle");
+    expect(reply.profile_data_purged_at).toBeNull();
+    expect(reply.activity_content_purged_at).toBeNull();
+  });
+
   // ══ (3) no documented cap — never purged, however old ═══════════════════════════════════════
   it("an Instagram thread is NEVER purged, even at 10 years old — no documented retention cap exists", async () => {
     const { threadId, messageId } = await makeThreadWithMessage(A, igAccount, "instagram", 24 * 365 * 10);

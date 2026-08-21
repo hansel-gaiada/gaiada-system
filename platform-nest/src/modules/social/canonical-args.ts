@@ -134,3 +134,44 @@ export function variantPublishArgs(v: {
 export function variantArgsSha256(v: Parameters<typeof variantPublishArgs>[0]): string {
   return argsSha256(variantPublishArgs(v));
 }
+
+// ── SMM-17 — the reply-call arguments a message's approval is bound to ────────────────────────────
+//
+// Byte-for-byte the SAME idea as `VariantPublishArgs` above, for `social.sendReply` instead of
+// `social.publishPost`: this shape IS the contract the hub's grant will be bound to, so it must be
+// exactly what the tool will be called with at execution time. `threadId`/`accountId` travel
+// alongside `messageId`/`body` for the SAME reason `VariantPublishArgs` carries `accountId` next to
+// `variantId` — defense in depth against a mismapped join, not information the caller could not
+// otherwise derive.
+export interface ReplyDispatchArgs {
+  tenantId: string;
+  messageId: string;
+  threadId: string;
+  accountId: string;
+  body: string;
+}
+
+/** Build the canonical args for a reply message. `body` is kept explicit (never omitted) for the
+ *  same "a variant with no first comment must hash identically either way" reasoning
+ *  `variantPublishArgs` states — an empty reply body and a missing one must hash the same. */
+export function replyDispatchArgs(m: {
+  tenantId: string;
+  id: string;
+  threadId: string;
+  accountId: string;
+  body: string;
+}): ReplyDispatchArgs {
+  return {
+    tenantId: m.tenantId,
+    messageId: m.id,
+    threadId: m.threadId,
+    accountId: m.accountId,
+    body: m.body ?? "",
+  };
+}
+
+/** The hash stored on `social_inbox_messages.args_sha256` and re-checked at dispatch — the SAME
+ *  edit-invalidates-approval anchor (D-15) `variantArgsSha256` gives publish, applied to a reply. */
+export function replyArgsSha256(m: Parameters<typeof replyDispatchArgs>[0]): string {
+  return argsSha256(replyDispatchArgs(m));
+}
