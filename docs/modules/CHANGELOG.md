@@ -11,6 +11,58 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.29.0` — 2026-08-21 — six pages that answer at a glance
+
+`/`, the four `/reports/*` grain pages and `/admin/users`. Diagnosed by driving the LIVE box, which
+changed the diagnosis twice and then caught a regression this same work had shipped one release
+earlier — the numbers below are measurements, not estimates.
+
+**Changed**
+- **Two headers became one.** `PageHeader` + `ReportViewer`'s own 24px scope heading meant
+  `/reports/company` printed the company name twice in a row at two sizes. The viewer's heading is
+  now a `scopeHeading` prop DEFAULTING TO TRUE, because `app/print/reports/[jobToken]` mounts the
+  viewer with no `PageHeader` and `print.css` styles `.rc-header__scope` as the PDF title —
+  suppressing it outright would have shipped a titleless export.
+- **KPI weighting.** Seventeen kpis in one flat grid at identical weight, twelve reading `0`/`0%`/`0m`
+  on a live account. Now a lead band of four over a demoted compact tail; nothing hidden, and the
+  `ChartDataFallback` table still lists all of them. Lead uses EXPLICIT 4/2 column counts, not
+  auto-fit: `minmax(200px, 1fr)` resolved to three columns in the ~698px main column and laid four
+  tiles out 3-then-1, which the first version of this change shipped.
+- **The noise inside the tiles**, which the first pass left untouched and which is why the page still
+  read as a wall: `"vs 1 Jul - 31 Jul"` rendered on all eighteen tiles while the header states the
+  compared range once, and `NOT APPRAISED` rendered eleven times. The range no longer reaches a tile
+  (the delta FIGURE is the per-tile fact and stays); the appraisal marker is an inline degree sign
+  explained ONCE by a legend under the bands. §5.2's disclosure is preserved and now reads as a
+  sentence rather than jargon repeated eleven times.
+- **`/admin/users`**: the per-row role form (~200px per person) moved behind a native `<details>`;
+  name+email merged into one identity cell so the `service` badge stops colliding across the column
+  gap; humans sort before service accounts, which on the live company had put four automation
+  accounts above every colleague.
+- **Project/department pickers**: three bordered tiles became one inline stat strip.
+  `minmax(100px, 1fr)` needed 320px in a ~318px card, so it wrapped 2-then-1 with a dead cell.
+- **Home**: the check-in card's two prefilled textareas inherited a global 72px `min-height` and
+  pushed "Needs you" below the fold; scoped to 46px, still resizable, global rule untouched. TR-10's
+  four render branches and <=3-interaction budget deliberately left alone.
+
+**Fixed**
+- **The assistant FAB was covering CONTROLS** — Approve/Deny on Home, the last row of the users
+  table. It is `position: fixed` and reserved no space. The selector hangs off `.erp-app`, not
+  `.erp-main`: the FAB is a SIBLING of `.erp-main`, so `.erp-main:has(.asst-fab)` matches nothing.
+- `.rc-kpi__label-row` overflow (181>171 on six of seventeen tiles) — the appraisal badge was a
+  second flex child in that row. The replacement mark sits INSIDE the label span for exactly this
+  reason: inline in the text it wraps with the words and cannot overflow the row.
+- **...and the regression that fix caused** (`.rc-kpi__foot` 142>138, x4 per report), found only by
+  re-shooting the live pages after release. The verification harness had asserted on the row being
+  FIXED and never on the row things were moved INTO; it now measures every descendant of every tile.
+- `.dept-table-scroll` lifted to `ui.css` as `.lux-table-scroll` — it guards `.lux-table`, a ui.css
+  primitive used outside the department console, and `/admin/users` needed it.
+
+**Verified** — 20/20 checks against the real stylesheets at the three actual main-column widths
+(698/858/1116px), zero overflowing elements anywhere in a tile; `tsc` clean; 2483/2483 tests.
+`Productivity.test.tsx` retargeted at the new disclosure and strengthened to require the legend and
+its wording (the PM productivity surface composes the same `KpiTiles`; an earlier grep for that
+contract was scoped to `components/reports` and missed it).
+
 ### monitoring `0.2.0` — 2026-08-19 — the IAM catalog was only half-seeded
 
 **Fixed**
@@ -523,6 +575,25 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.060.0118a` - 2026-08-21 - six pages that answer at a glance
+
+Manifest (counter +2, 0116 -> 0118): `platform-ui 0.28.4 -> 0.29.0`. No migration.
+
+**ONE LINE OF THIS MANIFEST OVERSTATES THE BUILD, knowingly.** The +2 spans two platform-ui bumps:
+`0.28.4 -> 0.28.5` (AGN-3 reader-degrade, recorded in `dd89e0e`) and `0.28.5 -> 0.29.0` (this UI
+work). **AGN-3's CODE IS NOT IN THIS BUILD** — `lib/readerDegrade.test.ts` and its `lib/people.ts`
+change were still uncommitted in the shared checkout at cut time, verified with `git cat-file -e`
+against `origin/main`. Its changelog entry therefore runs ahead of its code, and this release ships
+`platform-ui 0.29.0` whose registry lineage claims work the image does not contain. Cut anyway on the
+owner's explicit call, to get the report-page fixes onto the box. The repair is for the AGN-3 seat to
+commit those two files, after which no further version move is needed — the number is already here.
+Do not read this entry as evidence AGN-3 shipped.
+
+Everything else here is real and measured on the live box. `01.059` carried the first half of this UI
+work (`3566e2b`) without recording it — its manifest counts platform-nest and social-media only —
+and that half also shipped a `.rc-kpi__foot` overflow which `a4be13d` and `d96af3e` fix. This entry
+covers all three commits, so the module bump lands once, here.
 
 ### `Alpha 01.059.0116a` - 2026-08-21 - a principal discriminator, and a root boundary that holds
 
