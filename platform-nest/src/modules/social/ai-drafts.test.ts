@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyHashtagStrategy, buildCaptionPrompt, parseCaptionDraft, buildIdeaPrompt, parseIdeaDraft,
   MAX_IDEA_COUNT, type CaptionGroundingFacts, type IdeaGroundingFacts, type HashtagStrategy,
+  buildTriagePrompt, parseTriageDraft, type TriageGroundingFacts,
 } from "./ai-drafts";
 import { maxHashtagsFor } from "./media-rules";
 
@@ -185,5 +186,56 @@ describe("buildIdeaPrompt / parseIdeaDraft (SMM-19)", () => {
   it("NEVER throws on a null completion and falls back", () => {
     expect(() => parseIdeaDraft(null, baseIdeaFacts)).not.toThrow();
     expect(parseIdeaDraft(null, baseIdeaFacts).draftedVia).toBe("fallback");
+  });
+});
+
+// ── Inbox triage (SMM-16) ────────────────────────────────────────────────────────────────────────
+const baseTriageFacts: TriageGroundingFacts = {
+  network: "linkedin",
+  engagementName: "Acme Coffee",
+  messages: [
+    { authorHandle: "@commenter", body: "love the new blend!", postedAt: "2026-08-20T10:00:00.000Z" },
+  ],
+};
+
+describe("buildTriagePrompt / parseTriageDraft (SMM-16)", () => {
+  it("the prompt includes every message's own body and author, and only THIS thread's own facts", () => {
+    const prompt = buildTriagePrompt(baseTriageFacts);
+    expect(prompt).toContain("love the new blend!");
+    expect(prompt).toContain("@commenter");
+    expect(prompt).toContain("linkedin");
+  });
+
+  it("parses a well-formed classification into all three axes", () => {
+    const raw = JSON.stringify({ sentiment: "positive", category: "praise", urgency: "low" });
+    const { result, draftedVia } = parseTriageDraft(raw);
+    expect(draftedVia).toBe("ai");
+    expect(result).toEqual({ sentiment: "positive", category: "praise", urgency: "low" });
+  });
+
+  it("is case-insensitive and tolerates surrounding prose", () => {
+    const raw = `Here you go:\n${JSON.stringify({ sentiment: "NEGATIVE", category: "Complaint", urgency: "High" })}\nHope that helps.`;
+    const { result } = parseTriageDraft(raw);
+    expect(result).toEqual({ sentiment: "negative", category: "complaint", urgency: "high" });
+  });
+
+  // ── NEVER a guessed value — the ticket's own named discipline ────────────────────────────────
+  it("NEVER throws, and returns result:null (never a guessed value) on malformed JSON", () => {
+    expect(() => parseTriageDraft("not json at all")).not.toThrow();
+    expect(parseTriageDraft("not json at all")).toEqual({ result: null, draftedVia: "unavailable" });
+  });
+
+  it("returns result:null on a null completion (gateway unreachable/unconfigured)", () => {
+    expect(parseTriageDraft(null)).toEqual({ result: null, draftedVia: "unavailable" });
+  });
+
+  it("returns result:null on an out-of-vocabulary value — never silently coerced to a valid one", () => {
+    const raw = JSON.stringify({ sentiment: "furious", category: "praise", urgency: "low" });
+    expect(parseTriageDraft(raw)).toEqual({ result: null, draftedVia: "unavailable" });
+  });
+
+  it("returns result:null when any one of the three axes is missing entirely", () => {
+    const raw = JSON.stringify({ sentiment: "positive", category: "praise" }); // no urgency
+    expect(parseTriageDraft(raw)).toEqual({ result: null, draftedVia: "unavailable" });
   });
 });

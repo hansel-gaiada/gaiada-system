@@ -109,9 +109,19 @@ async function purgeInboxRetention(c: PoolClient, tenantId: string, now: Date): 
     }
 
     if (policy.activityContentMaxHours !== null) {
+      // SMM-16's own migration header answers a question this ticket asked by name: a
+      // sentiment/category/urgency classification is DISTILLED FROM the comment text this purge is
+      // about to scrub, so it inherits the SAME retention cap, on the SAME clock, rather than a
+      // second one that could drift from it. `ai_triage_status` moves 'classified' -> 'purged' (the
+      // migration's own fourth, honest state: "was classified, then scrubbed", distinct from
+      // 'unclassified'/'never touched') — `sit_activity_purge_scrubs_triage`'s CHECK makes this the
+      // ONLY way a 'classified' row can coexist with a set `activity_content_purged_at` at all, so
+      // this UPDATE is not a policy choice this file could silently skip; the constraint requires it.
       const threads = await c.query(
         `UPDATE social_inbox_threads
-            SET excerpt = NULL, activity_content_purged_at = $3
+            SET excerpt = NULL, activity_content_purged_at = $3,
+                sentiment = NULL, category = NULL, urgency = NULL,
+                ai_triage_status = CASE WHEN ai_triage_status = 'classified' THEN 'purged' ELSE ai_triage_status END
           WHERE tenant_id = $1 AND network = $2 AND activity_content_purged_at IS NULL
             AND deleted_at IS NULL AND created_at < $3::timestamptz - make_interval(hours => $4::int)`,
         [tenantId, network, now, policy.activityContentMaxHours],
