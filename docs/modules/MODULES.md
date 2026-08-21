@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.9` | IN PROGRESS | Social Media | 2026-08-21 |
+| social-media | `0.5.10` | IN PROGRESS | Social Media | 2026-08-21 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,109 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.9` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.10` · IN PROGRESS
+
+**0.5.10 (2026-08-21, SMM-38 phase 38e, senior-integrator) — the flip: closing the three gaps 38c/38d
+named, Gap 1's live wiring, and the capability inventory's driver-per-capability rows.** Worktree was
+BEHIND main (`5ff9e6f` — the 38c merge commit) at cut time; `git merge main` (clean fast-forward)
+pulled 38d in before any of this pass's own code was written.
+
+**Gap 1 — the crux of the phase — CLOSED with a new resolver, not a widened `openOrg`.** New
+`provisioning.ts#resolveDispatchOrgHandle(tenantId, chain, capability)`: consults
+`registry.ts#resolvePublisherForCapability` and, when it resolves to anything but `direct`, builds
+the IDENTICAL Postiz-shaped `OrgHandle` `openOrg` always built; when it resolves to `direct`, resolves
+the account's OAuth grant for REAL through `oauth-tokens.ts#resolveActiveAccessToken` (fail-closed on
+revoked/expired/missing) and builds the `direct`-shaped handle (`.secret()` = the bearer token,
+`.orgId` = `config.social.direct.linkedin.organizationUrn` for LinkedIn — an existing 38c config
+constant, sufficient because `direct`-routed LinkedIn connects are already own-brand-only via OQ-3;
+unused for YouTube). `openOrg` itself is UNCHANGED — widening it would have re-defined a contract
+every Postiz caller already depends on, for the benefit of one driver; a considered decision, not an
+oversight. `dispatch.ts#dispatchApprovedPublish` now calls this resolver TWICE, once for
+`media_upload` (only when the variant carries attachments) and once for `schedule` — proven live, not
+merely asserted: `dispatch.test.ts`'s new (D1)–(D4) drive a REAL `social_oauth_tokens` row through a
+REAL `resolveActiveAccessToken` call and a SECOND registered driver (key `"direct"`) actually
+receiving the resolved token, including per-CAPABILITY routing (D3: only `media_upload` overridden,
+`schedule` still reaches the org's own driver) and fail-closed behaviour on a revoked grant (D4: the
+approval is still consumed, `dispatch_error` carries `oauth_token_revoked`, never a crash).
+
+**A gap FOUND while wiring Gap 1, fixed at its source, not worked around.**
+`linkedin-oauth.ts#completeLinkedInConnect`/`youtube-oauth.ts#completeYouTubeConnect` (38c/38d)
+promoted an account to `connected` without ever setting `postiz_integration_id` — and
+`provisioning.ts#assertDispatchChain`'s generic `account_not_connected` gate refuses ANY account
+whose `postiz_integration_id` is NULL, regardless of driver. Fixed with a self-describing, non-NULL
+sentinel (`'direct:linkedin'` / `'direct:youtube'`) — never a real Postiz-issued id (which never
+contains a `:`) — rather than relaxing the generic gate. Regression-pinned in both oauth test files.
+
+**Gap 2 — YouTube's `uploadMedia` metadata channel — CLOSED.** `SocialPublisher.uploadMedia`'s `file`
+parameter gains two OPTIONAL fields, `title`/`description` (`types.ts`) — additive, on the SAME bag
+`network` was added to in 38d, so `postiz`/mock/LinkedIn simply ignore what they don't use.
+`dispatch.ts#resolveEngineMedia` (the one call site) derives both from the variant's own `body` for a
+YouTube-network upload (`youtubeUploadMetadata`, new): the body's first line becomes `title`
+(truncated to 100 chars, YouTube's commonly-documented limit, ⚠UNVERIFIED, a defensive cap either
+way), the full trimmed body becomes `description`. `direct.ts`'s YouTube branch prefers a real
+supplied title, falling back to the filename ONLY when none was sent (or it was blank/whitespace) —
+never silently overriding a real one. Pinned in `direct.test.ts` (a real title/description sent
+verbatim; a blank one still falls back).
+
+**Gap 3 — the YouTube quota counter's durability — CLOSED with an injectable store, not a hard
+rewrite.** New `YouTubeQuotaStore` interface (`youtube-quota.ts`): `defaultYouTubeQuotaStore()` wraps
+the ORIGINAL 38d module-level functions byte-for-byte (every existing test, including
+`resetYouTubeQuotaUsage()`'s own seam, is UNCHANGED — proven by re-running the untouched
+`youtube-quota.test.ts` cases verbatim); `createDbYouTubeQuotaStore()` is the new durable
+implementation, backed by a NEW GLOBAL table (`social_youtube_quota_usage`, migration
+`202608210411_social_youtube_quota_usage.sql`) — no `tenant_id`, no RLS, the SAME D-4 reasoning
+`social_platform_apps` already uses (the 100-upload/day cap is a per-Google-Cloud-PROJECT fact, shared
+across every tenant's every channel, never per-tenant). `record()` is a single atomic
+`INSERT...ON CONFLICT DO UPDATE SET col = col + EXCLUDED.col` — proven under REAL concurrency (10
+parallel increments summing to exactly 10, not less) rather than merely asserted from the SQL text.
+`direct.ts`'s `DirectDriverOptions` gains `quotaStore?: YouTubeQuotaStore` (default: the in-memory
+wrapper — every test in this module keeps its exact 38d behaviour); `boot.ts` wires the DB-backed one
+for the real app.
+
+**The flip's config shape — the default stays INERT, proven by re-running the baseline suite
+unchanged.** No default value was added to `config.social.publisher.capabilityDrivers` — it ships
+exactly as empty as 38a/38b/38c/38d left it. `resolvePublisher`'s `publisher_not_configured` signal
+(`anyNonDirectRegistered`) is untouched and unregressed (no new test needed — every existing
+`publisher.test.ts` case still passes verbatim). The RECOMMENDED override for a deployment that has
+cleared LinkedIn's credential gate (D-23, staging) is
+`linkedin:schedule=direct,linkedin:media_upload=direct,linkedin:inbox_read=direct` — deliberately
+EXCLUDING any `youtube:*` key: see the capability inventory's new "Driver per capability" section and
+this ticket's own report for why YouTube's flip carries a SECOND, independent gap beyond the
+credential one (the dispatch state machine has no representation for a network whose publish
+terminates at `uploadMedia`, and `dispatch.ts` unconditionally calls `schedulePost` after any upload
+for every network today) — reported as an open architecture question, not silently wired around or
+silently ignored.
+
+**Capability inventory (SMM-33's deliverable, §PD's own exit criterion for this phase) updated.**
+`docs/modules/social-capability-inventory.md`'s new "Driver per capability" section records, for
+every (network, capability) pair this wave built something for, which driver serves it today, which
+COULD serve it if flipped, and exactly what stands between "could" and "does" — naming the credential
+gap (D-23) and YouTube's dispatch-flow gap as two INDEPENDENT reasons, not one collapsed "not live
+yet" sentence.
+
+Test counts: **483 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline measured directly in this worktree by
+stashing this pass's changes: **470 / 0 / 5**, matching `main`'s own stated baseline exactly — +13:
+`dispatch.test.ts` +4 [(D1)–(D4)], `direct.test.ts` +3 [metadata + injectable store], `youtube-quota.test.ts`
++6 [store-seam unit case + 5 durable-store DB cases]; `linkedin-oauth.test.ts`/`youtube-oauth.test.ts`
+gained ASSERTIONS on an existing case each, not new `it()`s, so they add 0 to the count while still
+pinning the `postiz_integration_id` fix). The full changed/new-file set re-run ALONE afterward
+(6 files, 117/117) to rule out the shared-test-Postgres phantom-failure class this program names —
+green. `tsc --noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/
+`lint:migration-names` all green (127 migrations scanned, 128 files on disk — one non-`.sql` file in
+the directory is excluded by the linter's own glob, unrelated to this pass). `test:iam-chain-alignment`
+green (25/25, unaffected — no Cerbos/IAM change this phase).
+
+**What SMM-15 (P2 inbox sync, still unbuilt) must build against what this phase leaves:** everything
+38c/38d already named for it (LinkedIn/YouTube's `listComments` keyed by `providerPostId`, not an
+account integration id) is unchanged; this phase adds nothing new for SMM-15 to react to, since
+neither `inbox_read` capability was flipped in the shipped default.
+
+**What the architect must decide, named rather than guessed:** the dispatch-state-machine question
+for a network whose publish terminates at `uploadMedia` (YouTube) rather than a separate `schedulePost`
+step — see `provisioning.ts#resolveDispatchOrgHandle`'s own header and the capability inventory's new
+section for the full reasoning. Until that is decided, `youtube:media_upload` must not be set to
+`direct` in `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` on any deployment, credentialed or not.
 
 **0.5.9 (2026-08-21, SMM-38 phase 38d, senior-integrator) — YouTube on the `direct` driver.**
 Worktree was already at the 38c merge commit at start (`git log -1` = `5ff9e6f merge: SMM-38c

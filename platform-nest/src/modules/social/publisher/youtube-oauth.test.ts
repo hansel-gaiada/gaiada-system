@@ -218,10 +218,13 @@ describe.skipIf(!TEST_URL)("SMM-38d · YouTube connect readiness + the full star
     expect(completed).toEqual({ accountId: started.accountId, status: "connected" });
 
     const { rows: connected } = await withTenants([T], (c) =>
-      c.query(`SELECT status, connected_by, platform_app_id FROM social_accounts WHERE id = $1`, [started.accountId]), MODULES);
+      c.query(`SELECT status, connected_by, platform_app_id, postiz_integration_id FROM social_accounts WHERE id = $1`, [started.accountId]), MODULES);
     expect(connected[0].status).toBe("connected");
     expect(connected[0].connected_by).toBe(actorId);
     expect(connected[0].platform_app_id).not.toBeNull();
+    // SMM-38 phase 38e — the SAME gap `linkedin-oauth.test.ts` pins, network swapped: see that
+    // file's own comment on this exact assertion.
+    expect(connected[0].postiz_integration_id).toBe("direct:youtube");
 
     const resolved = await withTenants([T], (c) => resolveActiveAccessToken(c, started.accountId));
     expect(resolved.secret()).toBe("yt-at-1");

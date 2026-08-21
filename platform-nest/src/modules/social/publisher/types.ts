@@ -336,9 +336,20 @@ export interface SocialPublisher {
    *  upload endpoint each, per network already); `direct` branches on it. The ONE call site
    *  (`dispatch.ts#resolveEngineMedia`) already carries the variant's own network in scope, so this
    *  is a port-widening with no live-caller migration debt. */
+  //
+  // ── `title`/`description` (SMM-38 phase 38e) — GAP 2's metadata channel, closed here ────────────
+  // 38d shipped YouTube's `uploadMedia` branch with NO way to carry a real title/description: the
+  // call synthesized `title` from `file.filename` and left `description` empty, named in its own
+  // header as "a YouTube upload without a title is not a post". Both fields are OPTIONAL and additive
+  // on the SAME `file` bag `network` was added to in 38d, not a fourth positional parameter — `postiz`
+  // and the mock driver already ignore fields they do not use (this is the identical shape, one more
+  // field). `dispatch.ts#resolveEngineMedia` is the one call site and now derives both from the
+  // variant's own `body` for a YouTube-network upload, never fabricating a title `uploadMedia`'s
+  // caller does not have. Absent for every other network (LinkedIn's asset upload and Postiz's
+  // generic multipart both have no metadata concept at this call).
   uploadMedia(
     org: OrgHandle,
-    file: { filename: string; contentType: string; bytes: Uint8Array },
+    file: { filename: string; contentType: string; bytes: Uint8Array; title?: string; description?: string },
     network: Network,
   ): Promise<{ id: string; url?: string }>;
 

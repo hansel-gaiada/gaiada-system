@@ -13,17 +13,19 @@
 // rather than breaking it, by fixing the heuristic itself (`registry.ts#resolvePublisher`, see its
 // own updated header) to ignore `direct`'s registration when deciding "is anything configured".
 //
-// This remains behaviourally INERT on every live path today, for three independent reasons, each
-// sufficient on its own:
+// This remains behaviourally INERT on every deployment that has not deliberately set the override
+// below, for two independent reasons — a THIRD reason 38c/38d's own header used to name here
+// (`dispatch.ts` had no call site that could ever reach `direct`) was closed by 38e's
+// `provisioning.ts#resolveDispatchOrgHandle` + `dispatch.ts`'s own wiring onto it, proven with a
+// live-shaped test (a real `social_oauth_tokens` row, a real `resolveActiveAccessToken` call) rather
+// than merely asserted:
 //   1. `resolvePublisher` is only ever called with `org.driver`, which 0105's CHECK constrains to
 //      'postiz'|'mixpost' — 'direct' is never named there, so the ordinary per-org resolution path
-//      (`provisioning.ts#openOrg`, `dispatch.ts`) can never reach it.
+//      (`provisioning.ts#openOrg`) can never reach it.
 //   2. `resolvePublisherForCapability`'s override map (`config.social.publisher.capabilityDrivers`)
 //      is still EMPTY by default — nothing routes a (network, capability) pair to `direct` unless an
-//      operator explicitly sets `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, which no deployment does today.
-//   3. Even where that switch IS consulted, no live call site passes it a `direct`-shaped `OrgHandle`
-//      yet (`direct.ts`'s own header: nobody on a live path resolves a LinkedIn/YouTube access token
-//      and builds the handle `schedulePost`/`uploadMedia` need — that surgery is 38e's).
+//      operator explicitly sets `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, which no deployment does today
+//      (38e does not change this default — see that ticket's own tracker evidence for why).
 // `registerLinkedInTokenRefresher()`/`registerYouTubeTokenRefresher()` (38d adds the latter) are the
 // SAME story: each is a pure Map insert (no network call), and each only becomes reachable when
 // SMM-36's retention sweep finds a grant of its OWN network within its refresh-ahead window — which
@@ -52,6 +54,7 @@ import { config } from "../../../config";
 import { checkPrivateVendorBaseUrl } from "../../../search-vendor-baseurl-guard";
 import { createPostizDriverFromConfig } from "./postiz";
 import { createDirectDriver } from "./direct";
+import { createDbYouTubeQuotaStore } from "./youtube-quota";
 import { registerLinkedInTokenRefresher } from "./linkedin-oauth";
 import { registerYouTubeTokenRefresher } from "./youtube-oauth";
 import { registerPublisher } from "./registry";
@@ -119,7 +122,10 @@ export function wireSocialPublisher(): void {
   // (a real deployment shape: LinkedIn/YouTube via `direct`, no Postiz at all, once 38e flips the
   // config). See this file's header for why this is still inert on every live path today, and
   // `registry.ts#resolvePublisher`'s own updated header for the heuristic fix that keeps it safe.
-  registerPublisher(createDirectDriver());
+  // SMM-38 phase 38e — Gap 3's durability fix: the REAL app gets the DB-backed, cross-instance-safe
+  // quota store (`youtube-quota.ts`'s own header); every test that builds its own driver via
+  // `createDirectDriver()` with no override keeps the in-memory default, unchanged.
+  registerPublisher(createDirectDriver({ quotaStore: createDbYouTubeQuotaStore() }));
   registerLinkedInTokenRefresher();
   // SMM-38 phase 38d — same pure-Map-insert, verified-inert-until-a-real-grant-exists property as
   // registerLinkedInTokenRefresher() immediately above; see that call's own reasoning in this file's

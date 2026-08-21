@@ -326,10 +326,20 @@ export async function completeLinkedInConnect(
         `SELECT id FROM social_platform_apps WHERE network = 'linkedin' AND deleted_at IS NULL
            AND review_status <> 'rejected' ORDER BY updated_at DESC LIMIT 1`,
       );
+      // SMM-38 phase 38e — a gap found while wiring Gap 1's live dispatch path, fixed HERE at the
+      // source rather than relaxed generically in `provisioning.ts#assertDispatchChain`: that
+      // function refuses `account_not_connected` for ANY account whose `postiz_integration_id` is
+      // NULL, and this UPDATE never set it. A `direct`-connected LinkedIn account has no Postiz-
+      // mirrored integration id to put there (there is no Postiz involvement in this flow at all) —
+      // `'direct:linkedin'` is a self-describing, non-NULL sentinel, never mistaken for a real
+      // Postiz-issued opaque id (which never contains a `:`), satisfying the SAME generic "is this
+      // account provably connected" gate every driver's account rows are held to, honestly rather
+      // than by weakening that gate for this one driver.
       await c.query(
         `UPDATE social_accounts
             SET status = 'connected', platform_app_id = $2, connected_by = $3, connected_at = now(),
-                last_error = NULL, updated_at = now()
+                last_error = NULL, postiz_integration_id = COALESCE(postiz_integration_id, 'direct:linkedin'),
+                updated_at = now()
           WHERE id = $1`,
         [accountId, platformApp.rows[0]?.id ?? null, args.actorId],
       );

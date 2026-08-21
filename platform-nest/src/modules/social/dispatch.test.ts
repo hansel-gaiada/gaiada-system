@@ -14,6 +14,7 @@
 // would make the query return zero rows, silently. Nothing here needs a second, artificial "GUC
 // removed" test — the happy path IS the guard.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { randomBytes } from "node:crypto";
 import { config } from "../../config";
 import { newId, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, adminPool, TEST_URL } from "../../testing/setup";
@@ -23,6 +24,7 @@ import { setStorageForTest } from "../../core/storage";
 import { registerPublisher, resetPublishers } from "./publisher/registry";
 import { createMockPublisher, newMockPublisherState, type MockPublisherState } from "./publisher/mock-driver";
 import { SocialPublisherError } from "./publisher/types";
+import { storeOAuthGrant, revokeOAuthGrant } from "./publisher/oauth-tokens";
 import { variantPublishArgs, variantArgsSha256 } from "./canonical-args";
 import { SOCIAL_PUBLISH_TOOL, resetCreatorInfoVerifier } from "./publish-precondition";
 import { installCreatorInfoVerifier } from "./creator-info-verifier";
@@ -550,6 +552,195 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
 
       expect(verdict).toMatchObject({ ok: false, stage: "creator_info", reason: "creator_selection_no_longer_permitted" });
       expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+    });
+  });
+
+  // ══ SMM-38 phase 38e — GAP 1, PROVEN ON THE LIVE DISPATCH PATH ═════════════════════════════════
+  //
+  // 38c/38d proved `direct`'s LinkedIn/YouTube methods correct against a resolved token
+  // (`direct.test.ts`'s stub-`fetchImpl` cases) but named — three times over — that NOTHING on a
+  // live dispatch path ever built that token or that handle. This block is the proof that changed:
+  // a REAL `social_oauth_tokens` row, a REAL `resolveActiveAccessToken` call (through
+  // `provisioning.ts#resolveDispatchOrgHandle`), and a SECOND registered driver (under key
+  // `"direct"`) actually receiving the resolved bearer token — never asserted against a mock of the
+  // resolution itself.
+  describe("SMM-38e · resolveDispatchOrgHandle — the (network, capability) switch reaches `direct` for real", () => {
+    let linkedinAccount: string;
+    let directState: MockPublisherState;
+    let capabilityDriversBefore: Record<string, string>;
+    let organizationUrnBefore: string;
+    let integrationTokenKeyBefore: string;
+    let linkedinFileId: string;
+    const ACCESS_TOKEN = "lg-real-bearer-token-never-logged";
+    const ORG_URN = "urn:li:organization:99900";
+
+    beforeAll(async () => {
+      capabilityDriversBefore = config.social.publisher.capabilityDrivers;
+      organizationUrnBefore = config.social.direct.linkedin.organizationUrn;
+      config.social.direct.linkedin.organizationUrn = ORG_URN;
+      // `storeOAuthGrant`/`resolveActiveAccessToken` seal through secret-box.ts, which fails closed
+      // without a real key — set one for real, the same seam `oauth-tokens.test.ts` uses.
+      integrationTokenKeyBefore = config.integrationTokenKey;
+      config.integrationTokenKey = randomBytes(32).toString("base64");
+
+      linkedinAccount = newId();
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO social_accounts
+             (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+           VALUES ($1,$2,$3,$4,'linkedin',$5,$6,'connected','{}','central')`,
+          [linkedinAccount, co, clientId, publisherOrgId, uniq("@brand-li"), uniq("direct:linkedin")]), MODULES);
+      linkedinFileId = await createFile("li-photo.jpg", "image/jpeg", Buffer.from("fake-li-jpeg-bytes"));
+
+      // The REAL grant, sealed through secret-box.ts and read back through resolveActiveAccessToken
+      // — never a mock of the resolver itself.
+      await withTenants([co], (c) =>
+        storeOAuthGrant(c, {
+          tenantId: co, accountId: linkedinAccount, network: "linkedin", accessToken: ACCESS_TOKEN,
+          expiresAt: new Date(Date.now() + 3600_000),
+        }), MODULES);
+    });
+    afterAll(async () => {
+      config.social.publisher.capabilityDrivers = capabilityDriversBefore;
+      config.social.direct.linkedin.organizationUrn = organizationUrnBefore;
+      config.integrationTokenKey = integrationTokenKeyBefore;
+    });
+    beforeEach(() => {
+      config.social.publisher.capabilityDrivers = {};
+      state = newMockPublisherState();
+      directState = newMockPublisherState();
+      resetPublishers();
+      registerPublisher(createMockPublisher(state));
+      registerPublisher(createMockPublisher(directState, { key: "direct" }));
+    });
+
+    // `fileExecutingApproval`'s own body literal ("Hello from SMM-10's dispatch flow") is hardcoded
+    // and re-used verbatim here — the approval-args hash must match the variant's own stored args
+    // exactly, or the precondition refuses `args_hash_mismatch` before ever reaching this ticket's
+    // own wiring.
+    const BODY = "Hello from SMM-10's dispatch flow";
+
+    async function makeLinkedinVariant(opts: { media?: unknown } = {}): Promise<{ variantId: string; media: unknown }> {
+      const engagementId = await makeEngagement({ networks: { linkedin: true } });
+      const postId = newId();
+      const variantId = newId();
+      const media = opts.media ?? [];
+      const hash = variantArgsSha256({
+        tenantId: co, id: variantId, accountId: linkedinAccount, body: BODY,
+        firstComment: null, media, settings: {}, scheduledAt: null,
+      });
+      await withTenants([co], async (c) => {
+        await c.query(`INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
+                       VALUES ($1,$2,$3,'38e post','approved','central')`, [postId, co, engagementId]);
+        await c.query(
+          `INSERT INTO social_post_variants
+             (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,'{}',$7,'approved','central')`,
+          [variantId, co, postId, linkedinAccount, BODY, JSON.stringify(media), hash],
+        );
+      }, MODULES);
+      return { variantId, media };
+    }
+
+    it("(D1) NO CONFIG OVERRIDE ⇒ the default stays inert: a linkedin-connected account still dispatches through the SAME driver as every other network, never `direct`", async () => {
+      // capabilityDrivers is {} (beforeEach) — the ticket's own required property, proven, not assumed.
+      const { variantId } = await makeLinkedinVariant();
+      await fileExecutingApproval(variantId, [], { accountId: linkedinAccount, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict).toMatchObject({ ok: true, network: "linkedin" });
+      expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1);
+      expect(directState.calls).toHaveLength(0);
+    });
+
+    it("(D2) `linkedin:schedule` + `linkedin:media_upload` overridden to `direct` ⇒ BOTH calls land " +
+       "on the direct driver, with the REAL resolved token and the configured org URN — never the " +
+       "postiz mock", async () => {
+      config.social.publisher.capabilityDrivers = { "linkedin:schedule": "direct", "linkedin:media_upload": "direct" };
+      const media = [{ fileId: linkedinFileId, kind: "image", format: "jpeg" }];
+      const { variantId } = await makeLinkedinVariant({ media });
+      await fileExecutingApproval(variantId, media, { accountId: linkedinAccount, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict).toMatchObject({ ok: true, network: "linkedin" });
+      // Nothing reached the postiz mock at all — full per-network routing, not a partial one.
+      expect(state.calls).toHaveLength(0);
+      expect(directState.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(1);
+      expect(directState.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1);
+      // The org id every call carried is the ORG URN config's own value, never the Postiz org row's
+      // postiz_org_id — proving `resolveDispatchOrgHandle` built the direct-shaped handle, not the
+      // Postiz-shaped one.
+      expect(directState.calls.every((c) => c.orgId === ORG_URN)).toBe(true);
+    });
+
+    it("(D3) PER-CAPABILITY, NOT PER-NETWORK: only `linkedin:media_upload` overridden ⇒ the upload " +
+       "reaches `direct`, the schedule call still reaches the SAME driver every other capability uses " +
+       "— proving the switch really is keyed on (network, capability), not network alone", async () => {
+      config.social.publisher.capabilityDrivers = { "linkedin:media_upload": "direct" };
+      const media = [{ fileId: linkedinFileId, kind: "image", format: "jpeg" }];
+      const { variantId } = await makeLinkedinVariant({ media });
+      await fileExecutingApproval(variantId, media, { accountId: linkedinAccount, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict).toMatchObject({ ok: true, network: "linkedin" });
+      expect(directState.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(1);
+      expect(directState.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+      expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(1);
+      expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(0);
+    });
+
+    it("(D4) a REVOKED grant fails closed through the real path — never a crash, never a stray " +
+       "publish, the approval still consumed (design's own neverAutoRetry doctrine)", async () => {
+      config.social.publisher.capabilityDrivers = { "linkedin:schedule": "direct" };
+      const revoked = newId();
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO social_accounts
+             (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+           VALUES ($1,$2,$3,$4,'linkedin',$5,$6,'connected','{}','central')`,
+          [revoked, co, clientId, publisherOrgId, uniq("@brand-li-revoked"), uniq("direct:linkedin")]), MODULES);
+      await withTenants([co], (c) =>
+        storeOAuthGrant(c, {
+          tenantId: co, accountId: revoked, network: "linkedin", accessToken: "will-be-revoked",
+          expiresAt: new Date(Date.now() + 3600_000),
+        }), MODULES);
+      await withTenants([co], (c) => revokeOAuthGrant(c, revoked, "38e test — deliberately revoked"), MODULES);
+
+      const engagementId = await makeEngagement({ networks: { linkedin: true } });
+      const postId = newId();
+      const variantId = newId();
+      const hash = variantArgsSha256({
+        tenantId: co, id: variantId, accountId: revoked, body: BODY, firstComment: null,
+        media: [], settings: {}, scheduledAt: null,
+      });
+      await withTenants([co], async (c) => {
+        await c.query(`INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
+                       VALUES ($1,$2,$3,'38e revoked post','approved','central')`, [postId, co, engagementId]);
+        await c.query(
+          `INSERT INTO social_post_variants
+             (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, origin_site)
+           VALUES ($1,$2,$3,$4,$5,'[]','{}',$6,'approved','central')`,
+          [variantId, co, postId, revoked, BODY, hash],
+        );
+      }, MODULES);
+      await fileExecutingApproval(variantId, [], { accountId: revoked, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict.ok).toBe(false);
+      if (verdict.ok) throw new Error("unreachable");
+      expect(verdict.reason).toBe("dispatch_error");
+      expect(directState.calls).toHaveLength(0);
+      expect(state.calls).toHaveLength(0);
+      // The approval is STILL consumed — the same neverAutoRetry property every other dispatch
+      // failure in this file already proves, now for a token-resolution failure too.
+      const row = await variantRow(variantId);
+      expect(row.status).toBe("failed");
+      expect(row.approvalId).not.toBeNull();
+      expect(row.lastError).toContain("oauth_token_revoked");
     });
   });
 });

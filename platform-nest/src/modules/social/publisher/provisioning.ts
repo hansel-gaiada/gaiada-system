@@ -28,9 +28,11 @@ import { emitEvent } from "../../../events/outbox.service";
 import { isNetwork, type Network } from "../media-rules";
 import { resolveAccountCapabilities, deriveAccountStatus, KNOWN_NETWORKS, type AccountCapabilities } from "./capabilities";
 import { describeKeyRef, resolveOrgApiKey, DEFAULT_KEY_REF } from "./keys";
-import { invokePublisher, resolvePublisher } from "./registry";
+import { invokePublisher, resolvePublisher, resolvePublisherForCapability } from "./registry";
+import { resolveActiveAccessToken } from "./oauth-tokens";
 import {
-  OrgHandle, SocialPublisherError, type IntegrationState, type PublisherRefusalCode, type SocialPublisher,
+  OrgHandle, SocialPublisherError, type IntegrationState, type PublisherCapability,
+  type PublisherRefusalCode, type SocialPublisher,
 } from "./types";
 
 /** The third wall, named once. Every `withTenants` call in this file passes it — see the header. */
@@ -170,6 +172,97 @@ async function verify(org: PublisherOrgRow): Promise<ProvisionResult["verificati
 export function openOrg(org: PublisherOrgRow): { driver: SocialPublisher; handle: OrgHandle } {
   const driver = resolvePublisher(org.driver);
   const handle = new OrgHandle(org.id, org.postizOrgId, resolveOrgApiKey(org.apiKeyRef));
+  return { driver, handle };
+}
+
+// ── SMM-38 phase 38e — Gap 1's resolution: a capability-aware handle resolver ─────────────────────
+//
+// The design question this ticket exists to answer: 38c/38d proved `direct`'s LinkedIn/YouTube
+// methods correct against a resolved token (contract tests, `direct.test.ts`), but named — three
+// times, in `direct.ts`'s, `boot.ts`'s and this file's own headers — that NOTHING on a live path
+// ever builds the `direct`-shaped `OrgHandle` those methods need. `openOrg` above only ever resolves
+// `org.driver` (0105's CHECK admits only 'postiz'/'mixpost' in that column, by design — 'direct'
+// never reaches it), so it can never be the answer by itself.
+//
+// ── WHY A NEW FUNCTION, NOT A WIDENED `openOrg` ─────────────────────────────────────────────────────
+// `openOrg` is synchronous and touches no database — correct for Postiz, whose credential is an
+// env-resolved API-key alias (`keys.ts#resolveOrgApiKey`), no round trip needed. `direct`'s
+// credential is a per-ACCOUNT OAuth bearer token resolvable ONLY through
+// `oauth-tokens.ts#resolveActiveAccessToken`, which needs a tenant-scoped `PoolClient` and is
+// fail-closed (throws `OAuthTokenError` on a revoked/expired/missing grant — never a stale token).
+// Making `openOrg` itself async-and-DB-aware would widen a function every EXISTING Postiz caller
+// (`verify`, `syncConnectorRegistry`, `initiateAccountConnect`) already calls synchronously, for the
+// benefit of exactly one driver — the identical "silently redefine a shared contract" 38c refused to
+// do to `OrgHandle` itself. So this ships as a SEPARATE resolver, consulted only by the ONE caller
+// that actually needs the (network, capability) switch: `dispatch.ts`, for its two capabilities that
+// can legitimately be routed to a different driver than the org's own (`media_upload`, `schedule`).
+//
+// ── THE LinkedIn ORG-URN QUESTION, ANSWERED BY A FACT 38c ALREADY SHIPPED ───────────────────────────
+// `direct.ts#schedulePost`'s LinkedIn branch needs `org.orgId` to carry the target organization's URN
+// (`urn:li:organization:...`). There is no `social_accounts`/`social_publisher_orgs` column for a
+// per-account org URN — but there does not need to be one: `config.social.direct.linkedin.organizationUrn`
+// (38c's own config key, "the Gaiada LinkedIn Company Page this deployment publishes AS... ONE per
+// deployment, own-brand-first") is EXACTLY this fact, and `checkConnectReadiness`/
+// `checkLinkedInConnectReadiness` already gate every `direct`-routed LinkedIn connect on
+// `ownBrandClientIds` (OQ-3) — so a `direct`-connected LinkedIn account is, by construction, always
+// an own-brand one publishing to the ONE org URN this deployment is configured for. For YouTube,
+// `org.orgId` is simply unused by every 38d method (direct.ts's own header) — the channel is
+// identified implicitly by the bearer token — so any stable string is safe there.
+//
+// ── THE LinkedIn/YouTube "connected but no `postiz_integration_id`" GAP, FOUND HERE AND FIXED AT
+// THE SOURCE (`linkedin-oauth.ts`/`youtube-oauth.ts`), NOT WORKED AROUND HERE ────────────────────────
+// `assertDispatchChain` (below) refuses `account_not_connected` for ANY account whose
+// `postiz_integration_id` is NULL, regardless of driver — a generic, load-bearing invariant this
+// function does not relax. `completeLinkedInConnect`/`completeYouTubeConnect` (38c/38d) promoted the
+// row to `connected` WITHOUT ever setting that column, which would have made every `direct`-connected
+// account fail this gate before ever reaching `resolveDispatchOrgHandle`. Fixed at those two call
+// sites (both under this ticket's `publisher/*` surface) with an explicit, self-describing sentinel
+// (`'direct:' || network`) rather than relaxed here — see those files' own headers.
+//
+// ── WHAT THIS FUNCTION DELIBERATELY DOES NOT DO FOR YouTube ─────────────────────────────────────────
+// `resolvePublisherForCapability` will happily resolve `youtube:media_upload` to `direct` if an
+// operator sets that override — this function does not special-case YouTube out. What it does NOT do
+// is recommend that override, or wire it into a default: YouTube's `uploadMedia` IS its publish call
+// (`direct.ts`'s own header), but `dispatch.ts#dispatchApprovedPublish` unconditionally calls
+// `schedulePost` AFTER any media upload for EVERY network — a shape that fits LinkedIn's real API
+// (upload an asset, THEN publish referencing it) but would, for YouTube, upload a real video via
+// `direct` and then immediately attempt a SECOND publish step that `direct.ts` refuses
+// `capability_unsupported` for (YouTube has no `schedulePost`) — an approval spent, a stray video
+// already live upstream, and a variant row recorded `failed`. That is a dispatch-STATE-MACHINE
+// question (how does a network whose publish terminates at `uploadMedia` get represented in a flow
+// built around "upload then schedule"), not a token-resolution one, and is NOT decided here — see the
+// tracker's 38e evidence for why this is reported as a specific, scoped follow-up for the architect
+// rather than silently wired around or silently ignored.
+function directOrgRef(network: Network): string {
+  // LinkedIn: the ONE org URN this deployment is configured to publish AS — see this function's own
+  // header for why a config constant, not a per-account column, is the correct and sufficient answer
+  // given `direct`-routed LinkedIn connects are already own-brand-only (OQ-3).
+  if (network === "linkedin") return config.social.direct.linkedin.organizationUrn;
+  // YouTube (and every other network, hypothetically): unused by every current `direct` method.
+  return "";
+}
+
+/** THE resolver `dispatch.ts` calls for its two capability-switchable operations
+ *  (`media_upload`/`schedule`), instead of `openOrg`. Falls through to the IDENTICAL Postiz-shaped
+ *  handle `openOrg` has always built whenever the (network, capability) switch does not name
+ *  `direct` (which is every deployment today, by default — see this function's own header) —
+ *  proving the no-config-default-stays-inert property by construction, not by a separate branch. */
+export async function resolveDispatchOrgHandle(
+  tenantId: string,
+  chain: Pick<DispatchChain, "org" | "network" | "accountId">,
+  capability: PublisherCapability,
+): Promise<{ driver: SocialPublisher; handle: OrgHandle }> {
+  const network = chain.network as Network;
+  const driver = resolvePublisherForCapability(chain.org.driver, network, capability);
+  if (driver.key !== "direct") {
+    return { driver, handle: new OrgHandle(chain.org.id, chain.org.postizOrgId, resolveOrgApiKey(chain.org.apiKeyRef)) };
+  }
+  // `direct`: resolve the account's OAuth grant for real. Fails closed (OAuthTokenError) on a
+  // revoked/expired/missing grant — `dispatch.ts` is the caller and turns that into the SAME
+  // `media_upload_failed`/`dispatch_error` refusal shape it already uses for any other pre-network
+  // failure, never a crash.
+  const resolved = await withTenants([tenantId], (c) => resolveActiveAccessToken(c, chain.accountId), MODULES);
+  const handle = new OrgHandle(chain.accountId, directOrgRef(network), resolved.secret());
   return { driver, handle };
 }
 

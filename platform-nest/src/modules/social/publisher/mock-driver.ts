@@ -24,6 +24,7 @@ import {
   type OrgVerification,
   type PostMetrics,
   type PostStatus,
+  type PublisherKey,
   type PublishOp,
   type PublisherCapability,
   type SocialPublisher,
@@ -75,6 +76,14 @@ export interface MockPublisherOptions {
   /** SMM-10/D-22 — advertise + implement `getCreatorInfo`. Default false: matching the real driver,
    *  where `creatorInfoProbeTool` is unset until D-21's fork exception is verified live. */
   withCreatorInfoProbe?: boolean;
+  /** SMM-38 phase 38e — register this SAME mock shape under a different `PublisherKey`. Default
+   *  `"postiz"` (unchanged from every existing caller). Lets a test register a SECOND mock under
+   *  `"direct"` to prove `registry.ts#resolvePublisherForCapability`'s (network, capability) switch
+   *  actually routes a live call to a different driver — this file otherwise has nothing that speaks
+   *  `direct`'s real LinkedIn/YouTube wire shapes, and a contract-level fake is the right tool for
+   *  proving ROUTING, as opposed to `direct.test.ts`'s own stub-`fetchImpl` cases, which prove the
+   *  real driver's own wire behaviour. */
+  key?: PublisherKey;
 }
 
 const DEFAULT_CAPS: PublisherCapability[] = [
@@ -99,7 +108,7 @@ export function createMockPublisher(
   };
 
   const driver: SocialPublisher = {
-    key: "postiz",
+    key: opts.key ?? "postiz",
     capabilities: caps,
 
     async createOrg() {

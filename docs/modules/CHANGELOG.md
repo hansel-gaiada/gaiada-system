@@ -77,6 +77,33 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-38 phase 38e**, `social-media 0.5.9 -> 0.5.10` (IN PROGRESS). The flip's three
+  gaps, closed. **Gap 1** (the crux): new `provisioning.ts#resolveDispatchOrgHandle` — a SEPARATE,
+  capability-aware resolver (not a widened `openOrg`) that `dispatch.ts` now calls for `media_upload`
+  and `schedule`; when `resolvePublisherForCapability` names `direct`, resolves a REAL OAuth grant via
+  `oauth-tokens.ts#resolveActiveAccessToken` and builds the `direct`-shaped handle (LinkedIn's org URN
+  from 38c's own `config.social.direct.linkedin.organizationUrn`, sufficient since `direct`-routed
+  connects are own-brand-only). Proven live end to end (`dispatch.test.ts` D1–D4: a real token row,
+  per-CAPABILITY routing, fail-closed on a revoked grant). Found and fixed a real gap while wiring
+  this: `completeLinkedInConnect`/`completeYouTubeConnect` never set `postiz_integration_id`, which
+  would have failed `assertDispatchChain`'s generic connected-account gate for every `direct`
+  account — fixed with a self-describing sentinel (`'direct:linkedin'`/`'direct:youtube'`), not a
+  relaxed gate. **Gap 2**: `uploadMedia`'s `file` param gains optional `title`/`description`
+  (`types.ts`); `dispatch.ts#resolveEngineMedia` derives both from the variant's own `body` for a
+  YouTube upload. **Gap 3**: new `YouTubeQuotaStore` seam (`youtube-quota.ts`) —
+  `defaultYouTubeQuotaStore()` wraps the untouched 38d singleton (zero test changes);
+  `createDbYouTubeQuotaStore()` is a durable, atomic, GLOBAL-table (no RLS, D-4 reasoning) store
+  `boot.ts` wires in for the real app. New migration `202608210411_social_youtube_quota_usage.sql`.
+  **The flip's default stays empty** — no capability-driver override shipped; the recommended
+  override (staging, once credentialed) covers LinkedIn's three capabilities only, deliberately
+  EXCLUDING `youtube:media_upload`/`youtube:schedule` — YouTube's "upload IS publish" shape collides
+  with `dispatch.ts`'s unconditional upload-then-schedule flow, reported to the architect as an open
+  question rather than wired around. Capability inventory
+  (`docs/modules/social-capability-inventory.md`) gained the required "driver per capability" table.
+  Test counts: **483/0/5** (baseline **470/0/5**, measured directly by stashing this pass — matches
+  `main`'s own stated figure exactly; +13 new). Full detail: `docs/modules/MODULES.md`'s social-media
+  0.5.10 entry, `docs/plans/smm-tracker.md`'s PD row.
+
 - **2026-08-21 — SMM-38 phase 38d**, `social-media 0.5.8 -> 0.5.9` (IN PROGRESS). YouTube on the
   `direct` driver. Resolved the `uploadMedia(org, file)` network-routing collision 38c named by
   widening the port to `uploadMedia(org, file, network)` — updated in `types.ts`, `postiz.ts`,
