@@ -103,6 +103,10 @@ import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-j
 // three tickets were in flight over this file at once; the seat handed up the line instead of
 // editing it, which is what kept the collision from happening.
 import { startMetricsPullLoop, socialMetricsPullEnabled, socialMetricsPullIntervalMs } from "./modules/social/metrics-job";
+// SMM-15 — the smm-inbox-pull sweep. Registered here rather than by the authoring seat: three
+// tickets have now handed this line up instead of editing main.ts, which is exactly why none of
+// them collided over it.
+import { startInboxPullLoop } from "./modules/social/inbox-sync-job";
 // SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
@@ -455,6 +459,11 @@ async function bootstrap(): Promise<void> {
       registerPositionEventHandlers();
       // eslint-disable-next-line no-console
       console.log(`position reconciler on: streams [${POSITION_STREAMS.join(", ")}]`);
+    }
+    if (config.social.inboxPull.pullEnabled) {
+      startInboxPullLoop(config.social.inboxPull.pullIntervalMs);
+      // eslint-disable-next-line no-console
+      console.log(`social inbox pull (smm-inbox-pull) on: every ${config.social.inboxPull.pullIntervalMs}ms`);
     }
     if (socialMetricsPullEnabled()) {
       startMetricsPullLoop(socialMetricsPullIntervalMs());
