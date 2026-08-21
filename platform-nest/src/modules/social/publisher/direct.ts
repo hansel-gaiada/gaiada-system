@@ -1,47 +1,68 @@
-// SMM-38/38a — the `direct` driver SKELETON (owner decision D-20).
+// SMM-38 — the `direct` driver, D-20's second `SocialPublisher` implementation.
 //
-// D-20 chose a second, free `SocialPublisher` implementation switched in per capability, so the
-// AGPL zone, both fork exceptions and the P2 inbox gap can be removed without forking Postiz —
-// design addendum §PD. This file is phase 38a's entire contribution to that build: a driver that
-// conforms to the port's SHAPE and refuses every member HONESTLY. It is not a stub that half-works;
-// it is a driver that tells the truth about what it cannot do yet.
+// 38a shipped the SKELETON: every member refused `capability_unsupported`, `capabilities` was an
+// empty Set, and the file's whole argument was "nothing is implemented, and this is the honest way
+// to say so." 38c (this phase, design addendum §PD) gives it its first REAL capability: LinkedIn's
+// org-page publish, media upload, and comment read. Everything this file does NOT cover — every
+// other network, and every LinkedIn method not listed below — still refuses exactly as 38a left it.
 //
-// ── WHAT THIS FILE DELIBERATELY DOES NOT DO (38b/38c/38d's job, not this one's) ──────────────────
-// No OAuth, no token storage, no media upload, no network call — not even a health check. Every
-// member below either throws `capability_unsupported` synchronously (wrapped in a rejected Promise
-// by virtue of being declared `async`) or, for the port's two genuinely OPTIONAL members
-// (`listComments`/`sendReply`/`getCreatorInfo`), is simply ABSENT — the exact "absent, not
-// throwing" discipline types.ts's header established for a capability nobody has built yet (see
-// item (a) there): a method that threw would read as a bug, while an absent one is the honest
-// capability fact `capabilities.ts`'s three-reasons model already knows how to render ("driver
-// cannot" — the same bucket Postiz's own inbox gap occupies today).
+// ── HOW A DRIVER-WIDE CAPABILITY COEXISTS WITH PER-NETWORK COVERAGE ─────────────────────────────
+// `PublisherCapability` (types.ts) is DRIVER-wide, not per-network — the port has no `(network,
+// capability)` granularity at the capability-Set level (that granularity lives one layer up, in
+// `registry.ts`'s `resolvePublisherForCapability`, which routes a (network, capability) PAIR to a
+// driver — it does not ask the driver "which networks do you cover for this capability"). `direct`
+// will genuinely cover LinkedIn now and YouTube in 38d, on DIFFERENT schedules, so advertising
+// `schedule`/`media_upload`/`inbox_read` driver-wide while only LinkedIn is real is the SAME shape
+// `postiz.ts` already uses for `getQuota`/`getCreatorInfo` — capability advertised at the driver
+// level, a network-gate INSIDE the method body, and a TYPED refusal (never a crash) for a network
+// the method does not yet cover. `schedulePost`/`uploadMedia`/`listComments` below all follow this
+// exact pattern: check the approval/args shape first, then branch on `network`, and name the gap
+// honestly (`capability_unsupported`, "the 'direct' driver does not yet cover '<network>' for
+// '<op>'") for anything that is not LinkedIn yet. **This is a real, load-bearing gap for 38d to
+// inherit**: the port's capability model cannot express "schedule: true for LinkedIn, false for
+// YouTube" at the Set level, and 38d must decide (with the architect, if it wants to change the
+// port) whether that stays a per-method network branch forever, or whether the port itself grows a
+// per-network capability shape. Not decided here — named, not silently worked around.
 //
-// ── WHY `capabilities` IS AN EMPTY SET, AND WHY THAT IS THE CORRECT ANSWER FOR 38a ────────────────
-// Every capability-gated caller in this codebase (capabilities.ts's `resolveAccountCapabilities`,
-// provisioning.ts's various `driver.capabilities.has(...)` guards, the shared contract suite this
-// phase adds) checks the SET before ever calling a method. An empty set here means every one of
-// those call sites already gets the right, honest answer without reaching a single method below —
-// which is exactly why 38a can ship a driver nothing in the running system uses yet: nothing that
-// checks capabilities first will ever be told this driver can do something it cannot.
+// ── THE CREDENTIAL SHAPE: `OrgHandle.secret()` CARRIES A RESOLVED BEARER TOKEN, NOT AN ORG API KEY
+// `OrgHandle` (types.ts) was built for Postiz's custody model: one API key PER ORG, resolved by
+// alias at call time (`publisher/keys.ts`). `direct` has no such thing — LinkedIn's credential is a
+// per-ACCOUNT OAuth bearer token, resolved from `social_oauth_tokens` via
+// `oauth-tokens.ts#resolveActiveAccessToken`, which needs a `PoolClient` and a tenant-scoped
+// transaction. The port's own method signatures (`schedulePost(org, req)`, `uploadMedia(org, file)`,
+// `listComments(org, integrationId, since)`) carry NEITHER a `PoolClient` NOR a tenantId — by
+// design, per the port's own containment rule ("drivers are stateless per call... a process-level
+// singleton holding a tenant's credential is how one tenant's key serves another's call", types.ts
+// header). So the token MUST be resolved by the CALLER, before this driver is ever invoked, exactly
+// the way `dispatch.ts` already resolves `org.secret()` from `social_publisher_orgs.api_key_ref`
+// before calling `driver.schedulePost`.
 //
-// ── REGISTRATION — DELIBERATELY NOT WIRED INTO main.ts BY THIS PHASE ────────────────────────────
-// `createDirectDriver()` is exported for the shared contract suite (`publisher-contract.ts`) and for
-// 38b+ to register once there is a real reason to. It is NOT called from `boot.ts`/`main.ts` in
-// 38a: `registry.ts`'s `resolvePublisher` treats an EMPTY registry as the deliberate signal
-// `publisher_not_configured` (see its own header) precisely for the "Postiz is unset, nothing else
-// is running either" deployment. Registering this driver unconditionally at boot would make that
-// Map non-empty even when Postiz is unconfigured, which would silently change `resolvePublisher`'s
-// refusal from `publisher_not_configured` to `unknown_publisher` for every existing org row — a
-// live-behaviour change 38a's own acceptance bar forbids. Wiring `direct` into boot is therefore
-// left to whichever phase first gives it a capability worth reaching (38b's custody work, at the
-// earliest), at which point that phase also owns re-examining `resolvePublisher`'s empty-registry
-// heuristic if it needs to.
+// **This file therefore repurposes `OrgHandle` for `direct`**: `org.secret()` is the ALREADY-RESOLVED
+// LinkedIn access token (never a key alias), and `org.orgId` is the target LinkedIn organization URN
+// (`urn:li:organization:...`) — both resolved by the caller. `org.publisherOrgId` carries whatever
+// our-row id the caller wants named on a span/audit line (naturally `social_accounts.id`, since
+// `direct` has no separate "org" concept the way Postiz does — an ACCOUNT is the granular unit here).
+//
+// **WHO BUILDS THAT HANDLE, TODAY: NOBODY ON A LIVE PATH.** `dispatch.ts` and
+// `provisioning.ts#openOrg` are the only two places a `SocialPublisher` call is made against a real
+// `OrgHandle` today, and both are Postiz-shaped: `openOrg` builds `new OrgHandle(org.id,
+// org.postizOrgId, resolveOrgApiKey(org.apiKeyRef))` from `social_publisher_orgs`, which has no
+// notion of a per-account OAuth token at all. Wiring "resolve this account's LinkedIn token, then
+// build a `direct`-shaped `OrgHandle` from it" into either of those call sites is real surgery this
+// phase's file surface does not include (`dispatch.ts` is off-limits; `provisioning.ts` is not this
+// ticket's to restructure) — it is 38e's job, the SAME phase whose own exit criterion is "flip
+// LinkedIn + YouTube publishing to `direct` in config". Named here, not silently worked around: this
+// phase proves the driver's LinkedIn methods are correct against a resolved token (contract tests +
+// `direct.test.ts`'s own LinkedIn cases), but nothing on a live dispatch path constructs that token
+// or that handle yet. See `linkedin-oauth.ts`'s header for the piece that DOES land on a live path
+// this phase — acquiring and storing the grant in the first place.
 import {
   OrgHandle,
   SocialPublisherError,
   type DailyMetrics,
   type DateRange,
   type IntegrationState,
+  type InboxItem,
   type OrgVerification,
   type PostMetrics,
   type PostStatus,
@@ -51,27 +72,49 @@ import {
   type VariantDispatch,
 } from "./types";
 import type { QuotaSnapshot } from "../media-rules";
+import {
+  getPostComments,
+  publishOrganizationPost,
+  registerImageUpload,
+  uploadImageBytes,
+  type LinkedInFetchOptions,
+} from "./linkedin-client";
 
-/** Nothing is implemented yet. 38b adds token custody (still no network capability by itself),
- *  38c/38d add LinkedIn/YouTube — this set grows exactly once per phase that actually lands the
- *  capability, never ahead of what is built and verified. See publisher.test.ts's own "carries NO
- *  quota constant" regression-pin pattern for the sibling discipline this file must not violate
- *  either: nothing here may synthesize a capability it has not earned. */
-const DIRECT_CAPABILITIES: PublisherCapability[] = [];
+/** LinkedIn's org-page publish, media upload and comment read are real as of 38c. Every other
+ *  capability (org_create, org_verify, connect_url, integrations, quota_probe, cancel, post_status,
+ *  account_metrics, post_metrics, inbox_reply, creator_info_probe) stays unimplemented — see the
+ *  header for `inbox_reply` specifically (SMM-17, gated on SMM-15, out of this phase's scope). */
+const DIRECT_CAPABILITIES: PublisherCapability[] = ["schedule", "media_upload", "inbox_read"];
 
-/** One refusal, one message shape, used by every required member below. `op` names the exact port
- *  method so an operator (or an agent) reading the error knows precisely what to wait for and which
- *  phase brings it — never a generic "not implemented". */
+/** One refusal, one message shape, used by every member 38c still leaves unimplemented. Unchanged
+ *  from 38a except the phase number, since 38a's own instruction ("op names the exact port method")
+ *  still applies verbatim to what remains unimplemented. */
 function refuseUnsupported(op: string): never {
   throw new SocialPublisherError(
     "capability_unsupported",
-    `the 'direct' driver does not implement '${op}' yet — phase 38a ships the skeleton only `
-    + "(SMM-38, design addendum §PD); OAuth, token custody, media upload and the per-network builds "
-    + "land in 38b-38d",
+    `the 'direct' driver does not implement '${op}' yet — SMM-38 (design addendum §PD); OAuth, `
+    + "org-page publish, media upload and comment read for LinkedIn land in 38c, YouTube in 38d",
   );
 }
 
-export function createDirectDriver(): SocialPublisher {
+/** The per-network gate every 38c-real method applies AFTER its own structural checks (approval id,
+ *  etc.) — see the header's "how a driver-wide capability coexists with per-network coverage". */
+function refuseNetworkNotCovered(op: string, network: string): never {
+  throw new SocialPublisherError(
+    "capability_unsupported",
+    `the 'direct' driver advertises '${op}' but does not yet cover network '${network}' for it — `
+    + "only LinkedIn is implemented as of SMM-38 phase 38c; YouTube lands in 38d",
+  );
+}
+
+export interface DirectDriverOptions {
+  /** Injected in tests so no real socket is ever opened — mirrors postiz.ts's own `fetchImpl` seam. */
+  fetchImpl?: typeof fetch;
+}
+
+export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublisher {
+  const li: LinkedInFetchOptions = { fetchImpl: opts.fetchImpl };
+
   return {
     key: "direct",
     capabilities: new Set<PublisherCapability>(DIRECT_CAPABILITIES),
@@ -85,6 +128,15 @@ export function createDirectDriver(): SocialPublisher {
     },
 
     async connectUrl(_org: OrgHandle, _network, _redirect: string): Promise<string> {
+      // Deliberately STILL unimplemented via the port, even though a real LinkedIn OAuth start
+      // exists as of 38c — see `linkedin-oauth.ts`'s header for why: this method's signature
+      // (`org: OrgHandle, network, redirect: string`) carries no tenantId/accountId, and a real
+      // per-account OAuth grant acquisition needs both to create/resume the pending
+      // `social_accounts` row and to mint a CSRF-bound state. Retrofitting that context into this
+      // signature would either lie about what the call needs or silently redefine the port's
+      // contract — neither of which this phase does without an architect decision. `direct`'s
+      // LinkedIn OAuth flow is therefore a STANDALONE subsystem (`linkedin-oauth.ts` +
+      // `linkedin-oauth.controller.ts`), reached through its own endpoints, not through this method.
       return refuseUnsupported("connectUrl");
     },
 
@@ -93,17 +145,47 @@ export function createDirectDriver(): SocialPublisher {
     },
 
     async getQuota(_org: OrgHandle, _integration: IntegrationState): Promise<QuotaSnapshot | undefined> {
+      // LinkedIn's Standard-tier rate limits are UNPUBLISHED (dossier §4.4) — there is no live probe
+      // endpoint to call even if this driver covered `quota_probe`, and inventing a number here
+      // would be exactly the "confident wrong answer" capabilities.ts's own header forbids. Stays
+      // unimplemented; `quota_probe` is not in `DIRECT_CAPABILITIES`.
       return refuseUnsupported("getQuota");
     },
 
-    // getCreatorInfo stays ABSENT (D-22/D-21's TikTok-only fork-exception concern does not apply to
-    // this driver at all — TikTok stays on Postiz per §PD's own "what SMM-38 does NOT do").
+    // getCreatorInfo stays ABSENT — TikTok-only concern (D-21/D-22), out of scope for a driver that
+    // does not serve TikTok at all (§PD: "what SMM-38 does NOT do").
 
-    async schedulePost(_org: OrgHandle, _req: VariantDispatch): Promise<{ providerPostId: string }> {
-      return refuseUnsupported("schedulePost");
+    async schedulePost(org: OrgHandle, req: VariantDispatch): Promise<{ providerPostId: string }> {
+      // D-6, checked FIRST and unconditionally — exactly like postiz.ts's own schedulePost, and
+      // exactly what lets the shared contract suite's "approval_required if it can schedule at all"
+      // case pass regardless of which network fixture it happens to run with (publisher-contract.ts).
+      if (!req.approvalId) {
+        throw new SocialPublisherError(
+          "approval_required",
+          "publisher refused a dispatch with no one-shot approval id (design D-6): approved content only",
+        );
+      }
+      if (req.network !== "linkedin") {
+        return refuseNetworkNotCovered("schedulePost", req.network);
+      }
+      // See the file header: `org.secret()` is the ALREADY-RESOLVED LinkedIn access token, never an
+      // org API key alias, and `org.orgId` is the target organization URN. Neither is resolved here.
+      return publishOrganizationPost(
+        org.secret(),
+        {
+          organizationUrn: org.orgId,
+          commentary: req.body,
+          mediaUrns: (req.media ?? []).map((m) => m.id),
+        },
+        li,
+      );
     },
 
     async cancelPost(_org: OrgHandle, _providerPostId: string): Promise<void> {
+      // ⚠UNVERIFIED whether LinkedIn's Posts API even offers a delete/retract route for an already-
+      // PUBLISHED post (dossier §4.5 found no native SCHEDULING at all, and cancellation of a live
+      // post is a different, unresearched question) — refusing honestly rather than guessing at a
+      // route this driver has never been told exists.
       return refuseUnsupported("cancelPost");
     },
 
@@ -112,10 +194,19 @@ export function createDirectDriver(): SocialPublisher {
     },
 
     async uploadMedia(
-      _org: OrgHandle,
-      _file: { filename: string; contentType: string; bytes: Uint8Array },
+      org: OrgHandle,
+      file: { filename: string; contentType: string; bytes: Uint8Array },
     ): Promise<{ id: string; url?: string }> {
-      return refuseUnsupported("uploadMedia");
+      // ⚠ THE NETWORK-ROUTING GAP THIS METHOD CANNOT CLOSE ITSELF: the port's `uploadMedia` carries
+      // NO `network` parameter at all (types.ts), unlike `schedulePost`/`listComments`, which get it
+      // from `VariantDispatch.network` / the caller's own context. As of 38c only LinkedIn's asset
+      // flow is implemented, so this method always attempts it — correct BY ELIMINATION today, and
+      // WRONG the moment 38d adds a second real network. 38d must resolve this (with the architect,
+      // if the port itself needs a `network` parameter added to `uploadMedia`) — not silently papered
+      // over here by guessing from `file.contentType`, which cannot distinguish LinkedIn from YouTube.
+      const registered = await registerImageUpload(org.secret(), org.orgId, li);
+      await uploadImageBytes(registered.uploadUrl, file.bytes, file.contentType, li);
+      return { id: registered.assetUrn };
     },
 
     async getAccountMetrics(_org: OrgHandle, _integrationId: string, _range: DateRange): Promise<DailyMetrics[]> {
@@ -126,13 +217,33 @@ export function createDirectDriver(): SocialPublisher {
       return refuseUnsupported("getPostMetrics");
     },
 
-    // listComments / sendReply stay ABSENT — see the file header. Nothing is implemented, so
-    // nothing is advertised, and there is no method here that could be mistaken for a bug rather
-    // than a capability fact.
+    /** SMM-38c — the reason this whole phase exists (P2's `pullComments`). PRESENT, not absent,
+     *  because `inbox_read` is now a real capability — matching the port's own "absent IS the
+     *  finding" discipline in the other direction: a capability that IS implemented must not stay
+     *  optionally-undefined, or a caller checking `capabilities.has('inbox_read')` before calling
+     *  would find nothing to call.
+     *
+     *  ⚠ `integrationId` HERE NAMES A POST'S `providerPostId` (LinkedIn share URN), NOT a connected
+     *  ACCOUNT's integration id — a deliberate, documented departure from how the port's doc describes
+     *  this parameter for an account-wide inbox (types.ts's `listComments` doc, written against
+     *  Postiz's — nonexistent — inbox model). LinkedIn's Community Management API has no "every
+     *  comment across my organization page" endpoint; comments are read PER SHARE
+     *  (`GET /rest/socialActions/{shareUrn}/comments`, dossier §4.2). SMM-15 (P2 inbox sync, whenever
+     *  it is built) must call this once per published LinkedIn post it wants freshly pulled, not once
+     *  per connected account — the `InboxItem[]` shape returned is exactly what SMM-36's retention
+     *  purge already reaches once ingested: `authorHandle`/`authorName`/`body`/`postedAt` map
+     *  directly onto `social_inbox_threads`/`social_inbox_messages`' own columns
+     *  (`inbox-retention-job.ts`), which already purge ANY network tagged `linkedin` generically —
+     *  no purge-side change was needed for this shape to be reachable. */
+    async listComments(org: OrgHandle, integrationId: string, since: Date): Promise<InboxItem[]> {
+      return getPostComments(org.secret(), integrationId, since, li);
+    },
+
+    // sendReply stays ABSENT — SMM-17 (reply flow), gated on SMM-15, is out of this phase's scope
+    // per the ticket brief's own scope line ("OAuth, org-page publish, media upload, pullComments").
 
     estimateCostUsd(_op: PublishOp): number {
-      // Pure + synchronous per the port (types.ts's PublishOp doc). $0 is correct, not a placeholder:
-      // this driver cannot dispatch to ANY network yet, metered or not, so there is no cost to price.
+      // LinkedIn is not metered (design §05/OQ-2 — only X is, and X ships disabled regardless).
       return 0;
     },
   };

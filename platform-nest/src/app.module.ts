@@ -75,6 +75,11 @@ import { SocialController } from "./modules/social/social.controller";
 // social.controller.ts's edit surface this wave). Shares SocialController's exact route prefix; no
 // individual route path collides (social-reports.controller.ts's own header).
 import { SocialReportsController } from "./modules/social/social-reports.controller";
+// SMM-38 phase 38c — LinkedIn's OAuth grant flow. `LinkedInOAuthController` shares SocialController's
+// route prefix (same reasoning as SocialReportsController above); `LinkedInOAuthCallbackController`
+// is tenant-agnostic at a FIXED path, mirroring SearchGoogleOauthCallbackController below for the
+// identical reason (no wildcard redirect_uri at the issuer).
+import { LinkedInOAuthController, LinkedInOAuthCallbackController } from "./modules/social/linkedin-oauth.controller";
 import { LoansController } from "./modules/hr/loans.controller";
 import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
@@ -122,6 +127,11 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // surface this wave). Shares SocialController's exact route prefix; no individual route path
     // collides (social-reports.controller.ts's own header).
     SocialReportsController,
+    // SMM-38 phase 38c: LinkedIn's OAuth grant flow — `LinkedInOAuthController` shares
+    // SocialController's route prefix (same reasoning as SocialReportsController above);
+    // `LinkedInOAuthCallbackController` is tenant-agnostic at a fixed path, same reason as
+    // SearchGoogleOauthCallbackController immediately below.
+    LinkedInOAuthController, LinkedInOAuthCallbackController,
     // SM-25a: the Google OAuth callback is tenant-agnostic on purpose (Google permits no wildcard
     // redirect URIs — see the file header) and so cannot mount under SearchController's
     // `api/:tenantId/modules/search` prefix. Registered as its own controller, mounted at the fixed

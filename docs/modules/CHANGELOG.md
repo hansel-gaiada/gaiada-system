@@ -77,6 +77,22 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-38 phase 38c**, `social-media 0.5.7 -> 0.5.8` (IN PROGRESS). LinkedIn on the
+  `direct` driver — the phase that unblocks P2's inbox. OAuth grant flow (new
+  `publisher/linkedin-oauth.ts` + `linkedin-oauth.controller.ts`, tenant-agnostic callback mirroring
+  `SearchGoogleOauthCallbackController`), org-page publish + the 3-step media asset flow + comment
+  read (new `publisher/linkedin-client.ts`; `direct.ts`'s `DIRECT_CAPABILITIES` now
+  `schedule`/`media_upload`/`inbox_read`, LinkedIn only — every other network still refuses
+  `capability_unsupported`), and `registerTokenRefresher('linkedin', ...)`. No migration — reuses
+  0105's `social_accounts` and the already-merged `social_oauth_tokens` (202608201518).
+  `registry.ts#resolvePublisher`'s empty-registry heuristic fixed (`anyNonDirectRegistered`) so
+  `direct` can now be registered at boot without flipping a Postiz-unconfigured deployment's
+  `publisher_not_configured` into `unknown_publisher` — proven behaviourally inert on every live
+  path today regardless. A named architecture gap for 38e: `direct.ts#connectUrl` still refuses
+  (the port's `OrgHandle`-based signature carries no tenantId/accountId a real OAuth flow needs), so
+  no live call site yet resolves a LinkedIn token and builds the handle `schedulePost`/`uploadMedia`
+  need. Full detail: `docs/modules/MODULES.md`'s social-media 0.5.8 entry, `docs/plans/smm-tracker.md`'s
+  PD row.
 - **2026-08-20 — SMM-33 + SMM-24 (docs half)**, `social-media 0.5.6` (docs-only, no version change).
   Capability inventory + eval register (SMM-33) and the outstanding BFF-rows/AGPL-gap half of
   SMM-24. New `docs/modules/social-capability-inventory.md`: one row per capability (endpoint · MCP

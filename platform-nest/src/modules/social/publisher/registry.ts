@@ -42,7 +42,17 @@ export function getPublisher(key: PublisherKey): SocialPublisher | undefined {
 export function resolvePublisher(driver: string): SocialPublisher {
   const p = publishers.get(driver as PublisherKey);
   if (!p) {
-    if (publishers.size === 0) {
+    // SMM-38c — `direct`'s registration must not flip this heuristic. `resolvePublisher` is called
+    // ONLY with `org.driver` (0105's `social_publisher_orgs.driver` CHECK admits only
+    // 'postiz'|'mixpost' — 'direct' is never written to that column, see types.ts's header), so
+    // "is anything configured" means "is any driver OTHER THAN `direct` registered", not "is the
+    // registry non-empty". Without this carve-out, registering `direct` the moment it earned a real
+    // capability (this phase) would have silently turned every Postiz-unconfigured deployment's
+    // honest `publisher_not_configured` into a confusing `unknown_publisher` — exactly the
+    // live-behaviour change `boot.ts`'s own header named as forbidden. `direct` is only ever reached
+    // by NAME through `resolvePublisherForCapability` below, never through this function.
+    const anyNonDirectRegistered = [...publishers.keys()].some((k) => k !== "direct");
+    if (!anyNonDirectRegistered) {
       throw new SocialPublisherError(
         "publisher_not_configured",
         "no social publisher is configured in this deployment (SOCIAL_POSTIZ_BASE_URL unset) — "

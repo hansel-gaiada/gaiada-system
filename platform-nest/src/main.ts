@@ -21,7 +21,7 @@ import { ClientAccessErrorFilter } from "./core/client-access-error.filter";
 // SMM-05 — the social publisher's typed refusals. Registered for the same reason its search
 // sibling above is: SocialPublisherError is a plain Error, so without a filter every refusal —
 // including the cross-client publish defence REPORTING that it fired — escapes as a body-less 500.
-import { SocialPublisherErrorFilter } from "./modules/social/publisher-error.filter";
+import { SocialPublisherErrorFilter, SocialOAuthErrorFilter } from "./modules/social/publisher-error.filter";
 import { LastResortExceptionFilter } from "./last-resort-exception.filter";
 import { maxUploadBytes } from "./core/meetings.controller";
 import { migrate } from "./db/migrate";
@@ -168,6 +168,10 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new GoogleOAuthErrorFilter(),
     new ClientAccessErrorFilter(),
     new SocialPublisherErrorFilter(),
+    // SMM-38 phase 38c — `linkedin-oauth.controller.ts` is the first caller to surface
+    // `OAuthTokenError`/`LinkedInOAuthStateError` over HTTP (38b shipped the former with no filter
+    // at all, since no controller existed yet to need one).
+    new SocialOAuthErrorFilter(),
   );
   // WD-04: the one multipart consumer in the app (in-ERP meeting audio/video upload). The size cap
   // is enforced HERE (busboy truncates + MeetingRecordingsController turns that into a clean 400)
@@ -398,9 +402,12 @@ async function bootstrap(): Promise<void> {
   // SM-75: the search provider-mode + ads-write-mode boot wiring — see wireSearchProviderModeAndAdsWriteMode's
   // own header above `bootstrap()` for why this is a single unconditional call rather than inline code.
   wireSearchProviderModeAndAdsWriteMode();
-  // SMM-05/06: register the social publisher driver (or deliberately register nothing). Also the
-  // home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC address, which
-  // means the containment perimeter moved (addendum §A4l §2/§3). No network call is made here.
+  // SMM-05/06: register the social publisher driver (Postiz, or deliberately register nothing).
+  // Also the home of the one social BOOT REFUSAL — a publisher base URL pointing at a PUBLIC
+  // address, which means the containment perimeter moved (addendum §A4l §2/§3). No network call is
+  // made here. SMM-38 phase 38c: ALSO registers the `direct` driver (LinkedIn's real capabilities)
+  // and LinkedIn's token refresher, unconditionally and regardless of Postiz's own configuration —
+  // see boot.ts's own header for why this stays behaviourally inert on every live path today.
   wireSocialPublisher();
   // SMM-38/38b — token custody's purger registration, alongside the publisher-driver wiring above
   // (its own ticket asked for exactly this placement — "at module boot, alongside wherever 38b

@@ -370,6 +370,25 @@ describe("SMM-05 · the registry fails closed and instruments every call", () =>
     resetPublishers();
   });
 
+  // SMM-38 phase 38c — `direct` is now registered at boot (boot.ts's own header), and this is the
+  // property that registration must NOT break: a deployment with Postiz unconfigured but `direct`
+  // registered (a real shape once 38e flips LinkedIn/YouTube to `direct`) must still read as
+  // "nothing is configured" for `resolvePublisher('postiz')` — never `unknown_publisher`, which
+  // would misreport a genuinely unconfigured deployment as a naming mistake. Regression-pinned: this
+  // is exactly the property that fails if `registry.ts#resolvePublisher`'s `anyNonDirectRegistered`
+  // check is ever simplified back to a plain `publishers.size === 0`.
+  it("registering `direct` alone still reads as publisher_not_configured, never unknown_publisher", () => {
+    resetPublishers();
+    registerPublisher(createDirectDriver());
+    try {
+      resolvePublisher("postiz");
+      throw new Error("should have refused");
+    } catch (e) {
+      expect((e as SocialPublisherError).code).toBe("publisher_not_configured");
+    }
+    resetPublishers();
+  });
+
   it("normalizes a raw thrown Error into a typed refusal (no body-less 500s)", async () => {
     await expect(invokePublisher({ op: "test" }, async () => { throw new Error("socket hang up"); }))
       .rejects.toMatchObject({ code: "publisher_unreachable", name: "SocialPublisherError" });

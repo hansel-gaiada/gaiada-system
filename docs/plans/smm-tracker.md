@@ -31,19 +31,22 @@ not afterwards.
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
-| PD `direct` driver (SMM-38) | **2 (38a, 38b)** | 5 phases |
+| PD `direct` driver (SMM-38) | **3 (38a, 38b, 38c)** | 5 phases |
 | P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.7 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+Module: `social-media 0.5.8 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
 SAME running process; metrics (SMM-21) **DEV-VERIFIED** — `pullMetrics` nightly ingest + the
 Analytics tab, driven in a real browser, `main.ts` registration **confirmed landed**; the SMM-33
-capability inventory + SMM-24 docs closure (this pass) found the entire client-review capability
-group has no MCP tool and named it plainly rather than papering over it.
+capability inventory + SMM-24 docs closure found the entire client-review capability group has no
+MCP tool and named it plainly rather than papering over it; SMM-38 phase 38c (this pass) gives
+`direct` its first real capability — LinkedIn OAuth + org-page publish + media + `pullComments`,
+contract/unit-tested against a stub (no live LinkedIn credential exists, D-23) — with nothing wired
+into a live dispatch path yet, named explicitly rather than implied.
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
 | P3 content ops | 2 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
@@ -245,9 +248,9 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 |---|---|---|
 | 38a | Driver skeleton + per-capability switch (defaults to `postiz`) + shared contract suite | ✅ **merged** |
 | 38b | **Token custody** — encrypted at rest on the tenant wall, refresh-ahead, revocation fails closed | ✅ **merged** |
-| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | ⬜ depends on SMM-36 ✅, 38b ✅ |
+| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | 🟡 **partial, this pass (senior-integrator)** — real driver methods + real OAuth flow, contract/unit-tested against a stub; nothing wired into a live dispatch path yet (see evidence below) |
 | 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | ⬜ depends on 38b ✅ |
-| 38e | Flip LinkedIn + YouTube to `direct`; Postiz retained for IG/FB/TikTok | ⬜ |
+| 38e | Flip LinkedIn + YouTube to `direct`; Postiz retained for IG/FB/TikTok | ⬜ — also now owns the `direct.ts#connectUrl`/`uploadMedia` gaps 38c named (see below) |
 
 ⚠ 38b reverses D-5 (client tokens deliberately live *inside* Postiz so we never hold them). That is a
 security decision the owner accepted with D-20, not a convenience.
@@ -295,11 +298,118 @@ change: **346 / 0 / 0**, matching this file's own 38a row — the ticket brief's
 not match what this worktree actually had). `tsc --noEmit` clean. `lint:postiz-deps`/
 `lint:withtenants`/`lint:migration-rls`/`lint:migration-names` all green.
 
-**Blockers/follow-ups for 38c/38d:** neither `storeOAuthGrant` nor any OAuth callback route exists yet
-— 38c/38d each build their own network's OAuth grant flow and call `storeOAuthGrant` at the end of it,
-then `registerTokenRefresher(network, fn)` with their own token-endpoint client. Both also decide (and
-this phase deliberately did not) how/when `direct` first gets registered into `publisher/registry.ts`
-and whether `resolvePublisher`'s empty-registry heuristic still means what it means once it is.
+**Blockers/follow-ups for 38c/38d (pre-38c; superseded — see 38c's own evidence below):** neither
+`storeOAuthGrant` nor any OAuth callback route exists yet — 38c/38d each build their own network's
+OAuth grant flow and call `storeOAuthGrant` at the end of it, then `registerTokenRefresher(network,
+fn)` with their own token-endpoint client. Both also decide (and this phase deliberately did not)
+how/when `direct` first gets registered into `publisher/registry.ts` and whether
+`resolvePublisher`'s empty-registry heuristic still means what it means once it is.
+
+**38c evidence (2026-08-21, senior-integrator).** Worktree was cut BEFORE 38b (and SMM-21/23/20,
+SMM-33/24 docs) landed on `main` — `oauth-tokens.ts`, the `202608201518_social_oauth_tokens.sql`
+migration, `registerTokenRefresher`, `storeOAuthGrant`/`resolveActiveAccessToken` were entirely
+ABSENT from this worktree at the start, exactly the "cut before a same-turn commit" hazard this file
+names four times over. Confirmed via `git merge-base HEAD main` (HEAD was a strict ancestor, 16
+commits behind); `git merge main` (clean fast-forward, no divergent commits) pulled everything in
+before any of this ticket's own code was written.
+
+**No migration.** Reuses 0105's `social_accounts` (the pending→connected account row) and the
+already-merged `social_oauth_tokens` table byte-for-byte.
+
+**OAuth grant flow — a STANDALONE subsystem, not `SocialPublisher.connectUrl`.** `direct.ts`'s
+`connectUrl(org: OrgHandle, network, redirect)` still refuses `capability_unsupported` — the port's
+signature carries neither a tenantId nor an accountId, and a real per-account OAuth flow needs both
+(to create/resume the pending `social_accounts` row and mint a CSRF-bound state). Retrofitting that
+into the port would have silently redefined its contract, which this ticket does not do
+unilaterally — named as an architecture question for 38e/the architect, not worked around quietly.
+Built instead: new `publisher/linkedin-oauth.ts` (HMAC-signed, time-boxed state —
+`client-invites.ts`'s pattern reused verbatim, including its domain-separated key derivation off
+`config.integrationTokenKey`; deliberately NOT DB-backed single-use like the Google OAuth state
+machine — a named, considered simplification, not a silent one, given no live LinkedIn credential
+exists to attack today) + new `linkedin-oauth.controller.ts` (`LinkedInOAuthController`, tenant-scoped
+start/readiness reusing the EXISTING `social_account`/`connect` Cerbos action — no new policy;
+`LinkedInOAuthCallbackController`, tenant-agnostic at a fixed path, mirroring
+`SearchGoogleOauthCallbackController`'s three-point defence — signature-first, then Cerbos, then
+LinkedIn's own single-use `code` closing the replay window the signed-but-unpersisted state does
+not). Ends by calling `storeOAuthGrant` (38b's seam, used exactly as its own header promised) and
+promoting the account row to `connected`, mirroring what `syncConnectorRegistry` would eventually do
+for a Postiz-driven account.
+
+**LinkedIn's real driver capabilities.** New `publisher/linkedin-client.ts` (the wire client — token
+exchange/refresh, `POST /rest/posts` org-page publish, the 3-step asset upload dance
+[`registerImageUpload`→`uploadImageBytes`], `GET /rest/socialActions/{shareUrn}/comments` — every
+route ⚠UNVERIFIED against a live app, D-23, reasoned from the app-review dossier §4 and collected in
+ONE routes table, `postiz.ts`'s own discipline). `direct.ts`'s `DIRECT_CAPABILITIES` is now
+`["schedule","media_upload","inbox_read"]` — the SAME driver-wide-capability-plus-per-network-gate
+shape `postiz.ts` already uses for `getQuota`/`getCreatorInfo` (advertised at the driver level,
+gated per-network inside the method body, typed refusal for anything not LinkedIn), generalised to
+`schedulePost`/`uploadMedia`/`listComments` now that `direct` covers a real network. **Named,
+load-bearing gap for 38d**: the port's capability Set has no per-network granularity at all, and
+`uploadMedia`'s own signature carries no `network` parameter — this phase's implementation always
+assumes LinkedIn's asset flow, correct only by elimination until 38d adds a second real network.
+
+**`pullComments`.** `listComments(org, integrationId, since)` is now PRESENT (not absent) on
+`direct` — but `integrationId` here is redefined, deliberately and documented in `direct.ts`'s own
+header, to name a POST's `providerPostId` (LinkedIn share URN), not a connected account's
+integration id: LinkedIn's Community Management API has no "every comment on my page" endpoint,
+only per-share. The returned `InboxItem[]` shape (`authorHandle`/`authorName`/`body`/`postedAt`)
+maps directly onto `social_inbox_threads`/`social_inbox_messages`' own columns — SMM-36's purge
+(`inbox-retention-job.ts`) already handles `network='linkedin'` generically via
+`retention-policy.ts`'s existing documented 24h/48h row, so **no purge-side change was needed**;
+SMM-15, whenever it is built, must call `listComments` once per published LinkedIn post it wants
+freshly pulled, not once per connected account.
+
+**Rate limits: modelled as unknown, never invented.** No `quota_probe` capability was added; the
+dossier's own finding (Standard-tier limits are unpublished, visible only in the Developer Portal
+after a live call) is respected by building nothing that would need a number.
+
+**A missing app credential.** `checkLinkedInConnectReadiness` reuses SMM-07's exact
+`platform_app_not_registered` token (per the ticket's own instruction), gated on BOTH
+`hasRegisteredPlatformApp('linkedin')` (the administrative fact, `provisioning.ts`, read-only
+import) AND `hasLinkedInAppCredentials()` (the env pair actually being non-empty) — either missing
+refuses the same way, since neither alone is enough to start a real OAuth round trip.
+
+**`direct` is now registered at boot, and the `publisher_not_configured` distinction IS
+preserved.** `boot.ts#wireSocialPublisher` now calls `registerPublisher(createDirectDriver())` +
+`registerLinkedInTokenRefresher()` UNCONDITIONALLY, ahead of the Postiz base-URL check — this is the
+ticket's own call to make, and it is made by fixing `registry.ts#resolvePublisher`'s heuristic
+(`anyNonDirectRegistered`, not `publishers.size===0`) rather than leaving it broken: a deployment
+with `direct` registered but Postiz unconfigured still reads `publisher_not_configured` for
+`resolvePublisher('postiz')`, never `unknown_publisher` — regression-pinned in `publisher.test.ts`
+("registering `direct` alone still reads as publisher_not_configured"). Proven still behaviourally
+INERT on every live path today, for three independent reasons stated in `boot.ts`'s own header
+(0105's CHECK never writes `'direct'` to `social_publisher_orgs.driver`; the capability-driver
+override map is still empty by default; and even where it were consulted, nothing on a live path
+builds the `direct`-shaped `OrgHandle` `schedulePost`/`uploadMedia` need — see below).
+
+**What 38d/38e must build against what 38c left:**
+1. **The `connectUrl`/token-resolution gap** (this section's own header): whichever phase first
+   routes a LIVE dispatch call through `direct` must decide how the caller resolves
+   `resolveActiveAccessToken` and builds the `direct`-shaped `OrgHandle` (`.secret()` = the bearer
+   token, `.orgId` = the organization URN) — that is real surgery on `provisioning.ts#openOrg` /
+   `dispatch.ts`, both out of this ticket's file surface (the latter explicitly off-limits).
+2. **`uploadMedia`'s missing `network` parameter** — 38d's YouTube upload will collide with this
+   phase's "always assume LinkedIn" choice; the port itself may need to grow the parameter (an
+   architect-level port change) or `direct.ts` needs another documented convention.
+3. **The port's capability model has no per-network granularity** — `direct.capabilities` is
+   driver-wide; LinkedIn/YouTube coverage differs per method today via an in-method gate, which
+   works but is a per-method discipline someone has to remember for every future network, not a
+   structural guarantee.
+4. **The OAuth state's DB-backed single-use gap** — named, not silently decided as unnecessary; a
+   future pass wanting full parity with the Google flow's atomic consume would add a small state
+   table.
+
+Test counts: **413 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline measured directly in THIS worktree,
+post-merge, by stashing this ticket's changes: **393 / 0 / 5** — +20 new: `linkedin-oauth.test.ts`
+12, `linkedin-client.test.ts` 7, `direct.test.ts` +7, `publisher.test.ts` +1 registry regression
+pin). **7 failures in `social-client-review-portal.controller.test.ts` reproduced IDENTICALLY with
+this ticket's changes stashed back OUT** — a shared Cerbos-container environmental flake (verified
+by reproducing it against unmodified baseline code, not asserted), not counted in either total
+above and not this ticket's to fix (touching shared infra another session may depend on). `tsc
+--noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names`
+all green. `test:iam-chain-alignment` green (25/25, unaffected — no Cerbos/IAM change this pass).
+Full detail: `docs/modules/MODULES.md`'s social-media 0.5.8 entry.
 
 **38a evidence (2026-08-20, senior-integrator):** no migration, no Cerbos change, no `main.ts`
 change — **verified inert**: every capability still resolves to `postiz`. Built:
@@ -700,7 +810,14 @@ zero rows would mean "no grant found" for an account that plainly has one, or wo
 refresh, all clean" forever while a grant sits unrefreshed. The ONE function in that file that does
 **not** self-declare, `purgeOAuthTokens`, is deliberate (it runs inside the already-scoped
 transaction `purgeTenantInboxRetention` opens, per SMM-36's own purger contract) and is pinned by the
-inverse test: calling it directly on an unscoped transaction must read zero rows.
+inverse test: calling it directly on an unscoped transaction must read zero rows. SMM-38c's
+`linkedin-oauth.ts` (`startLinkedInConnect`/`completeLinkedInConnect`) uses the SAME
+`withTenants([tenantId], fn, MODULES)` call-site shape `social-reports.controller.ts` uses (never
+`declareSocialModuleScope` inline) — not pinned by a dedicated "delete the option and watch it fail"
+test this pass, but every existing assertion already depends on the option being present: the
+start→complete round-trip test asserts a REAL `connected` row and a REAL resolvable token
+afterward, which reads back "0 rows"/`oauth_token_not_found` the instant `MODULES` is dropped from
+either call — the same shape SMM-31/SMM-23's own regression tests rely on.
 `social-client-review-portal.controller.test.ts`'s header note). SMM-23's `social-reports.controller.ts`
 uses the SAME `withTenants([tenantId], fn, { modules: ["social"] })` shape every other route in this
 file uses (never `declareSocialModuleScope` inline, since every query runs through that one option
