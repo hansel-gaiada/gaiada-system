@@ -810,31 +810,32 @@ const configBase = {
       // persistently-down gateway would spend the whole per-run cap retrying the same failed threads
       // and never reach a freshly-arrived one. An operational cooldown, not a business number.
       retryUnavailableAfterMs: Number(process.env.SOCIAL_INBOX_TRIAGE_RETRY_MS ?? 30 * 60 * 1000),
-    },
-    slaGuard: {
-      guardEnabled:
-        process.env.SOCIAL_INBOX_SLA_GUARD_ENABLED === "1" || process.env.SOCIAL_INBOX_SLA_GUARD_ENABLED === "true",
-      // 0105's own `ix_social_inbox_threads_sla` comment: "the SLA guard (smm-inbox-sla-guard, every
-      // 15 min)". Kept at the figure the schema itself already named, not a new invention.
-      guardIntervalMs: Number(process.env.SOCIAL_INBOX_SLA_GUARD_INTERVAL_MS ?? 15 * 60 * 1000),
-      // ── SPIKE DETECTION — the ticket's own instruction, quoted here so nobody "tightens" this into
-      // a claimed vendor/business number later: "do not invent thresholds... whatever you choose is
-      // config with a documented rationale, never a constant that reads as measured." No account is
-      // connected and app reviews are deferred to staging (D-23) — there is NO real traffic to derive
-      // a measured baseline from. Every value below is a deliberately generous, self-imposed default
-      // meant to stay silent through ordinary variance on a real account, not a business commitment
-      // about what "too many comments" means. Revisit once real inbox volume exists to measure.
-      spikeWindowMinutes: Number(process.env.SOCIAL_INBOX_SPIKE_WINDOW_MINUTES ?? 60),
-      // Trailing baseline = this many PRIOR windows of the same size (24 x 60min = a 24h baseline at
-      // the default window).
-      spikeBaselineWindows: Number(process.env.SOCIAL_INBOX_SPIKE_BASELINE_WINDOWS ?? 24),
-      // The recent window's count must reach at least this many TIMES the trailing average.
-      spikeMultiplier: Number(process.env.SOCIAL_INBOX_SPIKE_MULTIPLIER ?? 3),
-      // A brand-new or low-volume account has a near-zero baseline; multiplying near-zero by ANY
-      // multiplier is still near-zero, which would make even a single ordinary comment read as a
-      // "spike". This absolute floor exists ONLY to prevent that div-by-noise failure mode — it is
-      // not a claim that 5 comments/hour is meaningful for any real account.
-      spikeMinRecentCount: Number(process.env.SOCIAL_INBOX_SPIKE_MIN_RECENT ?? 5),
+      slaGuard: {
+        guardEnabled:
+          process.env.SOCIAL_INBOX_SLA_GUARD_ENABLED === "1" || process.env.SOCIAL_INBOX_SLA_GUARD_ENABLED === "true",
+        // 0105's own `ix_social_inbox_threads_sla` comment: "the SLA guard (smm-inbox-sla-guard,
+        // every 15 min)". Kept at the figure the schema itself already named, not a new invention.
+        guardIntervalMs: Number(process.env.SOCIAL_INBOX_SLA_GUARD_INTERVAL_MS ?? 15 * 60 * 1000),
+        // ── SPIKE DETECTION — the ticket's own instruction, quoted here so nobody "tightens" this
+        // into a claimed vendor/business number later: "do not invent thresholds... whatever you
+        // choose is config with a documented rationale, never a constant that reads as measured."
+        // No account is connected and app reviews are deferred to staging (D-23) — there is NO real
+        // traffic to derive a measured baseline from. Every value below is a deliberately generous,
+        // self-imposed default meant to stay silent through ordinary variance on a real account, not
+        // a business commitment about what "too many comments" means. Revisit once real inbox
+        // volume exists to measure.
+        spikeWindowMinutes: Number(process.env.SOCIAL_INBOX_SPIKE_WINDOW_MINUTES ?? 60),
+        // Trailing baseline = this many PRIOR windows of the same size (24 x 60min = a 24h baseline
+        // at the default window).
+        spikeBaselineWindows: Number(process.env.SOCIAL_INBOX_SPIKE_BASELINE_WINDOWS ?? 24),
+        // The recent window's count must reach at least this many TIMES the trailing average.
+        spikeMultiplier: Number(process.env.SOCIAL_INBOX_SPIKE_MULTIPLIER ?? 3),
+        // A brand-new or low-volume account has a near-zero baseline; multiplying near-zero by ANY
+        // multiplier is still near-zero, which would make even a single ordinary comment read as a
+        // "spike". This absolute floor exists ONLY to prevent that div-by-noise failure mode — it is
+        // not a claim that 5 comments/hour is meaningful for any real account.
+        spikeMinRecentCount: Number(process.env.SOCIAL_INBOX_SPIKE_MIN_RECENT ?? 5),
+      },
     },
   },
   search: {

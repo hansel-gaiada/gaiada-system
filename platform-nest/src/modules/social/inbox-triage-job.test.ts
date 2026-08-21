@@ -73,7 +73,7 @@ async function makeEngagement(tenant: string, clientId: string, slaMinutes: numb
 async function makeEngagementOwner(tenant: string, email: string): Promise<string> {
   const userId = newId();
   await withGlobal((c) =>
-    c.query(`INSERT INTO users (id, email, name, kind, origin_site) VALUES ($1,$2,'Triage Owner','human','central')`, [userId, email]));
+    c.query(`INSERT INTO users (id, email, name, kind, origin_site) VALUES ($1,$2,'Triage Owner','employee','central')`, [userId, email]));
   await withTenants([tenant], (c) =>
     c.query(
       `INSERT INTO company_memberships (id, tenant_id, user_id, status, origin_site) VALUES ($1,$2,$3,'active','central')`,
@@ -87,18 +87,27 @@ async function setEngagementOwner(tenant: string, engagementId: string, ownerId:
 }
 
 /** A published post + variant under `engagementId`, and returns the variant id — the chain
- *  `refreshThreadSla`/the breach notifier walk to find an engagement for a thread. */
+ *  `refreshThreadSla`/the breach notifier walk to find an engagement for a thread.
+ *  `svar_dispatched_has_approval` (0105) requires a real `approval_id` for any non-draft, non-
+ *  native-import variant — mirrors `inbox-sync-job.test.ts#makePublishedVariant`'s own seed shape. */
 async function makePublishedVariant(tenant: string, engagementId: string, accountId: string): Promise<string> {
   const postId = newId();
   const variantId = newId();
+  const approvalId = newId();
   await withTenants([tenant], async (c) => {
+    await c.query(
+      `INSERT INTO automation_approvals
+         (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at, origin, origin_site, execution_status)
+       VALUES ($1,$2,'wf:delivery','social.publishPost','{}','high','approved',NULL,NULL,now(),'automation','main','executed')`,
+      [approvalId, tenant]);
     await c.query(
       `INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
        VALUES ($1,$2,$3,'triage post','published','central')`, [postId, tenant, engagementId]);
     await c.query(
-      `INSERT INTO social_post_variants (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, published_at, origin_site)
-       VALUES ($1,$2,$3,$4,'body','[]','{}','deadbeef','published', now() - interval '1 day', 'central')`,
-      [variantId, tenant, postId, accountId],
+      `INSERT INTO social_post_variants
+         (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, approval_id, status, published_at, origin_site)
+       VALUES ($1,$2,$3,$4,'body','[]','{}','deadbeef',$5,'published', now() - interval '1 day', 'central')`,
+      [variantId, tenant, postId, accountId, approvalId],
     );
   }, MODULES);
   return variantId;
@@ -330,8 +339,13 @@ describe.skipIf(!TEST_URL)("SMM-16 · inbox-triage-job", () => {
     const ownerId = await makeEngagementOwner(A, `${uniq("owner")}@example.com`);
     await setEngagementOwner(A, engagementId, ownerId);
     const variantId = await makePublishedVariant(A, engagementId, accountId);
+    // `runTenantSlaGuard` REFRESHES `sla_due_at` from the engagement's own `slaMinutes` before
+    // checking for breaches (see the header on why: a fresh comment restarts the clock) — seeding
+    // `sla_due_at` directly would be overwritten by that refresh. Seed `last_message_at` far enough
+    // in the past instead: 60 slaMinutes ago = 2h ago means the refreshed due date (last_message_at
+    // + 60min = 1h ago) is ALREADY breached.
     const threadId = await makeThread(A, accountId, "linkedin", {
-      postVariantId: variantId, slaDueAt: new Date(Date.now() - 3600_000), // already breached
+      postVariantId: variantId, lastMessageAt: new Date(Date.now() - 2 * 3600_000),
     });
 
     const result = await runTenantSlaGuard(A, new Date());
@@ -351,9 +365,9 @@ describe.skipIf(!TEST_URL)("SMM-16 · inbox-triage-job", () => {
     const accountId = await makeAccount(A, clientId, "linkedin");
     const engagementId = await makeEngagement(A, clientId, 60);
     const variantId = await makePublishedVariant(A, engagementId, accountId);
-    const threadId = await makeThread(A, accountId, "linkedin", {
-      postVariantId: variantId, slaDueAt: new Date(Date.now() + 3600_000), // not due yet
-    });
+    // `last_message_at` defaults to "now" (see `makeThread`) — refreshed due date = now + 60min,
+    // comfortably in the future. `sla_due_at` is not seeded directly; see (T7)'s own comment on why.
+    const threadId = await makeThread(A, accountId, "linkedin", { postVariantId: variantId });
 
     await runTenantSlaGuard(A, new Date());
     const thread = await readThread(A, threadId);
@@ -362,45 +376,54 @@ describe.skipIf(!TEST_URL)("SMM-16 · inbox-triage-job", () => {
 
   // ══ (T8) SPIKE DETECTION — config-driven, no invented business number ══════════════════════════
 
+  // `runTenantSpikeDetection` scans EVERY connected account in the tenant, so each of these gets its
+  // OWN fresh tenant — reusing the shared `A` (which by this point in file-declaration order already
+  // holds several other tests' connected accounts/threads) would let an EARLIER test's burst count
+  // toward THIS test's result, exactly this module's own recurring defect class #7 (shared state
+  // polluting across `it()`s in file order), just at the fixture layer instead of a `vi.fn()`.
+
   it("(T8) a burst of recent comments against a near-zero baseline is a spike, above the configured absolute floor", async () => {
-    const clientId = await makeClient(A);
-    const accountId = await makeAccount(A, clientId, "linkedin");
-    await makeEngagement(A, clientId, 240);
-    const threadId = await makeThread(A, accountId, "linkedin");
+    const T = await makeTenant("SMM-16 Spike T8");
+    const clientId = await makeClient(T);
+    const accountId = await makeAccount(T, clientId, "linkedin");
+    await makeEngagement(T, clientId, 240);
+    const threadId = await makeThread(T, accountId, "linkedin");
 
     const minRecent = config.social.triage.slaGuard.spikeMinRecentCount;
     // Comfortably above the floor, all inside the recent window, none in the baseline window.
     for (let i = 0; i < minRecent + 3; i += 1) {
-      await addMessage(A, threadId, `burst comment ${i}`, new Date(Date.now() - 60_000));
+      await addMessage(T, threadId, `burst comment ${i}`, new Date(Date.now() - 60_000));
     }
 
-    const result = await runTenantSpikeDetection(A, new Date());
+    const result = await runTenantSpikeDetection(T, new Date());
     expect(result.spikes).toBeGreaterThanOrEqual(1);
   });
 
   it("(T8b) ordinary, below-floor volume on a brand-new account is NOT a spike", async () => {
-    const clientId = await makeClient(A);
-    const accountId = await makeAccount(A, clientId, "linkedin");
-    await makeEngagement(A, clientId, 240);
-    const threadId = await makeThread(A, accountId, "linkedin");
-    await addMessage(A, threadId, "a single ordinary comment", new Date());
+    const T = await makeTenant("SMM-16 Spike T8b");
+    const clientId = await makeClient(T);
+    const accountId = await makeAccount(T, clientId, "linkedin");
+    await makeEngagement(T, clientId, 240);
+    const threadId = await makeThread(T, accountId, "linkedin");
+    await addMessage(T, threadId, "a single ordinary comment", new Date());
 
-    const result = await runTenantSpikeDetection(A, new Date());
+    const result = await runTenantSpikeDetection(T, new Date());
     expect(result.spikes).toBe(0);
   });
 
   // ══ (T9) ⭐ MODULE-GUC REGRESSION — spike detection ════════════════════════════════════════════
 
   it("(T9) ⭐ spike detection reads through a transaction with no module scope passed at the call site — fails (0 spikes on a real burst) if declareSocialModuleScope is ever removed", async () => {
-    const clientId = await makeClient(A);
-    const accountId = await makeAccount(A, clientId, "linkedin");
-    await makeEngagement(A, clientId, 240);
-    const threadId = await makeThread(A, accountId, "linkedin");
+    const T = await makeTenant("SMM-16 Spike T9");
+    const clientId = await makeClient(T);
+    const accountId = await makeAccount(T, clientId, "linkedin");
+    await makeEngagement(T, clientId, 240);
+    const threadId = await makeThread(T, accountId, "linkedin");
     const minRecent = config.social.triage.slaGuard.spikeMinRecentCount;
     for (let i = 0; i < minRecent + 5; i += 1) {
-      await addMessage(A, threadId, `burst ${i}`, new Date());
+      await addMessage(T, threadId, `burst ${i}`, new Date());
     }
-    const result = await runTenantSpikeDetection(A, new Date());
+    const result = await runTenantSpikeDetection(T, new Date());
     expect(result.spikes).toBeGreaterThanOrEqual(1); // would read 0 accounts/0 spikes if scope were dropped
   });
 });

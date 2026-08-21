@@ -284,7 +284,7 @@ async function refreshThreadSla(c: PoolClient): Promise<SlaRefreshRow[]> {
   const { rows } = await c.query<SlaRefreshRow>(
     `UPDATE social_inbox_threads t
         SET sla_due_at = t.last_message_at
-              + make_interval(mins => (e.tool_scope -> 'inbox' ->> 'slaMinutes')::numeric),
+              + make_interval(secs => (((e.tool_scope -> 'inbox' ->> 'slaMinutes')::numeric) * 60)::int),
             updated_at = now()
        FROM social_post_variants v, social_posts p, social_engagements e
       WHERE t.post_variant_id = v.id AND v.tenant_id = t.tenant_id
@@ -296,7 +296,7 @@ async function refreshThreadSla(c: PoolClient): Promise<SlaRefreshRow[]> {
         AND (
           t.sla_due_at IS NULL
           OR t.sla_due_at <> t.last_message_at
-               + make_interval(mins => (e.tool_scope -> 'inbox' ->> 'slaMinutes')::numeric)
+               + make_interval(secs => (((e.tool_scope -> 'inbox' ->> 'slaMinutes')::numeric) * 60)::int)
         )
       RETURNING t.id AS "threadId", t.sla_due_at AS "slaDueAt"`,
   );
