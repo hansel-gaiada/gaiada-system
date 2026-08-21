@@ -36,25 +36,29 @@ not afterwards.
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.10 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+Module: `social-media 0.5.11 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
 SAME running process; metrics (SMM-21) **DEV-VERIFIED** — `pullMetrics` nightly ingest + the
 Analytics tab, driven in a real browser, `main.ts` registration **confirmed landed**; the SMM-33
 capability inventory + SMM-24 docs closure found the entire client-review capability group has no
-MCP tool and named it plainly rather than papering over it; SMM-38 phase 38c gave `direct` its first
+MCP tool and named it plainly rather than papering over it — **both named gaps now CLOSED (this
+pass, senior-be)**: three new MCP tools cover staff request/read/withdraw (portal decide confirmed
+to stay undeclared, per this program's own no-portal-tool rule), and the post-status webhook's
+shared `applyPostStatuses` now writes an honestly-attributed (`actor_id NULL`) `work_activity` row
+for both the webhook and safety-poll paths; SMM-38 phase 38c gave `direct` its first
 real capability (LinkedIn OAuth + org-page publish + media + `pullComments`); phase 38d (this pass)
 adds YouTube's resumable upload (which IS the publish call for that network in this driver — no
 `schedulePost`), quota accounting against SMM-37's three real buckets (self-tracked, not a live
 probe — Google exposes none), and `pullComments` via `youtube.force-ssl`, resolving the
 `uploadMedia` network-routing collision 38c named by widening the port. Both networks remain
 contract/unit-tested against a stub (no live LinkedIn/YouTube credential exists, D-23); phase 38e
-(this pass) closes the three gaps 38c/38d named and left for it — a live dispatch path DOES now reach
+closes the three gaps 38c/38d named and left for it — a live dispatch path DOES now reach
 `direct` for real for LinkedIn (proven with a real OAuth-token row, not merely asserted), a real
 YouTube title/description channel, and a durable YouTube quota counter — while reporting YouTube's
 own dispatch-path flip as an open architecture question rather than wiring around it. Module:
-`social-media 0.5.10 · IN PROGRESS`.
+`social-media 0.5.11 · IN PROGRESS`.
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
 | P3 content ops | 2 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
@@ -736,7 +740,7 @@ any single capability is real, that phase decides how `direct` gets registered a
 | SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ✅ | backend DEV-VERIFIED against live Postgres + Redis + a real sidecar round trip, evidence below |
 | SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | ✅ **docs closed** 2026-08-20 | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20; `docs/FRONTEND-BFF-CONTRACT.md` §19 gained the missing dispatch-endpoint row, the webhook-intake row, and the two SMM-21 metrics rows, each verified against the controller code read directly. **The AGPL source-offer itself is NOT built** — confirmed (no footer surface anywhere in the staff console; `DeptShellFrame.tsx`/`departments/[deptId]/layout.tsx` carry none, `PortalShell.tsx`'s is client-facing) and a placement recommended (see the gap entry below, updated) — remains a tracked gap for the owner/senior-uiux to action, not a build this ticket's docs scope covers |
 | SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
-| SMM-33 | Capability inventory + eval register | ✅ **docs closed** 2026-08-20 | golden-case table (SMM-14, proof of P1) stands; **the companion registry now exists**: `docs/modules/social-capability-inventory.md` — every capability across P0–P3-merged, endpoint · MCP tool · impact class · refusal vocabulary · `work_activity` row, built from the controllers/index.ts/approval-executables.ts directly. **18 MCP tools**, not 17 (this row's own prior estimate, corrected by counting `name:` occurrences in `index.ts`). Two structural gaps found and stated plainly, not filled with a plausible guess: the entire client-review capability group (request/read/withdraw/decide) has no MCP tool, and the post-status webhook callback writes no `work_activity` row with no stated reason (unlike the purge/metrics jobs, which name theirs) |
+| SMM-33 | Capability inventory + eval register | ✅ **both named gaps CLOSED** 2026-08-21 | golden-case table (SMM-14, proof of P1) stands; the companion registry (`docs/modules/social-capability-inventory.md`) named two structural gaps 2026-08-20; **both closed in code 2026-08-21 (senior-be)** — see evidence below. **21 MCP tools** now (was 18; the three new client-review tools), the group's own read/request/withdraw declared, the portal decide confirmed to stay undeclared; the post-status webhook (and its shared safety-poll sibling) now writes an honestly-attributed (`actor_id NULL`) `work_activity` row |
 
 **SMM-33 + SMM-24 evidence (2026-08-20, medior, docs-only pass).** Started from a worktree cut before
 `main` had SMM-21's merge (`9a5a8f5`); confirmed a clean fast-forward (`git merge-base --is-ancestor
@@ -750,6 +754,76 @@ intake row (`POST webhooks/post-status`), the two SMM-21 metrics rows (`GET metr
 this pass, not carried over from a prior claim. No product code touched (out of this ticket's
 surface); every gap found where a doc claim would have required a code change to be true is reported
 above and in the inventory file, not invented around.
+
+**SMM-33 gap-closing evidence (2026-08-21, senior-be).** Worktree was cut 6 commits behind `main` —
+missing `docs/modules/social-capability-inventory.md`, `client-review.ts`, and
+`publisher/youtube-client.ts` entirely (the exact three files this ticket's own brief named as the
+tripwire). `git merge main` (clean fast-forward, no divergent commits) pulled everything in before
+any of this pass's own code was written; flagged per this file's own repeated cross-session hazard.
+
+**Gap 1 — the client-review capability group's zero MCP tool coverage — CLOSED.** Three tools
+declared on `socialModule.mcpTools` (`modules/social/index.ts`): `social.requestClientReview`
+(POST `.../client-review`, write, impact `'medium'`), `social.getClientReview` (GET the same path,
+plain read, no write/impact pair), `social.withdrawClientReview` (POST `.../client-review/withdraw`,
+write, impact `'low'`) — each fronting the SAME `authorize()` call its existing endpoint
+(`social.controller.ts`, SMM-31) already runs. `request`'s 'medium' rests on the same "outward-
+facing" ground `deliverReport`/`provisionPublisherOrg` already use — it is the first moment content
+crosses the client trust boundary (notifies the client's portal contacts) — so an automation/agent
+principal is suspended into WS4 rather than allowed to expose unreviewed content unsupervised.
+`withdraw`'s 'low' rests on `syncConnectorRegistry`'s own "blast radius is a stale row" ground: it is
+a write (never a read — the ticket brief's own warning), but purely corrective, and never notifies
+the client (`social.client_review.withdrawn` rides the drained stream but has NO registered handler
+in `event-handlers.ts`, unlike `.requested`/`.decided` — a real gap found while reasoning about the
+impact class, named here, NOT fixed this pass: `event-handlers.ts` is outside this ticket's file
+surface). Neither `request` nor `withdraw` is registered in `approval-executables.ts` — the same
+shape `setEngagementScope`/`provisionPublisherOrg`/`deliverReport` already have (all 'medium'/none
+executable), so a suspended call stays suspended for a human to act on directly; no
+`resource_mcp_tool.yaml` change was needed (that grant-lift list mirrors ONLY the executable
+registry, per its own header, and nothing was added there).
+
+**The portal decide's absence confirmed, not just repeated.** `social-client-review-portal.
+controller.ts`'s `decide` is a `portal.*` Cerbos action (`approve_post`), never `social.*` — the
+client's decision is a human act on the trust boundary, made in an authenticated browser session,
+never something any agent is the caller of. Regression-pinned in `social.test.ts`: no tool name
+contains "decide", no `pathTemplate` contains `/portal/`.
+
+**Gap 2 — the post-status webhook's missing `work_activity` row — CLOSED at the shared root.**
+`applyPostStatuses` (`post-status-sync-job.ts`) is the ONE function both `reconcileOneProviderPost`
+(the webhook intake, the inventory's own named gap) and `reconcileTenantPostStatus` (the safety
+poll) call to apply the network's own authoritative `'published'`/`'failed'` status — fixing it once
+closes the gap for both paths, not just the named one. `writeActivity(tenantId, null, verb,
+"social_post_variant", variantId, metadata)` fires AFTER the update transaction commits (collected
+into a `pendingActivity` array during the loop, matching `dispatch.ts`/`pm.controller.ts`'s own
+non-nested sequencing for this same helper). `actorId` is `null` — the honest answer, not a guess:
+neither caller ever has a principal (`postStatusWebhook` doesn't even take a `@Req()`), matching the
+`activities` table's own column comment ("NULL = system/service") and the SAME convention
+`pm.controller.ts`'s `auto_promoted` rows already use for a system-derived change nobody's own
+action caused. No module-GUC exposure introduced (`activities` is a core table, no third wall, so
+`declareSocialModuleScope` is correctly absent from the new code).
+
+**Regression tests, driven RED first.** `post-status-sync-job.test.ts`'s (T1)/(T2)/(T3)/(T5) gained
+a `activityRows()` helper + new assertions on the SAME existing cases that already carry this file's
+own module-GUC regression note (0 new `it()`s — assertions added, not new tests, matching this
+program's preference for fewer, denser tests). Verified RED by temporarily commenting out the
+`writeActivity` call and re-running: all four new assertions failed exactly as predicted (`expected
+[] to have a length of 1`), then restored. `social.test.ts`'s existing registration test gained
+assertions for the three new tools' shapes and the portal-decide-absence checks above.
+
+Test counts: **483 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** by stashing this
+pass's changes: **483 / 0 / 5** — unchanged, because every new assertion extended an existing
+`it()` rather than adding one; one suite, `dispatch.test.ts`, failed on the very first baseline run
+with `tuple concurrently updated` — reproduced as the shared-test-Postgres phantom failure this file
+warns about, confirmed green (16/16) re-run alone, not a real baseline failure). `tsc --noEmit`
+clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps` all green.
+No migration, no Cerbos policy change. `test:iam-chain-alignment` not re-run (no IAM/Cerbos touched
+this pass). Full detail: `docs/modules/MODULES.md`'s social-media 0.5.11 entry.
+
+**Anything the spec did not answer, named rather than silently decided:**
+`social.client_review.withdrawn`'s event has no registered handler in `event-handlers.ts` — found
+while reasoning about `withdraw`'s impact class, but that file is outside this pass's surface and
+the gap is cosmetic today (nothing depends on a withdrawal notification existing), so it is left for
+a future pass rather than fixed unilaterally.
 
 **SMM-21 evidence (2026-08-20, medior).** Schema already in place (`0105`'s `social_metrics_daily`/
 `social_post_metrics`) — no migration, no Cerbos change. Built:

@@ -487,6 +487,99 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "variantId"],
       },
     },
+    // ── SMM-33/24 (this pass): the client-review capability group (SMM-31/32, D-16) ────────────
+    // Closes the largest gap the capability inventory found: `social.client_review.
+    // {read,request,withdraw}` are real, grantable Cerbos permissions (declared above), and all
+    // three staff endpoints already exist on `social.controller.ts` — so all three are declarable
+    // per this file's own header rule. Same `authorize()` calls as the endpoints, nothing loosened.
+    //
+    // The CLIENT's own decide is deliberately NOT declared here, and never will be: it is a
+    // `portal.*` action (`portal.approve_post`), not a `social.*` one, and no portal capability is
+    // ever an MCP tool in this program (see the portal-decide comment two blocks above and
+    // `social-client-review-portal.controller.ts`'s own header) — the client's decision is a human
+    // act on the trust boundary, made in a browser session authenticated as that client, not
+    // something any agent (staff-side or otherwise) is ever the caller of.
+    //
+    // Impact classes chosen individually, not copy-pasted:
+    //  - `request` is impact 'medium': the FIRST moment a variant becomes visible to an external
+    //    party outside the tenant (`handleClientReviewRequested` notifies the client's portal
+    //    contacts). That is the same "outward-facing" ground `deliverReport`/`provisionPublisherOrg`
+    //    already use for 'medium' — an automation/agent principal is suspended into WS4 rather than
+    //    allowed to put draft content in front of a client unsupervised.
+    //  - `withdraw` is impact 'low': a write (never a read — the endpoint mutates
+    //    `social_post_client_reviews`), but a purely CORRECTIVE one. It never notifies the client
+    //    (`social.client_review.withdrawn` rides the drained stream but has no registered handler,
+    //    unlike `.requested`/`.decided`) and it only retracts exposure that already happened —
+    //    matching `syncConnectorRegistry`'s own 'low' reasoning ("its blast radius is a stale row,
+    //    not a post"). Here the blast radius is a retracted ask, not new exposure.
+    //  - `read` carries no write/impact pair at all, matching every other plain read tool on this
+    //    contract (`listPosts`, `validateVariant`, `listAccounts`) — `{status:'not_requested'}` is
+    //    data, not an error, exactly as the endpoint's own comment states.
+    {
+      name: "social.requestClientReview",
+      description:
+        "Ask the client to sign off on one post variant. IDEMPOTENT: one row per variant forever "
+        + "(0105's UNIQUE(variant_id)) — re-asking after 'changes_requested' or 'withdrawn', or even "
+        + "after a stale 'approved', upserts the SAME row back to 'pending' rather than creating a "
+        + "second one, and a repeat call while already pending is a no-op (no duplicate client "
+        + "notification). This is the first moment the variant's content becomes visible to the "
+        + "client, so an automation/agent principal calling it is suspended for human approval rather "
+        + "than applied.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/client-review",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The post variant to send for client sign-off." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
+    {
+      name: "social.getClientReview",
+      description:
+        "Read one variant's client sign-off state: status ('not_requested'|'pending'|"
+        + "'changes_requested'|'withdrawn'|'approved'), the client's comment when changes were "
+        + "requested, and whether an 'approved' decision is stale (its `reviewedArgsSha256` no longer "
+        + "matches the variant's live content). A variant that never needed sign-off, or has not been "
+        + "asked for one yet, answers `{status:'not_requested'}` as data — never a 404.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/client-review",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The post variant." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
+    {
+      name: "social.withdrawClientReview",
+      description:
+        "Retract a pending client sign-off request (the content changed, the campaign was "
+        + "cancelled). Only a 'pending' review can be withdrawn ('client_review_not_pending' otherwise); "
+        + "withdrawing an already-withdrawn review is an idempotent no-op, never an error. Never "
+        + "notifies the client — this undoes an ask, it does not put anything new in front of them.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/client-review/withdraw",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The post variant whose pending review to withdraw." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
     // ── SMM-10: THE PUBLISH GATE'S DISPATCH ENDPOINT ───────────────────────────────────────────
     // The tool `core/approval-executables.ts`'s SMM-09 section left undeclared, naming exactly this
     // ticket as the one that builds the endpoint. Declared from the pinned classification constant

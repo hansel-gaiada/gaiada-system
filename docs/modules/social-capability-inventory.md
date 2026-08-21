@@ -107,21 +107,34 @@ campaign plan or setting a KPI target has no tool to call; both are console/huma
 
 | Capability | Endpoint | MCP tool | Impact class | Refusal | `work_activity` |
 |---|---|---|---|---|---|
-| Request client review | `POST variants/:id/client-review` | **none** | write, unclassified | 404 (this endpoint's own; `CLIENT_REVIEW_REFUSAL` is what the *gate* checks, not what this endpoint returns) | `requested` / `social_post_client_review` |
-| Read client review state | `GET variants/:id/client-review` | **none** | read, unclassified | none — `{status:'not_requested'}` is data, not an error | none (read) |
-| Withdraw client review | `POST variants/:id/client-review/withdraw` | **none** | write, unclassified | `client_review_not_pending`, 404 | `withdrawn` / `social_post_client_review` |
+| Request client review | `POST variants/:id/client-review` | **`social.requestClientReview`** (CLOSED 2026-08-21) | write, **medium** — the first moment content crosses the client trust boundary | 404 (this endpoint's own; `CLIENT_REVIEW_REFUSAL` is what the *gate* checks, not what this endpoint returns) | `requested` / `social_post_client_review` |
+| Read client review state | `GET variants/:id/client-review` | **`social.getClientReview`** (CLOSED 2026-08-21) | read, unclassified | none — `{status:'not_requested'}` is data, not an error | none (read) |
+| Withdraw client review | `POST variants/:id/client-review/withdraw` | **`social.withdrawClientReview`** (CLOSED 2026-08-21) | write, **low** — corrective, never notifies the client | `client_review_not_pending`, 404 | `withdrawn` / `social_post_client_review` |
 | Client decides (portal) | `POST :tenantId/portal/social-reviews/:id/decide` | **none — no portal capability is ever an MCP tool in this program** | write, unclassified | ownership resolves as "not found" rather than "not yours" (0075 rule 1); a second decide on an already-resolved row is a conflict, not a crash | `approved`/`changes_requested` / `social_post_client_review` |
 
-**Gap named plainly, and it is the single largest one this pass found:** every client-review
-capability — request, read, withdraw, and the gate's own composed `CLIENT_REVIEW_REFUSAL` vocabulary
-it produces on the dry-run/dispatch paths — has **zero MCP tool coverage**. `social.client_review.
-{read,request,withdraw}` are real, grantable Cerbos permissions (SMM-31/32), but nothing in
-`modules/social/index.ts` declares a tool for any of them. An agent operating this module can draft
-a post, validate it, and dry-run its publish preconditions, but **cannot ask a client for sign-off,
-check whether one is pending, or withdraw a stale ask** — it can only reach the read half indirectly
-through `checkPublishPreconditions`'s composed `stage:"client_review"` answer, never act on it. This
-is exactly the "does it work identically under a human, n8n, and an agent" bar the agentic-native
-plan sets, and today it plainly does not for this whole capability group.
+**Gap CLOSED 2026-08-21 (senior-be).** The largest parity hole this pass found is now covered: three
+new tools on `socialModule.mcpTools` (`modules/social/index.ts`) front the staff-side trio, each
+running the SAME `authorize()` call its endpoint already runs — `social.client_review.
+{read,request,withdraw}` (real, grantable Cerbos permissions since SMM-31/32) are now reachable by
+an agent, not only a human console session. An agent operating this module can now ask a client for
+sign-off, check whether one is pending, and withdraw a stale ask, closing the "does it work
+identically under a human, n8n, and an agent" gap the agentic-native plan's criterion 1 names.
+`request` is impact `'medium'` (suspends an automation/agent principal into WS4 — it is the first
+exposure of content to an external party, the same "outward-facing" ground `deliverReport`/
+`provisionPublisherOrg` already use); `withdraw` is impact `'low'` (a write, never a read, but
+purely corrective and never client-notified — the same "blast radius is a stale row" ground
+`syncConnectorRegistry` already uses); `read` carries no write/impact pair, matching every other
+plain read tool. **The portal decide stays undeclared, confirmed rather than merely repeated**: it
+is a `portal.*` action (`approve_post`), never `social.*`, and no portal capability is ever an MCP
+tool in this program — the client's decision is a human act on the trust boundary, made in an
+authenticated browser session, never something any agent (staff-side or client-side) is the caller
+of. Regression-pinned in `social.test.ts`.
+
+**A real, adjacent gap found while closing this one, named but NOT fixed this pass (out of file
+surface):** `social.client_review.withdrawn`'s event has no registered handler in
+`event-handlers.ts`'s routing table, unlike `.requested`/`.decided` — which is WHY `withdraw` never
+notifies the client and part of why it is classified 'low' rather than 'medium'. Left for a future
+pass; the gap is cosmetic today (nothing currently depends on a withdrawal notification existing).
 
 ## Publish / dispatch (SMM-09/10) — the D14 spine
 
@@ -134,14 +147,24 @@ plan sets, and today it plainly does not for this whole capability group.
 
 | Capability | Endpoint | MCP tool | Impact class | Refusal | `work_activity` |
 |---|---|---|---|---|---|
-| Post-status reconcile callback | `POST webhooks/post-status` | **none — not agent-facing by design; gated by a service-token + `x-social-webhook-secret`, not Cerbos** | write, unclassified | HTTP-level (401/403 on a bad/missing secret); the underlying `reconcileOneProviderPost` (`post-status-sync-job.ts`) returns a boolean, no typed refusal vocabulary | **none** — `reconcileOneProviderPost` has no `writeActivity` call anywhere in it (grepped, confirmed absent) |
+| Post-status reconcile callback | `POST webhooks/post-status` | **none — not agent-facing by design; gated by a service-token + `x-social-webhook-secret`, not Cerbos** | write, unclassified | HTTP-level (401/403 on a bad/missing secret); the underlying `reconcileOneProviderPost` (`post-status-sync-job.ts`) returns a boolean, no typed refusal vocabulary | **`published`/`failed` on `social_post_variant`, `actor_id NULL`** (CLOSED 2026-08-21) |
 
-**Gap named plainly:** this endpoint performs a real state change (a post's status/`provider_post_id`
-reconciled against the live network) with no `work_activity` row at all. It may belong in the same
-"no user attribution to attach a row to" bucket the golden-case table already puts the retention
-purge and metrics pull in (SMM-14/this pass) — it is machine-originated, not human-originated — but
-that reasoning has never been written down for this specific endpoint, so it is named here rather
-than assumed.
+**Gap CLOSED 2026-08-21 (senior-be), at the shared root rather than the named function alone.**
+`applyPostStatuses` (`post-status-sync-job.ts`) is the ONE function both `reconcileOneProviderPost`
+(this webhook) and `reconcileTenantPostStatus` (the safety poll) call to apply the network's own
+authoritative `'published'`/`'failed'` status — fixing it there closes the gap for BOTH unattended
+paths, not only the one this row names. It now calls `writeActivity(tenantId, null, verb,
+"social_post_variant", variantId, metadata)` for each transition, fired AFTER the update transaction
+commits (matching `dispatch.ts`/`pm.controller.ts`'s own non-nested sequencing for this helper).
+This was NOT the "no user attribution to attach a row to" bucket the golden-case table puts the
+retention purge and metrics pull in — those two never touch a single named entity's own audit trail
+the way a publish/dispatch/reconcile lifecycle does; this row is closer kin to `dispatch.ts`'s own
+`dispatched`/`failed`/`refused` rows (which DO attribute to a human, because dispatch is always
+human-triggered via the D14 executor) than to a bucket sweep. `actor_id` is `null`, honestly: neither
+caller ever has a principal (`postStatusWebhook` doesn't even take a `@Req()`) — matching the
+`activities` table's own column comment ("NULL = system/service") and the SAME convention
+`pm.controller.ts`'s `auto_promoted` rows already use, never a guess at "whoever last touched the
+row." Regression-pinned in `post-status-sync-job.test.ts` (T1/T2/T3/T5), driven RED first.
 
 ## Accounts, publisher orgs, connect (SMM-05/07) — Cerbos kind `social_account`
 
@@ -219,24 +242,34 @@ new, since item 6 is exactly the place a pre-named gap should also land.
 
 ## Summary — what item 6 actually shows
 
-- **18 MCP tools declared** (`modules/social/index.ts`), covering roughly a third of the ~40
-  distinct HTTP capabilities enumerated above. The tracker's prior estimate of "17" undercounted by
-  one; corrected here and in `docs/plans/smm-tracker.md`.
+- **21 MCP tools declared** (`modules/social/index.ts`), up from 18 as of this pass (2026-08-21,
+  senior-be) — the three new client-review tools (Gap 1, below). The tracker's prior estimate of
+  "17" undercounted by one before that; both corrections recorded in `docs/plans/smm-tracker.md`.
 - **`social.publishPost` IS declared and IS the D14-registered executable** (`write:true,
   impact:'high'`); `social.publishPostMetered` is barred and correctly never declared. (The prior
   seat's contrary finding was traced to grepping the literal string instead of the
   `SOCIAL_PUBLISH_TOOL` constant — see `docs/plans/smm-tracker.md`'s defect-class §4b.)
-- **Two structural coverage gaps, both real, neither previously written down in one place:**
-  1. **The entire client-review capability group (request/read/withdraw + the portal decide) has no
-     MCP tool.** An agent cannot participate in the client sign-off loop at all.
-  2. **Every plain single-resource read/update/delete (engagement, post, variant, brand profile,
-     campaign, KPI target) has no MCP tool** — only list/create/scope-style capabilities got one.
-     This may be intentional (a smaller declared surface is safer), but it has never been stated as
-     a decision anywhere this pass found.
-- **`work_activity` coverage is broad but not total.** 18 `writeActivity()` call sites cover nearly
-  every human-triggered write. The one gap this pass found and named: **the post-status webhook
-  callback (`reconcileOneProviderPost`) writes no `work_activity` row**, and unlike the purge/metrics
-  jobs, nobody has stated whether that is a considered decision or an oversight.
+- **The two structural gaps this pass originally found are now BOTH CLOSED (2026-08-21, senior-be):**
+  1. ~~The entire client-review capability group (request/read/withdraw + the portal decide) has no
+     MCP tool.~~ **CLOSED** — `social.requestClientReview`/`social.getClientReview`/
+     `social.withdrawClientReview` now cover the staff trio; the portal decide is confirmed to stay
+     undeclared, by design, not by omission.
+  2. ~~The post-status webhook callback (`reconcileOneProviderPost`) writes no `work_activity`
+     row.~~ **CLOSED** — fixed at the shared `applyPostStatuses` root, covering the safety-poll path
+     too, with an honestly-attributed (`actor_id NULL`) row.
+- **A THIRD gap, never structural but real, remains open and is intentionally NOT declared an MCP
+  tool:** every plain single-resource read/update/delete (engagement, post, variant, brand profile,
+  campaign, KPI target) has no MCP tool — only list/create/scope-style capabilities got one. This
+  may be intentional (a smaller declared surface is safer), but it has never been stated as a
+  decision anywhere this or the prior pass found, and closing it was outside this pass's mandate
+  (scoped to the two agentic-exit-bar gaps above).
+- **`work_activity` coverage was broad but not total; the one gap this pass found and named is now
+  closed.** The post-status webhook callback (`reconcileOneProviderPost`) wrote no `work_activity`
+  row; `post-status-sync-job.ts` now carries a new `writeActivity()` call site inside the shared
+  `applyPostStatuses`, covering both that webhook path and its safety-poll sibling
+  (`reconcileTenantPostStatus`). This pass did not re-audit this file's earlier "18 call sites"
+  figure for the rest of the module — that count was produced by a prior pass and re-verifying it
+  was outside this pass's two named gaps.
 - **Five named refusal vocabularies, all verified against the source file that declares them:**
   `PUBLISH_REFUSAL` (16), `DISPATCH_REFUSAL` (4), `CLIENT_REVIEW_REFUSAL` (5), SMM-07's three
   `PublisherRefusalCode` additions (of 11 total in that union type), and `direct.ts`'s single

@@ -11,6 +11,14 @@
 // (T3)/(T4) below fire the SAME reconcile input/webhook call twice and assert exactly ONE event and
 // no double-application — "assume every webhook/event fires twice" applied to this module's second
 // untrusted transport.
+//
+// ── SMM-33/24 Gap 2: `work_activity`, READ BACK, NOT ASSERTED FROM THE SOURCE TEXT ────────────────
+// (T1)/(T2)/(T3)/(T5) below now also read the `activities` table directly and assert a real row
+// with `actor_id IS NULL` (the honest non-human attribution — see `applyPostStatuses`'s own header)
+// exists for every 'published'/'failed' transition this file's functions apply, through BOTH the
+// safety-poll path (T1/T2/T3, via `applyPostStatuses` directly) and the webhook intake (T5) — closing
+// the exact gap the SMM-33 capability inventory named ("reconcileOneProviderPost has no writeActivity
+// call anywhere in it").
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { config } from "../../config";
 import { newId, withTenants } from "../../db";
@@ -118,6 +126,19 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
     return rows.map((r) => r.event_type);
   }
 
+  /** SMM-33/24 Gap 2 — the `work_activity` rows this file's functions owe, read back for real
+   *  rather than trusted from the source text. `activities` is a CORE table (no third RLS wall), so
+   *  a plain admin-pool read is correct here, matching `outboxEvents`'s own idiom above. */
+  async function activityRows(variantId: string): Promise<Array<{ verb: string; actorId: string | null; metadata: Record<string, unknown> }>> {
+    const { rows } = await adminPool().query<{ verb: string; actor_id: string | null; metadata: Record<string, unknown> }>(
+      `SELECT verb, actor_id, metadata FROM activities
+        WHERE target_entity_type = 'social_post_variant' AND target_entity_id = $1
+        ORDER BY occurred_at`,
+      [variantId],
+    );
+    return rows.map((r) => ({ verb: r.verb, actorId: r.actor_id, metadata: r.metadata }));
+  }
+
   // ══ (T1) applyPostStatuses — the idempotent apply, direct ══════════════════════════════════════
 
   it("(T1) ⭐ applies an authoritative 'published' status, and this IS the module-GUC regression test", async () => {
@@ -133,6 +154,15 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
     expect(row.status).toBe("published");
     expect(row.publishedUrl).toBe("https://instagram.example/p/1");
     expect(await outboxEvents(variantId)).toContain("social.post.published");
+
+    // SMM-33/24 Gap 2 — a real work_activity row, read back, not merely "did not throw". actor_id
+    // NULL is the honest signal: nobody's own action published this, the network's authoritative
+    // answer did.
+    const activity = await activityRows(variantId);
+    expect(activity).toHaveLength(1);
+    expect(activity[0].verb).toBe("published");
+    expect(activity[0].actorId).toBeNull();
+    expect(activity[0].metadata.providerPostId).toBe(providerPostId);
   });
 
   it("(T2) applies a 'failed' status with the network's own error text, emits social.post.failed", async () => {
@@ -145,6 +175,13 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
     expect(row.status).toBe("failed");
     expect(row.lastError).toBe("upstream rejected the post");
     expect(await outboxEvents(variantId)).toContain("social.post.failed");
+
+    // SMM-33/24 Gap 2 — same non-human attribution for the failure path.
+    const activity = await activityRows(variantId);
+    expect(activity).toHaveLength(1);
+    expect(activity[0].verb).toBe("failed");
+    expect(activity[0].actorId).toBeNull();
+    expect(activity[0].metadata.detail).toBe("upstream rejected the post");
   });
 
   it("(T2b) 'unknown' state leaves the row untouched — 'the engine could not tell us' is not a fact about our own queue", async () => {
@@ -168,6 +205,12 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
     const events = await outboxEvents(variantId);
     expect(events.filter((e) => e === "social.post.failed")).toHaveLength(1);
     expect((await variantRow(variantId)).status).toBe("failed");
+
+    // SMM-33/24 Gap 2 — the redelivery must not double-write the activity row either: the second
+    // call's UPDATE touches zero rows (already terminal), so no second `pendingActivity` entry is
+    // ever queued for it.
+    const activity = await activityRows(variantId);
+    expect(activity.filter((a) => a.verb === "failed")).toHaveLength(1);
   });
 
   // ══ (T4) reconcileTenantPostStatus — the batched sweep, via the mock driver's OWN state ════════
@@ -208,6 +251,16 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
     expect(second).toBe(false);
     const events = await outboxEvents(variantId);
     expect(events.filter((e) => e === "social.post.published")).toHaveLength(1);
+
+    // SMM-33/24 Gap 2 — THE gap this pass closes: the capability inventory found
+    // `reconcileOneProviderPost` (the webhook intake — no principal exists on that path at all,
+    // `postStatusWebhook` doesn't even take a `@Req()`) wrote no `work_activity` row. Read back for
+    // real: exactly one row, non-human (`actor_id IS NULL`), and the redelivered second call added
+    // no second one.
+    const activity = await activityRows(variantId);
+    expect(activity).toHaveLength(1);
+    expect(activity[0].verb).toBe("published");
+    expect(activity[0].actorId).toBeNull();
   });
 
   it("(T6) an unknown/foreign providerPostId resolves to `false` — never leaks whether it belongs to another tenant", async () => {

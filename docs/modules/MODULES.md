@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.10` | IN PROGRESS | Social Media | 2026-08-21 |
+| social-media | `0.5.11` | IN PROGRESS | Social Media | 2026-08-21 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,100 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.10` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.11` · IN PROGRESS
+
+**0.5.11 (2026-08-21, SMM-33/24 gap-closing pass, senior-be) — the two agentic-exit-bar gaps the
+SMM-33 capability inventory named plainly, closed rather than merely documented.** Worktree was cut
+6 commits behind `main` (missing `docs/modules/social-capability-inventory.md`, `client-review.ts`,
+`publisher/youtube-client.ts` entirely) — `git merge main` (clean fast-forward, no divergent commits)
+pulled everything in before any of this pass's own code was written, per this program's own
+repeated cross-session hazard note.
+
+**Gap 1 — the entire client-review capability group had zero MCP tool coverage — CLOSED.** Three
+new tools declared on `socialModule.mcpTools` (`modules/social/index.ts`), one per staff endpoint
+already live on `social.controller.ts` (SMM-31): `social.requestClientReview` (`POST
+variants/:variantId/client-review`), `social.getClientReview` (`GET` the same path),
+`social.withdrawClientReview` (`POST .../client-review/withdraw`) — each fronting the SAME
+`authorize()` call its endpoint already runs (`social_client_review` kind, `request`/`read`/
+`withdraw` actions), nothing loosened. Impact classes chosen individually, not copy-pasted from
+`setEngagementScope`/`publishPost`: `request` is `write:true, impact:'medium'` — the FIRST moment a
+variant becomes visible to an external party outside the tenant (`handleClientReviewRequested`
+notifies the client's portal contacts), the same "outward-facing" ground `deliverReport`/
+`provisionPublisherOrg` already use for 'medium', so an automation/agent principal is suspended into
+WS4 rather than allowed to put draft content in front of a client unsupervised (neither tool is
+registered in `approval-executables.ts` — same precedent as `setEngagementScope`/
+`provisionPublisherOrg`/`deliverReport`, all 'medium' with no executable entry, so a suspended call
+simply stays suspended for a human to act on directly rather than auto-re-driving). `withdraw` is
+also `write:true` (never a read — the spec's own warning) but `impact:'low'`: purely corrective,
+never notifies the client (`social.client_review.withdrawn` rides the drained stream but has no
+registered handler, unlike `.requested`/`.decided` — a real, separate gap named but NOT fixed this
+pass, out of file surface), and only retracts exposure that already happened — the same "blast
+radius is a stale row, not a post" ground `syncConnectorRegistry` already uses for 'low'. `read`
+carries no `write`/`impact` pair at all, matching every other plain read tool on this contract.
+
+**The portal decide stays undeclared, confirmed, not just repeated.** `social-client-review-
+portal.controller.ts`'s `decide` action is a `portal.*` Cerbos action (`approve_post`), never a
+`social.*` one — no portal capability is ever an MCP tool in this program, because the client's
+decision is a human act on the trust boundary, made in a browser session authenticated AS that
+client, never something any agent (staff-side or client-side) is ever the caller of. Regression-
+pinned in `social.test.ts`: no declared tool name contains "decide", and no `pathTemplate` contains
+`/portal/`.
+
+**Gap 2 — the post-status webhook wrote no `work_activity` row — CLOSED, at the shared root, not
+just the named function.** `applyPostStatuses` (`post-status-sync-job.ts`) is the ONE place
+`social_post_variants.status` ever becomes `'published'`/`'failed'` from the network's OWN
+authoritative answer (`dispatch.ts` only ever writes `'dispatched'`/`'failed'` for an IMMEDIATE,
+synchronous outcome, or leaves the row for this function to resolve later) — and it is the shared
+function BOTH `reconcileOneProviderPost` (the webhook intake, the inventory's own named gap) and
+`reconcileTenantPostStatus` (the safety poll) call, so the fix lands once, closing the gap for both
+paths rather than patching only the one named. `actorId` is `null`, honestly — the ONLY correct
+answer: `postStatusWebhook` doesn't even take a `@Req()`, so there is no principal on that path at
+all, and the safety poll has no request context either. This is the SAME convention
+`pm.controller.ts`'s `auto_promoted` rows already use for a system-derived state change nobody's own
+action caused directly (`activities.actor_id`'s own column comment: "NULL = system/service") — never
+the account's connect actor, the composer's last editor, or any other human who merely last touched
+the row, which the spec named explicitly as the wrong move. The verb is the network's own vocabulary
+(`'published'`/`'failed'`) and the metadata is the SAME facts already carried on the sibling
+`emitEvent` call, never a second independently-worded copy. `writeActivity` runs AFTER the update
+transaction commits (collected into a `pendingActivity` array during the loop, written once outside
+`withTenants`) — the same non-nested sequencing `dispatch.ts`/`pm.controller.ts` already use, not a
+second connection held open inside the first for no atomicity gain those callers don't already
+accept. No module-GUC exposure introduced: `activities` is a CORE table with no third wall, so
+`declareSocialModuleScope` is correctly absent from this new code path.
+
+**Regression tests, driven RED first, not merely asserted.** `post-status-sync-job.test.ts`'s (T1)/
+(T2)/(T3)/(T5) gained a `activityRows()` helper reading the `activities` table back for real and new
+assertions on top of each existing case (0 new `it()`s — assertions added to the SAME cases that
+already carry this file's own module-GUC regression note, per this program's preference for fewer,
+denser tests over proliferation): (T1)/(T2) assert exactly one row with the correct verb and
+`actor_id IS NULL`; (T3) asserts the redelivered second call adds no second row; (T5) — the webhook
+path itself, the exact gap named — asserts the same through `reconcileOneProviderPost`. Verified RED
+by temporarily commenting out the `writeActivity` call and re-running: all four assertions failed
+exactly as predicted (`expected [] to have a length of 1`), then restored. `social.test.ts`'s
+existing registration test gained assertions for all three new tools' `write`/`impact`/`method`/
+`pathTemplate` shapes plus the portal-decide-absence checks above.
+
+Test counts: **483 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** in this worktree
+by stashing this pass's changes: **483 / 0 / 5** — unchanged, because this pass added assertions to
+EXISTING `it()` blocks rather than new ones; one suite, `dispatch.test.ts`, failed on the baseline run
+with `tuple concurrently updated` — reproduced as the shared-test-Postgres phantom failure this file
+warns about, confirmed by re-running it alone (16/16 green), not counted as a real baseline failure).
+`tsc --noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps`
+all green (no migration, no new withTenants call needing review — the one new DB touch,
+`writeActivity`, is a pre-existing core helper, not a raw `withTenants` call this pass introduced).
+No Cerbos policy change (no new executable, so `resource_mcp_tool.yaml`'s grant-lift list is
+correctly untouched — request/withdraw are 'medium'/'low' respectively with no `approval-
+executables.ts` entry, the same shape `setEngagementScope`/`syncConnectorRegistry` already have);
+`test:iam-chain-alignment` unaffected (25/25, not re-run this pass — no IAM/Cerbos change).
+
+**Anything the spec did not answer, named rather than silently decided:** `social.client_review.
+withdrawn`'s event has no registered handler in `event-handlers.ts`'s routing table (unlike
+`.requested`/`.decided`) — found while reasoning about `withdraw`'s impact class (it's WHY withdraw
+never notifies the client, which is part of why it is classified 'low' rather than 'medium'), but
+`event-handlers.ts` is outside this pass's file surface and the gap is cosmetic today (nothing
+currently depends on a withdrawal notification existing), so it is named here for a future pass
+rather than fixed unilaterally.
 
 **0.5.10 (2026-08-21, SMM-38 phase 38e, senior-integrator) — the flip: closing the three gaps 38c/38d
 named, Gap 1's live wiring, and the capability inventory's driver-per-capability rows.** Worktree was

@@ -77,6 +77,27 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-33/24 gap-closing pass**, `social-media 0.5.10 -> 0.5.11` (IN PROGRESS). The two
+  agentic-exit-bar gaps SMM-33's capability inventory named plainly, closed. **Gap 1**: three new MCP
+  tools on `socialModule.mcpTools` (`modules/social/index.ts`) — `social.requestClientReview`
+  (write, impact `'medium'` — the first moment content crosses the client trust boundary, so an
+  automation/agent principal suspends into WS4), `social.getClientReview` (plain read, no
+  write/impact pair), `social.withdrawClientReview` (write, impact `'low'` — corrective, never
+  notifies the client) — each fronting the SAME `authorize()` call its existing `social.controller.ts`
+  endpoint (SMM-31) already runs, nothing loosened. The portal decide stays undeclared, confirmed:
+  no portal capability is ever an MCP tool in this program, regression-pinned in `social.test.ts`.
+  **Gap 2**: `applyPostStatuses` (`post-status-sync-job.ts`) — the ONE function both the webhook
+  intake and the safety poll share for the network's own authoritative `'published'`/`'failed'`
+  status — now calls `writeActivity` with `actor_id = NULL` (the honest "system/service" attribution
+  the `activities` table's own column comment already names), never a human who merely last touched
+  the row. Fires AFTER the update transaction commits, matching `dispatch.ts`/`pm.controller.ts`'s
+  own non-nested sequencing. Regression tests driven RED first (verified by temporarily removing the
+  `writeActivity` call and re-running — all four new assertions failed exactly as predicted). No
+  migration, no Cerbos change. Test counts: **483/0/5**, unchanged from baseline (**483/0/5**,
+  measured directly by stashing this pass) because the new assertions extend existing `it()` cases
+  rather than adding new ones. Full detail: `docs/modules/MODULES.md`'s social-media 0.5.11 entry,
+  `docs/plans/smm-tracker.md`'s P2 section.
+
 - **2026-08-21 — SMM-38 phase 38e**, `social-media 0.5.9 -> 0.5.10` (IN PROGRESS). The flip's three
   gaps, closed. **Gap 1** (the crux): new `provisioning.ts#resolveDispatchOrgHandle` — a SEPARATE,
   capability-aware resolver (not a widened `openOrg`) that `dispatch.ts` now calls for `media_upload`
