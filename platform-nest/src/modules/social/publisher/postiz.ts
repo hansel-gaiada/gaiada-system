@@ -326,10 +326,16 @@ export function createPostizDriver(opts: PostizDriverOptions): SocialPublisher {
       return normalizePosts(rows).filter((p) => wanted.size === 0 || wanted.has(p.providerPostId));
     },
 
-    async uploadMedia(org: OrgHandle, file): Promise<{ id: string; url?: string }> {
+    async uploadMedia(org: OrgHandle, file, _network): Promise<{ id: string; url?: string }> {
       // The one call whose duration changed by more than milliseconds when the engine moved hosts,
       // and the one the runbook's MTU trap silently black-holes (wg default 1420 over a 1460 MTU:
       // small requests all succeed, megabyte uploads vanish). Hence its own 120s class.
+      //
+      // `_network` (SMM-38 phase 38d, types.ts's own header): Postiz's upload endpoint is ONE generic
+      // multipart route regardless of the target network — the engine itself routes the resulting
+      // media id to whichever network the later `schedulePost` call names. Accepted and ignored here,
+      // not because it is unused everywhere, but because THIS driver genuinely has nothing to branch
+      // on — `direct.ts` is the one that needs it.
       const form = new FormData();
       form.append("file", new Blob([file.bytes as unknown as BlobPart], { type: file.contentType }), file.filename);
       const res = await call<unknown>(org, POSTIZ_ROUTES.upload, {

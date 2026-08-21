@@ -323,8 +323,24 @@ export interface SocialPublisher {
 
   /** Upload media into the engine before a dispatch references it. The ONE call on this hop whose
    *  duration changed by more than milliseconds when Postiz moved hosts (§A4l §4) — hence its own
-   *  timeout class, and the MTU trap in the runbook that silently black-holes exactly this traffic. */
-  uploadMedia(org: OrgHandle, file: { filename: string; contentType: string; bytes: Uint8Array }): Promise<{ id: string; url?: string }>;
+   *  timeout class, and the MTU trap in the runbook that silently black-holes exactly this traffic.
+   *
+   *  ── `network` (SMM-38 phase 38d) — THE COLLISION 38c NAMED, RESOLVED HERE ─────────────────────
+   *  38c's own header flagged this: a driver serving two networks cannot tell which upload protocol
+   *  to use from `file` alone (both LinkedIn and YouTube accept the same `{filename, contentType,
+   *  bytes}` shapes — there is no wire-level tell in the FILE that distinguishes them, unlike
+   *  `schedulePost`/`listComments`'s own `VariantDispatch.network` / caller-supplied `integrationId`
+   *  convention). `network` is threaded through explicitly rather than guessed from `contentType`,
+   *  which cannot distinguish "upload this image to LinkedIn's asset API" from "upload this video to
+   *  YouTube's resumable protocol". `postiz` and the mock driver accept and ignore it (one generic
+   *  upload endpoint each, per network already); `direct` branches on it. The ONE call site
+   *  (`dispatch.ts#resolveEngineMedia`) already carries the variant's own network in scope, so this
+   *  is a port-widening with no live-caller migration debt. */
+  uploadMedia(
+    org: OrgHandle,
+    file: { filename: string; contentType: string; bytes: Uint8Array },
+    network: Network,
+  ): Promise<{ id: string; url?: string }>;
 
   // Analytics.
   getAccountMetrics(org: OrgHandle, integrationId: string, range: DateRange): Promise<DailyMetrics[]>;

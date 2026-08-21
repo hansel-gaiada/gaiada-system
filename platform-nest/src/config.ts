@@ -694,6 +694,39 @@ const configBase = {
         // config constant.
         organizationUrn: process.env.SOCIAL_LINKEDIN_ORGANIZATION_URN ?? "",
       },
+      // SMM-38 phase 38d — YouTube's OWN app credentials, a SEPARATE Google Cloud project/OAuth
+      // client from search's `config.google` (dossier §8's own app-mapping table: "Gaiada YouTube" is
+      // its own row, distinct from search's older Google app and from LinkedIn's app above). Reusing
+      // `config.google`/`core/google-oauth` here would either silently borrow search's client
+      // credentials for a YouTube consent screen (wrong app, wrong scope-sensitivity review, wrong
+      // verification track) or require widening a core file outside this ticket's surface — named
+      // in `publisher/youtube-client.ts`'s own header, same reasoning `linkedin-client.ts` gave for
+      // not reusing `core/google-oauth/state.ts`.
+      //
+      // KEYLESS IS A SUPPORTED MODE, same doctrine as `direct.linkedin` above: with no
+      // SOCIAL_YOUTUBE_CLIENT_ID/_SECRET the YouTube OAuth start refuses `platform_app_not_registered`
+      // (the same reused SMM-07 token), never a half-built authorize URL with an empty client_id.
+      youtube: {
+        clientId: process.env.SOCIAL_YOUTUBE_CLIENT_ID ?? "",
+        clientSecret: process.env.SOCIAL_YOUTUBE_CLIENT_SECRET ?? "",
+        // OUR callback route — fixed, tenant-agnostic, mirroring `direct.linkedin.redirectUri` and
+        // GOOGLE_OAUTH_REDIRECT_URI's shape (Google, like LinkedIn, permits no wildcard redirect_uri).
+        redirectUri: process.env.SOCIAL_YOUTUBE_REDIRECT_URI ?? "",
+        // Google's own documented endpoints (dossier §6) — ⚠UNVERIFIED against a live app (D-23), not
+        // driven. `authorizeUrl` is the standard Google OAuth 2.0 endpoint, not a YouTube-specific one.
+        authorizeUrl: process.env.SOCIAL_YOUTUBE_AUTHORIZE_URL ?? "https://accounts.google.com/o/oauth2/v2/auth",
+        tokenUrl: process.env.SOCIAL_YOUTUBE_TOKEN_URL ?? "https://oauth2.googleapis.com/token",
+        // Data API v3 base for ordinary calls (comments, etc).
+        apiBaseUrl: process.env.SOCIAL_YOUTUBE_API_BASE_URL ?? "https://www.googleapis.com/youtube/v3",
+        // The resumable-upload endpoint is a DIFFERENT path on the SAME host, per Google's own
+        // resumable-upload protocol doc — never folded into `apiBaseUrl` above, since the two are
+        // genuinely different routes with different bodies (JSON metadata init vs. raw byte PUT).
+        uploadUrl: process.env.SOCIAL_YOUTUBE_UPLOAD_URL ?? "https://www.googleapis.com/upload/youtube/v3/videos",
+        // Own timeout class, same reasoning as `direct.linkedin` above: a resumable upload's
+        // initiate+PUT dance is a different host/shape from Postiz's single multipart POST.
+        readTimeoutMs: Number(process.env.SOCIAL_YOUTUBE_READ_TIMEOUT_MS ?? 30000),
+        uploadTimeoutMs: Number(process.env.SOCIAL_YOUTUBE_UPLOAD_TIMEOUT_MS ?? 120000),
+      },
     },
     // SMM-10 — the dispatch/reconcile pair's own knobs.
     //

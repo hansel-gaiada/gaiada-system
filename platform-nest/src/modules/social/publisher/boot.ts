@@ -22,12 +22,17 @@
 //      is still EMPTY by default — nothing routes a (network, capability) pair to `direct` unless an
 //      operator explicitly sets `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, which no deployment does today.
 //   3. Even where that switch IS consulted, no live call site passes it a `direct`-shaped `OrgHandle`
-//      yet (`direct.ts`'s own header: nobody on a live path resolves a LinkedIn access token and
-//      builds the handle `schedulePost`/`uploadMedia` need — that surgery is 38e's).
-// `registerLinkedInTokenRefresher()` is the SAME story: it is a pure Map insert (no network call),
-// and it only becomes reachable when SMM-36's retention sweep finds a `linkedin` grant within its
-// refresh-ahead window — which requires a LIVE grant to already exist, and none does until 38e (or a
-// standalone LinkedIn connect ceremony) actually completes one via `linkedin-oauth.controller.ts`.
+//      yet (`direct.ts`'s own header: nobody on a live path resolves a LinkedIn/YouTube access token
+//      and builds the handle `schedulePost`/`uploadMedia` need — that surgery is 38e's).
+// `registerLinkedInTokenRefresher()`/`registerYouTubeTokenRefresher()` (38d adds the latter) are the
+// SAME story: each is a pure Map insert (no network call), and each only becomes reachable when
+// SMM-36's retention sweep finds a grant of its OWN network within its refresh-ahead window — which
+// requires a LIVE grant to already exist, and none does until 38e (or a standalone connect ceremony)
+// actually completes one via `linkedin-oauth.controller.ts`/`youtube-oauth.controller.ts`.
+//
+// 38d itself adds no NEW reason this stays inert — it widens `direct`'s real capability set
+// (YouTube's resumable upload, quota accounting, comment read) using the SAME registration call this
+// header already documents; none of the three reasons above needed revisiting.
 //
 // ── THE PROPERTY THIS FILE OWES: BOOTING CLEANLY WITH POSTIZ UNREACHABLE ────────────────────────
 // Nothing here opens a socket. Registration is a pure, local decision from config, so:
@@ -48,6 +53,7 @@ import { checkPrivateVendorBaseUrl } from "../../../search-vendor-baseurl-guard"
 import { createPostizDriverFromConfig } from "./postiz";
 import { createDirectDriver } from "./direct";
 import { registerLinkedInTokenRefresher } from "./linkedin-oauth";
+import { registerYouTubeTokenRefresher } from "./youtube-oauth";
 import { registerPublisher } from "./registry";
 
 /** Escape hatch for the one legitimate case: an operator deliberately running the engine behind a
@@ -115,6 +121,10 @@ export function wireSocialPublisher(): void {
   // `registry.ts#resolvePublisher`'s own updated header for the heuristic fix that keeps it safe.
   registerPublisher(createDirectDriver());
   registerLinkedInTokenRefresher();
+  // SMM-38 phase 38d — same pure-Map-insert, verified-inert-until-a-real-grant-exists property as
+  // registerLinkedInTokenRefresher() immediately above; see that call's own reasoning in this file's
+  // header (point 3) and oauth-tokens.ts's own header.
+  registerYouTubeTokenRefresher();
 
   assertPublisherBaseUrlIsPrivate(
     config.social.publisher.baseUrl,

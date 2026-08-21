@@ -31,22 +31,26 @@ not afterwards.
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
-| PD `direct` driver (SMM-38) | **3 (38a, 38b, 38c)** | 5 phases |
+| PD `direct` driver (SMM-38) | **4 (38a, 38b, 38c, 38d)** | 5 phases |
 | P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
-Module: `social-media 0.5.8 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
+Module: `social-media 0.5.9 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
 end** — backend (SMM-31) + portal UI + composer/calendar reflection (SMM-32), a real client decision
 via the portal driven in a real browser and observed landing correctly in the staff Composer in the
 SAME running process; metrics (SMM-21) **DEV-VERIFIED** — `pullMetrics` nightly ingest + the
 Analytics tab, driven in a real browser, `main.ts` registration **confirmed landed**; the SMM-33
 capability inventory + SMM-24 docs closure found the entire client-review capability group has no
-MCP tool and named it plainly rather than papering over it; SMM-38 phase 38c (this pass) gives
-`direct` its first real capability — LinkedIn OAuth + org-page publish + media + `pullComments`,
-contract/unit-tested against a stub (no live LinkedIn credential exists, D-23) — with nothing wired
-into a live dispatch path yet, named explicitly rather than implied.
+MCP tool and named it plainly rather than papering over it; SMM-38 phase 38c gave `direct` its first
+real capability (LinkedIn OAuth + org-page publish + media + `pullComments`); phase 38d (this pass)
+adds YouTube's resumable upload (which IS the publish call for that network in this driver — no
+`schedulePost`), quota accounting against SMM-37's three real buckets (self-tracked, not a live
+probe — Google exposes none), and `pullComments` via `youtube.force-ssl`, resolving the
+`uploadMedia` network-routing collision 38c named by widening the port. Both networks remain
+contract/unit-tested against a stub (no live LinkedIn/YouTube credential exists, D-23) — nothing
+wired into a live dispatch path yet for either, named explicitly rather than implied.
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
 | P3 content ops | 2 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
@@ -248,8 +252,8 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 |---|---|---|
 | 38a | Driver skeleton + per-capability switch (defaults to `postiz`) + shared contract suite | ✅ **merged** |
 | 38b | **Token custody** — encrypted at rest on the tenant wall, refresh-ahead, revocation fails closed | ✅ **merged** |
-| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | 🟡 **partial, this pass (senior-integrator)** — real driver methods + real OAuth flow, contract/unit-tested against a stub; nothing wired into a live dispatch path yet (see evidence below) |
-| 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | ⬜ depends on 38b ✅ |
+| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | 🟡 **partial** — real driver methods + real OAuth flow, contract/unit-tested against a stub; nothing wired into a live dispatch path yet (see evidence below) |
+| 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | 🟡 **partial, this pass (senior-integrator)** — real driver methods + real OAuth flow, quota accounting; contract/unit-tested against a stub; nothing wired into a live dispatch path yet (see evidence below) |
 | 38e | Flip LinkedIn + YouTube to `direct`; Postiz retained for IG/FB/TikTok | ⬜ — also now owns the `direct.ts#connectUrl`/`uploadMedia` gaps 38c named (see below) |
 
 ⚠ 38b reverses D-5 (client tokens deliberately live *inside* Postiz so we never hold them). That is a
@@ -410,6 +414,138 @@ above and not this ticket's to fix (touching shared infra another session may de
 --noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names`
 all green. `test:iam-chain-alignment` green (25/25, unaffected — no Cerbos/IAM change this pass).
 Full detail: `docs/modules/MODULES.md`'s social-media 0.5.8 entry.
+
+**38d evidence (2026-08-21, senior-integrator).** Worktree was ALREADY at the 38c merge commit at
+worktree-cut time (`git log -1` = `5ff9e6f merge: SMM-38c LinkedIn on the direct driver`;
+`git merge-base --is-ancestor HEAD main` confirmed HEAD an ancestor of `main`) — **no merge was
+needed**, flagged here per this file's own repeated cross-session-hazard rather than silently
+assumed. `oauth-tokens.ts`, `linkedin-*` and `202608201518_social_oauth_tokens.sql` were present from
+the start.
+
+**The `uploadMedia` collision — resolved exactly as instructed, port widened in one place, six files
+touched.** `SocialPublisher.uploadMedia(org, file)` gained a third parameter, `network: Network`
+(`types.ts`): a driver serving two networks with genuinely different upload protocols cannot tell
+them apart from `file.contentType`/`filename` alone (both LinkedIn and YouTube accept the same
+image/video content types — no wire-level tell exists there, unlike `schedulePost`'s own
+`VariantDispatch.network`). Updated: `postiz.ts` (accepts and ignores — one generic multipart
+endpoint regardless of network), `mock-driver.ts` (accepts, records `state.lastUploadNetwork`),
+`direct.ts` (branches on it), `publisher-contract.ts` (passes `integration.network` through). **The
+ONE call site**, `dispatch.ts#resolveEngineMedia`: the variant's own `network` (already that
+function's parameter) is cast `as VariantDispatch["network"]` and threaded through — the SAME cast
+idiom the identical function already uses a few lines below for the `schedulePost` request. Nothing
+else in `dispatch.ts` touched.
+
+**Google OAuth — a STANDALONE subsystem, mirroring 38c's LinkedIn shape almost verbatim ("Follow
+that shape" was this ticket's own instruction).** New `publisher/youtube-client.ts` (token
+exchange/refresh against `oauth2.googleapis.com`, the resumable-upload protocol against
+`www.googleapis.com/upload/youtube/v3/videos`, `commentThreads.list` against the Data API v3) —
+**deliberately does NOT reuse `core/google-oauth/token-endpoint-client.ts`**: that file is
+hard-wired to `config.google.*`, search's own SEPARATE Google Cloud app (dossier §8's app-mapping
+table names "Gaiada YouTube" as its own row) — reusing it would either silently borrow search's
+client credentials for YouTube's consent screen or require widening a core file outside this
+ticket's surface. Also **no PKCE** (a confidential client with `client_secret`, matching
+`linkedin-client.ts`'s shape — `core/google-oauth`'s PKCE use is for a different client type, named
+rather than silently diverged from). New `publisher/youtube-oauth.ts` (the SAME HMAC-signed,
+time-boxed state scheme 38c built — `client-invites.ts`'s pattern — with `STATE_PREFIX="yts1"`
+distinguishing it from LinkedIn's `"lis1"` inside the signed input, so a token minted for one
+network can never verify against the other's parser despite both deriving from the identical
+domain-separated key; `checkYouTubeConnectReadiness`/`startYouTubeConnect`/`completeYouTubeConnect`/
+`registerYouTubeTokenRefresher()`). New `youtube-oauth.controller.ts`
+(`YouTubeOAuthController`/`YouTubeOAuthCallbackController`, mirroring
+`LinkedInOAuthController`/`LinkedInOAuthCallbackController`'s three-point callback defence exactly).
+`app.module.ts` registers both. Scopes requested: EXACTLY `youtube.upload` +
+`youtube.force-ssl` (dossier §6.2 (a)/(b)) — never the broad `youtube` manage scope, never
+analytics, never anything DM-shaped.
+
+**YouTube's real driver capabilities — and the deliberate absence of `schedulePost`.** `direct.ts`'s
+`DIRECT_CAPABILITIES` gains `quota_probe` (driver-wide); YouTube gets `media_upload`/`inbox_read`/
+`quota_probe` but **NOT** `schedule` — a `videos.insert` call IS the post for this network (creates
+the video resource directly), not a separate publish step referencing an already-uploaded asset the
+way LinkedIn's org-page flow works, so there is no "schedule an already-uploaded YouTube video"
+operation for this driver to implement. `uploadMedia`'s YouTube branch does the resumable
+initiate→PUT dance and returns the created video's id. **Named, load-bearing gap**: the metadata
+sent (title, privacyStatus) is MINIMAL — `title` from `file.filename`, `privacyStatus: "private"` —
+because `uploadMedia`'s own signature carries no title/description field, and widening it further
+than the single `network` parameter this collision required was not this ticket's call to make
+unilaterally. `privacyStatus: "private"` is the SAFE default that happens to match the dossier's own
+§6.3 UNVERIFIED, community-reported forced-private lock — requested deliberately, not as a
+workaround for a fact this pass confirmed live.
+
+**Quota accounting against SMM-37's three real buckets — self-tracked, not a live probe, and why
+that is the honest answer.** New `publisher/youtube-quota.ts`. The caps (100 `search.list`/day, 100
+`videos.insert`/day, 10,000 units/day for everything else) are CITED CONSTANTS quoted verbatim from
+the dossier's own §6.4 — a genuinely different situation from the "never synthesize a cap" warning
+in `types.ts` (written for Instagram's per-account, live-probeable, genuinely-variable cap): YouTube's
+cap is neither variable nor probeable, since no "remaining quota" endpoint exists anywhere in the
+Data API (the dossier names none) and the cap is a per-Google-Cloud-PROJECT fact, identical across
+every channel this ONE deployment's ONE app touches (dossier §6.5: "100 video uploads/day across the
+ENTIRE FLEET, not per client"). The `used` half is this PROCESS's own accounting — an in-memory,
+per-UTC-day counter, incremented ONLY after a call this driver OBSERVED succeed (never
+speculatively, since a call we cannot confirm reached Google could report a false "exhausted"
+against an account nowhere near its real limit). **Named limitation, not silently accepted**:
+in-memory means the counter resets on a process restart and does not share state across multiple Node
+instances — both real gaps for a LIVE deployment, but nothing on a live path calls
+`recordYouTubeQuotaUsage` today (the same "verified inert" property 38b's refresh-ahead registry and
+38c's signed-but-unpersisted OAuth state both shipped with), so building a durable, cross-instance
+counter for a capability nothing can reach live yet was left as a follow-up for 38e's live call path
+to decide, not built unilaterally.
+
+**`pullComments` — told apart from LinkedIn WITHOUT a port `network` parameter on this method, a
+narrower choice than `uploadMedia`'s fix.** `direct.ts#listComments` branches on
+`integrationId.startsWith("urn:li:")`: LinkedIn's entire id namespace is URN-shaped by LinkedIn's OWN
+wire format (mandated by its API, not a convention this codebase invented), so this is a real,
+principled tell — NOT the same class of guess `uploadMedia`'s old `file.contentType` branch would
+have been (no tell exists there; both networks accept identical content types). This ticket's scope
+did not name `listComments` as needing the port widened, so a real `network` parameter on that
+method — the cleaner long-term answer — is left to the architect/38e/SMM-15, whichever first needs a
+case this heuristic cannot cover (none among 0105's ten admitted networks collide with it today).
+YouTube's branch calls `commentThreads.list` and records 1 unit against `otherUnitsToday` on success.
+
+**No DM — modelled, not newly discovered.** `capabilities.ts`'s YouTube row already carried `dm:
+false, reasons: { dm: "network" }` from SMM-05's own research pass (§A4g) — this ticket's instruction
+to "model the absence with capabilities.ts's three-reasons model" was already satisfied before this
+phase touched the file; verified by reading the row directly, not re-decided or rebuilt.
+
+**A missing credential** refuses `platform_app_not_registered` (SMM-07's exact token, reused via
+`checkYouTubeConnectReadiness`, gated on BOTH `hasRegisteredPlatformApp('youtube')` and
+`hasYouTubeAppCredentials()`) — identical shape to LinkedIn's own gate, unchanged reasoning.
+
+**`resolvePublisher`'s `publisher_not_configured` signal still holds** — unaffected; `boot.ts`
+registers `direct` + both refreshers unconditionally, still behaviourally inert on every live path
+for the same three reasons 38c's header names, unrevisited this phase (38d needed no new reason).
+
+**No migration.** Reuses 0105's `social_accounts` (CHECK constraint already admits `'youtube'`) and
+the already-merged `social_oauth_tokens` table byte-for-byte, exactly as 38c did for LinkedIn.
+
+Test counts: **470 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** in this worktree
+before any change: **420 / 0 / 5** — the ticket brief's stated "425/0/0" did not match, per this
+file's own "measure your own baseline" instruction; +50 new: `youtube-client.test.ts` 16,
+`youtube-quota.test.ts` 6, `youtube-oauth.test.ts` 14, `direct.test.ts` +14 [YouTube upload/quota/
+listComments cases, a second YouTube-shaped contract-suite run, updated capability-set and
+`uploadMedia`-signature assertions]). The full run AND the 8 new/changed files re-run ALONE
+afterward (163/163) to rule out the shared-test-Postgres phantom-failure class this file names — both
+green. `tsc --noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/
+`lint:migration-names` all green (no migration this phase). `test:iam-chain-alignment` green (25/25,
+unaffected — no Cerbos/IAM change). Full detail: `docs/modules/MODULES.md`'s social-media 0.5.9 entry.
+
+**What 38e must build against what 38d left, in addition to what 38c already named:**
+1. Everything 38c's own "what 38d/38e must build" list already named (the `connectUrl`/token-
+   resolution gap on `provisioning.ts#openOrg`/`dispatch.ts`; the port's per-network capability
+   granularity, still a per-method discipline; the OAuth state's DB-backed single-use gap) — all
+   still open, now for TWO networks instead of one.
+2. **YouTube's `uploadMedia` metadata gap** — real video title/description drawn from the variant's
+   own body has nowhere to travel through the current `uploadMedia(org, file, network)` signature;
+   38e (or a dedicated pass) must decide whether that needs a fourth parameter, a different seam, or
+   stays filename-derived.
+3. **The quota counter's durability** — in-memory, per-process, resets on restart, does not share
+   state across instances. Fine while nothing live increments it; NOT fine the moment 38e's dispatch
+   wiring makes a real upload call reachable. A future pass should decide a table vs. a shared cache
+   before that day, not after a real upload silently exceeds the 100/day wall unnoticed.
+4. **`listComments`'s URN-prefix heuristic** — works for LinkedIn vs. YouTube today; the FIRST future
+   network whose id namespace also happens to start with `urn:li:` (none exists) or otherwise
+   collides would need the port's `network` parameter added to this method for real, not another
+   heuristic layered on top.
 
 **38a evidence (2026-08-20, senior-integrator):** no migration, no Cerbos change, no `main.ts`
 change — **verified inert**: every capability still resolves to `postiz`. Built:
