@@ -35,7 +35,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { withGlobal, withTenants, newId } from "../../db";
 import { buildApp } from "../../main";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../../testing/fixtures";
 import { registerModule, resetModules } from "../registry";
 import { hrModule } from "./index";
@@ -129,6 +129,12 @@ describe.skipIf(!RUN)("WSD-7 — owner's literal acceptance scenario (HR serving
     exec = await createUser("exec@holding.test");
     const ge = await createRole("group_executive");
     await grantRole(exec, ge, "global", null);
+    // MON-00c: group_executive's rules are gated on `variables.inRoot`, and a root resolves from
+    // `users.home_company_id` or an active membership. This exec holds a GLOBAL grant and therefore
+    // has no membership, so it resolved `rootCompanies: []` and every call below 403'd. Anchored to
+    // H, this fixture's ROOT company, via home_company_id rather than a membership — a
+    // membership would place the exec inside the very companies these assertions count.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [H, exec]);
 
     u1 = await createUser("u1-lead@a.test", "HR Lead");
     u2 = await createUser("u2-staff@a.test", "HR Staff Two");

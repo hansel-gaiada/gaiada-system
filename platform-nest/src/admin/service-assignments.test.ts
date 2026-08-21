@@ -7,7 +7,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { withTenants, newId } from "../db";
 import { buildApp } from "../main";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
 import { registerModule, resetModules } from "../modules/registry";
 
@@ -62,6 +62,12 @@ describe.skipIf(!TEST_URL)("service-assignments API (ORG-3)", () => {
     await grantRole(providerAdmin, companyAdminRole, "company", A);
     await grantRole(targetAdmin, companyAdminRole, "company", B);
     await grantRole(globalExec, execRole, "global", null);
+    // MON-00c: group_executive's rules are gated on `variables.inRoot`, and a root resolves from
+    // `users.home_company_id` or an active membership. This exec holds a GLOBAL grant and therefore
+    // has no membership, so it resolved `rootCompanies: []` and every call below 403'd. Anchored to
+    // A, this fixture's ROOT company, via home_company_id rather than a membership — a
+    // membership would place the exec inside the very companies these assertions count.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [A, globalExec]);
 
     app = await buildApp();
 
