@@ -3333,17 +3333,30 @@ Contract notes:
 5. **Disk queries must stay identical to the `DiskSpaceLow` alert expression.** The console and the
    pager reading different series is worse than having only one of them.
 
-### 20.1a Estate view — multi-host Plane A (MSO program, 2026-08-21) — ⛔ PENDING (design ratified: `docs/plans/2026-08-21-multi-server-observability.md`)
+### 20.1a Estate view — multi-host Plane A (MSO program, 2026-08-21) — 🟡 PROTOTYPED (BACKEND, MSO-05, 2026-08-21) — design: `docs/plans/2026-08-21-multi-server-observability.md`
 
 Supersedes §20.1's single-host response **via expand/contract** (note 6). Same route, same gate,
 same plane: staff-only, never tenant-scoped, never merged with §20 Plane B.
 
 | Method | Path | Gate | Returns | Status |
 |---|---|---|---|---|
-| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `EstateObservabilitySnapshot` | ⛔ PENDING |
+| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `EstateObservabilitySnapshot` | 🟡 BACKEND PROTOTYPED — `platform-nest/src/admin/observability.controller.ts` + `estate-observability.ts`; UI consumer (MSO-06) not this ticket's scope. Promote to ✅ only after QA (MSO-07) |
 
-Shapes (canonical in `platform-ui/src/lib/observability.ts` once built; `Reading`, `HostHealth`,
-`TargetSummary`, `DatastoreHealth` are §20.1's, with `HostHealth` gaining `cores: Reading`):
+**MSO-04 (the `infra_hosts` inventory table) was built BY THIS TICKET**, not under its own MSO-04
+ticket — it had not landed when MSO-05 started, and MSO-05's non-negotiable #3 (expected-but-dark
+hosts must appear) cannot be satisfied without it. Migration
+`platform-nest/migrations/202608211610_mso04_infra_hosts.sql` implements §3.1's schema **verbatim**
+(no improvised columns), seeded with the two hosts verified live in the design doc's §1
+(`gda-aicenter` / production / erp-core, `sumopod` / ops / observability-hub). No RLS — global
+table, read via `withGlobal()`, same posture as `permissions`/`roles`. If a concurrent MSO-04
+session lands the same table under a different migration file, one of the two must be deleted; do
+not attempt to reconcile them by hand.
+
+Shapes (canonical in `platform-ui/src/lib/observability.ts` once MSO-06 lands; `Reading`,
+`HostHealth`, `TargetSummary`, `DatastoreHealth`, `HostSnapshot`, `EstateSummary`, `EstateAlert` are
+now exported from `platform-nest/src/admin/estate-observability.ts` — the pure, unit-tested half of
+this endpoint — and re-exported from `observability.controller.ts` for callers that only know the
+old file path. `HostHealth` gains `cores: Reading` as ratified):
 
 ```ts
 interface EstateObservabilitySnapshot {
@@ -3355,8 +3368,9 @@ interface EstateObservabilitySnapshot {
   estate: EstateSummary | null;
   alerts: EstateAlert[] | null;    // [] = measured, none firing; null = Alertmanager unreadable
   alertsNote?: string | null;      // why alerts is null
-  // Plus, for ONE release (expand phase): §20.1's legacy host/targets/datastores/alerts fields,
-  // derived from the gda-aicenter row. New consumers must not read them (note 6).
+  // Plus, for ONE release (expand phase): §20.1's legacy host/targets/datastores fields, derived
+  // from the gda-aicenter row. New consumers must not read them (note 6). `alerts` above IS the
+  // legacy field's replacement, not an addition alongside it — see note 8 for why.
 }
 
 interface HostSnapshot {
@@ -3434,6 +3448,44 @@ Contract notes:
 7. §20.1 notes **2** (Reading discipline), **4** (target-up ≠ check-valid) and **5** (disk
    expressions stay identical to `DiskSpaceLow`/`DiskWillFillIn24h`) carry over unchanged, now per
    host.
+
+**Corrections made against reality during MSO-05's build (trust-reality clauses, per the ticket
+that built this):**
+
+8. **The `alerts` field name collision in this design is unbuildable literally — resolved, not
+   guessed around.** The fenced interface above defines ONE `alerts: EstateAlert[] | null`, and its
+   own prose two lines above says the expand phase ALSO carries forward "§20.1's legacy
+   host/targets/datastores/**alerts** fields" — but a JSON object cannot hold two fields both named
+   `alerts` with different shapes. `host`/`targets`/`datastores` don't collide and are kept verbatim
+   (derived from the `gda-aicenter` `HostSnapshot`, not re-queried). For `alerts`, the build keeps
+   the ONE field as the new Alertmanager-sourced `EstateAlert[]` shown above: it is a structural
+   superset of the old `{name, severity}` shape for any reader that only touches those two fields,
+   and — unlike re-deriving a second list from Prometheus's `ALERTS` series — it cannot render a
+   silenced alert as firing, which is exactly what note 3 above exists to prevent. No second,
+   differently-named legacy alerts field was invented.
+9. **Alertmanager is fetched INDEPENDENTLY of Prometheus's own reachability**, not gated behind
+   `available`. Note 5 says a down Alertmanager doesn't flip `available` — read the other direction
+   too: a down *Prometheus* does not blind an operator to Alertmanager's currently-firing alerts if
+   Alertmanager itself still answers, so `alerts`/`alertsNote`/`estate.alertsActive`/
+   `alertsSuppressed` can be populated even when `available:false` and `hosts`/`estate.hosts` are
+   null. This is a real behavior choice the design text didn't specify explicitly; recorded here so
+   it isn't re-litigated as a bug.
+10. **The by-host disk queries and the live `DiskSpaceLow`/`DiskWillFillIn24h` alert rules are NOT
+    byte-identical today** (note 7 above says they must stay identical). `infra/observability/
+    prometheus/rules/alerts.yml`'s rules have not been generalized to `by (host)` as of this ticket
+    — that is MSO-02, not built yet. The controller's queries already carry the `by (host)` shape
+    the rules will need; they converge automatically once MSO-02 lands the host label onto the
+    rule file. Flagged rather than silently assumed complete, per this ticket's own "trust reality"
+    instruction.
+11. **containersRunning is hardcoded, not queried.** Since `count(container_last_seen{name!=""})`
+    is verified empty estate-wide (MON-09n), the controller does not spend a Prometheus round trip
+    proving that on every request — it returns the constant `CONTAINERS_RUNNING_UNAVAILABLE` reading
+    (`estate-observability.ts`) for every host unconditionally. Revisit this the day MON-09n closes.
+12. **`hosts[]`'s unregistered-host detection unions every host-keyed metric map**, not only the
+    freshness map, so a host is never dropped just because one particular query didn't happen to
+    mention it that round (the ordinary case is that every host contributing to `up` also
+    contributes to the freshness subquery, since it derives from the same metric — this is a
+    defensive widening, found while writing the live-DB test for exactly this case).
 
 ---
 

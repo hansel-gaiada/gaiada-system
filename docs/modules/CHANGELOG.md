@@ -11,6 +11,64 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.34.0` — 2026-08-21 — MSO-05: the observability console learns there is more than one server
+
+`GET /api/admin/observability` (Plane A, staff-only) grows from a single-box summary into an
+estate view — `docs/plans/2026-08-21-multi-server-observability.md`, contract
+`docs/FRONTEND-BFF-CONTRACT.md` §20.1a (PENDING → 🟡 PROTOTYPED, backend only).
+
+**Added**
+- `hosts[]` + `estate` + Alertmanager-sourced `alerts[]`, alongside §20.1's legacy
+  `host`/`targets`/`datastores` fields for one release (expand/contract — a deployed UI still
+  reads the old shape). New pure module `src/admin/estate-observability.ts` carries the freshness
+  state machine (`fresh`/`stale`/`dark`/`never`, the `dark` boundary shared byte-for-byte with the
+  600s `RemoteWriteStalled` threshold) and every null-vs-zero mapping function, split out
+  specifically so it is unit-testable without a live Prometheus, Alertmanager, or database.
+- `infra_hosts` (migration `202608211610_mso04_infra_hosts.sql`) — built under THIS ticket because
+  MSO-04 had not landed and MSO-05 cannot show an expected-but-dark host without an inventory table
+  that survives the host going silent. Global (non-tenant) table, no RLS, `withGlobal()`-only —
+  same posture as `permissions`/`roles`. Seeded with the two hosts verified live (`gda-aicenter`
+  production/erp-core, `sumopod` ops/observability-hub).
+- `ALERTMANAGER_URL` config (`config.observability.alertmanagerUrl`). Alerts now come from
+  Alertmanager v2, not Prometheus's `ALERTS` series, so silence/inhibition state is visible —
+  fetched INDEPENDENTLY of Prometheus's own reachability, so a Prometheus outage doesn't also blind
+  the console to currently-firing alerts.
+- `containersRunning` is now a hardcoded `{value: null, note: "...MON-09n..."}` reading for every
+  host — cAdvisor's per-container discovery is verified broken estate-wide, so this is never
+  queried and never allowed to read as a measured `0`.
+
+**Found and fixed while building**
+- The ratified §20.1a design text names a NEW `alerts: EstateAlert[]` field and then says the
+  expand phase also carries forward "§20.1's legacy ... alerts field" — two fields cannot share one
+  JSON key. Resolved by keeping the one Alertmanager-sourced `alerts` field (a structural superset
+  of the old shape for any reader touching only `name`/`severity`); recorded as contract note 8
+  rather than silently picked.
+- `mergeHostInventory`'s "unregistered host" detection originally unioned only the freshness map
+  with `infra_hosts` rows; a host present in `up`/target/datastore series but (for any reason) not
+  in the same round's freshness result would have been silently dropped instead of rendered
+  unregistered. Widened to union every host-keyed metric map — caught by the live-DB test, not the
+  pure unit tests, which is exactly why both exist.
+
+**Tests**: `estate-observability.test.ts` 31/31 (pure — freshness boundaries incl. clock-skew, the
+three null/zero/error outcomes never collapsing, target/datastore null-vs-measured-empty,
+Alertmanager mapping, and the inventory merge's unregistered/never/decommissioned-aging-out cases).
+`observability-estate.db.test.ts` 8/8 against real Postgres + Cerbos + stubbed Prometheus/
+Alertmanager (`app.inject`): 403 for non-admin, full estate assembly, containersRunning
+null-with-note across every host, measured-vs-not-shipped datastores, Alertmanager
+active/suppressed split, legacy-field derivation, and the two upstreams' independent-failure paths.
+Full `src/admin/` suite (33 files) green at 421/421 with both new files included. Three
+platform-nest lints (`lint:withtenants`, `lint:migration-rls`, `lint:migration-names`) all pass —
+no `withTenants()` call was introduced (this table is read via `withGlobal()` only) and no
+FORCE-RLS backfill risk exists (the table carries no RLS at all).
+
+**Not done in this ticket** (explicitly out of scope, named so nobody assumes otherwise): MSO-02
+(env-routed Alertmanager paging + the `by (host)` generalization of the `DiskSpaceLow`/
+`RemoteWriteStalled` alert rules — the by-host queries this ticket ships are ahead of the still-
+single-host live rules), MSO-06 (console UI consumption — a concurrent session owns
+`platform-ui`), MSO-07 (QA adversarial pass), MSO-08 (onboarding the rest of the fleet). No live
+server was touched; verification was against a stubbed Prometheus/Alertmanager and a disposable
+test database only.
+
 ### platform-ui `0.29.1` — 2026-08-21 — the company report said its own name twice
 
 **Fixed**

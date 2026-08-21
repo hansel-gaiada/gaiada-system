@@ -1,6 +1,8 @@
 # Multi-server Plane A observability (MSO)
 
-**Date:** 2026-08-21 · **Status:** PLANNED (design ratified by architect; nothing built) ·
+**Date:** 2026-08-21 · **Status:** IN PROGRESS — MSO-00/01 DEV-VERIFIED live; MSO-04 (`infra_hosts`)
+and MSO-05 (estate endpoint) PROTOTYPED, backend only, unit + live-DB tested, not yet consumed by a
+UI; OQ-2/3/4 ANSWERED below (§10); MSO-02/03/06/07/08 still PLANNED ·
 **Owner ask:** "we need to see more servers in there. we are having lots of servers for staging,
 production etc." — the ERP's Systems → Observability console must become a multi-host,
 multi-environment view.
@@ -323,6 +325,21 @@ full re-run.
 | **MSO-07** | qa · seat default | Adversarial pass: stop the agent on a non-prod host → console `dark` ≤ 12 m and `RemoteWriteStalled` fires; mock-empty-Prometheus null audit (zero coerced 0s); inject an unlabeled/unknown-host series → unregistered row appears; AM down → `alerts:null` + reason; measured-zero case (0 firing alerts ≠ null) renders distinctly | All five drills pass **driven through the real surface**, screenshots/logs attached to the ticket | MSO-03, MSO-05, MSO-06 |
 | **MSO-08** | devops · seat default (repeat per host) | Onboard each remaining owner-approved host per runbook; add its `infra_hosts` row (status → active) | Console row `fresh`; disk rules verified matching the host's series via promtool test (never by filling a real disk); box-owner rules obeyed (`docker ps -a` diff) | MSO-03, OQ-1 |
 
+**Status update (2026-08-21, MSO-05 ticket close-out):** MSO-04 and MSO-05 above both moved to
+🟡 PROTOTYPED in the same pass — MSO-04's `infra_hosts` table did not exist when MSO-05 started, and
+MSO-05 cannot satisfy its own "expected-but-dark hosts must appear" acceptance criterion without it
+(§3.1's own opening line), so MSO-05 built MSO-04's migration verbatim rather than blocking on a
+separate ticket, per this doc's own §3.1 fallback clause. `estate-observability.ts` (pure
+freshness/null-vs-zero logic) has 31/31 unit tests green with no infrastructure; the `app.inject`
+suite (`observability-estate.db.test.ts`) has 8/8 green against a real Postgres + Cerbos +
+stubbed Prometheus/Alertmanager. Neither ticket is DEV-VERIFIED against the LIVE remote Prometheus
+end-to-end yet (that needs a live `ALERTMANAGER_URL` deploy value and a platform restart) or
+consumed by a UI (MSO-06, separate ticket, separate session) — hence PROTOTYPED, not further.
+Contract deviations found while building (the `alerts` field-name collision in §20.1a's own text,
+Alertmanager fetched independently of Prometheus, the still-single-host disk alert rules) are
+recorded in `docs/FRONTEND-BFF-CONTRACT.md` §20.1a notes 8–12, not here — that file is the contract
+of record.
+
 Critical path: **MSO-00 → MSO-01 → MSO-05 → MSO-06 → MSO-07**, with MSO-03/04 in parallel after
 MSO-01/—. Highest value per unit of effort: **MSO-00** (stops active waste and lies today) and
 **MSO-01** (unblocks everything multi-host).
@@ -336,15 +353,33 @@ MSO-01/—. Highest value per unit of effort: **MSO-00** (stops active waste and
    (34.158.47.112, **98 % disk — most urgent candidate**). Confirm env (production/staging/ops/dev)
    and role for each, and name any staging boxes not yet in ssh config ("lots of servers" implies
    more than we can see). `delphi`/`helios` are treated as permanently out of scope — confirm.
-2. **OQ-2 — Paging policy by environment.** Production alerts page (current transports). Should
-   staging/dev alerts page too, or land ticket-only/ntfy? Sets the Alertmanager routing tree.
-3. **OQ-3 — Hub blast-radius acceptance.** Every onboarding adds one WireGuard peer on the SumoPod
-   host — a host-level change on the box carrying your private production. Accept as standing
-   policy, or should the obs hub eventually move to a dedicated box? (Related: the hub is now the
-   single point of estate visibility; the external dead-man's-switch remains the backstop.)
-4. **OQ-4 — Confirm no-Tailscale.** Rejected here for third-party control-plane and new-dependency
-   reasons; costs nothing to reverse later. Spend for the whole design as ruled: **zero** (no new
-   boxes, no SaaS).
+2. **OQ-2 — Paging policy by environment — ANSWERED 2026-08-21 (owner: "use the best way n
+   safest").** **PRODUCTION pages** (current transports, unchanged). **staging/dev/ops are
+   ticket-only** — never a page. Rationale, written down because it is the whole point of the
+   ruling: alert fatigue IS the failure mode that makes real pages get ignored. A staging box waking
+   someone at 3am does not make the estate safer — it trains the responder to treat the pager as
+   noise, which is precisely how a genuine production page gets snoozed. Routing is by the `env`
+   label MSO-01 landed (§4), so one rule file keeps covering every host regardless of environment —
+   the routing tree branches on `env`, the rules themselves stay env-agnostic. This is now MSO-02's
+   acceptance criterion, not an open question: `amtool config routes test` must show production ⇒
+   page transports, staging/dev/ops ⇒ ticket-only receiver, for every env value in the CHECK
+   constraint on `infra_hosts.env`.
+3. **OQ-3 — Hub blast-radius acceptance — ANSWERED 2026-08-21: ACCEPT peer-per-host.** The
+   mitigation is already load-bearing in the design (§2.2): every spoke's `AllowedIPs` is
+   `10.88.0.2/32` **only**, so an onboarded host can reach the hub and reach nothing else on the
+   mesh — a compromised spoke cannot pivot to another spoke, by construction, regardless of how many
+   peers the hub accumulates. **Revisit trigger, recorded so this isn't re-litigated per host:** if
+   the fleet outgrows a handful of hosts, move the hub to a dedicated box rather than keep widening
+   the peer list on the box that also carries the owner's private production. Until that trigger
+   fires, each onboarding (MSO-08) adds one peer entry on SumoPod as standing policy — not a
+   one-off exception each time.
+4. **OQ-4 — Confirm no-Tailscale — ANSWERED 2026-08-21: STAYS REJECTED.** Fewer external
+   dependencies and no third-party control plane on hosts this program does not fully own (SumoPod
+   carries the owner's private production; `aire-vps`'s ownership status is still unresolved per
+   OQ-1). Spend for the whole design **as ratified: zero** (no new boxes, no SaaS) — Tailscale would
+   have been the one line item that could have changed that, and it is exactly the item this answer
+   removes. Reversible later at zero sunk cost if the fleet's ops posture ever changes; not
+   revisited absent that.
 5. **OQ-5 — First onboarding target** — ANSWERED 2026-08-21: NOT `gda-ce01`, which the owner has ruled out of scope entirely. Dry-run the runbook on `gda-aicenter` (already instrumented, and the box we can afford to be wrong about) BEFORE touching the live estate. The superseded recommendation read: `gda-ce01` — it is
    the box most likely to fill a disk unobserved, so it buys the most safety per hour of work.
 

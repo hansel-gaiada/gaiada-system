@@ -431,6 +431,15 @@ const configBase = {
     // Display-only: an operator-facing hint about where the full dashboards live. Never fetched
     // (Grafana requires its own auth and is reached over an SSH tunnel, not proxied by us).
     grafanaUrl: process.env.GRAFANA_PUBLIC_HINT ?? "",
+    // MSO-05 (docs/plans/2026-08-21-multi-server-observability.md §5): alerts for the estate view
+    // come from ALERTMANAGER, never from Prometheus's own `ALERTS` series — that is the only way
+    // silence/inhibition state is visible (a silenced alert rendered as firing teaches operators to
+    // distrust the board). Deploy value is `http://10.88.0.2:9093` (the SumoPod hub, over the
+    // WireGuard tunnel — never a public address). Empty ⇒ the estate endpoint reports
+    // `alerts: null` with a reason naming this var, exactly like an unset PROMETHEUS_URL degrades
+    // the rest of the console — never a silent fallback to the Prometheus ALERTS series, which is a
+    // second source that can disagree with this one.
+    alertmanagerUrl: process.env.ALERTMANAGER_URL ?? "",
   },
   services: {
     gateway: { url: process.env.GATEWAY_URL ?? "", token: process.env.GATEWAY_TOKEN ?? "" },
