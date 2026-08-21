@@ -119,6 +119,16 @@ export function RoleManager({
         )}
       </div>
 
+      {/* The grant chips above are the at-a-glance answer and stay visible. Everything below is the
+          EDIT surface, and it used to be expanded for every row at once: on the live company the
+          users table rendered a Role select, a Scope select, a Scope-ID input, an Assign button and a
+          Revoke-sessions button inside EVERY row, ~200px of chrome per person, so four rows filled the
+          viewport and the actual roster sat below the fold. A native <details> keeps all of it in the
+          DOM (so nothing here becomes unreachable, and the tests that drive the scope picker still
+          find it) while collapsing the row to its facts until someone chooses to act. */}
+      <details className="lux-rm">
+        <summary className="lux-rm__summary">Manage access</summary>
+        <div className="lux-rm__body">
       <form action={assignFormAction} style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "flex-end" }}>
         <label className="lux-field">
           <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Role</Eyebrow>
@@ -186,6 +196,8 @@ export function RoleManager({
           {sessionPending ? "Revoking…" : "Revoke sessions"}
         </Button>
       </form>
+        </div>
+      </details>
 
       {assignState?.error && <Toast message={assignState.error} />}
       {assignState?.ok && <Toast message="Role assigned." />}

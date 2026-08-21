@@ -6,7 +6,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getReportDocument, getReportOverview, isForbidden, isRangeTooLarge } from "@/lib/reports-data";
 import { dayCountOf, type ReportPeriodKind } from "@/lib/reports";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, KpiTile } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReportAccessDenied } from "@/components/reports/ReportAccessDenied";
 import { ReportRangeError } from "@/components/reports/ReportRangeError";
@@ -68,9 +68,18 @@ export default async function DepartmentReportPage({
             <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
               {overview.scopes.map((s) => (
                 <Card key={s.scopeRef} title={s.scopeName}>
-                  <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", marginBottom: 12 }}>
+                  {/* An inline stat strip, not three bordered KpiTiles. `minmax(100px, 1fr)` needed
+                      3x100 + 2x10 = 320px and the card's inner width is ~318 on a 3-up card grid, so it
+                      landed one pixel short of three columns and wrapped 2-up-plus-one every time —
+                      leaving a dead cell beside the third stat and making every card ~360px tall for three
+                      numbers. A flex strip has no such cliff, and dropping the per-stat borders removes a
+                      box-inside-a-box that was carrying no information. */}
+                  <div className="lux-statstrip">
                     {s.kpis.map((k) => (
-                      <KpiTile key={k.metricKey} label={k.label} value={formatKpiValue(k.unit, k.value)} />
+                      <div className="lux-stat" key={k.metricKey}>
+                        <span className="lux-stat__label">{k.label}</span>
+                        <span className="lux-stat__value">{formatKpiValue(k.unit, k.value)}</span>
+                      </div>
                     ))}
                   </div>
                   <Link href={scopeHref(periodKind, start, end, s.scopeRef)} className="lux-btn lux-btn--ghost lux-btn--sm">

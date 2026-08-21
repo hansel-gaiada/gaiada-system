@@ -44,8 +44,18 @@
 .filter-chip__label { font: 400 12px var(--font-body); }
 .filter-chip__count { font: 700 12px var(--font-body); }
 
-.command-center__chips-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 22px; }
-.command-center__chips-row .throughput-sparkline { min-width: 160px; max-width: 260px; flex: 1; }
+/* `align-items: flex-end` bottom-aligned a ~34px chip row against a ~72px sparkline block, so the
+   row stood 72px tall with the chips pinned to its floor and the chart's label floating away up
+   and to the right — the two read as unrelated things that had collided rather than one control
+   strip. Centred and shorter now, with a hairline to its left so the glance-value chart is
+   visibly a separate unit from the filters it sits beside instead of bleeding into them.
+   `flex: 0 1 auto`, not `flex: 1`: it should take the width it needs, not fight the chips for the
+   leftover space. */
+.command-center__chips-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
+.command-center__chips-row .throughput-sparkline {
+  min-width: 150px; max-width: 230px; flex: 0 1 auto;
+  padding-left: 20px; border-left: 0.5px solid var(--erp-hairline);
+}
 .command-center__heading { display: block; margin-bottom: 10px; }
 
 .queue-agenda { display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start; }
@@ -65,6 +75,18 @@
 /* ---- TR-10: the My Work check-in card ---- */
 .checkin-card__prefill-note { margin: 0 0 14px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); font-style: italic; }
 .checkin-card__form { display: flex; flex-direction: column; gap: 4px; }
+/* Height, scoped to this card only. The two `lux-field` textareas inherit forms.css's global
+   `min-height: 72px`, which is right for a real composition box but wrong here: the summary arrives
+   PREFILLED with one line of server-drafted text and blockers is usually empty, so 144px of the
+   card was reserved for two mostly-empty boxes. Measured on the live box the card ran ~430px tall
+   and pushed "Needs you (10)" — the actual point of this page — below the fold on a 1440x1000
+   viewport. Both still `resize: vertical`, so anyone with more to say drags one open; the global
+   rule is untouched for every other form in the app.
+
+   Deliberately NOT restructured beyond this: TR-10 fixes the four render branches and a <=3
+   interaction budget asserted in this component's tests, and the ticket put the card ahead of the
+   queue on purpose. Shrinking its footprint fixes the hierarchy without relitigating that. */
+.checkin-card__form .lux-field__control--textarea { min-height: 46px; }
 .checkin-card__actions { display: flex; gap: 10px; margin-top: 14px; }
 /* #B5622F was --primitive-rust spelled out by hand, i.e. the GRAPHIC tier of the critical
    ramp used as body text. --status-critical-fg is the text tier of that same ramp (#A0511F,

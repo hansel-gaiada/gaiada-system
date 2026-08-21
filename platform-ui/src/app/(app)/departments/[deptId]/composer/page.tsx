@@ -60,7 +60,7 @@ export default async function DepartmentComposerPage({ params }: { params: Param
       {posts.data.length === 0 ? (
         <TeachState glyph="✎" title="No posts yet" body="Draft your first post using the form above." />
       ) : (
-        <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "680px" }}>
+        <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "680px" }}>
           <HairlineTable
             columns={[{ label: "Post" }, { label: "Engagement" }, { label: "Status" }, { label: "Scheduled" }, { label: "Variants" }]}
             rows={posts.data.map((p) => [

@@ -90,7 +90,7 @@ export default async function DepartmentEngagementsPage({ params }: { params: Pa
             ctaHref={canManage ? `/departments/${deptId}/audit` : undefined}
           />
         ) : (
-          <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "840px" }}>
+          <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "840px" }}>
             <HairlineTable
               columns={[
                 { label: "Engagement" },
@@ -114,7 +114,7 @@ export default async function DepartmentEngagementsPage({ params }: { params: Pa
             body="A property is a client domain this department works on. Crawls, keywords, rankings and briefs all hang off it."
           />
         ) : (
-          <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "780px" }}>
+          <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "780px" }}>
             <HairlineTable
               columns={[{ label: "Domain" }, { label: "Site URL" }, { label: "Verified" }, { label: "Status" }]}
               rows={properties.map((p) => [

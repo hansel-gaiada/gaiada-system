@@ -10,14 +10,17 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { RoleManager } from "@/components/admin/RoleManager";
 import { assignRoleAction, revokeRoleAction, revokeSessionAction } from "./actions";
 
+// Name and email were two columns, and the `service` badge sat inline after the name in the first
+// of them — so on every automation account the badge ran into the email text in the column beside
+// it. They are ONE identity, so they are now one cell (name over email), which removes the
+// collision and buys the width back for the column that actually needed it.
 const COLUMNS = [
-  { label: "Name" },
-  { label: "Email" },
+  { label: "Member" },
   { label: "Title" },
   { label: "Status" },
   { label: "Roles & access" },
 ];
-const TCOLS = "1.2fr 1.6fr 1fr 0.8fr 2.4fr";
+const TCOLS = "2.1fr 1fr 0.7fr 2.2fr";
 
 export default async function AdminUsersPage() {
   const userId = await getSessionUserId();
@@ -48,6 +51,16 @@ export default async function AdminUsersPage() {
     throw e;
   }
 
+  // Humans first. `listUsers(…, true)` includes service principals on purpose (this is where an
+  // automation account's grants get audited — hiding them would hide exactly what needs governing,
+  // see the call above), but the endpoint returns them in whatever order it likes and on the live
+  // company that put FOUR automation accounts at the top: an admin opening this page met a screen
+  // of bots before a single colleague. Service accounts are the exception case, so they sort last;
+  // within each group, by name, so the order is stable rather than endpoint-dependent.
+  const sortedUsers = [...users].sort((a, b) =>
+    Number(a.isService) - Number(b.isService) || a.name.localeCompare(b.name),
+  );
+
   const roles = tenant ? await listRoles(userId, tenant) : [];
   // The `org_unit` scope picker (RoleManager) reuses the same org chart the org builder reads —
   // no new fetch, per IAM-UI-SCOPE's constraint. Falls back to an empty list (renders as "no
@@ -66,19 +79,21 @@ export default async function AdminUsersPage() {
         {users.length === 0 ? (
           <EmptyNote>No members found for the active company.</EmptyNote>
         ) : (
+          // Same guard the department console tabs use: `HairlineTable` is an fr-column grid with no
+          // track minimum and no stacked mode, so below its no-wrap width every cell breaks
+          // mid-phrase. 720px is this table's measured floor.
+          <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "720px" }}>
           <HairlineTable
             tcols={TCOLS}
             columns={COLUMNS}
-            rows={users.map((u) => [
-              u.isService ? (
-                <span key={`${u.id}-name`} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            rows={sortedUsers.map((u) => [
+              <span key={`${u.id}-who`} className="lux-who">
+                <span className="lux-who__name">
                   {u.name}
-                  <StatusBadge label="service" />
+                  {u.isService && <StatusBadge label="service" />}
                 </span>
-              ) : (
-                u.name
-              ),
-              u.email,
+                <span className="lux-who__email">{u.email}</span>
+              </span>,
               u.title ?? "—",
               <StatusBadge key={`${u.id}-status`} label={u.status} />,
               <RoleManager
@@ -93,6 +108,7 @@ export default async function AdminUsersPage() {
               />,
             ])}
           />
+          </div>
         )}
       </Card>
     </>

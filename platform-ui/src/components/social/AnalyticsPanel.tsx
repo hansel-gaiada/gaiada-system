@@ -40,7 +40,7 @@ function AccountDailyTable({ network, handle, displayName, rows }: {
       <div style={{ font: "700 12px var(--font-body)", color: "var(--text-primary)", marginBottom: 6 }}>
         {displayName ?? handle} <span style={{ opacity: 0.55, fontWeight: 400 }}>· {network} · @{handle}</span>
       </div>
-      <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "620px" }}>
+      <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "620px" }}>
         <div className="lux-table" style={{ ["--lux-tcols" as string]: "1fr 0.9fr 0.9fr 0.9fr 0.9fr 0.9fr 0.9fr" }}>
           <div className="lux-table__head" style={GRID_GAP}>
             <span>Date</span><span>Followers</span><span>Impressions</span><span>Reach</span>
@@ -111,7 +111,7 @@ export function AnalyticsPanel({ dailySeries, postMetrics }: {
             One row per post, showing the most recent pull. A published post that never appears here
             has simply never been pulled — never a fabricated zero-engagement row.
           </p>
-          <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "600px" }}>
+          <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "600px" }}>
             <div className="lux-table" style={{ ["--lux-tcols" as string]: "0.9fr 0.9fr 0.7fr 0.7fr 0.7fr 0.7fr 0.7fr 0.9fr" }}>
               <div className="lux-table__head" style={GRID_GAP}>
                 <span>Network</span><span>Published</span><span>Impr.</span><span>Likes</span>

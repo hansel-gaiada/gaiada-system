@@ -10,15 +10,36 @@ import { ChartDataFallback } from "./ChartDataFallback";
 // `pointInTime`/`distinctOver` kpi is visibly labelled (§5.4): without that a
 // reader assumes any number on a 30-day report is a 30-day total, and both
 // markers read as inflated totals if silently summed.
+// LEAD_COUNT — how many KPIs get the big treatment. The person grain ships SEVENTEEN kpis and the
+// flat `repeat(auto-fit, minmax(180px, 1fr))` grid drew every one of them at identical weight: three
+// ragged rows of 28px figures, twelve of which read `0`, `0%` or `0m` on a real account. A wall of
+// equally-loud zeros answers no question, so the reader has to search it. `document.kpis` order is
+// authored per grain in §7, so the first few ARE the headline ones — promote those and demote the
+// tail to a compact band that is still fully present, just quieter. No KPI is dropped or hidden:
+// this is a weighting change, not a filter (the `ChartDataFallback` table below still lists all).
+const LEAD_COUNT = 4;
+
 export function KpiTiles({ kpis, comparisonLabel }: { kpis: ReportKpi[]; comparisonLabel?: string | null }) {
   if (kpis.length === 0) return null;
+  // Only split when the tail is worth demoting. At 6 or fewer the flat grid reads fine in one band,
+  // and splitting would strand one or two tiles in a nearly-empty second row.
+  const split = kpis.length > 6;
+  const lead = split ? kpis.slice(0, LEAD_COUNT) : kpis;
+  const rest = split ? kpis.slice(LEAD_COUNT) : [];
   return (
     <div className="rc-viz">
-      <div className="rc-kpis">
-        {kpis.map((k) => (
+      <div className="rc-kpis rc-kpis--lead">
+        {lead.map((k) => (
           <KpiTile key={k.metricKey} kpi={k} comparisonLabel={comparisonLabel} />
         ))}
       </div>
+      {rest.length > 0 && (
+        <div className="rc-kpis rc-kpis--rest">
+          {rest.map((k) => (
+            <KpiTile key={k.metricKey} kpi={k} comparisonLabel={comparisonLabel} compact />
+          ))}
+        </div>
+      )}
       <ChartDataFallback
         caption="KPI values, as a table"
         columns={["Metric", "Value", "Numerator", "Denominator", "Delta", "Class"]}
@@ -48,21 +69,30 @@ function formatValue(k: ReportKpi): string {
   return k.value.toLocaleString();
 }
 
-function KpiTile({ kpi, comparisonLabel }: { kpi: ReportKpi; comparisonLabel?: string | null }) {
+function KpiTile({ kpi, comparisonLabel, compact = false }: {
+  kpi: ReportKpi; comparisonLabel?: string | null; compact?: boolean;
+}) {
   const ratio = kpi.numerator !== undefined && kpi.denominator !== undefined
     ? `${kpi.numerator.toLocaleString()}/${kpi.denominator.toLocaleString()}`
     : null;
   return (
-    <div className="rc-kpi">
+    <div className={`rc-kpi${compact ? " rc-kpi--compact" : ""}`}>
+      {/* The label owns this row alone. The appraisal-unsafe marker used to sit here as a second
+          flex child, and MEASURED on the live person report it overflowed the row (181px of content
+          in 171px) on six of seventeen tiles — "TASKS COMPLETED", "MINUTES LOGGED", "COMMENTS
+          AUTHORED" and friends each wrapped to two lines around it, which is what made the band
+          look ragged. It moved to `__foot`, where every other qualifier badge already lives and
+          which wraps by design. Still always rendered — §5.2 anti-gaming needs it stated — just no
+          longer competing with the label for one line, and no longer in alarm red. */}
       <div className="rc-kpi__label-row">
         <span className="rc-kpi__label">{kpi.label}</span>
-        {!kpi.appraisalSafe && (
-          <span className="rc-kpi__badge rc-kpi__badge--unsafe" title="Not used in appraisal scoring">appraisal-unsafe</span>
-        )}
       </div>
       <div className="rc-kpi__value">{formatValue(kpi)}</div>
       <div className="rc-kpi__foot">
         {ratio && <span className="rc-kpi__ratio">{ratio}</span>}
+        {!kpi.appraisalSafe && (
+          <span className="rc-kpi__badge rc-kpi__badge--unsafe" title="Not used in appraisal scoring">not appraised</span>
+        )}
         {kpi.pointInTime && (
           <span className="rc-kpi__badge" title="Evaluated at the end of the range, not summed across it">as of range end</span>
         )}

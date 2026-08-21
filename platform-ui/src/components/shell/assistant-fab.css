@@ -25,3 +25,19 @@
 @media (max-width: 560px) {
   .asst-fab { right: 14px; bottom: 14px; padding: 9px 14px; }
 }
+
+/* Reserve the floor the FAB occupies. It is `position: fixed`, so it takes no layout space and sat
+   directly ON TOP of whatever ended the page — measured on the live box it covered the last row's
+   Approve/Deny buttons on Home and the last row of the users table on /admin/users, i.e. it hid
+   controls, not just text. `.erp-main` is the scroll container (the document itself does not
+   scroll), so the padding belongs on its inner wrapper: ~40px of button + 20px of offset + a
+   little air. Additive to the 40px `.erp-main__inner` already carries.
+
+   Scoped by `:has()` to shells that actually mount the FAB, so a surface without one (print, the
+   client portal) keeps its original bottom. The selector hangs off `.erp-app`, NOT `.erp-main`:
+   `AssistantFab` is a SIBLING of `.erp-main` in Shell.tsx, so `.erp-main:has(.asst-fab)` matches
+   nothing at all. */
+.erp-app:has(.asst-fab) .erp-main__inner { padding-bottom: 104px; }
+@media (max-width: 560px) {
+  .erp-app:has(.asst-fab) .erp-main__inner { padding-bottom: 92px; }
+}

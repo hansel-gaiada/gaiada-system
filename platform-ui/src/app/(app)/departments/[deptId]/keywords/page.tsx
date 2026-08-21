@@ -86,7 +86,7 @@ export default async function DepartmentSeoKeywordsPage({ params, searchParams }
                 body="A keyword set is what import/embed/cluster all key off. Create the first one for this engagement below."
               />
             ) : (
-              <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "300px" }}>
+              <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "300px" }}>
                 <HairlineTable
                   columns={[{ label: "Set" }, { label: "Source" }, { label: "" }]}
                   rows={keywordSets.map((s) => [

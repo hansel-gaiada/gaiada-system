@@ -50,7 +50,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
           {runs.length === 0 ? (
             <EmptyNote>No PRD runs yet. Record a briefing above — a run appears here once the meeting is dispatched into the pipeline.</EmptyNote>
           ) : (
-            <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "480px" }}>
+            <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "480px" }}>
               <HairlineTable
                 columns={[{ label: "Run" }, { label: "Source meeting" }, { label: "Status" }, { label: "Started", align: "right" }]}
                 tcols="2fr 1.3fr 1fr 1fr"

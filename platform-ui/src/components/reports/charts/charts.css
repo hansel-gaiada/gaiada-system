@@ -119,9 +119,31 @@
    marks-and-anatomy.md is explicit that a hero/stat-tile value in a serif
    face reads as off-brand decoration — a real difference from the generic
    `.lux-kpi__value` elsewhere in ui.css, which does use --font-display. */
+/* Two bands, one scale of importance. `--lead` keeps the original card treatment at a slightly
+   wider track and a bigger figure; `--rest` is the demoted tail — same information, a third of
+   the visual weight, packed tighter so seventeen KPIs stop reading as seventeen headlines.
+   auto-FILL on the rest band, not auto-fit: a short tail should stay at its natural cell width
+   in a left-aligned run rather than stretching four tiles across the full page. */
 .rc-kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+/* Explicit counts, not auto-fit. LEAD_COUNT is 4, and `minmax(200px, 1fr)` resolved to THREE
+   columns in the ~698px main column (measured), laying the lead band out 3-then-1 with a dead cell
+   — the same raggedness this whole change exists to remove. 4 and 2 both divide 4 evenly, so the
+   band is always a full 1x4 or a full 2x2 and never strands a tile. If LEAD_COUNT ever changes,
+   these two counts have to change with it. */
+.rc-kpis--lead { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .rc-kpis--lead { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rc-kpis--lead .rc-kpi__value { font-size: 34px; }
+.rc-kpis--rest { grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 10px; margin-top: -4px; }
+.rc-kpi--compact { padding: 11px 12px; gap: 5px; background: transparent; }
+.rc-kpi--compact .rc-kpi__value { font-size: 19px; }
+.rc-kpi--compact .rc-kpi__label { font-size: 9px; }
+.rc-kpi--compact .rc-kpi__foot { font-size: 10px; gap: 6px; }
 .rc-kpi { background: var(--rc-surface); border: 0.5px solid var(--rc-axis); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.rc-kpi__label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+/* `min-width: 0` on the row AND the label: without it a long label establishes a min-content floor
+   that the 158px compact track cannot honour, and the tile pushes past its cell instead of the
+   label simply wrapping inside it. */
+.rc-kpi__label-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rc-kpi__label-row .rc-kpi__label { min-width: 0; overflow-wrap: anywhere; }
 .rc-kpi__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--rc-text-muted); }
 .rc-kpi__value { font: 700 28px var(--font-body); color: var(--rc-text-primary); line-height: 1.1; font-variant-numeric: proportional-nums; }
 .rc-kpi__foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 11px var(--font-body); color: var(--rc-text-secondary); }
@@ -130,7 +152,10 @@
   font: 700 8px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--rc-text-secondary); border: 0.5px solid var(--rc-axis); padding: 1px 5px; white-space: nowrap;
 }
-.rc-kpi__badge--unsafe { color: var(--rc-serious); border-color: var(--rc-serious); }
+/* Was `--rc-serious` (alarm red) on nine of seventeen tiles at once, which read as "nine things are
+   wrong" when it only ever meant "this number is not an appraisal input". Same ink as the other
+   qualifier badges now — informational, not a warning. The colour is the message, so it had to go. */
+.rc-kpi__badge--unsafe { color: var(--rc-text-muted); border-color: var(--rc-axis); }
 /* Appraisal cohort-band badge (TR-26) — the same fixed, never-themed status ramp KpiTiles reserves
    for good/warning/serious/critical, keyed off the 1-5 band so it stays a single source of truth
    between the badge and the distribution-strip marker below rather than two inline color maps. */

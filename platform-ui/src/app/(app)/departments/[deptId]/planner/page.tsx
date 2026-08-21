@@ -81,7 +81,7 @@ export default async function DepartmentSeoPlannerPage({ params, searchParams }:
                 body="No campaigns exist for this engagement. Generate one from a clustered keyword set below, or create an empty campaign shell to build up manually."
               />
             ) : (
-              <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "360px" }}>
+              <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "360px" }}>
                 <HairlineTable
                   columns={[
                     { label: "Campaign" }, { label: "Platform" }, { label: "Status" }, { label: "Budget", align: "right" },

@@ -81,7 +81,7 @@ export default async function DepartmentSeoAuditPage({ params, searchParams }: {
                 body="Once search-crawl-go (or another adapter) completes a crawl and its report is ingested, the audit and its findings will appear here."
               />
             ) : (
-              <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "600px" }}>
+              <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "600px" }}>
                 <HairlineTable
                   columns={[
                     { label: "Kind" }, { label: "Source" }, { label: "Status" },

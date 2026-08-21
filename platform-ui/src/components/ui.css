@@ -34,6 +34,54 @@
    jitter row to row. --font-data is Inter with tnum always on. */
 .lux-table__cell--num { justify-self: end; text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 
+/* ── The scroll guard every `.lux-table` needs ─────────────────────────────────────────────────
+   `.lux-table__head`/`__row` above are fr-column grids. `fr` is `minmax(auto, 1fr)`, so the tracks
+   do NOT overflow and the spans do NOT geometrically collide — measured, both are clean at every
+   desktop width. What actually happens is that `auto` floors at min-content, and min-content for
+   wrappable text is its longest WORD: past the squeeze point each cell silently wraps mid-phrase,
+   the header row grows a line, and the columns stop reading as columns.
+
+   `--lux-table-min` is the wrapped table's measured no-wrap width — the narrowest container in
+   which none of its cells break — set per call site, never guessed from the column count (an
+   8-column table of short figures needs 600px; a 5-column table carrying domains needs 840px).
+   Below it the wrapper takes the scroll: swiping a table whose columns survive beats reading one
+   that has folded in on itself. Above it nothing scrolls and the table sits inside its card.
+
+   This began life as the Projects tab's private `.dept-proj__scroll`, then `.dept-table-scroll` in
+   departments.css — but it guards `.lux-table`, which is a ui.css primitive used well outside the
+   department console (admin/users among others), so it belongs here under a name that says so. */
+.lux-table-scroll { overflow-x: auto; }
+.lux-table-scroll > .lux-table { min-width: var(--lux-table-min, 640px); }
+/* Identity cell — a name over its email, one column instead of two. `min-width: 0` + anywhere-wrap
+   because an address is one long unbreakable token and will otherwise set a min-content floor the
+   track cannot honour. */
+.lux-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lux-who__name { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; font: 400 14px var(--font-body); color: var(--text-primary); }
+.lux-who__email { font: 400 12px var(--font-body); color: var(--ink-subtle); overflow-wrap: anywhere; }
+
+/* Row-level edit disclosure (see RoleManager.tsx for why the form collapsed). The marker is
+   suppressed and replaced with a text affordance, matching pipeline.css's existing <details>
+   idiom rather than inventing a second one. */
+.lux-rm { min-width: 0; }
+.lux-rm__summary {
+  cursor: pointer; list-style: none; width: max-content;
+  font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--erp-accent); padding: 3px 0;
+}
+.lux-rm__summary::-webkit-details-marker { display: none; }
+.lux-rm__summary::before { content: "+ "; }
+.lux-rm[open] .lux-rm__summary::before { content: "2 "; }
+.lux-rm__summary:hover { opacity: 0.7; }
+.lux-rm__summary:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+.lux-rm__body { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 2px; }
+/* Inline stat strip — a few headline figures inside a card that is ALREADY a card, so the stats
+   themselves carry no border. Wraps rather than overflowing; `min-width: 0` lets a long label wrap
+   inside its own stat instead of widening the strip. */
+.lux-statstrip { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 14px; }
+.lux-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lux-stat__label { font: 700 9px var(--font-body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-subtle); }
+.lux-stat__value { font: 700 22px/1.1 var(--font-body); color: var(--text-primary); font-variant-numeric: lining-nums tabular-nums; }
+
 .lux-toast { box-shadow: var(--elev-overlay); position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: var(--surface-inverse); color: var(--text-on-inverse); padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); display: flex; align-items: center; gap: 12px; }
 .lux-toast__undo { background: none; border: none; padding: 0; color: var(--accent-on-inverse); font: 700 12px var(--font-body); letter-spacing: 0.04em; text-decoration: underline; cursor: pointer; }
 .lux-toast__undo:hover { color: var(--text-on-inverse); }

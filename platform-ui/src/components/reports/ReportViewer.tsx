@@ -29,9 +29,15 @@ import "./reports.css";
 // share a scale (dataviz's hard "one axis" rule — never combine two
 // differently-scaled measures on one plot without knowing they're the same
 // unit family).
-export function ReportViewer({ document, periodControl, children }: {
+export function ReportViewer({ document, periodControl, scopeHeading = true, children }: {
   document: ReportDocument;
   periodControl?: { value: PeriodSelectorValue; onChange: (next: PeriodSelectorValue) => void; todayIso: string };
+  /** Render the scope name as this surface's OWN heading. True by default, because the PRINT
+   *  surface (`app/print/reports/[jobToken]`) mounts this viewer with no `PageHeader` above it and
+   *  `print.css` styles `.rc-header__scope` as the document title — suppressing it there would ship
+   *  a titleless PDF. The in-app grain pages pass FALSE: their `PageHeader` already states the scope,
+   *  and rendering both printed the company name twice in a row at two different sizes. */
+  scopeHeading?: boolean;
   children?: ReactNode;
 }) {
   const { header } = document;
@@ -41,7 +47,7 @@ export function ReportViewer({ document, periodControl, children }: {
     <div className="rc-viz rc-page">
       <div className="rc-header">
         <div>
-          <h2 className="rc-header__scope">{header.scopeName}</h2>
+          {scopeHeading && <h2 className="rc-header__scope">{header.scopeName}</h2>}
           <div className="rc-header__meta">
             <span>{header.periodLabel}</span>
             {header.sealed ? (

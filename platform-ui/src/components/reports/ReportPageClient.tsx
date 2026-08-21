@@ -35,7 +35,7 @@ export function ReportPageClient({ document, todayIso, children }: {
   return (
     <>
       <RevisionNote header={header} />
-      <ReportViewer document={document} periodControl={{ value, onChange, todayIso }}>
+      <ReportViewer document={document} periodControl={{ value, onChange, todayIso }} scopeHeading={false}>
         {children}
       </ReportViewer>
     </>

@@ -18,11 +18,18 @@
 .rc-comparison-chip { font: 400 12px var(--font-body); color: var(--rc-text-muted); white-space: nowrap; }
 
 /* ---- warnings banner ---- */
-.rc-warnings { display: flex; flex-direction: column; gap: 6px; }
+/* Density only — every set flag still renders, always, undismissable and uncollapsed, exactly as
+   WarningsBanner.tsx requires ("silence here is a lie of omission"). What changed is the footprint:
+   two stacked info banners at 8/12 padding ate ~80px directly above the KPIs on a normal month-to-
+   date range, so the first actual number sat below a wall of caveats. Tighter padding and a smaller
+   face give the same sentences a third of the room. The risk tone keeps its full weight — a
+   fact-history gap or a membership split is not a footnote. */
+.rc-warnings { display: flex; flex-direction: column; gap: 4px; }
 .rc-warning {
-  display: flex; align-items: flex-start; gap: 8px; font: 400 12px var(--font-body);
-  padding: 8px 12px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); color: var(--rc-text-primary);
+  display: flex; align-items: flex-start; gap: 7px; font: 400 11.5px/1.45 var(--font-body);
+  padding: 5px 10px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); color: var(--rc-text-secondary);
 }
+.rc-warning--risk { color: var(--rc-text-primary); padding: 8px 12px; font-size: 12px; }
 .rc-warning--risk { border-color: var(--rc-serious); }
 .rc-warning__glyph {
   flex: 0 0 auto; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center;

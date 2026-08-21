@@ -10,7 +10,7 @@ export function ThroughputSparkline({ series }: { series: number[] }) {
   return (
     <div className="throughput-sparkline">
       <Eyebrow style={{ fontSize: 10, opacity: 0.5 }}>Throughput · last 8 weeks</Eyebrow>
-      <LineChart series={series} height={56} />
+      <LineChart series={series} height={38} />
     </div>
   );
 }
