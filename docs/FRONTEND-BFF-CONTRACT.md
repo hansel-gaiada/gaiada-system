@@ -3333,6 +3333,108 @@ Contract notes:
 5. **Disk queries must stay identical to the `DiskSpaceLow` alert expression.** The console and the
    pager reading different series is worse than having only one of them.
 
+### 20.1a Estate view — multi-host Plane A (MSO program, 2026-08-21) — ⛔ PENDING (design ratified: `docs/plans/2026-08-21-multi-server-observability.md`)
+
+Supersedes §20.1's single-host response **via expand/contract** (note 6). Same route, same gate,
+same plane: staff-only, never tenant-scoped, never merged with §20 Plane B.
+
+| Method | Path | Gate | Returns | Status |
+|---|---|---|---|---|
+| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `EstateObservabilitySnapshot` | ⛔ PENDING |
+
+Shapes (canonical in `platform-ui/src/lib/observability.ts` once built; `Reading`, `HostHealth`,
+`TargetSummary`, `DatastoreHealth` are §20.1's, with `HostHealth` gaining `cores: Reading`):
+
+```ts
+interface EstateObservabilitySnapshot {
+  available: boolean;              // the central Prometheus (PROMETHEUS_URL) answered
+  reason?: string | null;          // set when available:false
+  grafanaHint: string;
+  collectedAt: string;
+  hosts: HostSnapshot[] | null;    // null only when available:false
+  estate: EstateSummary | null;
+  alerts: EstateAlert[] | null;    // [] = measured, none firing; null = Alertmanager unreadable
+  alertsNote?: string | null;      // why alerts is null
+  // Plus, for ONE release (expand phase): §20.1's legacy host/targets/datastores/alerts fields,
+  // derived from the gda-aicenter row. New consumers must not read them (note 6).
+}
+
+interface HostSnapshot {
+  key: string;                     // = `host` series label = infra_hosts.key; never ""
+  displayName: string;             // = key when unregistered
+  env: "production" | "staging" | "ops" | "dev" | null;  // from inventory; null when unregistered
+  role: string | null;
+  registered: boolean;             // false ⇒ series exist but no infra_hosts row — render visibly abnormal
+  status: "active" | "onboarding" | "decommissioned" | null;  // null when unregistered
+  envDrift: boolean;               // series `env` label ≠ inventory env — render a drift badge
+  freshness: {
+    state: "fresh" | "stale" | "dark" | "never";
+    lastSampleAgeSeconds: number | null;   // null ⇔ state "never"
+  };
+  host: HostHealth | null;         // null when dark/never (instant vectors empty past staleness)
+  targets: TargetSummary | null;   // null = no target data for this host — NOT {up:0, down:0}
+  containersRunning: Reading;      // today ALWAYS {value:null, note:"…MON-09n…"} — see note 2
+  datastores: DatastoreHealth | null;  // null = host ships no pg/redis exporters; ≠ measured-down
+}
+
+interface EstateSummary {
+  hosts: { total: number; fresh: number; stale: number; dark: number; never: number };
+  alertsActive: number | null;     // null when Alertmanager unreadable — never 0
+  alertsSuppressed: number | null;
+}
+
+interface EstateAlert {
+  name: string;
+  severity: string;
+  state: "active" | "suppressed";  // Alertmanager v2 vocabulary; suppressed = silenced or inhibited
+  host: string | null;             // null = not attributable to one host (app-level alerts)
+}
+```
+
+Contract notes:
+
+1. **Freshness is first-class and gates rendering.** Thresholds: `fresh` ≤ 90 s since the host's
+   last sample, `stale` ≤ 600 s, `dark` > 600 s — deliberately the same 10 m boundary as the
+   `RemoteWriteStalled` alert, so the console and the pager cannot disagree — and `never` = no
+   sample in the 48 h lookback. When state ≠ `fresh` the UI MUST render that host's readings as
+   historical ("as of Xm ago") and muted; a `dark` host must be impossible to read as green. A
+   stale feed is the most dangerous state on this board precisely because it looks calm.
+2. **Measured-zero vs not-measured, field by field** (this console class has shipped null-as-0
+   repeatedly; every consumer renders `null` as unknown-with-reason, never as `0`):
+   - `containersRunning` — `{value: null, note}` **estate-wide today**: cAdvisor per-container
+     discovery is broken under the containerd snapshotter (MON-09n;
+     `count(container_last_seen{name!=""})` verified empty). A count of `0` would mean "measured:
+     nothing runs", which is false on every host.
+   - `targets: null` = no scrape data for this host (dark/never) — never emitted as `{up:0,down:0}`.
+   - `datastores: null` = nothing to measure (no exporters shipped) — distinct from
+     `{…, up:false}`, which is measured-and-down.
+   - `alerts: []` = Alertmanager answered and nothing fires; `alerts: null` = Alertmanager
+     unreadable (`alertsNote` says why). Same for the two `EstateSummary` counters.
+   - `freshness.lastSampleAgeSeconds: null` only with `state:"never"`.
+3. **Alerts come from Alertmanager (`ALERTMANAGER_URL`), not Prometheus's `ALERTS` series**, so
+   silence/inhibition is visible — a silenced alert rendered as firing teaches operators to
+   distrust the board, and the reverse hides a mute. No fallback to Prometheus when AM is down:
+   two sources that can disagree are worse than one honest `null`. `Watchdog` stays excluded
+   (§20.1 note 3). **`RemoteWriteStalled` is never excluded**: the UI renders it as a whole-board
+   banner — "estate feed dark; everything below is UNKNOWN, not healthy" — matching the alert's
+   own description.
+4. **`hosts[]` is inventory-driven, both drift directions visible.** It contains every
+   non-decommissioned `infra_hosts` row *even when no series exist* (`freshness: "never"`;
+   `status:"onboarding"` renders as expected-pending rather than alarming), decommissioned rows
+   muted until their series age out, **plus** unregistered hosts derived from series
+   (`registered:false`, visibly abnormal). Host key `""` (pre-label legacy series) is never
+   emitted. A host list derived only from series would silently drop a fully-dark host — the exact
+   failure this § exists to kill.
+5. **`available` covers only the central Prometheus.** Per-host reachability is `freshness`;
+   Alertmanager failing does not flip `available` (it nulls `alerts` per note 2).
+6. **Expand/contract migration.** The BE ships `hosts[]`/`estate`/`alerts` alongside §20.1's legacy
+   single-host fields for one release; the UI switches; the legacy fields then drop and §20.1's
+   response shape is retired. Releases on this estate do not land atomically across FE/BE waves —
+   do not build anything new against the legacy fields.
+7. §20.1 notes **2** (Reading discipline), **4** (target-up ≠ check-valid) and **5** (disk
+   expressions stay identical to `DiskSpaceLow`/`DiskWillFillIn24h`) carry over unchanged, now per
+   host.
+
 ---
 
 ## IAM Phase 2 — the routed override (P2-08 part B, 2026-08-19)
