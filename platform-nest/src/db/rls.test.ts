@@ -12,7 +12,16 @@ describe.skipIf(!TEST_URL)("core schema + RLS (authorized-tenant-set)", () => {
   beforeAll(async () => {
     await initTestDb();
     tenantA = await createCompany("Resort A");
-    tenantB = await createCompany("Agency B");
+    // MON-00b: `withTenants` now REFUSES a tenant set spanning two root company trees
+    // (CrossRootTenantSetError), so two independently-created companies can no longer be authorized
+    // together — which is what every "management path sees {A,B}" case below does. B is therefore a
+    // SUBSIDIARY of A rather than an unrelated company: one root, two tenants.
+    //
+    // This does not weaken what these suites test. RLS isolation is keyed on `tenant_id`, not on the
+    // root, so B remains a fully distinct tenant that A must not see; if anything it is the stronger
+    // case, since isolation now has to hold for two companies that DO share a root. Cross-root
+    // refusal is a separate guarantee, pinned in cross-root-boundary.db.test.ts.
+    tenantB = await createCompany("Agency B", [], tenantA);
     await createProject(tenantA, "Pool renovation");
     await createProject(tenantB, "Brand campaign");
   });
