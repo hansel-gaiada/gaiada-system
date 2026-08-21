@@ -4,6 +4,31 @@
 // extracted after the SM-24 gate found two guard lines nested inside a mode branch while a comment
 // claimed they ran unconditionally.
 //
+// ── SMM-38 PHASE 38c — `direct` IS NOW REGISTERED, AND WHY THAT IS STILL INERT ──────────────────
+// 38a/38b deliberately did NOT call `registerPublisher(createDirectDriver())` here: `direct` had an
+// EMPTY capability set, and registering an empty-but-present driver would have flipped
+// `resolvePublisher`'s "is anything configured" heuristic from an honest `publisher_not_configured`
+// to a confusing `unknown_publisher` for zero behavioural gain. 38c gives `direct` its first real
+// capability (LinkedIn), so this phase makes the registration call — and PRESERVES the distinction
+// rather than breaking it, by fixing the heuristic itself (`registry.ts#resolvePublisher`, see its
+// own updated header) to ignore `direct`'s registration when deciding "is anything configured".
+//
+// This remains behaviourally INERT on every live path today, for three independent reasons, each
+// sufficient on its own:
+//   1. `resolvePublisher` is only ever called with `org.driver`, which 0105's CHECK constrains to
+//      'postiz'|'mixpost' — 'direct' is never named there, so the ordinary per-org resolution path
+//      (`provisioning.ts#openOrg`, `dispatch.ts`) can never reach it.
+//   2. `resolvePublisherForCapability`'s override map (`config.social.publisher.capabilityDrivers`)
+//      is still EMPTY by default — nothing routes a (network, capability) pair to `direct` unless an
+//      operator explicitly sets `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS`, which no deployment does today.
+//   3. Even where that switch IS consulted, no live call site passes it a `direct`-shaped `OrgHandle`
+//      yet (`direct.ts`'s own header: nobody on a live path resolves a LinkedIn access token and
+//      builds the handle `schedulePost`/`uploadMedia` need — that surgery is 38e's).
+// `registerLinkedInTokenRefresher()` is the SAME story: it is a pure Map insert (no network call),
+// and it only becomes reachable when SMM-36's retention sweep finds a `linkedin` grant within its
+// refresh-ahead window — which requires a LIVE grant to already exist, and none does until 38e (or a
+// standalone LinkedIn connect ceremony) actually completes one via `linkedin-oauth.controller.ts`.
+//
 // ── THE PROPERTY THIS FILE OWES: BOOTING CLEANLY WITH POSTIZ UNREACHABLE ────────────────────────
 // Nothing here opens a socket. Registration is a pure, local decision from config, so:
 //   - Postiz down, tunnel down, VPS not built yet → the platform boots normally, the social module
@@ -21,6 +46,8 @@
 import { config } from "../../../config";
 import { checkPrivateVendorBaseUrl } from "../../../search-vendor-baseurl-guard";
 import { createPostizDriverFromConfig } from "./postiz";
+import { createDirectDriver } from "./direct";
+import { registerLinkedInTokenRefresher } from "./linkedin-oauth";
 import { registerPublisher } from "./registry";
 
 /** Escape hatch for the one legitimate case: an operator deliberately running the engine behind a
@@ -80,6 +107,15 @@ export function assertPublisherBaseUrlIsPrivate(baseUrl: string, allowOverride: 
  *  never appeared on a client's account while our calendar said it did — silent, and worse than an
  *  outage (see mock-driver.ts's header for the full contrast with SM-33's simulated providers). */
 export function wireSocialPublisher(): void {
+  // SMM-38c — registered FIRST and UNCONDITIONALLY, deliberately ahead of the Postiz early-return
+  // below: `direct` must be present in the registry regardless of whether Postiz is configured, or
+  // `resolvePublisherForCapability` could never find it by name in a Postiz-unconfigured deployment
+  // (a real deployment shape: LinkedIn/YouTube via `direct`, no Postiz at all, once 38e flips the
+  // config). See this file's header for why this is still inert on every live path today, and
+  // `registry.ts#resolvePublisher`'s own updated header for the heuristic fix that keeps it safe.
+  registerPublisher(createDirectDriver());
+  registerLinkedInTokenRefresher();
+
   assertPublisherBaseUrlIsPrivate(
     config.social.publisher.baseUrl,
     process.env[SOCIAL_ALLOW_PUBLIC_PUBLISHER_BASE_URL_ENV] === "1",
@@ -90,7 +126,8 @@ export function wireSocialPublisher(): void {
     console.log(
       "[social] publisher not configured (SOCIAL_POSTIZ_BASE_URL unset) — connector sync and "
       + "publishing are unavailable and refuse with publisher_not_configured; every other social "
-      + "capability is unaffected",
+      + "capability is unaffected ('direct' is registered for LinkedIn's own capabilities regardless — "
+      + "SMM-38 phase 38c)",
     );
     return;
   }

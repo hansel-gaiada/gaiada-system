@@ -24,6 +24,8 @@
 import { ArgumentsHost, Catch, ExceptionFilter } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { SocialPublisherError } from "./publisher/types";
+import { OAuthTokenError } from "./publisher/oauth-tokens";
+import { LinkedInOAuthStateError } from "./publisher/linkedin-oauth";
 
 /** Status per refusal kind, chosen so a caller can tell the four genuinely different situations
  *  apart, because each needs a different human response:
@@ -79,6 +81,35 @@ export class SocialPublisherErrorFilter implements ExceptionFilter {
     // refusal, and defaulting to 500 would silently recreate the exact bug this filter exists to
     // fix for anything added after it. Pinned by a test so the default is relied on knowingly.
     const status = STATUS_BY_CODE[exception.code] ?? 503;
+    void reply.status(status).send({ error: exception.message, code: exception.code });
+  }
+}
+
+// SMM-38 phase 38c — 38b shipped `oauth-tokens.ts`'s `OAuthTokenError` with no HTTP mapping at all
+// (no controller existed yet to need one). `linkedin-oauth.controller.ts` is the first caller to
+// surface it over HTTP, so this is where that gap closes — same reasoning as the filter above
+// (a plain Error escaping a module is a body-less 500), same "default to 503, not 500" discipline
+// for anything added to either vocabulary later.
+const OAUTH_TOKEN_STATUS_BY_CODE: Record<string, number> = {
+  // No live grant / a revoked or expired one: well-formed request, the STATE forbids it — 409,
+  // matching `org_not_provisioned`'s own family in the table above.
+  oauth_token_not_found: 409,
+  oauth_token_revoked: 409,
+  oauth_token_expired: 409,
+  // A deployment configuration gap (INTEGRATION_TOKEN_KEY unset) — nothing the caller can fix by
+  // retrying, matching `publisher_not_configured`'s own family.
+  oauth_vault_not_configured: 503,
+};
+
+@Catch(OAuthTokenError, LinkedInOAuthStateError)
+export class SocialOAuthErrorFilter implements ExceptionFilter {
+  catch(exception: OAuthTokenError | LinkedInOAuthStateError, host: ArgumentsHost): void {
+    const reply = host.switchToHttp().getResponse<FastifyReply>();
+    const status = exception instanceof LinkedInOAuthStateError
+      // A forged/expired/malformed state is a bad REQUEST, not a server or data-state fact — 400,
+      // the same status client-invites.ts's own ClientInviteError uses for the identical shape.
+      ? 400
+      : (OAUTH_TOKEN_STATUS_BY_CODE[exception.code] ?? 503);
     void reply.status(status).send({ error: exception.message, code: exception.code });
   }
 }

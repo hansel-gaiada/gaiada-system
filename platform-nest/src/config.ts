@@ -648,6 +648,53 @@ const configBase = {
       // already documents.
       capabilityDrivers: parseCapabilityDriverOverrides(process.env.SOCIAL_PUBLISHER_CAPABILITY_DRIVERS),
     },
+    // ── `direct` (SMM-38 phase 38c, design addendum §PD) — the `direct` driver's OWN per-network app
+    // credentials. Deliberately a SEPARATE block from `publisher` above, not folded into it:
+    // `publisher.*` is the POSTIZ ENGINE's own wiring (base URL, org-scoped API key, per-network
+    // deployment toggles) and stays that even as `direct` grows more networks (38d adds YouTube);
+    // `direct.*` is THIS platform's own OAuth app registration, one sub-object per network, read
+    // from env — never a tenant row (client credentials are the deployment's, never a client's, same
+    // "client credentials come from config/env" rule GOOGLE_OAUTH_CLIENT_ID/`config.search.google`
+    // already follows). `direct` NEVER crosses the WireGuard tunnel — it is a second, independent
+    // OAuth client speaking to the network directly, which is the whole point of D-20.
+    //
+    // KEYLESS IS A SUPPORTED MODE, same doctrine as `publisher.baseUrl` above: with no
+    // SOCIAL_LINKEDIN_CLIENT_ID/_SECRET the LinkedIn OAuth start refuses `platform_app_not_registered`
+    // (SMM-07's existing, reused token — see `publisher/linkedin-oauth.ts`), never a half-built
+    // authorize URL with an empty client_id baked in.
+    direct: {
+      linkedin: {
+        clientId: process.env.SOCIAL_LINKEDIN_CLIENT_ID ?? "",
+        clientSecret: process.env.SOCIAL_LINKEDIN_CLIENT_SECRET ?? "",
+        // OUR callback route (a fixed, tenant-agnostic path — see linkedin-oauth.controller.ts's
+        // header for why: LinkedIn, like Google, permits no wildcard redirect_uri). Mirrors
+        // GOOGLE_OAUTH_REDIRECT_URI's shape (SM-25) exactly. Unset ⇒ the connect start refuses
+        // `connect_redirect_not_configured` (SMM-07's existing token, reused) rather than handing
+        // LinkedIn an empty destination.
+        redirectUri: process.env.SOCIAL_LINKEDIN_REDIRECT_URI ?? "",
+        // LinkedIn's own hosts — never Postiz's. ⚠UNVERIFIED against a live app (no credential exists
+        // yet, D-23): these are the documented endpoints from the app-review dossier §4, not driven.
+        authorizeUrl: process.env.SOCIAL_LINKEDIN_AUTHORIZE_URL ?? "https://www.linkedin.com/oauth/v2/authorization",
+        tokenUrl: process.env.SOCIAL_LINKEDIN_TOKEN_URL ?? "https://www.linkedin.com/oauth/v2/accessToken",
+        apiBaseUrl: process.env.SOCIAL_LINKEDIN_API_BASE_URL ?? "https://api.linkedin.com",
+        // LinkedIn's REST API requires a versioned header on every call (`LinkedIn-Version:
+        // YYYYMM`) — ⚠UNVERIFIED which version this deployment's eventual app is approved against;
+        // a fixed recent value so the wire shape is at least well-formed when first driven.
+        apiVersion: process.env.SOCIAL_LINKEDIN_API_VERSION ?? "202601",
+        // Own timeout class (§A4l §4's own reasoning, ported to a SECOND host): LinkedIn's asset
+        // upload is a 3-step register→PUT→finalize dance on api.linkedin.com, not Postiz's single
+        // multipart POST, so it earns its own budget rather than inheriting
+        // SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS — a DIFFERENT host's number for a DIFFERENT wire shape.
+        readTimeoutMs: Number(process.env.SOCIAL_LINKEDIN_READ_TIMEOUT_MS ?? 30000),
+        uploadTimeoutMs: Number(process.env.SOCIAL_LINKEDIN_UPLOAD_TIMEOUT_MS ?? 120000),
+        // The Gaiada LinkedIn Company Page this deployment publishes AS (dossier §4.6 checklist item
+        // 1), e.g. "urn:li:organization:12345". ONE per deployment, own-brand-first (D-20/OQ-3
+        // unchanged) — a CLIENT's own org URN is a per-account fact (a future `social_accounts`
+        // column, not built by this phase since no client LinkedIn connect exists yet), never a
+        // config constant.
+        organizationUrn: process.env.SOCIAL_LINKEDIN_ORGANIZATION_URN ?? "",
+      },
+    },
     // SMM-10 — the dispatch/reconcile pair's own knobs.
     //
     // `reconcileIntervalMs` is the SAFETY POLL's cadence: `smm-post-status-sync`'s batched

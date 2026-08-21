@@ -339,13 +339,16 @@ export async function purgeOAuthTokens(
 /** Called once from `main.ts`, alongside `wireSocialPublisher()` (that ticket's own header names
  *  exactly this placement: "at module boot, alongside wherever 38b registers its publisher driver").
  *  Registers `purgeOAuthTokens` into SMM-36's seam under the key `'oauth_tokens'` — no new job, no
- *  new schedule, no network call. Deliberately does NOT call `registerTokenRefresher` for anything
- *  (38b ships zero refreshers) and does NOT register the `direct` driver into `publisher/registry.ts`
- *  (that stays exactly as 38a left it — see `publisher/boot.ts`'s header for why registering `direct`
- *  unconditionally would flip `resolvePublisher`'s empty-registry heuristic, a live-behaviour change
- *  this phase does not need and must not make: `direct.capabilities` is still the empty set 38a
- *  shipped, so there is nothing yet for a caller to reach through the registry even if it were
- *  registered). */
+ *  new schedule, no network call.
+ *
+ *  ⚠ STALE-COMMENT UPDATE (SMM-38 phase 38c, this module's own defect class #4b): this header used
+ *  to say "deliberately does NOT call `registerTokenRefresher` for anything" and "does NOT register
+ *  the `direct` driver" — both TRUE for 38b, both now WRONG for 38c. `boot.ts#wireSocialPublisher`
+ *  now registers `direct` (real LinkedIn capability) AND calls `registerLinkedInTokenRefresher()`
+ *  (`linkedin-oauth.ts`) — NOT from this function, which still only wires the purge seam, but from
+ *  its own sibling call in `main.ts`/`boot.ts`. See `publisher/boot.ts`'s header for how the
+ *  `resolvePublisher` empty-registry heuristic was fixed (not left broken) to keep that registration
+ *  behaviourally inert on every live path today. */
 export function wireOAuthTokenCustody(): void {
   registerRetentionPurger("oauth_tokens", purgeOAuthTokens);
 }

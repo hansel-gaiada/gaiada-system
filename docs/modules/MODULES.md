@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.7` | IN PROGRESS | Social Media | 2026-08-20 |
+| social-media | `0.5.8` | IN PROGRESS | Social Media | 2026-08-21 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,60 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.7` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.8` · IN PROGRESS
+
+**0.5.8 (2026-08-21, SMM-38 phase 38c, senior-integrator) — LinkedIn on the `direct` driver.**
+This worktree was cut before 38b + several other tickets (SMM-21/23/20, SMM-33/24 docs,
+`202608201518_social_oauth_tokens.sql`) landed on `main` — fast-forward `git merge main` pulled
+them in before any of this ticket's own code was written (the tracker's own repeated
+worktree-cut-before-commit hazard, hit directly).
+
+Built: `publisher/linkedin-client.ts` (new — the LinkedIn wire client: token exchange/refresh,
+org-page publish via `POST /rest/posts`, the 3-step asset upload dance
+[`registerImageUpload`→`uploadImageBytes`], comment read via
+`GET /rest/socialActions/{shareUrn}/comments`; every route ⚠UNVERIFIED against a live app — D-23,
+no credential exists — reasoned from the app-review dossier §4, collected in ONE routes table
+mirroring `postiz.ts`'s own discipline). `publisher/linkedin-oauth.ts` (new — the OAuth grant flow:
+HMAC-signed, time-boxed state (`client-invites.ts`'s pattern, reused, deliberately NOT DB-backed —
+named simplification in the file's own header), `startLinkedInConnect`/`completeLinkedInConnect`
+[reuses `loadOrgByClient`/`hasRegisteredPlatformApp` from `provisioning.ts` read-only; ends by
+calling `storeOAuthGrant` and promoting the pending `social_accounts` row to `connected`],
+`registerLinkedInTokenRefresher()`). `linkedin-oauth.controller.ts` (new) — `LinkedInOAuthController`
+(tenant-scoped start/readiness, reusing the existing `social_account`/`connect` Cerbos action — no
+new policy) + `LinkedInOAuthCallbackController` (tenant-agnostic fixed path, mirrors
+`SearchGoogleOauthCallbackController`'s exact three-point defence). `direct.ts` — `DIRECT_CAPABILITIES`
+now `["schedule","media_upload","inbox_read"]` (LinkedIn only; every other network still refuses
+`capability_unsupported` from INSIDE the method body — the same driver-wide-capability +
+per-network-gate shape `postiz.ts` already uses for `getQuota`/`getCreatorInfo`, generalised).
+`registry.ts` — fixed `resolvePublisher`'s empty-registry heuristic (`anyNonDirectRegistered`, not
+`publishers.size===0`) so registering `direct` at boot cannot flip a Postiz-unconfigured
+deployment's `publisher_not_configured` into `unknown_publisher`. `boot.ts` — registers `direct` +
+the LinkedIn refresher unconditionally, proven still behaviourally inert on every live path today
+(three independent reasons, in the file's own header). `publisher-error.filter.ts`/`main.ts` — new
+`SocialOAuthErrorFilter` (38b shipped `OAuthTokenError` with no HTTP mapping at all; this is the
+first controller to need one).
+
+**No migration.** Reuses 0105's `social_accounts` + the already-merged `social_oauth_tokens`
+(202608201518). **A named architecture gap, not silently worked around**: `direct.ts`'s
+`connectUrl` port method STILL refuses `capability_unsupported` — the port's `(org: OrgHandle,
+network, redirect)` signature carries neither a tenantId nor an accountId, which a real per-account
+OAuth flow needs, so LinkedIn's OAuth grant acquisition is a standalone subsystem reached through
+its own controller, not through the port. `OrgHandle` is repurposed for `direct`'s three real
+methods: `.secret()` carries an ALREADY-RESOLVED LinkedIn bearer token, `.orgId` carries the
+organization URN — but **no live call site resolves that token and builds the handle yet**
+(`dispatch.ts` off-limits, `provisioning.ts#openOrg` is Postiz-shaped) — left to 38e, which also
+owns `uploadMedia`'s own gap (the port carries no `network` parameter at all, so it always assumes
+LinkedIn's asset flow — correct by elimination until 38d).
+
+Test counts: **413 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline measured directly in this worktree
+after the merge: **393 / 0 / 5**, +20 new: `linkedin-oauth.test.ts` 12, `linkedin-client.test.ts` 7,
+`direct.test.ts` +7, `publisher.test.ts` +1 registry regression pin). **7 failures in
+`social-client-review-portal.controller.test.ts` reproduced IDENTICALLY with this ticket's changes
+stashed out** — a shared-Cerbos-container environmental flake (confirmed, not this ticket's), not
+counted above. `tsc --noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/
+`lint:migration-names` all green. `test:iam-chain-alignment` green (25/25, unaffected — no
+Cerbos/IAM change this pass).
 
 **0.5.7 (2026-08-20, SMM-23 — reports: snapshot + AI narrative → approve → render → files + Drive +
 deliverable, medior).** `social_reports` was already in 0105 and its Cerbos policy
