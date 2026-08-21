@@ -107,6 +107,9 @@ import { startMetricsPullLoop, socialMetricsPullEnabled, socialMetricsPullInterv
 // tickets have now handed this line up instead of editing main.ts, which is exactly why none of
 // them collided over it.
 import { startInboxPullLoop } from "./modules/social/inbox-sync-job";
+// SMM-16 — triage classification + the SLA guard. Fourth ticket to hand its registration up
+// rather than edit this file, which is why none of them have collided here.
+import { startInboxTriageLoop, startInboxSlaGuardLoop } from "./modules/social/inbox-triage-job";
 // SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
@@ -459,6 +462,16 @@ async function bootstrap(): Promise<void> {
       registerPositionEventHandlers();
       // eslint-disable-next-line no-console
       console.log(`position reconciler on: streams [${POSITION_STREAMS.join(", ")}]`);
+    }
+    if (config.social.triage.classifyEnabled) {
+      startInboxTriageLoop(config.social.triage.classifyIntervalMs);
+      // eslint-disable-next-line no-console
+      console.log(`social inbox triage (smm-inbox-triage) on: every ${config.social.triage.classifyIntervalMs}ms`);
+    }
+    if (config.social.triage.slaGuard.guardEnabled) {
+      startInboxSlaGuardLoop(config.social.triage.slaGuard.guardIntervalMs);
+      // eslint-disable-next-line no-console
+      console.log(`social inbox SLA guard (smm-inbox-sla-guard) on: every ${config.social.triage.slaGuard.guardIntervalMs}ms`);
     }
     if (config.social.inboxPull.pullEnabled) {
       startInboxPullLoop(config.social.inboxPull.pullIntervalMs);
