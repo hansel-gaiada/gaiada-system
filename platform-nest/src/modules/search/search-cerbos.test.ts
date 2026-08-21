@@ -41,7 +41,14 @@ const report: Resource = { kind: "resource_search_report", tenantId: T1, module:
 const ledger: Resource = { kind: "resource_search_ledger", tenantId: T1, module: "search" };
 
 // Named principals for the parity matrix.
-const owner = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], []);
+// MON-00c: the explicit root this file's own helper comment calls for. `owner` holds a GLOBAL
+// group_executive grant and therefore no memberships, so `rootCompanies` (which defaults to
+// `companies`) came out EMPTY and `variables.inRoot` was false — denying the exec on every resource
+// below for a reason none of these parity cases are about. T1 is the served company every resource
+// in this file belongs to, so anchoring the root there restores the single-root fixture world the
+// matrix was written against. Cross-root refusal is pinned in cerbos.test.ts and
+// cross-root-boundary.db.test.ts, not here.
+const owner = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], "high", [T1]);
 const manager = principal([{ role: "search_manager", scopeType: "company", scopeId: T1 }]);
 const member = principal([{ role: "search_staff", scopeType: "company", scopeId: T1 }]);
 const servedDeptUser = principal([{ role: "search_staff", scopeType: "company", scopeId: T1 }], [T1, T2]);

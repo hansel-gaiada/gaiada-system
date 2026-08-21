@@ -62,17 +62,31 @@ function bundlePrincipal(role: "platform_admin" | "group_executive"): Principal 
     [{ role, scopeType: "global", scopeId: null }],
     keys.map((key) => ({ key, scopeType: "global" as const, scopeId: null })),
     [],
+    1,
+    "u1",
+    // MON-00c: rooted at T1, the tenant this parity sweep probes. `companies` stays [] because a
+    // real holder of a GLOBAL grant has no memberships — but with `rootCompanies` also empty,
+    // `inRoot` is false, so can() denied the root-bounded exec rules while the bundle (which treats
+    // a rule condition as satisfied — see role-permission-parity.db.test.ts) still counted them.
+    // The suite then read that as group_executive OVER-REPORTING its reach. The over-report was an
+    // artifact of the unrooted fixture, not of the bundle.
+    [T1],
   );
 }
 
+// MON-00c: `rootCompanies` defaults to `companies`, and omitting the key is NOT neutral —
+// `_variables.yaml` guards `inRoot` with `has()` exactly because a directly-constructed fixture has
+// no such key, and CEL then produces a deny indistinguishable from a policy bug. A principal with no
+// memberships (a global grant) must therefore state its root explicitly.
 function principal(
   roles: RoleGrant[],
   perms: PermissionGrant[] = [],
   companies: string[] = [T1],
   sessionVersion = 1,
   userId = "u1",
+  rootCompanies: string[] = companies,
 ): Principal {
-  return { userId, assurance: "high", companies, roles, perms, sessionVersion };
+  return { userId, assurance: "high", companies, roles, perms, rootCompanies, sessionVersion };
 }
 
 function req(p: Principal, headers: Record<string, string> = {}): FastifyRequest {

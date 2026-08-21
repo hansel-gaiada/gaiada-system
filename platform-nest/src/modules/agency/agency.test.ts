@@ -53,6 +53,17 @@ describe.skipIf(!TEST_URL)("agency module (phase e2e)", () => {
     await grantRole(approver, memberRole, "company", agencyCo);
     await grantRole(approver, approverRole, "company", agencyCo);
     await grantRole(exec, execRole, "global", null);
+    // MON-00c: `group_executive`'s cross-company rules are now gated on `variables.inRoot`, and
+    // `assemblePrincipal` resolves a root from `users.home_company_id` OR active memberships. This
+    // exec deliberately has NO membership (that is the point of a global grant), so before this it
+    // resolved `rootCompanies: []` and every cross-company rollup read below was denied.
+    //
+    // Anchored via `home_company_id` rather than by adding a membership, on purpose: a membership
+    // would put the exec INSIDE the agency company and change the very headcount/utilization
+    // numbers these rollup assertions check, turning an authorization fix into a silent data-fixture
+    // change. `home_company_id` is also the anchor MON-00c's own fixtures use (see principal.ts's
+    // note that every existing root-anchored fixture sets it directly).
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [agencyCo, exec]);
 
     app = await buildApp();
   });

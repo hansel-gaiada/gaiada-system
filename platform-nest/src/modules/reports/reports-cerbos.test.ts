@@ -40,19 +40,30 @@ const T2 = "dddddddd-2222-0000-0000-000000000002"; // a DIFFERENT company
 const SELF = "11111111-aaaa-0000-0000-000000000001";
 const OTHER = "11111111-aaaa-0000-0000-000000000002";
 
+// MON-00c: `rootCompanies` defaults to `companies` — in a single-root fixture world the principal's
+// root subtree IS the companies under test. It must be passed EXPLICITLY for a principal with no
+// memberships (a global group_executive), because an absent/empty set makes `variables.inRoot` false
+// and the root-bounded exec rules deny. Note that OMITTING the key is not neutral: `_variables.yaml`
+// guards with `has()` precisely because a directly-constructed fixture has no such key, and CEL then
+// yields a deny that looks identical to a policy bug.
 function principal(
   roles: RoleGrant[],
   companies: string[] = [T1],
   assurance: Principal["assurance"] = "high",
   userId = SELF,
+  rootCompanies: string[] = companies,
 ): Principal {
-  return { userId, assurance, companies, roles, sessionVersion: 1 };
+  return { userId, assurance, companies, roles, rootCompanies, sessionVersion: 1 };
 }
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
 // ── principals ────────────────────────────────────────────────────────────────────────────────
 const owner = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], []);
-const exec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], []);
+// Root anchored to T1 (the tenant every resource in this matrix belongs to) because this principal
+// holds a GLOBAL grant and so has no memberships to derive a root from. §8's "cross-company" reach
+// is cross-COMPANY within the exec's own root, which MON-00c made explicit; the cross-ROOT refusal
+// is pinned in cerbos.test.ts and cross-root-boundary.db.test.ts rather than duplicated here.
+const exec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], "high", SELF, [T1]);
 const admin = principal([{ role: "company_admin", scopeType: "company", scopeId: T1 }]);
 const lead = principal([{ role: "manager", scopeType: "company", scopeId: T1 }]);
 const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }]);
