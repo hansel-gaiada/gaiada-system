@@ -77,6 +77,18 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — senior-uiux**, `social-media 0.5.10` (no version change — a UI-only closure, see
+  `docs/modules/MODULES.md`'s dated addendum under the same version). The AGPL-3.0 §13 source-offer
+  for Postiz, an open item with no ticket number since SMM-24's docs pass, closed: new
+  `platform-ui/src/components/social/SourceOfferNotice.tsx`, rendered from
+  `departments/[deptId]/layout.tsx` gated on `toolkitFor(dept.name).slug === "social-media"` — the
+  department's own console, not the console-wide staff shell the prior seat had recommended, since
+  every other department never calls Postiz. Copy promises "the source for exactly what we run"
+  rather than naming a version or "unmodified", so it stays true once D-21's still-unapplied fork
+  exception lands (only the link target moves then). Driven in a real browser: present with a
+  resolving link on Social Media's Home/Calendar/Composer, absent on Web Dev. `tsc --noEmit` clean;
+  `platform-ui` suite unchanged, 2444/0/0 measured both with and without the change.
+
 - **2026-08-21 — SMM-38 phase 38e**, `social-media 0.5.9 -> 0.5.10` (IN PROGRESS). The flip's three
   gaps, closed. **Gap 1** (the crux): new `provisioning.ts#resolveDispatchOrgHandle` — a SEPARATE,
   capability-aware resolver (not a widened `openOrg`) that `dispatch.ts` now calls for `media_upload`

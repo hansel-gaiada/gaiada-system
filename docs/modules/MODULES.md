@@ -1326,6 +1326,27 @@ COULD serve it if flipped, and exactly what stands between "could" and "does" �
 gap (D-23) and YouTube's dispatch-flow gap as two INDEPENDENT reasons, not one collapsed "not live
 yet" sentence.
 
+**2026-08-21 (senior-uiux) — the AGPL §13 source-offer, tracked as an open item with no ticket
+number since SMM-24's docs pass (2026-08-20), CLOSED.** Postiz (this module's publishing engine)
+is AGPL-3.0; §13 requires offering its Corresponding Source to whoever's network interaction it
+relays — the STAFF working this console's Calendar/Composer/Inbox/Analytics tabs, not a client (the
+client portal never talks to Postiz). New `platform-ui/src/components/social/SourceOfferNotice.tsx`,
+rendered from `departments/[deptId]/layout.tsx` gated on `toolkitFor(dept.name).slug ===
+"social-media"` — the SAME resolved value the layout already uses for the tab strip, so the notice
+survives whatever id/name the org structure assigns and reaches every tab this department has
+(including the structurally different full-bleed `DeptShellFrame` branch Calendar uses). **Rejected
+the prior seat's own recommendation** of a console-wide footer on `platform-ui/src/app/(app)/layout.tsx`
+— that shell wraps every staff page, most of which never call Postiz, and a licence notice in front
+of people it has nothing to do with is a second kind of wrong, not a safer one. Copy never names a
+version or says "unmodified" (a claim D-21's still-unapplied fork exception would make silently
+false); it promises "the source for exactly what we run" and links the upstream repo today — the
+component's own header comment states plainly that only the LINK TARGET must move when D-21 lands,
+to a publicly reachable fork/mirror, since this console's own staff may not hold private-repo
+access. Driven in a real browser (`DEMO_MODE=1`, headless Chromium): present with a resolving link
+on the Social Media department's Home/Calendar/Composer tabs, absent on Web Dev. `tsc --noEmit`
+clean; `platform-ui` suite unchanged (2444/0/0 with and without the change, measured directly).
+Full evidence: `docs/plans/smm-tracker.md`'s "open items" table.
+
 Test counts: **483 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
 + `social-client-review-portal.controller.test.ts` (baseline measured directly in this worktree by
 stashing this pass's changes: **470 / 0 / 5**, matching `main`'s own stated baseline exactly — +13:
