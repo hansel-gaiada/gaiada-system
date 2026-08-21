@@ -129,6 +129,37 @@ describe.skipIf(!TEST_URL)("social module (SMM-02)", () => {
     expect(publish?.write).toBe(true);
     expect(publish?.impact).toBe("high");
     expect(publish?.pathTemplate).toBe("/api/:tenantId/modules/social/variants/:variantId/publish");
+
+    // SMM-33/24 (Gap 1) — the client-review capability group the inventory found had zero MCP tool
+    // coverage. `request` crosses the client trust boundary for the first time (impact 'medium',
+    // suspends an automation/agent principal into WS4); `withdraw` is a write but purely corrective
+    // (impact 'low' — "a withdraw is not a read", but it is also not the same blast radius as
+    // exposing new content); `read` carries no write/impact pair at all, matching every other plain
+    // read tool on this contract.
+    const requestReview = socialModule.mcpTools.find((t) => t.name === "social.requestClientReview");
+    expect(requestReview?.write).toBe(true);
+    expect(requestReview?.impact).toBe("medium");
+    expect(requestReview?.method).toBe("POST");
+    expect(requestReview?.pathTemplate).toBe("/api/:tenantId/modules/social/variants/:variantId/client-review");
+
+    const withdrawReview = socialModule.mcpTools.find((t) => t.name === "social.withdrawClientReview");
+    expect(withdrawReview?.write).toBe(true);
+    expect(withdrawReview?.impact).toBe("low");
+    expect(withdrawReview?.method).toBe("POST");
+    expect(withdrawReview?.pathTemplate).toBe("/api/:tenantId/modules/social/variants/:variantId/client-review/withdraw");
+
+    const readReview = socialModule.mcpTools.find((t) => t.name === "social.getClientReview");
+    expect(readReview?.write).toBeUndefined();
+    expect(readReview?.impact).toBeUndefined();
+    expect(readReview?.method).toBe("GET");
+    expect(readReview?.pathTemplate).toBe("/api/:tenantId/modules/social/variants/:variantId/client-review");
+
+    // The portal decide must NEVER be declared here — no portal capability is ever an MCP tool in
+    // this program; the client's decision is a human act on the trust boundary, made in a browser
+    // session authenticated as the client, never something an agent (staff-side or client-side) is
+    // the caller of.
+    expect(socialModule.mcpTools.find((t) => t.name.toLowerCase().includes("decide"))).toBeUndefined();
+    expect(socialModule.mcpTools.some((t) => t.pathTemplate?.includes("/portal/"))).toBe(false);
   });
 
   // ── (2) the module gate ───────────────────────────────────────────────────────────────────────

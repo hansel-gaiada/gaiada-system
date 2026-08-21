@@ -30,6 +30,11 @@ import { openOrg, type PublisherOrgRow } from "./publisher/provisioning";
 import type { PostStatus } from "./publisher/types";
 import { invokePublisher } from "./publisher/registry";
 import { emitEvent } from "../../events/outbox.service";
+// SMM-33/24 (this pass) — Gap 2: the ONLY writer of `social_post_variants.status -> 'published'`/
+// `'failed'` that reaches this table asynchronously (neither the safety poll nor the webhook intake
+// carries a human principal) had no `work_activity` row at all, unlike `dispatch.ts`'s own
+// synchronous 'dispatched'/'failed'/'refused' rows — see this file's own bottom comment for why.
+import { writeActivity } from "../../core/http";
 
 /** One tenant's worth of in-flight rows, grouped by their publisher org so `getPostStatus` can be
  *  called ONCE per (org, window) rather than once per variant (addendum §A4l §4 — the batched-read
@@ -81,15 +86,43 @@ const APPLY_STATUS: Partial<Record<PostStatus["state"], "published" | "failed" |
   publishing: "publishing",
 };
 
+/** One `work_activity` row this function still owes, collected during the transaction and written
+ *  AFTER it commits — the same non-nested sequencing `dispatch.ts`/`pm.controller.ts` already use
+ *  for `writeActivity` (it opens its own connection via `withTenants`; nesting it inside THIS
+ *  function's own transaction would just be a second, pointless connection held open inside the
+ *  first for no atomicity gain `writeActivity`'s own callers don't already accept elsewhere). */
+interface PendingActivity {
+  verb: "published" | "failed";
+  variantId: string;
+  metadata: Record<string, unknown>;
+}
+
 /**
  * Apply a batch of AUTHORITATIVE statuses for ONE tenant. Idempotent by construction (see the file
  * header): the UPDATE only ever touches a row still `queued`/`publishing`, so a repeat delivery of
  * the same status is a silent no-op, never a second failure event for an already-`failed` row.
  * Declares its own module scope — same trap, same fix, as every other social write path.
+ *
+ * ── `work_activity`, HONESTLY ATTRIBUTED (SMM-33/24 Gap 2) ──────────────────────────────────────
+ * This is the ONLY place `social_post_variants.status` ever becomes `'published'`/`'failed'` from
+ * the network's OWN authoritative answer — `dispatch.ts` only ever writes `'dispatched'`/`'failed'`
+ * (an immediate, synchronous outcome) or leaves the row `'queued'`/`'publishing'` for THIS function
+ * to resolve later. Both of this function's two callers (`reconcileTenantPostStatus`'s safety poll
+ * and `reconcileOneProviderPost`'s webhook intake) run with NO principal at all — no human, no
+ * session, nothing `req.principal` could ever be here (the webhook handler
+ * (`social.controller.ts#postStatusWebhook`) does not even take a `@Req()`). `actorId` is therefore
+ * `null`, on purpose, matching the SAME convention `pm.controller.ts`'s `auto_promoted` rows already
+ * use for a system-derived state change nobody's own action caused directly — never the account's
+ * connect actor, the composer's last editor, or any other human who merely last touched the row,
+ * which would be a false attribution the audit trail would then repeat forever. The verb IS the
+ * network's own vocabulary (`'published'`/`'failed'`), and `reason`/`network`/`providerPostId` in the
+ * metadata are the SAME facts already carried on the sibling `emitEvent` call — one source of truth,
+ * never a second, independently-worded copy of what happened.
  */
 export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]): Promise<{ applied: number }> {
   if (statuses.length === 0) return { applied: 0 };
   let applied = 0;
+  const pendingActivity: PendingActivity[] = [];
   await withTenants([tenantId], async (c) => {
     await declareSocialModuleScope(c);
     for (const s of statuses) {
@@ -120,13 +153,27 @@ export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]
           reason: "network_reported_failed", network: row.network, engagementId: row.engagement_id,
           providerPostId: s.providerPostId, detail: s.error ?? null,
         });
+        pendingActivity.push({
+          verb: "failed", variantId: row.id,
+          metadata: {
+            reason: "network_reported_failed", network: row.network, engagementId: row.engagement_id,
+            providerPostId: s.providerPostId, detail: s.error ?? null,
+          },
+        });
       } else if (nextStatus === "published") {
         await emitEvent(c, tenantId, "social_post_variant", row.id, "social.post.published", {
           network: row.network, engagementId: row.engagement_id, providerPostId: s.providerPostId,
         });
+        pendingActivity.push({
+          verb: "published", variantId: row.id,
+          metadata: { network: row.network, engagementId: row.engagement_id, providerPostId: s.providerPostId },
+        });
       }
     }
   });
+  for (const a of pendingActivity) {
+    await writeActivity(tenantId, null, a.verb, "social_post_variant", a.variantId, a.metadata);
+  }
   return { applied };
 }
 
