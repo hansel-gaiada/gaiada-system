@@ -25,6 +25,25 @@ resourcePolicy:
     # kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the permission
     # catalog).
 
+    # MON-00c completion (2026-08-21): `variables.inRoot` added. This was the ONE mirror rule the
+    # 183-mirror inRoot sweep missed, and it was missed for a mechanical reason worth recording:
+    # the sweep appended `inRoot` to each mirror rule's EXISTING condition, and this rule was the
+    # estate's only mirror with NO condition line at all — nothing to substitute into. That left a
+    # real hole on exactly the kind the MON-00 ruling's leak chain #2 names (rulings §1.2): a
+    # GLOBAL-scoped grant of `core.rollup.read` satisfied `perm_rollup_read`'s global branch on ANY
+    # tenantId, in any root — a cross-root read via the permission arm, alive after the role arm
+    # above was root-bounded. Caught statically by iam-04-reg1-mirror-reach-invariant.test.ts the
+    # moment the exec's role arm became condition-narrowed (the register grew `rollup.read`).
+    #
+    # `inRoot` ALONE — no `inTenant`, no `notLow` — deliberately, for three pinned reasons:
+    # 1. It is the sweep's own transformation (append inRoot to the existing clauses; here: none).
+    # 2. rollup deliberately has NO notLow floor (iam-verify-02.low-assurance.test.ts pins this) —
+    #    the role arm has none, and the mirror must not be able to grant wider than the role arm
+    #    but need not be narrower on an axis the kind's design deliberately omits.
+    # 3. No inTenant: rollups are the cross-company-within-root surface; the derived role's own
+    #    scope check already pins company-scoped grants to their one company, and `inRoot` bounds
+    #    global-scoped grants to the holder's own root — which is MON-00's invariant verbatim.
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_rollup_read"]
+      condition: { match: { expr: "variables.inRoot" } }

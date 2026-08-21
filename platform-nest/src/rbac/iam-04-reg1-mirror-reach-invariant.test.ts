@@ -144,6 +144,57 @@ function topLevelAndClauses(expr: string): string[] {
   return splitTopLevel(expr, "&&").filter(Boolean);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// MON-00c (2026-08-21) — the comparator's ONE semantic implication, and why it exists.
+//
+// The coverage check below asks: is holder H's role-arm rule at least as WIDE as the mirror —
+// i.e. does the mirror's condition IMPLY the role-arm rule's condition, so that everything the
+// permission arm can grant a key-holder, the role arm would have granted anyway? The syntactic
+// test (every role-arm clause textually present among the mirror's clauses) is a SOUND witness of
+// that implication but an INCOMPLETE one: textual absence proves nothing. Until MON-00c that
+// incompleteness was invisible, because every role arm in the estate was syntactically ⊆ its
+// mirror. MON-00c made `group_executive` the estate's first condition-NARROWED role arm
+// (`variables.inRoot`, rulings doc §1.3 Wall 2), and the incompleteness surfaced at once: the
+// DISCOVERY register grew five entries, four of which flagged the exec as "narrower than the
+// mirror" against mirrors that are in fact STRICTLY NARROWER than the exec's arm (self-scoped
+// `perm_checkin_read_self` / `perm_hr_case_{read,create,cancel}_self` — inTenant ∧ notLow ∧
+// subjectUserId==principal.id, the narrowest shapes in the estate). Those four were not hazard
+// instances; they were comparator false positives. (The FIFTH growth entry, `rollup.read`, WAS a
+// real instance — the one mirror rule the 183-mirror inRoot sweep missed because it had no
+// condition line to append to — and it was fixed at the responsible kind's policy, exactly as
+// this file's own doctrine instructs, not pinned. See resource_rollup.yaml's dated comment.)
+//
+// THE AXIOM: a mirror clause `variables.inTenant` satisfies a role-arm clause `variables.inRoot`.
+// Soundness rests on MON-00a's anchor invariant (migration 202608201326):
+//   1. The migration ABORTS if any user's memberships span two roots, and anchors
+//      `users.home_company_id` from those same memberships.
+//   2. `assemblePrincipal` computes `rootCompanies` as the home root's full company set, so for
+//      every anchored principal memberships ⊆ rootCompanies — inTenant ⇒ inRoot, pointwise.
+//   3. The one principal shape where the implication fails — memberships but NO anchor
+//      (`rootCompanies: []`) — cannot be used to smuggle reach past this comparator: every mirror
+//      this axiom can mark as covering `inRoot` is itself inTenant-gated, so such a principal's
+//      permission-arm reach is at most its own member tenants (a single root by the span-abort),
+//      while its inRoot-gated ROLE arm already denies outright (empty set fails closed). Nothing
+//      cross-root can hide behind the axiom.
+// Honestly-stated forward soft spot: MON-00a proves and anchors the state AT MIGRATION TIME;
+// no trigger yet refuses a FUTURE `company_memberships` INSERT into a foreign root. That gap is
+// recorded in the rulings doc with a recommended guard, and the live-decision suite
+// (`cross-root-boundary.db.test.ts`) — not this static comparator — remains the boundary's
+// authoritative gate, per the rulings doc's own "verification blindness" section.
+//
+// ONE-DIRECTIONAL, ON PURPOSE: inRoot is the WIDER set (memberships ⊆ root), so a mirror gated
+// only on `inRoot` must NEVER satisfy a role-arm clause `variables.inTenant` — that direction is
+// a real over-grant and stays flagged (teeth-proven below). And this is the ONLY implication this
+// comparator knows: notably it does NOT teach `assurance == "high"` ⇒ `notLow`, because doing so
+// would silently SHRINK pinned baseline entries other tickets own (hr_case.export's exec entry).
+// One axiom, the one MON-00c needs; grow this list only with a written soundness argument.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+function clauseSatisfiedByMirror(clause: string, mirrorClauses: Set<string>): boolean {
+  if (mirrorClauses.has(clause)) return true;
+  if (clause === "variables.inRoot" && mirrorClauses.has("variables.inTenant")) return true;
+  return false;
+}
+
 /** Locate the FIRST `.exists(` call in a derived-role expression and return the text before it
  *  (`pre`, checked for a top-level resource-attribute gate) and the balanced-paren body inside
  *  the call, with the leading lambda parameter (`g,` / `x,`) stripped. Returns null if the
@@ -299,7 +350,7 @@ function findNarrowHolders(
         }
         if (!info.literalRoleNames.includes(role)) continue;
         const ruleClauses = topLevelAndClauses(rule.condition);
-        const extra = ruleClauses.filter((c) => !mirrorClauses.has(c));
+        const extra = ruleClauses.filter((c) => !clauseSatisfiedByMirror(c, mirrorClauses));
         if (extra.length === 0) {
           covered = true;
           break outer;
@@ -411,6 +462,19 @@ const IAM_04_REG1_OWNED_KINDS = new Set([
  * goes red and must be updated deliberately, the same discipline `iam-215-boundary-pin.test.ts`
  * uses for its own frozen baseline. If a future ticket FIXES one of these, shrink the pin to match
  * — do not widen it to "make it pass" without also shrinking.
+ *
+ * MON-00c (2026-08-21) — this baseline is UNCHANGED through the cross-root boundary work, and the
+ * doctrine above was honored, not bent, in getting there. Root-gating the exec's role arms
+ * (`variables.inRoot`) made the register grow by five entries. Per the doctrine, growth means "a
+ * NEW instance of this hazard shape was just introduced" — so each entry was dispositioned
+ * against that definition instead of pinned: FOUR (checkin.read, hr_case.{read,create,cancel},
+ * all flagging group_executive against SELF-scoped mirrors) were not instances at all — the
+ * mirrors there are strictly NARROWER than the exec's root-gated arm, and the flags were the
+ * syntactic comparator's incompleteness, fixed in `clauseSatisfiedByMirror` (see the dated
+ * doctrine block at that function). ONE (rollup.read) was a genuine instance — the only mirror
+ * rule in the estate with no condition, missed by the 183-mirror inRoot sweep for exactly that
+ * reason — and was fixed at the responsible kind's policy (resource_rollup.yaml), which is the
+ * doctrine's own instruction for real growth. Nothing was added to this register to make it pass.
  */
 const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> = {
   "agency_approval.approve": ["agency_approver"],
@@ -616,6 +680,57 @@ describe("IAM-04-REG1 · permission-arm MIRROR-REACH invariant (static, re-deriv
       const freshWired = discoverMirrors(fresh).filter((m) => m.kind === "automation_approval");
       expect(freshWired.some((m) => m.action === "decide")).toBe(false);
       expect(freshWired.some((m) => m.action === "read")).toBe(false);
+    });
+
+    // ── MON-00c TEETH (2026-08-21): the `inTenant ⇒ inRoot` axiom in `clauseSatisfiedByMirror`
+    // must not have lobotomized the detector, in either direction. ──
+    it("an UNCONDITIONED mirror is still flagged for a root-gated holder — the exact live shape found on rollup.read (2026-08-21), which the axiom must NOT mask", () => {
+      // Reproduce the pre-fix state in-memory: the real role-arm rules (exec at
+      // `variables.inRoot`) against a mirror with NO condition at all — the shape the B12 rollout
+      // shipped and the 183-mirror inRoot sweep missed (nothing to append to). An empty mirror
+      // clause set contains neither `inRoot` nor `inTenant`, so the axiom has nothing to fire on
+      // and the exec must flag. If this ever passes covered, the comparator has been weakened
+      // into exactly the blindness that let a cross-root permission-arm read survive Wall 2.
+      const key = keyFor(catalog, "rollup", "read")!;
+      const holders = holdersOf(bundles, key);
+      expect(holders, "group_executive must still hold core.rollup.read in the bundle (else this proof is vacuous)").toContain(
+        "group_executive",
+      );
+      const narrow = findNarrowHolders("rollup", "read", "", kinds, derivedExprs, holders);
+      expect(
+        narrow.map((n) => n.role),
+        "a condition-less rollup.read mirror must flag the root-gated exec — re-dropping resource_rollup.yaml's mirror condition reopens the §1.2 leak",
+      ).toContain("group_executive");
+    });
+
+    it("the axiom is ONE-directional: a mirror gated on inRoot does NOT satisfy a role arm gated on inTenant (root-wide mirror > membership-gated arm — must flag)", () => {
+      // Fully synthetic kind, real `group_executive` derived-role expr: the role arm is
+      // membership-gated (`inTenant`), the hypothetical mirror is root-gated (`inRoot`). inRoot
+      // is the WIDER set (MON-00a: memberships ⊆ the holder's root), so this mirror over-grants
+      // and must flag. If this passes covered, someone made the implication bidirectional and
+      // reopened the hole the axiom is not allowed to hide.
+      const synthetic: ParsedKind = {
+        kind: "axiom_direction_probe",
+        rules: [
+          {
+            actions: ["read"],
+            effect: "EFFECT_ALLOW",
+            derivedRoles: ["group_executive"],
+            condition: "variables.inTenant && variables.notLow",
+          },
+        ],
+      };
+      const patchedKinds = new Map(kinds);
+      patchedKinds.set("axiom_direction_probe", synthetic);
+      const narrow = findNarrowHolders(
+        "axiom_direction_probe",
+        "read",
+        "variables.inRoot && variables.notLow",
+        patchedKinds,
+        derivedExprs,
+        ["group_executive"],
+      );
+      expect(narrow.map((n) => n.role)).toContain("group_executive");
     });
 
     it("no false positive: the SAME mechanism does NOT flag automation_approval.retry (no hr_manager holder)", () => {
