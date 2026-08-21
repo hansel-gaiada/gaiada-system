@@ -33,12 +33,17 @@ const T1 = "bbbbbbbb-0000-0000-0000-000000000001";
 const T2 = "bbbbbbbb-0000-0000-0000-000000000002";
 const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post"] as const;
 
+// MON-00i: `rootCompanies` defaults to `companies` (single-root fixture world) now that
+// `resource_portal.yaml`'s role-arm rule and all 7 `perm_portal_*` mirrors carry `&& variables.
+// inRoot`. Omitting it would default to `[]` via `cerbos.ts`'s `?? []`, which denies every ALLOW
+// case below for a reason that has nothing to do with what each test actually means to exercise.
 function principal(
   roles: RoleGrant[],
   perms: PermissionGrant[],
   companies: string[] = [T1],
+  rootCompanies: string[] = companies,
 ): Principal {
-  return { userId: "u1", assurance: "high", companies, roles, perms, sessionVersion: 1 };
+  return { userId: "u1", assurance: "high", companies, roles, perms, rootCompanies, sessionVersion: 1 };
 }
 
 const portalResource = (tenantId: string): Resource => ({ kind: "portal", id: "p-1", tenantId });

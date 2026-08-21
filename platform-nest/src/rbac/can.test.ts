@@ -22,14 +22,22 @@ const live = process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const T1 = "aaaaaaaa-0000-0000-0000-000000000001";
 const T2 = "aaaaaaaa-0000-0000-0000-000000000002";
 
+// MON-00c: `rootCompanies` defaults to `companies` because in a single-root fixture world the two
+// coincide — every kind this file exercises (pm.task, hr.case, assistant.agent_run) has long since
+// had `inRoot` added to its perm-arm mirror (183 mirrors, MON-00c), and a hand-built `Principal`
+// literal that omits `rootCompanies` gets `[]` from `cerbos.ts`'s `?? []`, which denies everything
+// root-gated — a false negative for a well-formed fixture, not a real deny. Verified live: this
+// default was previously missing here and "ALLOW via the permission arm alone" (pm.task.read) was
+// failing for exactly that reason before this fix.
 function principal(
   roles: RoleGrant[],
   perms: PermissionGrant[] = [],
   companies: string[] = [T1],
   assurance: Principal["assurance"] = "high",
   userId = "u1",
+  rootCompanies: string[] = companies,
 ): Principal {
-  return { userId, assurance, companies, roles, perms, sessionVersion: 1 };
+  return { userId, assurance, companies, roles, perms, rootCompanies, sessionVersion: 1 };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -121,6 +129,19 @@ describe.skipIf(!live)("can() — wraps check(), both arms, both directions (liv
   it("cross-tenant is DENIED even with a matching company-scope permission grant (no leak across tenants)", async () => {
     const p = principal([], [{ key: "pm.task.read", scopeType: "company", scopeId: T1 }], [T1, T2]);
     expect(await can(p, "pm.task.read", { id: "task-1", tenantId: T2 })).toBe(false);
+  });
+
+  // MON-00c (2026-08-21): the counterpart to the helper's `rootCompanies = companies` default
+  // above — that default is legitimate ONLY because it models MON-00a's anchored-membership
+  // invariant (a member of T1 anchored at T1's root has T1 in `rootCompanies`), never because
+  // empty stopped meaning deny. This pins the deny half so the default can't quietly become "the
+  // permission arm works without an anchor": an unanchored principal (`rootCompanies: []`, the
+  // exact shape `assemblePrincipal` fails closed to when `home_company_id` is NULL) is denied by
+  // the mirror's `variables.inRoot` even in its OWN member tenant, with the grant held and
+  // assurance high — everything else about the request is allowable.
+  it("DENY: an unanchored principal (rootCompanies=[]) cannot use the permission arm even in a member tenant — the MON-00a anchor fails closed", async () => {
+    const p = principal([], [{ key: "pm.task.read", scopeType: "company", scopeId: T1 }], [T1], "high", "u1", []);
+    expect(await can(p, "pm.task.read", { id: "task-1", tenantId: T1 })).toBe(false);
   });
 
   it("the wildcard bypass resolves correctly through can() with ZERO perms — platform_admin's role-arm wildcard, not a `*` permission, is what answers (IAM-04c)", async () => {

@@ -90,12 +90,20 @@ describe("IAM-04-B7 · portal permission-arm retry (static, re-derived every run
     expect([...portalRules.keys()].sort()).toEqual([...PORTAL_ACTIONS].sort());
   });
 
-  it("the client role-arm rule itself is BYTE-UNCHANGED (zero decisions changed for the client role)", () => {
+  it("the client role-arm rule now also carries the MON-00i root gate (zero decisions changed for a well-anchored client)", () => {
+    // MON-00i (2026-08-21): this rule is the ACTUAL path a real client authorizes through — the
+    // `perm_portal_*` mirrors below are a second, currently-unused-in-practice path to the same
+    // reach (only `client`'s own bundle populates `perms` with `portal.*` keys today). Gating only
+    // the mirrors and leaving this rule alone would have closed nothing, so it changes too. Still
+    // "zero decisions changed" for any client whose root anchor resolves correctly (principal.ts's
+    // client_contacts fallback, docs/plans/2026-08-20-monitoring-gated-rulings.md §1b) — `inRoot` can
+    // only narrow a decision `inTenant` already pinned to the caller's own `client_contacts` row,
+    // never widen one.
     const entry = kinds.get("portal")!;
     const clientRule = entry.rules.find((r) => r.derivedRoles.includes("client"));
-    expect(clientRule, "the client rule must still exist, untouched").toBeDefined();
+    expect(clientRule, "the client rule must still exist").toBeDefined();
     expect(clientRule!.actions.sort()).toEqual([...PORTAL_ACTIONS].sort());
-    expect(clientRule!.condition).toBe("variables.inTenant");
+    expect(clientRule!.condition).toBe("variables.inTenant && variables.inRoot");
   });
 
   it("no staff role (company_admin/manager/group_executive) was added to ANY portal rule — DR-12's staff-read removal is untouched", () => {
@@ -130,9 +138,9 @@ describe("IAM-04-B7 · portal permission-arm retry (static, re-derived every run
     },
   );
 
-  it.each(PORTAL_ACTIONS)("the resource-policy rule for %s carries the SAME 'variables.inTenant' condition the client rule uses — no widening via the mirror's own rule condition", (action) => {
+  it.each(PORTAL_ACTIONS)("the resource-policy rule for %s carries the SAME condition the client rule uses (MON-00i: 'variables.inTenant && variables.inRoot') — no widening via the mirror's own rule condition", (action) => {
     const rule = portalRules.get(action)!;
-    expect(rule.condition).toBe("variables.inTenant");
+    expect(rule.condition).toBe("variables.inTenant && variables.inRoot");
   });
 
   it("every wired perm_portal_* action resolves to a real, pre-existing permission-catalog key (class='grantable')", () => {

@@ -41,15 +41,21 @@ export interface Principal {
   userId: string | null; // null = unknown external identity
   assurance: Assurance;
   companies: string[]; // authorized tenant set (active memberships)
-  /** MON-00c (Wall 2). Every company sharing this principal's ROOT company tree, from
-   *  users.home_company_id. Cerbos's `inRoot` variable tests `resource.tenantId in rootCompanies`,
-   *  which needs no handler change because tenantId is already on every resource.
+  /** MON-00c (Wall 2). Every company sharing this principal's ROOT company tree. Cerbos's `inRoot`
+   *  variable tests `resource.tenantId in rootCompanies`, which needs no handler change because
+   *  tenantId is already on every resource.
    *
-   *  Deliberately NOT derived from memberships: `group_executive` is a global grant whose holders
-   *  have ZERO membership rows (IAM-TRAP4), so a membership-derived set would be empty for exactly
-   *  the role that can otherwise read every company in the database.
+   *  Anchor precedence (assemblePrincipal, MON-00c + MON-00i): `users.home_company_id` first, else
+   *  the roots of any ACTIVE `company_memberships` row ("staff anchors" — this is why
+   *  `group_executive` still works despite holding a global grant with ZERO membership rows,
+   *  IAM-TRAP4: its home_company_id carries it, not memberships); else, ONLY if neither exists, the
+   *  roots of any ACTIVE `client_contacts` row (the "portal anchor" — MON-00i, closes the gap where
+   *  a client-portal principal had no anchor at all and so could never satisfy a root-gated
+   *  `portal` rule). The portal anchor is a fallback, never merged in alongside a staff anchor —
+   *  see assemblePrincipal's own comment for why unioning them would let an unrelated portal
+   *  identity widen a staff principal's root-gated reach.
    *
-   *  EMPTY MEANS DENY, WITH NO EXCEPTION. A null home company yields the empty set and therefore
+   *  EMPTY MEANS DENY, WITH NO EXCEPTION. An unanchored principal yields the empty set and therefore
    *  denies, including on the principal's own data. That is deliberate and it is the correction of a
    *  first attempt at this field which read "null => operator staff => every company": the very
    *  principal that leaks (a customer's group_executive) has no memberships and so lands on exactly
@@ -226,11 +232,24 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
   // client_contacts carries its own principal_lookup policy (0072 §7b) for the same reason
   // company_memberships does: this read happens BEFORE any tenant context exists, so under
   // tenant_isolation alone it would match zero rows.
-  const companies = await withGlobal(async (c) => {
+  //
+  // MON-00i — `companies` and `rootCompanies` are now resolved in the SAME transaction/GUC scope,
+  // not two separate `withGlobal` calls. They used to be split, and the split was a live bug: the
+  // root-anchor query joined `company_memberships` (FORCE RLS, `principal_lookup` policy keyed on
+  // `app.principal_user_id`) from a plain `withGlobal` call that never set that GUC. RLS therefore
+  // returned ZERO rows for that join regardless of how many real memberships existed, so the
+  // membership-fallback branch the comment below describes was dead code — verified live: a user
+  // with one active membership and no `home_company_id` resolved `rootCompanies: []`. Nothing
+  // caught this because every existing root-anchored fixture (`cross-root-boundary.db.test.ts`'s
+  // execA, etc.) sets `home_company_id` directly and so never exercised the membership branch.
+  // Fixing it here is not a scope departure: MON-00i's own new client_contacts anchor (below) reads
+  // the identical FORCE-RLS/`principal_lookup` shape, so it would have shipped with the exact same
+  // defect if the two queries stayed apart.
+  const { companies, rootCompanies } = await withGlobal(async (c) => {
     await c.query("BEGIN");
     try {
       await c.query("SELECT set_config('app.principal_user_id', $1, true)", [userId]);
-      const res = await c.query<{ tenant_id: string }>(
+      const companiesRes = await c.query<{ tenant_id: string }>(
         `SELECT m.tenant_id FROM company_memberships m
           WHERE m.user_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL
          UNION
@@ -238,42 +257,60 @@ export async function assemblePrincipal(userId: string, assurance: Assurance): P
           WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL`,
         [userId],
       );
+
+      // MON-00c + MON-00i. Resolved from the user's home company and memberships first ("staff
+      // anchors"); a client-portal anchor (client_contacts) is consulted ONLY as a fallback when
+      // NEITHER exists. A user with no anchor of any kind is operator staff or truly unanchored and
+      // gets the empty set, which denies rather than allows.
+      //
+      // WHY PRECEDENCE, NOT A FLAT UNION ACROSS ALL THREE SOURCES: `users.email` is globally
+      // unique (CLAUDE.md), so the SAME `users` row can in principle be both an internal employee
+      // of one root (home_company_id, or a membership) AND, independently, an external portal
+      // contact of a completely unrelated company under a DIFFERENT root (their client_contacts
+      // row was added by some other agency's staff, using the same email). Unioning that
+      // client_contacts root into a STAFF principal's `rootCompanies` would silently widen every
+      // OTHER root-gated rule this same user's staff roles hold (`group_executive`'s `inRoot`, and
+      // any future one) into a foreign root they merely happen to also be a client of — a real
+      // escalation, not a portal-only concern. A pure portal principal (no staff anchor at all) has
+      // no such rule to widen: its only root-gated reach is the 8 `portal` rules this ticket adds
+      // (the `client` role-arm rule plus its 7 `perm_portal_*` mirrors), and those are ALSO gated on
+      // `variables.inTenant` — which is independently pinned to the caller's own explicit
+      // `client_contacts` rows — so `inRoot` there can only ever narrow, never widen, a decision
+      // `inTenant` didn't already allow. See resource_portal.yaml's header for that argument in
+      // full. `NOT EXISTS` (not a plain `UNION`) is what encodes "fallback, not merge" here.
+      const rootRes = await c.query<{ id: string }>(
+        `WITH staff_anchors AS (
+           SELECT home.root_company_id
+             FROM users u JOIN companies home ON home.id = u.home_company_id
+            WHERE u.id = $1
+           UNION
+           SELECT co.root_company_id
+             FROM company_memberships m JOIN companies co ON co.id = m.tenant_id
+            WHERE m.user_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL
+         ),
+         portal_anchors AS (
+           SELECT co.root_company_id
+             FROM client_contacts cc JOIN companies co ON co.id = cc.tenant_id
+            WHERE cc.user_id = $1 AND cc.status = 'active' AND cc.deleted_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM staff_anchors)
+         ),
+         anchors AS (
+           SELECT root_company_id FROM staff_anchors
+           UNION
+           SELECT root_company_id FROM portal_anchors
+         )
+         SELECT co.id FROM companies co
+          WHERE co.deleted_at IS NULL
+            AND co.root_company_id IN (SELECT root_company_id FROM anchors)`,
+        [userId],
+      );
+
       await c.query("COMMIT");
-      return res;
+      return { companies: companiesRes, rootCompanies: rootRes.rows.map((r) => r.id) };
     } catch (err) {
       await c.query("ROLLBACK");
       throw err;
     }
-  });
-
-  // MON-00c. Resolved from the user's home company, NOT from memberships — see the field's comment.
-  // A user with no home company is operator staff and gets every company; a user whose home company
-  // exists but resolves to no root gets the empty set, which denies rather than allows.
-  const rootCompanies = await withGlobal(async (c) => {
-    const { rows } = await c.query<{ id: string }>(
-      // Anchor precedence: the explicit home company first, then the roots of any ACTIVE membership.
-      //
-      // The membership fallback is safe and is not the membership-derived scheme rejected in the
-      // header: it cannot help the principal being fenced in (a global group_executive has no
-      // memberships, so it contributes nothing and the set stays empty -> denied), while a principal
-      // that genuinely belongs somewhere is anchored by where it demonstrably belongs. Without it,
-      // every ordinary member would be denied until a backfill reached them, which is a fail-closed
-      // outage rather than a boundary.
-      `WITH anchors AS (
-         SELECT home.root_company_id
-           FROM users u JOIN companies home ON home.id = u.home_company_id
-          WHERE u.id = $1
-         UNION
-         SELECT c.root_company_id
-           FROM company_memberships m JOIN companies c ON c.id = m.tenant_id
-          WHERE m.user_id = $1 AND m.status = 'active' AND m.deleted_at IS NULL
-       )
-       SELECT co.id FROM companies co
-        WHERE co.deleted_at IS NULL
-          AND co.root_company_id IN (SELECT root_company_id FROM anchors)`,
-      [userId],
-    );
-    return rows.map((r) => r.id);
   });
 
   return {
