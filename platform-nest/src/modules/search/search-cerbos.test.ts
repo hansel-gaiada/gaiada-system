@@ -22,8 +22,11 @@ const live = process.env.CERBOS_URL && process.env.CERBOS_URL.length > 0;
 const T1 = "cccccccc-1111-0000-0000-000000000001"; // the served company under test
 const T2 = "cccccccc-1111-0000-0000-000000000002"; // a DIFFERENT company (cross-tenant / other-service-scope)
 
-function principal(roles: RoleGrant[], companies: string[] = [T1], assurance: Principal["assurance"] = "high"): Principal {
-  return { userId: "u1", assurance, companies, roles, sessionVersion: 1 };
+// MON-00c: `rootCompanies` defaults to `companies` — in a single-root fixture world the
+// principal's root subtree IS the companies under test. Pass it explicitly for a principal with
+// no memberships (a global group_executive); an empty set denies, which is the boundary working.
+function principal(roles: RoleGrant[], companies: string[] = [T1], assurance: Principal["assurance"] = "high", rootCompanies: string[] = companies): Principal {
+  return { userId: "u1", assurance, companies, roles, rootCompanies, sessionVersion: 1 };
 }
 const allow = async (p: Principal, r: Resource, a: string) => (await check(p, r, a)).allow;
 
