@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DeptTabs } from "@/components/shell/DeptTabs";
 import { DeptShellFrame } from "@/components/departments/DeptShellFrame";
 import { MyWorkRail, type RailTaskItem, type RailWaitingItem, type RailBallItem } from "@/components/departments/MyWorkRail";
+import { SourceOfferNotice } from "@/components/social/SourceOfferNotice";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -142,6 +143,12 @@ export default async function DepartmentConsoleLayout({ children, params }: { ch
       <DeptShellFrame groups={toolkit.groups} deptId={deptId} rail={<MyWorkRail today={today} waiting={waiting} ball={ball} />}>
         {children}
       </DeptShellFrame>
+      {/* AGPL-3.0 §13 source-offer (docs/plans/smm-tracker.md's "open items" table). Gated on the
+          RESOLVED toolkit, not on `deptId` or `dept.name` directly, so it survives whatever id/name
+          the org structure assigns — the same robustness `toolkitFor` already gives every other
+          consumer of this value. Every other department's pages never call Postiz; only this one
+          does, so only this one carries the notice. */}
+      {toolkit.slug === "social-media" && <SourceOfferNotice />}
     </>
   );
 }
