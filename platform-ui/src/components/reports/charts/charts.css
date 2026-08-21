@@ -133,11 +133,28 @@
 .rc-kpis--lead { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 1000px) { .rc-kpis--lead { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .rc-kpis--lead .rc-kpi__value { font-size: 34px; }
-.rc-kpis--rest { grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 10px; margin-top: -4px; }
-.rc-kpi--compact { padding: 11px 12px; gap: 5px; background: transparent; }
-.rc-kpi--compact .rc-kpi__value { font-size: 19px; }
-.rc-kpi--compact .rc-kpi__label { font-size: 9px; }
-.rc-kpi--compact .rc-kpi__foot { font-size: 10px; gap: 6px; }
+/* The tail stops being CARDS. Demoting them was not enough — fourteen bordered boxes still read as
+   fourteen competing objects, and 14 into a 6-column track stranded two on a ragged last row.
+
+   The border is what made the raggedness visible: an empty CELL is invisible, an absent BOX is a
+   hole. So the boxes go and the tail becomes a plain stat grid — label, figure, qualifiers, no
+   chrome — which also lets the columns pack tighter and the whole band shrink to roughly a third
+   of its height. A short last row is now just text ending, which needs no explaining.
+
+   Tried and rejected: one metric per full-width row in two columns. At this page width that put
+   ~600px of dead air between each label and its figure and made every row ~95px tall — a table
+   with worse density than the grid it replaced. Measured, not guessed. */
+.rc-kpis--rest { grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 15px 26px; margin-top: 12px; }
+/* Scoped through the PARENT (`.rc-kpis--rest .rc-kpi`), not the `--compact` class on its own.
+   Both are one-class selectors of equal specificity, and the base `.rc-kpi` rule — which carries
+   the border and `padding: 16px` — is DECLARED BELOW this block, so a bare `.rc-kpi--compact`
+   lost the cascade on exactly the two properties this change is about. The band kept its boxes
+   and its padding while the font sizes appeared to apply, which is what a rendered preview
+   showed and a specificity assumption would not have. Two classes wins regardless of order. */
+.rc-kpis--rest .rc-kpi { border: none; background: transparent; padding: 0; gap: 3px; }
+.rc-kpis--rest .rc-kpi__label { font-size: 9.5px; }
+.rc-kpis--rest .rc-kpi__value { font-size: 17px; }
+.rc-kpis--rest .rc-kpi__foot { font-size: 10px; gap: 6px; }
 /* The comparison range no longer reaches a tile at all (KpiTiles.tsx), which removes the
    unbreakable ~143px run that was overflowing `.rc-kpi__foot` at 142>138 on four tiles per
    report. `min-width: 0` stays as the floor so a longer unit string in some future grain

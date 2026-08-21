@@ -46,7 +46,15 @@ export default async function CompanyReportPage({
     const document = await getReportDocument(tenant, userId, { grain: "company", scopeRef: tenant, periodKind, start, end });
     return (
       <>
-        <PageHeader eyebrow="Reports" title={document.header.scopeName} subtitle="Company-wide delivery and department portfolio over the selected period." />
+        {/* "Company Report", NOT the company name. The sidebar pins the active company under a
+            COMPANY label two inches away, so printing `scopeName` here made the reader see "Gaia
+            Digital Agency" twice on one screen — a second duplication, distinct from the in-page
+            H1/H2 pair already removed. This grain's scope IS the active company, so the name adds
+            nothing the chrome has not said; the page should say what it is instead. Project and
+            department keep `scopeName` in their titles on purpose — a project or unit name is NOT
+            in the sidebar, so there it is the only place the reader learns which one they opened.
+            The PDF is unaffected: print mounts ReportViewer with `scopeHeading` on. */}
+        <PageHeader eyebrow="Reports" title="Company Report" subtitle="Company-wide delivery and department portfolio over the selected period." />
         <ReportPageClient document={document} todayIso={today}>
           <CompanyCharts document={document} />
         </ReportPageClient>
