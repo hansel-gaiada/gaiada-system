@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OrgHandle, SocialPublisherError } from "./types";
 import { createDirectDriver } from "./direct";
 import { runPublisherContractSuite } from "./publisher-contract";
-import { resetYouTubeQuotaUsage } from "./youtube-quota";
+import { resetYouTubeQuotaUsage, getYouTubeQuotaSnapshot, type YouTubeQuotaStore } from "./youtube-quota";
 
 const ORG = new OrgHandle("row-1", "org-abc", "unused-key");
 /** A LinkedIn-shaped handle: `orgId` carries the organization URN, `secret()` carries the
@@ -249,6 +249,86 @@ describe("SMM-38d · uploadMedia — YouTube's resumable initiate→PUT upload I
     ).rejects.toMatchObject({ code: "publisher_http_error" });
     const snapshot = await d.getQuota(YOUTUBE_ORG, { id: "i", network: "youtube", handle: "@h" });
     expect(snapshot?.youtubeQuota?.videosInsertCallsToday).toEqual({ used: 0, cap: 100 });
+  });
+
+  // ── SMM-38 phase 38e — Gap 2: the metadata channel ────────────────────────────────────────────
+  it("a REAL title/description, when the caller supplies them, are sent verbatim — never overridden " +
+     "by the filename fallback", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("uploadType=resumable")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.snippet.title).toBe("A real post title");
+        expect(body.snippet.description).toBe("A real, multi-line description.");
+        return new Response("", { status: 200, headers: { Location: "https://upload.example/session-3" } });
+      }
+      return new Response(JSON.stringify({ id: "yt-video-titled" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const d = createDirectDriver({ fetchImpl });
+    const res = await d.uploadMedia(
+      YOUTUBE_ORG,
+      {
+        filename: "clip.mp4", contentType: "video/mp4", bytes: new Uint8Array([1, 2]),
+        title: "A real post title", description: "A real, multi-line description.",
+      },
+      "youtube",
+    );
+    expect(res).toEqual({ id: "yt-video-titled" });
+  });
+
+  it("a blank/whitespace-only supplied title still falls back to the filename — never sends an " +
+     "empty title to Google", async () => {
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).includes("uploadType=resumable")) {
+        const body = JSON.parse(String(init?.body));
+        expect(body.snippet.title).toBe("clip.mp4");
+        return new Response("", { status: 200, headers: { Location: "https://upload.example/session-4" } });
+      }
+      return new Response(JSON.stringify({ id: "yt-video-blank-title" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const d = createDirectDriver({ fetchImpl });
+    await d.uploadMedia(
+      YOUTUBE_ORG,
+      { filename: "clip.mp4", contentType: "video/mp4", bytes: new Uint8Array([1]), title: "   " },
+      "youtube",
+    );
+  });
+
+  // ── SMM-38 phase 38e — Gap 3: the injectable quota store ──────────────────────────────────────
+  it("a caller-supplied `quotaStore` is used instead of the default singleton — proving `boot.ts` " +
+     "can swap in the durable store without direct.ts's own methods changing", async () => {
+    const calls: Array<{ bucket: string; units: number }> = [];
+    let snapshotCalls = 0;
+    const fakeStore: YouTubeQuotaStore = {
+      async record(bucket, units) { calls.push({ bucket, units }); },
+      async snapshot() {
+        snapshotCalls += 1;
+        return {
+          searchListCallsToday: { used: 7, cap: 100 },
+          videosInsertCallsToday: { used: 3, cap: 100 },
+          otherUnitsToday: { used: 0, cap: 10000 },
+        };
+      },
+    };
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("uploadType=resumable")) {
+        return new Response("", { status: 200, headers: { Location: "https://upload.example/session-5" } });
+      }
+      return new Response(JSON.stringify({ id: "yt-video-injected" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const d = createDirectDriver({ fetchImpl, quotaStore: fakeStore });
+
+    const snap = await d.getQuota(YOUTUBE_ORG, { id: "i", network: "youtube", handle: "@h" });
+    expect(snap?.youtubeQuota?.videosInsertCallsToday).toEqual({ used: 3, cap: 100 });
+    expect(snapshotCalls).toBe(1);
+
+    await d.uploadMedia(YOUTUBE_ORG, { filename: "clip.mp4", contentType: "video/mp4", bytes: new Uint8Array([1]) }, "youtube");
+    expect(calls).toEqual([{ bucket: "videosInsertCallsToday", units: 1 }]);
+
+    // The module-level singleton (what every OTHER test in this file implicitly reads via
+    // `resetYouTubeQuotaUsage()`) was never touched — proving this driver instance's accounting is
+    // fully isolated to the store it was given.
+    expect(getYouTubeQuotaSnapshot().videosInsertCallsToday!.used).toBe(0);
   });
 });
 

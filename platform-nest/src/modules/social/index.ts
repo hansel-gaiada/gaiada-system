@@ -98,6 +98,9 @@ export const socialModule: ModuleContract = {
     "0118_social_variant_uploaded_media.sql",
     // SMM-38/38b — `social_oauth_tokens`, the `direct` driver's in-house token custody table.
     "202608201518_social_oauth_tokens.sql",
+    // SMM-38/38e — `social_youtube_quota_usage`, Gap 3's durable YouTube quota counter (GLOBAL, no
+    // RLS, same D-4 reasoning as social_platform_apps).
+    "202608210411_social_youtube_quota_usage.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is

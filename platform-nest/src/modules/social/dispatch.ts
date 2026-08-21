@@ -70,9 +70,13 @@ import {
 // only at the executor's.
 import { evaluatePublishPreconditionWithClientReview, type ClientReviewRefusalReason } from "./client-review";
 import { variantPublishArgs, type VariantPublishArgs } from "./canonical-args";
-import { assertDispatchChain, openOrg, type DispatchChain } from "./publisher/provisioning";
+import { assertDispatchChain, resolveDispatchOrgHandle, type DispatchChain } from "./publisher/provisioning";
 import { invokePublisher } from "./publisher/registry";
 import { SocialPublisherError, type OrgHandle, type SocialPublisher, type VariantDispatch } from "./publisher/types";
+// SMM-38 phase 38e — Gap 1's live wiring resolves an OAuth grant through this file's own fail-closed
+// codes when the (network, capability) switch names `direct`; formatted the same way a
+// `SocialPublisherError` already is below, never left as an untyped message.
+import { OAuthTokenError } from "./publisher/oauth-tokens";
 import { refreshCreatorInfoSnapshot } from "./creator-info-verifier";
 
 /** Refusals that belong to THIS file's own routing question ("who authorized this call"), not to
@@ -232,6 +236,24 @@ async function loadFileForUpload(tenantId: string, fileId: string): Promise<File
  *  a caller assemble a one-image post out of a three-image approval (this ticket's own AC). Whatever
  *  succeeded before the failing attachment is already durably persisted (migration 0116), so a
  *  redispatch after a human files a fresh approval resumes rather than re-uploading from zero. */
+/** SMM-38 phase 38e — Gap 2's metadata channel. YouTube's `uploadMedia` IS its publish call
+ *  (`direct.ts`'s own header), and "a YouTube upload without a title is not a post" (this ticket's
+ *  own instruction) — so a YouTube-network upload derives a real title/description from the
+ *  variant's own `body`, the ONE piece of caller-side content this function already has in scope,
+ *  rather than leaving `uploadMedia`'s caller (this function) to synthesize one from a filename.
+ *  `title` is truncated to 100 chars — YouTube's commonly-documented title limit, ⚠UNVERIFIED against
+ *  a live app (D-23) but a defensive cap either way: better a truncated real title than a 400 this
+ *  driver has never been told how to recover from. Absent/blank for every other network — Postiz's
+ *  generic multipart upload and LinkedIn's asset API both have no metadata concept at this call, and
+ *  `uploadMedia`'s new fields are optional exactly so a caller with nothing to say need not fabricate
+ *  something. */
+function youtubeUploadMetadata(body: string): { title: string; description: string } {
+  const trimmed = body.trim();
+  const firstLine = (trimmed.split(/\r?\n/, 1)[0] ?? "").trim();
+  const title = (firstLine.length > 0 ? firstLine : trimmed || "Untitled").slice(0, 100);
+  return { title, description: trimmed };
+}
+
 async function resolveEngineMedia(
   tenantId: string,
   variantId: string,
@@ -239,6 +261,7 @@ async function resolveEngineMedia(
   driver: SocialPublisher,
   handle: OrgHandle,
   network: string,
+  variantBody: string,
 ): Promise<Array<{ id: string; url?: string }>> {
   if (descriptors.length === 0) return [];
 
@@ -269,6 +292,11 @@ async function resolveEngineMedia(
 
     let ref: { id: string; url?: string };
     try {
+      // SMM-38 phase 38e — Gap 2: a YouTube-network upload carries real title/description derived
+      // from the variant's own body (`youtubeUploadMetadata`, this file's own function above); every
+      // other network gets neither, since `uploadMedia`'s new fields are optional exactly so a caller
+      // with nothing to say need not fabricate something.
+      const meta = network === "youtube" ? youtubeUploadMetadata(variantBody) : undefined;
       ref = await invokePublisher(
         { op: "uploadMedia", org: handle, network, costUsd: 0 },
         // SMM-38 phase 38d — `uploadMedia` now carries the variant's own network (types.ts's own
@@ -279,7 +307,7 @@ async function resolveEngineMedia(
         // request just below in this same file.
         () => driver.uploadMedia(
           handle,
-          { filename: file.filename, contentType: file.contentType, bytes },
+          { filename: file.filename, contentType: file.contentType, bytes, title: meta?.title, description: meta?.description },
           network as VariantDispatch["network"],
         ),
       );
@@ -463,7 +491,16 @@ export async function dispatchApprovedPublish(
   // own 120s timeout class, `SOCIAL_POSTIZ_UPLOAD_TIMEOUT_MS`) and holding the advisory lock across
   // it would be a self-inflicted outage, exactly the shape D-22's creator-info fetch above already
   // established for this file.
-  const { driver, handle } = openOrg(chain.org);
+  //
+  // SMM-38 phase 38e — Gap 1: `openOrg(chain.org)` is GONE from this function. `media_upload` and
+  // `schedule` are now resolved SEPARATELY, each through `resolveDispatchOrgHandle` (provisioning.ts),
+  // because the (network, capability) switch (`registry.ts#resolvePublisherForCapability`) can
+  // legitimately route them to DIFFERENT drivers (the whole reason the switch is keyed on
+  // (network, capability) and not network alone — see that function's own header). With the
+  // capability-driver override map empty (every deployment today, by default), both resolutions fall
+  // straight through to the IDENTICAL Postiz-shaped handle `openOrg` always built — this loop's
+  // behaviour is UNCHANGED for every existing deployment.
+  const mediaDescriptors = parseMediaDescriptors(args.media);
 
   let dispatched: { providerPostId: string } | null = null;
   let dispatchError: string | null = null;
@@ -471,16 +508,27 @@ export async function dispatchApprovedPublish(
   let engineMedia: Array<{ id: string; url?: string }> = [];
   try {
     // SMM-39 — resolve the composer's `{fileId}` descriptors to already-uploaded engine refs.
-    // A text-only variant (`args.media` empty/absent) returns here immediately: `resolveEngineMedia`
-    // never touches `files`, `storage()` or the driver when there is nothing to upload — it must not
-    // acquire an upload round trip it never needed (this ticket's own AC).
-    engineMedia = await resolveEngineMedia(tenantId, variantId, parseMediaDescriptors(args.media), driver, handle, chain.network);
+    // A text-only variant (`args.media` empty/absent) never resolves a media handle at all and never
+    // touches `files`, `storage()` or a driver — it must not acquire an upload round trip it never
+    // needed (this ticket's own AC), and (38e) it must not spend a token-resolution round trip either.
+    if (mediaDescriptors.length > 0) {
+      const media = await resolveDispatchOrgHandle(tenantId, chain, "media_upload");
+      engineMedia = await resolveEngineMedia(
+        tenantId, variantId, mediaDescriptors, media.driver, media.handle, chain.network, args.body,
+      );
+    }
   } catch (err) {
     // Refuse closed on ANY partial failure: `resolveEngineMedia` never returns a partial list (see
     // its own doc), so reaching here means `schedulePost` is NEVER called below — a three-image
     // variant whose second upload fails must not publish a one-image post (this ticket's own AC).
+    // 38e: a `resolveDispatchOrgHandle` failure (an unregistered override, or — for `direct` — a
+    // revoked/expired/missing OAuth grant) lands here too, for the SAME reason: nothing was sent to
+    // any engine.
     dispatchReason = DISPATCH_REFUSAL.mediaUploadFailed;
-    dispatchError = err instanceof MediaUploadError ? err.message : ((err as Error)?.message ?? "unknown media upload error");
+    dispatchError = err instanceof MediaUploadError ? err.message
+      : err instanceof SocialPublisherError ? `${err.code}: ${err.message}`
+      : err instanceof OAuthTokenError ? `${err.code}: ${err.message}`
+      : ((err as Error)?.message ?? "unknown media upload error");
   }
 
   if (!dispatchError) {
@@ -498,13 +546,22 @@ export async function dispatchApprovedPublish(
       variantId,
     };
     try {
+      // 38e: resolved SEPARATELY from the media-upload handle above — see this block's own header.
+      // A resolution failure here (an unregistered override, or a revoked/expired/missing `direct`
+      // OAuth grant) is reported as `dispatch_error`, the SAME token a live `schedulePost` failure
+      // already uses: both mean "the schedule step did not complete", and a caller's remedy is
+      // identical either way (fix the underlying issue, file a fresh approval) — a new token for this
+      // narrower case would not change what anyone does with the answer.
+      const scheduled = await resolveDispatchOrgHandle(tenantId, chain, "schedule");
       dispatched = await invokePublisher(
-        { op: "schedulePost", org: handle, network: chain.network, costUsd: 0 },
-        () => driver.schedulePost(handle, dispatch),
+        { op: "schedulePost", org: scheduled.handle, network: chain.network, costUsd: 0 },
+        () => scheduled.driver.schedulePost(scheduled.handle, dispatch),
       );
     } catch (err) {
       dispatchReason = DISPATCH_REFUSAL.publishDispatchFailed;
-      dispatchError = err instanceof SocialPublisherError ? `${err.code}: ${err.message}` : (err as Error)?.message ?? "unknown dispatch error";
+      dispatchError = err instanceof SocialPublisherError ? `${err.code}: ${err.message}`
+        : err instanceof OAuthTokenError ? `${err.code}: ${err.message}`
+        : (err as Error)?.message ?? "unknown dispatch error";
     }
   }
 

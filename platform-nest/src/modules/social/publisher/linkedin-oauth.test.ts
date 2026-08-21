@@ -187,10 +187,16 @@ describe.skipIf(!TEST_URL)("SMM-38c · LinkedIn connect readiness + the full sta
     expect(completed).toEqual({ accountId: started.accountId, status: "connected" });
 
     const { rows: connected } = await withTenants([T], (c) =>
-      c.query(`SELECT status, connected_by, platform_app_id FROM social_accounts WHERE id = $1`, [started.accountId]), MODULES);
+      c.query(`SELECT status, connected_by, platform_app_id, postiz_integration_id FROM social_accounts WHERE id = $1`, [started.accountId]), MODULES);
     expect(connected[0].status).toBe("connected");
     expect(connected[0].connected_by).toBe(actorId);
     expect(connected[0].platform_app_id).not.toBeNull();
+    // SMM-38 phase 38e — a gap found wiring Gap 1's live dispatch path: THIS call used to leave
+    // `postiz_integration_id` NULL, which would make `provisioning.ts#assertDispatchChain` refuse
+    // `account_not_connected` for every direct-connected LinkedIn account, regardless of a live
+    // OAuth grant existing. The sentinel is non-NULL and self-describing, never mistaken for a real
+    // Postiz-issued opaque id (which never contains a `:`).
+    expect(connected[0].postiz_integration_id).toBe("direct:linkedin");
 
     const resolved = await withTenants([T], (c) => resolveActiveAccessToken(c, started.accountId));
     expect(resolved.secret()).toBe("li-at-1");

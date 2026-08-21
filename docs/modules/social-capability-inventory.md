@@ -160,6 +160,42 @@ browser"), but that design reasoning is stated for the connect POST, not repeate
 readiness GET, which is a pure read an agent could in principle consult. Left as-is; named so the
 absence reads as considered, not missed.
 
+## Driver per capability (SMM-38, the `direct` driver) — which engine actually serves each capability
+
+§PD's own exit criterion for phase 38e: *"Capability inventory records which driver serves each
+capability."* The switch (`registry.ts#resolvePublisherForCapability`) is config-driven and keyed on
+`(network, capability)`, most-specific-wins — see that file's own header. The table below records, for
+each (network, capability) pair this driver wave actually built something for, which engine COULD
+serve it and what stands between "could" and "does" today.
+
+| Network | Capability | Served by (default, no config) | Served by (if flipped) | What's missing for the flip to be more than principle |
+|---|---|---|---|---|
+| LinkedIn | `schedule` (publish) | Postiz (AGPL zone) | `direct` — REAL org-page publish, contract-tested (38c) | A `social_platform_apps` row + non-empty `SOCIAL_LINKEDIN_CLIENT_ID`/`_SECRET` (D-23, deferred to staging) — **principle-only for want of credentials**, nothing else. The dispatch-side wiring itself is REAL: `dispatch.test.ts`'s (D1)–(D4) drive a genuine `resolveActiveAccessToken` call and a genuine second driver receiving the resolved bearer token, end to end, against a real Postgres row |
+| LinkedIn | `media_upload` | Postiz | `direct` — REAL 3-step asset upload, contract-tested (38c) | Same as above — credential-gated only |
+| LinkedIn | `inbox_read` (`pullComments`) | n/a — Postiz has NO inbox surface for any network (spike §8b) | `direct` — REAL per-post comment read, contract-tested (38c) | Same as above; ALSO gated on SMM-15 (P2 inbox sync) existing to ever call it — no caller exists yet regardless of credentials |
+| YouTube | `media_upload` (= publish, for this network) | Postiz | `direct` — REAL resumable upload, contract-tested (38d), now with real title/description (38e, Gap 2) | Credential-gated (same as LinkedIn) **AND** a second, independent gap: `dispatch.ts` unconditionally calls `schedulePost` after any media upload, for every network — a shape that fits LinkedIn's real API but not YouTube's ("upload IS publish", no separate schedule step). Routing `youtube:media_upload` to `direct` on a live dispatch call today would upload a real video and then attempt a doomed second `schedulePost` step. **This is reported to the architect as its own open question (see `provisioning.ts#resolveDispatchOrgHandle`'s own header) — deliberately NOT wired into the recommended flip config below.** Principle-only for TWO independent reasons, not one |
+| YouTube | `quota_probe` | n/a — Postiz never advertised this for YouTube | `direct` — REAL accounting (38d) against a NOW-DURABLE store (38e, Gap 3: `social_youtube_quota_usage`, global, no RLS, D-4's own reasoning) | Only reachable once `media_upload`/a future `videos.insert` caller exists on a live path — see the row above |
+| YouTube | `inbox_read` (`pullComments`) | n/a — Postiz has no inbox surface | `direct` — REAL comment read via `youtube.force-ssl` (38d) | Credential-gated + SMM-15, same as LinkedIn's row |
+| Instagram / Facebook | everything | Postiz (AGPL zone) | **not built** — `direct` has zero IG/FB capability | Meta Business Verification (staging, D-23) is the serial prerequisite before ANY IG/FB work on `direct` would even be worth starting (§PD: "IG/FB stay on Postiz") |
+| TikTok | everything | Postiz (AGPL zone, D-21 fork exception) | **not built** — `direct` has zero TikTok capability | TikTok's own audit (staging, D-23); §PD: "TikTok stays behind its own audit" |
+
+**The flip itself (38e) does NOT change the shipped default.** `config.social.publisher.capabilityDrivers`
+stays the empty map every prior phase shipped — every deployment with no
+`SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` set behaves EXACTLY as before this phase, for every network,
+including LinkedIn and YouTube. The recommended override for a deployment that HAS cleared LinkedIn's
+credential gate (D-23) is `linkedin:schedule=direct,linkedin:media_upload=direct,linkedin:inbox_read=direct`
+— deliberately never `youtube:media_upload=direct` or any `youtube:schedule` key, for the reason named
+in the table above. Setting an override is an explicit, staging-time operator action; nothing in this
+phase makes that decision on a deployment's behalf.
+
+**Why "principle-only" is the honest word, twice over, for two different reasons in this wave:**
+(1) every platform app credential in the estate is empty (D-23, deferred to staging) — true for LinkedIn
+AND YouTube equally; (2) YouTube ALSO carries a second, independent gap that has nothing to do with
+credentials — the dispatch state machine itself does not yet know how to represent a network whose
+publish terminates at `uploadMedia`. Naming both, rather than collapsing them into one "not live yet"
+sentence, is what lets a future pass tell "get a credential" apart from "redesign a flow" — two very
+different amounts of work hiding behind the same word.
+
 ## Metrics (SMM-21) — read-only, `social_account::read`
 
 | Capability | Endpoint | MCP tool | Impact class | Refusal | `work_activity` |

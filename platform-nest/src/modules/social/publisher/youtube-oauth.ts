@@ -315,10 +315,13 @@ export async function completeYouTubeConnect(
         `SELECT id FROM social_platform_apps WHERE network = 'youtube' AND deleted_at IS NULL
            AND review_status <> 'rejected' ORDER BY updated_at DESC LIMIT 1`,
       );
+      // SMM-38 phase 38e — the SAME gap `linkedin-oauth.ts#completeLinkedInConnect` fixes, same
+      // reasoning, network swapped: see that file's own comment on this exact statement shape.
       await c.query(
         `UPDATE social_accounts
             SET status = 'connected', platform_app_id = $2, connected_by = $3, connected_at = now(),
-                last_error = NULL, updated_at = now()
+                last_error = NULL, postiz_integration_id = COALESCE(postiz_integration_id, 'direct:youtube'),
+                updated_at = now()
           WHERE id = $1`,
         [accountId, platformApp.rows[0]?.id ?? null, args.actorId],
       );

@@ -53,20 +53,26 @@
 // (naturally `social_accounts.id`, since `direct` has no separate "org" concept the way Postiz does —
 // an ACCOUNT is the granular unit here, for both networks).
 //
-// **WHO BUILDS THAT HANDLE, TODAY: NOBODY ON A LIVE PATH.** `dispatch.ts` and
-// `provisioning.ts#openOrg` are the only two places a `SocialPublisher` call is made against a real
-// `OrgHandle` today, and both are Postiz-shaped: `openOrg` builds `new OrgHandle(org.id,
-// org.postizOrgId, resolveOrgApiKey(org.apiKeyRef))` from `social_publisher_orgs`, which has no
-// notion of a per-account OAuth token at all. Wiring "resolve this account's LinkedIn/YouTube token,
-// then build a `direct`-shaped `OrgHandle` from it" into either of those call sites is real surgery
-// this phase's file surface does not include (`dispatch.ts` is off-limits; `provisioning.ts` is not
-// this ticket's to restructure) — it is 38e's job, the SAME phase whose own exit criterion is "flip
-// LinkedIn + YouTube publishing to `direct` in config". Named here, not silently worked around: this
-// phase (and 38c before it) prove the driver's LinkedIn/YouTube methods are correct against a
-// resolved token (contract tests + `direct.test.ts`'s own cases for both networks), but nothing on a
-// live dispatch path constructs that token or that handle yet. See `linkedin-oauth.ts`'s/
-// `youtube-oauth.ts`'s own headers for the piece that DOES land on a live path each phase — acquiring
-// and storing the grant in the first place, through each network's own OAuth controller.
+// **WHO BUILDS THAT HANDLE, AS OF 38e: `provisioning.ts#resolveDispatchOrgHandle`, a NEW function,
+// not a widened `openOrg`.** 38c/38d left this as "nobody on a live path" — `dispatch.ts` and
+// `provisioning.ts#openOrg` only ever built a Postiz-shaped handle from `social_publisher_orgs`,
+// which has no notion of a per-account OAuth token. 38e's own design call (see that function's own
+// header in `provisioning.ts`): do NOT widen `openOrg` itself (it stays synchronous, DB-free, correct
+// for Postiz's env-resolved API-key alias); add a SEPARATE, capability-aware resolver that
+// `dispatch.ts` consults for the two capabilities (`media_upload`, `schedule`) that actually need a
+// driver decided per (network, capability) rather than per-org. When `resolvePublisherForCapability`
+// resolves to anything other than `direct`, that resolver builds the IDENTICAL Postiz-shaped handle
+// `openOrg` always built; only when it resolves to `direct` does it call `oauth-tokens.ts#resolveActiveAccessToken`
+// (fail-closed on a revoked/expired/missing grant) and build the handle this file's header describes.
+// `dispatch.ts` now reaches `direct` for real, for LinkedIn, the moment an operator sets
+// `linkedin:schedule`/`linkedin:media_upload` in `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` — proven by a
+// live-shaped test in `dispatch.test.ts` (a real `social_oauth_tokens` row, a real
+// `resolveActiveAccessToken` call, a real second driver receiving the resolved bearer token). YouTube
+// is a NAMED, DELIBERATE exception — see `provisioning.ts#resolveDispatchOrgHandle`'s own header for
+// why routing YouTube's `media_upload` through this same path today would be unsafe (upload-is-publish
+// colliding with `dispatch.ts`'s unconditional "upload then schedule" flow), and why that is reported
+// as a sub-question for the architect rather than silently wired around. See `linkedin-oauth.ts`'s/
+// `youtube-oauth.ts`'s own headers for the piece that lands the grant in the first place.
 import {
   OrgHandle,
   SocialPublisherError,
@@ -96,7 +102,7 @@ import {
   uploadVideoBytes,
   type YouTubeFetchOptions,
 } from "./youtube-client";
-import { getYouTubeQuotaSnapshot, recordYouTubeQuotaUsage } from "./youtube-quota";
+import { defaultYouTubeQuotaStore, type YouTubeQuotaStore } from "./youtube-quota";
 
 /** LinkedIn's org-page publish, media upload and comment read are real as of 38c. 38d adds YouTube's
  *  media upload, quota accounting (`quota_probe` — see `getQuota`'s own comment for why this is
@@ -133,11 +139,21 @@ function refuseNetworkNotCovered(op: string, network: string): never {
 export interface DirectDriverOptions {
   /** Injected in tests so no real socket is ever opened — mirrors postiz.ts's own `fetchImpl` seam. */
   fetchImpl?: typeof fetch;
+  /** SMM-38 phase 38e — Gap 3's durability fix, injected rather than hard-coded. Defaults to
+   *  `defaultYouTubeQuotaStore()` (the SAME in-memory, per-process singleton 38d shipped — every
+   *  existing test that calls `createDirectDriver()` with no override keeps that exact behaviour,
+   *  including `resetYouTubeQuotaUsage()`'s own test seam, unchanged). `boot.ts` is the one real
+   *  caller that overrides this, with `createDbYouTubeQuotaStore()` — see that file's own header for
+   *  why this counter becomes load-bearing only once a live upload path can reach it, and why the
+   *  swap is safe here rather than in `youtube-quota.ts`'s own module-level functions (this driver is
+   *  the ONLY caller of either). */
+  quotaStore?: YouTubeQuotaStore;
 }
 
 export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublisher {
   const li: LinkedInFetchOptions = { fetchImpl: opts.fetchImpl };
   const yt: YouTubeFetchOptions = { fetchImpl: opts.fetchImpl };
+  const quota: YouTubeQuotaStore = opts.quotaStore ?? defaultYouTubeQuotaStore();
 
   return {
     key: "direct",
@@ -183,8 +199,9 @@ export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublis
       // that is the honest answer here (no live "remaining quota" endpoint exists, and the cap is a
       // documented per-PROJECT constant, not a per-account fact to ask Google for). Same snapshot for
       // every YouTube account this deployment connects (the dossier's own finding: the cap is shared
-      // across the entire fleet, not per client).
-      return { youtubeQuota: getYouTubeQuotaSnapshot() };
+      // across the entire fleet, not per client). Read through the injected store (Gap 3) — the DB-
+      // backed one in production, the in-memory singleton in every existing test.
+      return { youtubeQuota: await quota.snapshot() };
     },
 
     // getCreatorInfo stays ABSENT — TikTok-only concern (D-21/D-22), out of scope for a driver that
@@ -238,7 +255,7 @@ export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublis
 
     async uploadMedia(
       org: OrgHandle,
-      file: { filename: string; contentType: string; bytes: Uint8Array },
+      file: { filename: string; contentType: string; bytes: Uint8Array; title?: string; description?: string },
       network: Network,
     ): Promise<{ id: string; url?: string }> {
       // 38d resolves the network-routing gap 38c named: the port's `uploadMedia` now carries
@@ -253,23 +270,27 @@ export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublis
       if (network === "youtube") {
         // YouTube's resumable upload IS the publish call for this driver (see `schedulePost`'s own
         // comment) — `videos.insert` creates the video resource directly, there is no separate
-        // "reference this asset from a later post" step the way LinkedIn's flow works. Metadata is
-        // deliberately MINIMAL: `uploadMedia`'s own signature carries no title/description field
-        // beyond `{filename, contentType, bytes}` (widening it further than the single `network`
-        // parameter this collision required was NOT this ticket's call to make unilaterally — see
-        // `youtube-client.ts#ResumableUploadMetadata`'s own comment), so `title` is derived from the
-        // filename and `privacyStatus` defaults to `private` (the SAFE default that happens to match
-        // the dossier's own UNVERIFIED forced-private-lock report — see that file's header). Named,
-        // load-bearing gap for whoever wires this to a live dispatch path (38e): real video
-        // title/description drawn from the variant's own body has nowhere to travel through this
-        // call today.
+        // "reference this asset from a later post" step the way LinkedIn's flow works.
+        //
+        // SMM-38 phase 38e — GAP 2 CLOSED: `file.title`/`file.description` (types.ts's own header)
+        // now carry the caller's real metadata; `dispatch.ts#resolveEngineMedia` is the caller and
+        // derives both from the variant's own `body`. `title` falls back to the filename ONLY when
+        // the caller sent neither (e.g. a direct contract-test call, or a future caller with no post
+        // body to draw from) — never silently substituted when a real title was supplied.
+        // `privacyStatus` still defaults to `private` (the SAFE default that happens to match the
+        // dossier's own UNVERIFIED forced-private-lock report — see that file's header); this phase
+        // does not add a way to request a different one (no composer/settings plumbing exists for it
+        // yet, same reasoning 38d gave).
+        const title = (file.title && file.title.trim().length > 0) ? file.title.trim() : file.filename;
         const initiated = await initiateResumableUpload(
-          org.secret(), { title: file.filename, privacyStatus: "private" }, file.bytes.byteLength, file.contentType, yt,
+          org.secret(),
+          { title, description: file.description, privacyStatus: "private" },
+          file.bytes.byteLength, file.contentType, yt,
         );
         const uploaded = await uploadVideoBytes(initiated.uploadUrl, file.bytes, file.contentType, yt);
         // Recorded ONLY after both calls succeed — see youtube-quota.ts's own header on why a failed
-        // call is never counted as used quota.
-        recordYouTubeQuotaUsage("videosInsertCallsToday", 1);
+        // call is never counted as used quota. Through the injected store (Gap 3).
+        await quota.record("videosInsertCallsToday", 1);
         return { id: uploaded.videoId };
       }
       return refuseNetworkNotCovered("uploadMedia", network);
@@ -318,8 +339,9 @@ export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublis
       }
       const items = await listVideoCommentThreads(org.secret(), integrationId, since, yt);
       // commentThreads.list costs 1 unit against the 10,000/day pool (dossier §6.4) — recorded only
-      // after the call succeeded, same discipline as uploadMedia's own accounting call.
-      recordYouTubeQuotaUsage("otherUnitsToday", 1);
+      // after the call succeeded, same discipline as uploadMedia's own accounting call. Through the
+      // injected store (Gap 3).
+      await quota.record("otherUnitsToday", 1);
       return items;
     },
 
