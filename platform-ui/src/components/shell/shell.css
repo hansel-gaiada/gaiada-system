@@ -128,8 +128,11 @@
    group flat, so ~9 icons stand in for ~35 rows. Labels come from the flyout and
    from .erp-railtip on hover/focus — which is why the drawer breakpoint still
    gets an off-canvas panel instead: touch has no hover. */
-/* Floated out of the flow so the wordmark/tagline keep the full header width. */
-.erp-sidetoggle { position: absolute; top: 18px; right: 12px; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: none; background: transparent; color: var(--ink-subtle); cursor: pointer; transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease); }
+/* An IN-FLOW flex item, deliberately not absolute. Absolute took it out of flow, so the brand
+   beside it had no idea it was there and "SYROWATKA" ran under the icon once the sidebar
+   narrowed (248px -> 208px at the <=1024px breakpoint). As a flex sibling it always reserves
+   its own 32px plus the head's 8px gap, at every width. */
+.erp-sidetoggle { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: none; background: transparent; color: var(--ink-subtle); cursor: pointer; transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease); }
 .erp-sidetoggle:hover { color: var(--text-primary); background: var(--tint-hover); }
 .erp-railtip { position: fixed; z-index: 200; transform: translateY(-50%); padding: 7px 12px; border-radius: 999px; background: var(--surface-inverse); color: var(--text-on-inverse); font: 500 12.5px var(--font-body); white-space: nowrap; pointer-events: none; box-shadow: var(--elev-overlay); }
 
@@ -155,7 +158,6 @@ html[data-sidebar="collapsed"] .erp-railmenu .erp-navbtn span { display: inline;
   html[data-sidebar="collapsed"] .erp-side__mark { display: block; }
   /* Toggle above the mark, both centred — the rail has no room for a row. */
   html[data-sidebar="collapsed"] .erp-side__head { flex-direction: column-reverse; align-items: center; gap: 12px; padding: 16px 0 14px; }
-  html[data-sidebar="collapsed"] .erp-sidetoggle { position: static; }
   html[data-sidebar="collapsed"] .erp-side__brand { flex: none; }
   html[data-sidebar="collapsed"] .erp-side__nav { padding: 12px 6px; }
   html[data-sidebar="collapsed"] .erp-navbtn { justify-content: center; gap: 0; padding: 10px 0; }
@@ -168,6 +170,10 @@ html[data-sidebar="collapsed"] .erp-railmenu .erp-navbtn span { display: inline;
 /* ---- Responsive ---- */
 @media (max-width: 1024px) {
   .erp-app { grid-template-columns: 208px 1fr; }
+  /* The rail loses 40px here while the wordmark did not, which is what actually crowded the
+     toggle: "SYROWATKA" at 22px/0.14em needs ~150px of Cormorant Garamond, but the brand box
+     is only ~124px wide at this width. Shrink the type rather than let it collide. */
+  .erp-side__wordmark { font-size: 18px; letter-spacing: 0.08em; }
   .erp-main__inner { padding: 24px 22px 32px; }
   .erp-top { gap: 14px; padding: 0 18px; }
   .erp-top__search { max-width: 300px; }
