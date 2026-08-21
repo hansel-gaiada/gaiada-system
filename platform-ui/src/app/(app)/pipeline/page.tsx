@@ -47,7 +47,11 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
     listPipelineRuns(userId, tenant, { status: status || undefined, clientId: clientFilter || undefined }),
     listInternalPendingGates(userId, tenant),
     // Still fetched, but only for the MEETING title column now — not to reconstruct the client.
-    listRecordings(userId, tenant),
+    // AGN-3: recordings ENRICH this view (a crumb/link), they are not its subject. A refusal here
+    // means the enrichment cannot be built, and the primary content still renders — so it is
+    // unwrapped rather than surfaced. Recorded explicitly because an undocumented unwrap is how the
+    // silent-empty defect spread in the first place.
+    listRecordings(userId, tenant).then((r) => (r.kind === "ok" ? r.data : [])),
     listClients(userId, tenant),
     listProjects(userId, tenant),
   ]);

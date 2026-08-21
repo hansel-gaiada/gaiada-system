@@ -6,6 +6,7 @@ import { can } from "@/lib/rbac";
 import { getClient, listDeliverables, listProjects } from "@/lib/entities";
 import { deleteClientForm } from "@/lib/clientWorkActions";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
 import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
@@ -32,13 +33,21 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
   const deliverables = (await listDeliverables(userId, tenant)).filter((d) => d.client_id === clientId);
   // WD-07 (Web Dev Phase 1 §12) — recordings scoped to this client, plus RecordControls with
   // clientId pre-filled: the client-workspace half of the capture-edge context plumbing.
-  const meetings = await listRecordings(userId, tenant, { clientId });
+  // AGN-3: these two are PANELS on a client page, not the page's subject, so a refusal is rendered
+  // inline beside the rest of the client rather than taking the whole page down — but it IS rendered.
+  // The panels are unwrapped here so the JSX below stays a straight list render; `refused` carries
+  // the reason a panel is empty, which is exactly the distinction that was being lost.
+  const meetingsResult = await listRecordings(userId, tenant, { clientId });
+  const meetings = meetingsResult.kind === "ok" ? meetingsResult.data : [];
+  const meetingsRefusal = meetingsResult.kind === "ok" ? null : meetingsResult;
   // W0-5 — the external half of engagement setup (D-3: the client is present BEFORE the first
   // meeting). Both reads degrade to [] rather than throwing, so one missing grant cannot take the
   // whole client page down.
   const contacts = await listClientContacts(userId, tenant, clientId);
   // W1 (D-3): what is coming up for this client, server-filtered to future scheduled rows.
-  const upcoming = await listRecordings(userId, tenant, { clientId, scheduled: "upcoming" });
+  const upcomingResult = await listRecordings(userId, tenant, { clientId, scheduled: "upcoming" });
+  const upcoming = upcomingResult.kind === "ok" ? upcomingResult.data : [];
+  const upcomingRefusal = upcomingResult.kind === "ok" ? null : upcomingResult;
   const clientProjects = (await listProjects(userId, tenant).catch(() => []))
     .filter((p) => p.client_id === clientId)
     .map((p) => ({ id: p.id, name: p.name }));
@@ -84,11 +93,27 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
       </div>
       <div style={{ marginTop: 20 }}>
         <Card title={`Scheduled${upcoming.length ? ` · ${upcoming.length}` : ""}`}>
+          {upcomingRefusal ? (
+            <ReadRefusal
+              subject="this client's scheduled meetings"
+              kind={upcomingRefusal.kind}
+              reason={upcomingRefusal.kind === "unavailable" ? upcomingRefusal.reason : undefined}
+              inline
+            />
+          ) : null}
           <ScheduleMeetingPanel clientId={clientId} upcoming={upcoming} />
         </Card>
       </div>
       <div style={{ marginTop: 20 }}>
         <Card title={`Meetings${meetings.length ? ` · ${meetings.length}` : ""}`}>
+          {meetingsRefusal ? (
+            <ReadRefusal
+              subject="this client's meetings"
+              kind={meetingsRefusal.kind}
+              reason={meetingsRefusal.kind === "unavailable" ? meetingsRefusal.reason : undefined}
+              inline
+            />
+          ) : null}
           <RecordControls clientId={clientId} />
           {meetings.length > 0 && (
             <div style={{ marginTop: 18 }}>

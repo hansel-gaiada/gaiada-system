@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { listRecordings, STATUS_LABEL, DRIVE_LABEL, formatDuration, type RecordingStatus } from "@/lib/meetings";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { listPipelineRuns } from "@/lib/pipeline";
 import { listClients, listProjects } from "@/lib/entities";
 import { RecordControls } from "@/components/meetings/RecordControls";
@@ -34,11 +35,20 @@ export default async function MeetingsPage({ searchParams }: { searchParams: SP 
   // (lib/meetings.ts:82-90) — this page just never passed them through. Client/project dropdowns
   // are populated from the existing entity lists (already fetched elsewhere in the app; no new
   // backend call shape).
-  const [recordings, clients, projects] = await Promise.all([
+  const [recordingsResult, clients, projects] = await Promise.all([
     listRecordings(userId, tenant, { status: status || undefined, clientId: clientId || undefined, projectId: projectId || undefined }),
     listClients(userId, tenant),
     listProjects(userId, tenant).catch(() => []),
   ]);
+  // AGN-3: the registry is this page's whole subject, so a refusal takes the page rather than
+  // rendering an empty table that asserts "no recordings" on the strength of a denial.
+  if (recordingsResult.kind === "forbidden") {
+    return <ReadRefusal subject="the meeting registry for this company" kind="forbidden" />;
+  }
+  if (recordingsResult.kind === "unavailable") {
+    return <ReadRefusal subject="The meeting registry" kind="unavailable" reason={recordingsResult.reason} />;
+  }
+  const recordings = recordingsResult.data;
   // WD-07: run-status chips — the recording's own status only says "in pipeline"; resolve the
   // linked run's actual delivery status too, so the registry answers "what's happening with it
   // now" without a click-through. Cheap: one extra list call, not per-row.

@@ -4,6 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getRecording, STATUS_LABEL, DRIVE_LABEL, formatDuration } from "@/lib/meetings";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { RecordingWorkbench } from "@/components/meetings/RecordingWorkbench";
 import { ParticipantsPanel } from "@/components/meetings/ParticipantsPanel";
 import { listClientContacts } from "@/lib/clientContacts";
@@ -27,7 +28,17 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) redirect("/meetings");
-  const rec = await getRecording(userId, tenant, id);
+  const recResult = await getRecording(userId, tenant, id);
+  // AGN-3: three outcomes that used to be one. `notFound()` is right ONLY for a genuine absence; a
+  // refusal or an unreadable backend must say so, because "this meeting does not exist" is a
+  // different and wrong claim to make to someone who simply may not read it.
+  if (recResult.kind === "forbidden") {
+    return <ReadRefusal subject="this meeting recording" kind="forbidden" />;
+  }
+  if (recResult.kind === "unavailable") {
+    return <ReadRefusal subject="This meeting recording" kind="unavailable" reason={recResult.reason} />;
+  }
+  const rec = recResult.data;
   if (!rec) notFound();
 
   // W1 (D-3) — candidates for the participant picker. Both reads degrade to [] rather than throwing,

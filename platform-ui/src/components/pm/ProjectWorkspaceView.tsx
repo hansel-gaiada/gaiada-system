@@ -150,7 +150,11 @@ export async function ProjectWorkspaceView({
     // WD-07: recordings started from THIS project workspace (client/project context plumbed
     // straight into `RecordControls` below) — verifies the capture edge end-to-end from a
     // project's own page, not just the standalone /meetings registry.
-    listRecordings(userId, tenant, { projectId }),
+    // AGN-3: recordings ENRICH this view (a crumb/link), they are not its subject. A refusal here
+    // means the enrichment cannot be built, and the primary content still renders — so it is
+    // unwrapped rather than surfaced. Recorded explicitly because an undocumented unwrap is how the
+    // silent-empty defect spread in the first place.
+    listRecordings(userId, tenant, { projectId }).then((r) => (r.kind === "ok" ? r.data : [])),
   ]);
   // Burndown overlay (P2-08, design spec §4 phase-2) — only fetched when the Timeline or Charts
   // tab is actually being rendered, same lazy pattern as everything else view-scoped on this page.

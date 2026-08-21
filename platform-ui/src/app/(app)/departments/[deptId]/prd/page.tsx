@@ -28,7 +28,11 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
   // WD-07: resolve each run's source recording so "Source meeting" is a clickable chip back into
   // the registry, not just a raw meetingId string — the same recording<->run link WD-02 draws in
   // the run workspace, just the other direction.
-  const recordings = runs.some((r) => r.source_meeting_id) ? await listRecordings(userId, tenant) : [];
+  const recordings = runs.some((r) => r.source_meeting_id)
+      // AGN-3: enrichment only (resolves a run's meeting into a link); unwrapped, see note in
+      // pipeline/page.tsx. The PRD list itself is unaffected by a recordings refusal.
+      ? await listRecordings(userId, tenant).then((r) => (r.kind === "ok" ? r.data : []))
+      : [];
   const recordingIdByMeetingId = new Map(recordings.map((r) => [r.meeting_id, r.id]));
 
   return (

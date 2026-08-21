@@ -1,4 +1,5 @@
 import "server-only";
+import { readResult, type ReadResult } from "./readResult";
 // WS11 capture edge — meeting-recordings registry data layer. Thin readers over the platform
 // meetings API (0023 / MeetingRecordingsController). Every reader DEGRADES gracefully (return
 // []/null on 404/403) so the page ships ahead of the backend deploy — same pattern as lib/pipeline.ts.
@@ -80,20 +81,11 @@ export const DRIVE_LABEL: Record<DriveStatus, string> = {
   failed: "Drive failed",
 };
 
-async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await p;
-  } catch (e) {
-    if (e instanceof PlatformError && (e.status === 404 || e.status === 403)) return fallback;
-    throw e;
-  }
-}
-
 export async function listRecordings(
   userId: string,
   tenant: string,
   opts: { status?: string; clientId?: string; projectId?: string; scheduled?: "upcoming" } = {},
-): Promise<MeetingRecording[]> {
+): Promise<ReadResult<MeetingRecording[]>> {
   const q = new URLSearchParams();
   if (opts.status) q.set("status", opts.status);
   if (opts.clientId) q.set("clientId", opts.clientId);
@@ -102,11 +94,25 @@ export async function listRecordings(
   // client-side slice, so it stays correct as the registry grows.
   if (opts.scheduled) q.set("scheduled", opts.scheduled);
   const qs = q.toString();
-  return safe(platformFetch<MeetingRecording[]>(`/api/${tenant}/meetings/recordings${qs ? `?${qs}` : ""}`, userId), []);
+  // AGN-3: a refused registry read is no longer indistinguishable from "no recordings". Callers get
+  // the discriminated result and render `<ReadRefusal>`; `absentAsEmpty` covers the one honest
+  // absence, a deployment where the meetings routes are not served at all.
+  return readResult(
+    platformFetch<MeetingRecording[]>(`/api/${tenant}/meetings/recordings${qs ? `?${qs}` : ""}`, userId),
+    { absentAsEmpty: [] },
+  );
 }
 
-export async function getRecording(userId: string, tenant: string, id: string): Promise<MeetingRecordingDetail | null> {
-  return safe(platformFetch<MeetingRecordingDetail>(`/api/${tenant}/meetings/recordings/${id}`, userId), null);
+export async function getRecording(
+  userId: string,
+  tenant: string,
+  id: string,
+): Promise<ReadResult<MeetingRecordingDetail | null>> {
+  // A 404 on a single ITEM is a real answer ("no such recording"), so it stays inside `ok` as null —
+  // see readResult.ts on why `absent` is not a variant of the refusal type. A 403 is not an answer.
+  return readResult(platformFetch<MeetingRecordingDetail>(`/api/${tenant}/meetings/recordings/${id}`, userId), {
+    absentAsEmpty: null,
+  });
 }
 
 /** WD-02: resolve a run's `source_meeting_id` (the dispatcher's meetingId, NOT a recording row id —
@@ -116,8 +122,13 @@ export async function getRecording(userId: string, tenant: string, id: string): 
  *  right-sized fix rather than a new backend query. Returns null if no recording matches (e.g. a
  *  run entered without a captured meeting). */
 export async function findRecordingByMeetingId(userId: string, tenant: string, meetingId: string): Promise<MeetingRecording | null> {
-  const rows = await listRecordings(userId, tenant);
-  return rows.find((r) => r.meeting_id === meetingId) ?? null;
+  // Deliberately collapses a refusal to null here: this resolves a run's meeting into a LINK, and a
+  // link that cannot be built is simply not rendered. The caller's own page already distinguishes a
+  // refused project read (see its `projectRefused` handling), so surfacing a second refusal banner
+  // for a missing crumb would be noise rather than honesty.
+  const res = await listRecordings(userId, tenant);
+  if (res.kind !== "ok") return null;
+  return res.data.find((r) => r.meeting_id === meetingId) ?? null;
 }
 
 /** Human-friendly duration (e.g. "1h 02m", "8m 30s"). */

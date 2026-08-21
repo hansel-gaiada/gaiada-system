@@ -20,7 +20,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const tenant = me ? await getActiveTenant(me) : null;
   if (!tenant) return NextResponse.json({ error: "No active company selected." }, { status: 404, headers: { "Cache-Control": "no-store" } });
 
-  const rec = await getRecording(userId, tenant, id);
+  // AGN-3: this route is polled by the client while a recording processes, so collapsing every
+  // non-answer into 404 told the poller "it's gone" when the truth was "you may not read it" or "we
+  // cannot tell" — and a poller that believes "gone" stops polling. Each outcome now gets its own
+  // status, which is also what makes the refusal legible in the network tab.
+  const recResult = await getRecording(userId, tenant, id);
+  if (recResult.kind === "forbidden") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+  if (recResult.kind === "unavailable") {
+    return NextResponse.json(
+      { error: "recording status unavailable", reason: recResult.reason },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const rec = recResult.data;
   if (!rec) return NextResponse.json({ error: "recording not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
 
   return NextResponse.json(
