@@ -175,16 +175,24 @@ async function anyStaffUser(tenantId: string): Promise<string | null> {
   // findClient's note). The first version used withGlobal and would have returned null for every
   // company — leaving every project unowned, which is the one thing this function exists to prevent.
   // The column is `tenant_id`, NOT `company_id` — the first version guessed and got a 42703
-  // errorMissingColumn on the live box. `kind <> 'service'` matters too: automation and bot principals
-  // are deliberately `users` rows with a `service` membership, and making a bot the owner of a client's
-  // project would send every client notification to something that cannot read it.
+  // errorMissingColumn on the live box. Excluding non-humans matters too: automation and bot
+  // principals are deliberately `users` rows, and making a bot the owner of a client's project would
+  // send every client notification to something that cannot read it.
+  //
+  // PK-02: that exclusion now reads `u.kind = 'employee'` instead of `cm.kind <> 'service'`. The old
+  // test asked why the account is in this company and used the answer to guess what it is, which was
+  // both too weak and too strong: too strong because the shared-service reconciler gives real placed
+  // STAFF a `kind='service'` membership in the served company, so the humans most likely to be the
+  // right owner here were the ones being skipped.
   const r = await withTenants([tenantId], (c) =>
     c.query<{ user_id: string }>(
       `SELECT cm.user_id
          FROM company_memberships cm
         WHERE cm.tenant_id = $1 AND cm.deleted_at IS NULL AND cm.status = 'active'
-          AND COALESCE(cm.kind, 'employee') <> 'service'
-          AND EXISTS (SELECT 1 FROM users u WHERE u.id = cm.user_id AND u.deleted_at IS NULL)
+          AND EXISTS (
+            SELECT 1 FROM users u
+             WHERE u.id = cm.user_id AND u.deleted_at IS NULL AND u.kind = 'employee'
+          )
           AND NOT EXISTS (
             SELECT 1 FROM client_contacts cc WHERE cc.user_id = cm.user_id AND cc.deleted_at IS NULL
           )

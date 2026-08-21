@@ -301,6 +301,22 @@ export class CoreController {
     // planned "served-company badging" consumption).
     const includeService = config.serviceAssignmentsEnabled && includeServiceRaw === "1";
     const filterEmployeeOnly = config.serviceAssignmentsEnabled && !includeService;
+    // ⚠ PK-02: NON-HUMANS ARE EXCLUDED REGARDLESS OF THE FLAG, and that is a fix for a live defect.
+    // Everything above this line is about SERVICE ASSIGNMENTS — "is this row a reconciler-
+    // materialized placement?" — and it is correctly gated on the release-train flag. But whether a
+    // row is a PERSON was never that question, and with the flag off (the default, and true for
+    // every deployed consumer today) this endpoint applied no filter at all: `/members` listed the
+    // 17 n8n service accounts alongside real staff, which is the same defect that once made HR
+    // report 36 people when 19 were people.
+    //
+    // `users.kind` can finally ask it directly, so the two dimensions are now separated:
+    //   u.kind = 'employee'  -> is this a person?              (always, flag-independent)
+    //   m.kind = 'employee'  -> is this placement ordinary?     (unchanged, still flag-gated)
+    // Deliberately NOT folded together: when the flag is on, the ordinary directory hides
+    // reconciler-materialized rows by default, and those rows are HUMANS placed into the served
+    // company. Whether the served company's directory should show them (badged, per ORG-12) is a
+    // product decision, not this ticket's — so that behaviour is left exactly as it was.
+    const includeNonHuman = includeServiceRaw === "1";
     const rows = await withTenants([tenantId], async (c) => {
       // Reset a possibly-stale principal_user_id GUC before the RLS'd read (see Fastify note).
       await c.query("SELECT set_config('app.principal_user_id', NULL, true)");
@@ -308,6 +324,7 @@ export class CoreController {
         `SELECT m.user_id, u.name, u.email, u.title${config.serviceAssignmentsEnabled ? ", m.kind" : ""}
          FROM company_memberships m JOIN users u ON u.id = m.user_id
          WHERE m.deleted_at IS NULL AND u.deleted_at IS NULL AND u.status = 'active'
+           ${includeNonHuman ? "" : "AND u.kind = 'employee'"}
            ${filterEmployeeOnly ? "AND m.kind = 'employee'" : ""}
          ORDER BY u.name`,
       );

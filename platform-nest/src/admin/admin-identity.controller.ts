@@ -145,17 +145,27 @@ export class AdminIdentityController {
 
   // ---- Users with their role grants ----
   //
-  // Employee-only by DEFAULT, `?includeService=1` to opt in — the same convention
-  // `GET /api/:t/members` (core.controller) already uses, and for the same reason: a membership
-  // with kind='service' is not a person. Non-human principals are real `users` rows on purpose
-  // (an n8n workflow authenticates via its OBO envelope -> identity_link -> user -> Cerbos, so a
-  // workflow that is not a user cannot be authorized at all), which means every people-shaped
-  // surface has to filter them out explicitly. This endpoint did not, so the People directory
-  // listed 17 automation service accounts among 19 real staff and HR headcount read 36.
+  // Human-only by DEFAULT, `?includeService=1` to opt in — the same convention
+  // `GET /api/:t/members` (core.controller) already uses, and for the same reason. Non-human
+  // principals are real `users` rows on purpose (an n8n workflow authenticates via its OBO
+  // envelope -> identity_link -> user -> Cerbos, so a workflow that is not a user cannot be
+  // authorized at all), which means every people-shaped surface has to filter them out
+  // explicitly. This endpoint did not, so the People directory listed 17 automation service
+  // accounts among 19 real staff and HR headcount read 36.
+  //
+  // ⚠ PK-02: THE FILTER MOVED FROM `m.kind` TO `u.kind`, AND THAT IS A BUG FIX, NOT A REFACTOR.
+  // The two columns answer different questions and the interim fix could only ask the wrong one:
+  //   `company_memberships.kind` = WHY this account is in this company (employee | service)
+  //   `users.kind`               = WHAT this account IS (employee | client | automation | bot)
+  // The shared-service reconciler materializes `kind='service'` memberships in the SERVED company
+  // for real, placed STAFF (service-reconciler.ts:234). Filtering on the membership therefore hid
+  // every shared-service human from the directory of the company they actually serve — a person
+  // erased from a people surface for the crime of being lent to another company. Filtering on
+  // `users.kind` asks the question the surface actually has: is this a person?
   //
   // Not filtered unconditionally, because the SAME endpoint backs Settings → Users & Roles, where
   // an admin legitimately needs to see and revoke an automation account's grants. That page asks
-  // for them; the directory does not. `kind` is echoed either way so callers can badge.
+  // for them; the directory does not. Both kinds are echoed either way so callers can badge.
   @Get(":tenantId/users")
   async users(
     @Req() req: FastifyRequest,
@@ -166,11 +176,14 @@ export class AdminIdentityController {
     const includeService = includeServiceRaw === "1";
     const members = await withTenants([tenantId], async (c) => {
       await c.query("SELECT set_config('app.principal_user_id', NULL, true)");
-      return c.query<{ id: string; name: string; email: string; title: string | null; status: string; kind: string }>(
-        `SELECT u.id, u.name, u.email, u.title, u.status, m.kind
+      return c.query<{
+        id: string; name: string; email: string; title: string | null; status: string;
+        kind: string; principalKind: string;
+      }>(
+        `SELECT u.id, u.name, u.email, u.title, u.status, m.kind, u.kind AS "principalKind"
          FROM company_memberships m JOIN users u ON u.id = m.user_id
          WHERE m.deleted_at IS NULL AND u.deleted_at IS NULL
-           ${includeService ? "" : "AND m.kind = 'employee'"}
+           ${includeService ? "" : "AND u.kind = 'employee'"}
          ORDER BY u.name`,
       );
     });
@@ -199,8 +212,16 @@ export class AdminIdentityController {
       title: m.title,
       status: m.status,
       // Echoed so an admin surface that opted in can badge the row instead of presenting a
-      // workflow's service account as a colleague.
-      isService: m.kind === "service",
+      // workflow's service account as a colleague. PK-02: derived from `users.kind`, so the badge
+      // now means "not a person" rather than "here on a service membership" — a shared-service
+      // HR manager is a colleague and stops being badged as a robot.
+      isService: m.principalKind !== "employee",
+      /** PK-02: the account's own kind (employee|client|automation|bot) — lets a surface say WHICH
+       *  sort of non-human it is, which `isService` (a boolean) never could. */
+      principalKind: m.principalKind,
+      /** Why this account is in THIS company (employee|service). Orthogonal to `principalKind`;
+       *  kept because the shared-service surfaces genuinely need it. */
+      membershipKind: m.kind,
       roles: (byUser.get(m.id) ?? []).map((g) => ({
         grantId: g.grantId,
         role: g.role,
