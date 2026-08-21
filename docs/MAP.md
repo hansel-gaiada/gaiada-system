@@ -165,11 +165,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202608210218_monitoring_partition_roll_forward.sql`
+- Head: `202608210411_social_youtube_quota_usage.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 127 (121 legacy `NNNN_`, 6 timestamped)
+- Applied files on disk: 128 (121 legacy `NNNN_`, 7 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -236,6 +236,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
+| `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/youtube-oauth.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
@@ -246,6 +247,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/mail` | `platform-nest/src/mail/webhook.controller.ts` |
 | `/api/search/google/oauth` | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
 | `/api/social/linkedin/oauth` | `platform-nest/src/modules/social/linkedin-oauth.controller.ts` |
+| `/api/social/youtube/oauth` | `platform-nest/src/modules/social/youtube-oauth.controller.ts` |
 | `/internal/reports/print-payload` | `platform-nest/src/modules/reports/print-payload.controller.ts` |
 | `/mcp` | `platform-nest/src/modules/mcp-tools.controller.ts` |
 
