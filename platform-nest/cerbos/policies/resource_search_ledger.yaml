@@ -39,8 +39,8 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_ledger_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["admin"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_ledger_admin"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

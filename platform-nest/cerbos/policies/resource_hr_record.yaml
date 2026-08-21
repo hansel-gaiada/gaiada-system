@@ -47,19 +47,19 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_record_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_record_create"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_record_update"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_record_delete"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
 
     # perm_hr_record_export — REMOVED by IAM-04-REG2 (2026-08-12), RESTORED by IAM-04-REG3
     # (2026-08-13) at the CORRECT tier. Keeping REG2's own account here rather than deleting it:

@@ -51,20 +51,20 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_engagement_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_engagement_create"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_engagement_update"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_engagement_delete"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["set_scope"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_engagement_set_scope"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

@@ -30,8 +30,8 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_compliance_gate_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_compliance_gate_update"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

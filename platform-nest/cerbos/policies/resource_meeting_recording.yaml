@@ -33,24 +33,24 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_create"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_update"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["ingest"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_ingest"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["sync_drive"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_sync_drive"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["relink"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_meeting_recording_relink"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

@@ -51,12 +51,12 @@ resourcePolicy:
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_pipeline_gate_create"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_pipeline_gate_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["decide"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_pipeline_gate_decide"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

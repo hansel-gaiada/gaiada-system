@@ -28,20 +28,20 @@ resourcePolicy:
     - actions: ["remove_member"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_chat_group_remove_member"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["promote_member"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_chat_group_promote_member"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["set_subject"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_chat_group_set_subject"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["pin"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_chat_group_pin"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["add_member"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_chat_group_add_member"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

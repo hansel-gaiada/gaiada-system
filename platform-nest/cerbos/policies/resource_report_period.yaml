@@ -93,16 +93,16 @@ resourcePolicy:
     - actions: ["view"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_report_period_view"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["seal"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_report_period_seal"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["amend"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_report_period_amend"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["pin"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_report_period_pin"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

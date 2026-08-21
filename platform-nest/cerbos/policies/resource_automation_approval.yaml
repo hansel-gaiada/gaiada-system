@@ -116,7 +116,7 @@ resourcePolicy:
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_automation_approval_create"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     # IAM-04-REG1 (2026-08-12): `read` and `decide` are DELIBERATELY NOT mirrored here, reverting
     # Batch 4's over-grant. `role-permission-bundles.json` shows `core.automation_approval.read`
     # AND `.decide` are held by `hr_manager` — but hr_manager's ONLY role-arm path to either action
@@ -137,7 +137,7 @@ resourcePolicy:
     - actions: ["retry"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_automation_approval_retry"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
 
     # ══════════ P2-08 part B (design §6.5) — `decide_override`: the ROUTED OVERRIDE decision ══════
     #

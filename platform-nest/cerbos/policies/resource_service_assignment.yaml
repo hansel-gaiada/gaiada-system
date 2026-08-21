@@ -68,27 +68,27 @@ resourcePolicy:
     - actions: ["propose"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_propose"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["accept"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_accept"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["revoke"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_revoke"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["suspend"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_suspend"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["resume"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_resume"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["relink"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_service_assignment_relink"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
 
     # perm_service_assignment_read REMOVED (IAM-04-REG2, 2026-08-12). `role-permission-bundles.json`
     # unions the "read" rule above (module_staff/module_manager, gated on `resource.attr.module`)

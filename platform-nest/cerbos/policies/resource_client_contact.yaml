@@ -50,16 +50,16 @@ resourcePolicy:
     - actions: ["create"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_client_contact_create"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_client_contact_update"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["revoke"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_client_contact_revoke"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_client_contact_read"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

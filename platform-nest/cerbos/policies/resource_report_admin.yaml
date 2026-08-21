@@ -70,4 +70,4 @@ resourcePolicy:
     - actions: ["recompute"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_report_admin_recompute"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

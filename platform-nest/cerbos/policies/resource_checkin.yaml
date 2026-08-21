@@ -176,14 +176,14 @@ resourcePolicy:
     - actions: ["excuse"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_checkin_excuse"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
 
     - actions: ["pending_reminders"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_checkin_pending_reminders"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
 
     - actions: ["missed_by_unit"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_checkin_missed_by_unit"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

@@ -61,11 +61,11 @@ resourcePolicy:
     - actions: ["update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_case_update"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_case_delete"]
-      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
     - actions: ["export"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_hr_case_export"]
