@@ -84,6 +84,23 @@ export interface MockPublisherOptions {
    *  proving ROUTING, as opposed to `direct.test.ts`'s own stub-`fetchImpl` cases, which prove the
    *  real driver's own wire behaviour. */
   key?: PublisherKey;
+  /** SMM-38e — closing pass (2026-08-21). Declares `SocialPublisher.isUploadTerminalFor` (types.ts)
+   *  true for exactly these networks — the same fact `direct.ts` declares true for YouTube ONLY.
+   *  Lets `dispatch.test.ts` prove the upload-terminal path (schedulePost is skipped, the upload's
+   *  own returned id is stamped as `provider_post_id`) against this file's ROUTING-proof mock,
+   *  without needing YouTube's real wire shape (`direct.test.ts` already proves that separately).
+   *  Absent (default) ⇒ the method is not implemented on this mock instance at all — matching
+   *  Postiz's real, upload-then-schedule shape for every network, and every EXISTING test that never
+   *  passes this option is unaffected. */
+  uploadTerminalNetworks?: string[];
+  /** SMM-38e — closing pass (2026-08-21). Declares `SocialPublisher.coversNetworkCapability`
+   *  (types.ts) from an explicit `{network: capability[]}` map, so a test can prove
+   *  `registry.ts#resolvePublisherForCapability`'s eager, data-driven refusal without needing
+   *  `direct`'s own real LinkedIn/YouTube coverage shape. Absent (default) ⇒ the method is not
+   *  implemented on this mock instance at all — matching Postiz's real, flat (one capability set,
+   *  every network alike) shape, and every EXISTING test that never passes this option is
+   *  unaffected. */
+  networkCapabilities?: Record<string, PublisherCapability[]>;
 }
 
 const DEFAULT_CAPS: PublisherCapability[] = [
@@ -193,6 +210,15 @@ export function createMockPublisher(
       record("sendReply", org);
       return { externalId: "mock-reply" };
     };
+  }
+  // SMM-38e — closing pass (2026-08-21). See MockPublisherOptions' own doc: absent ⇒ NOT
+  // implemented at all, matching Postiz's real shape (every existing caller is unaffected).
+  if (opts.uploadTerminalNetworks) {
+    driver.isUploadTerminalFor = (network) => opts.uploadTerminalNetworks!.includes(network);
+  }
+  if (opts.networkCapabilities) {
+    driver.coversNetworkCapability = (network, capability) =>
+      (opts.networkCapabilities![network] ?? []).includes(capability);
   }
   return driver;
 }

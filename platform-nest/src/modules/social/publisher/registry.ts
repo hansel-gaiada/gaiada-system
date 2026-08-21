@@ -100,12 +100,16 @@ export function resolvePublisher(driver: string): SocialPublisher {
  *  run throws `unknown_publisher` — it never falls back to the org's own driver, which would be
  *  exactly the silent-substitution `resolvePublisher` was written to forbid, just moved one layer up.
  *
- *  ── NOT YET CALLED FROM ANY LIVE PATH ───────────────────────────────────────────────────────────
- *  `provisioning.ts`'s `openOrg` still calls `resolvePublisher(org.driver)` directly. Routing
- *  different capabilities of ONE call to different drivers is real surgery on those call sites —
- *  38c/38d's job, once `direct` has a capability worth routing to. This function ships the switch
- *  itself, proven correct in isolation by the tests directly below, without touching a live call
- *  path. */
+ *  ── CALLED FROM A LIVE PATH AS OF 38e ────────────────────────────────────────────────────────────
+ *  Stale note, corrected 2026-08-21 (this codebase's own "a stale comment beats the code" defect
+ *  class — see the tracker's recurring-defect-classes §4b): this function is no longer isolation-only.
+ *  `provisioning.ts#resolveDispatchOrgHandle` (38e) calls it for `dispatch.ts`'s two
+ *  capability-switchable operations (`media_upload`/`schedule`); `provisioning.ts#openOrg` still
+ *  calls `resolvePublisher(org.driver)` directly for every OTHER caller (`verify`,
+ *  `syncConnectorRegistry`, `initiateAccountConnect`), which is correct — those never need a
+ *  (network, capability) split. See `coversNetworkCapability`'s own doc just below for the
+ *  gap-closure pass (2026-08-21) that made an override this function resolves also SAFE to actually
+ *  call, not merely resolvable. */
 export function resolvePublisherForCapability(
   orgDriver: string,
   network: Network,
@@ -120,6 +124,34 @@ export function resolvePublisherForCapability(
       "unknown_publisher",
       `social publisher driver '${override}' (configured for network '${network}' capability `
       + `'${capability}' via SOCIAL_PUBLISHER_CAPABILITY_DRIVERS) is not registered`,
+    );
+  }
+  // ── SMM-38, gap-closure pass (2026-08-21) — the override-safety gap, closed HERE ─────────────
+  // Before this pass, naming a REGISTERED driver was the only bar an override had to clear — a
+  // config value could name a (network, capability) pair the resolved driver would refuse the
+  // instant it was actually called (`youtube:schedule=direct`: `direct` never implements a schedule
+  // step for YouTube, by design — its publish terminates at `uploadMedia` instead, see
+  // `isUploadTerminalFor`'s own doc). That let a doomed dispatch travel all the way to the network
+  // hop before failing, which is exactly the "refuse late" shape this codebase's own D-12 doctrine
+  // forbids.
+  //
+  // `coversNetworkCapability` (types.ts) is DATA the driver itself declares — the same "a driver
+  // that declares what it can serve beats a list someone must keep in sync" precedent
+  // `DIRECT_CAPABILITIES` / `capabilities.ts`'s three-reasons model already set for this module. A
+  // future network or capability this driver grows needs exactly ONE new entry, on the driver's own
+  // map (`direct.ts#NETWORK_CAPABILITIES`) — never a second list here, in `config.ts`, or anywhere
+  // else that could silently drift out of sync with the driver's real behaviour.
+  //
+  // Absent method ⇒ this driver makes no per-network distinction at all (Postiz's/the mock's real
+  // shape: one flat capability set, every network alike) — nothing to refuse, and this branch is a
+  // pure no-op for every deployment that has never registered anything but `postiz`/the mock, which
+  // is every deployment today.
+  if (p.coversNetworkCapability && !p.coversNetworkCapability(network, capability)) {
+    throw new SocialPublisherError(
+      "capability_unsupported",
+      `social publisher driver '${p.key}' does not cover network '${network}' for capability `
+      + `'${capability}' (configured via SOCIAL_PUBLISHER_CAPABILITY_DRIVERS) — refused before any `
+      + "network call was attempted, not after one",
     );
   }
   return p;

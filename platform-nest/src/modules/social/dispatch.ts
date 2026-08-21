@@ -506,6 +506,17 @@ export async function dispatchApprovedPublish(
   let dispatchError: string | null = null;
   let dispatchReason: DispatchRefusalReason = DISPATCH_REFUSAL.publishDispatchFailed;
   let engineMedia: Array<{ id: string; url?: string }> = [];
+  // ── SMM-38, gap-closure pass (2026-08-21) — the upload-terminal flag ──────────────────────────
+  // (NOT 38e's own "GAP 1" above — that one was the live-wiring/token-resolution gap, already
+  // closed. This is a DIFFERENT, later-named gap: 38e's own evidence flagged it as an open
+  // architecture question rather than deciding it — see the tracker's 38e row.)
+  // Set ONLY when media was actually uploaded (mirrors `engineMedia`'s own scope: a text-only
+  // variant never resolves a media handle and never asks this question) AND the driver that
+  // actually served `media_upload` for this (network, capability) pair DECLARES that its upload
+  // for this network IS the publish (`SocialPublisher.isUploadTerminalFor`, types.ts — YouTube on
+  // `direct`, today; nothing else). When true, this file must NEVER call `schedulePost` for this
+  // dispatch — see the block below.
+  let uploadIsTerminal = false;
   try {
     // SMM-39 — resolve the composer's `{fileId}` descriptors to already-uploaded engine refs.
     // A text-only variant (`args.media` empty/absent) never resolves a media handle at all and never
@@ -516,6 +527,7 @@ export async function dispatchApprovedPublish(
       engineMedia = await resolveEngineMedia(
         tenantId, variantId, mediaDescriptors, media.driver, media.handle, chain.network, args.body,
       );
+      uploadIsTerminal = media.driver.isUploadTerminalFor?.(chain.network as VariantDispatch["network"]) ?? false;
     }
   } catch (err) {
     // Refuse closed on ANY partial failure: `resolveEngineMedia` never returns a partial list (see
@@ -531,7 +543,31 @@ export async function dispatchApprovedPublish(
       : ((err as Error)?.message ?? "unknown media upload error");
   }
 
-  if (!dispatchError) {
+  if (!dispatchError && uploadIsTerminal) {
+    // ── the upload-terminal gap, closed ───────────────────────────────────────────────────────
+    // The upload just performed WAS the publish (`direct.ts`'s own `isUploadTerminalFor` — a
+    // `videos.insert` call creates the video resource directly; there is no "reference this
+    // already-uploaded asset from a later post" step for a network whose driver declares this).
+    // Calling `schedulePost` here would be a SECOND, doomed publish attempt against a network that
+    // never had one to offer — the exact "approval spent, a stray video already live upstream, and
+    // a variant row recorded failed" danger this pass exists to close. The single-transaction stamp
+    // (`approval_id` + `provider_post_id`, SMM-10) still runs exactly as it does for every other
+    // network below — it is fed from the upload's own returned id instead of a second network
+    // call's, never bypassed. `media-rules.ts`'s `maxMedia: 1` for a terminal-upload network (today,
+    // only YouTube) is what makes `engineMedia`'s one entry unambiguous.
+    const term = engineMedia[engineMedia.length - 1];
+    if (term) {
+      dispatched = { providerPostId: term.id };
+    } else {
+      // Structurally unreachable: `uploadIsTerminal` is only ever set after `resolveEngineMedia` ran
+      // on a NON-EMPTY descriptor list and returned without throwing (see the try block above), so
+      // `engineMedia` always carries at least one entry here. Refused honestly rather than asserted
+      // away — this file's own discipline (`stampRaceLost`'s doc) is "never assume, always check".
+      dispatchReason = DISPATCH_REFUSAL.mediaUploadFailed;
+      dispatchError = "the resolved driver declared this network's media upload as terminal (its own "
+        + "publish), but the upload step returned no media reference to record as the publish result";
+    }
+  } else if (!dispatchError) {
     const dispatch: VariantDispatch = {
       integrationId: chain.integrationId,
       network: chain.network as VariantDispatch["network"],
@@ -547,11 +583,13 @@ export async function dispatchApprovedPublish(
     };
     try {
       // 38e: resolved SEPARATELY from the media-upload handle above — see this block's own header.
-      // A resolution failure here (an unregistered override, or a revoked/expired/missing `direct`
-      // OAuth grant) is reported as `dispatch_error`, the SAME token a live `schedulePost` failure
-      // already uses: both mean "the schedule step did not complete", and a caller's remedy is
-      // identical either way (fix the underlying issue, file a fresh approval) — a new token for this
-      // narrower case would not change what anyone does with the answer.
+      // A resolution failure here (an unregistered override, a (network, capability) pair the
+      // resolved driver does not cover — the override-safety gap, `registry.ts`'s own eager
+      // refusal — or a revoked/expired/missing `direct` OAuth grant) is reported as `dispatch_error`,
+      // the SAME token a live `schedulePost` failure already uses: both mean "the schedule step did
+      // not complete", and a caller's remedy is identical either way (fix the underlying issue, file
+      // a fresh approval) — a new token for this narrower case would not change what anyone does
+      // with the answer.
       const scheduled = await resolveDispatchOrgHandle(tenantId, chain, "schedule");
       dispatched = await invokePublisher(
         { op: "schedulePost", org: scheduled.handle, network: chain.network, costUsd: 0 },

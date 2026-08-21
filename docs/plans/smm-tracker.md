@@ -31,7 +31,7 @@ not afterwards.
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **2** | 6 |
-| PD `direct` driver (SMM-38) | **4 (38a, 38b, 38c, 38d) + 38e partial** | 5 phases |
+| PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
 | P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
@@ -50,6 +50,9 @@ shared `applyPostStatuses` now writes an honestly-attributed (`actor_id NULL`) `
 for both the webhook and safety-poll paths; SMM-38 phase 38c gave `direct` its first
 real capability (LinkedIn OAuth + org-page publish + media + `pullComments`); phase 38d (this pass)
 adds YouTube's resumable upload (which IS the publish call for that network in this driver — no
+MCP tool and named it plainly rather than papering over it; SMM-38 phase 38c gave `direct` its first
+real capability (LinkedIn OAuth + org-page publish + media + `pullComments`); phase 38d adds
+YouTube's resumable upload (which IS the publish call for that network in this driver — no
 `schedulePost`), quota accounting against SMM-37's three real buckets (self-tracked, not a live
 probe — Google exposes none), and `pullComments` via `youtube.force-ssl`, resolving the
 `uploadMedia` network-routing collision 38c named by widening the port. Both networks remain
@@ -59,6 +62,21 @@ closes the three gaps 38c/38d named and left for it — a live dispatch path DOE
 YouTube title/description channel, and a durable YouTube quota counter — while reporting YouTube's
 own dispatch-path flip as an open architecture question rather than wiring around it. Module:
 `social-media 0.5.11 · IN PROGRESS`.
+closed the three gaps 38c/38d named for it — a live dispatch path DOES now reach `direct` for real
+for LinkedIn (proven with a real OAuth-token row, not merely asserted), a real YouTube
+title/description channel, and a durable YouTube quota counter — but reported YouTube's own
+dispatch-path flip as an open architecture question rather than wiring around it, and flagged the
+resolver's own willingness to accept an unhonourable override as a related, unresolved safety gap;
+**the 38e closing pass (this pass, senior-be) closes BOTH**: `dispatch.ts` now consults a
+driver-declared `isUploadTerminalFor(network)` (types.ts) and, for a network whose upload IS the
+publish (YouTube, on `direct`), stamps the upload's own returned id as `provider_post_id` and never
+calls `schedulePost` — proven live (`dispatch.test.ts`'s (E1)–(E3)); `registry.ts#resolvePublisherForCapability`
+now consults a driver-declared `coversNetworkCapability(network, capability)` and refuses EAGERLY,
+typed, any override the resolved driver does not actually cover (e.g. `youtube:schedule=direct`) —
+before any network call, backed by ONE map on `direct.ts` shared with its own per-method gates, never
+a second hand-maintained list. `youtube:media_upload=direct` moves from "reported unsafe" to
+"principle-safe, credential-gated only" — the SAME D-23 gap every other flip in this wave already
+carries. Module: `social-media 0.5.11 · IN PROGRESS`.
 | PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
 | P3 content ops | 2 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
@@ -251,7 +269,7 @@ is bounded by "which distinct engagements in view require client-ok" but is stil
 per page load beyond the existing account-lookup N — acceptable at this data scale, flagged as a real
 (if minor) cost the same way this file already flags the roll-up's missing `network` field.
 
-## PD — the `direct` driver (D-20) ⬜
+## PD — the `direct` driver (D-20) ✅ — all 5 phases merged (2026-08-21)
 
 Second `SocialPublisher` implementation alongside Postiz, switched per capability. The only free path
 that removes the AGPL zone, both fork exceptions and the inbox gap together.
@@ -260,9 +278,9 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 |---|---|---|
 | 38a | Driver skeleton + per-capability switch (defaults to `postiz`) + shared contract suite | ✅ **merged** |
 | 38b | **Token custody** — encrypted at rest on the tenant wall, refresh-ahead, revocation fails closed | ✅ **merged** |
-| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | 🟡 **partial** — real driver methods + real OAuth flow, contract/unit-tested against a stub; nothing wired into a live dispatch path yet (see evidence below) |
-| 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | 🟡 **partial, this pass (senior-integrator)** — real driver methods + real OAuth flow, quota accounting; contract/unit-tested against a stub; nothing wired into a live dispatch path yet (see evidence below) |
-| 38e | Flip LinkedIn + YouTube to `direct`; Postiz retained for IG/FB/TikTok | 🟡 **partial (2026-08-21, senior-integrator)** — Gap 1 (live dispatch wiring) + Gap 2 (metadata) + Gap 3 (durable quota) all CLOSED and proven live; LinkedIn's flip is real, credential-gated only (D-23); YouTube's flip is reported BLOCKED on an open dispatch-state-machine question (upload-is-publish), not wired around — see evidence below |
+| 38c | **LinkedIn** — OAuth, org-page publish, media, `pullComments` (48h retention) | ✅ **merged** — real driver methods + real OAuth flow; wired into a live dispatch path by 38e (stale "nothing wired yet" note corrected here, 2026-08-21 closing pass — see evidence below) |
+| 38d | **YouTube** — OAuth, resumable upload, 3-bucket quota, `pullComments` | ✅ **merged** — real driver methods + real OAuth flow, quota accounting; `media_upload`/`inbox_read`/`quota_probe` wired into a live dispatch path by 38e + this closing pass (stale "nothing wired yet" note corrected here, 2026-08-21 — see evidence below) |
+| 38e | Flip LinkedIn + YouTube to `direct`; Postiz retained for IG/FB/TikTok | ✅ **merged (2026-08-21, senior-integrator + senior-be closing pass)** — Gap 1 (live dispatch wiring) + Gap 2 (metadata) + Gap 3 (durable quota) all CLOSED and proven live; LinkedIn's flip is real, credential-gated only (D-23); YouTube's flip was reported BLOCKED on an open dispatch-state-machine question and a related resolver-safety gap — **both CLOSED by the closing pass, see its own evidence below** — YouTube's flip is now credential-gated only too, same as LinkedIn |
 
 ⚠ 38b reverses D-5 (client tokens deliberately live *inside* Postiz so we never hold them). That is a
 security decision the owner accepted with D-20, not a convenience.
@@ -680,7 +698,7 @@ this phase). Full detail: `docs/modules/MODULES.md`'s social-media 0.5.10 entry.
 beyond what 38c/38d already named — neither `inbox_read` capability was flipped in the shipped
 default, so `listComments`'s own keying-by-`providerPostId` note stands unchanged.
 
-**What the architect must decide — named, not guessed at:** the dispatch-state-machine
+**What the architect must decide (as of 38e itself) — named, not guessed at:** the dispatch-state-machine
 representation for a network whose publish terminates at `uploadMedia` rather than a separate
 `schedulePost` step (YouTube, today; potentially a future network). Until decided,
 `youtube:media_upload` must never be set to `direct` in `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` on any
@@ -688,6 +706,127 @@ deployment, credentialed or not — a config value nothing currently prevents an
 which is itself worth the architect's attention (should `resolvePublisherForCapability` refuse an
 override the dispatch flow cannot safely honour, rather than accepting any registered driver name?
 Not decided here — this ticket's own file surface and mandate stop at reporting the question).
+
+**Both of the above are CLOSED by the 38e closing pass (2026-08-21, senior-be) — see its own evidence
+block immediately below.** Worktree state, before touching anything: `git log --oneline -1` =
+`d59c730 fix(authz): /api/rollups authorizes against the caller's root, not no tenant at all`;
+`git merge-base --is-ancestor HEAD origin/main` confirmed the worktree was ALREADY current with
+`origin/main` — no merge was needed, stated rather than assumed, per this file's own repeated
+cross-session-hazard note. Every file the ticket named as load-bearing
+(`publisher/youtube-client.ts`, `publisher/youtube-quota.ts`,
+`provisioning.ts#resolveDispatchOrgHandle`) was present and current at cut time.
+
+**The upload-terminal gap — CLOSED with a driver-declared property `dispatch.ts` consults, chosen
+over a documented no-op `schedulePost`, and why.** Both shapes were weighed, per the ticket's own
+instruction. A no-op `schedulePost` for YouTube would still require `dispatch.ts` to resolve a SECOND
+(network, capability) pair after the upload, open a second OTel span for an operation that does
+nothing, and — critically — if `schedule` were ever misconfigured to point at a driver that does not
+cover YouTube (exactly the override-safety gap below), the refusal would arrive AFTER a live video
+already exists upstream, the same "false negative hiding a real side effect" class this program's
+tests exist to catch. The declared-property shape avoids ever asking the question: new optional
+`SocialPublisher.isUploadTerminalFor(network): boolean` (`types.ts`) lets a driver state, per network,
+that its `uploadMedia` IS the publish — no distinct step exists to call. `direct.ts` declares this
+`true` for YouTube only (backed by a new `UPLOAD_TERMINAL_NETWORKS` set), `false`/absent for LinkedIn
+(whose `media_upload` genuinely registers an asset a LATER `schedulePost` references) and every other
+network. `dispatch.ts#dispatchApprovedPublish` checks it immediately after `resolveEngineMedia`
+returns — only when media was actually uploaded, mirroring the existing "a text-only variant never
+acquires an upload round trip" AC — and when true, takes engineMedia's own last entry's `id` as
+`providerPostId` and skips `resolveDispatchOrgHandle(..., "schedule")`/`schedulePost` ENTIRELY. **The
+single-transaction stamp still holds, unmodified**: `stampDispatchOutcome` (SMM-10) runs exactly as it
+always has, fed `dispatched = {providerPostId: term.id}` instead of `schedulePost`'s return value —
+one UPDATE, both columns, only after the network call (the upload) was actually attempted. Proven
+live in `dispatch.test.ts`'s new (E1)–(E3), using a SECOND registered mock (not the real `direct`
+driver — `direct.test.ts` already proves YouTube's real wire shape; this proves ROUTING/STAMPING, the
+split `mock-driver.ts`'s own header already draws) configured to declare the same facts the real
+driver declares: (E1) `youtube:media_upload=direct` ALONE dispatches successfully, `schedulePost`
+reached on NEITHER driver, `provider_post_id` is the upload's own returned id verbatim, status
+`queued`, approval consumed; (E2) ALSO setting `youtube:schedule=direct` changes nothing — the
+terminal check short-circuits before `schedule` is ever resolved, proving the misconfiguration is
+simply never reached; (E3) `youtube:schedule=direct` WITHOUT a `media_upload` override still refuses
+(via the override-safety gap below), proving the two fixes are independent, not each secretly
+depending on the other.
+
+**The override-safety gap — CLOSED with a driver-declared coverage map, never a hand-maintained
+deny-list.** New optional `SocialPublisher.coversNetworkCapability(network, capability): boolean`
+(`types.ts`) — the precedent named in the ticket brief (`DIRECT_CAPABILITIES` / `capabilities.ts`'s
+three-reasons model: "a driver that declares what it can serve beats a list someone must keep in
+sync"), applied to the ROUTING question rather than the account-facing one. Backed on `direct.ts` by
+ONE new map, `NETWORK_CAPABILITIES` — LinkedIn: `schedule`/`media_upload`/`inbox_read` (not
+`quota_probe` — unpublished rate limits, unchanged reasoning); YouTube: `media_upload`/`inbox_read`/
+`quota_probe` (not `schedule` — see the gap above) — the SAME map both this new port member AND the
+pre-existing in-method runtime gates (`refuseNetworkNotCovered`) read from, so a future network or
+capability needs exactly one new entry, never two lists that could drift apart.
+`registry.ts#resolvePublisherForCapability` consults it AFTER the existing "is this driver name
+registered" check (so `unknown_publisher` still fires first, unchanged) and refuses EAGERLY, with the
+existing `capability_unsupported` code (no new refusal token — the ticket's own reuse-over-invention
+discipline), the moment a configured override names a (network, capability) pair the resolved driver
+does not cover — before any network call, not after one. **Made data, not a crash, per the ticket's
+own instruction**: the refusal is a typed `SocialPublisherError`, not an exception a caller has to
+guess the shape of. Absent method (Postiz, the mock) ⇒ no per-network restriction at all — the SAME
+"absent capability member means nothing to check" shape `listComments`/`sendReply`/`getCreatorInfo`
+already use — so every existing deployment (which registers only Postiz/the mock) is provably
+unaffected. Proven in `publisher.test.ts`: TWO pre-existing switch-suite cases were REWRITTEN, not
+just left alone, because they happened to exercise a (network, capability) pair `direct` does not
+actually cover (`linkedin:*` applied to `quota_probe`; `*:schedule` applied to `youtube`) — both now
+assert the eager refusal instead of a silent resolve that 38e itself had left silently unsafe; the
+underlying property each test was ACTUALLY there to prove (network-wildcard/capability-wildcard
+precedence) was re-pointed at `media_upload`, which both LinkedIn and YouTube genuinely cover, so the
+tests still prove precedence rather than accidentally proving coverage. A NEW case proves the
+inverse: a driver with no `coversNetworkCapability` declared at all is never refused, even for a
+(network, capability) pair nothing models.
+
+**A stale comment corrected at the source, not left to mislead the next reader** (this file's own
+recurring defect class §4b). `provisioning.ts#resolveDispatchOrgHandle`'s own header used to name
+YouTube's flip as unsafe and deliberately excluded; `direct.ts`'s file header carried the matching
+claim in its "WHO BUILDS THAT HANDLE" section. Both corrected in place to describe the closed gap and
+point at the fix, rather than left standing next to code that now contradicts them.
+
+**Inertness, `publisher_not_configured`, and `unknown_publisher` — all three invariants proven still
+held, not merely asserted.** No default value was added to `config.social.publisher.capabilityDrivers`
+— it ships exactly as empty as every prior phase left it. `resolvePublisher`'s
+`publisher_not_configured` signal (`anyNonDirectRegistered`) is untouched — no test needed rewriting
+for it. `unknown_publisher` for an override naming an unregistered driver is untouched — the coverage
+check runs strictly AFTER the registration check, so a name this deployment does not run still
+refuses `unknown_publisher`, never `capability_unsupported`, never a silent fallback. Both new port
+members are OPTIONAL, so Postiz/the mock needed zero lines changed, and 100% of the pre-existing
+suite (except the two rewritten cases named above, whose rewrite was the point) passes byte-for-byte.
+
+**Is `youtube:media_upload=direct` now safe to configure, or still refused — and which is correct?**
+**Safe, and that is the correct answer.** Both of 38e's own stated blockers for this SPECIFIC
+combination are resolved: the dispatch-flow danger (a stray live video plus a doomed second publish
+step) is eliminated by construction (the schedule step is never reached), and the resolver no longer
+blindly trusts a config string it has no way to verify. What remains is `youtube:schedule=direct`
+NAMED ALONE (without a `media_upload` override) — and THAT is correctly refused, eagerly, by the
+override-safety gap, because `direct` genuinely never implements a schedule step for YouTube and never
+will (the upload-terminal gap is not a workaround for a missing feature; it is the correct
+representation of a network whose API has no such step). The recommended override for a
+credential-cleared deployment (D-23, staging) is therefore now
+`linkedin:schedule=direct,linkedin:media_upload=direct,linkedin:inbox_read=direct,youtube:media_upload=direct,youtube:inbox_read=direct,youtube:quota_probe=direct`
+— `youtube:schedule` correctly absent, not because of caution but because there is nothing for it to
+name.
+
+Test counts: **494 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** in this worktree by
+stashing this pass's changes: **483 / 0 / 5** — matching `main`'s own stated 38e figure exactly; +11
+new: `dispatch.test.ts` +3 [(E1)–(E3)], `direct.test.ts` +7 [4 `coversNetworkCapability` cases, 3
+`isUploadTerminalFor` cases], `publisher.test.ts` +1 [the absent-method case; two existing cases
+rewritten in place, not counted as new — see above]). The full `src/modules/social` suite (27 files)
+re-run ALONE afterward, and each of the three touched test files re-run alone individually too, to
+rule out the shared-test-Postgres phantom-failure class this file names — all green. **One real
+regression was found and fixed during this pass's own verification, not shipped**: a new
+`direct.test.ts` case reused the shared module-level `unreachableFetch` mock with a non-empty approval
+id; because it was inserted ahead of a pre-existing test in file declaration order, its call polluted
+that earlier test's own `expect(unreachableFetch).not.toHaveBeenCalled()` assertion — a NEW,
+generalizable defect class (recorded below), fixed by giving the new case its own locally-scoped stub
+rather than reusing a shared, stateful mock. `tsc --noEmit` clean.
+`lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names` all green (still 127
+migrations — no migration this pass). `test:iam-chain-alignment` green (25/25, unaffected — no
+Cerbos/IAM change this phase). Full detail: `docs/modules/MODULES.md`'s social-media 0.5.11 entry.
+
+**Anything the spec did not answer:** whether a future third network with a similarly split
+upload/schedule shape should widen `listComments`'s own id-namespace heuristic (branching on
+`urn:li:` today) to a real `network` parameter on that method — 38d's own named follow-up, still
+open, untouched by this pass since no such network exists among 0105's ten admitted networks yet.
 
 **38a evidence (2026-08-20, senior-integrator):** no migration, no Cerbos change, no `main.ts`
 change — **verified inert**: every capability still resolves to `postiz`. Built:
@@ -1214,6 +1353,23 @@ against a real server can see this class.** Mutable DEMO_MODE stores pin to `glo
 dead every call 502s while the container reports healthy. And the ERP's own publisher treats a missing
 base URL as a *supported* mode — 200s everywhere, publish refusing 503. **Prove with a call that
 expects a specific status.**
+
+**7. A shared, stateful module-level mock pollutes across `it()`s in FILE DECLARATION ORDER, not
+insertion-time-of-writing order (SMM-38e closing pass, 2026-08-21).** `direct.test.ts`'s top-level
+`const unreachableFetch = vi.fn(...)` is used by several cases; ONE pre-existing case asserts
+`expect(unreachableFetch).not.toHaveBeenCalled()`. A new case, added into a describe block placed
+EARLIER in the file than that assertion's own describe block, called `unreachableFetch` with a
+non-empty approval id (a genuine, intentional network attempt) — and Vitest runs `it()`s in the file's
+own top-to-bottom declaration order, so the new case's call landed BEFORE the older assertion ran,
+failing it with "expected not to have been called, but was called 1 times" despite the older test's
+own code being completely unchanged. Caught only because this pass re-ran the touched file ALONE
+before calling anything settled (this file's own §"shared test Postgres" instruction, generalized to
+in-process shared state too) — a full-module run would have reported it as a regression in a file
+nobody edited that day. **Any new `it()` in an existing file that reuses a shared, stateful
+module-level mock (a `vi.fn()` whose call count or history another case already asserts on) needs
+either its OWN locally-scoped mock, or a `beforeEach`/`afterEach` reset that EVERY case in the file
+already relies on** — reusing the shared one silently makes the new case's position in the file
+load-bearing for a test it never mentions.
 
 ## Cross-session hazards
 

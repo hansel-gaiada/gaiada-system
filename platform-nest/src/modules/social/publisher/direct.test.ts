@@ -88,6 +88,79 @@ describe("SMM-38 · the `direct` driver skeleton (38a) is still honest for every
   });
 });
 
+// SMM-38e — closing pass (2026-08-21): the two gaps 38e's own evidence reported to the architect
+// rather than deciding — see this file's header ("YouTube's own exception, corrected...").
+describe("SMM-38e closing pass · coversNetworkCapability — the override-safety gap's data source", () => {
+  it("LinkedIn: covers schedule/media_upload/inbox_read, NOT quota_probe (unpublished rate limits)", () => {
+    const d = createDirectDriver();
+    expect(d.coversNetworkCapability?.("linkedin", "schedule")).toBe(true);
+    expect(d.coversNetworkCapability?.("linkedin", "media_upload")).toBe(true);
+    expect(d.coversNetworkCapability?.("linkedin", "inbox_read")).toBe(true);
+    expect(d.coversNetworkCapability?.("linkedin", "quota_probe")).toBe(false);
+  });
+
+  it("YouTube: covers media_upload/inbox_read/quota_probe, NOT schedule (upload IS the publish)", () => {
+    const d = createDirectDriver();
+    expect(d.coversNetworkCapability?.("youtube", "media_upload")).toBe(true);
+    expect(d.coversNetworkCapability?.("youtube", "inbox_read")).toBe(true);
+    expect(d.coversNetworkCapability?.("youtube", "quota_probe")).toBe(true);
+    expect(d.coversNetworkCapability?.("youtube", "schedule")).toBe(false);
+  });
+
+  it("every other network covers nothing — `direct` has zero IG/FB/TikTok/etc capability (§PD)", () => {
+    const d = createDirectDriver();
+    for (const network of ["instagram", "facebook", "tiktok", "x", "threads"] as const) {
+      for (const capability of ["schedule", "media_upload", "inbox_read", "quota_probe"] as const) {
+        expect(d.coversNetworkCapability?.(network, capability)).toBe(false);
+      }
+    }
+  });
+
+  it("agrees with the per-method runtime gates — the SAME map backs both, never two lists that " +
+     "could drift", async () => {
+    // A LOCALLY-scoped stub, never the shared module-level `unreachableFetch` — that constant's own
+    // call count is asserted `not.toHaveBeenCalled()` by an EARLIER-DECLARED test in this file
+    // ("checks the one-shot approval id FIRST..."), and Vitest runs `it()`s in file declaration
+    // order, so a shared, stateful mock invoked by a LATER-DECLARED case would pollute an EARLIER
+    // one's assertion the instant this describe block was inserted ahead of it — caught by running
+    // this suite alone during this pass's own verification, not shipped as a flake for someone else
+    // to chase.
+    const localFetch = vi.fn(async () => {
+      throw new Error("stub: no real network in this case either");
+    }) as unknown as typeof fetch;
+    const d = createDirectDriver({ fetchImpl: localFetch });
+    // schedulePost: covered (linkedin) reaches the network (publisher_unreachable, not
+    // capability_unsupported); not-covered (youtube) refuses capability_unsupported.
+    expect(d.coversNetworkCapability?.("linkedin", "schedule")).toBe(true);
+    await expect(
+      d.schedulePost(LINKEDIN_ORG, { integrationId: "i", network: "linkedin", body: "hi", approvalId: "a-1", variantId: "v-1" }),
+    ).rejects.toMatchObject({ code: "publisher_unreachable" });
+    expect(d.coversNetworkCapability?.("youtube", "schedule")).toBe(false);
+    await expect(
+      d.schedulePost(YOUTUBE_ORG, { integrationId: "i", network: "youtube", body: "hi", approvalId: "a-1", variantId: "v-1" }),
+    ).rejects.toMatchObject({ code: "capability_unsupported" });
+  });
+});
+
+describe("SMM-38e closing pass · isUploadTerminalFor — the upload-terminal gap's declaration", () => {
+  it("YouTube: true — a videos.insert call IS the publish, no separate schedule step exists", () => {
+    const d = createDirectDriver();
+    expect(d.isUploadTerminalFor?.("youtube")).toBe(true);
+  });
+
+  it("LinkedIn: false — media_upload registers an asset for a LATER schedulePost call to reference", () => {
+    const d = createDirectDriver();
+    expect(d.isUploadTerminalFor?.("linkedin")).toBe(false);
+  });
+
+  it("every other network: false — `direct` has no upload capability for them at all", () => {
+    const d = createDirectDriver();
+    for (const network of ["instagram", "facebook", "tiktok", "x"] as const) {
+      expect(d.isUploadTerminalFor?.(network)).toBe(false);
+    }
+  });
+});
+
 describe("SMM-38c · schedulePost — LinkedIn org-page publish is real; every other network still refuses", () => {
   it("checks the one-shot approval id FIRST, unconditionally — before ever looking at the network", async () => {
     const d = createDirectDriver({ fetchImpl: unreachableFetch });

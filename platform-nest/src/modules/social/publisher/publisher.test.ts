@@ -490,24 +490,54 @@ describe("SMM-38/38a→38b · the per-(network, capability) switch — a new dim
     expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe").key).toBe("postiz");
   });
 
-  it("a network wildcard (`network:*`) applies to every capability on that one network, and no other network", () => {
+  it("a network wildcard (`network:*`) applies to every capability the driver actually covers on " +
+     "that network, and no other network — and refuses, never silently resolves, for a capability " +
+     "the driver does NOT cover on the matched network (SMM-38e closing pass, the override-safety " +
+     "gap: `direct` does not cover `quota_probe` for LinkedIn)", () => {
     resetPublishers();
     registerPublisher(createMockPublisher(newMockPublisherState()));
     registerPublisher(createDirectDriver());
     config.social.publisher.capabilityDrivers = { "linkedin:*": "direct" };
     expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
-    expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "linkedin", "media_upload").key).toBe("direct");
     expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("postiz");
+    expect(() => resolvePublisherForCapability("postiz", "linkedin", "quota_probe")).toThrowError(/does not cover/);
+    try {
+      resolvePublisherForCapability("postiz", "linkedin", "quota_probe");
+    } catch (e) {
+      expect((e as SocialPublisherError).code).toBe("capability_unsupported");
+    }
   });
 
-  it("a capability wildcard (`*:capability`) applies across every network for that one capability", () => {
+  it("a capability wildcard (`*:capability`) applies across every network the driver actually " +
+     "covers for that capability, and refuses — never silently resolves — for a network it does " +
+     "not (SMM-38e closing pass, the override-safety gap: `direct` never covers `schedule` for " +
+     "YouTube — its publish terminates at `uploadMedia` instead)", () => {
     resetPublishers();
     registerPublisher(createMockPublisher(newMockPublisherState()));
     registerPublisher(createDirectDriver());
+    config.social.publisher.capabilityDrivers = { "*:media_upload": "direct" };
+    expect(resolvePublisherForCapability("postiz", "linkedin", "media_upload").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "youtube", "media_upload").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("postiz"); // no override for schedule at all
+
     config.social.publisher.capabilityDrivers = { "*:schedule": "direct" };
-    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
-    expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("direct");
-    expect(resolvePublisherForCapability("postiz", "linkedin", "quota_probe").key).toBe("postiz");
+    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct"); // LinkedIn covers schedule
+    expect(() => resolvePublisherForCapability("postiz", "youtube", "schedule")).toThrowError(/does not cover/);
+    try {
+      resolvePublisherForCapability("postiz", "youtube", "schedule");
+    } catch (e) {
+      expect((e as SocialPublisherError).code).toBe("capability_unsupported");
+    }
+  });
+
+  it("a driver with NO `coversNetworkCapability` declared (Postiz's/the mock's real shape) is never " +
+     "refused by the override-safety gap, even for a (network, capability) pair nothing models — " +
+     "absence of the method means absence of a per-network restriction, not a blanket refusal", () => {
+    resetPublishers();
+    registerPublisher(createMockPublisher(newMockPublisherState()));
+    config.social.publisher.capabilityDrivers = { "*:quota_probe": "postiz" };
+    expect(resolvePublisherForCapability("postiz", "bluesky", "quota_probe").key).toBe("postiz");
   });
 
   it("most-specific-wins: an exact (network,capability) entry beats BOTH a network wildcard and a capability wildcard set at the same time", () => {
@@ -528,11 +558,15 @@ describe("SMM-38/38a→38b · the per-(network, capability) switch — a new dim
     registerPublisher(createMockPublisher(newMockPublisherState()));
     registerPublisher(createDirectDriver());
     registerPublisher({ ...createDirectDriver(), key: "mixpost" });
-    config.social.publisher.capabilityDrivers = { "linkedin:*": "direct", "*:schedule": "mixpost" };
+    // `media_upload`, not `schedule`: `direct` (and `mixpost`, the same shape re-registered) covers
+    // `media_upload` on BOTH LinkedIn and YouTube, so this proves wildcard PRECEDENCE, not coverage
+    // (SMM-38e closing pass — `schedule` would trip the override-safety gap for YouTube here, which
+    // is a different property, already covered by its own test above).
+    config.social.publisher.capabilityDrivers = { "linkedin:*": "direct", "*:media_upload": "mixpost" };
     // linkedin matches its own network wildcard first.
-    expect(resolvePublisherForCapability("postiz", "linkedin", "schedule").key).toBe("direct");
+    expect(resolvePublisherForCapability("postiz", "linkedin", "media_upload").key).toBe("direct");
     // youtube has no network wildcard entry, so the capability wildcard applies instead.
-    expect(resolvePublisherForCapability("postiz", "youtube", "schedule").key).toBe("mixpost");
+    expect(resolvePublisherForCapability("postiz", "youtube", "media_upload").key).toBe("mixpost");
   });
 
   it("refuses — never silently substitutes — when the override names a driver this deployment does not run", () => {

@@ -1340,6 +1340,96 @@ never notifies the client, which is part of why it is classified 'low' rather th
 `event-handlers.ts` is outside this pass's file surface and the gap is cosmetic today (nothing
 currently depends on a withdrawal notification existing), so it is named here for a future pass
 rather than fixed unilaterally.
+**0.5.11 (2026-08-21, senior-be) — SMM-38e closing pass: the two gaps 38e's own evidence reported to
+the architect rather than deciding, both closed.** Worktree was UP TO DATE with `main` at cut time
+(`git log -1` = `d59c730`; `git merge-base --is-ancestor HEAD main` confirmed it) — no merge was
+needed, per this file's own "verify first" instruction.
+
+**The upload-terminal gap — CLOSED with a driver-declared property `dispatch.ts` consults, not a
+special case buried in a conditional.** New optional `SocialPublisher.isUploadTerminalFor(network)`
+(`types.ts`): a driver declares, per network, that its `uploadMedia` IS the publish (no distinct
+"reference an already-uploaded asset from a later post" step exists). `direct.ts` declares this `true`
+for YouTube ONLY (a `videos.insert` call creates the live video resource directly), `false`/absent for
+every other network including LinkedIn (whose `media_upload` genuinely registers an asset for a LATER
+`schedulePost` call). Chose the declared-property shape over a documented no-op `schedulePost` for
+YouTube: a no-op `schedulePost` would still require `dispatch.ts` to resolve a SECOND
+(network, capability) pair, spend a second OTel span, and — if `schedule` were ever misconfigured to a
+driver YouTube doesn't cover — reach a refusal AFTER the network already carries a live video; the
+declared property lets `dispatch.ts` skip the schedule step ENTIRELY, so the single-transaction stamp
+(`approval_id` + `provider_post_id`, SMM-10) is fed straight from the upload's own returned id.
+`dispatch.ts#dispatchApprovedPublish` checks it right after `resolveEngineMedia` returns (only when
+media was actually uploaded — a text-only variant never asks) and, when true, stamps
+`{providerPostId: engineMedia[last].id}` without ever calling `resolveDispatchOrgHandle(..., "schedule")`
+or `schedulePost` — proven live in `dispatch.test.ts`'s new (E1)–(E3): (E1) `youtube:media_upload=direct`
+alone dispatches successfully, `schedulePost` reached on NEITHER driver, `provider_post_id` is the
+upload's own id verbatim; (E2) ALSO setting `youtube:schedule=direct` changes nothing — the
+terminal check short-circuits before `schedule` is ever resolved; (E3) `youtube:schedule=direct`
+WITHOUT a `media_upload` override still refuses (see the override-safety gap below), proving the two
+fixes compose rather than silently relying on each other.
+
+**The override-safety gap — CLOSED with a driver-declared coverage map the resolver refuses against,
+never a hand-maintained deny-list.** New optional `SocialPublisher.coversNetworkCapability(network,
+capability)` (`types.ts`): a driver declares which (network, capability) pairs it ACTUALLY serves — a
+per-network refinement of the existing driver-wide `capabilities` Set, backed on `direct.ts` by ONE new
+map (`NETWORK_CAPABILITIES`) that is the single source of truth both for this new port member AND for
+the pre-existing in-method runtime gates (`refuseNetworkNotCovered`) — never two lists that could
+drift. LinkedIn: `schedule`/`media_upload`/`inbox_read` (not `quota_probe` — unpublished rate limits).
+YouTube: `media_upload`/`inbox_read`/`quota_probe` (not `schedule` — see the upload-terminal gap
+above). `registry.ts#resolvePublisherForCapability` consults it AFTER the existing "is this driver
+name registered" check and BEFORE returning: an override naming a REGISTERED driver that does not
+cover the resolved (network, capability) pair now refuses EAGERLY with a typed `capability_unsupported`
+— at the earliest point the switch is ever consulted, never after a network call already happened.
+Absent method (Postiz, the mock) ⇒ no per-network restriction at all, matching their real, flat shape
+— proven inert for every existing deployment by `publisher.test.ts`'s full switch suite (rewritten
+where it exercised a (network, capability) pair `direct` does not actually cover — `linkedin:*`
+applied to `quota_probe`, `*:schedule` applied to `youtube` — both now assert the EAGER refusal instead
+of a silent resolve that would have failed later; the two properties genuinely being tested,
+network-wildcard/capability-wildcard PRECEDENCE, were re-pointed at `media_upload`, which both networks
+cover, so they still prove precedence rather than accidentally proving coverage). A brand-new test
+proves the inverse: a driver with no `coversNetworkCapability` at all is never refused, even for a
+(network, capability) pair nothing models.
+
+**A stale comment corrected at the source, not left to mislead the next reader** (this codebase's own
+recurring defect class §4b): `provisioning.ts#resolveDispatchOrgHandle`'s own header and `direct.ts`'s
+file header both used to name YouTube's `media_upload` flip as unsafe and excluded in principle — both
+corrected in place to point at the fix, rather than left standing next to code that now contradicts
+them.
+
+**The no-config default stays INERT — proven, not merely claimed.** No default value was added to
+`config.social.publisher.capabilityDrivers`. `resolvePublisher`'s `publisher_not_configured` signal
+(`anyNonDirectRegistered`) is untouched. `unknown_publisher` for an override naming an unregistered
+driver is untouched (checked BEFORE the new coverage check, so it still fires first). Both new port
+members are OPTIONAL, so no existing driver (Postiz, the mock) needed a single line changed.
+
+**Capability inventory updated** (`docs/modules/social-capability-inventory.md`'s "Driver per
+capability" section): `youtube:media_upload`/`inbox_read`/`quota_probe` move from "principle-only, two
+independent reasons" to "principle-safe, credential-gated only, same as LinkedIn"; `youtube:schedule`
+gets its own row naming the eager resolver refusal. The recommended override for a
+credential-cleared deployment now includes YouTube's three real capabilities.
+
+Test counts: **494 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** in this worktree by
+stashing this pass's changes: **483 / 0 / 5**, matching `main`'s own stated 38e figure exactly; +11 new:
+`dispatch.test.ts` +3 [(E1)–(E3)], `direct.test.ts` +7 [4 `coversNetworkCapability` cases, 3
+`isUploadTerminalFor` cases], `publisher.test.ts` +1 [the absent-method-means-no-restriction case; two
+existing cases were REWRITTEN in place, not counted as new, to keep testing wildcard precedence rather
+than a coverage pair that no longer silently resolves]). The full `src/modules/social` suite (27 files)
+re-run ALONE, and each of the three touched test files re-run alone individually, to rule out the
+shared-test-Postgres phantom-failure class this program names — all green (one real regression WAS
+found and fixed this way, not shipped: a new `direct.test.ts` case reused the shared module-level
+`unreachableFetch` mock with a non-empty approval id, polluting an EARLIER-DECLARED test's own
+zero-calls assertion the moment the new describe block landed ahead of it in file order — fixed with a
+locally-scoped stub in the new case, never touching the pre-existing test). `tsc --noEmit` clean.
+`lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names` all green (still 127
+migrations — no migration this pass). `test:iam-chain-alignment` green (25/25, unaffected — no
+Cerbos/IAM change).
+
+**What this pass did NOT decide:** whether a future third network with a similarly split
+upload/schedule shape should widen `listComments`'s own id-namespace heuristic to a real `network`
+parameter (38d's own named follow-up, untouched); whether the recommended-override doc string itself
+should become a config preset rather than prose (out of this pass's file surface — `config.ts` gained
+no new keys, only consumers of the existing `capabilityDrivers` map). Full detail:
+`docs/plans/smm-tracker.md`'s 38e row.
 
 **0.5.10 (2026-08-21, SMM-38 phase 38e, senior-integrator) — the flip: closing the three gaps 38c/38d
 named, Gap 1's live wiring, and the capability inventory's driver-per-capability rows.** Worktree was

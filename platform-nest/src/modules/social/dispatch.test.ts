@@ -743,4 +743,166 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
       expect(row.lastError).toContain("oauth_token_revoked");
     });
   });
+
+  // ══ SMM-38e — closing pass (2026-08-21): the two gaps 38e's own evidence left open ═══════════════
+  //
+  // 38e reported, rather than decided, that flipping `youtube:media_upload` to a driver whose upload
+  // IS its publish would upload a real video and then hit a doomed second `schedulePost` step (this
+  // file's own D-block above proved the OPPOSITE case — LinkedIn's ordinary upload-then-schedule
+  // shape — reaches `direct` correctly; nothing here duplicates that proof). This block proves the
+  // upload-terminal fix using a SECOND registered mock (not the real `direct` driver — `direct.test.ts`
+  // already proves YouTube's real wire shape; this file proves ROUTING and STAMPING, the same split
+  // the D-block's own header draws), configured to declare its upload terminal for one network — the
+  // same `isUploadTerminalFor`/`coversNetworkCapability` shape `direct.ts` declares for real.
+  describe("SMM-38e closing pass · isUploadTerminalFor — an upload-terminal network never reaches schedulePost", () => {
+    let youtubeAccount: string;
+    let directState: MockPublisherState;
+    let capabilityDriversBefore: Record<string, string>;
+    let networksBefore: string[];
+    let integrationTokenKeyBefore: string;
+    // `fileExecutingApproval`'s own body literal is hardcoded ("Hello from SMM-10's dispatch flow")
+    // and re-used verbatim here — same reason the D-block above states in its own comment: the
+    // approval-args hash must match the variant's own stored args exactly, or the precondition
+    // refuses `args_hash_mismatch` before ever reaching this pass's own wiring.
+    const BODY = "Hello from SMM-10's dispatch flow";
+
+    beforeAll(async () => {
+      capabilityDriversBefore = config.social.publisher.capabilityDrivers;
+      networksBefore = config.social.publisher.enabledNetworks;
+      config.social.publisher.enabledNetworks = [...new Set([...networksBefore, "youtube"])];
+      // `resolveDispatchOrgHandle` resolves a REAL OAuth grant through `oauth-tokens.ts` for ANY
+      // driver registered under the key `"direct"` — regardless of whether that driver is the real
+      // `direct.ts` or (as here) a mock registered under the same key to prove ROUTING — so this
+      // account needs a real, decryptable grant on file, the SAME seam the D-block above uses.
+      integrationTokenKeyBefore = config.integrationTokenKey;
+      config.integrationTokenKey = randomBytes(32).toString("base64");
+
+      youtubeAccount = newId();
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO social_accounts
+             (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+           VALUES ($1,$2,$3,$4,'youtube',$5,$6,'connected','{}','central')`,
+          [youtubeAccount, co, clientId, publisherOrgId, uniq("@brand-yt"), uniq("yt")]), MODULES);
+      await withTenants([co], (c) =>
+        storeOAuthGrant(c, {
+          tenantId: co, accountId: youtubeAccount, network: "youtube", accessToken: "yt-bearer-token-never-logged",
+          expiresAt: new Date(Date.now() + 3600_000),
+        }), MODULES);
+    });
+    afterAll(() => {
+      config.social.publisher.capabilityDrivers = capabilityDriversBefore;
+      config.social.publisher.enabledNetworks = networksBefore;
+      config.integrationTokenKey = integrationTokenKeyBefore;
+    });
+    beforeEach(() => {
+      state = newMockPublisherState();
+      directState = newMockPublisherState();
+      resetPublishers();
+      registerPublisher(createMockPublisher(state));
+      // The SAME facts the real `direct` driver declares for YouTube: upload IS the publish, and
+      // the driver covers `media_upload`/`inbox_read`/`quota_probe` for this network but NOT
+      // `schedule` — see `direct.ts`'s own `NETWORK_CAPABILITIES`/`UPLOAD_TERMINAL_NETWORKS`.
+      registerPublisher(createMockPublisher(directState, {
+        key: "direct",
+        uploadTerminalNetworks: ["youtube"],
+        networkCapabilities: { youtube: ["media_upload", "inbox_read", "quota_probe"] },
+      }));
+    });
+
+    async function makeYoutubeVariant(): Promise<{ variantId: string; media: unknown; filename: string }> {
+      // A FRESH, uniquely-named file per call — never the shared fixture pattern this describe
+      // block's own sibling suites use. `uploadMedia`'s own returned id (via the terminal path) is
+      // what ends up stamped as `provider_post_id`, and 0105's `ux_social_post_variants_provider` is
+      // a GLOBAL partial unique index (the D-block's own comment above names this exact hazard for
+      // its random-per-call schedulePost id; the mock's `uploadMedia` id is DETERMINISTIC from the
+      // filename instead, so two tests sharing one file would collide on the SAME provider_post_id).
+      const filename = uniq("clip") + ".mp4";
+      const fileId = await createFile(filename, "video/mp4", Buffer.from("fake-mp4-bytes"));
+      const engagementId = await makeEngagement({ networks: { youtube: true } });
+      const postId = newId();
+      const variantId = newId();
+      const media = [{ fileId, kind: "video", format: "mp4" }];
+      const hash = variantArgsSha256({
+        tenantId: co, id: variantId, accountId: youtubeAccount, body: BODY,
+        firstComment: null, media, settings: {}, scheduledAt: null,
+      });
+      await withTenants([co], async (c) => {
+        await c.query(`INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
+                       VALUES ($1,$2,$3,'gap-closure post','approved','central')`, [postId, co, engagementId]);
+        await c.query(
+          `INSERT INTO social_post_variants
+             (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,'{}',$7,'approved','central')`,
+          [variantId, co, postId, youtubeAccount, BODY, JSON.stringify(media), hash],
+        );
+      }, MODULES);
+      return { variantId, media, filename };
+    }
+
+    it("(E1) `youtube:media_upload=direct` ALONE ⇒ schedulePost is called on NO driver, and the " +
+       "stamp records the upload's OWN returned id as provider_post_id, through the SAME " +
+       "single-transaction stamp every other network uses", async () => {
+      config.social.publisher.capabilityDrivers = { "youtube:media_upload": "direct" };
+      const { variantId, media, filename } = await makeYoutubeVariant();
+      const approvalId = await fileExecutingApproval(variantId, media, { accountId: youtubeAccount, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict).toMatchObject({ ok: true, network: "youtube" });
+      if (!verdict.ok) throw new Error("unreachable");
+      expect(directState.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(1);
+      // THE proof: schedulePost is reached on NEITHER driver — not the one the upload used, and not
+      // the org's own default driver either (which `schedule`, being unconfigured, would otherwise
+      // have fallen through to).
+      expect(directState.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+      expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+
+      const row = await variantRow(variantId);
+      expect(row.status).toBe("queued");
+      expect(row.approvalId).toBe(approvalId);
+      expect(row.providerPostId).toBe(verdict.providerPostId);
+      expect(row.providerPostId).toBe(`mock-media-${filename}`); // the upload's OWN returned id, verbatim
+    });
+
+    it("(E2) setting `youtube:schedule=direct` TOO changes nothing — the upload-terminal check " +
+       "short-circuits before `schedule` is ever resolved, so a nonsensical schedule override for " +
+       "this network is simply never consulted", async () => {
+      config.social.publisher.capabilityDrivers = {
+        "youtube:media_upload": "direct", "youtube:schedule": "direct",
+      };
+      const { variantId, media } = await makeYoutubeVariant();
+      await fileExecutingApproval(variantId, media, { accountId: youtubeAccount, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict).toMatchObject({ ok: true, network: "youtube" });
+      expect(directState.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+    });
+
+    it("(E3) `youtube:schedule=direct` WITHOUT a media_upload override ⇒ the override-safety gap " +
+       "refuses EAGERLY (capability_unsupported) — `direct` never covers `schedule` for YouTube — " +
+       "before any network call for the schedule step, and the approval is still consumed", async () => {
+      config.social.publisher.capabilityDrivers = { "youtube:schedule": "direct" };
+      const { variantId, media } = await makeYoutubeVariant();
+      const approvalId = await fileExecutingApproval(variantId, media, { accountId: youtubeAccount, settings: {} });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser);
+
+      expect(verdict.ok).toBe(false);
+      if (verdict.ok) throw new Error("unreachable");
+      expect(verdict.reason).toBe("dispatch_error");
+      // The upload happened on the org's own (unconfigured, default) driver — never `direct` — since
+      // no `media_upload` override was set. `direct` was reached ONLY for the refused `schedule`
+      // resolution, and even that resolution never got far enough to call anything on it.
+      expect(state.calls.filter((c) => c.op === "uploadMedia")).toHaveLength(1);
+      expect(directState.calls).toHaveLength(0);
+
+      const row = await variantRow(variantId);
+      expect(row.status).toBe("failed");
+      expect(row.approvalId).toBe(approvalId); // still consumed — neverAutoRetry
+      expect(row.lastError).toContain("capability_unsupported");
+      expect(row.lastError).toContain("does not cover network 'youtube'");
+    });
+  });
 });
