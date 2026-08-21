@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.11` | IN PROGRESS | Social Media | 2026-08-21 |
+| social-media | `0.5.12` | IN PROGRESS | Social Media | 2026-08-21 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,97 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.11` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.12` · IN PROGRESS
+
+**0.5.12 (2026-08-21, SMM-15, medior) — `pullInbox`: the first P2 inbox ticket lands, unblocked by
+SMM-38c's `pullComments` on the `direct` LinkedIn driver.** Worktree was already at the SMM-38e
+closing-pass merge commit at cut time (`git log --oneline -1` = the 38e closing-pass commit;
+`git merge-base --is-ancestor HEAD main` confirmed it) — no merge was needed, stated rather than
+assumed, per this program's own repeated cross-session-hazard note. `publisher/linkedin-client.ts`,
+`publisher/direct.ts`'s `NETWORK_CAPABILITIES`, and `retention-policy.ts` were all present and
+current.
+
+**New file, `inbox-sync-job.ts`, one exported job (`pullTenantInbox`/`runInboxPull`/
+`startInboxPullLoop`), the `smm-inbox-pull` scheduled flow.** No migration: 0105's own
+`social_inbox_threads`/`social_inbox_messages` tables and their 0113 retention columns already carry
+the shape this sync needs.
+
+**Per-post, never per-account — the constraint 38c named.** `listComments(org, integrationId, since)`
+is called once per published `social_post_variants` row that carries a `provider_post_id`
+(`integrationId` = that post's own provider id, a LinkedIn share URN or YouTube video id — never a
+connected account's integration id), because neither network exposes an account-wide comment feed.
+The cursor is per (account, post): the existing thread's `last_message_at` when one exists, else the
+post's own `published_at` (no comment can predate its post, and no new column is needed). Idempotency
+rides 0105's own two unique keys — `UNIQUE(account_id, external_thread_id)` for the thread,
+`UNIQUE(thread_id, external_id) WHERE external_id IS NOT NULL` for each message — `ON CONFLICT ...
+DO UPDATE`/`DO NOTHING` respectively, proven by running the same pull twice and asserting one thread,
+zero duplicate messages (`inbox-sync-job.test.ts`'s (T2)).
+
+**Quota-aware from the start, never an invented number.** Neither network's Standard-tier rate limit
+is published anywhere reachable without a live Developer Portal session (D-23); this file invents
+nothing about what LinkedIn/YouTube will tolerate. It bounds only its OWN call volume:
+`config.social.inboxPull.maxPostsPerAccountPerRun` (default 20) caps how many posts ONE sweep asks
+about per account, newest-published first — a SELF-IMPOSED safety valve, named as such in `config.ts`
+and proven in (T6), never confused with a vendor ceiling.
+
+**Unsupported vs empty — the ticket's own named distinction, and the caller this port needed.**
+`resolvePublisherForCapability` does not itself check whether the DEFAULT (no-override) resolved
+driver advertises `inbox_read` — that check belongs to the caller, per `listComments`'s own "absent
+capability member ⇒ nothing to check" contract. `pullTenantInbox` is that caller: it checks
+`driver.capabilities.has("inbox_read") && typeof driver.listComments === "function"` before ever
+calling, and counts a failing check as `unsupported` (Postiz, every network today, spike §8b) —
+distinct from `posts` examined with zero new rows (a real, empty result). (T4)/(T4b) prove the two
+are never conflated. A `capability_unsupported` thrown one layer up by
+`registry.ts#resolvePublisherForCapability`'s own eager, data-driven refusal (a misconfigured
+override) is counted the same honest way.
+
+**Retention: rows land where SMM-36's existing purge can already reach them — no purge-side
+change.** `upsertInboxItems` writes the SAME two tables and SAME columns
+`inbox-retention-job.ts#purgeInboxRetention` already scrubs generically for any
+`hasDocumentedRetentionCap` network (LinkedIn's 24h/48h today). One real interaction respected: 0113's
+own state-law CHECKs (`sit_profile_purge_scrubs_author`, `sit_activity_purge_scrubs_excerpt`) forbid
+writing a fresh `excerpt`/`author_handle` onto a THREAD whose purge marker is already set — the
+upsert's `ON CONFLICT` clause guards both columns with a `CASE WHEN ... purged_at IS NULL` so it
+never violates that CHECK. Individual MESSAGE rows carry no such guard: each is a brand-new row with
+its own fresh `created_at`, so a new comment always starts its own 48h/24h clock — proven in (T7)
+against a thread seeded already-purged by hand.
+
+**The module GUC — `upsertInboxItems` self-declares (recurring defect class #1).** Pinned by (T1):
+called on a caller-side transaction with NO `{modules:['social']}` option, asserting a real thread +
+message row exists afterward — fails with "threadsWritten: 0" if `declareSocialModuleScope` is ever
+removed, the exact "0 new comments, looks perfectly healthy" shape the ticket named.
+
+**A locally-scoped test driver, not `mock-driver.ts`.** That file is read-only to this ticket and its
+own `listComments` stub always returns `[]` regardless of args, with no per-post-configurable state —
+`inbox-sync-job.test.ts` builds its own small `SocialPublisher` shape, scoped to the file, avoiding
+this module's own recurring defect class #7 (a shared, stateful module-level mock polluting a later
+assertion).
+
+**Config additions only — `config.ts`'s `social.inboxPull` block** (`pullEnabled`/`pullIntervalMs`/
+`lookbackDays`/`maxPostsPerAccountPerRun`), dark by default like every other sweep in this module.
+`main.ts` was NOT edited (off-limits to this ticket) — the exact line to add is reported to the
+orchestrator: `if (config.social.inboxPull.pullEnabled) { startInboxPullLoop(config.social.inboxPull.pullIntervalMs); }`
+alongside the existing `inboxRetention`/`reconcileEnabled` gates.
+
+Test counts: **502 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** in this worktree by
+stashing this ticket's changes: **494 / 0 / 5**, matching the 38e closing pass's own stated figure
+exactly; +8 new, all in the new `inbox-sync-job.test.ts`). The new/changed test file was also re-run
+ALONE afterward (8/8 green) to rule out the shared-test-Postgres phantom-failure class this program
+warns about. `tsc --noEmit` clean. `lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/
+`lint:migration-names` all green (no migration this ticket — 127 migrations, unchanged).
+`test:iam-chain-alignment` not re-run (no Cerbos/IAM change this ticket — no MCP tool declared; the
+job is a process-level scheduled sweep, the same shape `metrics-job.ts`/`inbox-retention-job.ts`
+already use with no tool of their own).
+
+**Anything the spec did not answer, named rather than silently decided:** (1) SMM-16/17/18 (triage,
+reply, inbox UI) are unbuilt — this ticket writes rows a human cannot yet see in any UI; (2) the
+`source` column's CHECK on `social_inbox_messages` only admits `'postiz_sync'`/`'reply'` — every
+inbound sync, `direct`-routed or not, is written as `'postiz_sync'` because that is the only inbound
+value the CHECK admits (not a schema gap needing a migration, just a slightly Postiz-named token this
+ticket does not own); (3) whether a thread should ever transition OUT of a terminal status
+(`dismissed`/`closed`) when fresh comments arrive is left to SMM-16/17/18 — this sync never touches
+`status` on conflict, deliberately, so it cannot silently reopen a thread a human closed on purpose.
 
 **0.5.11 (2026-08-21, SMM-33/24 gap-closing pass, senior-be) — the two agentic-exit-bar gaps the
 SMM-33 capability inventory named plainly, closed rather than merely documented.** Worktree was cut

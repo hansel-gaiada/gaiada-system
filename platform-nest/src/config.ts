@@ -771,6 +771,30 @@ const configBase = {
       // never be mistaken for compliant. No effect unless purgeEnabled.
       purgeIntervalMs: Number(process.env.SOCIAL_INBOX_RETENTION_PURGE_INTERVAL_MS ?? 3600 * 1000),
     },
+    // SMM-15 — `pullInbox` / `smm-inbox-pull`: the per-post engagement-inbox comment sync
+    // (`inbox-sync-job.ts`). Dark by default, same convention as `inboxRetention`/`reconcileEnabled`
+    // above — a fresh deployment with no LinkedIn/YouTube account connected has nothing to pull, and
+    // turning this on is a deploy-time decision paired with clearing D-23's credential gate for the
+    // first network, not a boot-time default.
+    inboxPull: {
+      pullEnabled:
+        process.env.SOCIAL_INBOX_PULL_ENABLED === "1" || process.env.SOCIAL_INBOX_PULL_ENABLED === "true",
+      pullIntervalMs: Number(process.env.SOCIAL_INBOX_PULL_INTERVAL_MS ?? 15 * 60 * 1000),
+      // How far back a PUBLISHED post is still eligible for a comment pull — an OPERATIONAL job
+      // parameter (mirrors `metrics-job.ts`'s own `POST_METRICS_LOOKBACK_DAYS` reasoning), never a
+      // business or quota number: an old post can still gather new comments, but pulling every post
+      // ever published, forever, on every sweep would be unbounded API spend for a vanishing return.
+      lookbackDays: Number(process.env.SOCIAL_INBOX_PULL_LOOKBACK_DAYS ?? 30),
+      // ⚠ A SELF-IMPOSED SAFETY VALVE, NOT A CLAIMED LINKEDIN/YOUTUBE RATE LIMIT. Neither network's
+      // Standard-tier per-app/per-user rate limit is published anywhere reachable without a live
+      // Developer Portal session (D-23) — this ticket's own instruction is to model that as UNKNOWN,
+      // never to invent a number and call it a limit. This cap instead bounds how many `listComments`
+      // calls ONE sweep will make for a SINGLE account, so an account with an unbounded backlog of
+      // eligible posts cannot turn one tenant's sweep into an unbounded burst of outbound calls with
+      // no ceiling at all — the newest posts win (query orders by `published_at DESC`), and whatever
+      // does not fit this run is picked up on the next one.
+      maxPostsPerAccountPerRun: Number(process.env.SOCIAL_INBOX_PULL_MAX_POSTS_PER_ACCOUNT ?? 20),
+    },
   },
   search: {
     defaultProvider: process.env.SEARCH_DEFAULT_PROVIDER ?? "dataforseo",
