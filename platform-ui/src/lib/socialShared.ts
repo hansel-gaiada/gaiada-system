@@ -164,6 +164,17 @@ export const QUOTA_UNKNOWN_RULE = "quota_unknown";
  *  can recognise it without string-matching prose. */
 export const IMAGE_GENERATION_UNAVAILABLE_WARNING = "image_generation_unavailable";
 
+/** One attached-media descriptor — `social_post_variants.media` (D-15: deliberately OUTSIDE
+ *  `uploaded_media`, see `dispatch.ts`'s header). `format` (SMM-37/SMM-20) is optional and
+ *  composer/library-supplied, never re-derived from `files.content_type` on THIS side of the
+ *  wire — same trust boundary `media-rules.ts`'s own `MediaItem.format` doc states. */
+export interface MediaDescriptor {
+  fileId?: string;
+  kind?: "image" | "video";
+  alt?: string;
+  format?: string;
+}
+
 /** Full per-network variant content (`getPost`'s `variants[]` and every variant write response). */
 export interface SocialPostVariant {
   id: string;
@@ -172,7 +183,7 @@ export interface SocialPostVariant {
   handle: string;
   body: string;
   firstComment: string | null;
-  media: { fileId?: string; kind?: "image" | "video"; alt?: string }[];
+  media: MediaDescriptor[];
   settings: Record<string, unknown>;
   validation: ValidationResult;
   argsSha256: string;
@@ -347,6 +358,59 @@ export const NOT_REQUESTED_REVIEW: ClientReviewState = { status: "not_requested"
 
 export type ClientReviewVerdict = { ok: true } | { ok: false; reason: ClientReviewRefusalReason };
 
+// ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ─────────────────
+//
+// `GET engagements/:id/asset-library` — files already on record for the engagement's CLIENT
+// (uploads AND Drive-mirrored references, `source` names which) plus every Studio-graded
+// `creative_assets` row in the tenant. Neither source is a `social_*` table (see
+// `social.controller.ts`'s own module-GUC boundary note for this endpoint) — this is read-only
+// browsing data, never itself hashed or approved; only the DESCRIPTOR an attach produces touches
+// `args_sha256`.
+export interface AssetLibraryFile {
+  id: string;
+  filename: string;
+  contentType: string;
+  byteSize: number;
+  /** `upload` = real bytes in our storage; `drive` = a reference-attach with a `url` and no blob
+   *  of ours (OQ-5's "files + Drive mirror" — a Drive-origin attachment rides the SAME `files`
+   *  row shape, distinguished only by the absent `storage_key`). Render these distinctly; never
+   *  claim a `drive` row has bytes it doesn't. */
+  source: "upload" | "drive";
+  url: string | null;
+  createdAt: string;
+}
+
+export interface AssetLibraryStudioAsset {
+  id: string;
+  name: string;
+  contentType: string;
+  width: number | null;
+  height: number | null;
+  gradedByteSize: number;
+  presetId: string | null;
+  createdAt: string;
+}
+
+export interface AssetLibrary {
+  files: AssetLibraryFile[];
+  studioAssets: AssetLibraryStudioAsset[];
+}
+
+export const EMPTY_ASSET_LIBRARY: AssetLibrary = { files: [], studioAssets: [] };
+
+/** `POST variants/:id/media/attach` — the ONLY write this ticket adds. Mirrors
+ *  `UpdateVariantResult` (same edit-invalidates-approval contract) plus the resolved `fileId` and
+ *  the variant's full `media` array as it now stands, so the caller can render the new entry
+ *  without a second round trip. */
+export interface AttachMediaResult {
+  ok: true;
+  fileId: string;
+  media: MediaDescriptor[];
+  validation: ValidationResult;
+  argsSha256: string;
+  approvalInvalidated: boolean;
+}
+
 /** A client-safe MIRROR of the backend's `evaluateClientReviewPrecondition` (client-review.ts) — same
  *  five-way branch, same "approved-but-`reviewedArgsSha256` no longer matches the LIVE `argsSha256`
  *  is `stale`" rule (D-15 restated for the client's side). Used by the Composer's per-variant panel
@@ -486,6 +550,10 @@ const REFUSAL_LABELS: Record<string, string> = {
   variant_not_editable: "This variant is no longer editable (it's live, in flight, or already published).",
   variant_native_import_immutable: "This variant records a post published by hand — it can't be edited, only viewed.",
   variant_is_live: "This variant is queued, publishing, or already published — it can't be deleted.",
+
+  // ── SMM-20 (asset attach; AMENDED by D-17 — generation removed) ───────────────────────────────
+  unsupported_asset_source: "That isn't a recognised asset source (must be a file or a Studio asset).",
+  asset_not_found: "That asset no longer exists (deleted, or never did) — try refreshing the library.",
 
   // ── the publish-precondition vocabulary (platform-nest's `PUBLISH_REFUSAL`, publish-
   // precondition.ts) — the dry-run endpoint `GET .../publish-preconditions` and the D14 executor

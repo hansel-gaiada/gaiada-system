@@ -572,4 +572,248 @@ describe.skipIf(!TEST_URL)("social module (SMM-02)", () => {
     expect(fresh.json().validation.errors.map((e: { rule: string }) => e.rule)).toContain("quota_exhausted");
   });
 
+  // ============================================================ SMM-20 ASSET LIBRARY ==========
+  // Asset attach only (D-17: generation removed). `files`/`creative_assets` are NOT `social_*`
+  // tables — every fixture insert below deliberately uses NO `{modules:["social"]}` option
+  // (plain tenant wall only), and every assertion reads the row BACK through the real endpoint or
+  // a plain-tenant-wall SELECT, never through a vacuous "did not throw". `social_engagements`/
+  // `social_post_variants` reads/writes in the endpoint itself carry `{modules:["social"]}` — if
+  // that were ever removed, the engagement lookup 404s (asset-library) or the guarded UPDATE
+  // affects zero rows (attach), and every "real row changed" assertion below fails loudly.
+  describe("SMM-20 — asset library (attach only, D-17)", () => {
+  // Tightened at merge 2026-08-21. The library READ is client-scoped; the attach lookup was not,
+  // so naming another client's file id landed it on this client's variant -- and from there it
+  // publishes to this client's live account. A UI that never offers the row is not a check.
+  it("refuses another client's file even though it is in the same tenant", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const postId = await makePost(B, eng);
+      const accountId = await makeAccount(B, clientB, "linkedin");
+      const created = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+        payload: { accountId, body: "cross-client attach must refuse" },
+      });
+      const variantId = created.json().id;
+
+      // A file owned by a DIFFERENT client in the SAME tenant.
+      const otherClient = newId();
+      await withTenants([B], (c) => c.query(
+        `INSERT INTO clients (id, tenant_id, name, origin_site) VALUES ($1,$2,$3,'central')`,
+        [otherClient, B, `other-${otherClient.slice(0, 8)}`],
+      ));
+      const foreignFile = await insertClientFile(B, otherClient, { storageKey: `t/${newId()}`, contentType: "image/png" });
+
+      const res = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "file", assetId: foreignFile },
+      });
+      // 400 + the token in `error` is this endpoint's own convention (see the
+      // asset_not_found/unsupported_asset_source test below): the refusal is set on `message` and
+      // http-error.filter.ts renames it to `error`.
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("asset_not_found");
+
+      const { rows } = await withTenants([B], (c) => c.query<{ media: unknown }>(
+        `SELECT media FROM social_post_variants WHERE id = $1`, [variantId],
+      ), { modules: ["social"] });
+      expect(JSON.stringify(rows[0]!.media)).not.toContain(foreignFile);
+    });
+
+    async function insertClientFile(tenant: string, clientId: string, opts: { storageKey: string | null; url?: string | null; contentType?: string }): Promise<string> {
+      const id = newId();
+      await withTenants([tenant], (c) =>
+        c.query(
+          `INSERT INTO files (id, tenant_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, url, scrubbed, origin_site)
+           VALUES ($1,$2,'client',$3,'smm20-fixture.bin',$4,1024,$5,$6,false,'central')`,
+          [id, tenant, clientId, opts.contentType ?? "image/jpeg", opts.storageKey, opts.url ?? null],
+        ),
+        // deliberately NO {modules:["social"]} — `files` carries no module wall at all.
+      );
+      return id;
+    }
+
+    async function insertCreativeAsset(tenant: string, contentType = "image/webp"): Promise<{ id: string; gradedKey: string }> {
+      const id = newId();
+      const gradedKey = `studio/${id}`;
+      await withTenants([tenant], (c) =>
+        c.query(
+          `INSERT INTO creative_assets (id, tenant_id, name, content_type, grade, graded_key, graded_byte_size, origin_site)
+           VALUES ($1,$2,'smm20-graded.webp',$3,'{}'::jsonb,$4,2048,'central')`,
+          [id, tenant, contentType, gradedKey],
+        ),
+        // deliberately NO {modules:["social"]} — `creative_assets` carries no module wall either.
+      );
+      return { id, gradedKey };
+    }
+
+    it("reads files (client-scoped) and creative_assets (tenant-wide) into the library — neither through the module GUC", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const fileId = await insertClientFile(B, clientB, { storageKey: `t/${newId()}`, contentType: "image/png" });
+      const { id: assetId } = await insertCreativeAsset(B);
+
+      const res = await app.inject({
+        method: "GET", url: `/api/${B}/modules/social/engagements/${eng}/asset-library`, headers: asUser(manager),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.files.map((f: { id: string }) => f.id)).toContain(fileId);
+      const found = body.files.find((f: { id: string }) => f.id === fileId);
+      expect(found.source).toBe("upload");
+      expect(body.studioAssets.map((a: { id: string }) => a.id)).toContain(assetId);
+    });
+
+    it("names a Drive-mirrored reference (no storage_key) distinctly from an uploaded file", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const driveFileId = await insertClientFile(B, clientB, { storageKey: null, url: "https://drive.example/x" });
+      const res = await app.inject({
+        method: "GET", url: `/api/${B}/modules/social/engagements/${eng}/asset-library`, headers: asUser(manager),
+      });
+      const found = res.json().files.find((f: { id: string }) => f.id === driveFileId);
+      expect(found.source).toBe("drive");
+      expect(found.url).toBe("https://drive.example/x");
+    });
+
+    it("attaches an existing file onto a variant — recomputes args_sha256 and invalidates an approved variant", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const postId = await makePost(B, eng);
+      const accountId = await makeAccount(B, clientB, "linkedin");
+      const created = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+        payload: { accountId, body: "attach me" },
+      });
+      const variantId = created.json().id;
+      const hashBefore = created.json().argsSha256;
+
+      // Approve it first, exactly like the "EDIT INVALIDATES APPROVAL" test above.
+      const approvalId = newId();
+      await withTenants([B], async (c) => {
+        await c.query(
+          `INSERT INTO automation_approvals (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, origin, requested_by, origin_site)
+           VALUES ($1,$2,'smm20-fixture','social.publishPost','{}'::jsonb,'high','approved','automation',$3,'central')`,
+          [approvalId, B, manager],
+        );
+        await c.query(`UPDATE social_post_variants SET status='approved', approval_id=$1 WHERE id=$2`, [approvalId, variantId]);
+      }, { modules: ["social"] });
+
+      const fileId = await insertClientFile(B, clientB, { storageKey: `t/${newId()}`, contentType: "image/jpeg" });
+      const res = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "file", assetId: fileId, alt: "a promo shot" },
+      });
+      expect(res.statusCode).toBe(201);
+      const out = res.json();
+      expect(out.ok).toBe(true);
+      expect(out.fileId).toBe(fileId);
+      expect(out.approvalInvalidated).toBe(true);
+      expect(out.argsSha256).not.toBe(hashBefore);
+      expect(out.media.some((m: { fileId: string; kind?: string; format?: string }) => m.fileId === fileId && m.kind === "image" && m.format === "jpeg")).toBe(true);
+
+      // Real state, read back independently — never trust the response alone.
+      const { rows } = await withTenants([B], (c) =>
+        c.query<{ status: string; approval_id: string | null; args_sha256: string; media: { fileId: string }[] }>(
+          `SELECT status, approval_id, args_sha256, media FROM social_post_variants WHERE id = $1`, [variantId]),
+        { modules: ["social"] });
+      expect(rows[0].status).toBe("draft");
+      expect(rows[0].approval_id).toBeNull();
+      expect(rows[0].args_sha256).not.toBe(hashBefore);
+      expect(rows[0].media.map((m) => m.fileId)).toContain(fileId);
+    });
+
+    it("re-attaching the SAME file is idempotent — one entry, not a duplicate", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const postId = await makePost(B, eng);
+      const accountId = await makeAccount(B, clientB, "linkedin");
+      const created = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+        payload: { accountId, body: "attach twice" },
+      });
+      const variantId = created.json().id;
+      const fileId = await insertClientFile(B, clientB, { storageKey: `t/${newId()}` });
+
+      await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "file", assetId: fileId },
+      });
+      const second = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "file", assetId: fileId, alt: "updated alt" },
+      });
+      expect(second.statusCode).toBe(201);
+      const entries = second.json().media.filter((m: { fileId: string }) => m.fileId === fileId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].alt).toBe("updated alt");
+    });
+
+    it("attaches a Studio-graded creative_asset by materializing ONE files row, idempotently, without duplicating bytes", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const postId = await makePost(B, eng);
+      const accountId = await makeAccount(B, clientB, "instagram");
+      const created = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+        payload: { accountId, body: "studio asset" },
+      });
+      const variantId = created.json().id;
+      const { id: assetId, gradedKey } = await insertCreativeAsset(B, "image/webp");
+
+      const first = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "creative_asset", assetId },
+      });
+      expect(first.statusCode).toBe(201);
+      const materializedFileId = first.json().fileId;
+      expect(first.json().media.some((m: { fileId: string; kind?: string }) => m.fileId === materializedFileId && m.kind === "image")).toBe(true);
+
+      // The materialized `files` row reuses the SAME storage_key as the Studio asset's
+      // `graded_key` — no bytes copied — and a second attach of the SAME asset must reuse the
+      // SAME `files` row rather than growing a duplicate one.
+      const filesRows = await withTenants([B], (c) =>
+        c.query<{ id: string; storage_key: string }>(`SELECT id, storage_key FROM files WHERE storage_key = $1`, [gradedKey]));
+      expect(filesRows.rows).toHaveLength(1);
+      expect(filesRows.rows[0].storage_key).toBe(gradedKey);
+
+      const second = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "creative_asset", assetId },
+      });
+      expect(second.json().fileId).toBe(materializedFileId);
+      const filesRowsAfter = await withTenants([B], (c) =>
+        c.query<{ id: string }>(`SELECT id FROM files WHERE storage_key = $1`, [gradedKey]));
+      expect(filesRowsAfter.rows).toHaveLength(1);
+    });
+
+    it("refuses asset_not_found and unsupported_asset_source, and refuses attach onto a live variant", async () => {
+      const eng = await makeEngagement(B, clientB);
+      const postId = await makePost(B, eng);
+      const accountId = await makeAccount(B, clientB, "linkedin");
+      const created = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/posts/${postId}/variants`, headers: asUser(manager),
+        payload: { accountId, body: "refusals" },
+      });
+      const variantId = created.json().id;
+
+      const badSource = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "not_a_source", assetId: newId() },
+      });
+      expect(badSource.statusCode).toBe(400);
+      expect(badSource.json().error).toBe("unsupported_asset_source");
+
+      const missing = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "file", assetId: newId() },
+      });
+      expect(missing.statusCode).toBe(400);
+      expect(missing.json().error).toBe("asset_not_found");
+
+      const fileId = await insertClientFile(B, clientB, { storageKey: `t/${newId()}` });
+      await withTenants([B], (c) =>
+        c.query(`UPDATE social_post_variants SET status='published', approval_id=NULL, native_import=true WHERE id=$1`, [variantId]),
+        { modules: ["social"] });
+      const onLive = await app.inject({
+        method: "POST", url: `/api/${B}/modules/social/variants/${variantId}/media/attach`, headers: asUser(manager),
+        payload: { source: "file", assetId: fileId },
+      });
+      expect(onLive.statusCode).toBe(400);
+      expect(onLive.json().error).toBe("variant_native_import_immutable");
+    });
+  });
 });

@@ -162,6 +162,21 @@ function validateScopePatch(patch: ToolScope): string[] {
   return warnings;
 }
 
+/** MIME major/minor -> the composer's `MediaItem.kind`/`format` shape (media-rules.ts). Used by
+ *  the SMM-20 asset-attach endpoint below. Derived here, not in media-rules.ts: that file's own
+ *  header explains why `format` is normally COMPOSER-supplied rather than re-derived from
+ *  `files.content_type` (avoiding a DB join per variant write) — but the attach endpoint already
+ *  has the row in hand (it just read it to attach it), so deriving costs nothing extra and gives
+ *  the composer a sane default instead of the `media_format_unknown` warning on every single
+ *  library attach. The caller's own `kind`/`format` in the request body, if sent, still wins
+ *  (merged in at the call site) — this is a default, never an override. */
+function contentTypeToKindFormat(contentType: string | null | undefined): { kind?: "image" | "video"; format?: string } {
+  const ct = (contentType ?? "").toLowerCase();
+  if (ct.startsWith("image/")) return { kind: "image", format: ct.slice("image/".length) || undefined };
+  if (ct.startsWith("video/")) return { kind: "video", format: ct.slice("video/".length) || undefined };
+  return {};
+}
+
 @Controller("api/:tenantId/modules/social")
 @UseGuards(AuthGuard, ModuleEnabledGuard("social"))
 export class SocialController {
@@ -1011,6 +1026,320 @@ export class SocialController {
       validation: validateVariant(account.network, shape, account.quota),
       estimatedCostUsd: estimateCostUsd(account.network, shape),
       network: account.network,
+    };
+  }
+
+  // ============================================================ ASSET LIBRARY (SMM-20) =======
+  // Attach-only media library — files / Drive-mirrored files / Studio-graded `creative_assets`
+  // into a variant's `media` (addendum SMM-20, AMENDED by D-17: generation is OUT of scope; the
+  // `ai.imageGen` toggle above ships inert and names why — this file never calls a generator).
+  //
+  // ── THE MODULE-GUC BOUNDARY, DRAWN DELIBERATELY (defect class #1) ──────────────────────────
+  // `files` and `creative_assets` are NOT `social_*` tables — no `app_module_allowed('social')`
+  // wall, so every read/write against them below carries NO `{modules:["social"]}` option,
+  // exactly like `dispatch.ts`'s own `loadFileForUpload` (that file's header names this same
+  // boundary for the SAME table). `social_engagements`/`social_post_variants` ARE `social_*`
+  // tables and every query against them below DOES carry `{modules:["social"]}` — getting this
+  // backwards in either direction is the trap: forgetting it on the social side reads/writes
+  // ZERO ROWS SILENTLY; adding it on the `files`/`creative_assets` side would just as silently
+  // read/write zero rows on ANY tenant that has never enabled the social module for that table's
+  // owning department, which is nonsensical since neither table is gated by a module at all.
+  // `attachVariantMedia`'s own test asserts REAL rows change through this endpoint end to end —
+  // if `{modules:["social"]}` were ever removed from the `social_post_variants` write below, the
+  // guarded UPDATE would affect zero rows and the test's "media now contains the new fileId"
+  // assertion would fail loudly, never pass vacuously.
+
+  /** The engagement's client (asset libraries are client-scoped — `files` rows attached to the
+   *  CLIENT are the natural "everything this client has ever sent us" library) and nothing else;
+   *  a lighter read than `loadEngagementForAi`, which also joins the brand profile this endpoint
+   *  does not need. */
+  private async loadEngagementClientId(tenantId: string, engagementId: string): Promise<string> {
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ clientId: string }>(
+        `SELECT client_id AS "clientId" FROM social_engagements WHERE id = $1 AND deleted_at IS NULL`,
+        [engagementId],
+      ),
+      { modules: ["social"] },
+    );
+    if (!rows[0]) throw new NotFoundException("social engagement not found");
+    return rows[0].clientId;
+  }
+
+  @Get("engagements/:engagementId/asset-library")
+  async getAssetLibrary(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("engagementId") engagementId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_engagement", id: engagementId, tenantId, module: "social" }, "read");
+    const clientId = await this.loadEngagementClientId(tenantId, engagementId);
+
+    // `files`/`creative_assets` — plain tenant wall only, no `{modules:["social"]}` (see this
+    // section's own header note on the boundary).
+    const [filesResult, studioResult] = await Promise.all([
+      withTenants([tenantId], (c) => c.query<{
+        id: string; filename: string; contentType: string; byteSize: string; storageKey: string | null; url: string | null; createdAt: Date;
+      }>(
+        `SELECT id, filename, content_type AS "contentType", byte_size AS "byteSize",
+                storage_key AS "storageKey", url, created_at AS "createdAt"
+           FROM files WHERE target_entity_type = 'client' AND target_entity_id = $1 AND deleted_at IS NULL
+          ORDER BY created_at DESC LIMIT 200`,
+        [clientId],
+      )),
+      withTenants([tenantId], (c) => c.query<{
+        id: string; name: string; contentType: string; width: number | null; height: number | null;
+        gradedByteSize: string; presetId: string | null; createdAt: Date;
+      }>(
+        `SELECT id, name, content_type AS "contentType", width, height,
+                graded_byte_size AS "gradedByteSize", preset_id AS "presetId", created_at AS "createdAt"
+           FROM creative_assets WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 200`,
+      )),
+    ]);
+
+    return {
+      files: filesResult.rows.map((f) => ({
+        id: f.id, filename: f.filename, contentType: f.contentType, byteSize: Number(f.byteSize),
+        // Reference attach (`files.controller.ts`'s upload() no-`content` branch) has no
+        // `storage_key` — that IS the Drive-mirror shape (OQ-5: "media rides `files` + Drive
+        // mirror"): a filename + url, no blob of ours. `source` names which one this is so the
+        // console can render them distinctly rather than pretending every row has bytes.
+        source: f.storageKey ? ("upload" as const) : ("drive" as const),
+        url: f.url,
+        createdAt: f.createdAt,
+      })),
+      studioAssets: studioResult.rows.map((a) => ({
+        id: a.id, name: a.name, contentType: a.contentType, width: a.width, height: a.height,
+        gradedByteSize: Number(a.gradedByteSize), presetId: a.presetId, createdAt: a.createdAt,
+      })),
+    };
+  }
+
+  /** Read one `files` row's content type, tenant-scoped, no module wall — `files` is not a
+   *  `social_*` table (this section's own header). Returns null rather than throwing so the
+   *  caller can answer with the named `asset_not_found` token instead of a generic 404. */
+  /** ⚠ SCOPED TO THE VARIANT'S CLIENT ON PURPOSE — tightened at merge, 2026-08-21.
+   *
+   *  The library READ above is client-scoped (`target_entity_type='client' AND target_entity_id =
+   *  <the engagement's client>`). This lookup originally was not: it matched on `id` alone inside the
+   *  tenant wall, so a crafted attach could name client B's file id and land it on client A's
+   *  variant — and from there it publishes to client A's live social account. The wrong client's
+   *  creative going out publicly is the same nightmare `PUBLISH_REFUSAL`'s `cross_client_account`
+   *  and `keys.ts`'s no-fallback rule both exist to prevent; a UI that never offers the row is not
+   *  an authorization check.
+   *
+   *  The predicate now MIRRORS the library's exactly, so anything attachable is something the
+   *  library would have listed. `creative_assets` deliberately stays tenant-wide — Studio-graded
+   *  assets belong to the agency, not to one client — which is why only this half needed narrowing. */
+  private async loadLibraryFileContentType(
+    tenantId: string, clientId: string, fileId: string,
+  ): Promise<string | null> {
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ content_type: string }>(
+        `SELECT content_type FROM files
+          WHERE id = $1 AND target_entity_type = 'client' AND target_entity_id = $2 AND deleted_at IS NULL`,
+        [fileId, clientId],
+      ),
+    );
+    return rows[0]?.content_type ?? null;
+  }
+
+  /** Read one Studio-graded asset's materializable fields. No module wall — `creative_assets` is
+   *  not a `social_*` table either. */
+  private async loadStudioAsset(
+    tenantId: string, assetId: string,
+  ): Promise<{ name: string; contentType: string; gradedKey: string; gradedByteSize: number } | null> {
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ name: string; content_type: string; graded_key: string; graded_byte_size: string }>(
+        `SELECT name, content_type, graded_key, graded_byte_size FROM creative_assets WHERE id = $1 AND deleted_at IS NULL`,
+        [assetId],
+      ),
+    );
+    if (!rows[0]) return null;
+    return {
+      name: rows[0].name, contentType: rows[0].content_type,
+      gradedKey: rows[0].graded_key, gradedByteSize: Number(rows[0].graded_byte_size),
+    };
+  }
+
+  /** Materialize a Studio asset as a `files` row so `dispatch.ts`'s `resolveEngineMedia`/
+   *  `loadFileForUpload` (both UNEDITED by this ticket) resolve it exactly like any other
+   *  attached file — the whole point of reusing the SAME `graded_key` as the new row's
+   *  `storage_key` rather than copying bytes: zero duplicated storage, and the engine-upload path
+   *  never needs to know an attachment originated in the Studio rather than an ordinary upload.
+   *  Idempotent by construction: a repeat attach of the same Studio asset for the same client
+   *  reuses the SAME `files` row (matched on `storage_key`) rather than growing a duplicate one
+   *  per click. No module wall — `files` is not a `social_*` table. */
+  private async materializeStudioAssetAsFile(
+    tenantId: string, uploaderId: string | null, clientId: string,
+    asset: { name: string; contentType: string; gradedKey: string; gradedByteSize: number },
+  ): Promise<string> {
+    return withTenants([tenantId], async (c) => {
+      const existing = await c.query<{ id: string }>(
+        `SELECT id FROM files
+          WHERE target_entity_type = 'client' AND target_entity_id = $1 AND storage_key = $2 AND deleted_at IS NULL
+          LIMIT 1`,
+        [clientId, asset.gradedKey],
+      );
+      if (existing.rows[0]) return existing.rows[0].id;
+      const id = newId();
+      await c.query(
+        `INSERT INTO files
+           (id, tenant_id, uploader_id, target_entity_type, target_entity_id, filename, content_type, byte_size, storage_key, scrubbed, origin_site)
+         VALUES ($1,$2,$3,'client',$4,$5,$6,$7,$8,false,$9)`,
+        [id, tenantId, uploaderId, clientId, asset.name, asset.contentType, asset.gradedByteSize, asset.gradedKey, config.originSite],
+      );
+      return id;
+    });
+  }
+
+  /** Everything `attachVariantMedia` needs about the target row in one round trip — same
+   *  `{modules:["social"]}` discipline as every other `social_post_variants` read in this file.
+   *  The joined `clientId` is what a Studio-asset attach materializes its new `files` row under. */
+  private async loadVariantForMediaAttach(tenantId: string, variantId: string): Promise<{
+    accountId: string; status: string; nativeImport: boolean; clientId: string;
+  }> {
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{ accountId: string; status: string; nativeImport: boolean; clientId: string }>(
+        `SELECT v.account_id AS "accountId", v.status, v.native_import AS "nativeImport", e.client_id AS "clientId"
+           FROM social_post_variants v
+           JOIN social_posts p ON p.id = v.post_id
+           JOIN social_engagements e ON e.id = p.engagement_id
+          WHERE v.id = $1 AND v.deleted_at IS NULL`,
+        [variantId],
+      ),
+      { modules: ["social"] },
+    );
+    if (!rows[0]) throw new NotFoundException("post variant not found");
+    return rows[0];
+  }
+
+  /** Attach ONE library asset (an existing `files` row, or a Studio-graded `creative_assets` row)
+   *  onto a variant's `media` array. Never uploads anything to the engine — that is SMM-39's job,
+   *  entirely unaffected: this endpoint only ever writes the composer-side descriptor
+   *  (`{fileId, kind, alt, format}`) into `social_post_variants.media`, the SAME column
+   *  `updateVariant` already writes, never `uploaded_media` (D-15's separation — see this
+   *  module's dispatch.ts header for why that column must stay outside `args_sha256`; this
+   *  endpoint recomputes `args_sha256` from `media`, exactly like `updateVariant`, and never
+   *  touches `uploaded_media` at all). */
+  @Post("variants/:variantId/media/attach")
+  async attachVariantMedia(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+    @Body() body: { source?: "file" | "creative_asset"; assetId?: string; alt?: string; kind?: "image" | "video"; format?: string },
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "update");
+    const source = body?.source;
+    const assetId = body?.assetId;
+    if (!source || !assetId) refuse("missing_field");
+    if (source !== "file" && source !== "creative_asset") refuse("unsupported_asset_source");
+
+    const variant = await this.loadVariantForMediaAttach(tenantId, variantId);
+    // Same editability law `updateVariant` enforces — an attach IS an edit of `media`.
+    if (variant.nativeImport) refuse("variant_native_import_immutable");
+    if (!EDITABLE_VARIANT_STATUSES.has(variant.status)) refuse("variant_not_editable");
+
+    // No SEPARATE `file`/`client` Cerbos check here, deliberately: the caller has already cleared
+    // `social_post`/`update` above, which IS the capability this endpoint grants ("attach media to
+    // a variant you may edit") — same reasoning `getAssetLibrary`'s single `social_engagement`/
+    // `read` check gives for the identical `files`/`creative_assets` reads. `social_staff`/
+    // `social_manager` are module-scoped roles and hold no blanket company-wide `file` grant, so
+    // gating a second time on that resource would refuse the exact staff this ticket is for.
+    let fileId: string;
+    let derived: { kind?: "image" | "video"; format?: string };
+    if (source === "file") {
+      const contentType = await this.loadLibraryFileContentType(tenantId, variant.clientId, assetId);
+      if (contentType === null) refuse("asset_not_found");
+      fileId = assetId;
+      derived = contentTypeToKindFormat(contentType);
+    } else {
+      const asset = await this.loadStudioAsset(tenantId, assetId);
+      if (!asset) refuse("asset_not_found");
+      fileId = await this.materializeStudioAssetAsFile(tenantId, req.principal.userId, variant.clientId, asset);
+      derived = contentTypeToKindFormat(asset.contentType);
+    }
+
+    const descriptor: Record<string, unknown> = {
+      fileId,
+      kind: body?.kind ?? derived.kind,
+      alt: body?.alt,
+      format: body?.format ?? derived.format,
+    };
+
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const { rows } = await c.query<{
+          id: string; account_id: string; body: string; first_comment: string | null; media: unknown;
+          settings: Record<string, unknown>; scheduled_at: Date | null; status: string; approval_id: string | null; native_import: boolean;
+        }>(
+          `SELECT id, account_id, body, first_comment, media, settings, scheduled_at, status, approval_id, native_import
+             FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [variantId],
+        );
+        const row = rows[0];
+        if (!row) return { kind: "not_found" as const };
+        if (row.native_import) return { kind: "refuse" as const, reason: "variant_native_import_immutable" };
+        if (!EDITABLE_VARIANT_STATUSES.has(row.status)) return { kind: "refuse" as const, reason: "variant_not_editable" };
+
+        const existingMedia = Array.isArray(row.media) ? (row.media as Record<string, unknown>[]) : [];
+        const already = existingMedia.findIndex((m) => m && typeof m === "object" && m.fileId === fileId);
+        const nextMedia = [...existingMedia];
+        if (already >= 0) {
+          // Idempotent re-attach: refresh kind/alt/format on the SAME entry, never a duplicate —
+          // a retried "attach" click (or an at-least-once agent caller) must not grow the array.
+          nextMedia[already] = { ...nextMedia[already], ...descriptor };
+        } else {
+          nextMedia.push(descriptor);
+        }
+
+        const argsSha256 = variantArgsSha256({
+          tenantId, id: row.id, accountId: row.account_id, body: row.body, firstComment: row.first_comment,
+          media: nextMedia, settings: row.settings, scheduledAt: row.scheduled_at,
+        });
+        // D-15's state law, mechanically, exactly like `updateVariant`: attaching media changes
+        // the hashed args, so an approved/in-review variant drops back to draft in the SAME
+        // statement, and a failed dispatch's approval_id is cleared the same way.
+        const wasApproved = row.approval_id !== null || row.status === "approved";
+        await c.query(
+          `UPDATE social_post_variants
+              SET media = $1, args_sha256 = $2, approval_id = NULL,
+                  status = CASE WHEN status IN ('in_review','approved','failed') THEN 'draft' ELSE status END,
+                  updated_at = now()
+            WHERE id = $3`,
+          [JSON.stringify(nextMedia), argsSha256, variantId],
+        );
+        return {
+          kind: "ok" as const, accountId: row.account_id, media: nextMedia, argsSha256, wasApproved,
+          body: row.body, firstComment: row.first_comment, settings: row.settings, scheduledAt: row.scheduled_at,
+        };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("post variant not found");
+    if (result.kind === "refuse") refuse(result.reason);
+
+    const account = await this.loadAccount(tenantId, result.accountId);
+    const validation = validateVariant(account.network, {
+      body: result.body, firstComment: result.firstComment,
+      media: result.media as never[], settings: result.settings, scheduledAt: result.scheduledAt,
+    }, account.quota);
+    await withTenants(
+      [tenantId],
+      (c) => c.query(
+        `UPDATE social_post_variants SET validation = $1, estimated_cost_usd = $2 WHERE id = $3`,
+        [JSON.stringify(validation), estimateCostUsd(account.network, {
+          body: result.body, media: result.media as never[], settings: result.settings,
+        }), variantId],
+      ),
+      { modules: ["social"] },
+    );
+    await writeActivity(tenantId, req.principal.userId, "updated", "social_post_variant", variantId, {
+      mediaAttached: true, source, fileId, approvalInvalidated: result.wasApproved,
+    });
+    return {
+      ok: true, fileId, media: result.media, validation, argsSha256: result.argsSha256,
+      approvalInvalidated: result.wasApproved,
     };
   }
 

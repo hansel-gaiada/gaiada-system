@@ -9,7 +9,7 @@ import { AccessDenied } from "@/components/social/AccessDenied";
 import { PostFieldsForm } from "@/components/social/PostFieldsForm";
 import { VariantCard } from "@/components/social/VariantCard";
 import { BackendPending } from "@/components/BackendPending";
-import { getPost, listAccounts, getEngagementScope, getClientReview } from "@/lib/social";
+import { getPost, listAccounts, getEngagementScope, getClientReview, getAssetLibrary } from "@/lib/social";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string; postId: string }>;
@@ -70,6 +70,12 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
   const clientReviews = await Promise.all(post.variants.map((v) => getClientReview(userId, tenant, v.id)));
   const reviewByVariantId = new Map(post.variants.map((v, i) => [v.id, clientReviews[i].data]));
 
+  // SMM-20 (AMENDED by D-17 — attach only, generation removed): the asset library is scoped to
+  // the POST's engagement (one client, shared by every variant under it) — read once here, same
+  // "one value shared by every variant" pattern `requiresClientOk` above already follows, rather
+  // than each VariantCard re-fetching the same files/creative_assets rows.
+  const assetLibrary = await getAssetLibrary(userId, tenant, post.engagementId);
+
   return (
     <>
       <Card title={post.title}>
@@ -89,6 +95,7 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
                 account={accountById.get(v.accountId)} accountsForbidden={accounts.forbidden}
                 clientReview={reviewByVariantId.get(v.id)!} requiresClientOk={requiresClientOk}
                 canRequestReview={canRequestReview} canWithdrawReview={canWithdrawReview}
+                assetLibrary={assetLibrary.data} assetLibraryForbidden={assetLibrary.forbidden}
               />
             ))}
           </div>

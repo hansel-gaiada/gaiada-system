@@ -3,6 +3,7 @@ import {
   SOCIAL_NETWORKS, EMPTY_TOOL_SCOPE, QUOTA_UNKNOWN_RULE, IMAGE_GENERATION_UNAVAILABLE_WARNING,
   describeRefusal, describeQuota, PUBLISH_PRECONDITION_STAGES,
   CLIENT_REVIEW_REFUSAL, evaluateClientReviewState,
+  EMPTY_ASSET_LIBRARY,
 } from "./socialShared";
 
 // Pure-helper tests only — no network. `readGuarded`/`platformFetch` (the networked half of
@@ -191,5 +192,21 @@ describe("describeQuota", () => {
     for (const n of ["facebook", "tiktok", "linkedin", "x", "threads", "pinterest", "bluesky", "mastodon"] as const) {
       expect(describeQuota(n, { igPosts24h: { used: 1, cap: 2 } }).status).toBe("not_modeled");
     }
+  });
+});
+
+// ── SMM-20 (asset attach only; AMENDED by D-17 — generation removed) ──────────────────────────────
+describe("SMM-20 asset library refusal tokens", () => {
+  it("names both new attach refusals as themselves, never a generic error (criterion 5)", () => {
+    expect(describeRefusal("unsupported_asset_source")).toBe(
+      "That isn't a recognised asset source (must be a file or a Studio asset).",
+    );
+    expect(describeRefusal("asset_not_found")).toBe(
+      "That asset no longer exists (deleted, or never did) — try refreshing the library.",
+    );
+  });
+
+  it("ships EMPTY_ASSET_LIBRARY as two empty arrays — the honest fallback for a 403/404 read", () => {
+    expect(EMPTY_ASSET_LIBRARY).toEqual({ files: [], studioAssets: [] });
   });
 });

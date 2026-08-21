@@ -61,10 +61,14 @@ interface DemoAccount {
   publisherOrgRef: string; driver: string;
 }
 
+interface DemoMediaDescriptor {
+  fileId?: string; kind?: "image" | "video"; alt?: string; format?: string;
+}
+
 interface DemoVariant {
   id: string; accountId: string; network: DemoSocialNetwork; handle: string; body: string;
   firstComment: string | null;
-  media: { fileId?: string; kind?: "image" | "video"; alt?: string }[];
+  media: DemoMediaDescriptor[];
   settings: Record<string, unknown>;
   validation: DemoValidation;
   argsSha256: string;
@@ -432,6 +436,52 @@ const POSTS_SEED: DemoPost[] = [
   },
 ];
 
+// ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ──────────────
+// Read-only reference data (nothing here ever mutates), so a plain module-level const is fine —
+// the `globalThis`-pinning discipline above is specifically about MUTABLE state; this file's own
+// header names the exact trap that doctrine exists to avoid, and it does not apply to data
+// nothing ever writes to. Two Studio-graded assets given DIFFERENT content types (image/video) so
+// both branches of `contentTypeToKindFormat`'s real-backend counterpart are exercisable here too.
+const LIBRARY_FILES = [
+  {
+    id: "demo-file-promo-1", filename: "promo-carousel-1.jpg", contentType: "image/jpeg",
+    byteSize: 482_311, source: "upload" as const, url: null, createdAt: "2026-08-10T09:00:00Z",
+  },
+  {
+    id: "demo-file-bts-1", filename: "studio-walkthrough.mp4", contentType: "video/mp4",
+    byteSize: 8_204_112, source: "upload" as const, url: null, createdAt: "2026-08-14T10:30:00Z",
+  },
+  {
+    // A Drive-mirrored reference — no bytes of ours (OQ-5's "files + Drive mirror"; the shape
+    // `files.controller.ts`'s reference-attach branch produces: filename + url, `storage_key`
+    // NULL). Attaching this is legal here (mirrors the real backend, which does not block it
+    // either) even though it carries no bytes to upload at dispatch time — a genuinely separate,
+    // already-documented gap (dispatch's own `mediaUploadFailed`), not something this ticket
+    // re-solves twice.
+    id: "demo-file-drive-brief", filename: "Autumn Drop Brief.pdf", contentType: "application/pdf",
+    byteSize: 0, source: "drive" as const, url: "https://drive.google.com/file/d/demo-autumn-brief",
+    createdAt: "2026-08-05T08:00:00Z",
+  },
+] as const;
+
+const LIBRARY_STUDIO_ASSETS = [
+  {
+    id: "demo-studio-1", name: "storefront-exterior-graded.webp", contentType: "image/webp",
+    width: 1600, height: 900, gradedByteSize: 214_009, presetId: "vivid-warm", createdAt: "2026-08-04T12:00:00Z",
+  },
+  {
+    id: "demo-studio-2", name: "autumn-drop-teaser-graded.webp", contentType: "image/webp",
+    width: 1080, height: 1350, gradedByteSize: 301_552, presetId: "product-clean", createdAt: "2026-08-16T15:00:00Z",
+  },
+] as const;
+
+function libraryContentTypeToKindFormat(contentType: string): { kind?: "image" | "video"; format?: string } {
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith("image/")) return { kind: "image", format: ct.slice("image/".length) || undefined };
+  if (ct.startsWith("video/")) return { kind: "video", format: ct.slice("video/".length) || undefined };
+  return {};
+}
+
 const CLIENT_REVIEWS_SEED: DemoClientReview[] = [
   {
     id: "cr-1", variantId: "soc-var-7", clientId: "cl-1", status: "pending",
@@ -753,6 +803,62 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     if (!found) return err(404, "not found");
     const { variant } = found;
     return ok({ validation: variant.validation, estimatedCostUsd: variant.estimatedCostUsd, network: variant.network });
+  }
+
+  // ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ────────────
+  const assetLibraryM = tail.match(/^engagements\/([^/]+)\/asset-library$/);
+  if (assetLibraryM && m === "GET") {
+    const eng = ENGAGEMENTS.find((e) => e.id === assetLibraryM[1]);
+    if (!eng) return err(404, "not found");
+    return ok({ files: LIBRARY_FILES, studioAssets: LIBRARY_STUDIO_ASSETS });
+  }
+
+  const attachMediaM = tail.match(/^variants\/([^/]+)\/media\/attach$/);
+  if (attachMediaM && m === "POST") {
+    const found = findPostByVariantId(attachMediaM[1]);
+    if (!found) return err(404, "not found");
+    const { variant } = found;
+    if (variant.nativeImport) return err(400, "variant_native_import_immutable");
+    if (!EDITABLE_VARIANT_STATUSES.includes(variant.status)) return err(400, "variant_not_editable");
+    const body_ = b() as { source?: "file" | "creative_asset"; assetId?: string; alt?: string; kind?: "image" | "video"; format?: string };
+    if (!body_.source || !body_.assetId) return err(400, "missing_field");
+    if (body_.source !== "file" && body_.source !== "creative_asset") return err(400, "unsupported_asset_source");
+
+    let fileId: string;
+    let contentType: string;
+    if (body_.source === "file") {
+      const f = LIBRARY_FILES.find((x) => x.id === body_.assetId);
+      if (!f) return err(400, "asset_not_found");
+      fileId = f.id;
+      contentType = f.contentType;
+    } else {
+      const a = LIBRARY_STUDIO_ASSETS.find((x) => x.id === body_.assetId);
+      if (!a) return err(400, "asset_not_found");
+      // Materialization simulated deterministically (same asset id -> same synthesized fileId
+      // every time), matching the real backend's idempotent "reuse the same `files` row" property
+      // without actually needing a second store to prove it.
+      fileId = `demo-file-from-${a.id}`;
+      contentType = a.contentType;
+    }
+    const derived = libraryContentTypeToKindFormat(contentType);
+    const descriptor: DemoMediaDescriptor = {
+      fileId, kind: body_.kind ?? derived.kind, alt: body_.alt, format: body_.format ?? derived.format,
+    };
+    const already = variant.media.findIndex((mm) => mm.fileId === fileId);
+    if (already >= 0) variant.media[already] = { ...variant.media[already], ...descriptor };
+    else variant.media.push(descriptor);
+
+    const priorStatus = variant.status;
+    const approvalInvalidated = priorStatus === "approved" || priorStatus === "in_review";
+    if (approvalInvalidated) {
+      variant.status = "draft";
+      variant.approvalId = null;
+    }
+    variant.argsSha256 = nid("sha256-demo");
+    return ok({
+      ok: true, fileId, media: variant.media, validation: variant.validation,
+      argsSha256: variant.argsSha256, approvalInvalidated,
+    });
   }
 
   const preconditionsM = tail.match(/^variants\/([^/]+)\/publish-preconditions$/);
