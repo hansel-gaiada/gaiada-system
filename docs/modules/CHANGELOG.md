@@ -6193,6 +6193,27 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - 26 tickets P0–P3 + 2 committed P4 (design §12).
 
 ## social-media
+### [0.5.13] — 2026-08-21 · IN PROGRESS
+- **SMM-16 — AI triage over the engagement inbox: sentiment/category/urgency classification, spike
+  detection, SLA guard flows.** New migration `202608211200_social_inbox_triage.sql` (category/
+  urgency/ai_triage_status/ai_triage_at/sla_alerted_at on `social_inbox_threads`; a structural CHECK
+  makes `unclassified`/`unavailable`/`classified`/`purged` mutually exclusive — never a nullable
+  column conflating "never asked" with "asked, got nothing usable"). New `inbox-triage-job.ts`
+  (`smm-inbox-triage` + `smm-inbox-sla-guard`). `ai-drafts.ts`'s new `parseTriageDraft` has NO
+  deterministic fallback — a classification is a guess, never laundered into a fact.
+- **The cross-client leak test.** No WS8 retrieval step exists on this surface (unlike SMM-19/23), so
+  the leak boundary is "one gateway call, one thread's own messages" — proven by classifying two
+  clients' threads in one sweep and asserting each prompt only ever contains its own thread's text.
+- **Retention: a text-derived label inherits LinkedIn's 48h cap on the SAME clock.** Wired into
+  SMM-36's existing purger (`inbox-retention-job.ts`), never a second job — the same UPDATE that
+  scrubs the excerpt now also nulls sentiment/category/urgency and flips the status to `purged`.
+- **SLA guard reuses 0105's existing `sla_due_at`/`ix_social_inbox_threads_sla`**, sourcing its
+  target ONLY from `social_engagements.tool_scope.inbox.slaMinutes` — never an invented duration.
+  Spike detection is config-driven with its rationale in `config.ts` (no live traffic exists to
+  measure a baseline from, per D-23) — never a constant presented as measured.
+- Two new event handlers (`social.inbox.sla_breached` risk-shaped bell+mail,
+  `social.inbox.spike_detected` bell only), riding the already-drained `social_post_variant` stream.
+
 ### [0.5.7] — 2026-08-20 · IN PROGRESS
 - **SMM-23 — client-facing engagement reports: snapshot + AI narrative → approve → render → files +
   Drive + deliverable.** `social_reports` (0105) + its Cerbos policy/catalog rows (0106) already

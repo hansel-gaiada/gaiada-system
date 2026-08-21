@@ -349,6 +349,112 @@ export function buildReportNarrativePrompt(facts: ReportNarrativeGroundingFacts)
   return lines.join("\n\n");
 }
 
+// ───────────────────────────────────────────── Inbox triage (SMM-16) ──────────────────────────────
+// Sentiment/category/urgency classification for ONE engagement-inbox thread. This is the highest-
+// risk prompt in the module for a reason `gateway-client.ts`'s own header does not cover: SMM-19's
+// caption drafting and SMM-23's report narrative both ground on a CLIENT'S OWN brand corpus, fetched
+// through a scope-prefixed WS8 search that is itself the leak boundary. This file has no such
+// boundary to lean on — it is handed whatever `messages` the CALLER puts in `TriageGroundingFacts`,
+// verbatim, with NO retrieval step of its own. That makes the caller (`inbox-triage-job.ts`) the
+// entire safety boundary: it must build ONE `TriageGroundingFacts` per THREAD, holding only that
+// thread's own messages, and must never batch two threads' (and so, potentially, two different
+// clients') comment text into a single prompt. `inbox-triage-job.test.ts`'s cross-client leak test
+// proves the caller honours that, not this file — this file has nothing to check, by construction,
+// since it is never given more than one thread's facts to begin with.
+//
+// ── A CLASSIFICATION IS A GUESS, NEVER A FACT — SO THERE IS NO FALLBACK VALUE HERE ────────────────
+// Every OTHER parse* function above has a deterministic fallback (a template caption, a placeholder
+// idea, a numbers-only narrative) because losing a DRAFT to a gateway hiccup is an inconvenience a
+// human catches at approval time regardless. Inventing a fallback sentiment/category/urgency would
+// be different in kind: it would put a GUESSED classification in the same column a REAL one lives
+// in, indistinguishable from the model actually having read the comment. `parseTriageDraft` returns
+// `result: null` on ANY failure (gateway unreachable, malformed JSON, an out-of-vocabulary value) —
+// the caller writes `ai_triage_status = 'unavailable'` for that outcome, never a guessed
+// 'neutral'/'other'/'low'. This is the module's own three-reasons discipline (`capabilities.ts`'s
+// header) applied to a classification instead of a capability: 'unclassified' (never attempted),
+// 'unavailable' (attempted, no usable answer), 'classified' (a real value) are three different
+// facts, and collapsing "we don't know" into a value this column can also mean "the model said so"
+// would launder a guess into a fact — precisely what the ticket named as the thing not to do.
+export type TriageSentiment = "positive" | "neutral" | "negative";
+export type TriageCategory = "question" | "complaint" | "praise" | "spam" | "other";
+export type TriageUrgency = "low" | "normal" | "high";
+const TRIAGE_SENTIMENTS: readonly TriageSentiment[] = ["positive", "neutral", "negative"];
+const TRIAGE_CATEGORIES: readonly TriageCategory[] = ["question", "complaint", "praise", "spam", "other"];
+const TRIAGE_URGENCIES: readonly TriageUrgency[] = ["low", "normal", "high"];
+
+export interface TriageGroundingFacts {
+  network: Network;
+  engagementName: string;
+  /** ONLY this ONE thread's own messages, oldest first — see the file header. Never another
+   *  thread's, never another client's. */
+  messages: Array<{ authorHandle: string | null; body: string; postedAt: string }>;
+}
+
+export interface TriageResult {
+  sentiment: TriageSentiment;
+  category: TriageCategory;
+  urgency: TriageUrgency;
+}
+export interface TriageDraftResult {
+  /** `null` means "no usable classification" — see the file header on why this is never guessed. */
+  result: TriageResult | null;
+  draftedVia: "ai" | "unavailable";
+}
+
+export function buildTriagePrompt(facts: TriageGroundingFacts): string {
+  const lines = [
+    `You are triaging a ${facts.network} engagement-inbox thread for the brand behind `
+      + `"${facts.engagementName}". Below is the ENTIRE thread — every message anyone has posted in `
+      + `it — and nothing from any other thread or any other client.`,
+    facts.messages
+      .map((m) => `- ${m.authorHandle ?? "(unknown author)"} (${m.postedAt}): ${m.body}`)
+      .join("\n"),
+    "Classify this thread on three independent axes:",
+    '  sentiment: one of "positive", "neutral", "negative" — the commenter\'s tone toward the brand.',
+    '  category: one of "question", "complaint", "praise", "spam", "other".',
+    '  urgency: one of "low", "normal", "high" — how quickly a human should respond.',
+    "Base every axis ONLY on the thread text above. Never invent context about the brand, the post, ",
+    "or the commenter that is not present in these messages.",
+    "Reply with STRICT JSON only, no prose, no markdown fences: "
+      + '{"sentiment": "<one of the three>", "category": "<one of the five>", "urgency": "<one of the three>"}',
+  ];
+  return lines.join("\n\n");
+}
+
+/** Parse the gateway's /complete response for a triage classification. NEVER throws — see the file
+ *  header for why an unparsable/out-of-vocabulary response returns `result: null` rather than any
+ *  fallback value. */
+export function parseTriageDraft(raw: string | null): TriageDraftResult {
+  if (raw) {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0]) as { sentiment?: unknown; category?: unknown; urgency?: unknown };
+        const sentiment = typeof parsed.sentiment === "string" ? parsed.sentiment.trim().toLowerCase() : "";
+        const category = typeof parsed.category === "string" ? parsed.category.trim().toLowerCase() : "";
+        const urgency = typeof parsed.urgency === "string" ? parsed.urgency.trim().toLowerCase() : "";
+        if (
+          (TRIAGE_SENTIMENTS as readonly string[]).includes(sentiment)
+          && (TRIAGE_CATEGORIES as readonly string[]).includes(category)
+          && (TRIAGE_URGENCIES as readonly string[]).includes(urgency)
+        ) {
+          return {
+            result: {
+              sentiment: sentiment as TriageSentiment,
+              category: category as TriageCategory,
+              urgency: urgency as TriageUrgency,
+            },
+            draftedVia: "ai",
+          };
+        }
+      } catch {
+        /* malformed JSON -> falls through to `result: null` below */
+      }
+    }
+  }
+  return { result: null, draftedVia: "unavailable" };
+}
+
 function fallbackReportNarrative(facts: ReportNarrativeGroundingFacts): string {
   if (facts.kpis.length === 0) {
     return `No metrics have been fetched yet for ${facts.engagementName} during ${facts.periodLabel} `

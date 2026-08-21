@@ -1,5 +1,6 @@
 // SMM-13 — notification and mail routing for social post events.
 // SMM-31 extends the same routing table with the client-review stage's two events.
+// SMM-16 extends it again with the inbox SLA guard's breach event and the spike detector's event.
 //
 // Routing:
 // - `social.post.dispatched` → notifications only (routine success)
@@ -7,16 +8,23 @@
 // - `social.post.failed` → notifications + mail (risk warning)
 // - `social.client_review.requested` → notifies the CLIENT (portal contacts) that a post awaits them
 // - `social.client_review.decided` → notifies STAFF (the engagement owner) of the client's decision
+// - `social.inbox.sla_breached` → notifications + mail (risk warning — a customer-visible thread has
+//   gone unanswered past the engagement's OWN configured response window)
+// - `social.inbox.spike_detected` → notifications only (attention-needed, not yet a confirmed
+//   incident — see `inbox-triage-job.ts`'s own header on why this has no measured baseline yet)
 //
 // Event payload contains: network, engagementId, providerPostId, reason (for failed)
 // We query the engagement to find the owner and notify them of the outcome.
 //
-// Both new handlers ride the ALREADY-DRAINED "social_post_variant" entity-type stream
-// (main.ts#startConsumerLoop) — deliberately, rather than a new stream name, because that list is
-// the ONE thing deciding whether a Redis stream is ever read at all (this file's own SMM-14 fix,
-// documented at the call site in main.ts): a new stream name here with no corresponding addition
-// there would be exactly the "registered but never invoked" defect this module has already shipped
-// once. Both events are emitted with `entityId = variantId`, matching the other three.
+// Every handler added by SMM-31 AND SMM-16 rides the ALREADY-DRAINED "social_post_variant"
+// entity-type stream (main.ts#startConsumerLoop) — deliberately, rather than a new stream name,
+// because that list is the ONE thing deciding whether a Redis stream is ever read at all (this
+// file's own SMM-14 fix, documented at the call site in main.ts): a new stream name here with no
+// corresponding addition there would be exactly the "registered but never invoked" defect this
+// module has already shipped once. `entityId` on the OUTBOX event is whatever the emitting job
+// says it is (a review id, a thread id, an account id) — never assumed to be a variant id just
+// because the stream is named after one; each handler below reads its own real ids out of the
+// payload instead.
 import { withTenants } from "../../db";
 import { declareSocialModuleScope } from "./publish-precondition";
 import { notify } from "../../core/http";
@@ -230,5 +238,89 @@ export async function handleClientReviewDecided(event: OutboxEvent): Promise<voi
     entityType: "social_post_client_review",
     entityId: payload.reviewId ?? event.entityId,
     href: `/departments/social-media/posts`,
+  });
+}
+
+interface InboxSlaBreachedPayload {
+  threadId?: string;
+  network?: string;
+  engagementId?: string;
+  slaDueAt?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Handle `social.inbox.sla_breached` (SMM-16). A thread's OWN engagement-configured response
+ * window (`tool_scope.inbox.slaMinutes` — never a number this module invents, see
+ * `inbox-triage-job.ts`'s header) has passed with the thread still `open`. Risk-shaped: an
+ * unanswered client-facing comment is a customer-visible problem, the same reasoning
+ * `handlePostFailed` above uses for a publish failure.
+ */
+export async function handleInboxSlaBreached(event: OutboxEvent): Promise<void> {
+  const payload = event.payload as InboxSlaBreachedPayload;
+  if (!payload.threadId || !payload.engagementId) return;
+
+  const engagement = await loadEngagementOwner(event.tenantId, payload.engagementId);
+  if (!engagement || !engagement.owner_id) return;
+
+  const network = typeof payload.network === "string" ? payload.network : "unknown";
+  await notify(event.tenantId, engagement.owner_id, null, "social.inbox.sla_breached", {
+    title: `An inbox thread on ${network} missed its response window${engagement.name ? ` (${engagement.name})` : ""}`,
+    severity: "critical",
+    entityType: "social_inbox_thread",
+    entityId: payload.threadId,
+    href: `/departments/social-media/inbox`,
+    network,
+  });
+
+  if (!engagement.owner_email) return; // enqueueMail refuses an implausible address — see handlePostFailed's own note
+  await enqueueMail({
+    stream: "notify",
+    templateKey: "social.inbox_sla_breached",
+    toEmail: engagement.owner_email,
+    tenantId: event.tenantId,
+    userId: engagement.owner_id,
+    entityType: "social_inbox_thread",
+    entityId: payload.threadId,
+    payload: {
+      href: `/departments/social-media/inbox`,
+      network,
+      engagementName: engagement.name,
+      slaDueAt: typeof payload.slaDueAt === "string" ? payload.slaDueAt : null,
+    },
+  });
+}
+
+interface InboxSpikeDetectedPayload {
+  accountId?: string;
+  network?: string;
+  engagementId?: string;
+  recentCount?: number;
+  baselineAvgPerWindow?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Handle `social.inbox.spike_detected` (SMM-16). Bell only — see `inbox-triage-job.ts`'s own header
+ * on why this has no measured baseline and is a self-imposed, generous default rather than a
+ * confirmed incident signal; escalating it to a risk-warning email would overstate confidence this
+ * ticket does not have the data to back.
+ */
+export async function handleInboxSpikeDetected(event: OutboxEvent): Promise<void> {
+  const payload = event.payload as InboxSpikeDetectedPayload;
+  if (!payload.accountId || !payload.engagementId) return;
+
+  const engagement = await loadEngagementOwner(event.tenantId, payload.engagementId);
+  if (!engagement || !engagement.owner_id) return;
+
+  const network = typeof payload.network === "string" ? payload.network : "unknown";
+  await notify(event.tenantId, engagement.owner_id, null, "social.inbox.spike_detected", {
+    title: `Unusual comment volume on ${network}${engagement.name ? ` (${engagement.name})` : ""}`,
+    severity: "warning",
+    entityType: "social_account",
+    entityId: payload.accountId,
+    href: `/departments/social-media/inbox`,
+    network,
+    recentCount: payload.recentCount ?? null,
   });
 }

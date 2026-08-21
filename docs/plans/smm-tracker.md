@@ -30,11 +30,16 @@ not afterwards.
 |---|---|---|
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
-| P2 inbox + client approval | **3** (SMM-15 landed 2026-08-21) | 6 |
+| P2 inbox + client approval | **4** (SMM-16 landed 2026-08-21) | 6 |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
 | P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
+
+**Note (2026-08-21, medior, SMM-16):** the module-version line below still reads `0.5.11`, pre-dating
+both SMM-15 (0.5.12) and this ticket (0.5.13, `docs/modules/MODULES.md`'s own entry) — flagged per
+this file's own repeated cross-session-hazard note rather than silently rewritten; the merge
+orchestrator reconciles this paragraph.
 
 Module: `social-media 0.5.11 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
@@ -136,7 +141,7 @@ commit made in the same turn" cross-session hazard — the merge orchestrator re
 | SMM-31 | Client review backend: `social_post_client_reviews` state machine, portal decide, `portal.approve_post`, idempotent decision | ✅ **merged** | backend DEV-VERIFIED; **318 / 0 / 0** re-run on `main` by the orchestrator, `tsc` clean. UI is SMM-32's, tracked separately |
 | SMM-32 | Client review portal UI: preview + approve / request-changes | ✅ **merged** | UI DEV-VERIFIED — 2392 / 0 / 0 platform-ui, `tsc` clean; browser-driven (see evidence below) |
 | SMM-15 | Inbox sync (`pullInbox`, idempotent upsert) | ✅ **merged** | backend DEV-VERIFIED, evidence below — **502 / 0 / 5** (baseline 494/0/5), `tsc` clean |
-| SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ⬜ | SMM-15 (now unblocked) |
+| SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ✅ **merged** | backend DEV-VERIFIED, evidence below |
 | SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ⬜ | SMM-15 (now unblocked); should set `neverAutoRetry` |
 | SMM-18 | Inbox tab UI: triage queue, thread view, SLA timers | ⬜ | SMM-15 (now unblocked)/16/17 |
 
@@ -238,6 +243,131 @@ admits only `'postiz_sync'`/`'reply'` — every inbound sync, `direct`-routed or
 gap needing a migration — flagged rather than silently worked around); (3) whether a `dismissed`/
 `closed` thread should ever reopen when fresh comments arrive is left to SMM-16/17/18 — this sync
 never touches `status` on conflict, so it cannot silently reopen a thread a human closed on purpose.
+
+**SMM-16 evidence (2026-08-21, medior).** Worktree was BEHIND at cut time — `git log --oneline -1`
+did not match `main`'s tip (SMM-15's own merge commit plus an unrelated monitoring ticket had
+landed) — `git merge main` (fast-forward, clean) pulled `inbox-sync-job.ts` and the
+`202608211136_social_inbox_message_source_provenance.sql` follow-up in before any of this ticket's
+own code was written, stated rather than silently assumed, per this file's own repeated
+cross-session-hazard note. A watchdog stall mid-session was checkpointed by the orchestrator onto
+this branch (`ff1df2a`) and resumed from there — no work lost, restated here for the record.
+
+New migration `202608211200_social_inbox_triage.sql`: `category`/`urgency`/`ai_triage_status`/
+`ai_triage_at`/`sla_alerted_at` on `social_inbox_threads`. 0105's existing `sentiment` column is
+REUSED (its dead `'urgent'` enum value stays in the CHECK, same "history, never rewritten" idiom as
+the provenance migration's `'postiz_sync'`, but this ticket never writes it — urgency is now its own
+axis). Registered in `index.ts`'s `migrations` array at write time.
+
+**The classification schema, and how unclassified differs from neutral.** `ai_triage_status` is
+`unclassified` (never attempted) | `unavailable` (attempted; gateway down/unconfigured/unparsable —
+NEVER a guessed value) | `classified` (a real model answer) | `purged` (was classified, then
+scrubbed on the retention clock, see below) — `capabilities.ts`'s own three-reasons discipline
+applied to a classification instead of a capability. `sit_triage_shape`, a structural CHECK in the
+0106/0113 idiom, makes exactly one of those four shapes hold: `sentiment='neutral',
+ai_triage_status='classified'` (the model looked and said neutral) is a DIFFERENT, distinguishable
+fact from `sentiment=NULL, ai_triage_status='unclassified'` (nobody has looked yet) — a single
+nullable column could never tell those apart, which is precisely the ticket's own named risk
+("launder a guess into a fact"). `ai-drafts.ts`'s new `parseTriageDraft` has NO deterministic
+fallback (unlike every other `parse*` in that file) for exactly this reason: malformed/
+out-of-vocabulary/absent gateway output returns `result: null`, and the caller writes `unavailable`,
+never a placeholder classification sitting in the same column a real one would occupy.
+
+**THE CROSS-CLIENT LEAK TEST, and exactly what it proves.** Unlike SMM-19/SMM-23, there is no WS8
+retrieval step here to be a second leak boundary — the only safety property is "one gateway call
+gets one thread's own messages, never two threads' text in one prompt". `inbox-triage-job.test.ts`'s
+(T1)/(T1b) seed two threads under two DIFFERENT clients in the SAME tenant, each with a distinctive
+marker string in its own comment text, classify both in the SAME sweep (`pullTenantInboxTriage`),
+and assert every gateway prompt containing one client's marker NEVER contains the other's, in both
+directions — proving the sweep never batches two threads into one prompt and never crosses a client
+boundary within a tenant, the worst defect this module could ship on this surface.
+
+**Is a text-derived label subject to LinkedIn's retention cap? Yes, and it is wired into SMM-36's
+existing purger, never a second job.** A sentiment/category/urgency label is distilled from the SAME
+comment text the 48h activity-content cap governs (addendum §A4e); reasoned that it inherits the
+SAME cap on the SAME clock (`activity_content_purged_at`) rather than a second, driftable one.
+`sit_activity_purge_scrubs_triage` (structural CHECK) makes a purged row unable to hold a live
+`classified` state; `inbox-retention-job.ts#purgeInboxRetention`'s EXISTING activity-content UPDATE
+was extended (not a new purger, not a new job) to null `sentiment`/`category`/`urgency` and flip
+`'classified' → 'purged'` in the SAME statement that already scrubs the excerpt.
+
+**Spike-detection baseline — config, not a constant, and why.** No account is connected and app
+reviews are deferred to staging (D-23) — there is NO real traffic to derive a measured baseline
+from. `config.social.triage.slaGuard.{spikeWindowMinutes: 60, spikeBaselineWindows: 24,
+spikeMultiplier: 3, spikeMinRecentCount: 5}` are self-imposed operational defaults with their
+rationale written in `config.ts` itself (the multiplier is deliberately generous; the absolute floor
+exists ONLY to stop a near-zero baseline from making one ordinary comment read as a spike) — never
+presented as measured or vendor-claimed. (T8)/(T8b) prove a real burst crosses the floor and
+ordinary low volume does not. Named limitation: no persistent dedup, so a sustained spike re-fires
+every sweep tick — stated rather than silently solved, since there is no live traffic yet to
+validate a dedup window against.
+
+**SLA guard flows over 0105's existing `sla_due_at` + `ix_social_inbox_threads_sla`, never an
+invented threshold.** `social_engagements.tool_scope.inbox.slaMinutes` (0105's OWN example shape) is
+the only source of a response-time target: `refreshThreadSla` sets
+`sla_due_at = last_message_at + slaMinutes` for every open thread whose engagement configured it,
+and — proven by (T6b) — assigns NO `sla_due_at` at all when an engagement never set `slaMinutes`,
+never a fallback duration invented to give it one. `findAndMarkSlaBreaches` uses the EXISTING SLA
+index to find breaching threads, alerts once per breach (`sla_alerted_at` dedup, re-arming when
+`sla_due_at` next moves forward — (T7) proves both the single alert and the re-run no-op), and
+emits `social.inbox.sla_breached`/`social.inbox.spike_detected` on the ALREADY-DRAINED
+`"social_post_variant"` stream (SMM-31's own precedent) — no `main.ts` stream registration needed,
+only the two new scheduled-loop lines below. Urgency classification is deliberately informational
+ONLY and never shrinks/extends `sla_due_at` — doing so would mean inventing an "urgent posts get N%
+less time" multiplier this ticket has no data to justify, the same "don't invent thresholds"
+instruction the spike knobs are held to.
+
+**Two new event handlers** (`event-handlers.ts`, registered in `index.ts`'s `eventHandlers`):
+`social.inbox.sla_breached` (bell + mail, risk-shaped — a customer-visible thread missed its own
+configured window, the SAME reasoning `handlePostFailed` uses) and `social.inbox.spike_detected`
+(bell only — no measured baseline exists to justify escalating to a risk-warning email).
+
+**The module GUC — self-declared everywhere, each with its own regression test.** Every read/write
+function in `inbox-triage-job.ts` (classification write, SLA refresh, SLA breach detection, spike
+detection) declares its own module scope via `declareSocialModuleScope`. (T2)/(T6)/(T7)/(T9) each
+call the function on a transaction with NO `{modules:['social']}` option and assert a real row
+changed — fails with a silent zero if any one declaration is ever removed.
+
+**`main.ts` — not edited (off-limits). Exact lines for the orchestrator to apply**, alongside the
+existing `inboxPull`/`inboxRetention` gates:
+```ts
+import { startInboxTriageLoop, startInboxSlaGuardLoop } from "./modules/social/inbox-triage-job";
+// ...
+if (config.social.triage.classifyEnabled) {
+  startInboxTriageLoop(config.social.triage.classifyIntervalMs);
+  console.log(`social inbox triage (smm-inbox-triage) on: every ${config.social.triage.classifyIntervalMs}ms`);
+}
+if (config.social.triage.slaGuard.guardEnabled) {
+  startInboxSlaGuardLoop(config.social.triage.slaGuard.guardIntervalMs);
+  console.log(`social inbox SLA guard (smm-inbox-sla-guard) on: every ${config.social.triage.slaGuard.guardIntervalMs}ms`);
+}
+```
+
+Test counts: **522 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts`. Baseline: SMM-15's OWN stated figure (immediately
+prior entry, above) is **502 / 0 / 5** — this pass did NOT re-stash-and-measure it directly (the
+sandbox's git-safety layer refused `git stash` mid-session), so it is cited rather than re-verified;
+the delta is independently checkable by counting new `it()` blocks: +20 (13 in
+`inbox-triage-job.test.ts`, 7 in `ai-drafts.test.ts`'s new `buildTriagePrompt`/`parseTriageDraft`
+cases), which is exactly 522 − 502. `inbox-triage-job.test.ts` was ALSO re-run ALONE (13/13 green)
+per this file's own "shared test Postgres + a loaded machine produce phantom failures" instruction —
+its first run surfaced 5 real defects in the test fixtures themselves (a missing `approval_id` on a
+seeded variant, an invalid `users.kind` literal, a Postgres `make_interval` type mismatch, and two
+tests sharing a tenant whose OTHER tests' accounts polluted a tenant-wide spike-detection scan), all
+fixed before this count. `tsc --noEmit` clean.
+`lint:withtenants`/`lint:migration-names`/`lint:postiz-deps` all green.
+`lint:migration-rls` flags ONE pre-existing failure on `202608211136_social_inbox_message_source_
+provenance.sql` (SMM-15's own follow-up migration, landed before this ticket started and untouched
+by it — confirmed via `git diff` against the merge-base) — not introduced by, and out of scope for,
+this ticket. `test:iam-chain-alignment` not re-run (no Cerbos/IAM change; no MCP tool declared —
+this is a process-level scheduled sweep with no tool of its own, the same shape
+`metrics-job.ts`/`inbox-retention-job.ts` already use).
+
+**Anything the spec did not answer, named rather than silently decided:** (1) urgency classification
+never shrinks/extends `sla_due_at` (see above); (2) a thread with no `post_variant_id` (a DM/mention
+not tied to a post) gets neither an SLA target nor a notification path — counted `unnotifiable`,
+never silently dropped, left to SMM-17/18; (3) spike detection has no persistent dedup; (4) spike
+notification resolves an account's engagement as "most recently created active engagement for that
+client" when a client has more than one — a documented simplification, not a schema guarantee.
 
 **SMM-31 evidence (2026-08-20, senior-be):** schema/IAM already seeded (0105/0106) — no migration, no
 Cerbos change this pass. Built: staff request/read/withdraw (`social.controller.ts`, idempotent

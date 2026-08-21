@@ -28,9 +28,11 @@ import type { ModuleContract, RollupProvider } from "../contract";
 import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "./publish-precondition";
 // SMM-13 — event handlers for social post notifications and mail routing
 // SMM-31 — the client-review stage's own two events, same routing table
+// SMM-16 — the inbox SLA guard's breach event + the spike detector's event, same routing table
 import {
   handlePostDispatched, handlePostPublished, handlePostFailed,
   handleClientReviewRequested, handleClientReviewDecided,
+  handleInboxSlaBreached, handleInboxSpikeDetected,
 } from "./event-handlers";
 
 const socialRollups: RollupProvider = {
@@ -103,6 +105,9 @@ export const socialModule: ModuleContract = {
     "202608210411_social_youtube_quota_usage.sql",
     // SMM-15 follow-up: social_inbox_messages.source named a path that cannot exist.
     "202608211136_social_inbox_message_source_provenance.sql",
+    // SMM-16 — sentiment/category/urgency + the unclassified/unavailable/classified/purged
+    // three(+one)-fact triage-state model, and its structural tie into the retention purge.
+    "202608211200_social_inbox_triage.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
@@ -855,6 +860,10 @@ export const socialModule: ModuleContract = {
     // own header for why that is deliberate, not an oversight).
     "social.client_review.requested": handleClientReviewRequested,
     "social.client_review.decided": handleClientReviewDecided,
+    // SMM-16 — same reasoning: the inbox SLA guard and spike detector ride the same already-drained
+    // stream rather than needing a main.ts change to be read at all.
+    "social.inbox.sla_breached": handleInboxSlaBreached,
+    "social.inbox.spike_detected": handleInboxSpikeDetected,
   },
 };
 
