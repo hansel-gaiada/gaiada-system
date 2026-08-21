@@ -138,6 +138,20 @@
 .rc-kpi--compact .rc-kpi__value { font-size: 19px; }
 .rc-kpi--compact .rc-kpi__label { font-size: 9px; }
 .rc-kpi--compact .rc-kpi__foot { font-size: 10px; gap: 6px; }
+/* MEASURED REGRESSION, mine: moving the appraisal marker out of the label row fixed that row and
+   broke this one — `.rc-kpi__foot` then overflowed by ~4px on four tiles per report (142 > 138).
+   `.rc-delta` is `white-space: nowrap` and carries the comparison label, so "0.048pp vs 1 Jul –
+   31 Jul" is one unbreakable ~140px run that no amount of flex-wrap on the parent can fold.
+
+   The label goes, in the DEMOTED band only. It is not information lost: the compared range is
+   stated once in `.rc-header__meta` (ComparisonChip) and was then repeated verbatim on all
+   seventeen tiles — the delta figure itself, which is the per-tile fact, stays. Lead tiles keep
+   the label; they have the width for it.
+   `min-width: 0` + wrappable badges as the belt-and-braces floor, so a longer unit string in some
+   future grain degrades by wrapping inside the tile instead of escaping it. */
+.rc-kpi--compact .rc-delta .rc-kpi__ratio { display: none; }
+.rc-kpi__foot { min-width: 0; }
+.rc-kpi--compact .rc-kpi__badge { white-space: normal; }
 .rc-kpi { background: var(--rc-surface); border: 0.5px solid var(--rc-axis); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 /* `min-width: 0` on the row AND the label: without it a long label establishes a min-content floor
    that the 158px compact track cannot honour, and the tile pushes past its cell instead of the
@@ -165,7 +179,16 @@
 .rc-kpi__badge--band[data-band="4"], .rc-kpi__badge--band[data-band="5"] { color: var(--rc-good); border-color: var(--rc-good); }
 
 /* ---- delta chip ---- */
-.rc-delta { display: inline-flex; align-items: center; gap: 4px; font: 700 11px var(--font-body); white-space: nowrap; }
+/* `flex-wrap: wrap` with the nowrap KEPT. DeltaChip renders three spans (arrow, magnitude, and the
+   optional comparison label); nowrap must stay so "0.048pp" never breaks mid-figure, but without
+   wrap the three were one unbreakable ~143px run that overflowed a 130px tile foot. Wrapping lets
+   the label drop to a second line while arrow+magnitude stay together on the first.
+
+   This is the fix for the LEAD band specifically. `--lead` is pinned to 4 explicit columns, and a
+   media query cannot see that the main column is only ~698px wide at a 1280px viewport (sidebar +
+   rail eat the rest) — so lead tiles get compact-narrow while still carrying the label that compact
+   tiles drop. Making the content flexible is right where making the grid viewport-aware is not. */
+.rc-delta { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; font: 700 11px var(--font-body); white-space: nowrap; }
 .rc-delta--up-good { color: var(--rc-delta-up-good); }
 .rc-delta--down-bad { color: var(--rc-critical); }
 .rc-delta--neutral { color: var(--rc-text-muted); }
