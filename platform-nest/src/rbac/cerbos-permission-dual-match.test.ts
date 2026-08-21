@@ -171,7 +171,10 @@ describe.skipIf(!live)("IAM-04b dual-match pilot: hr_case (module-role compositi
     const hrManagerLinked = principal([{ role: "hr_manager", scopeType: "company", scopeId: T1 }], [], [T1], "linked");
     expect(await allow(hrManagerLinked, hrCase(), "export")).toBe(false); // assurance not high
 
-    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    // MON-00c: resource_hr_case.yaml's group_executive rule is now `notLow && inRoot` — anchor
+    // rootCompanies to include T2 alongside T1 so this stays a same-root cross-company check (still
+    // legitimate) rather than the now-blocked cross-ROOT case.
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1, T2]);
     expect(await allow(groupExec, { ...hrCase(), tenantId: T2 }, "read")).toBe(true); // deliberately cross-company
 
     const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }], []);
@@ -477,7 +480,9 @@ describe.skipIf(!live)("HIER-2 rollout batch 3: checkin's permission arm (Patter
     expect(await allow(companyAdmin, checkin(), "pending_reminders")).toBe(true);
     expect(await allow(companyAdmin, checkin(), "missed_by_unit")).toBe(true);
 
-    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    // MON-00c: resource_checkin.yaml's group_executive rule is now `notLow && inRoot` — anchor
+    // rootCompanies to include T2 alongside T1 so this stays a same-root cross-company check.
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1, T2]);
     expect(await allow(groupExec, { ...checkin(), tenantId: T2 }, "read")).toBe(true); // deliberately cross-company
 
     const hrManager = principal([{ role: "hr_manager", scopeType: "company", scopeId: T1 }], []);
@@ -586,7 +591,10 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
 
   it("device: ROLE ARM UNCHANGED — the wildcard platform_admin+group_executive tier is still decided by the role arm alone, not mirrored into the permission catalog (IAM-04c)", async () => {
     const resource: Resource = { kind: "device", id: "x1", tenantId: T1 };
-    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    // MON-00c: resource_device.yaml's group_executive wildcard rule is now gated on `inRoot` too —
+    // anchor rootCompanies to include T1 (the resource's tenant) so this stays "the untouched
+    // wildcard rule still allows", not a case the new root gate would deny.
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
     expect(await allow(groupExec, resource, "delete")).toBe(true); // via the untouched wildcard rule
     // The permission arm's OWN rule still requires inTenant&&notLow (it is not the wildcard rule),
     // so the principal must be a member of the resource's tenant for the global-scope grant to
@@ -667,7 +675,9 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
     const p = principal([], [{ key: "core.org_structure.update", scopeType: "company", scopeId: T1 }]);
     expect(await allow(p, resource, "update")).toBe(true);
     expect(await allow(p, { ...resource, tenantId: T2 }, "update")).toBe(false);
-    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    // MON-00c: resource_org_structure.yaml's group_executive rule is now `notLow && inRoot` — anchor
+    // rootCompanies to include T1 (the resource's tenant) so the untouched role-arm rule still fires.
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
     expect(await allow(groupExec, resource, "update")).toBe(true); // via the untouched role-arm rule, not the perm arm
   });
 
@@ -702,7 +712,9 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
       const p = principal([], [{ key: `reports.period.${action}`, scopeType: "company", scopeId: T1 }]);
       expect(await allow(p, resource, action), `report_period.${action} via permission alone`).toBe(true);
     }
-    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+    // MON-00c: resource_report_period.yaml's group_executive rule is now `notLow && inRoot` — anchor
+    // rootCompanies to include T1 (the resource's tenant) so the untouched role-arm rule still fires.
+    const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
     expect(await allow(groupExec, resource, "seal")).toBe(true); // via the untouched role-arm rule
   });
 

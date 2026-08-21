@@ -114,7 +114,10 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — integration_connection (own/othe
   });
 
   it("exec (group_executive, global): explicit carve-out — full CRUD on ANY tenant's rows, gated only by assurance", async () => {
-    const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    // MON-00c: T1 and T2 sit in the same root here — cross-company within one root is still the
+    // point of this test (a global exec's carve-out), so rootCompanies is anchored to include BOTH,
+    // not just T1. Anchoring to [T1] alone would now deny the T2 checks below via `inRoot`.
+    const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1, T2], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     for (const action of ["read", "create", "update", "delete"]) {
       expect(await allow(execP, companyRow, action)).toBe(true);
       expect(await allow(execP, otherUserRow, action)).toBe(true);
@@ -193,9 +196,12 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier v
     }
   });
 
-  it("group_executive (global, gated on notLow ONLY): read AND create/update/revoke succeed even " +
-     "CROSS-COMPANY — for a tenant the exec is not a member of at all", async () => {
-    const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+  it("group_executive (global, gated on notLow AND inRoot): read AND create/update/revoke succeed even " +
+     "CROSS-COMPANY within the exec's own root — for a tenant the exec is not a MEMBER of at all", async () => {
+    // MON-00c: T1 and T2 are anchored as the SAME root here, so this still exercises "not a member,
+    // but still allowed" (companies: [] — inTenant plays no part) without also claiming unbounded
+    // cross-root reach, which resource_client_contact.yaml's group_executive rule no longer grants.
+    const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1, T2], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     // Not a member of T1 or T2 (companies: []) — proves the rule truly does not depend on inTenant.
     for (const action of ["read", "create", "update", "revoke"]) {
       expect(await allow(execP, cc, action)).toBe(true);
@@ -276,11 +282,16 @@ describe.skipIf(!live)("PRV-03 Cerbos matrix — webdev_provisioned_site (manage
     for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(false);
   });
 
-  it("TRAP #4 — group_executive (owner) with NO membership row ANYWHERE is ALLOWED read/provision/reconcile (the exec rule is notLow-only, never inTenant)", async () => {
+  it("TRAP #4 — group_executive (owner) with NO membership row ANYWHERE is ALLOWED read/provision/reconcile (the exec rule is notLow+inRoot, never inTenant)", async () => {
     const execNoMembership: Principal = {
       userId: ME,
       assurance: "high",
       companies: [], // no company_memberships row at all — inTenant would be false for ANY tenant-gated rule
+      // MON-00c: T1 and T2 anchored as the SAME root — this fixture had no rootCompanies key at all
+      // before the boundary landed, which now denies via `inRoot`'s has() guard. T1 and T2 are still
+      // cross-company (no membership row in either), which is what this test is about; the anchor
+      // just says both belong to the exec's own holding.
+      rootCompanies: [T1, T2],
       roles: [{ role: "group_executive", scopeType: "global", scopeId: null }],
       sessionVersion: 1,
     };
