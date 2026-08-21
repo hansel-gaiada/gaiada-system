@@ -62,9 +62,17 @@ describe("Productivity", () => {
 
   it("marks every component tile as appraisal-unsafe — none of this feeds appraisal scoring", () => {
     const { container } = render(<Productivity report={makeReport()} scopeName="Ada" viewingSelf />);
-    const unsafeBadges = container.querySelectorAll(".rc-kpi__badge--unsafe");
-    // 8 components + total = 9 tiles, every one marked appraisal-unsafe.
-    expect(unsafeBadges.length).toBe(9);
+    // 8 components + total = 9 tiles, every one marked. The MARK moved out of a per-tile
+    // `appraisal-unsafe` badge and into an inline `.rc-kpi__mark` explained once by
+    // `.rc-kpis__legend` — on the live company report the badge was rendering eleven times, and
+    // eleven grey boxes competed with the eleven figures they annotated (KpiTiles.tsx).
+    // This assertion checks BOTH halves on purpose: nine marks with no legend would be nine
+    // unexplained glyphs, which is a worse disclosure than the badge it replaced, and the point of
+    // this test is the DISCLOSURE, not the markup that carries it.
+    expect(container.querySelectorAll(".rc-kpi__mark").length).toBe(9);
+    const legend = container.querySelectorAll(".rc-kpis__legend");
+    expect(legend.length).toBe(1);
+    expect(legend[0].textContent).toContain("not used in appraisal scoring");
   });
 
   it("zero-fills every day in the heatmap and never drops a day with no activity", () => {

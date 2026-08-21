@@ -138,20 +138,11 @@
 .rc-kpi--compact .rc-kpi__value { font-size: 19px; }
 .rc-kpi--compact .rc-kpi__label { font-size: 9px; }
 .rc-kpi--compact .rc-kpi__foot { font-size: 10px; gap: 6px; }
-/* MEASURED REGRESSION, mine: moving the appraisal marker out of the label row fixed that row and
-   broke this one — `.rc-kpi__foot` then overflowed by ~4px on four tiles per report (142 > 138).
-   `.rc-delta` is `white-space: nowrap` and carries the comparison label, so "0.048pp vs 1 Jul –
-   31 Jul" is one unbreakable ~140px run that no amount of flex-wrap on the parent can fold.
-
-   The label goes, in the DEMOTED band only. It is not information lost: the compared range is
-   stated once in `.rc-header__meta` (ComparisonChip) and was then repeated verbatim on all
-   seventeen tiles — the delta figure itself, which is the per-tile fact, stays. Lead tiles keep
-   the label; they have the width for it.
-   `min-width: 0` + wrappable badges as the belt-and-braces floor, so a longer unit string in some
-   future grain degrades by wrapping inside the tile instead of escaping it. */
-.rc-kpi--compact .rc-delta .rc-kpi__ratio { display: none; }
+/* The comparison range no longer reaches a tile at all (KpiTiles.tsx), which removes the
+   unbreakable ~143px run that was overflowing `.rc-kpi__foot` at 142>138 on four tiles per
+   report. `min-width: 0` stays as the floor so a longer unit string in some future grain
+   degrades by wrapping inside the tile instead of escaping it. */
 .rc-kpi__foot { min-width: 0; }
-.rc-kpi--compact .rc-kpi__badge { white-space: normal; }
 .rc-kpi { background: var(--rc-surface); border: 0.5px solid var(--rc-axis); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 /* `min-width: 0` on the row AND the label: without it a long label establishes a min-content floor
    that the 158px compact track cannot honour, and the tile pushes past its cell instead of the
@@ -166,10 +157,16 @@
   font: 700 8px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--rc-text-secondary); border: 0.5px solid var(--rc-axis); padding: 1px 5px; white-space: nowrap;
 }
-/* Was `--rc-serious` (alarm red) on nine of seventeen tiles at once, which read as "nine things are
-   wrong" when it only ever meant "this number is not an appraisal input". Same ink as the other
-   qualifier badges now — informational, not a warning. The colour is the message, so it had to go. */
+/* The appraisal marker is no longer a badge at all — it is `.rc-kpi__mark` inline in the label,
+   explained once by `.rc-kpis__legend`. Eleven grey boxes were still eleven boxes. This variant
+   is kept only because `--band` siblings below share the base `.rc-kpi__badge` rule and a future
+   qualifier may want the quiet treatment; nothing references it today. */
 .rc-kpi__badge--unsafe { color: var(--rc-text-muted); border-color: var(--rc-axis); }
+
+/* Inline footnote marker. `sup`-like offset without `<sup>`, so it never affects line height. */
+.rc-kpi__mark { margin-left: 2px; font-size: 1.15em; line-height: 0; color: var(--rc-text-muted); vertical-align: baseline; }
+.rc-kpis__legend { margin: 2px 0 0; font: 400 10.5px var(--font-body); color: var(--rc-text-muted); }
+.rc-kpis__legend span { font-size: 1.2em; line-height: 0; }
 /* Appraisal cohort-band badge (TR-26) — the same fixed, never-themed status ramp KpiTiles reserves
    for good/warning/serious/critical, keyed off the 1-5 band so it stays a single source of truth
    between the badge and the distribution-strip marker below rather than two inline color maps. */

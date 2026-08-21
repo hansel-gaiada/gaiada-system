@@ -68,7 +68,7 @@ export function ReportViewer({ document, periodControl, scopeHeading = true, chi
 
       <WarningsBanner header={header} />
 
-      <KpiTiles kpis={document.kpis} comparisonLabel={cmpLabel} />
+      <KpiTiles kpis={document.kpis} />
 
       {children ?? <AutoComposedCharts document={document} />}
 
