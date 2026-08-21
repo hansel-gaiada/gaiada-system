@@ -219,20 +219,31 @@ export function openOrg(org: PublisherOrgRow): { driver: SocialPublisher; handle
 // sites (both under this ticket's `publisher/*` surface) with an explicit, self-describing sentinel
 // (`'direct:' || network`) rather than relaxed here — see those files' own headers.
 //
-// ── WHAT THIS FUNCTION DELIBERATELY DOES NOT DO FOR YouTube ─────────────────────────────────────────
-// `resolvePublisherForCapability` will happily resolve `youtube:media_upload` to `direct` if an
-// operator sets that override — this function does not special-case YouTube out. What it does NOT do
-// is recommend that override, or wire it into a default: YouTube's `uploadMedia` IS its publish call
-// (`direct.ts`'s own header), but `dispatch.ts#dispatchApprovedPublish` unconditionally calls
-// `schedulePost` AFTER any media upload for EVERY network — a shape that fits LinkedIn's real API
-// (upload an asset, THEN publish referencing it) but would, for YouTube, upload a real video via
-// `direct` and then immediately attempt a SECOND publish step that `direct.ts` refuses
-// `capability_unsupported` for (YouTube has no `schedulePost`) — an approval spent, a stray video
-// already live upstream, and a variant row recorded `failed`. That is a dispatch-STATE-MACHINE
-// question (how does a network whose publish terminates at `uploadMedia` get represented in a flow
-// built around "upload then schedule"), not a token-resolution one, and is NOT decided here — see the
-// tracker's 38e evidence for why this is reported as a specific, scoped follow-up for the architect
-// rather than silently wired around or silently ignored.
+// ── WHAT THIS FUNCTION NOW DOES FOR YouTube — CORRECTED, SMM-38e's CLOSING PASS (2026-08-21) ────────
+// Stale note, corrected — this codebase's own "a stale comment beats the code" defect class (tracker
+// §4b). This section used to say `resolvePublisherForCapability` would "happily resolve
+// `youtube:media_upload` to `direct`" and then upload a real video before immediately attempting a
+// SECOND, doomed `schedulePost` step — an approval spent, a stray video already live upstream, and a
+// variant row recorded `failed`. That dispatch-STATE-MACHINE question (how a network whose publish
+// terminates at `uploadMedia` gets represented in a flow built around "upload then schedule") was
+// reported to the architect rather than decided, and is now answered:
+//
+//   1. `SocialPublisher.isUploadTerminalFor` (types.ts) lets a driver declare, per network, that its
+//      `uploadMedia` IS the publish. `direct.ts` declares this true for YouTube, false for LinkedIn.
+//      `dispatch.ts#dispatchApprovedPublish` consults it and, when true, NEVER calls `schedulePost` —
+//      it stamps the upload's own returned id as `provider_post_id` instead, through the SAME
+//      single-transaction stamp every other network's dispatch uses. `youtube:media_upload=direct`
+//      is therefore now SAFE to configure once LinkedIn's own credential gate (D-23) clears for
+//      YouTube too — see `dispatch.test.ts`'s own upload-terminal cases for the live proof.
+//   2. `SocialPublisher.coversNetworkCapability` (types.ts) is a SEPARATE, defence-in-depth fix for
+//      the more general shape of this problem: `resolvePublisherForCapability` (registry.ts) now
+//      refuses EAGERLY, with a typed `capability_unsupported`, any override naming a (network,
+//      capability) pair the resolved driver does not actually cover (e.g. `youtube:schedule=direct`
+//      in isolation, which `direct` never implements for YouTube by design) — before any network
+//      call is attempted, not after one already happened.
+// Together: (1) makes the ONE dangerous combination this section used to warn about safe to run, and
+// (2) refuses every OTHER combination this driver cannot honour, without either fix requiring the
+// other to also change `dispatch.ts` case-by-case for a future network.
 function directOrgRef(network: Network): string {
   // LinkedIn: the ONE org URN this deployment is configured to publish AS — see this function's own
   // header for why a config constant, not a per-account column, is the correct and sufficient answer

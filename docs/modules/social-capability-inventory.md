@@ -173,28 +173,61 @@ serve it and what stands between "could" and "does" today.
 | LinkedIn | `schedule` (publish) | Postiz (AGPL zone) | `direct` — REAL org-page publish, contract-tested (38c) | A `social_platform_apps` row + non-empty `SOCIAL_LINKEDIN_CLIENT_ID`/`_SECRET` (D-23, deferred to staging) — **principle-only for want of credentials**, nothing else. The dispatch-side wiring itself is REAL: `dispatch.test.ts`'s (D1)–(D4) drive a genuine `resolveActiveAccessToken` call and a genuine second driver receiving the resolved bearer token, end to end, against a real Postgres row |
 | LinkedIn | `media_upload` | Postiz | `direct` — REAL 3-step asset upload, contract-tested (38c) | Same as above — credential-gated only |
 | LinkedIn | `inbox_read` (`pullComments`) | n/a — Postiz has NO inbox surface for any network (spike §8b) | `direct` — REAL per-post comment read, contract-tested (38c) | Same as above; ALSO gated on SMM-15 (P2 inbox sync) existing to ever call it — no caller exists yet regardless of credentials |
-| YouTube | `media_upload` (= publish, for this network) | Postiz | `direct` — REAL resumable upload, contract-tested (38d), now with real title/description (38e, Gap 2) | Credential-gated (same as LinkedIn) **AND** a second, independent gap: `dispatch.ts` unconditionally calls `schedulePost` after any media upload, for every network — a shape that fits LinkedIn's real API but not YouTube's ("upload IS publish", no separate schedule step). Routing `youtube:media_upload` to `direct` on a live dispatch call today would upload a real video and then attempt a doomed second `schedulePost` step. **This is reported to the architect as its own open question (see `provisioning.ts#resolveDispatchOrgHandle`'s own header) — deliberately NOT wired into the recommended flip config below.** Principle-only for TWO independent reasons, not one |
-| YouTube | `quota_probe` | n/a — Postiz never advertised this for YouTube | `direct` — REAL accounting (38d) against a NOW-DURABLE store (38e, Gap 3: `social_youtube_quota_usage`, global, no RLS, D-4's own reasoning) | Only reachable once `media_upload`/a future `videos.insert` caller exists on a live path — see the row above |
+| YouTube | `media_upload` (= publish, for this network) | Postiz | `direct` — REAL resumable upload, contract-tested (38d), now with real title/description (38e, Gap 2) | **UPDATED, SMM-38e closing pass (2026-08-21): the dispatch-flow gap is CLOSED.** `SocialPublisher.isUploadTerminalFor` (types.ts) lets `direct` declare that its YouTube upload IS the publish; `dispatch.ts#dispatchApprovedPublish` consults it and never calls `schedulePost` afterward, stamping the upload's own returned id as `provider_post_id` through the SAME single-transaction stamp every other network uses (proven live: `dispatch.test.ts`'s (E1)–(E3)). `youtube:media_upload=direct` is therefore now **principle-safe** — only the SAME credential gap that already gates LinkedIn's own flip (D-23) stands between it and a live call. The recommended override below now includes it |
+| YouTube | `quota_probe` | n/a — Postiz never advertised this for YouTube | `direct` — REAL accounting (38d) against a NOW-DURABLE store (38e, Gap 3: `social_youtube_quota_usage`, global, no RLS, D-4's own reasoning) | Credential-gated only, now that the row above's dispatch-flow gap is closed |
 | YouTube | `inbox_read` (`pullComments`) | n/a — Postiz has no inbox surface | `direct` — REAL comment read via `youtube.force-ssl` (38d) | Credential-gated + SMM-15, same as LinkedIn's row |
+| YouTube | `schedule` | Postiz | **not built, and never will be for this driver** — `direct` deliberately does not advertise `schedule` for YouTube (`coversNetworkCapability("youtube","schedule")` is `false`; a `videos.insert` call IS the post, there is no distinct "reference an already-uploaded asset" step to implement) | An override naming `youtube:schedule=direct` in isolation refuses EAGERLY at the resolver (`capability_unsupported`, `registry.ts`'s new override-safety check, SMM-38e closing pass) rather than reaching the network — proven in `dispatch.test.ts`'s (E3) |
 | Instagram / Facebook | everything | Postiz (AGPL zone) | **not built** — `direct` has zero IG/FB capability | Meta Business Verification (staging, D-23) is the serial prerequisite before ANY IG/FB work on `direct` would even be worth starting (§PD: "IG/FB stay on Postiz") |
 | TikTok | everything | Postiz (AGPL zone, D-21 fork exception) | **not built** — `direct` has zero TikTok capability | TikTok's own audit (staging, D-23); §PD: "TikTok stays behind its own audit" |
 
-**The flip itself (38e) does NOT change the shipped default.** `config.social.publisher.capabilityDrivers`
-stays the empty map every prior phase shipped — every deployment with no
-`SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` set behaves EXACTLY as before this phase, for every network,
-including LinkedIn and YouTube. The recommended override for a deployment that HAS cleared LinkedIn's
-credential gate (D-23) is `linkedin:schedule=direct,linkedin:media_upload=direct,linkedin:inbox_read=direct`
-— deliberately never `youtube:media_upload=direct` or any `youtube:schedule` key, for the reason named
-in the table above. Setting an override is an explicit, staging-time operator action; nothing in this
-phase makes that decision on a deployment's behalf.
+**SMM-38e closing pass (2026-08-21) — the two gaps this section's own prior text named, closed.**
+38e's own evidence reported, rather than decided, that flipping `youtube:media_upload` to `direct`
+would upload a real video and then hit a doomed second `schedulePost` step, and that
+`resolvePublisherForCapability` accepted any registered driver name for any (network, capability) pair
+without asking whether the resolved driver could actually honour it. Both are now closed, by two
+independent, additive port members (`types.ts`), never a special case buried in `dispatch.ts`:
 
-**Why "principle-only" is the honest word, twice over, for two different reasons in this wave:**
-(1) every platform app credential in the estate is empty (D-23, deferred to staging) — true for LinkedIn
-AND YouTube equally; (2) YouTube ALSO carries a second, independent gap that has nothing to do with
-credentials — the dispatch state machine itself does not yet know how to represent a network whose
-publish terminates at `uploadMedia`. Naming both, rather than collapsing them into one "not live yet"
-sentence, is what lets a future pass tell "get a credential" apart from "redesign a flow" — two very
-different amounts of work hiding behind the same word.
+- **`SocialPublisher.isUploadTerminalFor(network)`** — a driver declares, per network, that its
+  `uploadMedia` IS the publish (no distinct schedule step exists to call). `direct.ts` declares this
+  `true` for YouTube only. `dispatch.ts` consults it and, when true, stamps the upload's own returned
+  id as `provider_post_id` and never calls `schedulePost` for that dispatch.
+- **`SocialPublisher.coversNetworkCapability(network, capability)`** — a driver declares, per
+  (network, capability) pair, whether it actually serves it — the SAME "driver declares what it can
+  serve" precedent `DIRECT_CAPABILITIES`/`capabilities.ts`'s three-reasons model already set, promoted
+  to cover the ROUTING question, not just the account-facing one. `registry.ts#resolvePublisherForCapability`
+  consults it and refuses EAGERLY, with a typed `capability_unsupported`, any override naming a pair
+  the resolved driver does not cover — before any network call, not after one. Backed by ONE map on
+  `direct.ts` (`NETWORK_CAPABILITIES`) that both this check and the driver's own per-method gates read
+  from, so a future network/capability pair needs exactly one new entry, never a second list to
+  remember.
+
+Both are OPTIONAL port members — absent on a driver (Postiz, the mock) means "no per-network
+restriction" / "never terminal", so every existing deployment and every existing test is unaffected;
+proven by `publisher.test.ts`'s full 64/64 (was 63/63) and every OTHER social suite passing verbatim.
+The result: `youtube:media_upload=direct` moves from "reported unsafe, deliberately excluded" to
+"principle-safe, credential-gated only", and `youtube:schedule=direct` (a config value nothing
+previously prevented an operator from setting) now refuses at the earliest possible moment instead of
+silently resolving to a driver that would fail deep inside `schedulePost`.
+
+**The flip itself (38e, and this closing pass) does NOT change the shipped default.**
+`config.social.publisher.capabilityDrivers` stays the empty map every prior phase shipped — every
+deployment with no `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` set behaves EXACTLY as before this phase, for
+every network, including LinkedIn and YouTube (proven, not merely claimed: every existing
+`publisher.test.ts` case that predates this closing pass still passes byte-for-byte). The recommended
+override for a deployment that HAS cleared the relevant credential gate (D-23) is now
+`linkedin:schedule=direct,linkedin:media_upload=direct,linkedin:inbox_read=direct,youtube:media_upload=direct,youtube:inbox_read=direct,youtube:quota_probe=direct`
+— YouTube's three covered capabilities now INCLUDED, `youtube:schedule` still correctly ABSENT (there
+is nothing for it to name; `direct` never covers it, and setting it would now refuse eagerly rather
+than silently doing nothing useful). Setting an override is an explicit, staging-time operator action;
+nothing in this phase makes that decision on a deployment's behalf.
+
+**Why "principle-only" was the honest word, twice over, for two different reasons in 38e's own wave —
+and why it is now honest just ONCE, for YouTube's `media_upload`/`inbox_read`/`quota_probe`:**
+38e reported (1) every platform app credential in the estate is empty (D-23, deferred to staging) —
+true for LinkedIn AND YouTube equally; (2) YouTube ALSO carried a second, independent gap that had
+nothing to do with credentials — the dispatch state machine did not yet know how to represent a
+network whose publish terminates at `uploadMedia`. This closing pass resolves (2) for good, leaving
+only (1) — the SAME credential gap every other flip in this table already carries, nothing new.
 
 ## Metrics (SMM-21) — read-only, `social_account::read`
 

@@ -283,6 +283,34 @@ export interface SocialPublisher {
   key: PublisherKey;
   capabilities: ReadonlySet<PublisherCapability>;
 
+  // ── SMM-38e — closing pass (2026-08-21) — the override-safety gap's per-network refinement of
+  // `capabilities` above (NOT 38e's own "GAP 2" elsewhere in this file, which was YouTube's
+  // uploadMedia metadata channel — a different, already-closed gap) ─────────────────────────────
+  // `capabilities` says what this driver can do AT ALL, driver-wide. A driver serving only ONE
+  // network (Postiz, the mock) has never needed anything finer — every capability it advertises
+  // applies to every network it is asked about. `direct` broke that assumption the moment it grew a
+  // SECOND real network with a DIFFERENT capability shape (38d: LinkedIn gets `schedule`, YouTube
+  // never does) — but until this pass, that distinction lived ONLY as an in-method runtime gate
+  // (`direct.ts`'s own `refuseNetworkNotCovered`), invisible to anything that resolves a driver
+  // BEFORE calling it. `registry.ts#resolvePublisherForCapability` — the (network, capability)
+  // config switch 38b built — is exactly such a caller: before this pass it accepted ANY registered
+  // driver name for ANY (network, capability) key, including one the resolved driver would refuse
+  // the moment it was actually called (e.g. `youtube:schedule=direct` — the tracker's own named
+  // "38e flagged this as an architect question" gap).
+  //
+  // This method is the fix: OPTIONAL, so a driver with no per-network distinction (Postiz, the mock)
+  // simply does not implement it, and the resolver treats that absence as "no restriction" — the
+  // SAME "absent capability member ⇒ nothing to check" shape `listComments`/`sendReply`/
+  // `getCreatorInfo` already use. A driver that DOES serve more than one network with different
+  // coverage (`direct`) declares the true shape ONCE, here, as DATA — never a second hand-maintained
+  // list in `registry.ts` or `config.ts` that a future network/capability pair could fall through
+  // the cracks of. `resolvePublisherForCapability` is the ONE consumer: it refuses EAGERLY, with a
+  // typed `capability_unsupported`, the moment a configured override names a (network, capability)
+  // pair the resolved driver does not cover — before any network call is ever attempted, not after
+  // one already happened. See `direct.ts`'s own `NETWORK_CAPABILITIES` map, the single source both
+  // this method AND the in-method gates it augments (not replaces) read from.
+  coversNetworkCapability?(network: Network, capability: PublisherCapability): boolean;
+
   // Org lifecycle. The tenant mapping stays OURS; the driver only ever carries the opaque org ref.
   /** Mint an org. `capability_unsupported` on Postiz — see the file header, item (b). */
   createOrg(ref: { name: string }): Promise<{ orgId: string; apiKeyRef: string }>;
@@ -352,6 +380,29 @@ export interface SocialPublisher {
     file: { filename: string; contentType: string; bytes: Uint8Array; title?: string; description?: string },
     network: Network,
   ): Promise<{ id: string; url?: string }>;
+
+  // ── `isUploadTerminalFor` (SMM-38e — closing pass, 2026-08-21) — the upload-terminal gap's answer
+  // `dispatch.ts#dispatchApprovedPublish` was built around ONE shape: upload media (if any), THEN
+  // call `schedulePost` to actually publish. That shape is correct for every network this port has
+  // ever served UNTIL YouTube (38d): a `videos.insert` call on `direct` creates the live video
+  // resource directly — the upload itself IS the publish, and there is no "reference this
+  // already-uploaded asset from a later post" step for `direct` to implement for that network at
+  // all (see `direct.ts`'s own header). Before this pass, `dispatch.ts` had no way to know that, so
+  // routing `youtube:media_upload` to a driver in this shape would upload a REAL video and then
+  // unconditionally attempt a SECOND, doomed `schedulePost` call — an approval spent, a stray video
+  // already live upstream, and a variant row recorded `failed` (the tracker's own named danger).
+  //
+  // OPTIONAL and per-NETWORK, mirroring `coversNetworkCapability` immediately above: a driver whose
+  // publish is always a distinct upload-then-reference step (Postiz, the mock, `direct`'s own
+  // LinkedIn coverage) simply does not implement this, or returns `false`/`undefined` for that
+  // network, and `dispatch.ts` keeps calling `schedulePost` exactly as it always has — the existing,
+  // unchanged, upload-then-schedule shape. A driver whose upload for a given network IS the publish
+  // declares it here, and `dispatch.ts` responds by treating THAT UPLOAD's own returned `{id}` as
+  // the `providerPostId` it stamps — through the SAME single-transaction `approval_id` +
+  // `provider_post_id` stamp SMM-10 built, never a bypass of it — and never calls `schedulePost` for
+  // that dispatch at all. `media-rules.ts`'s own `maxMedia: 1` for YouTube is what makes "the upload
+  // step's own result" unambiguous: exactly one media reference exists to promote.
+  isUploadTerminalFor?(network: Network): boolean;
 
   // Analytics.
   getAccountMetrics(org: OrgHandle, integrationId: string, range: DateRange): Promise<DailyMetrics[]>;

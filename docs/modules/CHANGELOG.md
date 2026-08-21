@@ -77,6 +77,33 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-38e closing pass**, `social-media 0.5.10 -> 0.5.11` (IN PROGRESS, senior-be). The
+  two gaps 38e's own evidence reported to the architect rather than deciding, both closed by
+  ADDITIVE, OPTIONAL port members (`types.ts`) — never a special case in `dispatch.ts`, never a
+  hand-maintained deny-list in `registry.ts`. **The upload-terminal gap**:
+  `SocialPublisher.isUploadTerminalFor(network)` — `direct.ts` declares `true` for YouTube only (a
+  `videos.insert` call IS the post); `dispatch.ts#dispatchApprovedPublish` consults it and, when true,
+  stamps the upload's OWN returned id as `provider_post_id` through SMM-10's SAME single-transaction
+  stamp, and never calls `schedulePost`. **The override-safety gap**:
+  `SocialPublisher.coversNetworkCapability(network, capability)` — backed by ONE map on `direct.ts`
+  (`NETWORK_CAPABILITIES`) shared with the pre-existing per-method runtime gates;
+  `registry.ts#resolvePublisherForCapability` now refuses EAGERLY (typed `capability_unsupported`) any
+  override naming a (network, capability) pair the resolved driver does not cover, before any network
+  call. Result: `youtube:media_upload=direct` moves from "reported unsafe" to "principle-safe,
+  credential-gated only" (same as LinkedIn); `youtube:schedule=direct` (a value nothing previously
+  prevented an operator from setting) now refuses at the resolver instead of failing deep inside
+  `schedulePost`. Both new members OPTIONAL — absent (Postiz, the mock) means no restriction/never
+  terminal, so the no-config default stays inert, proven by every pre-existing `publisher.test.ts`
+  case (two rewritten in place to exercise wildcard precedence rather than a now-refused pair, not
+  counted as new). Test counts: **494/0/5** (baseline **483/0/5**, measured directly by stashing this
+  pass — matches `main`'s own stated 38e figure exactly; +11 new: `dispatch.test.ts` +3,
+  `direct.test.ts` +7, `publisher.test.ts` +1). A real regression was found and fixed during this
+  pass's own verification, not shipped: a new `direct.test.ts` case reused the shared module-level
+  `unreachableFetch` mock with a non-empty approval id, polluting an earlier-declared test's
+  zero-calls assertion — fixed with a locally-scoped stub. Full detail: `docs/modules/MODULES.md`'s
+  social-media 0.5.11 entry, `docs/plans/smm-tracker.md`'s PD row,
+  `docs/modules/social-capability-inventory.md`'s "Driver per capability" section.
+
 - **2026-08-21 — SMM-38 phase 38e**, `social-media 0.5.9 -> 0.5.10` (IN PROGRESS). The flip's three
   gaps, closed. **Gap 1** (the crux): new `provisioning.ts#resolveDispatchOrgHandle` — a SEPARATE,
   capability-aware resolver (not a widened `openOrg`) that `dispatch.ts` now calls for `media_upload`

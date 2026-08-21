@@ -12,22 +12,23 @@
 // LinkedIn/YouTube method not listed below — still refuses exactly as 38a left it.
 //
 // ── HOW A DRIVER-WIDE CAPABILITY COEXISTS WITH PER-NETWORK COVERAGE ─────────────────────────────
-// `PublisherCapability` (types.ts) is DRIVER-wide, not per-network — the port has no `(network,
-// capability)` granularity at the capability-Set level (that granularity lives one layer up, in
-// `registry.ts`'s `resolvePublisherForCapability`, which routes a (network, capability) PAIR to a
-// driver — it does not ask the driver "which networks do you cover for this capability"). `direct`
-// will genuinely cover LinkedIn now and YouTube in 38d, on DIFFERENT schedules, so advertising
-// `schedule`/`media_upload`/`inbox_read` driver-wide while only LinkedIn is real is the SAME shape
-// `postiz.ts` already uses for `getQuota`/`getCreatorInfo` — capability advertised at the driver
-// level, a network-gate INSIDE the method body, and a TYPED refusal (never a crash) for a network
-// the method does not yet cover. `schedulePost`/`uploadMedia`/`listComments` below all follow this
-// exact pattern: check the approval/args shape first, then branch on `network`, and name the gap
-// honestly (`capability_unsupported`, "the 'direct' driver does not yet cover '<network>' for
-// '<op>'") for anything that is not LinkedIn yet. **This is a real, load-bearing gap for 38d to
-// inherit**: the port's capability model cannot express "schedule: true for LinkedIn, false for
-// YouTube" at the Set level, and 38d must decide (with the architect, if it wants to change the
-// port) whether that stays a per-method network branch forever, or whether the port itself grows a
-// per-network capability shape. Not decided here — named, not silently worked around.
+// `PublisherCapability` (types.ts) is DRIVER-wide at the `capabilities` Set level — advertising
+// `schedule`/`media_upload`/`inbox_read` while only LinkedIn (or only YouTube) is real for a given
+// one is the SAME shape `postiz.ts` already uses for `getQuota`/`getCreatorInfo`: capability
+// advertised at the driver level, a network-gate INSIDE the method body, and a TYPED refusal (never
+// a crash) for a network the method does not cover. `schedulePost`/`uploadMedia`/`listComments`
+// below all follow this exact pattern: check the approval/args shape first, then branch on
+// `network`, and name the gap honestly (`capability_unsupported`, "the 'direct' driver does not
+// cover '<network>' for '<op>'") for anything a given method does not implement.
+//
+// **The per-method-only gap 38c/38d flagged for 38d/the architect is CLOSED, SMM-38e's closing pass
+// (2026-08-21):** the port's capability model DOES now express "schedule: true for LinkedIn, false
+// for YouTube" — `SocialPublisher.coversNetworkCapability` (types.ts), backed by this file's own
+// `NETWORK_CAPABILITIES` map below, the ONE place both the per-method gates AND
+// `registry.ts#resolvePublisherForCapability`'s eager resolver-level refusal read from. The
+// per-method network branch stays (it is still what decides WHICH wire call to make, not merely
+// whether one exists), but a caller resolving a (network, capability) pair no longer has to reach a
+// method body to discover the driver cannot honour it.
 //
 // ── THE CREDENTIAL SHAPE: `OrgHandle.secret()` CARRIES A RESOLVED BEARER TOKEN, NOT AN ORG API KEY
 // `OrgHandle` (types.ts) was built for Postiz's custody model: one API key PER ORG, resolved by
@@ -67,12 +68,18 @@
 // `dispatch.ts` now reaches `direct` for real, for LinkedIn, the moment an operator sets
 // `linkedin:schedule`/`linkedin:media_upload` in `SOCIAL_PUBLISHER_CAPABILITY_DRIVERS` — proven by a
 // live-shaped test in `dispatch.test.ts` (a real `social_oauth_tokens` row, a real
-// `resolveActiveAccessToken` call, a real second driver receiving the resolved bearer token). YouTube
-// is a NAMED, DELIBERATE exception — see `provisioning.ts#resolveDispatchOrgHandle`'s own header for
-// why routing YouTube's `media_upload` through this same path today would be unsafe (upload-is-publish
-// colliding with `dispatch.ts`'s unconditional "upload then schedule" flow), and why that is reported
-// as a sub-question for the architect rather than silently wired around. See `linkedin-oauth.ts`'s/
-// `youtube-oauth.ts`'s own headers for the piece that lands the grant in the first place.
+// `resolveActiveAccessToken` call, a real second driver receiving the resolved bearer token).
+//
+// **YouTube's own exception, corrected by SMM-38e's closing pass (2026-08-21).** This section used
+// to name YouTube as a NAMED, DELIBERATE exclusion because routing its `media_upload` through this
+// path would collide with `dispatch.ts`'s (then-)unconditional "upload then schedule" flow. That is
+// fixed at the source, not worked around here: `isUploadTerminalFor` below tells `dispatch.ts` this
+// network's upload IS the publish, so `dispatch.ts` never calls `schedulePost` after it — see that
+// file's own header and `provisioning.ts#resolveDispatchOrgHandle`'s corrected header. YouTube is
+// therefore no longer excluded in principle; only the same credential gap (D-23) that already gates
+// LinkedIn's own flip stands between `youtube:media_upload=direct` and a live call. See
+// `linkedin-oauth.ts`'s/`youtube-oauth.ts`'s own headers for the piece that lands the grant in the
+// first place.
 import {
   OrgHandle,
   SocialPublisherError,
@@ -112,6 +119,44 @@ import { defaultYouTubeQuotaStore, type YouTubeQuotaStore } from "./youtube-quot
  *  `inbox_reply` specifically (SMM-17, gated on SMM-15, out of this phase's scope). Note `schedule`
  *  stays LinkedIn-only: YouTube never gets it in this phase (see `schedulePost`'s own comment). */
 const DIRECT_CAPABILITIES: PublisherCapability[] = ["schedule", "media_upload", "inbox_read", "quota_probe"];
+
+// ── SMM-38, gap-closure pass (2026-08-21) — the override-safety gap's single source of truth ────
+// (NOT 38e's own "GAP 2" below — that one was YouTube's uploadMedia metadata channel, already
+// closed. This is a DIFFERENT, later-named gap the tracker's 38e row reported to the architect
+// rather than deciding unilaterally.)
+//
+// `DIRECT_CAPABILITIES` above says what this driver can do AT ALL, driver-wide. It does NOT say
+// which network each one applies to — that has lived only as an in-method runtime gate
+// (`refuseNetworkNotCovered`, below) since 38d gave LinkedIn and YouTube genuinely different
+// coverage. This map is that same fact, promoted to DATA: it is the ONE place both (a) this file's
+// own per-method gates and (b) `registry.ts#resolvePublisherForCapability`'s new eager refusal
+// (`coversNetworkCapability`, types.ts) read from — never two independent lists that could drift.
+//
+// LinkedIn: `schedule` (org-page publish, 38c), `media_upload` (asset upload, 38c), `inbox_read`
+// (per-post comment read, 38c). NOT `quota_probe` — LinkedIn's Standard-tier rate limits are
+// UNPUBLISHED (dossier §4.4); `getQuota`'s own LinkedIn branch has always refused, unchanged.
+//
+// YouTube: `media_upload` (resumable upload — and, per `isUploadTerminalFor` below, this upload
+// IS the publish), `inbox_read` (`commentThreads.list`, 38d), `quota_probe` (accounting against
+// the 3-bucket regime, 38d/38e). Deliberately NOT `schedule` — see `schedulePost`'s own comment and
+// `isUploadTerminalFor`'s doc: there is no "reference an already-uploaded asset" step for this
+// network in this driver's shape, so advertising `schedule` for it would be a lie this map refuses
+// to tell, in either direction (the per-method gate and this map).
+const NETWORK_CAPABILITIES: Readonly<Record<string, ReadonlySet<PublisherCapability>>> = {
+  linkedin: new Set<PublisherCapability>(["schedule", "media_upload", "inbox_read"]),
+  youtube: new Set<PublisherCapability>(["media_upload", "inbox_read", "quota_probe"]),
+};
+
+// ── The upload-terminal gap's declaration: which networks above have an upload that IS the publish
+//
+// Only YouTube, today. LinkedIn's `media_upload` registers an asset for a LATER `schedulePost` call
+// to reference — the ordinary upload-then-publish shape every other network in this codebase uses.
+// YouTube's `videos.insert` creates the live video resource directly; there is no later step to
+// reference it from (see `schedulePost`'s own YouTube branch, and `uploadMedia`'s own YouTube
+// branch). `dispatch.ts` consults this (via the port's `isUploadTerminalFor`) to know it must never
+// call `schedulePost` after a YouTube upload through this driver, and must instead stamp the
+// upload's own returned `{id}` as the `providerPostId` — see that file's own header for the wiring.
+const UPLOAD_TERMINAL_NETWORKS: ReadonlySet<string> = new Set(["youtube"]);
 
 /** One refusal, one message shape, used by every member 38c/38d still leave unimplemented. Unchanged
  *  in shape from 38a except the phase number, since 38a's own instruction ("op names the exact port
@@ -158,6 +203,19 @@ export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublis
   return {
     key: "direct",
     capabilities: new Set<PublisherCapability>(DIRECT_CAPABILITIES),
+
+    // The override-safety gap (types.ts's own doc): the resolver's eager, data-driven refusal reads
+    // THIS, and only this — the SAME `NETWORK_CAPABILITIES` map every per-method gate below is
+    // written against.
+    coversNetworkCapability(network: Network, capability: PublisherCapability): boolean {
+      return NETWORK_CAPABILITIES[network]?.has(capability) ?? false;
+    },
+
+    // The upload-terminal gap (types.ts's own doc): only YouTube's upload is the publish itself,
+    // today.
+    isUploadTerminalFor(network: Network): boolean {
+      return UPLOAD_TERMINAL_NETWORKS.has(network);
+    },
 
     async createOrg(): Promise<{ orgId: string; apiKeyRef: string }> {
       return refuseUnsupported("createOrg");
