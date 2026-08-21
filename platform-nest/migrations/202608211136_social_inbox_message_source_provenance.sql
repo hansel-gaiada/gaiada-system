@@ -37,24 +37,43 @@ COMMENT ON COLUMN social_inbox_messages.source IS
   'inbound path that exists — Postiz has no inbound surface at all, OQ-4). ''reply'' = sent by us. '
   '''postiz_sync'' is DEAD and retained only because rows may already carry it: never write it.';
 
--- Backfill. Every existing inbound row was mislabelled by construction, so this is a rename of a
--- fact rather than a reinterpretation of one. Counted, not assumed: the RLS-GUC trap means an
--- unscoped backfill reads ZERO rows and reports success, so the assertion below is what proves the
--- statement actually ran rather than silently matching nothing.
+-- Backfill, ONE TENANT'S AUTHORIZED SET AT A TIME.
+--
+-- ⚠ I got this wrong on the first pass and `lint:migration-rls` caught it. `social_inbox_messages`
+-- is a FORCE-RLS table and migrations run as `platform_owner`, which is NOBYPASSRLS. An UPDATE with
+-- no `app.current_tenant_ids` set therefore matches ZERO rows -- and, worse, the "did it work?"
+-- assertion that follows ALSO reads zero, so the migration reports success having relabelled
+-- nothing. That is the exact trap this file's own header warns about, walked into by the person
+-- writing the warning. The lint exists because reasoning about it is not enough.
+--
+-- Pattern per 0051_pm_short_codes_backfill_fix.sql: iterate companies, set the GUC for that tenant
+-- (SET LOCAL semantics, scoped to this migration's transaction -- the same mechanism `withTenants`
+-- uses for every ordinary request), then touch the table. Idempotent by construction: the
+-- `source = 'postiz_sync'` guard means a second run is a true no-op.
 DO $$
 DECLARE
+  co RECORD;
   moved integer;
-  remaining integer;
+  total integer := 0;
+  remaining integer := 0;
+  left_over integer;
 BEGIN
-  UPDATE social_inbox_messages SET source = 'direct_sync' WHERE source = 'postiz_sync';
-  GET DIAGNOSTICS moved = ROW_COUNT;
+  FOR co IN SELECT id FROM companies WHERE deleted_at IS NULL LOOP
+    PERFORM set_config('app.current_tenant_ids', co.id::text, true);
 
-  SELECT count(*) INTO remaining FROM social_inbox_messages WHERE source = 'postiz_sync';
+    UPDATE social_inbox_messages SET source = 'direct_sync' WHERE source = 'postiz_sync';
+    GET DIAGNOSTICS moved = ROW_COUNT;
+    total := total + moved;
+
+    SELECT count(*) INTO left_over FROM social_inbox_messages WHERE source = 'postiz_sync';
+    remaining := remaining + left_over;
+  END LOOP;
+
   IF remaining <> 0 THEN
-    RAISE EXCEPTION 'SMM-15 follow-up: % rows still carry the dead ''postiz_sync'' source after backfill', remaining;
+    RAISE EXCEPTION 'SMM-15 follow-up: % row(s) still carry the dead ''postiz_sync'' source after a per-tenant backfill', remaining;
   END IF;
 
-  RAISE NOTICE 'SMM-15 follow-up: relabelled % inbound message(s) postiz_sync -> direct_sync', moved;
+  RAISE NOTICE 'SMM-15 follow-up: relabelled % inbound message(s) postiz_sync -> direct_sync across all tenants', total;
 END $$;
 
 -- Self-assertions, in the 0106 idiom: prove the constraint and the default are what this file claims,
