@@ -505,6 +505,28 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
   .dept-launcher-icon--unmapped { position: relative; }
 }
 
+/* ── Tab-page tables ────────────────────────────────────────────────────── */
+/* One scroll wrapper for every HairlineTable a console tab renders — this began as the Projects
+   tab's private `.dept-proj__scroll` and every other tab was exposed to the same defect.
+
+   `.lux-table__head`/`__row` are fr-column grids. `fr` is `minmax(auto, 1fr)`, so the tracks do
+   NOT overflow their container and the spans do NOT geometrically collide — measured, both are
+   clean at every desktop width. What actually happens is that `auto` floors at min-content, and
+   min-content for wrappable text is its longest WORD: past the squeeze point each cell silently
+   wraps mid-phrase, the header row grows a line, and the columns stop reading as columns. That is
+   the real defect, and it is what the Projects tab meant by "overlap".
+
+   `--dept-table-min` is therefore each table's measured no-wrap width — the narrowest container
+   in which none of its cells break — set per call site, not guessed from the column count (the
+   8-column analytics table needs only 600px because its cells are short figures, while the
+   5-column engagements table needs 840px because it carries domains and phrases). Rounded up to
+   a 20px step. Content longer than the sampled rows can still wrap; this is a floor for typical
+   content, not a guarantee. Below it the wrapper takes the scroll — swiping a table whose columns
+   survive beats reading one that has folded in on itself, the idiom the board, the Gantt and the
+   connections table already use. Above it nothing scrolls and the table sits inside the card. */
+.dept-table-scroll { overflow-x: auto; }
+.dept-table-scroll > .lux-table { min-width: var(--dept-table-min, 640px); }
+
 /* ── Department projects list (the Projects tab) ─────────────────────────── */
 /* Still a HairlineTable — this is a list to COMPARE rows in, and a table is right for that. What
    changed is what each cell holds: six columns became four, because "Tasks here" + "Done" were one
@@ -515,8 +537,6 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
 /* `HairlineTable` is an fr-column grid with no stacked mode, so below ~640px its four headers
    overlap and every cell wraps mid-phrase. The min-width keeps the columns intact and the wrapper
    takes the scroll; on any desktop width the table is narrower than the card and nothing scrolls. */
-.dept-proj__scroll { overflow-x: auto; }
-.dept-proj__scroll .lux-table { min-width: 640px; }
 .dept-proj__cell { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .dept-proj__name { font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; overflow-wrap: anywhere; }
 a.dept-proj__name:hover { opacity: 0.6; }

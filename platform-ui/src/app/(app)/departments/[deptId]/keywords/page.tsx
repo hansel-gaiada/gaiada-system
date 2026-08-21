@@ -86,21 +86,23 @@ export default async function DepartmentSeoKeywordsPage({ params, searchParams }
                 body="A keyword set is what import/embed/cluster all key off. Create the first one for this engagement below."
               />
             ) : (
-              <HairlineTable
-                columns={[{ label: "Set" }, { label: "Source" }, { label: "" }]}
-                rows={keywordSets.map((s) => [
-                  s.name,
-                  s.source,
-                  <Link
-                    key="l"
-                    href={`/departments/${deptId}/keywords?engagementId=${engagementId}&setId=${s.id}`}
-                    style={{ font: "600 12px var(--font-body)", color: s.id === setId ? "var(--erp-accent)" : "var(--text-primary)" }}
-                  >
-                    {s.id === setId ? "Viewing" : "Open"}
-                  </Link>,
-                ])}
-                tcols="2fr 1fr .8fr"
-              />
+              <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "300px" }}>
+                <HairlineTable
+                  columns={[{ label: "Set" }, { label: "Source" }, { label: "" }]}
+                  rows={keywordSets.map((s) => [
+                    s.name,
+                    s.source,
+                    <Link
+                      key="l"
+                      href={`/departments/${deptId}/keywords?engagementId=${engagementId}&setId=${s.id}`}
+                      style={{ font: "600 12px var(--font-body)", color: s.id === setId ? "var(--erp-accent)" : "var(--text-primary)" }}
+                    >
+                      {s.id === setId ? "Viewing" : "Open"}
+                    </Link>,
+                  ])}
+                  tcols="2fr 1fr .8fr"
+                />
+              </div>
             )}
 
             {canManage && engagementId && (

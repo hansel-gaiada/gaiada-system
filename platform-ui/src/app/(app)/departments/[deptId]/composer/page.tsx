@@ -60,17 +60,19 @@ export default async function DepartmentComposerPage({ params }: { params: Param
       {posts.data.length === 0 ? (
         <TeachState glyph="✎" title="No posts yet" body="Draft your first post using the form above." />
       ) : (
-        <HairlineTable
-          columns={[{ label: "Post" }, { label: "Engagement" }, { label: "Status" }, { label: "Scheduled" }, { label: "Variants" }]}
-          rows={posts.data.map((p) => [
-            <Link key="t" href={`/departments/${deptId}/composer/${p.id}`} style={{ font: "600 13px var(--font-body)" }}>{p.title}</Link>,
-            engagementById.get(p.engagementId)?.name ?? "—",
-            <StatusBadge key="s" label={p.status} />,
-            p.scheduledAt ? new Date(p.scheduledAt).toLocaleString() : "—",
-            String(p.variants.length),
-          ])}
-          tcols="2fr 1.4fr .9fr 1.3fr .7fr"
-        />
+        <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "680px" }}>
+          <HairlineTable
+            columns={[{ label: "Post" }, { label: "Engagement" }, { label: "Status" }, { label: "Scheduled" }, { label: "Variants" }]}
+            rows={posts.data.map((p) => [
+              <Link key="t" href={`/departments/${deptId}/composer/${p.id}`} style={{ font: "600 13px var(--font-body)" }}>{p.title}</Link>,
+              engagementById.get(p.engagementId)?.name ?? "—",
+              <StatusBadge key="s" label={p.status} />,
+              p.scheduledAt ? new Date(p.scheduledAt).toLocaleString() : "—",
+              String(p.variants.length),
+            ])}
+            tcols="2fr 1.4fr .9fr 1.3fr .7fr"
+          />
+        </div>
       )}
     </Card>
   );

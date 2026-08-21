@@ -81,27 +81,29 @@ export default async function DepartmentSeoAuditPage({ params, searchParams }: {
                 body="Once search-crawl-go (or another adapter) completes a crawl and its report is ingested, the audit and its findings will appear here."
               />
             ) : (
-              <HairlineTable
-                columns={[
-                  { label: "Kind" }, { label: "Source" }, { label: "Status" },
-                  { label: "Score", align: "right" }, { label: "Completed" }, { label: "" },
-                ]}
-                rows={audits.map((a) => [
-                  a.kind,
-                  a.source,
-                  <StatusBadge key="s" label={a.status} />,
-                  numberOrDash(a.score),
-                  a.completedAt ? new Date(a.completedAt).toLocaleString() : "—",
-                  <Link
-                    key="l"
-                    href={`/departments/${deptId}/audit?propertyId=${propertyId}&auditId=${a.id}`}
-                    style={{ font: "600 12px var(--font-body)", color: a.id === auditId ? "var(--erp-accent)" : "var(--text-primary)" }}
-                  >
-                    {a.id === auditId ? "Viewing" : "View findings"}
-                  </Link>,
-                ])}
-                tcols="1fr 1fr .9fr .7fr 1.3fr 1fr"
-              />
+              <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "600px" }}>
+                <HairlineTable
+                  columns={[
+                    { label: "Kind" }, { label: "Source" }, { label: "Status" },
+                    { label: "Score", align: "right" }, { label: "Completed" }, { label: "" },
+                  ]}
+                  rows={audits.map((a) => [
+                    a.kind,
+                    a.source,
+                    <StatusBadge key="s" label={a.status} />,
+                    numberOrDash(a.score),
+                    a.completedAt ? new Date(a.completedAt).toLocaleString() : "—",
+                    <Link
+                      key="l"
+                      href={`/departments/${deptId}/audit?propertyId=${propertyId}&auditId=${a.id}`}
+                      style={{ font: "600 12px var(--font-body)", color: a.id === auditId ? "var(--erp-accent)" : "var(--text-primary)" }}
+                    >
+                      {a.id === auditId ? "Viewing" : "View findings"}
+                    </Link>,
+                  ])}
+                  tcols="1fr 1fr .9fr .7fr 1.3fr 1fr"
+                />
+              </div>
             )}
           </>
         )}

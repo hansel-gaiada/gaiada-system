@@ -90,17 +90,19 @@ export default async function DepartmentEngagementsPage({ params }: { params: Pa
             ctaHref={canManage ? `/departments/${deptId}/audit` : undefined}
           />
         ) : (
-          <HairlineTable
-            columns={[
-              { label: "Engagement" },
-              { label: "Property" },
-              { label: "Status" },
-              { label: "Metered tools" },
-              { label: "Provider budget", align: "right" },
-            ]}
-            rows={rows}
-            tcols="2fr 1.6fr .8fr 1fr .9fr"
-          />
+          <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "840px" }}>
+            <HairlineTable
+              columns={[
+                { label: "Engagement" },
+                { label: "Property" },
+                { label: "Status" },
+                { label: "Metered tools" },
+                { label: "Provider budget", align: "right" },
+              ]}
+              rows={rows}
+              tcols="2fr 1.6fr .8fr 1fr .9fr"
+            />
+          </div>
         )}
       </Card>
 
@@ -112,16 +114,18 @@ export default async function DepartmentEngagementsPage({ params }: { params: Pa
             body="A property is a client domain this department works on. Crawls, keywords, rankings and briefs all hang off it."
           />
         ) : (
-          <HairlineTable
-            columns={[{ label: "Domain" }, { label: "Site URL" }, { label: "Verified" }, { label: "Status" }]}
-            rows={properties.map((p) => [
-              p.domain,
-              p.siteUrl ?? "—",
-              p.verifiedAt ? new Date(p.verifiedAt).toLocaleDateString() : "not verified",
-              <StatusBadge key="s" label={p.status} />,
-            ])}
-            tcols="1.4fr 1.6fr .9fr .8fr"
-          />
+          <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "780px" }}>
+            <HairlineTable
+              columns={[{ label: "Domain" }, { label: "Site URL" }, { label: "Verified" }, { label: "Status" }]}
+              rows={properties.map((p) => [
+                p.domain,
+                p.siteUrl ?? "—",
+                p.verifiedAt ? new Date(p.verifiedAt).toLocaleDateString() : "not verified",
+                <StatusBadge key="s" label={p.status} />,
+              ])}
+              tcols="1.4fr 1.6fr .9fr .8fr"
+            />
+          </div>
         )}
       </Card>
 

@@ -96,7 +96,7 @@ export default async function DepartmentProjectsPage({ params }: { params: Param
            "WORK ROUTEDRISK TARGET" and every cell wrapped mid-phrase. Swiping a table whose columns
            survive beats reading one that has folded in on itself — the same idiom the board, the
            Gantt and the connections table already use. */
-        <div className="dept-proj__scroll erp-scroll">
+        <div className="dept-table-scroll erp-scroll">
         <HairlineTable
           columns={[
             { label: "Project" },

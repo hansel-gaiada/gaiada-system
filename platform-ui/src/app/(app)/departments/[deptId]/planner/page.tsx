@@ -81,18 +81,20 @@ export default async function DepartmentSeoPlannerPage({ params, searchParams }:
                 body="No campaigns exist for this engagement. Generate one from a clustered keyword set below, or create an empty campaign shell to build up manually."
               />
             ) : (
-              <HairlineTable
-                columns={[
-                  { label: "Campaign" }, { label: "Platform" }, { label: "Status" }, { label: "Budget", align: "right" },
-                ]}
-                rows={campaigns.map((c) => [
-                  <Link key="n" href={`/departments/${deptId}/planner/${c.id}`}>{c.name}</Link>,
-                  c.platform === "google_ads" ? "Google Ads" : c.platform === "microsoft_ads" ? "Microsoft Ads" : c.platform,
-                  <StatusBadge key="s" label={c.status} />,
-                  formatBudget(numOrNull(c.budgetMinor), c.currency),
-                ])}
-                tcols="1.8fr 1fr .8fr 1fr"
-              />
+              <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "360px" }}>
+                <HairlineTable
+                  columns={[
+                    { label: "Campaign" }, { label: "Platform" }, { label: "Status" }, { label: "Budget", align: "right" },
+                  ]}
+                  rows={campaigns.map((c) => [
+                    <Link key="n" href={`/departments/${deptId}/planner/${c.id}`}>{c.name}</Link>,
+                    c.platform === "google_ads" ? "Google Ads" : c.platform === "microsoft_ads" ? "Microsoft Ads" : c.platform,
+                    <StatusBadge key="s" label={c.status} />,
+                    formatBudget(numOrNull(c.budgetMinor), c.currency),
+                  ])}
+                  tcols="1.8fr 1fr .8fr 1fr"
+                />
+              </div>
             )}
           </>
         )}

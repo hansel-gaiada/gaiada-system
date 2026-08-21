@@ -252,6 +252,8 @@ export const listPostMetrics = async (
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/metrics/posts?${qs.toString()}`, u), { posts: [] });
   const obj = asObject<{ posts: unknown }>(r.data);
   return { ...r, data: asArray<PostMetricRow>(obj?.posts) };
+};
+
 // ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ─────────────────
 //
 // `GET engagements/:id/asset-library` — read-tier (`social_engagement`/`read`), same as every

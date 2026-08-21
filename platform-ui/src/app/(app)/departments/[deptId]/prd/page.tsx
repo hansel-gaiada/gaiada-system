@@ -50,20 +50,22 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
           {runs.length === 0 ? (
             <EmptyNote>No PRD runs yet. Record a briefing above — a run appears here once the meeting is dispatched into the pipeline.</EmptyNote>
           ) : (
-            <HairlineTable
-              columns={[{ label: "Run" }, { label: "Source meeting" }, { label: "Status" }, { label: "Started", align: "right" }]}
-              tcols="2fr 1.3fr 1fr 1fr"
-              rows={runs.map((r) => [
-                <Link key="t" href={`/pipeline/${r.id}`}>{r.title ?? "(untitled)"}</Link>,
-                r.source_meeting_id ? (
-                  recordingIdByMeetingId.has(r.source_meeting_id) ? (
-                    <Link key="m" href={`/meetings/${recordingIdByMeetingId.get(r.source_meeting_id)}`}>{r.source_meeting_id}</Link>
-                  ) : r.source_meeting_id
-                ) : "—",
-                <StatusBadge key="s" label={r.status.replace(/_/g, " ")} />,
-                formatDateTime(r.created_at),
-              ])}
-            />
+            <div className="dept-table-scroll erp-scroll" style={{ ["--dept-table-min" as string]: "480px" }}>
+              <HairlineTable
+                columns={[{ label: "Run" }, { label: "Source meeting" }, { label: "Status" }, { label: "Started", align: "right" }]}
+                tcols="2fr 1.3fr 1fr 1fr"
+                rows={runs.map((r) => [
+                  <Link key="t" href={`/pipeline/${r.id}`}>{r.title ?? "(untitled)"}</Link>,
+                  r.source_meeting_id ? (
+                    recordingIdByMeetingId.has(r.source_meeting_id) ? (
+                      <Link key="m" href={`/meetings/${recordingIdByMeetingId.get(r.source_meeting_id)}`}>{r.source_meeting_id}</Link>
+                    ) : r.source_meeting_id
+                  ) : "—",
+                  <StatusBadge key="s" label={r.status.replace(/_/g, " ")} />,
+                  formatDateTime(r.created_at),
+                ])}
+              />
+            </div>
           )}
         </Card>
       </div>
