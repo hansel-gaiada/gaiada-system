@@ -51,7 +51,7 @@ adds) · `infra/CLAUDE.md`
 | cAdvisor per-container discovery | `count(container_last_seen{name!=""})` | **empty result** — still broken estate-wide (MON-09n) |
 | Remote Alertmanager reachable over the tunnel | `curl 10.88.0.2:9093/api/v2/status`, `/alerts` | serving; only `Watchdog` active |
 | `RemoteWriteStalled` is single-host | `infra/observability/prometheus/rules/alerts.yml:93` | `absent_over_time(up{job="otel-collector-self"}[10m])` — keyed to one host's collector, does not generalize |
-| Known ssh estate on the operator machine | `~/.ssh/config` | `gda-aicenter`, `sumopod`, `aire-vps`, `gda-ai01`(+`gda-tunnel`, same IP), `gda-ce01`, and **`delphi` / `helios` — another company's VPSes, out of scope permanently** |
+| Known ssh estate on the operator machine | `~/.ssh/config` | `gda-aicenter`, `sumopod`, `aire-vps`, `gda-ai01`(+`gda-tunnel`, same IP), `gda-ce01`, `delphi`, `helios`. **CORRECTED 2026-08-21 by owner decision:** `delphi` and `helios` ARE the owner's and ARE authorized onboarding targets — an earlier session had them on a never-touch list believing they belonged to another company, and that belief was wrong. They are LIVE, so they wait for the MSO-03 runbook. **`gda-ce01` is OUT OF SCOPE** — owner: "we shouldnt have anything to do with gda-ce01" |
 
 ### 1.1 The drift ruling: the resurrected local stack is NOT design
 
@@ -257,7 +257,7 @@ Per host, in render order (the contract fixes the null-vs-zero semantics of each
 | **Freshness** — `fresh / stale / dark / never` + last-sample age | `max by (host) (last_over_time(timestamp(up{host!=""})[48h:1m]))` | **The lead signal.** A stale feed is the most dangerous state because it looks calm; it gates how every other cell renders. Thresholds: fresh ≤ 90 s, stale ≤ 600 s, dark > 600 s (deliberately the same 10 m boundary as `RemoteWriteStalled`, so console and pager cannot disagree), never = nothing in the 48 h lookback |
 | CPU busy % + cores + load1 | `node_cpu_seconds_total`, `node_load1` by host | load1 without core count is unreadable across heterogeneous boxes |
 | Memory used % | `node_memory_*` by host | |
-| Disk used % + free GB + **projected free GB at +24 h** | same FS pinning as the `DiskSpaceLow` rule, `predict_linear` 6 h→24 h | this estate has had a full disk roll back a healthy release; `gda-ce01` sits at 98 % today. The projection is the actionable number, and it must stay expression-identical to `DiskWillFillIn24h` |
+| Disk used % + free GB + **projected free GB at +24 h** | same FS pinning as the `DiskSpaceLow` rule, `predict_linear` 6 h→24 h | this estate has had a full disk roll back a healthy release; a box observed at 98 % (that example was `gda-ce01`, since ruled out of scope — the *signal* is still the point, the box is not ours to watch). The projection is the actionable number, and it must stay expression-identical to `DiskWillFillIn24h` |
 | Scrape targets up/down + down job names | `up` by host | per-host, so one broken exporter on staging can't hide inside an estate total |
 | Containers running | `container_last_seen{name!=""}` by host | **unavailable estate-wide today** (MON-09n) — renders as unavailable-with-reason, never 0 (§7) |
 | Datastores (`pg_up` / `redis_up` per instance) | exporters, where a host ships them | the target-up-≠-check-valid lesson: these were 0 for weeks behind green targets |
@@ -345,7 +345,7 @@ MSO-01/—. Highest value per unit of effort: **MSO-00** (stops active waste and
 4. **OQ-4 — Confirm no-Tailscale.** Rejected here for third-party control-plane and new-dependency
    reasons; costs nothing to reverse later. Spend for the whole design as ruled: **zero** (no new
    boxes, no SaaS).
-5. **OQ-5 — First onboarding target** for the MSO-03 dry run. Recommendation: `gda-ce01` — it is
+5. **OQ-5 — First onboarding target** — ANSWERED 2026-08-21: NOT `gda-ce01`, which the owner has ruled out of scope entirely. Dry-run the runbook on `gda-aicenter` (already instrumented, and the box we can afford to be wrong about) BEFORE touching the live estate. The superseded recommendation read: `gda-ce01` — it is
    the box most likely to fill a disk unobserved, so it buys the most safety per hour of work.
 
 ---
