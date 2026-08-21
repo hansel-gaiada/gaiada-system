@@ -9,9 +9,17 @@
 // truth was that the read had been refused. An empty list is a CLAIM. Rendering one on the strength
 // of a caught exception asserts "there is nothing here" from evidence that says nothing of the kind.
 //
+// ⚠ THE SWEEP ITSELF WAS INCOMPLETE, WHICH IS THE BEST ARGUMENT FOR HAVING IT. It matched `safe`
+// and `skipMissing` because the plan named those two — and `queue.ts` had a THIRD copy called
+// `settle()`, whose own comment approvingly described the whole defect chain ("the underlying
+// readers already degrade 404/403 to [] themselves; this is the outer net for anything else").
+// A pattern with three names in one codebase is not going to be found by remembering names, so
+// the regex now covers all three and this note exists to make the next rename obvious.
+//
 // WHY IT READS THE SOURCE INSTEAD OF CALLING THE HELPERS. There are SIX near-duplicate helpers
-// (`safe` in people/pipeline/portal-data/webdevChangeRequests, `skipMissing` in adminData —
-// meetings.ts no longer has one: AGN-3 migrated it onto `readResult` and deleted its copy),
+// (`safe` in people/portal-data/webdevChangeRequests, `skipMissing` in adminData, `settle` in
+// queue.ts — meetings.ts and pipeline.ts no longer have one: AGN-3 migrated them onto
+// `readResult` and deleted their copies),
 // each private to its own module and each with SUBTLY DIFFERENT rules —
 // which is exactly how they drifted apart unnoticed. A behavioural test could only reach the ones a
 // module chooses to export; a source sweep sees all of them, including the seventh someone adds next
@@ -41,8 +49,22 @@ const DEGRADES_403_KNOWN: Record<string, string> = {
     "TRACKED, not accepted. Narrowed from a bare `catch {}` (which swallowed 500s, timeouts and " +
     "parse errors too) to absence + 403. Rethrowing 403 needs the plan's action item 4 (a shared typed-refusal component) " +
     "first, or a quietly-empty panel becomes a crashed page — worse for the viewer, no more honest.",
-  "pipeline.ts": "PRE-EXISTING. Not yet swept; same action-item-4 dependency as people.ts.",
   "webdevChangeRequests-data.ts": "PRE-EXISTING. Not yet swept; same action-item-4 dependency.",
+};
+
+/**
+ * Helpers permitted to catch EVERYTHING, each for a stated reason. Separate from
+ * DEGRADES_403_KNOWN because it is a different and wider defect: a 403-degrader at least knows what
+ * it swallowed, whereas a bare catch cannot tell a denial from a crash.
+ */
+const BARE_CATCH_KNOWN: Record<string, string> = {
+  "queue.ts":
+    "`settle()` — documented at length on the helper itself. The queue aggregates six independent " +
+    "sources and UX-2 §1.5 requires that one dead source must not blank it, which genuinely " +
+    "conflicts with 'never render a list you cannot vouch for'. Its callers' readers now return " +
+    "ReadResult, so this catches only transport failures. 🔴 KNOWN CONSEQUENCE: the queue can be " +
+    "SHORT without saying so, and on a 'work waiting for you' surface an empty one reads as 'you " +
+    "are done'. The fix is a queue-level partial-result indicator, not another try/catch.",
 };
 
 interface Helper {
@@ -56,7 +78,7 @@ function helpers(): Helper[] {
   for (const file of readdirSync(LIB)) {
     if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
     const src = readFileSync(join(LIB, file), "utf8");
-    const re = /async function (safe|skipMissing)\b[\s\S]*?\n}/g;
+    const re = /async function (safe|skipMissing|settle)\b[\s\S]*?\n}/g;
     for (const m of src.matchAll(re)) out.push({ file, body: m[0] });
   }
   return out;
@@ -71,17 +93,29 @@ describe("AGN-3 · the reader-degrade invariant", () => {
     expect(
       found.length,
       "no safe()/skipMissing() helpers matched — the sweep is broken, not the estate clean",
-    ).toBeGreaterThanOrEqual(5);
+    ).toBeGreaterThanOrEqual(4);
   });
 
-  it("🔴 no helper swallows EVERY error — a bare `catch` hides 500s, timeouts and outright bugs", () => {
-    const bare = helpers().filter((h) => /catch\s*(\(\s*\w*\s*\))?\s*\{\s*return/.test(h.body) && !/instanceof/.test(h.body));
+  it("🔴 no NEW helper swallows every error — a bare `catch` hides 500s, timeouts and outright bugs", () => {
+    const bare = helpers()
+      .filter((h) => /catch\s*(\(\s*\w*\s*\))?\s*\{\s*return/.test(h.body) && !/instanceof/.test(h.body))
+      .map((h) => h.file)
+      .filter((f) => !(f in BARE_CATCH_KNOWN));
     expect(
-      bare.map((h) => h.file),
+      bare,
       "these helpers degrade on ANY exception. That is not a refusal policy, it is a blindfold: a " +
         "5xx, a network timeout and a JSON parse error all render as 'there is nothing here'. " +
         "Discriminate on PlatformError.status, as adminData.ts's skipMissing() does.",
     ).toEqual([]);
+  });
+
+  it("the bare-catch allow-list has no stale entries either", () => {
+    const bare = new Set(
+      helpers()
+        .filter((h) => /catch\s*(\(\s*\w*\s*\))?\s*\{\s*return/.test(h.body) && !/instanceof/.test(h.body))
+        .map((h) => h.file),
+    );
+    expect(Object.keys(BARE_CATCH_KNOWN).filter((f) => !bare.has(f))).toEqual([]);
   });
 
   it("every helper that degrades a 403 is on the known list, with a recorded reason", () => {

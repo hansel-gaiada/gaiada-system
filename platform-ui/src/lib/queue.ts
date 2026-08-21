@@ -29,13 +29,31 @@ import { PM_STATUS_LADDER } from "./pmVocabulary";
 import type { PmHomeProps, PmHomeTask, PmHomeStatusGroup } from "@/components/pm/PmHome";
 import type { PmCounterValues } from "@/components/pm/PmCounters";
 
+/**
+ * ⚠ A THIRD NAME FOR THE DEGRADE PATTERN, AND A KNOWN LIMITATION (AGN-3).
+ *
+ * The reader-degrade sweep looked for `safe()` and `skipMissing()`; this is the same shape called
+ * `settle()`, which is why it was missed for so long — and its original comment described the whole
+ * defect chain approvingly: "The underlying readers already degrade 404/403 to [] themselves; this
+ * is the outer net for anything else." Those readers no longer do (AGN-3 gave them `ReadResult`),
+ * so this net now catches only genuine transport failures, which is what it should always have been.
+ *
+ * WHY IT IS KEPT AT ALL: the queue aggregates six independent sources, and UX-2 §1.5 is explicit
+ * that one dead source must not blank the whole queue. That requirement is right, and it conflicts
+ * with "never render an empty list you cannot vouch for" — so both cannot be fully satisfied by a
+ * helper at this level.
+ *
+ * 🔴 THE LIMITATION, STATED RATHER THAN HIDDEN: this queue can be SHORT without saying so. A refused
+ * or failed source drops out, the remaining items render, and nothing tells the viewer that "work
+ * waiting for you" is now a partial answer. For a QUEUE that is a consequential silence — the whole
+ * point of the surface is that an empty one means "you are done". Fixing it needs a queue-level
+ * partial-result indicator (which sources answered), not another try/catch; that is a surface change
+ * and is deliberately NOT smuggled in here. Tracked in `readerDegrade.test.ts`'s known list.
+ */
 async function settle<T>(p: Promise<T[]>): Promise<T[]> {
   try {
     return await p;
   } catch {
-    // Never let one failing source blank the whole queue (UX-2 §1.5 "Error
-    // (one source fails)"). The underlying readers already degrade 404/403 to
-    // [] themselves; this is the outer net for anything else (timeout, 500).
     return [];
   }
 }
@@ -216,7 +234,11 @@ export async function getMyWorkQueue(
         const [approvals, automation, gates, tasks, pmTasks, notifications] = await Promise.all([
           settle(getPendingApprovals(userId, [c])),
           settle(listAutomationApprovals(userId, c.id, { status: "pending" })),
-          settle(listInternalPendingGates(userId, c.id)),
+          // AGN-3: `listInternalPendingGates` now returns a discriminated result. Unwrapped here
+          // because the queue deliberately survives one dead source (UX-2 §1.5) — but see the
+          // KNOWN LIMITATION on `settle()` below: the queue still cannot say it is INCOMPLETE, so a
+          // refused gates read silently shortens "work waiting for you" rather than flagging it.
+          settle(listInternalPendingGates(userId, c.id).then((r) => (r.kind === "ok" ? r.data : []))),
           settle(getMyTasks(userId, c.id)),
           settle(listAllPmTasks(userId, c.id, { assignee: "me" })),
           settle(listNotifications(userId, c.id, true)),

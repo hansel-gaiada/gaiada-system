@@ -9,6 +9,7 @@ import { listClients, listProjects } from "@/lib/entities";
 import { decideGateAction } from "@/lib/pipelineActions";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { DataTable, type Column } from "@/components/data/DataTable";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { StartRunPanel } from "@/components/pipeline/StartRunPanel";
@@ -43,8 +44,10 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
   // the alternative is fetching the 200-row cap and hiding most of it in the browser, which stops
   // being a filter the moment there are more than 200 runs. Search + sort over the returned page are
   // DataTable's, which is the right place for them.
-  const [runs, gates, recordings, clients, projects] = await Promise.all([
+  const [runsResult, gatesResult, recordings, clients, projects] = await Promise.all([
     listPipelineRuns(userId, tenant, { status: status || undefined, clientId: clientFilter || undefined }),
+    // AGN-3: gates drive the "waiting on you" strip. A refusal must not read as "nothing waiting",
+    // so it is surfaced beside the strip rather than unwrapped into an empty one.
     listInternalPendingGates(userId, tenant),
     // Still fetched, but only for the MEETING title column now — not to reconstruct the client.
     // AGN-3: recordings ENRICH this view (a crumb/link), they are not its subject. A refusal here
@@ -55,6 +58,20 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
     listClients(userId, tenant),
     listProjects(userId, tenant),
   ]);
+  // AGN-3: the run list IS this page's subject, so a refusal takes the page rather than rendering an
+  // empty table that asserts "no runs".
+  if (runsResult.kind === "forbidden") {
+    return <ReadRefusal subject="the delivery pipeline for this company" kind="forbidden" />;
+  }
+  if (runsResult.kind === "unavailable") {
+    return <ReadRefusal subject="The delivery pipeline" kind="unavailable" reason={runsResult.reason} />;
+  }
+  const runs = runsResult.data;
+  // Gates are a STRIP on this page, not its subject: an unreadable gate list must not silently read
+  // as "nothing waiting on you", but it also must not hide the runs, so it renders inline below.
+  const gates = gatesResult.kind === "ok" ? gatesResult.data : [];
+  const gatesRefusal = gatesResult.kind === "ok" ? null : gatesResult;
+
   const mayDecide = can(me, "approvals.decide", tenant);
 
   const clientNameById = new Map(clients.map((c) => [c.id, c.name]));
@@ -95,8 +112,23 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
         </p>
       </div>
 
-      <Card title="Awaiting internal review" headerRight={<span className="dash-pending-chip">{gates.length} PENDING</span>}>
-        {gates.length === 0 ? (
+      <Card
+        title="Awaiting internal review"
+        // AGN-3: the chip asserted "0 PENDING" even when the gate read had been refused. A count is a
+        // claim; when we cannot count, the honest chip is a dash, not a zero.
+        headerRight={<span className="dash-pending-chip">{gatesRefusal ? "—" : `${gates.length} PENDING`}</span>}
+      >
+        {gatesRefusal ? (
+          // Was: "No prototypes or builds waiting on your review." — a statement that the viewer is
+          // DONE, rendered on the strength of a denial. That is the exact criterion-5 failure, on a
+          // surface whose whole purpose is telling someone whether they have work.
+          <ReadRefusal
+            subject="reviews waiting on you"
+            kind={gatesRefusal.kind}
+            reason={gatesRefusal.kind === "unavailable" ? gatesRefusal.reason : undefined}
+            inline
+          />
+        ) : gates.length === 0 ? (
           <EmptyNote>No prototypes or builds waiting on your review.</EmptyNote>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>

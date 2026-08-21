@@ -61,7 +61,18 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
   const tenant = await getActiveTenant(me);
   if (!tenant) redirect("/pipeline");
 
-  const run = await getPipelineRun(userId, tenant, runId);
+  const runResult = await getPipelineRun(userId, tenant, runId);
+  // AGN-3: `notFound()` was being returned for a DENIAL too, so a viewer without access was told the
+  // run does not exist. This page already draws exactly this distinction for its PROJECT read (see
+  // `projectRefused` below) — it just could not draw it for the run itself until the reader could
+  // say which non-answer it got.
+  if (runResult.kind === "forbidden") {
+    return <ReadRefusal subject="this pipeline run" kind="forbidden" />;
+  }
+  if (runResult.kind === "unavailable") {
+    return <ReadRefusal subject="This pipeline run" kind="unavailable" reason={runResult.reason} />;
+  }
+  const run = runResult.data;
   if (!run) notFound();
 
   const mayDecide = can(me, "approvals.decide", tenant);

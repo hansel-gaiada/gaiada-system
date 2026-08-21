@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -24,7 +25,17 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
   const { deptId } = await params;
   if (!tenant) notFound();
 
-  const runs = await listPipelineRuns(userId, tenant);
+  // AGN-3: the run list is this page's subject, so a refusal is stated rather than rendered as an
+  // empty PRD list — "this department has produced nothing" is a very different claim from "you may
+  // not see what it produced".
+  const runsResult = await listPipelineRuns(userId, tenant);
+  if (runsResult.kind === "forbidden") {
+    return <ReadRefusal subject="this department's delivery runs" kind="forbidden" />;
+  }
+  if (runsResult.kind === "unavailable") {
+    return <ReadRefusal subject="This department's delivery runs" kind="unavailable" reason={runsResult.reason} />;
+  }
+  const runs = runsResult.data;
   // WD-07: resolve each run's source recording so "Source meeting" is a clickable chip back into
   // the registry, not just a raw meetingId string — the same recording<->run link WD-02 draws in
   // the run workspace, just the other direction.

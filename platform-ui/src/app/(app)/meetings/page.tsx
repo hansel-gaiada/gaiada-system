@@ -52,7 +52,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: SP 
   // WD-07: run-status chips — the recording's own status only says "in pipeline"; resolve the
   // linked run's actual delivery status too, so the registry answers "what's happening with it
   // now" without a click-through. Cheap: one extra list call, not per-row.
-  const runs = recordings.some((r) => r.pipeline_run_id) ? await listPipelineRuns(userId, tenant) : [];
+  // AGN-3: run statuses ENRICH the registry rows (a chip); the recordings themselves are the
+  // subject and are already guarded above. A refusal here costs the chip, not the page — see the
+  // note in pipeline/page.tsx on why every unwrap is documented rather than silent.
+  const runs = recordings.some((r) => r.pipeline_run_id)
+    ? await listPipelineRuns(userId, tenant).then((r) => (r.kind === "ok" ? r.data : []))
+    : [];
   const runStatusById = new Map(runs.map((r) => [r.id, r.status]));
 
   return (

@@ -1,4 +1,5 @@
 import "server-only";
+import { readResult, type ReadResult } from "./readResult";
 // WS11 meeting-to-delivery pipeline — data layer for the internal ADNARA dashboard + gate inbox.
 // Thin readers over the platform pipeline API (0017 / PipelineController). Every reader DEGRADES
 // gracefully (return []/null on 404/403) so the page ships ahead of any missing backend — same
@@ -117,15 +118,6 @@ export function humanizeStageName(name: string): string {
     .join(" ");
 }
 
-async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await p;
-  } catch (e) {
-    if (e instanceof PlatformError && (e.status === 404 || e.status === 403)) return fallback;
-    throw e;
-  }
-}
-
 // C1: the controller accepts `status`, `clientId` and `projectId` (plus `sourceMeetingId`, not
 // surfaced here — that's the hub's own lookup path). Narrowing happens SERVER-side; the alternative
 // was fetching the 200-row cap and hiding most of it in the browser, which is not a filter.
@@ -134,22 +126,33 @@ export async function listPipelineRuns(
   userId: string,
   tenant: string,
   opts: { status?: string; clientId?: string; projectId?: string } = {},
-): Promise<PipelineRun[]> {
+): Promise<ReadResult<PipelineRun[]>> {
   const q = new URLSearchParams();
   if (opts.status) q.set("status", opts.status);
   if (opts.clientId) q.set("clientId", opts.clientId);
   if (opts.projectId) q.set("projectId", opts.projectId);
   const qs = q.toString();
-  return safe(platformFetch<PipelineRun[]>(`/api/${tenant}/pipeline/runs${qs ? `?${qs}` : ""}`, userId), []);
+  // AGN-3: a refused run list is no longer the same value as "this company has run nothing".
+  return readResult(platformFetch<PipelineRun[]>(`/api/${tenant}/pipeline/runs${qs ? `?${qs}` : ""}`, userId), {
+    absentAsEmpty: [],
+  });
 }
 
-export async function getPipelineRun(userId: string, tenant: string, runId: string): Promise<PipelineRunDetail | null> {
-  return safe(platformFetch<PipelineRunDetail>(`/api/${tenant}/pipeline/runs/${runId}`, userId), null);
+export async function getPipelineRun(userId: string, tenant: string, runId: string): Promise<ReadResult<PipelineRunDetail | null>> {
+  // 404 on one run is a real answer ("no such run") and stays inside `ok` as null; 403 is not.
+  return readResult(platformFetch<PipelineRunDetail>(`/api/${tenant}/pipeline/runs/${runId}`, userId), {
+    absentAsEmpty: null,
+  });
 }
 
 /** The internal review inbox: pending gates the client does NOT own (pm_review / pm_approval / prd_review). */
-export async function listInternalPendingGates(userId: string, tenant: string): Promise<PipelineGate[]> {
-  return safe(platformFetch<PipelineGate[]>(`/api/${tenant}/pipeline/gates?status=pending&actorSide=internal`, userId), []);
+export async function listInternalPendingGates(userId: string, tenant: string): Promise<ReadResult<PipelineGate[]>> {
+  // ⚠ This feeds a "work waiting for you" count. Degrading a refusal to [] told the viewer there
+  // was NOTHING TO DO, which is the most consequential possible way to be wrong about a queue.
+  return readResult(
+    platformFetch<PipelineGate[]>(`/api/${tenant}/pipeline/gates?status=pending&actorSide=internal`, userId),
+    { absentAsEmpty: [] },
+  );
 }
 
 // ---- Pure helpers for the run workspace (WD-02) — no fetch, easy to unit test ----
