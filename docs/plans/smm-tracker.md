@@ -30,7 +30,7 @@ not afterwards.
 |---|---|---|
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
-| P2 inbox + client approval | **2** | 6 |
+| P2 inbox + client approval | **3** (SMM-15 landed 2026-08-21) | 6 |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
 | P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
@@ -135,10 +135,109 @@ commit made in the same turn" cross-session hazard — the merge orchestrator re
 |---|---|---|---|
 | SMM-31 | Client review backend: `social_post_client_reviews` state machine, portal decide, `portal.approve_post`, idempotent decision | ✅ **merged** | backend DEV-VERIFIED; **318 / 0 / 0** re-run on `main` by the orchestrator, `tsc` clean. UI is SMM-32's, tracked separately |
 | SMM-32 | Client review portal UI: preview + approve / request-changes | ✅ **merged** | UI DEV-VERIFIED — 2392 / 0 / 0 platform-ui, `tsc` clean; browser-driven (see evidence below) |
-| SMM-15 | Inbox sync (`pullInbox`, idempotent upsert) | ⬜ | **SMM-38** — Postiz has ZERO inbound surface (OQ-4) |
-| SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ⬜ | SMM-15 |
-| SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ⬜ | SMM-15; should set `neverAutoRetry` |
-| SMM-18 | Inbox tab UI: triage queue, thread view, SLA timers | ⬜ | SMM-15/16/17 |
+| SMM-15 | Inbox sync (`pullInbox`, idempotent upsert) | ✅ **merged** | backend DEV-VERIFIED, evidence below — **502 / 0 / 5** (baseline 494/0/5), `tsc` clean |
+| SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ⬜ | SMM-15 (now unblocked) |
+| SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ⬜ | SMM-15 (now unblocked); should set `neverAutoRetry` |
+| SMM-18 | Inbox tab UI: triage queue, thread view, SLA timers | ⬜ | SMM-15 (now unblocked)/16/17 |
+
+**SMM-15 evidence (2026-08-21, medior).** Worktree was already at the SMM-38e closing-pass merge
+commit at cut time (`git log --oneline -1` matched; `git merge-base --is-ancestor HEAD main`
+confirmed) — no merge was needed, stated rather than assumed. `publisher/linkedin-client.ts`,
+`publisher/direct.ts`'s `NETWORK_CAPABILITIES`, and `retention-policy.ts` were all present.
+
+New file `platform-nest/src/modules/social/inbox-sync-job.ts` (`pullTenantInbox`/`runInboxPull`/
+`startInboxPullLoop`, the `smm-inbox-pull` flow). No migration — 0105/0113's existing tables and
+retention columns already carry the shape needed.
+
+**Per-post iteration, exactly as 38c named it.** `listComments(org, integrationId, since)` is called
+ONCE PER `social_post_variants` row that carries a `provider_post_id` (never once per account) —
+`integrationId` is that post's own provider id. The read query joins
+`social_post_variants → social_accounts → social_publisher_orgs`, filtered to `status='published'`,
+`provider_post_id IS NOT NULL`, a connected account, and within `config.social.inboxPull.lookbackDays`
+(default 30, an operational parameter mirroring `metrics-job.ts`'s own lookback reasoning, never a
+business number).
+
+**The cursor is per (account, post), not global.** The existing thread's `last_message_at` when a
+thread already exists for that (account, providerPostId) pair, else the post's own `published_at` —
+no comment can predate its post, so this needs no new column. Advances automatically: the next
+sweep's write updates `last_message_at` via `GREATEST(existing, new)`, so the next read's cursor
+naturally moves forward. Proven in a dedicated test (see below), not merely asserted.
+
+**Idempotency: 0105's own two unique keys, never a job-invented one.** `social_inbox_threads`'
+`UNIQUE(account_id, external_thread_id)` (ON CONFLICT ... DO UPDATE, guarding the excerpt/author
+columns against an already-purged thread — see below) and `social_inbox_messages`'
+`UNIQUE(thread_id, external_id) WHERE external_id IS NOT NULL` (ON CONFLICT ... DO NOTHING). **Run
+twice, one row, proven**: the test pulls the identical batch twice and asserts exactly one thread and
+one message row exist after both runs, the second run reporting `messagesWritten: 0` for the
+already-seen comment.
+
+**Rows satisfy LinkedIn's 24h/48h purge without touching the purge.** `upsertInboxItems` writes the
+SAME columns `inbox-retention-job.ts#purgeInboxRetention` already scrubs generically for any
+documented-retention network. The one real interaction: 0113's own state-law CHECKs
+(`sit_profile_purge_scrubs_author`/`sit_activity_purge_scrubs_excerpt`) forbid a fresh excerpt/author
+on a thread whose purge marker is already set — the upsert's `ON CONFLICT` clause is
+`CASE WHEN ...purged_at IS NULL THEN <new value> ELSE <existing, stays NULL> END` for exactly those
+two columns, so it can never violate the CHECK. Individual MESSAGE rows carry no such guard (each is
+a fresh row with its own `created_at`/purge clock) — proven against a hand-seeded, already-purged
+thread: the thread's excerpt stays NULL, the new message's body lands intact.
+
+**Quota-aware without an invented number.** `config.social.inboxPull.maxPostsPerAccountPerRun`
+(default 20) caps how many posts ONE sweep asks about per account, newest-first — a SELF-IMPOSED
+safety valve the config comment names explicitly as NOT a claimed LinkedIn/YouTube rate limit (D-23:
+neither is published anywhere reachable without a live Developer Portal session). Proven: seeding 5
+eligible posts with the cap set to 2 examines exactly 2.
+
+**Unsupported vs empty — the ticket's own named distinction.** `resolvePublisherForCapability` does
+not itself check whether the DEFAULT-resolved driver (no config override — every deployment today)
+actually advertises `inbox_read`; that check belongs to the caller per `listComments`'s own "absent
+member ⇒ nothing to check" contract. `pullTenantInbox` checks
+`driver.capabilities.has("inbox_read") && typeof driver.listComments === "function"` before ever
+calling, and an account that fails this is counted `unsupported` — proven distinct from a supported
+account that genuinely has zero new comments (counted as `posts` examined, `unsupported: 0`). A
+`capability_unsupported` refusal raised one layer up by the registry's own eager, data-driven check
+(a misconfigured override) is folded into the same honest counter.
+
+**The scheduled flow (`smm-inbox-pull`).** Env-gated via new `config.social.inboxPull` block
+(`pullEnabled`/`pullIntervalMs`/`lookbackDays`/`maxPostsPerAccountPerRun`), dark by default — the SAME
+`withGlobal` (tenant list) → per-tenant `withTenants([tenantId])` transaction → per-tenant
+try/catch-and-log shape `inbox-retention-job.ts`/`metrics-job.ts` already use. `main.ts` was **not**
+edited (off-limits to this ticket) — the exact line for the orchestrator to add, alongside the
+existing `inboxRetention`/`reconcileEnabled` gates:
+```ts
+if (config.social.inboxPull.pullEnabled) {
+  startInboxPullLoop(config.social.inboxPull.pullIntervalMs);
+  console.log(`social inbox pull (smm-inbox-pull) on: every ${config.social.inboxPull.pullIntervalMs}ms`);
+}
+```
+plus the import: `import { startInboxPullLoop } from "./modules/social/inbox-sync-job";`
+
+**The module GUC — self-declared, regression-pinned.** `upsertInboxItems` calls
+`declareSocialModuleScope` before touching a row; the module-GUC regression test calls it on a
+caller-side transaction with NO `{modules:['social']}` option and asserts a real row exists
+afterward — fails with "threadsWritten: 0" if that declaration is ever removed.
+
+**A locally-scoped test driver, not `mock-driver.ts`.** That file (off-limits, read-only) has no
+per-post-configurable `listComments` stub — `inbox-sync-job.test.ts` builds its own small
+`SocialPublisher` shape scoped to the file, so no shared module-level mock state can leak between
+`it()`s in file-declaration order (this file's own recurring defect class #7).
+
+Test counts: **502 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `social-client-review-portal.controller.test.ts` (baseline **measured directly** by stashing this
+ticket's changes: **494 / 0 / 5**, matching the 38e closing pass's own stated figure; +8 new, all in
+`inbox-sync-job.test.ts`, also re-run ALONE afterward — 8/8 green — ruling out the shared-test-Postgres
+phantom-failure class this file names). `tsc --noEmit` clean.
+`lint:postiz-deps`/`lint:withtenants`/`lint:migration-rls`/`lint:migration-names` all green (no
+migration — still 127 files). `test:iam-chain-alignment` not re-run (no Cerbos/IAM change; no MCP
+tool declared — this is a process-level scheduled sweep with no tool of its own, the same shape
+`metrics-job.ts`/`inbox-retention-job.ts` already use).
+
+**Anything the spec did not answer, named rather than silently decided:** (1) SMM-16/17/18 remain
+unbuilt, so this ticket writes rows no UI yet renders; (2) `social_inbox_messages.source`'s CHECK
+admits only `'postiz_sync'`/`'reply'` — every inbound sync, `direct`-routed or not, is written as
+`'postiz_sync'` because that is the only inbound token the CHECK admits (a naming quirk, not a schema
+gap needing a migration — flagged rather than silently worked around); (3) whether a `dismissed`/
+`closed` thread should ever reopen when fresh comments arrive is left to SMM-16/17/18 — this sync
+never touches `status` on conflict, so it cannot silently reopen a thread a human closed on purpose.
 
 **SMM-31 evidence (2026-08-20, senior-be):** schema/IAM already seeded (0105/0106) — no migration, no
 Cerbos change this pass. Built: staff request/read/withdraw (`social.controller.ts`, idempotent

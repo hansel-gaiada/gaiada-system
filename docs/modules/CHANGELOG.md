@@ -129,6 +129,23 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-15**, `social-media 0.5.11 -> 0.5.12` (IN PROGRESS, medior). `pullInbox` —
+  idempotent, per-post comment sync into `social_inbox_threads`/`social_inbox_messages`, unblocked by
+  SMM-38c's LinkedIn `pullComments`. New `inbox-sync-job.ts`; no migration. Walks
+  `social_post_variants` rows carrying a `provider_post_id`, calling `listComments` once per post (the
+  port's own per-post keying), cursored on each thread's `last_message_at`. Idempotent on 0105's own
+  two unique keys, proven by running the same pull twice (one thread, zero duplicate messages). Quota
+  bounded by a SELF-IMPOSED `maxPostsPerAccountPerRun` cap (never an invented vendor limit — neither
+  network's Standard-tier rate limit is published, D-23). Distinguishes `unsupported` (driver lacks
+  `inbox_read`) from a genuinely empty pull — both proven separately. Writes respect 0113's own
+  purge-marker CHECKs (never re-populate an already-purged thread's excerpt) without any purge-side
+  change. Module-GUC self-declared and regression-pinned. Test counts: **502/0/5** (baseline
+  **494/0/5**, measured directly by stashing this ticket's changes; +8 new, all in the new
+  `inbox-sync-job.test.ts`, also re-run alone). `tsc --noEmit` clean; all four migration/withTenants
+  linters green (no migration). `main.ts` NOT edited (off-limits) — the wiring line is reported to the
+  orchestrator. Full detail: `docs/modules/MODULES.md`'s social-media 0.5.12 entry,
+  `docs/plans/smm-tracker.md`'s P2 row.
+
 - **2026-08-21 — SMM-38e closing pass**, `social-media 0.5.10 -> 0.5.11` (IN PROGRESS, senior-be). The
   two gaps 38e's own evidence reported to the architect rather than deciding, both closed by
   ADDITIVE, OPTIONAL port members (`types.ts`) — never a special case in `dispatch.ts`, never a
