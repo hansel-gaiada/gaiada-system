@@ -232,7 +232,7 @@ export async function upsertInboxItems(
       const res = await c.query(
         `INSERT INTO social_inbox_messages
            (tenant_id, thread_id, direction, external_id, body, author_handle, posted_at, source, origin_site)
-         VALUES ($1,$2,'in',$3,$4,$5,$6,'postiz_sync','central')
+         VALUES ($1,$2,'in',$3,$4,$5,$6,'direct_sync','central')
          ON CONFLICT (thread_id, external_id) WHERE external_id IS NOT NULL DO NOTHING`,
         [tenantId, threadId, item.externalId, item.body, item.authorHandle ?? null, item.postedAt],
       );

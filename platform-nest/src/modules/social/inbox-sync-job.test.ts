@@ -218,7 +218,7 @@ describe.skipIf(!TEST_URL)("SMM-15 · inbox-sync-job — pullInbox into social_i
     const messages = await readMessages(A, threads[0].id);
     expect(messages).toHaveLength(1);
     expect(messages[0].body).toBe("nice post!");
-    expect(messages[0].source).toBe("postiz_sync");
+    expect(messages[0].source).toBe("direct_sync");
   });
 
   // ══ (T2) IDEMPOTENT — run the SAME pull twice, prove exactly ONE thread / ONE message row ══════

@@ -101,6 +101,8 @@ export const socialModule: ModuleContract = {
     // SMM-38/38e — `social_youtube_quota_usage`, Gap 3's durable YouTube quota counter (GLOBAL, no
     // RLS, same D-4 reasoning as social_platform_apps).
     "202608210411_social_youtube_quota_usage.sql",
+    // SMM-15 follow-up: social_inbox_messages.source named a path that cannot exist.
+    "202608211136_social_inbox_message_source_provenance.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
