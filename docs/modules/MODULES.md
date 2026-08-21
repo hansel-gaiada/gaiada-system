@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.32.0` | IN PROGRESS | WS1 | 2026-08-20 |
+| platform-nest | `0.33.0` | IN PROGRESS | WS1 | 2026-08-21 |
 | platform-ui | `0.28.4` | IN PROGRESS | WS5 | 2026-08-20 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.11.0` | PROTOTYPED | WS2 | 2026-08-20 |
@@ -59,7 +59,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.26.0` Â· PROTOTYPED
+## platform-nest â€” Platform Core Â· `0.33.0` Â· IN PROGRESS
 **0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
 maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
 now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,

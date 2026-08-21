@@ -524,6 +524,62 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.059.0116a` - 2026-08-21 - a principal discriminator, and a root boundary that holds
+
+Manifest (counter +2, 0114 -> 0116): `platform-nest 0.32.0 -> 0.33.0`, `social-media 0.5.10 -> 0.5.11`
+(landed separately). Migration: `202608201442_users_kind_discriminator.sql`.
+
+PK-01 gives `users` a kind, so the platform can finally tell a person from a workflow in the schema
+rather than by inference; PK-02 moves the people-shaped readers onto it, which un-erased every
+shared-service human from the directory of the company they serve and stopped 17 n8n accounts being
+listed as colleagues. Both are described in the platform-nest 0.33.0 entry above.
+
+**The larger part of this cut is fallout repair, and it is worth recording why it was invisible.**
+MON-00c root-bounded `group_executive` behind `variables.inRoot`, and `_variables.yaml` predicted the
+consequence in its own comment: the `has()` guard exists because "any test fixture that constructs the
+object directly has no `rootCompanies` key at all", and CEL then denies in a form that "makes every
+such denial look like a policy bug". It did — **25 test files**, presenting as `expected false to be
+true`, stray `403`s, and one `rows.find is not a function` where an endpoint returned an error object
+instead of an array. A principal whose only grant is GLOBAL has no membership, so no root resolves.
+Nineteen files re-anchored: in-memory fixtures explicitly, DB-backed suites via `home_company_id` —
+never by adding a membership, which would have placed the exec INSIDE the companies whose rollups,
+facts and headcounts those suites assert on, turning an authorization fix into a silent change to the
+data under test.
+
+A **second, separate** wall accounted for four more: MON-00b's `CrossRootTenantSetError` refuses a
+tenant set spanning two roots, and the RLS suites created two INDEPENDENT companies and authorized
+both. B became a subsidiary of A — one root, two tenants — rather than teaching ordinary
+tenant-isolation fixtures to pass `{ crossRoot: { reason } }`, which would erode the thing the wall
+is for. RLS is keyed on `tenant_id`, so isolation is still fully tested, and now has to hold between
+companies that DO share a root.
+
+Also fixed: `docs/MAP.md` documented UNCOMMITTED files (`import:nexus`, 128 migrations against HEAD's
+127), so `--check` could never pass; regenerated from a pristine `git archive HEAD`. And
+`SocialOAuthErrorFilter` was registered without updating the pin whose name is literally "adding one
+must be a deliberate edit here" — the pin worked, and the edit is now recorded.
+
+CI on `3973f3b`: the full workflow green — all ten jobs, `platform-nest` 371/373 files with 0 failed —
+for the first time since `1628c60`.
+
+### `Alpha 01.058.0114b` - 2026-08-20 - RETROACTIVE ENTRY: this shipped undocumented
+
+Manifest: counter unchanged at 0114, no module row bumped. Tag `alpha-01.058.0114b` points at
+`d59c730`, and **the live estate ran it** — so this entry exists because a deployed build must be
+reconstructible from this table, not because the cut was done properly.
+
+It was not. The VERSION bump reached `main` inside `d59c730`, a commit whose stated purpose was the
+`/api/rollups` authorization fix and which staged only `core.controller.ts`. Another session had
+VERSION **already staged in the shared index**, and `git commit` commits the index, not the paths you
+just added. So a release was cut with no CHANGELOG entry, no `MODULES.md` bump, and `platform-nest`
+still reading `0.32.0` while PK-01 and PK-02 were inside the build.
+
+Recorded rather than quietly folded into 0116a: `alpha-01.058.0114b` exists, is pushed, and ran in
+production, and pretending otherwise would break exactly the reconstructability this table promises.
+Its contents are the platform-nest 0.33.0 work minus the fixture repairs — which were test-only, so
+the shipped product code matches 0116a's. Verified live rather than assumed: 33 containers healthy,
+all 53 users' `home_company_id` populated, and a production Cerbos probe returning own-root ALLOW /
+foreign-root DENY.
+
 ### `Alpha 01.057.0114a` - 2026-08-20 - the platform can finally tell a human from their agent
 
 Manifest (counter +3, 0111 -> 0114): `platform-nest 0.31.0 -> 0.32.0`, `mcp-hub 0.10.3 -> 0.11.0`,
@@ -2413,6 +2469,48 @@ anywhere real.
 ---
 
 ## platform-nest
+### [0.33.0] - 2026-08-21 - IN PROGRESS (the principal discriminator, and the root boundary's fallout)
+- **PK-01 — `users.kind` (`employee|client|automation|bot`).** Authorization here is defined over
+  PRINCIPALS, so an n8n workflow has to be a `users` row to be authorized at all — which left
+  "principal" and "person" as different sets with nothing in the schema telling them apart. On
+  2026-08-03 HR reported 36 people when 19 were people and 17 were n8n service accounts. Backfilled
+  from evidence already in the DB, never from a guess.
+- 🔴 **Its own negative control found a defect in it.** The backfill was four sequential
+  `UPDATE ... WHERE kind <> ...` statements, each of which could only assign TOWARD a non-employee
+  kind — nothing could say "and otherwise you are an employee". After a deliberately GUC-blinded run
+  classified a staff member as `bot`, re-running the real block left them a `bot` **permanently**.
+  Rewritten as a single CASE: a total function of the evidence, so a wrong value self-heals, and
+  precedence is explicit rather than emergent from statement order.
+- **The design doc it implements was already stale.** It keys `client` on `clients.portal_user_id`,
+  which migration 0072 replaced and records as "written ONLY in testing/fixtures.ts and NULL for every
+  real client". Keying on the retired column alone would have classified ZERO real rows while looking
+  like it worked. `client_contacts` is the real source; both are read so fixture DBs classify as
+  production does.
+- **PK-02 — the people surfaces ask `users.kind`, not `company_memberships.kind`,** and that was
+  wrong in BOTH directions. TOO STRONG: the shared-service reconciler materializes a `kind='service'`
+  membership in the SERVED company for real placed STAFF, so filtering on the membership **erased
+  every shared-service human from the directory of the company they serve** — a colleague you cannot
+  find or assign work to, purely for having been lent out. TOO WEAK: `GET /:t/members` filtered
+  nothing at all unless `SERVICE_ASSIGNMENTS_ENABLED` was on (it is off by default), so the 17 n8n
+  accounts were listed as members. The two dimensions are now separated: `u.kind` = is this a person
+  (always); `m.kind` = is this placement ordinary (unchanged, still flag-gated). `isService` derives
+  from `users.kind`, so a shared-service HR manager stops being badged as a robot.
+- **`GET /api/rollups` authorizes against the caller's own ROOT company.** MON-00c gated the exec's
+  rollup rule on `variables.inRoot`, which reads `resource.attr.tenantId`; this endpoint passed no
+  tenantId at all, so the condition could not evaluate and a `group_executive` was denied outright on
+  the one endpoint that exists to serve them — returning an error object where callers expected an
+  array. Owner's ruling ("should be tenant id as we are using this for many company") implemented as
+  the caller's root, which `rootCompanies` always contains. **Rejected** the alternative of allowing
+  when tenantId is absent: that makes "omit the attribute" a way to skip a boundary check.
+- **A pool `error` listener (`attachPoolErrorHandler`).** `pg` emits `error` on the POOL when a backend
+  dies while its client is idle; with no listener that is an **uncaught exception**, so a Postgres blip
+  restarts the ERP. Found via a CI failure that read `Test Files 356 passed` / `Tests 5275 passed` /
+  `Errors 2` — every test green, exit 1.
+- Gates: `users-kind-discriminator.db.test.ts` 5/5 (re-executes the migration's own DO block read from
+  disk, so it cannot drift into testing a copy; runs as the app role because bypassing RLS would make
+  the zero-row trap invisible); `users-kind-readers.db.test.ts` 4/4 (asserts BOTH directions, each the
+  other's control); `cross-root-boundary.db.test.ts` 6/6 unchanged — the exec regains its own root and
+  nothing else. Live-probed against production Cerbos: own-root ALLOW, foreign-root DENY.
 ### [0.32.0] - 2026-08-20 - IN PROGRESS ([agent-attribution-gate] interim: writes name the agent, not only the human)
 - **`Principal.via = {provider, externalId, agent?}`.** Until now `Principal` carried
   userId · assurance · companies · roles · sessionVersion and NOTHING about the channel, so every
