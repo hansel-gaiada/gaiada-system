@@ -1,5 +1,5 @@
 // SMM-38 phase 38b — OAuth TOKEN CUSTODY for the `direct` driver (owner decision D-20, design
-// addendum §PD). Migration: `migrations/202608201518_social_oauth_tokens.sql` (`social_oauth_tokens`,
+// addendum §PD). Migration: `migrations/202608201519_social_oauth_tokens.sql` (`social_oauth_tokens`,
 // THIRD RLS wall — see that file's header for the wall justification).
 //
 // ── WHAT THIS FILE OWNS ──────────────────────────────────────────────────────────────────────────

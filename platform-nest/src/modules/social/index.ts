@@ -97,7 +97,7 @@ export const socialModule: ModuleContract = {
     // SMM-39 — `uploaded_media` column (already-uploaded engine media refs, kept out of args_sha256).
     "0118_social_variant_uploaded_media.sql",
     // SMM-38/38b — `social_oauth_tokens`, the `direct` driver's in-house token custody table.
-    "202608201518_social_oauth_tokens.sql",
+    "202608201519_social_oauth_tokens.sql",
     // SMM-38/38e — `social_youtube_quota_usage`, Gap 3's durable YouTube quota counter (GLOBAL, no
     // RLS, same D-4 reasoning as social_platform_apps).
     "202608210411_social_youtube_quota_usage.sql",

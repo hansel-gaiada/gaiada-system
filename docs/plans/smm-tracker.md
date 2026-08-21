@@ -263,7 +263,7 @@ that removes the AGPL zone, both fork exceptions and the inbox gap together.
 ⚠ 38b reverses D-5 (client tokens deliberately live *inside* Postiz so we never hold them). That is a
 security decision the owner accepted with D-20, not a convenience.
 
-**38b evidence (2026-08-20, senior-db).** Migration `202608201518_social_oauth_tokens.sql` (UTC
+**38b evidence (2026-08-20, senior-db).** Migration `202608201519_social_oauth_tokens.sql` (UTC
 timestamp scheme — sequential numbering is closed above 0118): new table `social_oauth_tokens`,
 THIRD RLS wall (`app_module_allowed('social')`, same as every social_* table except the portal-written
 `social_post_client_reviews` — this table's writers are all social-module code, never the portal, so
@@ -314,7 +314,7 @@ how/when `direct` first gets registered into `publisher/registry.ts` and whether
 `resolvePublisher`'s empty-registry heuristic still means what it means once it is.
 
 **38c evidence (2026-08-21, senior-integrator).** Worktree was cut BEFORE 38b (and SMM-21/23/20,
-SMM-33/24 docs) landed on `main` — `oauth-tokens.ts`, the `202608201518_social_oauth_tokens.sql`
+SMM-33/24 docs) landed on `main` — `oauth-tokens.ts`, the `202608201519_social_oauth_tokens.sql`
 migration, `registerTokenRefresher`, `storeOAuthGrant`/`resolveActiveAccessToken` were entirely
 ABSENT from this worktree at the start, exactly the "cut before a same-turn commit" hazard this file
 names four times over. Confirmed via `git merge-base HEAD main` (HEAD was a strict ancestor, 16
@@ -423,7 +423,7 @@ Full detail: `docs/modules/MODULES.md`'s social-media 0.5.8 entry.
 worktree-cut time (`git log -1` = `5ff9e6f merge: SMM-38c LinkedIn on the direct driver`;
 `git merge-base --is-ancestor HEAD main` confirmed HEAD an ancestor of `main`) — **no merge was
 needed**, flagged here per this file's own repeated cross-session-hazard rather than silently
-assumed. `oauth-tokens.ts`, `linkedin-*` and `202608201518_social_oauth_tokens.sql` were present from
+assumed. `oauth-tokens.ts`, `linkedin-*` and `202608201519_social_oauth_tokens.sql` were present from
 the start.
 
 **The `uploadMedia` collision — resolved exactly as instructed, port widened in one place, six files
