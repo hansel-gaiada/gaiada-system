@@ -1,3 +1,12 @@
+# ⚠ SUPERSEDED (MSO-00, 2026-08-21) — DO NOT bring this file up. It predates the WS9 stack
+# consolidation (2026-08-13) and the 2026-08-18 relocation. otel-collector + Prometheus now live
+# as described in docker-compose.observability.yml (collection, gda-aicenter) and
+# docker-compose.obs-remote.yml (storage, SumoPod `10.88.0.2:19090`). Not in the COMPOSE_FILES
+# repo variable; confirmed 2026-08-21 that nothing currently running on gda-aicenter was started
+# from it (docker ps -a shows no `gaiada-otel-metrics-*` container, only the leftover
+# `gaiada-otel-metrics_prometheus-data` VOLUME from when it last ran). Kept for provenance, not
+# deleted.
+#
 # OBS-01 (Tier 1) — otel-collector + Prometheus ONLY, run as their OWN compose project, attached
 # to the existing `gaiada` stack network as an external network. Same precedent as MAIL-02's
 # docker-compose.alertmanager-mail.yml: a separate compose project survives

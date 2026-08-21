@@ -114,6 +114,16 @@ exporters:
     endpoint: http://10.88.0.2:19090/api/v1/write
     tls:
       insecure: true
+    # MSO-01 (docs/plans/2026-08-21-multi-server-observability.md §4): every series from this
+    # collector was host-less, and BOTH node jobs (this box's and SumoPod's own) shared the
+    # identical instance label `node-exporter:9100` — the only thing telling them apart was a
+    # hand-added `host: sumopod` static label on the REMOTE side's own scrape config. A second
+    # agent-bundle host onboarded without a label here would emit LITERALLY IDENTICAL series and
+    # the remote store would interleave two hosts' samples into one series: corruption, not
+    # ambiguity. This makes gda-aicenter host #1 of the pattern rather than a special case.
+    external_labels:
+      host: gda-aicenter
+      env: production
     # DISABLED 2026-08-19. This promotes every resource attribute to a Prometheus label, and for
     # SCRAPED metrics the collector's prometheus receiver attaches a lot of them: http_scheme,
     # net_host_name, net_host_port, server_address, server_port, service_instance_id,
@@ -154,6 +164,18 @@ exporters:
       enabled: true
       storage: file_storage
       queue_size: 10000
+    # MSO-01: NOT mirrored with `external_labels` — verified live (`otelcol-contrib validate`,
+    # 2026-08-21) that this key does not exist on the otlphttp exporter's schema at all
+    # (prometheusremotewrite-only field; validate fails with "invalid keys: external_labels"). The
+    # design doc's plan to "mirror" host/env identity here was wrong about the mechanism: OTLP
+    # carries identity through RESOURCE ATTRIBUTES, which Prometheus's OTLP receiver then promotes
+    # to labels (see the MON-09p note above — that promotion is exactly what made switching to
+    # this exporter multiply cardinality by 8 extra labels). Adding host/env correctly here means
+    # a `resource` processor setting `host.name`/`deployment.environment` attributes on this
+    # pipeline specifically, scoped so it doesn't also leak onto the traces/logs pipelines that
+    # already carry their own resource attributes cleanly. Left undone: this exporter is
+    # unreferenced by any active pipeline (MON-09p is reverted), so there is no live gap today —
+    # tracked as a MON-09p follow-up rather than done speculatively here.
 
   otlp/tempo:
     endpoint: 10.88.0.2:4317

@@ -1,3 +1,10 @@
+# ⚠ SUPERSEDED (MSO-00, 2026-08-21) — DO NOT bring this file up. It predates the WS9 stack
+# consolidation (2026-08-13) and the 2026-08-18 relocation. Loki now lives only in
+# docker-compose.obs-remote.yml on the SumoPod VPS (project `gaiada-obs`, `10.88.0.2:13100`). Not
+# in the COMPOSE_FILES repo variable; confirmed 2026-08-21 that nothing currently running on
+# gda-aicenter was started from it (docker ps -a shows no `gaiada-loki-loki-*` container, only the
+# leftover `gaiada-loki_loki-data` VOLUME from when it last ran). Kept for provenance, not deleted.
+#
 # OBS-02 — Loki, run as its OWN compose project. Same precedent as MAIL-02's
 # docker-compose.alertmanager-mail.yml and OBS-01's docker-compose.otel-metrics.yml: a separate
 # compose project survives `docker compose -p gaiada ... up -d --remove-orphans` on the main

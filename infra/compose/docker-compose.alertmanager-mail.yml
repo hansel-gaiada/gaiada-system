@@ -1,3 +1,16 @@
+# ⚠ SUPERSEDED (MSO-00, 2026-08-21) — DO NOT bring this file up. Its own header text below is
+# stale: it says the full WS9 stack "is NOT up on gda-aicenter", which stopped being true when
+# docker-compose.observability.yml was consolidated into the main `gaiada` project (2026-08-13,
+# per that file's own history), and Alertmanager then moved OFF gda-aicenter entirely in the
+# 2026-08-18 relocation. Alertmanager now lives only in docker-compose.obs-remote.yml on the
+# SumoPod VPS (project `gaiada-obs`, `10.88.0.2:9093`). This file is NOT in the COMPOSE_FILES repo
+# variable and nothing currently running was started from it — confirmed 2026-08-21 (docker ps -a
+# on gda-aicenter shows no `gaiada-alertmanager-alertmanager-*` containers, only the leftover
+# `gaiada-alertmanager_alertmanager-config`/`-data` VOLUMES from when it last ran, pre-2026-08-13).
+# Kept in the repo for provenance only; not retired by deletion because deleting it does not
+# change any running state and a stray reference elsewhere is safer to find via grep than via a
+# missing file. Do not resurrect this path — use docker-compose.obs-remote.yml.
+#
 # MAIL-02 — Alertmanager (D15) run as its OWN compose project, attached to the existing `gaiada`
 # stack network as an external network. This is the n8n precedent (automation/docker-compose.yml):
 # a separate compose project survives `docker compose -p gaiada ... up -d --remove-orphans` on the

@@ -4,15 +4,17 @@
 # !override replaces the merged list instead of appending (Compose Spec, needs a recent compose).
 #   docker compose -f docker-compose.vps.yml -f docker-compose.local.yml -f docker-compose.devui.yml \
 #     -f docker-compose.observability.yml -f docker-compose.obs-local.yml up -d node-exporter
+#
+# MSO-00 (2026-08-21): the alertmanager override that used to live here is GONE. Alertmanager (and
+# the rest of storage/alerting) was removed from docker-compose.observability.yml — it only ever
+# ran locally there before the 2026-08-18 relocation moved it to the SumoPod VPS
+# (docker-compose.obs-remote.yml). An `!override` block targeting a service the base file no
+# longer defines does not patch anything; Compose would just create a bare half-service with no
+# image, which is worse than silently doing nothing. Local storage/alerting is not a supported
+# path any more — the local 16-container stack itself is OFF by owner decision (root CLAUDE.md,
+# "the server is the truth"), so this file's only remaining job is the node-exporter mount fix.
 name: gaiada
 services:
   node-exporter:
     volumes: !override
       - /:/host:ro
-
-  # Alertmanager's prod config needs Telegram/SMTP/dead-man's-switch creds we don't have locally →
-  # crash-loops on "missing bot_token". Mount a local ntfy-only config directly (no creds needed).
-  alertmanager:
-    volumes: !override
-      - ../../infra/observability/alertmanager/alertmanager.local.yml:/etc/alertmanager/alertmanager.yml:ro
-      - alertmanager-data:/alertmanager

@@ -1,9 +1,31 @@
-# WS9 Observability stack — merged into the `gaiada` compose project so it shares the network with
-# the core services. Bring the whole estate up WITH observability:
+# WS9 Observability — COLLECTION ONLY. Merged into the `gaiada` compose project so it shares the
+# network with the core services. Bring the whole estate up WITH observability:
 #   docker compose -f docker-compose.vps.yml -f docker-compose.observability.yml up -d
 # It is opt-in (kept in its own file like the separate automation stack) and adds no runtime
 # dependency to the data plane: services export telemetry only when OTEL_ENABLED=1 (see the core
-# compose env additions). Everything self-hosted, nothing published beyond localhost.
+# compose env additions).
+#
+# MSO-00 (2026-08-21, docs/plans/2026-08-21-multi-server-observability.md §1/§9): this file used to
+# ALSO define prometheus/grafana/loki/tempo/alertmanager(+render)/ntfy — the STORAGE + ALERTING
+# layer. The 2026-08-18 relocation (docs/plans/2026-08-18-observability-relocation.md) moved that
+# layer to the SumoPod VPS (`infra/compose/docker-compose.obs-remote.yml`, project `gaiada-obs`,
+# `10.88.0.2`) and stopped the local copies BY NAME, but never removed their service definitions
+# from this file — and this file has stayed in the `COMPOSE_FILES` repo variable the whole time, so
+# EVERY DEPLOY SINCE resurrected them. `alpha-01.059.0116a` did exactly that on 2026-08-19-ish,
+# leaving a second, disconnected Prometheus scraping 14 targets and evaluating the full rule set on
+# gda-aicenter for two days before this was caught. That zombie is a live trap: anyone probing
+# `:9090`/`:3001`/`:9093` on this box tests the WRONG stack.
+#
+# This file is now what it always should have been: the pieces that are BY DESIGN local to
+# gda-aicenter because they either scrape locally (otel-collector, node-exporter, cadvisor,
+# blackbox-exporter, the postgres/redis exporters) or run functional probes against this box
+# (synthetic-prober), plus the per-service OTEL_ENABLED merge-overrides. No storage, no query UI,
+# no alerting lives here. Grafana/Prometheus/Loki/Tempo/Alertmanager are reached at `10.88.0.2` —
+# see docker-compose.obs-remote.yml on the SumoPod side for that half.
+#
+# `COMPOSE_FILES` needed NO change for this split: the filename is unchanged, only its content —
+# so the existing repo variable (`-f docker-compose.vps.yml -f docker-compose.hostdata.yml
+# -f docker-compose.observability.yml`) already points at the corrected file once this ships.
 name: gaiada
 
 services:
@@ -36,120 +58,11 @@ services:
       # and a silent gap looks identical to a quiet system.
       - otel-queue:/var/lib/otelcol/queue
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    depends_on:
-      - tempo
-      - loki
-
-  prometheus:
-    image: prom/prometheus:v3.1.0
-    restart: unless-stopped
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=15d"
-      - "--web.enable-lifecycle"
-    volumes:
-      - ../../infra/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ../../infra/observability/prometheus/rules:/etc/prometheus/rules:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "127.0.0.1:9090:9090" # localhost-only (SSH tunnel)
-
-  tempo:
-    image: grafana/tempo:2.7.0
-    restart: unless-stopped
-    command: ["-config.file=/etc/tempo/tempo.yaml"]
-    volumes:
-      - ../../infra/observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo-data:/var/tempo
-
-  loki:
-    image: grafana/loki:3.3.2
-    restart: unless-stopped
-    command: ["-config.file=/etc/loki/loki.yaml"]
-    volumes:
-      - ../../infra/observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
-      - loki-data:/loki
-
-  grafana:
-    image: grafana/grafana:11.4.0
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_ANALYTICS_REPORTING_ENABLED: "false"
-    volumes:
-      - ../../infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../../infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    ports:
-      - "127.0.0.1:3001:3000" # localhost-only (SSH tunnel); 3001 host to avoid clashing bot:3001 internal
-    depends_on:
-      - prometheus
-      - tempo
-      - loki
-
-  # --- Alerting: D15 multi-transport + dead-man's-switch. alertmanager.yml is env-templated. The
-  # prom/alertmanager image has no envsubst (it's not Alpine), so a one-shot init container renders
-  # the config into a shared volume before Alertmanager starts (standard init pattern). ---
-  alertmanager-render:
-    image: alpine:3.21
-    environment: &am_env
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      ALERT_CHAT_ID: ${ALERT_CHAT_ID:-0}
-      SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      # MAIL-02: defaults to Alertmanager's own secure default (true) so an unset var never
-      # silently disables TLS against a real relay; the dev-stage Mailpit sink sets this to
-      # "false" explicitly in the mail-dev environment.
-      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
-      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
-      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://ntfy/gaiada-alerts}
-      DEADMANSSWITCH_URL: ${DEADMANSSWITCH_URL:-}
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        apk add --no-cache gettext >/dev/null &&
-        mkdir -p /rendered/templates &&
-        cp /tpl/templates/* /rendered/templates/ &&
-        envsubst < /tpl/alertmanager.yml > /rendered/alertmanager.yml &&
-        echo "alertmanager config rendered"
-    volumes:
-      - ../../infra/observability/alertmanager/alertmanager.yml:/tpl/alertmanager.yml:ro
-      - ../../infra/observability/alertmanager/templates:/tpl/templates:ro
-      - alertmanager-config:/rendered
-
-  alertmanager:
-    image: prom/alertmanager:v0.28.0
-    restart: unless-stopped
-    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
-    environment: *am_env
-    volumes:
-      - alertmanager-config:/etc/alertmanager
-      - alertmanager-data:/alertmanager
-    ports:
-      # loopback-only (SSH tunnel) — mirrors prometheus:9090 and grafana:3001 above.
-      # This block was MISSING while alertmanager ran as its own project from
-      # docker-compose.alertmanager-mail.yml, which published it. Consolidating the two projects
-      # (2026-08-13) therefore silently removed the operator's only route to the Alertmanager UI —
-      # alerting kept working (Prometheus reaches `alertmanager:9093` on the compose network), so
-      # nothing broke loudly, but SILENCING an alert is done through this UI. An alerting system
-      # you cannot silence gets muted at the source instead, which is how alerting dies.
-      - "127.0.0.1:9093:9093"
-    depends_on:
-      alertmanager-render:
-        condition: service_completed_successfully
-
-  ntfy:
-    image: binwiederhier/ntfy:v2.11.0
-    restart: unless-stopped
-    command: ["serve"]
-    volumes:
-      - ../../infra/observability/ntfy/server.yml:/etc/ntfy/server.yml:ro
-      - ntfy-data:/var/cache/ntfy
+    # MSO-00: `depends_on: [tempo, loki]` was removed here. Both were LOCAL services before the
+    # relocation; this collector now ships traces/logs to 10.88.0.2 over the exporters in
+    # config.yaml, not to anything in this compose project. Left in place, this would have been a
+    # hard `docker compose config` error the moment prometheus/tempo/loki/grafana/alertmanager were
+    # deleted below (depends_on must name a service defined in the SAME project).
 
   # --- Exporters ---
   # MON-09j: the exporters must reach the DATABASE, and on gda-aicenter Postgres and Redis run
@@ -189,8 +102,10 @@ services:
       # Falls back to platform_app if PG_EXPORTER_PASSWORD is unset, so a box without the role
       # provisioned keeps the previous (reduced) behaviour instead of losing the exporter entirely.
       DATA_SOURCE_NAME: "postgresql://${PG_EXPORTER_USER:-gaiada_exporter}:${PG_EXPORTER_PASSWORD:-${PLATFORM_APP_PASSWORD}}@${PG_HOST:-postgres}:5432/gaiada_platform?sslmode=disable"
-    depends_on:
-      - prometheus
+    # MSO-00: `depends_on: [prometheus]` removed — prometheus is no longer a service in this
+    # project (it lives on obs-remote.yml/SumoPod now). This exporter is scraped BY the otel
+    # collector's prometheus/scrape receiver, not the other way round, so it never actually needed
+    # to wait on a Prometheus container in the first place.
 
   postgres-exporter-bot:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
@@ -358,11 +273,10 @@ services:
       OTEL_SERVICE_NAME: "bot-media-worker"
 
 volumes:
+  # MSO-00: prometheus-data/tempo-data/loki-data/grafana-data/alertmanager-data/
+  # alertmanager-config/ntfy-data removed — they belonged to the storage/alerting services deleted
+  # above, which now live only in docker-compose.obs-remote.yml on the SumoPod side. Those NAMED
+  # volumes still exist on gda-aicenter today, undeleted, holding real historical data. See the
+  # MSO-00 execution record in docs/plans/2026-08-21-multi-server-observability.md for the
+  # decommission status and why they were deliberately NOT dropped here.
   otel-queue:
-  prometheus-data:
-  tempo-data:
-  loki-data:
-  grafana-data:
-  alertmanager-data:
-  alertmanager-config:
-  ntfy-data:
