@@ -6,6 +6,7 @@ import { canManageIT } from "@/components/shell/nav";
 import { listAccounts, sortByUrgency, summarize, STATE_LABEL, STATE_HINT, type AccountState } from "@/lib/it-accounts";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { AccountActions } from "@/components/it/AccountActions";
 import { provisionAccount, disableAccount, enableAccount, resetAccountPassword } from "./actions";
 import "@/components/it/it.css";
@@ -43,23 +44,22 @@ export default async function ItAccountsPage({ searchParams }: { searchParams: S
 
   const result = await listAccounts(userId, tenant);
 
+  // Both branches now render through the shared `ReadRefusal` (plan action item 4) instead of this
+  // page's own prose. The wording it carries is this page's wording, generalised — the "this is not a
+  // statement that there is nothing here" sentence originated here and is the whole point of the
+  // component, so nothing was softened in the move.
   if (result.kind === "forbidden") {
-    return <EmptyNote>You don&apos;t have permission to see account provisioning for this company.</EmptyNote>;
+    return <ReadRefusal subject="account provisioning for this company" kind="forbidden" />;
   }
 
   if (result.kind === "unavailable") {
     return (
-      <Card title="Accounts unavailable">
-        <div style={{ display: "grid", gap: 10 }}>
-          <p style={{ font: "400 13px var(--font-body)", color: "var(--text-primary)", margin: 0 }}>
-            The worklist cannot be built right now, so <strong>this is not a statement that everyone has a
-            login</strong> — it is a statement that account state cannot be read.
-          </p>
-          <p style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-50)", margin: 0 }}>
-            {result.reason}
-          </p>
-        </div>
-      </Card>
+      <ReadRefusal
+        subject="The account worklist"
+        kind="unavailable"
+        reason={result.reason}
+        detail="An empty worklist would assert that everyone already has a login; that claim cannot be made while the identity provider is unreadable."
+      />
     );
   }
 

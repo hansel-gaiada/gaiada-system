@@ -38,6 +38,7 @@ import { listProvisionedSitesForRun } from "@/lib/webdevProvisionedSites-data";
 import { provisionSiteAction, reconcileSiteAction } from "@/lib/webdevProvisionedSitesActions";
 import { Card, Eyebrow, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ArtifactMarkdown } from "@/components/pipeline/ArtifactMarkdown";
 import { SiteRepoCard, type SiteListState } from "@/components/pipeline/SiteRepoCard";
@@ -189,7 +190,15 @@ export default async function PipelineRunPage({ params }: { params: Promise<{ ru
                 project ? (
                   <>Project: <Link href={`/projects/${run.project_id}`}>{project.name}</Link></>
                 ) : projectRefused ? (
-                  <>Project: you don&apos;t have access to it (it exists — ask an admin if you need it)</>
+                  // Shared refusal vocabulary (plan action item 4). `detail` carries this page's
+                  // original, better-informed sentence: here we KNOW the row exists, because the run
+                  // references it — so hedging about existence would be evasive rather than careful.
+                  <ReadRefusal
+                    subject="this run's project"
+                    kind="forbidden"
+                    detail="It exists — ask an admin if you need it."
+                    inline
+                  />
                 ) : (
                   <>Project: not found (id {run.project_id} — it may have been deleted)</>
                 )

@@ -113,3 +113,12 @@
   font: 400 13px/1.55 var(--font-body);
   color: var(--text-primary);
 }
+
+/* ReadRefusal — the "refused" / "cannot tell" state (plan action item 4). Neighbour to
+   .sys-empty-note ("genuinely nothing") and .sys-connection-state ("not wired up yet"); the copy is
+   what distinguishes them, so these classes stay deliberately plain. Tokens only: styles/tokens.test.ts
+   fails the build on a hex or rgb() anywhere in components/**.css. */
+.sys-refusal { display: grid; gap: 8px; }
+.sys-refusal--inline { gap: 6px; }
+.sys-refusal__copy { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.sys-refusal__reason { margin: 0; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-50); }
