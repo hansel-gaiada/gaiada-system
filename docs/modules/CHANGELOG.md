@@ -11,6 +11,26 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.29.1` — 2026-08-21 — the company report said its own name twice
+
+**Fixed**
+- **The duplicate was the SIDEBAR.** `0.29.0` removed the in-page H1/H2 pair; this removes the one
+  left behind — the sidebar pins the active company under a COMPANY label while the page title
+  printed `scopeName`, so the company name appeared twice on one screen. Title now states what the
+  page is. Project/department keep `scopeName` deliberately: those names are NOT in the sidebar.
+- **The demoted tail was still fourteen cards.** Bordered boxes read as fourteen competing objects,
+  and 14 into a 6-column track stranded two on a ragged last row — the border is what made the
+  raggedness visible (an empty cell is invisible, an absent box is a hole). Now a borderless stat
+  grid: tail 662px -> 118px, whole KPI block ~600px -> 234px on the live values.
+- **The cascade bug that hid both**: the compact rules were a single `.rc-kpi--compact` class
+  declared ABOVE the base `.rc-kpi` that carries `border` and `padding: 16px`. Equal specificity,
+  later declaration wins, so the band kept its boxes while the font sizes appeared to apply. Scoped
+  through the parent band now, order-independent.
+
+**Verified** — 20/20 overflow checks at 698/858/1116px, tsc clean, 2484/2484 tests, plus a
+dark-theme render of the real live values reviewed at each step (which is what caught the cascade
+bug, and rejected a full-width two-column row layout that measured WORSE than the grid).
+
 ### platform-ui `0.29.0` — 2026-08-21 — six pages that answer at a glance
 
 `/`, the four `/reports/*` grain pages and `/admin/users`. Diagnosed by driving the LIVE box, which
@@ -592,6 +612,18 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.061.0119a` - 2026-08-21 - the company report stops repeating itself
+
+Manifest (counter +1, 0118 -> 0119): `platform-ui 0.29.0 -> 0.29.1`. No migration.
+
+Follow-up to 01.060, from the owner looking at the live page and saying it still read as messy and
+still showed the company name twice. Both were real: the second duplication was page-title vs
+sidebar (not the H1/H2 pair already fixed), and the demoted KPI tail was still rendering as fourteen
+bordered cards because a one-class rule lost the cascade to the base `.rc-kpi` declared below it.
+
+The AGN-3 manifest caveat recorded against 01.060 is now RESOLVED: that seat committed
+`lib/people.ts`, so `platform-ui`'s registry lineage no longer runs ahead of its code.
 
 ### `Alpha 01.060.0118a` - 2026-08-21 - six pages that answer at a glance
 
