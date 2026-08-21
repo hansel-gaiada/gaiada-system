@@ -60,6 +60,10 @@ describe.skipIf(!TEST_URL)("A1 detective control — managed_by is reconciler-on
     memberRoleId = await createRole("member");
     await grantRole(superadmin, paRole, "global", null);
     await grantRole(globalExec, execRole, "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
+    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [A, globalExec]);
 
     app = await buildApp();
   });

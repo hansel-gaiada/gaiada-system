@@ -12,7 +12,7 @@ import {
 } from "../rollups/engine";
 import { resetModules } from "../modules/registry";
 import { clientWorkRollups } from "./client-work";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../testing/fixtures";
 import { withTenants } from "../db";
 
@@ -53,6 +53,11 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     await grantRole(member2, await createRole("member"), "company", co);
     await grantRole(viewer, await createRole("viewer"), "company", co);
     await grantRole(exec, await createRole("group_executive"), "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves from
+    // `users.home_company_id` or memberships, `rootCompanies` came back empty, `variables.inRoot` was
+    // false, and the exec's own rules denied. Anchored via home_company_id rather than a membership so
+    // the exec does not join the companies whose numbers these assertions check.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, exec]);
 
     projectId = await createProject(co, "Acme Rebrand");
     app = await buildApp();

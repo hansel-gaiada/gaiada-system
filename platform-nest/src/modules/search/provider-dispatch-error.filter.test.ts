@@ -197,6 +197,12 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
       // SMM-05: SocialPublisherErrorFilter, appended last and therefore CHECKED first — safe,
       // because @Catch(SocialPublisherError) is disjoint from every other type above.
       "SocialPublisherErrorFilter",
+      // SMM-38b (token custody): SocialOAuthErrorFilter. This entry is the "deliberate edit" this
+      // test's own name demands — the filter was registered in main.ts without updating the pin, so
+      // the pin did its job and failed. Recorded here rather than loosened: @Catch(SocialOAuthError)
+      // is disjoint from every type above, and LastResortExceptionFilter stays FIRST, which is the
+      // only ordering property that is load-bearing (pinned independently by the next test).
+      "SocialOAuthErrorFilter",
     ]);
   });
 

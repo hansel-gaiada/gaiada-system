@@ -15,7 +15,7 @@ import {
   recomputeRollups, syncMetricDefinitions, registerCoreRollupProvider, resetCoreRollupProviders, coreTaskRollups,
 } from "./rollups/engine";
 import { clientWorkRollups } from "./core/client-work";
-import { initTestDb, teardownTestDb, TEST_URL } from "./testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "./testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "./testing/fixtures";
 
 const PERIOD = "2026-07-05";
@@ -50,6 +50,10 @@ describe.skipIf(!TEST_URL)("agency first-deploy daily flow (e2e)", () => {
     await grantRole(u.approver, await createRole("member"), "company", co);
     await grantRole(u.approver, await createRole("agency_approver"), "company", co);
     await grantRole(u.exec, await createRole("group_executive"), "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
+    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, u.exec]);
     app = await buildApp();
   });
   afterAll(async () => {

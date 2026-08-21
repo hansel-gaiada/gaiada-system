@@ -13,7 +13,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { withGlobal, withTenants, newId } from "../db";
 import { buildApp } from "../main";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole } from "../testing/fixtures";
 import { registerModule, resetModules, getModule } from "../modules/registry";
 import { hrModule } from "../modules/hr";
@@ -115,6 +115,10 @@ describe.skipIf(!RUN)("ORG-14 pre-flag adversarial gate", () => {
     exec = await createUser("org14-exec@holding.test");
     const ge = await createRole("group_executive");
     await grantRole(exec, ge, "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
+    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [H, exec]);
 
     app = await buildApp();
   });

@@ -17,7 +17,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { buildApp } from "../../main";
 import { newId, withGlobal, withTenants } from "../../db";
 import { config } from "../../config";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
 import { reportsModule } from "./index";
 import { reconcileAssignment } from "../../admin/service-reconciler";
@@ -110,6 +110,10 @@ describe.skipIf(!TEST_URL)("⚡ TR-25 person-axis boundary (live PG + RLS + Cerb
     for (const u of [fran, ben, cora]) await grantRole(u, await createRole("member"), "company", co);
     await grantRole(admin, await createRole("company_admin"), "company", co);
     await grantRole(exec, await createRole("group_executive"), "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
+    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, exec]);
     await grantRole(hrReader, await createRole("hr_staff"), "company", co);
     await grantRole(hrOps, await createRole("hr_manager"), "company", co);
     await grantRole(otherLead, await createRole("manager"), "company", otherCo);

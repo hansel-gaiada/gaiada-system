@@ -249,6 +249,10 @@ describe.skipIf(!TEST_URL)("TR-07 fact job + recompute endpoint (live PG + RLS +
     await grantRole(admin, await createRole("company_admin"), "company", co);
     await grantRole(member, await createRole("member"), "company", co);
     await grantRole(exec, await createRole("group_executive"), "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
+    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, exec]);
 
     await withTenants([co], (c) =>
       c.query(`INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,'central')`, [

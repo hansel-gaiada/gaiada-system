@@ -13,7 +13,7 @@ import {
   resetCoreRollupProviders,
   coreTaskRollups,
 } from "./engine";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import {
   createCompany, createUser, addMembership, createRole, grantRole, createProject, createTask,
 } from "../testing/fixtures";
@@ -36,13 +36,21 @@ describe.skipIf(!TEST_URL)("rollups (D12)", () => {
     await syncMetricDefinitions();
 
     tenantA = await createCompany("Agency A");
-    tenantB = await createCompany("Resort B");
+    // MON-00b: `withTenants` refuses a tenant set spanning two roots, and the cross-company view
+    // below authorizes both at once. B is a SUBSIDIARY of A: one root, two tenants — which is what a
+    // holding's cross-company rollup actually is.
+    tenantB = await createCompany("Resort B", [], tenantA);
     exec = await createUser("exec@gaiada.test");
     member = await createUser("member2@a.test");
     await addMembership(tenantA, member);
     const execRole = await createRole("group_executive");
     const memberRole = await createRole("member");
     await grantRole(exec, execRole, "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves from
+    // `users.home_company_id` or memberships, `rootCompanies` came back empty, `variables.inRoot` was
+    // false, and the exec's own rules denied. Anchored via home_company_id rather than a membership so
+    // the exec does not join the companies whose numbers these assertions check.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [tenantA, exec]);
     await grantRole(member, memberRole, "company", tenantA);
 
     const pA = await createProject(tenantA, "P-A");

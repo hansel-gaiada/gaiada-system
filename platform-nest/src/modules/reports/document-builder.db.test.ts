@@ -18,7 +18,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withTenants } from "../../db";
-import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../../testing/setup";
 import { addMembership, createCompany, createProject, createRole, createUser, grantRole } from "../../testing/fixtures";
 import { recomputeFactWindow } from "./fact-job";
 import { recomputeRollups, syncMetricDefinitions } from "../../rollups/engine";
@@ -118,6 +118,10 @@ describe.skipIf(!TEST_URL)("TR-13 ReportDocument builder + endpoints (live PG + 
     await grantRole(bob, await createRole("member"), "company", co);
     await grantRole(admin, await createRole("company_admin"), "company", co);
     await grantRole(exec, await createRole("group_executive"), "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
+    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, exec]);
 
     await withTenants([co], (c) => c.query(`INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,'central')`, [co, JSON.stringify(ORG_BLOB)]));
 

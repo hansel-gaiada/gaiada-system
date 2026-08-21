@@ -5,7 +5,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { withTenants } from "../db";
 import { buildApp } from "../main";
-import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
+import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, addMembership, createRole, grantRole, createProject } from "../testing/fixtures";
 
 const svc = { authorization: "Bearer svc-token" };
@@ -47,6 +47,11 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
     // (same pattern as src/admin/org14-preflight-adversarial.test.ts's `exec` fixture).
     await grantRole(platformAdmin, await createRole("platform_admin"), "global", null);
     await grantRole(groupExec, await createRole("group_executive"), "global", null);
+    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves from
+    // `users.home_company_id` or memberships, `rootCompanies` came back empty, `variables.inRoot` was
+    // false, and the exec's own rules denied. Anchored via home_company_id rather than a membership so
+    // the exec does not join the companies whose numbers these assertions check.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [tenant, groupExec]);
     app = await buildApp();
 
     // A client + project + billable time in the period to invoice against.
