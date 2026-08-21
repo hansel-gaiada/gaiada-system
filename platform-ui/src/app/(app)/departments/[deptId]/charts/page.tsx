@@ -92,12 +92,17 @@ export default async function DepartmentChartsPage({ params }: { params: Params 
 
   const tagRows = unionTagBreakdown(owned.map((op, i) => ({ tasks: op.tasks, registry: tagsList[i] })));
 
+  // P5-C1 — no wrapping Card. The three figures each own one, so the page was nesting cards
+  // inside a card, and its title repeated the sub-tab that is already highlighted above it. The
+  // scope line that used to sit in that card header says something the tab cannot.
   return (
-    <Card
-      title="Charts"
-      headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{owned.length} project{owned.length === 1 ? "" : "s"}</span>}
-    >
-      <Charts kpis={kpis} flow={flow} burndownSeries={burndownSeries} burndownOverlay={bdOverlay} tagRows={tagRows} />
-    </Card>
+    <>
+      <p className="dept-timeline__facts">
+        <span className="dept-timeline__fact">{owned.length} project{owned.length === 1 ? "" : "s"} owned</span>
+        <span className="dept-timeline__fact"><span className="dept-timeline__fact-sep" aria-hidden>·</span>{allTasks.length} task{allTasks.length === 1 ? "" : "s"}</span>
+        <span className="dept-timeline__fact"><span className="dept-timeline__fact-sep" aria-hidden>·</span>{kpis.done} done</span>
+      </p>
+      <Charts kpis={kpis} flow={flow} burndownSeries={burndownSeries} burndownOverlay={bdOverlay} tagRows={tagRows} taskTotal={allTasks.length} />
+    </>
   );
 }

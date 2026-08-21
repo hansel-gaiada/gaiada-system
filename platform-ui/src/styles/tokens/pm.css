@@ -74,6 +74,12 @@
      --pm-ink rather than a second literal: 7.95:1 on #64B5F6. */
   --pm-accent-fg:   #FFFFFF;
 
+  /* ---- One control height for every PM strip (P5-B4) -----------------------
+     The board strip and the Gantt toolbar are the same instrument in two places, and they had
+     drifted to 30/31/32px and 24/27/32px respectively. A shared number is the only thing that
+     keeps them agreeing after the next padding tweak. Not a colour, so no dark-block twin. */
+  --pm-ctl-h: 32px;
+
   /* Repsona is rounded; the house style is not. Scoped to PM only.
      Pills (tag chips, status badges, avatars) are fully round. */
   --pm-radius:      4px;
@@ -96,20 +102,58 @@
   --pm-urgency-neutral-fg:        #616161;  /* undated / done — never alarming   */
 
   /* ---- Status ladder (Backlog · ToDo · Doing · Blocked · Done) -------------
-     Hues mapped to the live instance's own cumulative-flow legend. Ids are the
-     PERSISTED values (see lib/pmVocabulary.ts) — `in_progress`, not `doing`. */
+     Ids are the PERSISTED values (see lib/pmVocabulary.ts) — `in_progress`, not `doing`.
+
+     Hues mapped to the live instance's own cumulative-flow legend (ToDo green, Doing yellow-green,
+     Blocked orange, Done amber).
+
+     P5-C1 KEPT THESE BY OWNER DECISION (2026-08-21), and the cost is recorded here rather than
+     lost. Run as a categorical set through the six-check validator these fail three:
+       · lightness band  — #CDDC39 (0.856) and #FFC107 (0.844) sit outside it
+       · chroma floor    — #90A4AE at 0.027 reads as plain grey, not as an identity
+       · normal-vision   — ToDo #8BC34A ↔ Doing #CDDC39 at ΔE 11.3, under the floor of 15: the two
+                           largest bands of the flow chart are hard to tell apart for a reader with
+                           FULL colour vision, before colour blindness enters into it
+     and warn on contrast (all five below 3:1 against the card). Measured at full saturation; the
+     flow chart renders them at 25% opacity, so the real separation is smaller again.
+
+     A validated alternative exists and was built: the five slots re-stepped onto `--rc-series-*`
+     (5/1/4/8/3 light, and their own dark steps) passes every check in both themes. If this ladder
+     is ever revisited, that is the answer — not a fresh guess. The relief that remains in place
+     meanwhile is a SHAPE: the flow chart hatches the Blocked band (see Charts.tsx), which is the
+     one distinction that survives both the low contrast and the CVD case. */
   --pm-status-backlog:     #90A4AE;
   --pm-status-todo:        #8BC34A;
   --pm-status-in-progress: #CDDC39;
   --pm-status-blocked:     #FF7043;
   --pm-status-done:        #FFC107;
-  /* Text/label sitting on a status-hue fill (Gantt bars, filled column dots) —
-     same ink-on-fill technique as --pm-tone-on below, and no coincidence: every
-     status hue above is literally one of the tone-ramp values (backlog=tone-8,
-     todo=tone-5, in-progress=tone-4, blocked=tone-6, done=tone-3), so the
-     already-measured ratios apply unchanged: 6.79 / 8.37 / 11.63 / 6.40 /
-     10.78:1. Theme-invariant like --pm-tone-on — no dark-block entry needed. */
-  --pm-status-ink:         var(--pm-ink);
+  /* NOTE: there is deliberately no `--pm-status-ink` any more. It existed for text sitting ON a
+     status fill; its one consumer (PmHome's status pill) became a coloured DOT beside a label in
+     the page's own text colour, which is the more robust pattern — it holds whatever these five
+     hues are, and it survived the ladder being reverted above without a second thought. Put text
+     on a status fill again and you re-acquire a per-hue contrast problem. */
+
+  /* ---- Timeline bar tiers (P5-T1) -----------------------------------------
+     The Gantt spends exactly ONE colour channel, and it is urgency. Bars are a
+     warm-neutral ramp derived from the house bronze so a saturated hue on the
+     axis can only ever mean "this is late" — the previous scheme painted STATUS
+     in hue (todo=green, done=amber, blocked=orange) while urgency was a 6px dot,
+     which made the least important axis the loudest thing on the page. Status
+     now rides shape/fill instead (solid · hollow · hatched · muted), see the
+     `.pm-gantt__bar--*` rules in components/pm/pm.css.
+     `-ink` is the label colour sitting ON a bar fill (both themes validated
+     against their own `--pm-bar-fill`); `-progress-b` is the brightness factor
+     the progress sub-fill applies to whatever the bar's own background is, so a
+     caller-supplied `barColors` tint still darkens rather than flattening to a
+     fixed grey. */
+  --pm-bar-fill:       #D9D3C8;  /* committed work — ink 11.4:1 */
+  --pm-bar-fill-muted: #ECE8E1;  /* done — deliberately recessive */
+  --pm-bar-line:       #B4AB9C;
+  --pm-bar-ink:        var(--pm-ink);
+  --pm-bar-progress-b: 0.82;
+  /* The slippage hatch: the ONLY place overdue-red appears as a fill on the
+     axis besides the today rule itself. */
+  --pm-slip-hatch: color-mix(in srgb, var(--pm-urgency-overdue-graphic) 42%, transparent);
 
   /* ---- Categorical tone ramp (tags, chart series, board accents) -----------
      8 tones, Material 300-400 level. `-on` is the text colour that sits ON the
@@ -162,6 +206,11 @@
     --pm-urgency-due-soon-fg: #FFB300;  /* 7.89:1 */
     --pm-urgency-on-track-fg: #81C784;  /* 7.04:1 */
     --pm-urgency-neutral-fg:  #B0BEC5;
+    --pm-bar-fill:       #4B463E;
+    --pm-bar-fill-muted: #37342E;
+    --pm-bar-line:       #6B6355;
+    --pm-bar-ink:        #ECEFF1;  /* 9.12:1 on --pm-bar-fill */
+    --pm-bar-progress-b: 1.42;     /* lighten, not darken — dark bars go UP to show progress */
   }
 }
 
@@ -181,4 +230,9 @@ html[data-theme="dark"] {
   --pm-urgency-due-soon-fg: #FFB300;
   --pm-urgency-on-track-fg: #81C784;
   --pm-urgency-neutral-fg:  #B0BEC5;
+  --pm-bar-fill:       #4B463E;
+  --pm-bar-fill-muted: #37342E;
+  --pm-bar-line:       #6B6355;
+  --pm-bar-ink:        #ECEFF1;
+  --pm-bar-progress-b: 1.42;
 }

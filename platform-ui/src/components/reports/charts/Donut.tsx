@@ -85,8 +85,13 @@ export function Donut({ distribution, title }: { distribution: ReportDistributio
               />
             ))}
           </g>
-          <text x={50} y={47} textAnchor="middle" className="rc-donut__center-label">Total</text>
-          <text x={50} y={60} textAnchor="middle" className="rc-donut__center-value">{total.toLocaleString()}</text>
+          {/* The two baselines are set so the LABEL+VALUE pair is optically centred on the ring,
+              not so each line clears the other by accident. At y=47/60 the value's ascenders ran
+              into the label's baseline — 13 units apart with a 20px face whose cap height is ~14,
+              so the two were touching. Cap heights are ~7 and ~14; a 5-unit gap between them makes
+              a 26-unit block, centred on 50. */}
+          <text x={50} y={44} textAnchor="middle" className="rc-donut__center-label">Total</text>
+          <text x={50} y={63} textAnchor="middle" className="rc-donut__center-value">{total.toLocaleString()}</text>
         </svg>
       </div>
       {hoverI !== null && (

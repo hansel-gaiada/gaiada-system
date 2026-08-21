@@ -76,6 +76,13 @@
    flex-end` so the selects' baselines line up with the buttons beside them, and `flex-wrap` so it
    folds to two rows on a phone instead of overflowing. */
 .pm-boardbar {
+  /* P5-B2 — ONE control height for the whole strip. Measured on the built page, the five controls
+     came out 30px (Filters), 31px (the selects) and 32px (the buttons): the bottoms lined up
+     because the strip is flex-end, so the mismatch showed as ragged TOPS, 2px apart, on a row whose
+     whole job is to read as one instrument. Every control below is pinned to this height with
+     border-box sizing rather than being padded until it happens to match — padding-to-fit drifts
+     again the moment a font or a border changes. */
+  --pm-boardbar-ctl-h: var(--pm-ctl-h);
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -84,19 +91,38 @@
   margin-bottom: 14px;
   border-bottom: 0.5px solid var(--pm-line);
 }
+/* Buttons, the Filters disclosure and the selects all sit on the same 32px box. Scoped to the
+   strip: `.lux-btn--sm` and `.pm-facets` are shared with surfaces that have their own rhythm. */
+.pm-boardbar .lux-btn--sm,
+.pm-boardbar .pm-facets,
+.pm-boardbar .pm-boardbar__field select {
+  box-sizing: border-box;
+  height: var(--pm-boardbar-ctl-h);
+}
+/* `button.lux-btn` is not a flex box by default (only `a.lux-btn` is, ui.css:47), so a fixed height
+   would top-align its label. */
+.pm-boardbar .lux-btn--sm {
+  display: inline-flex;
+  align-items: center;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 /* The label sits on the selects' baseline, not above them — it names the strip, it is not a field. */
 .pm-boardbar__label { align-self: flex-end; padding-bottom: 7px; color: var(--pm-text-dim); font-size: 10px; }
-.pm-boardbar__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0; }
+.pm-boardbar__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0; }
 .pm-boardbar__field { display: flex; flex-direction: column; gap: 5px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim); }
 .pm-boardbar__field select {
   border: none;
   border-bottom: 0.5px solid var(--line-control);
   background: transparent;
   outline: none;
-  padding: 6px 2px;
+  padding: 0 2px;
   /* Narrower than `lux-filters`' 150px: in a single strip the two selects plus Filters plus two
-     buttons have to share one row, and "Whole dept"/"Status" are short strings. */
-  min-width: 118px;
+     buttons have to share one row, and "Whole dept"/"Status" are short strings.
+     P5-B2 — a fixed width, not a min-width: the two sat at 135px and 173px purely because their
+     longest option differed, which put the strip's only two matching controls visibly out of step.
+     A native select clips its selected label, so a long division name still degrades gracefully. */
+  width: 156px;
   font: 400 13px var(--font-body);
   letter-spacing: normal;
   text-transform: none;
@@ -105,7 +131,7 @@
 .pm-boardbar__field select:focus-visible { border-bottom-color: var(--erp-accent); }
 /* Pushed to the far end: these two leave the board entirely, so they are not part of the control
    sequence that shapes it. */
-.pm-boardbar__links { display: flex; gap: 8px; margin-left: auto; }
+.pm-boardbar__links { display: flex; gap: 10px; margin-left: auto; }
 /* The bare (Card-less) facet panel, sitting in the strip. `min-width: 0` so a long chip row shrinks
    rather than forcing the strip wider than the page. */
 .pm-facets-bare { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -207,42 +233,131 @@
 .pm-doc:hover { border-color: var(--pm-accent); color: var(--pm-accent); }
 
 /* ---- gantt / timeline ---- */
+/* P5-T1 — the label gutter is ONE number now. Every row type, every overlay `left` offset and the
+   axis padding used to repeat the literal 232px/244px pair; they drifted apart twice. Change the
+   width here and the whole chart stays registered. */
+.pm-gantt, .pm-gantt__toolbar { --pm-gantt-labelw: 260px; --pm-gantt-gutter: 272px; }
 /* P4-C1/P4-C2 — zoom (Day/Week/Month) + explicit clearable date window. Sits above the scrollable
-   `.pm-gantt` box itself so it never scrolls out of view with the chart. */
-.pm-gantt__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+   `.pm-gantt` box itself so it never scrolls out of view with the chart.
+   P5-T1: ONE control row. Filters and the burndown toggle used to own a row each, so the chart
+   started ~110px down the card; the filter body is a popover off this row instead (below). */
+.pm-gantt__toolbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.pm-gantt__toolbar-spacer { flex: 1 1 auto; }
+/* P5-B4 — every control in this row sits on the shared PM control height. It shipped at four
+   different ones (zoom 24px, the date inputs 27px, the buttons 32px, the Filters disclosure 24px),
+   so nothing in the row shared a top or a bottom edge and the strip read as parts rather than an
+   instrument. Pinned with border-box, never padded-to-fit. */
+.pm-gantt__toolbar .lux-btn--sm,
+.pm-gantt__zoom,
+.pm-gantt__filterbar,
+.pm-gantt__window {
+  box-sizing: border-box;
+  height: var(--pm-ctl-h);
+}
+.pm-gantt__toolbar .lux-btn--sm {
+  display: inline-flex;
+  align-items: center;
+  padding-top: 0;
+  padding-bottom: 0;
+  white-space: nowrap;
+}
+/* TWO tiers, not five equals. The row shipped with Day/Week/Month, Apply, Export CSV, Filters and
+   Show burndown all set in the same 11px 0.14em uppercase bold — five controls shouting at one
+   volume, so nothing said which one commits and which one is a side door. Apply is the only submit
+   here, so it is the only solid control; everything else drops to the segmented control's own
+   quieter type and shares its hairline, which makes the secondary controls read as one family
+   instead of four separate demands. */
+.pm-gantt__toolbar .lux-btn--ghost {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--pm-text-dim);
+  border-color: var(--line-control);
+}
+.pm-gantt__toolbar .lux-btn--ghost:hover:not(:disabled) { color: var(--pm-text); }
 .pm-gantt__zoomgroup { display: inline-flex; }
+/* Square, like every other control beside it. A pill-ended segmented control among square buttons
+   was the one shape in the row that belonged to a different design language. */
 .pm-gantt__zoom {
+  display: inline-flex; align-items: center;
   font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim);
-  background: transparent; border: 0.5px solid var(--pm-line); padding: 5px 11px; cursor: pointer;
+  background: transparent; border: 0.5px solid var(--line-control); padding: 0 13px; cursor: pointer;
 }
 .pm-gantt__zoom + .pm-gantt__zoom { margin-left: -0.5px; }
-.pm-gantt__zoom:first-child { border-radius: var(--pm-radius) 0 0 var(--pm-radius); }
-.pm-gantt__zoom:last-child { border-radius: 0 var(--pm-radius) var(--pm-radius) 0; }
 .pm-gantt__zoom:hover { color: var(--pm-text); }
-.pm-gantt__zoom[aria-pressed="true"] { color: var(--pm-accent-fg); background: var(--pm-accent); border-color: var(--pm-accent); }
+/* P5-B5 — the pressed segment wears the SAME accent as the Apply button 40px away. It had the PM
+   island's Material blue while Apply had the house bronze: two different answers to "this one is
+   active", side by side, in a row that is supposed to read as one instrument. */
+.pm-gantt__zoom[aria-pressed="true"] { color: var(--text-on-accent); background: var(--erp-accent); border-color: var(--erp-accent); }
 .pm-gantt__zoom:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
-.pm-gantt__window { display: inline-flex; align-items: center; gap: 6px; }
-.pm-gantt__window input[type="date"] { font: 400 12px var(--font-body); padding: 4px 6px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
+/* The window is ONE object — a from, a dash and a to — not two boxed fields that happen to be
+   adjacent. It was the widest and loudest thing in the row while being the least-used control. */
+.pm-gantt__window {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 0 8px; border: 0.5px solid var(--line-control); background: transparent;
+}
+.pm-gantt__window input[type="date"] { font: 400 12px var(--font-body); padding: 0 2px; border: 0; border-radius: 0; background: transparent; color: var(--pm-text); }
 .pm-gantt__window input[type="date"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
-.pm-gantt__window-sep { color: var(--pm-text-faint); font-size: 11px; }
+.pm-gantt__window-sep { color: var(--pm-text-faint); font-size: 11px; padding: 0 2px; }
+/* Apply belongs to the window it submits, so it sits inside that shell rather than floating beside
+   it as a third free-standing button. */
+.pm-gantt__window .lux-btn--sm { margin-left: 8px; margin-right: -8px; height: calc(var(--pm-ctl-h) - 1px); }
+/* Inside the window shell it is a glyph belonging to the fields, not a third bordered control
+   competing with the two real ones. */
 .pm-gantt__window-clear {
-  font: 700 12px var(--font-body); line-height: 1; color: var(--pm-text-dim); background: transparent;
-  border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); width: 20px; height: 20px;
+  font: 700 13px var(--font-body); line-height: 1; color: var(--pm-text-faint); background: transparent;
+  border: 0; width: 18px; height: 18px;
   padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
 }
 .pm-gantt__window-clear:hover, .pm-gantt__window-clear:focus-visible { color: var(--pm-accent); border-color: var(--pm-accent); }
 .pm-gantt__window-clear:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 
 .pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 620px; position: relative; }
-.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); padding-left: 232px; }
-.pm-gantt__row { display: grid; grid-template-columns: 232px 1fr; align-items: center; gap: 12px; }
+.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); padding-left: var(--pm-gantt-gutter); }
+/* P5-B5 — the label column is the full gutter with its breathing room as PADDING, not as a grid
+   gap. A transparent 12px gap between a frozen column and the track is a slot for bars to scroll
+   into and sit beside the labels they belong to. */
+.pm-gantt__row { display: grid; grid-template-columns: var(--pm-gantt-gutter) 1fr; align-items: center; gap: 0; }
 /* P4-L3: label cell now stacks two lines — the title link, then a meta line (project · tags ·
    due date) — instead of one bare <a>. The width bump (200px -> 232px, propagated to every
    sibling row type + the guide/overlay `left` offsets below) is what gives the meta line room. */
-.pm-gantt__labelcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
+/* ---- P5-B5: the frozen label column ----------------------------------------
+   Scrolled right to reach a later month, every bar lost its name: the labels are ordinary grid
+   cells and travelled off the left edge with the chart. They are pinned to the scroller's left
+   edge instead — the same `position: sticky; left: 0` this file already uses for `BoardGrid`'s row
+   heads. Three things the pin needs and a plain `sticky` does not give you:
+     · an OPAQUE background, or bars scroll through underneath the text. It is the CARD's own
+       surface (`--surface-card`), not `--pm-surface-card`: this chart always sits in a `Card`, and
+       the PM white would print a pale panel down the left of a paper-toned one.
+     · a stacking order. Above the weekend bands and milestone guides (0), the dependency lines (1)
+       and the today rule (5) — all of which are positioned against the SCROLLED content and would
+       otherwise draw across the frozen strip — and below the group heads (7), which freeze too.
+     · a hairline at the freeze edge, so the column reads as pinned rather than as a coincidence. */
+.pm-gantt__labelcell,
+.pm-gantt__daxis-head,
+.pm-gantt__mslabel,
+.pm-gantt__bdlabel {
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  background: var(--surface-card);
+  padding-right: 12px;
+  border-right: 0.5px solid var(--pm-line-soft);
+  /* The strip has to be SOLID from top to bottom. `.pm-gantt__row` is `align-items: center`, so a
+     frozen cell is only as tall as its own text and the weekend bands — which are positioned
+     against the SCROLLED content and therefore slide in behind the column — showed through above
+     and below it. Stretch fills the row; the negative block margin plus equal padding then covers
+     the 8px gap BETWEEN rows, half from each neighbour, which is the other place they leaked. */
+  align-self: stretch;
+  margin-block: -4px;
+  padding-block: 4px;
+}
+.pm-gantt__labelcell { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; overflow: hidden; }
 .pm-gantt__label { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--pm-text); text-decoration: none; min-width: 0; }
 .pm-gantt__label:hover { color: var(--pm-accent); }
 .pm-gantt__label-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* P5-T1 — the urgency dot sits inline INSIDE the title span, so without this it butts straight
+   against the first letter ("▲Wire homepage hero"). */
+.pm-gantt__label-text > .pm-urg { margin-right: 5px; }
 /* Ball/assignee avatar (P4-L3) — initials only, no photo store exists yet. Text-on-fill, not a
    decorative graphic, so it uses --pm-text (already >=4.5:1 on --pm-surface-sunken in both
    themes — see tokens/pm.css: --pm-text is 12.26:1 on the dark card, and the light pairing is
@@ -257,11 +372,65 @@
 .pm-gantt__meta { display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 10px var(--font-body); color: var(--pm-text-faint); overflow: hidden; }
 .pm-gantt__meta-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 .pm-gantt__meta-tags { display: inline-flex; gap: 4px; flex: 0 0 auto; }
-.pm-gantt__track { position: relative; height: 22px; background: var(--pm-surface-sunken); border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); }
-.pm-gantt__bar { position: absolute; top: 3px; bottom: 3px; background: var(--pm-accent); color: var(--pm-accent-fg); border-radius: var(--pm-radius); opacity: 0.9; display: flex; align-items: center; padding: 0 6px; font: 700 9px var(--font-body); white-space: nowrap; overflow: hidden; text-decoration: none; min-width: 4px; }
-.pm-gantt__bar--done { background: var(--pm-status-done); color: var(--pm-status-ink); }
-.pm-gantt__bar--blocked { background: var(--pm-status-blocked); color: var(--pm-status-ink); }
-.pm-gantt__bar--todo { background: var(--pm-status-todo); color: var(--pm-status-ink); }
+/* P5-T1 — the track is a baseline, not a trough. It used to paint an opaque --pm-surface-sunken
+   fill on every row; stacked with the weekend bands and the milestone guides that made three
+   layers of grey, and the banding read louder than the bars sitting on it. */
+.pm-gantt__track { position: relative; height: 22px; background: transparent; border: 0; border-bottom: 0.5px solid var(--pm-line-soft); border-radius: 0; }
+.pm-gantt__bar { position: absolute; top: 3px; bottom: 3px; background: var(--pm-bar-fill); color: var(--pm-bar-ink); border-radius: var(--pm-radius); opacity: 1; display: flex; align-items: center; padding: 0 6px; font: 700 9px var(--font-body); white-space: nowrap; overflow: hidden; text-decoration: none; min-width: 4px; }
+
+/* P5-T1 — STATUS RIDES SHAPE, NOT HUE.
+   The old rules painted a status hue per bar (todo=green, done=amber, blocked=orange) while
+   urgency — the thing a department head actually scans for — was a 6px dot in the label column.
+   Two competing severity channels, and the loudest one was the least important. Hue is now spent
+   only on urgency (the `--u-*` rules below) and the slip hatch; status is fill and texture.
+   Note the ids are the PERSISTED values from lib/pmVocabulary.ts — `in_progress` with an
+   UNDERSCORE. The pre-P5 sheet only defined done/blocked/todo, so `in_progress` and `backlog`
+   matched no rule at all and both fell through to the bare accent: two different states rendered
+   identically. All five are declared here. */
+.pm-gantt__bar--in_progress { background: var(--pm-bar-fill); }
+.pm-gantt__bar--todo,
+.pm-gantt__bar--backlog {
+  background: transparent; color: var(--pm-text-dim);
+  box-shadow: inset 0 0 0 1px var(--pm-bar-line);
+}
+.pm-gantt__bar--blocked {
+  background: var(--pm-bar-fill-muted); color: var(--pm-bar-ink);
+  background-image: repeating-linear-gradient(135deg, transparent 0 3px, var(--pm-bar-line) 3px 5px);
+  box-shadow: inset 0 0 0 1px var(--pm-bar-line);
+}
+.pm-gantt__bar--done { background: var(--pm-bar-fill-muted); color: var(--pm-text-dim); box-shadow: inset 0 0 0 0.5px var(--pm-bar-line); }
+
+/* Urgency — the one colour channel. A 3px inset cap on the bar's DUE end, matched to the same
+   tier the label column's UrgencyChip dot already announces (colour is never the sole carrier). */
+.pm-gantt__bar--u-overdue { box-shadow: inset -3px 0 0 var(--pm-urgency-overdue-graphic); }
+.pm-gantt__bar--u-due-soon { box-shadow: inset -3px 0 0 var(--pm-urgency-due-soon-graphic); }
+.pm-gantt__bar--u-on-track { box-shadow: inset -3px 0 0 var(--pm-urgency-on-track-graphic); }
+/* The hollow/blocked/done outlines above must survive the cap — one box-shadow property, two
+   shadows, so the more specific pairing is spelled out rather than lost to the cascade. */
+.pm-gantt__bar--todo.pm-gantt__bar--u-overdue,
+.pm-gantt__bar--backlog.pm-gantt__bar--u-overdue,
+.pm-gantt__bar--blocked.pm-gantt__bar--u-overdue { box-shadow: inset 0 0 0 1px var(--pm-bar-line), inset -3px 0 0 var(--pm-urgency-overdue-graphic); }
+.pm-gantt__bar--todo.pm-gantt__bar--u-due-soon,
+.pm-gantt__bar--backlog.pm-gantt__bar--u-due-soon,
+.pm-gantt__bar--blocked.pm-gantt__bar--u-due-soon { box-shadow: inset 0 0 0 1px var(--pm-bar-line), inset -3px 0 0 var(--pm-urgency-due-soon-graphic); }
+.pm-gantt__bar--todo.pm-gantt__bar--u-on-track,
+.pm-gantt__bar--backlog.pm-gantt__bar--u-on-track,
+.pm-gantt__bar--blocked.pm-gantt__bar--u-on-track { box-shadow: inset 0 0 0 1px var(--pm-bar-line), inset -3px 0 0 var(--pm-urgency-on-track-graphic); }
+.pm-gantt__bar--done.pm-gantt__bar--u-overdue,
+.pm-gantt__bar--done.pm-gantt__bar--u-due-soon,
+.pm-gantt__bar--done.pm-gantt__bar--u-on-track { box-shadow: inset 0 0 0 0.5px var(--pm-bar-line); }
+
+/* P5-T1 — the bar legend. Sits at the end of the single control row: the chart previously used
+   five fills with no key anywhere on the page. */
+/* The key is about the BARS, not about the buttons, so it stops competing with them for the same
+   line: its own row, with air above it, below the controls it was crammed against. */
+.pm-gantt__legend { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 10px; font: 400 10px var(--font-body); color: var(--pm-text-faint); }
+.pm-gantt__legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pm-gantt__legend-swatch { display: inline-block; width: 14px; height: 8px; border-radius: var(--pm-radius); background: var(--pm-bar-fill); }
+.pm-gantt__legend-swatch--hollow { background: transparent; box-shadow: inset 0 0 0 1px var(--pm-bar-line); }
+.pm-gantt__legend-swatch--blocked { background-image: repeating-linear-gradient(135deg, transparent 0 3px, var(--pm-bar-line) 3px 5px); box-shadow: inset 0 0 0 1px var(--pm-bar-line); }
+.pm-gantt__legend-swatch--done { background: var(--pm-bar-fill-muted); box-shadow: inset 0 0 0 0.5px var(--pm-bar-line); }
+.pm-gantt__legend-swatch--slip { background: var(--pm-slip-hatch); background-image: repeating-linear-gradient(135deg, transparent 0 3px, var(--pm-urgency-overdue-graphic) 3px 5px); }
 .pm-gantt__bar--dashed { border: 1px dashed var(--pm-line); }
 
 /* P1-04 — interactive dept Gantt */
@@ -270,8 +439,12 @@
 .pm-gantt__bar[role="button"]:active { cursor: grabbing; }
 .pm-gantt__bar--dragging { opacity: 0.5; }
 .pm-gantt__bar--linksrc { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
-/* in-bar progress fill: same colour as the bar, darkened; sits behind the % text */
-.pm-gantt__fill { position: absolute; left: 0; top: 0; bottom: 0; background: inherit; filter: brightness(0.75); pointer-events: none; }
+/* in-bar progress fill: same colour as the bar, stepped; sits behind the % text. The factor is a
+   token because the direction flips per theme — a light bar darkens to show progress, a dark bar
+   has to LIGHTEN (brightness(0.75) on a dark neutral is indistinguishable from the bar itself).
+   Still `background: inherit` + filter rather than a fixed grey, so a caller-supplied `barColors`
+   tint keeps its own hue in the progress step. */
+.pm-gantt__fill { position: absolute; left: 0; top: 0; bottom: 0; background: inherit; filter: brightness(var(--pm-bar-progress-b)); pointer-events: none; }
 .pm-gantt__pct { position: relative; z-index: 1; }
 /* edge resize handles */
 .pm-gantt__handle { position: absolute; top: 0; bottom: 0; width: 7px; z-index: 2; cursor: ew-resize; }
@@ -287,32 +460,58 @@
 .pm-gantt__tip { position: absolute; top: -17px; font: 700 9px var(--font-body); letter-spacing: 0.02em; color: var(--pm-text); background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: 1px 5px; white-space: nowrap; z-index: 6; pointer-events: none; }
 
 /* milestone diamonds lane + dashed guidelines */
-.pm-gantt__msrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; }
-.pm-gantt__mslabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pm-gantt__mstrack { position: relative; height: 12px; }
-.pm-gantt__milestone { position: absolute; top: 1px; width: 8px; height: 8px; background: var(--pm-accent); transform: translateX(-4px) rotate(45deg); border: 0.5px solid var(--pm-surface-card); }
-.pm-gantt__guides { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
-.pm-gantt__guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--pm-line); }
+.pm-gantt__msrow { display: grid; grid-template-columns: var(--pm-gantt-gutter) 1fr; gap: 0; align-items: center; }
+.pm-gantt__mslabel { display: flex; align-items: center; justify-content: flex-end; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); white-space: nowrap; }
+.pm-gantt__mstrack { position: relative; height: 14px; }
+.pm-gantt__milestone { position: absolute; top: 1px; width: 10px; height: 10px; background: var(--pm-text); transform: translateX(-5px) rotate(45deg); border: 0.5px solid var(--pm-surface-card); }
+.pm-gantt__guides { position: absolute; left: var(--pm-gantt-gutter); right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+/* P5-T1 — the guide was a full-strength dashed rule per milestone, and with the weekend bands and
+   the row troughs behind it the chart carried three competing grey grids. Softened to the same
+   hairline tier everything else on this axis uses. */
+.pm-gantt__guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--pm-line-soft); }
 
 /* P4-L3 — day/week header (dense spans only; see Gantt.tsx `dense`). Same 232px+12px column
    contract as every other row type above, so its ticks land exactly under the bars they label. */
-.pm-gantt__daxis { display: grid; grid-template-columns: 232px 1fr; align-items: end; gap: 12px; }
-.pm-gantt__daxis-head { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); padding-bottom: 4px; }
+.pm-gantt__daxis { display: grid; grid-template-columns: var(--pm-gantt-gutter) 1fr; align-items: end; gap: 0; }
+.pm-gantt__daxis-head { display: flex; align-items: flex-end; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); padding-bottom: 4px; }
 .pm-gantt__daxis-track { position: relative; height: 26px; }
 .pm-gantt__daxis-tick { position: absolute; bottom: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+/* P5-B6 — the end ticks are anchored, not centred. Every tick is centred on its day boundary, so
+   the first one straddles the track's left edge: half of "TU 23" sat outside the track and used to
+   spill harmlessly into the column gap. The frozen label column is opaque and now paints over that
+   half, and the tick read "U 3". The two end ticks hang INTO the track instead — the only two
+   whose boundary is the edge itself, so nothing else has to move. */
+.pm-gantt__daxis-tick:first-child { transform: none; align-items: flex-start; }
+.pm-gantt__daxis-tick:last-child { transform: translateX(-100%); align-items: flex-end; }
 .pm-gantt__daxis-wd { font: 700 8px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--pm-text-faint); }
 .pm-gantt__daxis-d { font: 700 10px var(--font-body); color: var(--pm-text-dim); }
 
+/* P5-T1 — the MONTH BAND. The day ticks alone read "Tu 23 · Tu 30 · Tu 7 · Tu 14": the weekday
+   is identical on every tick (they are a fixed step apart, so of course it is) and the month is
+   never named at all — 7 July and 7 August were indistinguishable on this axis. The band names
+   each calendar month once, spanning its own width, and the weekday abbreviation is now kept only
+   at Day zoom where consecutive ticks actually differ.
+   The house uppercase 0.30em-tracking eyebrow signature, borrowed here deliberately: this is the
+   one piece of chrome on the chart that states what you are looking at. */
+.pm-gantt__daxis-months { position: relative; height: 15px; margin-bottom: 2px; }
+.pm-gantt__daxis-month {
+  position: absolute; top: 0; bottom: 0; overflow: hidden;
+  border-left: 0.5px solid var(--pm-line);
+  padding-left: 5px; display: flex; align-items: center;
+  font: 700 9px var(--font-body); letter-spacing: 0.30em; text-transform: uppercase;
+  color: var(--pm-text-faint); white-space: nowrap;
+}
+.pm-gantt__daxis-month:first-child { border-left: 0; padding-left: 0; }
+
 /* Weekend banding — a decorative fill (no 4.5:1 duty, it is never text), so a plain tint of
-   the existing hairline token is enough; no new colour token needed. Every row's OWN
-   `.pm-gantt__track` paints an opaque background (--pm-surface-sunken), so a band sitting
-   BEHIND that in the stacking order (as a negative z-index would put it) is invisible — it
-   would sink below every track, not just the bars. Explicit z-index:2 instead paints it as a
-   translucent wash ON TOP of the tracks (and any bar under it), same trick `.pm-gantt__guides`
-   already relies on for its dashed lines; the low mix keeps a bar's own status colour reading
-   clearly through the tint. */
-.pm-gantt__weekends { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 2; overflow: hidden; }
-.pm-gantt__weekend { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--pm-line) 30%, transparent); }
+   the existing hairline token is enough; no new colour token needed.
+   P5-T1 — this used to sit at z-index 2, ON TOP of the bars, because every row's own
+   `.pm-gantt__track` painted an opaque --pm-surface-sunken fill that a band behind it would
+   sink under. The track is a hairline baseline now (see `.pm-gantt__track` above), so the band
+   can sit where it belongs — BEHIND the bars — and stop washing a tint over the data. Grey
+   layers on this chart: one. */
+.pm-gantt__weekends { position: absolute; left: var(--pm-gantt-gutter); right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.pm-gantt__weekend { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--pm-line) 13%, transparent); }
 
 /* TODAY marker — Repsona draws it as a red rule crossing every row, so it needs to sit ABOVE the
    bars (z-index 5: above the dependency-line overlay at 1, below the sticky group headers at 7
@@ -320,18 +519,33 @@
    (theme-invariant by design, see tokens/pm.css) rather than adding a new one: it is the same
    "needs attention now" red, used here for a calendar marker instead of a task tier — a fill,
    not text, so it carries no 4.5:1 duty either way. */
-.pm-gantt__todaybox { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 5; }
+.pm-gantt__todaybox { position: absolute; left: var(--pm-gantt-gutter); right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 5; }
 .pm-gantt__todayline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--pm-urgency-overdue-graphic); transform: translateX(-1px); }
 
 /* collapsible group headers */
 .pm-gantt__group { display: flex; flex-direction: column; gap: 8px; }
-.pm-gantt__group-head { position: sticky; top: 0; z-index: 7; display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 4px; background: var(--pm-surface-card); border: 0; border-bottom: 0.5px solid var(--pm-line-soft); font: 700 11px var(--font-body); color: var(--pm-text); cursor: pointer; text-align: left; }
+/* The project name is the one place on this chart where something is NAMED rather than measured,
+   and it was set in the same 11px uppercase-adjacent micro-bold as every axis tick and every
+   count — which is what made a chart of eight rows read like a spreadsheet of eight hundred. It
+   takes the house display face (Cormorant, already the page-title face) at a size that can carry
+   it. Nothing else on the chart changes weight; one voice, not a chorus. */
+.pm-gantt__group-head { position: sticky; top: 0; z-index: 7; display: flex; align-items: baseline; gap: 9px; width: 100%; padding: 10px 4px 7px; background: var(--surface-card); border: 0; border-bottom: 0.5px solid var(--pm-line-soft); font: 500 17px var(--font-display); letter-spacing: 0.01em; color: var(--pm-text); cursor: pointer; text-align: left; }
+.pm-gantt__group-headline {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  padding-right: 14px;
+  background: inherit;
+}
 .pm-gantt__group-head:hover { color: var(--pm-accent); }
 .pm-gantt__group-head--static { cursor: default; }
 .pm-gantt__group-head--static:hover { color: var(--pm-text); }
-.pm-gantt__disc { flex: 0 0 12px; color: var(--pm-text-faint); }
+.pm-gantt__disc { flex: 0 0 12px; font: 400 10px var(--font-body); color: var(--pm-text-faint); align-self: center; }
 .pm-gantt__group-label { flex: 0 0 auto; }
-.pm-gantt__group-count { font: 700 10px var(--font-body); color: var(--pm-text-faint); }
+.pm-gantt__group-count { font: 700 10px var(--font-body); letter-spacing: 0.08em; color: var(--pm-text-faint); }
 .pm-gantt__group-note { font: 400 11px var(--font-body); color: var(--pm-text-faint); margin-left: 8px; }
 .pm-gantt__group--empty { opacity: 0.8; }
 
@@ -340,21 +554,45 @@
    "what we committed to" and "where the work actually sits" reads as slippage at a glance
    (decision 12). Reuses `.pm-gantt__row`/`.pm-gantt__track` for the same 232px+12px grid every
    task bar below it shares, so the two bars land under the exact same day columns. */
-.pm-gantt__projectbar-row { margin-bottom: 2px; }
+/* No extra margin: the group's own 8px row gap already separates this row, and the frozen label
+   column covers exactly half that gap from each side — an extra 2px here is 2px of gap nothing
+   covers, which reads as a hairline of chart leaking through the frozen strip. */
+.pm-gantt__projectbar-row { margin-bottom: 0; }
 .pm-gantt__projectbar-label { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); }
-.pm-gantt__projectbar-track { height: 26px; }
-.pm-gantt__projectbar { position: absolute; height: 8px; border-radius: var(--pm-radius); }
+.pm-gantt__projectbar-track { height: 26px; border-bottom: 0; }
+.pm-gantt__projectbar { position: absolute; height: 9px; border-radius: var(--pm-radius); }
 /* Authored (solid fill) sits above derived (dashed outline only) within the same track — fill vs
    outline is a SHAPE distinction, not just a colour one, so the pairing still reads on a
    greyscale render (same rule `UrgencyChip`'s glyphs follow). */
-.pm-gantt__projectbar--authored { top: 3px; background: var(--pm-accent); border: 0.5px solid var(--pm-accent); opacity: 0.85; }
-.pm-gantt__projectbar--derived { top: 15px; background: transparent; border: 1.5px dashed var(--pm-text-faint); }
+.pm-gantt__projectbar--authored { top: 2px; background: var(--pm-bar-fill); border: 0.5px solid var(--pm-bar-line); }
+.pm-gantt__projectbar--derived { top: 15px; background: transparent; border: 1px dashed var(--pm-bar-line); }
 /* Urgency treatment (P4-H2/P4-G2's `projectUrgency`) recolours the AUTHORED bar only — the
    derived envelope stays neutral on purpose, it's a fact ("here's where the work sits"), not a
-   judgement; projectUrgency judges the commitment, so only the commitment's bar carries it. */
-.pm-gantt__projectbar--overdue { background: var(--pm-urgency-overdue-graphic); border-color: var(--pm-urgency-overdue-graphic); }
-.pm-gantt__projectbar--due-soon { background: var(--pm-urgency-due-soon-graphic); border-color: var(--pm-urgency-due-soon-graphic); }
-.pm-gantt__projectbar--on-track { background: var(--pm-urgency-on-track-graphic); border-color: var(--pm-urgency-on-track-graphic); }
+   judgement; projectUrgency judges the commitment, so only the commitment's bar carries it.
+   P5-T1: the tier is now a 3px cap on the commitment's END, not a full re-fill. A whole bar
+   flooded in hue was the loudest mark on the chart while saying only "this project has a date". */
+.pm-gantt__projectbar--overdue { box-shadow: inset -3px 0 0 var(--pm-urgency-overdue-graphic); }
+.pm-gantt__projectbar--due-soon { box-shadow: inset -3px 0 0 var(--pm-urgency-due-soon-graphic); }
+.pm-gantt__projectbar--on-track { box-shadow: inset -3px 0 0 var(--pm-urgency-on-track-graphic); }
+
+/* P5-T1 — THE SLIP LANE, and the one place this chart raises its voice.
+   Decision 12 says the GAP between the authored commitment and the task-derived envelope IS the
+   slippage signal. Before this, that gap was implied by two hairline bars 12px apart and a reader
+   had to measure it by eye; the number nobody could read was the only number that mattered. The
+   span past the commitment is now hatched in overdue red and labelled with its own magnitude in
+   days, so "this project is nine days past what we promised" is legible without opening it.
+   Rendered only when the derived envelope actually ends after the authored one — an early or
+   on-time project draws no lane at all, so the mark can only ever mean bad news. */
+.pm-gantt__slip {
+  position: absolute; top: 2px; height: 9px; border-radius: 0 var(--pm-radius) var(--pm-radius) 0;
+  background: var(--pm-slip-hatch);
+  background-image: repeating-linear-gradient(135deg, transparent 0 3px, var(--pm-urgency-overdue-graphic) 3px 5px);
+}
+.pm-gantt__slip-label {
+  position: absolute; top: 0; transform: translateY(-1px);
+  font: 700 10px var(--font-body); letter-spacing: 0.04em;
+  color: var(--pm-urgency-overdue-fg); white-space: nowrap; padding-left: 5px;
+}
 
 /* dependency lines overlay */
 .pm-gantt__deps { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
@@ -362,15 +600,22 @@
 /* P2-08 — shift-multiselect: outline only (never replaces the status colour). */
 .pm-gantt__bar--selected { box-shadow: inset 0 0 0 2px var(--pm-accent); }
 
-/* P2-08 — burndown overlay */
-.pm-gantt__bdtoggle { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-
-/* ---- P4-C3: filter bar ---- */
-.pm-gantt__filterbar { margin-bottom: 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); }
-.pm-gantt__filterbar-summary { cursor: pointer; padding: 7px 10px; font: 700 11px var(--font-body); color: var(--pm-text); list-style: none; }
+/* ---- P4-C3: filter bar ----
+   P5-T1 — the filter bar is a POPOVER off the single control row, not a band of its own. As a
+   full-width block it cost a row whether or not anyone ever opened it, and the burndown toggle
+   cost a third row below it; between them the chart began ~110px into the card. The summary is
+   now just another control in the row and the body drops out of it. */
+.pm-gantt__filterbar { flex: 0 0 auto; border: 0.5px solid var(--line-control); border-radius: 0; background: transparent; }
+.pm-gantt__filterbar-summary { display: flex; align-items: center; height: 100%; cursor: pointer; padding: 0 13px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim); list-style: none; white-space: nowrap; }
 .pm-gantt__filterbar-summary::-webkit-details-marker { display: none; }
 .pm-gantt__filterbar-summary:hover, .pm-gantt__filterbar-summary:focus-visible { color: var(--pm-accent); }
-.pm-gantt__filterbar-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 10px; border-top: 0.5px solid var(--pm-line-soft); }
+.pm-gantt__filterbar[open] > .pm-gantt__filterbar-summary { color: var(--pm-accent); }
+.pm-gantt__filterbar-body {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 8;
+  display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  border: 0.5px solid var(--pm-line); background: var(--pm-surface-raised);
+  border-radius: var(--pm-radius); box-shadow: var(--elev-overlay);
+}
 .pm-gantt__filterbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pm-gantt__filterbar-field input {
   font: 400 12px var(--font-body); padding: 4px 6px; border: 0.5px solid var(--pm-line);
@@ -387,14 +632,14 @@
   border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text);
 }
 .pm-gantt__addtask input[type="text"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
-.pm-gantt__bdrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; animation: erp-toast 0.18s var(--erp-ease); }
-.pm-gantt__bdlabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; }
+.pm-gantt__bdrow { display: grid; grid-template-columns: var(--pm-gantt-gutter) 1fr; gap: 0; align-items: center; animation: erp-rise 0.18s var(--erp-ease); }
+.pm-gantt__bdlabel { display: flex; align-items: center; justify-content: flex-end; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); white-space: nowrap; }
 .pm-gantt__bdtrack { position: relative; height: 48px; border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); background: var(--pm-surface-sunken); }
 .pm-gantt__bdsvg { width: 100%; height: 100%; display: block; }
 .pm-gantt__bdline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .pm-gantt__bdline--ideal { stroke: var(--pm-text-faint); stroke-dasharray: 4 3; }
 .pm-gantt__bdline--actual { stroke: var(--pm-accent); }
-.pm-gantt__bdlegend { display: flex; gap: 16px; margin: 4px 0 0 244px; font: 400 10px var(--font-body); color: var(--pm-text-dim); animation: erp-toast 0.18s var(--erp-ease); }
+.pm-gantt__bdlegend { display: flex; gap: 16px; margin: 4px 0 0 var(--pm-gantt-gutter); font: 400 10px var(--font-body); color: var(--pm-text-dim); animation: erp-rise 0.18s var(--erp-ease); }
 .pm-gantt__bdlegend-dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; vertical-align: middle; }
 .pm-gantt__bdlegend-dot--ideal { background: var(--pm-text-faint); }
 .pm-gantt__bdlegend-dot--actual { background: var(--pm-accent); }
@@ -410,7 +655,7 @@
 .pm-blocked-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-urgency-overdue-fg); border: 0.5px solid var(--pm-urgency-overdue-graphic); border-radius: var(--pm-radius-pill); padding: 2px 6px; }
 
 /* ---- board error toast + a11y live region (P1-03) ---- */
-.pm-board__toast { margin: 0 0 10px; font: 700 12px var(--font-body); color: var(--pm-accent); border: 0.5px solid var(--pm-accent); border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: 8px 12px; animation: erp-toast 0.18s var(--erp-ease); }
+.pm-board__toast { margin: 0 0 10px; font: 700 12px var(--font-body); color: var(--pm-accent); border: 0.5px solid var(--pm-accent); border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: 8px 12px; animation: erp-rise 0.18s var(--erp-ease); }
 .pm-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* ---- contributors (TR-32) ---- */
@@ -524,6 +769,29 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 }
 /* Open state gets a mark, because a floating panel gives no other clue that the trigger is a
    toggle — and the `<details>` marker is suppressed above. */
+/* P5-B2 — inside the board strip the disclosure IS one of the buttons, so it wears their box and
+   their type (11px, uppercase, 0.14em). It shipped as 11px sentence case with 7px/10px padding,
+   which made the one control that opens a panel look like the one control that had been forgotten. */
+.pm-boardbar .pm-facets__summary {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 14px;
+  font: 700 11px var(--font-body);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+/* Transparent, like the ghost buttons it now sits between — the panel carries its own surface
+   (`.pm-facets--float .pm-facets__body`), so the trigger never needed one, and a filled box among
+   outlines read as a different KIND of control. Same hairline and hover tint as `.lux-btn--ghost`. */
+.pm-boardbar .pm-facets { border-color: var(--line-control); background: transparent; }
+.pm-boardbar .pm-facets__summary:hover { background: var(--tint-hover); color: var(--text-primary); }
+/* The caret's own leading space collapses against 0.14em tracking, so it renders welded to the
+   last letter ("FILTERS▾"). Spaced explicitly, and untracked — tracking a single glyph only pushes
+   it off its own centre. */
+.pm-boardbar .pm-facets__summary::after { margin-left: 7px; letter-spacing: 0; }
+.pm-gantt__filterbar-body .lux-btn { white-space: nowrap; }
 .pm-facets--float .pm-facets__summary::after { content: " ▾"; color: var(--pm-text-faint); }
 .pm-facets--float[open] .pm-facets__summary::after { content: " ▴"; }
 /* Below the strip's wrap point the panel goes back to expanding inline: the trigger can end up near
@@ -553,7 +821,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-swatch-wrap { position: relative; display: inline-block; }
 .pm-swatch-trigger { width: 22px; height: 22px; padding: 0; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .pm-swatch-trigger__dot { width: 13px; height: 13px; background: var(--pm-swatch-hex); }
-.pm-swatch-pop { position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
+.pm-swatch-pop { position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); box-shadow: var(--elev-overlay); transform-origin: top left; animation: erp-rise 0.16s var(--erp-ease); }
 .pm-swatch { width: 27px; height: 27px; padding: 0; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .pm-swatch__dot { width: 16px; height: 16px; background: var(--pm-swatch-hex); }
 .pm-swatch--active { border-color: var(--pm-text); border-width: 1.5px; }
@@ -561,7 +829,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-swatch:focus-visible, .pm-swatch-trigger:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 2px; }
 
 /* ---- board drop/move popovers (P1-03) — anchored variant of .erp-usermenu__pop ---- */
-.pm-dropmenu { position: fixed; min-width: 190px; max-width: 240px; background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); display: flex; flex-direction: column; z-index: 80; box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); max-height: 70vh; overflow-y: auto; }
+.pm-dropmenu { position: fixed; min-width: 190px; max-width: 240px; background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); display: flex; flex-direction: column; z-index: 80; box-shadow: var(--elev-overlay); transform-origin: top left; animation: erp-rise 0.16s var(--erp-ease); max-height: 70vh; overflow-y: auto; }
 .pm-dropmenu__item { text-align: left; padding: 9px 12px; font: 400 13px var(--font-body); color: var(--pm-text); background: transparent; border: 0; border-bottom: 0.5px solid var(--pm-line-soft); cursor: pointer; }
 .pm-dropmenu__item:last-child { border-bottom: 0; }
 .pm-dropmenu__item:hover, .pm-dropmenu__item:focus-visible { background: color-mix(in srgb, var(--pm-accent) 10%, transparent); }
@@ -632,7 +900,80 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-chart__legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .pm-chart__swatch { display: inline-block; width: 9px; height: 9px; flex: 0 0 9px; }
 .pm-chart__swatch--line { width: 12px; height: 2px; flex: 0 0 12px; }
-.pm-chart__plot { position: relative; height: 220px; }
+/* ---- P5-C1: the charts grid + its layout switch --------------------------------------------
+   Three figures, three columns, with a switch to give one of them the full width. Reading three
+   charts side by side is a different job from reading one closely, and the page cannot know which
+   one the reader came for — so it asks rather than guessing. */
+.pm-charts { display: flex; flex-direction: column; gap: 16px; }
+/* Cards size to their own content. Stretching them to a shared row height was tried and reverted
+   (owner decision): the height a shared row settles on is set by the TAG figure — a donut over a
+   bar list — and pushing that into the two time-series plots made them nearly square, which reads
+   as a chart stretched to fill a hole rather than a chart drawn to its data. The default view
+   opens one figure at full width instead, so the figure a reader is actually looking at has room
+   without the other two being distorted to match it. */
+.pm-charts__grid { display: grid; gap: 16px; align-items: start; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pm-charts__cell { min-width: 0; display: flex; }
+.pm-charts__cell > .lux-card { flex: 1 1 auto; min-width: 0; }
+
+/* One figure takes the whole row and moves to the top; the OTHER TWO then share a two-column row
+   beneath it. Spanning in place instead leaves the grid three rows tall with two thirds of two of
+   them empty — worse than what it replaced, and exactly what the first attempt did. */
+.pm-charts__grid--focused { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pm-charts__cell--expanded { grid-column: 1 / -1; order: -1; }
+
+/* The expand control, in the card's own header corner. Square and hairline like every other
+   control in the suite — an icon button is still a button. */
+.pm-chart__expand {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  background: transparent; border: 0.5px solid var(--line-control); color: var(--pm-text-dim);
+  cursor: pointer; transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
+}
+.pm-chart__expand:hover { color: var(--pm-text); background: var(--tint-hover); }
+.pm-chart__expand[aria-pressed="true"] { color: var(--text-on-accent); background: var(--erp-accent); border-color: var(--erp-accent); }
+.pm-chart__expand:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
+/* Below this the three-up grid is narrower than the axis labels need, so it folds regardless of
+   the switch — the switch chooses between "three across" and "one across", not between "three
+   across" and "unreadable". */
+@media (max-width: 1000px) { .pm-charts__grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- P5-C1: the axis frame -----------------------------------------------------------------
+   The plot SVG is `preserveAspectRatio="none"`, which is right for the SHAPE (a responsive chart
+   stretches its x scale) and fatal for TEXT — which is why these charts shipped with no scale at
+   all rather than with stretched labels. The labels live in HTML around the plot instead, so they
+   are never scaled, and the reader finally gets a chart with numbers on it. */
+.pm-chart__frame {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  column-gap: 8px;
+}
+.pm-chart__yaxis {
+  position: relative;
+  grid-column: 1; grid-row: 1;
+  display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end;
+  font: 500 10px var(--font-body); color: var(--pm-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+/* Each label is centred on its own gridline, and the first and last would otherwise hang half
+   outside the plot box. */
+.pm-chart__yaxis > span { transform: translateY(-50%); line-height: 1; }
+.pm-chart__yaxis > span:first-child { transform: none; }
+.pm-chart__yaxis > span:last-child { transform: translateY(-100%); }
+.pm-chart__xaxis {
+  grid-column: 2; grid-row: 2;
+  display: flex; justify-content: space-between; gap: 8px; padding-top: 6px;
+  font: 500 10px var(--font-body); color: var(--pm-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pm-chart__xaxis > span { white-space: nowrap; }
+.pm-chart__denom { font: 400 11.5px var(--font-body); color: var(--pm-text-faint); }
+
+.pm-chart__plot { grid-column: 2; grid-row: 1; position: relative; height: 176px; }
+/* Definite heights, both states. A plot sized from its container while the container is sized
+   from the plot resolves to whatever the browser feels like — which is exactly what the stretch
+   experiment produced in the expanded row. */
+.pm-charts__cell--expanded .pm-chart__plot { height: 250px; }
 .pm-chart__svg { width: 100%; height: 100%; display: block; cursor: crosshair; }
 .pm-chart__grid { stroke: var(--pm-line-soft); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .pm-chart__crosshair { stroke: var(--pm-text-faint); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -654,17 +995,20 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 
 /* tag breakdown — ranked horizontal bars, hairline rows, PM-radius ends */
 .pm-tagbars { display: flex; flex-direction: column; }
-.pm-tagbar { display: grid; grid-template-columns: 140px 1fr 80px; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 0.5px solid var(--pm-line-soft); }
+.pm-tagbar { display: grid; grid-template-columns: minmax(72px, 140px) minmax(0, 1fr) 76px; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 0.5px solid var(--pm-line-soft); }
 .pm-tagbar:last-child { border-bottom: 0; }
 .pm-tagbar__label { font: 400 13px var(--font-body); color: var(--pm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm-tagbar__track { height: 16px; background: var(--pm-surface-sunken); border-radius: var(--pm-radius); }
-.pm-tagbar__fill { height: 100%; border-radius: var(--pm-radius); background: var(--pm-tagbar-onlight, var(--pm-text-faint)); }
-.lux-card--dark .pm-tagbar__fill { background: var(--pm-tagbar-ondark, var(--pm-text-faint)); }
+/* P5-C1 — the fill colour is now handed in per row (`--pm-tagbar-hue`), matched to the slice the
+   donut beside it paints for the same tag. It used to come from the tag's OWN registry colour
+   while the donut coloured by rank from the reporting series ramp, so the same Frontend was navy
+   in one figure and blue in the other, 300px apart. */
+.pm-tagbar__fill { height: 100%; border-radius: var(--pm-radius); background: var(--pm-tagbar-hue, var(--pm-text-faint)); }
 /* Page-theme twin of the .lux-card--dark override above — see the .pm-tag note. */
 @media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) .pm-tagbar__fill { background: var(--pm-tagbar-ondark, var(--pm-text-faint)); }
+  /* nothing theme-specific left here: --pm-tagbar-hue is a `var(--rc-series-N)` reference, and
+     that token already carries its own per-theme value. */
 }
-html[data-theme="dark"] .pm-tagbar__fill { background: var(--pm-tagbar-ondark, var(--pm-text-faint)); }
 .pm-tagbar__fill--untagged { background: var(--pm-text-faint); }
 .pm-tagbar__val { font: 700 11px var(--font-body); color: var(--pm-text-dim); text-align: right; white-space: nowrap; }
 
@@ -698,7 +1042,7 @@ html[data-theme="dark"] .pm-tagbar__fill { background: var(--pm-tagbar-ondark, v
   position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 4px; padding: 8px; background: var(--pm-surface-card); border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius-lg);
-  box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); max-width: min(200px, calc(100vw - 32px));
+  box-shadow: var(--elev-overlay); transform-origin: top left; animation: erp-rise 0.16s var(--erp-ease); max-width: min(200px, calc(100vw - 32px));
 }
 .pm-rx-pop__item {
   width: 28px; height: 28px; padding: 0; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: transparent;

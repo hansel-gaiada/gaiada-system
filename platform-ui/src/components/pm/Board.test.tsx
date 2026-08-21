@@ -18,6 +18,13 @@ function task(p: Partial<PmTask> & Pick<PmTask, "id" | "title">): PmTask {
   };
 }
 
+// jsdom has no DragEvent constructor, so testing-library's fireEvent.dragOver builds a plain Event
+// with no clientX — and a handler that reads the pointer position then sees `undefined`. A MouseEvent
+// named "dragover" carries the coordinates and React dispatches it to onDragOver just the same.
+function dragAt(type: "dragover" | "drop", clientX: number, clientY: number): MouseEvent {
+  return new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
+}
+
 function statusColumns(tasks: PmTask[]): AxisColumn<"todo" | "in_progress">[] {
   return [
     { key: "todo", label: "To do", tasks: tasks.filter((t) => t.status === "todo") },
@@ -31,6 +38,46 @@ describe("Board", () => {
     expect(screen.getAllByRole("list")).toHaveLength(2); // one per column body
     expect(screen.getByRole("listitem")).toBeInTheDocument();
     expect(screen.getByText("Task one")).toBeInTheDocument();
+  });
+
+  it("scrolls itself while a card is dragged at the edge, and stops on drop (P5-B1)", async () => {
+    // The regression this pins: a five-column board wider than the viewport leaves Done off-screen,
+    // and during an HTML5 drag nothing can scroll the container — wheel/trackpad go to the drag, so
+    // the only reachable columns were the visible ones. jsdom does no layout, so the scroller's rect
+    // and its scroll extent are both stubbed; what is under test is the direction/stop logic and the
+    // frame loop, not the browser's geometry.
+    const { container } = render(
+      <Board columns={statusColumns([task({ id: "t1", title: "Only one" })])} move={vi.fn()} />
+    );
+    const scroller = container.querySelector(".pm-board-scroll") as HTMLElement;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      left: 0, right: 1000, top: 0, bottom: 600, width: 1000, height: 600, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    let scrollLeft = 0;
+    Object.defineProperty(scroller, "scrollLeft", {
+      configurable: true,
+      get: () => scrollLeft,
+      set: (v: number) => { scrollLeft = Math.max(0, Math.min(400, v)); },
+    });
+
+    // Well inside the board: nothing moves.
+    fireEvent(scroller, dragAt("dragover", 500, 300));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(scrollLeft).toBe(0);
+
+    // Held near the right edge: the board comes to the pointer, with no further pointer movement.
+    fireEvent(scroller, dragAt("dragover", 995, 300));
+    await waitFor(() => expect(scrollLeft).toBeGreaterThan(0));
+
+    fireEvent(scroller, dragAt("drop", 995, 300));
+    const parked = scrollLeft;
+    await new Promise((r) => setTimeout(r, 80));
+    expect(scrollLeft).toBe(parked); // the loop must not outlive the drag
+
+    // And back the other way.
+    fireEvent(scroller, dragAt("dragover", 5, 300));
+    await waitFor(() => expect(scrollLeft).toBeLessThan(parked));
+    fireEvent(scroller, dragAt("drop", 5, 300));
   });
 
   it("collapses a column with no cards and leaves staffed ones alone", () => {

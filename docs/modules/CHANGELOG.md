@@ -3335,6 +3335,224 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.29.0] - 2026-08-21 - IN PROGRESS (P5-T1 the department Timeline says what it means; P5-B1/B2 the board strip)
+Driven in a browser against `dept-1` (Web Dev, DEMO_MODE) before and after, light and dark. The chart
+rendered confidently and told you the wrong things.
+- 🔴 **The today rule never drew.** The axis spans the tasks' own min/max dates, so on a department
+  whose work sits in the past it ended weeks before today: every bar flagged overdue, and the one mark
+  that says *how* overdue fell off the axis. The axis now stretches to reach `todayISO` (server-pinned
+  only — stretching it moves every bar, so it must not happen on hydration), with two days of air past
+  the pin so the rule reads as a marker, not as the card's border.
+- 🔴 **Two statuses rendered identically.** `pm.css` defined `--done/--blocked/--todo` only, and the
+  persisted ids are `in_progress` and `backlog`; neither matched a rule, so both fell through to the
+  bare accent. All five are declared now.
+- 🔴 **The axis never named a month.** Ticks a fixed step apart necessarily repeat one weekday, so the
+  header read "Tu 23 · Tu 30 · Tu 7 · Tu 14" and 7 July was indistinguishable from 7 August. Added a
+  month band spanning each calendar month's real width; the weekday abbreviation is kept only where
+  consecutive ticks are consecutive days.
+- **ONE colour channel, and it is urgency.** Bars were painted by STATUS (todo=green, done=amber,
+  blocked=orange) while urgency — the thing a department head scans for — was a 6px dot: the loudest
+  mark on the page carried the least important axis, and there was no legend anywhere. Bars are now a
+  warm-neutral ramp (`--pm-bar-*`, derived from the house bronze), status rides shape (solid · hollow ·
+  hatched · muted), the urgency tier is a 3px cap on the bar's due end, and the key is stated in the
+  control row. The dot stays — colour is never the sole carrier.
+- **The slip lane.** Decision 12 calls the gap between the authored commitment and the task-derived
+  envelope the slippage signal, but it was two hairlines 12px apart and the reader had to measure it by
+  eye. An overrun is now hatched in overdue red and labelled with its magnitude (`+9d`); a project
+  inside its commitment draws nothing, so the mark can only mean bad news.
+- **Chrome, from three rows to one.** Zoom, window, export, filters and burndown each owned a band, so
+  the chart began ~110px into the card. The filter disclosure is a popover off the single control row.
+  The card's "Timeline" title (the active sub-tab already says it) and its "N projects scheduled" are
+  replaced by a fact line: projects · tasks · overdue · largest slip.
+- **The burndown stopped hiding.** It was suppressed under any explicit window, on the stated grounds
+  that its points carry no date to remap — `BurndownOverlayPoint.date` does, so each point's x is
+  recomputed like a milestone's and out-of-axis points drop.
+- Also: one grey grid instead of three (the row trough is a hairline baseline, weekend bands moved
+  behind the bars now that nothing opaque sits over them, guides softened); the label gutter is one
+  `--pm-gantt-labelw` var instead of a 232px/244px pair repeated in eleven rules, widened to 260px; the
+  urgency dot no longer butts against the task title.
+- 🔴 **P5-B1 — a column you cannot see is a column you cannot drop into.** The work board scrolls
+  sideways whenever its columns outrun the viewport, and on a five-column department board Done is
+  off-screen at most window widths. During an HTML5 drag the browser scrolls nothing for you — the
+  pointer belongs to the drag, wheel and trackpad go nowhere — so the card had to be dropped back
+  where it started and moved through the ⇅ Move menu instead. Both boards (`Board` and the two-axis
+  `BoardGrid`, which is also capped at 72vh and so scrolls vertically too) now scroll themselves
+  while the pointer is held near an edge, at a speed proportional to how close it is. Driven by
+  `requestAnimationFrame`, not by `dragover`: that event fires on pointer MOVEMENT and only lazily
+  when the pointer is still, which is exactly the moment someone waits for the board to come to
+  them. The loop is stopped on drop, on dragend, on leaving the scroller and on unmount — a frame
+  loop outliving its drag would scroll a board nobody is touching.
+- 🔴 **P5-C1 — the Charts tab used three palettes for one set of entities, and neither time chart
+  had an axis.** On the status ladder: run through the six-check validator it fails three — two
+  hues outside the lightness band, Backlog under the chroma floor (it reads as plain grey), and
+  To&nbsp;do ↔ Doing at ΔE 11.3, below the floor of 15, meaning a reader with FULL colour vision
+  cannot reliably tell the flow chart's two largest bands apart. Measured at full saturation, while
+  the chart renders them at 25% opacity. A validated replacement was built — the same five slots
+  re-stepped onto `--rc-series-*`, passing every check in both themes — and then **kept as-is by
+  owner decision (2026-08-21)**; the numbers and the alternative are both recorded in
+  `tokens/pm.css` so a future revisit starts from them rather than from a fresh guess. What stayed
+  is the SHAPE: the Blocked band is **hatched**, the same hatch the Gantt uses for blocked bars,
+  and with this ladder that is the only distinction on the chart surviving both the sub-3:1
+  contrast and the colour-blind case.
+- **The donut's centre read as one smudged word.** "Total" and the value sat 13 units apart in a
+  100-unit viewBox with a 20px face whose cap height is ~14 — the number's ascenders ran into the
+  label's baseline. The two baselines are now set so the label+value block is optically centred on
+  the ring rather than each line clearing the other by accident. In the shared reports chart kit,
+  so every donut in the suite gets it.
+- **The page opens with one figure already at full width** (the first; `?chart=none` is the
+  explicit collapse-everything state, since an absent parameter has to mean the default). Three
+  narrow charts is a contact sheet — it tells a reader what is here, not what any of it says — and
+  someone opening "Charts" is almost always here to read one of them. Equalising the three cards'
+  heights was tried first and reverted by owner decision: the height a shared row settles on is set
+  by the TAG figure, and pushing that into the two time-series plots made them nearly square, which
+  reads as a chart stretched to fill a hole rather than one drawn to its data. Plot heights are
+  definite in both states — a plot sized from its container while the container is sized from the
+  plot resolves to whatever the browser feels like, which is exactly what that experiment produced
+  in the expanded row.
+- **Both time charts have axes now.** They were a `viewBox="0 0 100 100"` stretched to 1096×220
+  with no dates, no counts and no gridline labels; the slope of a band means nothing without a
+  scale, so the chart could only be read by hovering it point by point. The labels live in HTML
+  around the plot rather than inside the SVG, because `preserveAspectRatio="none"` is right for the
+  shape and fatal for text — which is most of why they were missing rather than stretched.
+- **The two tag figures agreed on nothing.** The bars took each tag's own registry colour, the
+  donut coloured by rank from the reporting series ramp: the same Frontend was navy in one and blue
+  in the other, 300px apart. The bars now follow the donut's assignment (the donut is the
+  constrained half — `ReportDistribution.slices` carries no colour, and that contract is mirrored
+  by platform-nest). Each figure also states its own denominator: they answer genuinely different
+  questions — share of the *tags applied* versus share of the *tasks* — which is why Frontend reads
+  67% in one and 50% in the other, and the page used to print both with nothing to explain it. That
+  reasoning existed only as a comment in `Charts.tsx`.
+- **Three figures across, and any one of them takes the full row** from a control in its own corner
+  (`?chart=flow`, bookmarkable like the Gantt's zoom). A mode switch above all three would make a
+  reader say "show me this one properly" in two steps. The expanded figure also moves to the TOP
+  and the remaining two share a two-column row under it: spanning it in place left the grid three
+  rows tall with two thirds of two of them empty, which is worse than what it replaced. The
+  wrapping Card is gone with it — the page was nesting cards inside a card whose title repeated the
+  sub-tab already highlighted above it.
+- **Date ticks are evenly spaced.** Thinning them by rounding evenly-spaced fractions produced gaps
+  of 2-1-2-1-2 days — a date axis whose own ticks look mis-measured. The stride is chosen to DIVIDE
+  the span, so every label sits the same distance apart and the last day is still named.
+- 🔴 **`aggregateFlow` was dropping the done/blocked flags.** It keys bands by LABEL across
+  projects and hardcoded both to `false`, so a department-scope flow chart could not tell its
+  consumer which band was Blocked: the label said so and the data did not. Flags are unioned by
+  label now, and `FlowBand` carries `isBlocked` so no consumer has to re-derive it by string-
+  matching a `statusId` that department scope rewrites.
+- **`--pm-status-ink` is retired.** Text on a status fill only ever worked because the old ladder
+  was a set of very light Material tints; against the validated mid-lightness set no single ink
+  clears 4.5:1 across all five in either theme (dark ink 3.98–8.12 in light mode, white 2.17–4.42).
+  PM Home's status pill becomes a dot beside a label in the page's own text colour — text wears
+  text tokens, a coloured mark beside it carries the identity.
+- 🔴 **P5-S2 — six floating panels were animating in from 50% of their own width to the left.**
+  `@keyframes erp-toast` carries `translate(-50%, 10px)` — the `-50%` is `.lux-toast`'s own centring
+  transform (`left: 50%`) dragged through the animation. Every OTHER surface using it as the
+  house's generic "a panel appeared" motion — the account menu, the PM drop menu, both swatch
+  popovers, the board toast, the burndown row and its legend — was therefore slid half its own
+  width sideways for the whole animation and snapped back at the end. On the ~223px account menu
+  that is a 111px lurch, which is exactly the "stiff" the report named. shell.css already carried
+  `erp-railmenu-in` with a comment recording this trap for one surface; it is now a house keyframe,
+  `erp-rise` — rise plus a 1% scale, no X translate, with each consumer setting its own
+  `transform-origin` so the panel grows out of the edge it belongs to (the account menu out of the
+  user card below it, a drop menu out of the control above it) instead of arriving from nowhere.
+  `erp-toast` keeps the one genuinely centred consumer. Measured across the open: `left` holds at
+  12–13px for every frame, where the keyframe's own arithmetic put it at roughly −99px before.
+- **The account menu also had no way out.** It animated in and then vanished on a single frame,
+  which is half a gesture. It stays mounted for a shorter reverse (110ms — arriving is information,
+  leaving is acknowledgement, and a dismissal as long as the reveal reads as lag), unmounting on
+  the element's own `animationend` rather than a timeout guessing at the CSS duration. Verified
+  under `prefers-reduced-motion: reduce`, where the global kill-switch collapses the duration to
+  ~0: the event still fires and the panel simply disappears, as that reader asked. Clicking the
+  trigger mid-close catches it and reopens instead of demanding a second click; outside-click and
+  Escape both still close.
+- **P5-S1 — an appearance switch in the sidebar's account menu.** Three stops, not the two-state
+  pill a theme toggle usually is: the model has THREE values (`auto | light | dark`, lib/prefs.ts),
+  `auto` is the default and the only one that follows the reader's own device, and a two-state
+  toggle cannot express it — shipping one would quietly take a working preference away from
+  everyone who never set one. It reuses the segmented-control shape the suite already owns (the
+  Gantt's Day/Week/Month): square, hairline-joined, the chosen stop in the house bronze, so it is
+  the same "this one is active" answer every other control gives rather than a rounded knob
+  speaking a different language. `role="menuitemradio"` because it lives inside a `role="menu"`
+  popover, where arbitrary children are invalid and "exactly one of three" is what that role
+  describes. It writes through a dedicated `setThemeAction` and NOT through
+  `account/actions.ts::savePrefs`: that action reads density and width out of its own form and
+  falls back to "comfortable"/"standard" when they are absent — and the shipped default width is
+  "wide", so routing a theme change through it would silently reset the reader's content width.
+  Verified in a browser: click Dark, `data-theme` lands on the frame you clicked, the cookie reads
+  `{"density":"comfortable","width":"wide","theme":"dark",…}` — width intact — and it survives a
+  reload; Auto removes the attribute again.
+- 🔴 **P5-B6 — the Timeline's first date tick read "U 3" instead of "TU 23".** Every tick is centred
+  on its day boundary, so the first one straddles the track's left edge; the missing half used to
+  spill harmlessly into the column gap, and P5-B5's opaque frozen column now paints over it. The
+  two end ticks hang into the track instead — they are the only two whose boundary IS the edge.
+- 🔴 **P5-B5 — scrolling the Timeline right threw away everything that named the work.** The
+  toolbar was the horizontal scroller's first child, so reaching a later month carried every
+  control off the left edge with the chart: to change the zoom you first had to scroll back. It
+  sits outside the scroller now — the whole fix, and no sticky positioning, which in a horizontal
+  scroller would also have to fight the toolbar being as wide as the scrolled CONTENT rather than
+  the viewport. The label column is pinned with `position: sticky; left: 0` (the same mechanism
+  `BoardGrid`'s row heads already use here), so a bar can no longer end up on screen with its name
+  scrolled away. Three things that pin needed and a bare `sticky` does not give you: an OPAQUE
+  background — the CARD's `--surface-card`, not `--pm-surface-card`, or the PM white prints a pale
+  panel down the left of a paper-toned card; a stacking order above the weekend bands, the
+  milestone guides, the dependency lines and the today rule, all of which are positioned against
+  the scrolled content and drew straight across the frozen strip; and a hairline at the freeze
+  edge, so the column reads as pinned rather than as a coincidence. Making it SOLID took three
+  more passes the first attempt missed: `align-items: center` left each frozen cell only as tall
+  as its own text, the 8px inter-row gap belonged to nobody (covered now, half from each
+  neighbour), a stray `height: 100%` on the axis header fought `align-self: stretch` and left a
+  4px sliver, and `.pm-gantt__projectbar-row`'s extra 2px margin was 2px of gap nothing covered.
+  The row grid also dropped its 12px column gap in favour of padding — a transparent gap between a
+  frozen column and the track is a slot for bars to scroll into and sit beside the labels they
+  belong to.
+- **The date window's clear button had been pushed outside its own shell.** Apply is flush to the
+  shell's right edge, and the clear `×` came AFTER it in the form; it now sits with the dates it
+  clears, before the submit — where a destructive reset also stops being adjacent to the commit
+  button. The pressed segment of Day/Week/Month wore the PM island's Material blue while Apply,
+  40px away, wore the house bronze: two different answers to "this one is active", side by side.
+  One accent now.
+- **P5-B4 — the Timeline toolbar was four heights and five equal shouts.** Measured on the running
+  page: the Day/Week/Month segmented control 24px, the date inputs 27px, the Filters disclosure
+  24px, the three buttons 32px — nothing in the row shared a top or a bottom edge. All of it now
+  sits on `--pm-ctl-h`, a token the board strip reads too, so the console's two control strips
+  cannot drift apart again the next time one of them is padded. The segmented control also lost its
+  pill ends: rounded caps among square buttons were the one shape in the row speaking a different
+  language. Typographically the row had Day/Week/Month, Apply, Export CSV, Filters and Show
+  burndown at ONE volume (11px, 0.14em, uppercase, bold), so nothing distinguished the control that
+  commits from the ones that are side doors; Apply is the only submit and is now the only solid
+  control, and the rest drop to the segmented control's quieter type and share its hairline, which
+  makes them read as one family. The date window became a single bordered object — a from, a dash,
+  a to and its own Apply — instead of two boxed fields that happened to be adjacent while being the
+  widest, loudest thing in the row. The legend moved off the button line onto its own, since it
+  describes the bars. And `Apply filters` inside the popover was 46px tall because its label wrapped
+  to two lines at panel width.
+- **The project name is the one thing on this chart that is NAMED rather than measured**, and it was
+  set in the same 11px micro-bold as every axis tick and every count — which is most of why a chart
+  of eight rows read like a spreadsheet of eight hundred. It takes the house display face
+  (Cormorant, already the page-title face) at 17px. Nothing else changed weight: one voice, not a
+  chorus.
+- **P5-B3 — the Ball tab still had the layout the board tab records replacing.** An eyebrow row
+  with two buttons, then a full-width Card holding a SINGLE select whose Apply sat ~700px away at
+  the far end of the row (`.lux-filters__actions` is `margin-left: auto`), then a third full-width
+  Card holding a collapsed — so entirely empty-looking — Filters disclosure. Measured on the running
+  page, the first column began at y=565 of a 1000px viewport; it begins at y=405 now. Same controls,
+  same GET-form contract, one `.pm-boardbar` strip (minus Group by — this whole tab IS the ball
+  grouping), which also means the console stops carrying two differently-sized sets of chrome for
+  the same job. The page's inline-styled header row went with it.
+- **P5-B2 — the control strip was five controls at three different heights.** Measured on the built
+  page: the Filters disclosure 30px, the two selects 31px, the three buttons 32px. The strip is
+  `align-items: flex-end`, so the bottoms agreed and the mismatch surfaced as ragged tops 2px apart
+  on the one row whose whole job is to read as a single instrument. One `--pm-boardbar-ctl-h` now
+  sizes every control with `box-sizing: border-box` — pinned, not padded until it happens to match,
+  because padding-to-fit drifts again the next time a font or a border moves. The two selects also
+  sat at 135px and 173px purely because their longest option differed; both are 156px now. The
+  Filters trigger wears the buttons' box and type (11px, uppercase, 0.14em) and their transparent
+  ghost fill — it had shipped sentence-case, filled, and 2px short, so the one control that opens a
+  panel looked like the one control someone forgot.
+- Verified: `tsc --noEmit` clean, 150 files/2445 tests green, `DEMO_MODE=1 next build` green, the
+  `smoke` Playwright project green. The auto-scroll was also driven in a real browser against
+  `dept-1` (scrollLeft 0 → 122 = full extent while held at the right edge, frozen on drop, back to 0
+  at the left edge). Not DEV-VERIFIED beyond demo data — no live platform response was driven
+  through either surface.
+
 ### [0.27.0] - 2026-08-20 - IN PROGRESS (P2-10 / P2-11 / P2-12-FE: the three Phase 2 surfaces)
 Shared layer first, because all three write the same endpoints: `lib/iam.ts` (readers),
 `lib/iamActions.ts` (every write plus ONE translation of the typed refusal vocabulary),

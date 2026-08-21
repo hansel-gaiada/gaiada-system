@@ -103,15 +103,38 @@ export default async function DepartmentTimelinePage({ params }: { params: Param
   const burndownSeries = await Promise.all(datedOwned.map((op) => getBurndown(userId, tenant, op.project.id)));
   const burndown = burndownOverlay(timeline, aggregateBurndown(burndownSeries));
 
+  // P5-T1 — the fact line. The card used to open with the title "Timeline" (which the active
+  // sub-tab already says) and a right-aligned "N projects scheduled". Neither told a department
+  // head anything they came here to learn. These four figures do, and they are all already
+  // resolved above: nothing new is fetched for them.
+  const lateCount = Object.values(taskUrgencyById).filter((t) => t === "overdue").length;
+  const worstSlip = datedOwned.reduce((worst, op) => {
+    const pb = projectBars[op.project.id];
+    if (!pb?.authoredEnd || !pb.derivedEnd || pb.derivedEnd <= pb.authoredEnd) return worst;
+    const days = Math.round((Date.parse(pb.derivedEnd) - Date.parse(pb.authoredEnd)) / 86400000);
+    return Math.max(worst, days);
+  }, 0);
+  const facts = [
+    `${datedOwned.length} project${datedOwned.length === 1 ? "" : "s"} scheduled`,
+    `${allTasks.length} task${allTasks.length === 1 ? "" : "s"}`,
+    `${lateCount} overdue`,
+    worstSlip > 0 ? `largest slip +${worstSlip}d` : "nothing past its commitment",
+  ];
+
   return (
     // `pm-timeline-widen` (shell.css): the Timeline chart is a structurally wide surface — this
     // marker lifts the app shell's own `.erp-main__inner` 1180px cap for this page, the real fix
     // for "the Timeline must be far bigger" (see shell.css's comment on the `:has()` rule).
     <div className="pm-timeline-widen">
-      <Card
-        title={PM_TERMS.gantt}
-        headerRight={<span style={{ font: "700 10px var(--font-body)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{datedOwned.length} project{datedOwned.length === 1 ? "" : "s"} scheduled</span>}
-      >
+      <p className="dept-timeline__facts">
+        {facts.map((f, i) => (
+          <span key={f} className="dept-timeline__fact">
+            {i > 0 && <span className="dept-timeline__fact-sep" aria-hidden>·</span>}
+            {f}
+          </span>
+        ))}
+      </p>
+      <Card>
         <Gantt
           timeline={timeline}
           groups={groups}

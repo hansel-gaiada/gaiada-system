@@ -1,7 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { Charts, tagDistribution } from "./Charts";
-import type { TagBreakdownRow, FlowSeries, BurndownPoint, BurndownOverlayPoint } from "@/lib/pm";
+import type { TagBreakdownRow, FlowSeries, BurndownPoint, BurndownOverlayPoint } from "@/lib/pm";// Charts is a client component that reads the layout switch out of the URL (P5-C1) — stub the
+// router the same way Board.test.tsx does, so it can render outside an app-router tree.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/departments/dept-1/charts",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 // P4-A7: the tag-distribution donut (reusing `components/reports/charts/Donut` unmodified)
 // alongside the existing ranked bars, at every PM scope (this component is unchanged by scope —

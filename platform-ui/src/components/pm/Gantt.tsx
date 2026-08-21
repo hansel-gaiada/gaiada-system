@@ -221,6 +221,42 @@ function buildMonthTicks(start: string, end: string): HeaderTick[] {
   });
 }
 
+interface MonthBand { key: string; label: string; pct: number; widthPct: number }
+// P5-T1 — the MONTH BAND above the day ticks. The day axis on its own rendered "Tu 23 · Tu 30 ·
+// Tu 7 · Tu 14": ticks a fixed step apart necessarily repeat the same weekday, and the month was
+// never named anywhere, so 7 July and 7 August were the same label. Each band spans its own
+// calendar month's real width on the axis and names it once. Year is appended on the first band
+// and on every January, the same rule `buildMonthTicks` already uses for its own labels.
+// UTC getters throughout, like every other date helper in this file — never local ones — so a
+// band is a pure function of the ISO string and server/client can't disagree.
+const MAX_MONTH_BANDS = 120;
+function buildMonthBands(start: string, days: number): MonthBand[] {
+  if (days <= 0) return [];
+  const startMs = Date.parse(start);
+  const endMs = startMs + days * DAY;
+  const span = Math.max(DAY, endMs - startMs);
+  const out: MonthBand[] = [];
+  const first = new Date(startMs);
+  let y = first.getUTCFullYear();
+  let m = first.getUTCMonth();
+  let cursor = startMs;
+  while (cursor < endMs && out.length < MAX_MONTH_BANDS) {
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
+    const nextMs = Math.min(Date.UTC(y, m, 1), endMs);
+    const cd = new Date(cursor);
+    const showYear = out.length === 0 || cd.getUTCMonth() === 0;
+    out.push({
+      key: `${cd.getUTCFullYear()}-${cd.getUTCMonth()}`,
+      label: showYear ? `${MONTH_ABBR[cd.getUTCMonth()]} ${cd.getUTCFullYear()}` : MONTH_ABBR[cd.getUTCMonth()],
+      pct: ((cursor - startMs) / span) * 100,
+      widthPct: ((nextMs - cursor) / span) * 100,
+    });
+    cursor = nextMs;
+  }
+  return out;
+}
+
 // Offset (0-100) of `iso` within [start, start+days], or null when it falls outside the
 // rendered window — the guard that hides the today line when "today" isn't on this axis at all.
 // Also reused by P4-C2 to reposition milestone diamonds against an explicit window.
@@ -499,9 +535,28 @@ export function Gantt(props: GanttProps) {
     !Number.isNaN(Date.parse(winFromParam)) && !Number.isNaN(Date.parse(winToParam)) &&
     winToParam >= winFromParam // lexical ISO (yyyy-mm-dd) comparison is date-correct
   );
-  const effStart = windowActive ? winFromParam! : timeline.start;
-  const effEnd = windowActive ? winToParam! : timeline.end;
-  const effDays = windowActive ? Math.max(1, Math.round((Date.parse(effEnd) - Date.parse(effStart)) / DAY)) : timeline.days;
+  // P5-T1 — TODAY IS ALWAYS ON THE AXIS.
+  // The server-derived timeline spans the tasks' own min/max dates, so on a department whose work
+  // all sits in the past the default axis ended weeks before today: every bar was flagged overdue
+  // and the one mark that says how overdue — the today rule — fell outside the axis and rendered
+  // nothing at all. The axis is stretched to reach `todayISO` whenever it doesn't already.
+  // Gated on the SERVER-pinned `todayISO` only, never the post-mount client fallback: stretching
+  // the axis moves every bar, and doing that on hydration would be a visible jump (the today rule
+  // itself is decorative chrome and can afford to arrive a frame late — the geometry can't).
+  // `windowActive` still wins: an explicit window is the reader's own instruction.
+  const todayPin = props.todayISO ?? null;
+  const needsToday = !windowActive && !!todayPin && (todayPin < timeline.start || todayPin > timeline.end);
+  // Two days of air past the pin, so the today rule reads as a marker ON the axis rather than as
+  // the chart's own border — flush against the edge it is indistinguishable from the card frame.
+  const TODAY_PAD_DAYS = 2;
+  const axisStart = windowActive ? winFromParam! : needsToday && todayPin! < timeline.start ? dayShift(todayPin!, -TODAY_PAD_DAYS) : timeline.start;
+  const axisEnd = windowActive ? winToParam! : needsToday && todayPin! > timeline.end ? dayShift(todayPin!, TODAY_PAD_DAYS) : timeline.end;
+  // Everything downstream — bars, milestones, the burndown overlay — is re-derived against the
+  // axis whenever it isn't the server's own; `rescaled` is that single condition.
+  const rescaled = windowActive || needsToday;
+  const effStart = axisStart;
+  const effEnd = axisEnd;
+  const effDays = rescaled ? Math.max(1, Math.round((Date.parse(effEnd) - Date.parse(effStart)) / DAY)) : timeline.days;
 
   const setZoomParams = useCallback((next: URLSearchParams) => {
     const qs = next.toString();
@@ -534,12 +589,27 @@ export function Gantt(props: GanttProps) {
   // clamp math — see applyWindowToBars). Memoized: `groups`' own memo comment above explains why an
   // unmemoized fallback here would retrigger the dependency-line effect every render.
   const viewGroups: GanttGroup[] = useMemo(
-    () => (windowActive ? groups.map((g) => ({ ...g, bars: applyWindowToBars(g.bars, effStart, effEnd) })) : groups),
-    [groups, windowActive, effStart, effEnd],
+    () => (rescaled ? groups.map((g) => ({ ...g, bars: applyWindowToBars(g.bars, effStart, effEnd) })) : groups),
+    [groups, rescaled, effStart, effEnd],
   );
+  // P5-T1 — the burndown overlay follows the axis instead of hiding from it. It used to be
+  // suppressed outright whenever a window was active, on the stated grounds that "there is no
+  // per-point date to remap against an arbitrary window" — but `BurndownOverlayPoint` carries
+  // `date` (lib/pm.ts), so each point's x is simply recomputed the same way a milestone diamond's
+  // is, and a point outside the axis is dropped rather than misplaced. Same helper, same rule.
+  const viewBurndown: BurndownOverlayPoint[] = useMemo(() => {
+    if (!rescaled) return burndown;
+    const out: BurndownOverlayPoint[] = [];
+    for (const pt of burndown) {
+      const x = pctForDate(effStart, effDays, pt.date);
+      if (x === null) continue;
+      out.push({ ...pt, x });
+    }
+    return out;
+  }, [burndown, rescaled, effStart, effDays]);
   const viewMilestones: MilestoneMarker[] = useMemo(
-    () => (windowActive ? applyWindowToMilestones(milestones ?? [], effStart, effDays) : (milestones ?? [])),
-    [milestones, windowActive, effStart, effDays],
+    () => (rescaled ? applyWindowToMilestones(milestones ?? [], effStart, effDays) : (milestones ?? [])),
+    [milestones, rescaled, effStart, effDays],
   );
 
   // ---- P4-C3 — the filter bar, URL-driven like everything above (?gq=/?gtags=/?gstatus=/
@@ -714,6 +784,14 @@ export function Gantt(props: GanttProps) {
     return buildHeaderTicks(effStart, effDays, forceStep);
   }, [zoomParam, dense, effStart, effEnd, effDays]);
   const useFineAxis = zoomParam === "month" ? headerTicks.length > 0 : dense;
+  // Month zoom already names the month on every tick, so the band would only repeat it there.
+  const monthBands = useMemo(
+    () => (useFineAxis && zoomParam !== "month" ? buildMonthBands(effStart, effDays) : []),
+    [useFineAxis, zoomParam, effStart, effDays],
+  );
+  // The weekday abbreviation earns its place only where consecutive ticks are consecutive days.
+  // At a 7-day step every tick reads the same weekday, which is noise dressed as data.
+  const showWeekday = zoomParam === "day" || (zoomParam === null && effDays <= 31);
   const todayPct = resolvedToday ? pctForDate(effStart, effDays, resolvedToday) : null;
 
   // P4-C1: a real zoom, not just denser labels — widening `.pm-gantt`'s min-width scales every
@@ -960,7 +1038,13 @@ export function Gantt(props: GanttProps) {
     // P2-05: colour from the status registry when supplied (inline, overrides the
     // legacy class); the class stays as the fallback for callers that don't pass it.
     const barColor = props.barColors?.[t.id];
-    const cls = `pm-gantt__bar pm-gantt__bar--${t.status}${bar.startsMissing ? " pm-gantt__bar--dashed" : ""}${dragging ? " pm-gantt__bar--dragging" : ""}${linkSource ? " pm-gantt__bar--linksrc" : ""}${isSelected ? " pm-gantt__bar--selected" : ""}`;
+    // P5-T1 — the urgency tier now reaches the BAR, as a 3px cap on its due end, not just the dot
+    // in the label column. Only the three tiers that carry a judgement get a cap: `done` and
+    // `undated` are states, not alarms, and painting them would put colour back on the axis for
+    // no reason. The dot stays — colour is never the sole carrier of a tier.
+    const uCap = urgencyTier === "overdue" || urgencyTier === "due-soon" || urgencyTier === "on-track"
+      ? ` pm-gantt__bar--u-${urgencyTier}` : "";
+    const cls = `pm-gantt__bar pm-gantt__bar--${t.status}${uCap}${bar.startsMissing ? " pm-gantt__bar--dashed" : ""}${dragging ? " pm-gantt__bar--dragging" : ""}${linkSource ? " pm-gantt__bar--linksrc" : ""}${isSelected ? " pm-gantt__bar--selected" : ""}`;
     const colorStyle: React.CSSProperties = barColor ? { background: barColor } : {};
     const title = `${t.title} · ${t.progress}%${t.dueDate ? ` · due ${fmt(t.dueDate)}` : ""}`;
     const fill = (
@@ -1062,7 +1146,12 @@ export function Gantt(props: GanttProps) {
   }
 
   return (
-    <div className="erp-scroll" style={{ overflowX: "auto" }}>
+    // P5-B5 — the toolbar sits OUTSIDE the horizontal scroller. It used to be the scroller's first
+    // child, so scrolling right to reach a later month carried every control off the left edge with
+    // the chart: to change the zoom you first had to scroll back. Lifting it out is the whole fix —
+    // no sticky positioning, which in a horizontal scroller would also have to fight the fact that
+    // the toolbar is as wide as the scrolled CONTENT, not as wide as the viewport.
+    <>
       {/* P4-C1/P4-C2 toolbar — zoom + the explicit date window. Renders unconditionally (both are
           read-only-safe chrome, unlike the drag/link interactions gated on `interactive`/`canEdit`
           below), and is entirely URL-driven so it survives navigation/bookmarking like `?collapsed=`. */}
@@ -1095,175 +1184,188 @@ export function Gantt(props: GanttProps) {
           <input key={`gfrom-${winFromParam ?? effStart}`} name="gfrom" type="date" defaultValue={winFromParam ?? effStart} aria-label="Window start" />
           <span className="pm-gantt__window-sep" aria-hidden>–</span>
           <input key={`gto-${winToParam ?? effEnd}`} name="gto" type="date" defaultValue={winToParam ?? effEnd} aria-label="Window end" />
-          <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply</button>
+          {/* P5-B5 — the clear sits with the DATES it clears, before the submit. After it, the
+              submit's flush-right alignment pushed it outside the window shell entirely, and a
+              destructive reset immediately adjacent to the commit button is a mis-tap waiting to
+              happen either way. */}
           {windowActive && (
             <button type="button" className="pm-gantt__window-clear" onClick={clearWindow} aria-label="Clear date window — show the full timeline">×</button>
           )}
+          <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
         </form>
+        <span className="pm-gantt__toolbar-spacer" aria-hidden />
+        {/* P4-C3 — the filter bar. A `<details>` disclosure (same "collapsed by default, state
+            survives in the URL" shape as everything else in this toolbar) rather than always-open
+            chrome, so a read-only viewer who never filters isn't shown eight facets by default; it
+            opens itself when a filter is already active (e.g. from a bookmarked/shared link). */}
+        <details className="pm-gantt__filterbar" open={filtersActive || undefined}>
+          <summary className="pm-gantt__filterbar-summary">
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </summary>
+          <div className="pm-gantt__filterbar-body">
+            <form className="pm-gantt__filterbar-row" onSubmit={applyTextFilters} aria-label="Keywords and due-date filters">
+              <label className="pm-gantt__filterbar-field">
+                <span className="pm-sr-only">{PM_TERMS.keywords}</span>
+                <input key={`gq-${gq}`} name="gq" type="search" placeholder={PM_TERMS.keywords} defaultValue={gq} aria-label={PM_TERMS.keywords} />
+              </label>
+              <label className="pm-gantt__filterbar-field">
+                <span className="pm-sr-only">{PM_TERMS.dueDate} from</span>
+                <input key={`gduefrom-${gDueFrom}`} name="gduefrom" type="date" defaultValue={gDueFrom} aria-label={`${PM_TERMS.dueDate} from`} />
+              </label>
+              <span className="pm-gantt__window-sep" aria-hidden>–</span>
+              <label className="pm-gantt__filterbar-field">
+                <span className="pm-sr-only">{PM_TERMS.dueDate} to</span>
+                <input key={`gdueto-${gDueTo}`} name="gdueto" type="date" defaultValue={gDueTo} aria-label={`${PM_TERMS.dueDate} to`} />
+              </label>
+              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply filters</button>
+              {filtersActive && (
+                <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={clearFilters}>Clear filters</button>
+              )}
+            </form>
+
+            {facetOptions.statuses.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">Status</span>
+                <div className="pm-tagfilter__options">
+                  {facetOptions.statuses.map(([id, label]) => (
+                    <label key={id} className="pm-tagfilter__opt">
+                      <input type="checkbox" checked={filters.status.has(id)} onChange={() => toggleSetParam("gstatus", id)} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {facetOptions.priorities.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.priority}</span>
+                <div className="pm-tagfilter__options">
+                  {facetOptions.priorities.map((p) => (
+                    <label key={p} className="pm-tagfilter__opt">
+                      <input type="checkbox" checked={filters.priority.has(p)} onChange={() => toggleSetParam("gpriority", p)} />
+                      {GANTT_PRIORITY_LABEL[p]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {facetOptions.responsibles.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
+                <div className="pm-tagfilter__options">
+                  {facetOptions.responsibles.map(([id, name]) => (
+                    <label key={id} className="pm-tagfilter__opt">
+                      <input type="checkbox" checked={filters.responsible.has(id)} onChange={() => toggleSetParam("gresponsible", id)} />
+                      {name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {facetOptions.balls.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
+                <div className="pm-tagfilter__options">
+                  {facetOptions.balls.map(([id, name]) => (
+                    <label key={id} className="pm-tagfilter__opt">
+                      <input type="checkbox" checked={filters.ball.has(id)} onChange={() => toggleSetParam("gball", id)} />
+                      {name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {facetOptions.tags.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.tags}</span>
+                <div className="pm-tagfilter__options">
+                  {facetOptions.tags.map((tg) => (
+                    <label key={tg.id} className="pm-tagfilter__opt">
+                      <input type="checkbox" checked={filters.tags.has(tg.id)} onChange={() => toggleSetParam("gtags", tg.id)} />
+                      {tg.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {facetOptions.milestones.length > 0 && (
+              <div className="pm-tagfilter">
+                <span className="pm-tagfilter__label">{PM_TERMS.milestones}</span>
+                <div className="pm-tagfilter__options">
+                  {facetOptions.milestones.map((m) => (
+                    <label key={m.id} className="pm-tagfilter__opt">
+                      <input type="checkbox" checked={filters.milestone.has(m.id)} onChange={() => toggleSetParam("gmilestone", m.id)} />
+                      {m.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="pm-gantt__filterbar-toggles">
+              <label className="pm-tagfilter__opt" title={props.taskUrgency ? undefined : "Unavailable — this view wasn't given urgency data."}>
+                <input
+                  type="checkbox" checked={overdueOnly} disabled={!props.taskUrgency}
+                  onChange={(e) => setOverdueOnly(e.target.checked)}
+                />
+                {PM_TERMS.overdueOnly}
+                {!props.taskUrgency && <span className="pm-sr-only"> — unavailable: this view wasn't given urgency data.</span>}
+              </label>
+              <label className="pm-tagfilter__opt">
+                <input type="checkbox" checked={!hideClosed} onChange={(e) => setHideClosed(!e.target.checked)} />
+                {PM_TERMS.showClosed}
+              </label>
+              {/* P4-C3 / plan §5 decision 11 (open): our `Subtasks` are a checklist ON a task, not
+                  first-class `pm_tasks` rows, so there is nothing for a "Sub-task" toggle to
+                  include/exclude. Rendering it active would silently do nothing — worse than being
+                  honest about the gap — so it stays visible (for Repsona-fidelity scanability) but
+                  DISABLED, with the reason on the control itself, not hidden in a mouse-only tooltip. */}
+              <label
+                className="pm-tagfilter__opt pm-tagfilter__opt--disabled"
+                title="Not applicable yet — our Subtasks are a checklist on a task, not standalone tasks (open decision, plan §5 decision 11)."
+              >
+                <input type="checkbox" disabled aria-disabled="true" readOnly checked={false} />
+                {PM_TERMS.subTask}
+                <span className="pm-sr-only"> — not applicable: Subtasks are a checklist, not standalone tasks (open decision).</span>
+              </label>
+            </div>
+          </div>
+        </details>
+        {/* P2-08: hides entirely when the series is empty (disabled/stale backend, or a project
+            with no tasks yet) — no overlay, no error, per design spec §4 phase-2. P5-T1 dropped
+            the extra "also hidden under an explicit window" rule: the points carry dates and are
+            remapped onto the live axis now (see `viewBurndown`), so there is nothing left to
+            misalign, and the toggle no longer disappears the moment a reader picks a window. */}
         {/* P4-C5 — export the VISIBLE (filtered) rows, never the full unfiltered set; hidden when
             there's nothing to export rather than shown disabled (same convention as the burndown
-            toggle below — no control, no error, when its data is empty). */}
+            toggle beside it — no control, no error, when its data is empty). */}
         {filteredTotal > 0 && (
           <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={exportCsv}>Export CSV</button>
         )}
-      </div>
-
-      {/* P4-C3 — the filter bar. A `<details>` disclosure (same "collapsed by default, state
-          survives in the URL" shape as everything else in this toolbar) rather than always-open
-          chrome, so a read-only viewer who never filters isn't shown eight facets by default; it
-          opens itself when a filter is already active (e.g. from a bookmarked/shared link). */}
-      <details className="pm-gantt__filterbar" open={filtersActive || undefined}>
-        <summary className="pm-gantt__filterbar-summary">
-          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-        </summary>
-        <div className="pm-gantt__filterbar-body">
-          <form className="pm-gantt__filterbar-row" onSubmit={applyTextFilters} aria-label="Keywords and due-date filters">
-            <label className="pm-gantt__filterbar-field">
-              <span className="pm-sr-only">{PM_TERMS.keywords}</span>
-              <input key={`gq-${gq}`} name="gq" type="search" placeholder={PM_TERMS.keywords} defaultValue={gq} aria-label={PM_TERMS.keywords} />
-            </label>
-            <label className="pm-gantt__filterbar-field">
-              <span className="pm-sr-only">{PM_TERMS.dueDate} from</span>
-              <input key={`gduefrom-${gDueFrom}`} name="gduefrom" type="date" defaultValue={gDueFrom} aria-label={`${PM_TERMS.dueDate} from`} />
-            </label>
-            <span className="pm-gantt__window-sep" aria-hidden>–</span>
-            <label className="pm-gantt__filterbar-field">
-              <span className="pm-sr-only">{PM_TERMS.dueDate} to</span>
-              <input key={`gdueto-${gDueTo}`} name="gdueto" type="date" defaultValue={gDueTo} aria-label={`${PM_TERMS.dueDate} to`} />
-            </label>
-            <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Apply filters</button>
-            {filtersActive && (
-              <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" onClick={clearFilters}>Clear filters</button>
-            )}
-          </form>
-
-          {facetOptions.statuses.length > 0 && (
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">Status</span>
-              <div className="pm-tagfilter__options">
-                {facetOptions.statuses.map(([id, label]) => (
-                  <label key={id} className="pm-tagfilter__opt">
-                    <input type="checkbox" checked={filters.status.has(id)} onChange={() => toggleSetParam("gstatus", id)} />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {facetOptions.priorities.length > 0 && (
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">{PM_TERMS.priority}</span>
-              <div className="pm-tagfilter__options">
-                {facetOptions.priorities.map((p) => (
-                  <label key={p} className="pm-tagfilter__opt">
-                    <input type="checkbox" checked={filters.priority.has(p)} onChange={() => toggleSetParam("gpriority", p)} />
-                    {GANTT_PRIORITY_LABEL[p]}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {facetOptions.responsibles.length > 0 && (
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">{PM_TERMS.responsible}</span>
-              <div className="pm-tagfilter__options">
-                {facetOptions.responsibles.map(([id, name]) => (
-                  <label key={id} className="pm-tagfilter__opt">
-                    <input type="checkbox" checked={filters.responsible.has(id)} onChange={() => toggleSetParam("gresponsible", id)} />
-                    {name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {facetOptions.balls.length > 0 && (
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">{PM_TERMS.ball}</span>
-              <div className="pm-tagfilter__options">
-                {facetOptions.balls.map(([id, name]) => (
-                  <label key={id} className="pm-tagfilter__opt">
-                    <input type="checkbox" checked={filters.ball.has(id)} onChange={() => toggleSetParam("gball", id)} />
-                    {name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {facetOptions.tags.length > 0 && (
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">{PM_TERMS.tags}</span>
-              <div className="pm-tagfilter__options">
-                {facetOptions.tags.map((tg) => (
-                  <label key={tg.id} className="pm-tagfilter__opt">
-                    <input type="checkbox" checked={filters.tags.has(tg.id)} onChange={() => toggleSetParam("gtags", tg.id)} />
-                    {tg.label}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {facetOptions.milestones.length > 0 && (
-            <div className="pm-tagfilter">
-              <span className="pm-tagfilter__label">{PM_TERMS.milestones}</span>
-              <div className="pm-tagfilter__options">
-                {facetOptions.milestones.map((m) => (
-                  <label key={m.id} className="pm-tagfilter__opt">
-                    <input type="checkbox" checked={filters.milestone.has(m.id)} onChange={() => toggleSetParam("gmilestone", m.id)} />
-                    {m.name}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="pm-gantt__filterbar-toggles">
-            <label className="pm-tagfilter__opt" title={props.taskUrgency ? undefined : "Unavailable — this view wasn't given urgency data."}>
-              <input
-                type="checkbox" checked={overdueOnly} disabled={!props.taskUrgency}
-                onChange={(e) => setOverdueOnly(e.target.checked)}
-              />
-              {PM_TERMS.overdueOnly}
-              {!props.taskUrgency && <span className="pm-sr-only"> — unavailable: this view wasn't given urgency data.</span>}
-            </label>
-            <label className="pm-tagfilter__opt">
-              <input type="checkbox" checked={!hideClosed} onChange={(e) => setHideClosed(!e.target.checked)} />
-              {PM_TERMS.showClosed}
-            </label>
-            {/* P4-C3 / plan §5 decision 11 (open): our `Subtasks` are a checklist ON a task, not
-                first-class `pm_tasks` rows, so there is nothing for a "Sub-task" toggle to
-                include/exclude. Rendering it active would silently do nothing — worse than being
-                honest about the gap — so it stays visible (for Repsona-fidelity scanability) but
-                DISABLED, with the reason on the control itself, not hidden in a mouse-only tooltip. */}
-            <label
-              className="pm-tagfilter__opt pm-tagfilter__opt--disabled"
-              title="Not applicable yet — our Subtasks are a checklist on a task, not standalone tasks (open decision, plan §5 decision 11)."
-            >
-              <input type="checkbox" disabled aria-disabled="true" readOnly checked={false} />
-              {PM_TERMS.subTask}
-              <span className="pm-sr-only"> — not applicable: Subtasks are a checklist, not standalone tasks (open decision).</span>
-            </label>
-          </div>
-        </div>
-      </details>
-
-      {/* P2-08: hides entirely when the series is empty (disabled/stale backend, or a project
-          with no tasks yet) — no overlay, no error, per design spec §4 phase-2. Also hidden while
-          an explicit window is active: the overlay's x-positions are computed against the
-          SERVER-derived timeline (there is no per-point date to remap against an arbitrary
-          window — unlike bars/milestones, which carry real dates), so showing it here would
-          silently misalign rather than degrade gracefully. */}
-      {burndown.length > 0 && !windowActive && (
-        <div className="pm-gantt__bdtoggle">
+        {viewBurndown.length > 0 && (
           <button type="button" className="lux-btn lux-btn--ghost lux-btn--sm" aria-pressed={showBurndown} onClick={() => setShowBurndown((v) => !v)}>
             {showBurndown ? "Hide burndown" : "Show burndown"}
           </button>
+        )}
+        {/* P5-T1 — the key. The chart shipped with five different bar treatments and no legend
+            anywhere on the page, so the fills were tribal knowledge. Status is shape here, which
+            is exactly the kind of encoding that needs saying once, out loud. */}
+        <div className="pm-gantt__legend">
+          <span className="pm-gantt__legend-item"><span className="pm-gantt__legend-swatch" aria-hidden />Doing</span>
+          <span className="pm-gantt__legend-item"><span className="pm-gantt__legend-swatch pm-gantt__legend-swatch--hollow" aria-hidden />To do</span>
+          <span className="pm-gantt__legend-item"><span className="pm-gantt__legend-swatch pm-gantt__legend-swatch--blocked" aria-hidden />Blocked</span>
+          <span className="pm-gantt__legend-item"><span className="pm-gantt__legend-swatch pm-gantt__legend-swatch--done" aria-hidden />Done</span>
+          {groupBy === "project" && props.projectBars && (
+            <span className="pm-gantt__legend-item"><span className="pm-gantt__legend-swatch pm-gantt__legend-swatch--slip" aria-hidden />Past commitment</span>
+          )}
         </div>
-      )}
+      </div>
+      <div className="erp-scroll" style={{ overflowX: "auto" }}>
       <div className="pm-gantt" ref={containerRef} style={ganttWidthPx ? { minWidth: `${ganttWidthPx}px` } : undefined}>
         {/* P4-L3/P4-C1: day/week/month header with weekday labels — dense (<=~a year) spans get a
             real per-day/week tick axis (or, at Month zoom, calendar-month ticks regardless of
@@ -1272,21 +1374,33 @@ export function Gantt(props: GanttProps) {
         {useFineAxis ? (
           <div className="pm-gantt__daxis">
             <span className="pm-gantt__daxis-head">Task</span>
-            <div className="pm-gantt__daxis-track">
-              {headerTicks.map((tk) => (
-                <span key={tk.iso} className="pm-gantt__daxis-tick" style={{ left: `${tk.pct}%` }}>
-                  {tk.labelled ? (
-                    tk.label ? (
-                      <span className="pm-gantt__daxis-d">{tk.label}</span>
-                    ) : (
-                      <>
-                        <span className="pm-gantt__daxis-wd">{weekdayAbbr(tk.iso)}</span>
-                        <span className="pm-gantt__daxis-d">{dayOfMonth(tk.iso)}</span>
-                      </>
-                    )
-                  ) : null}
-                </span>
-              ))}
+            <div>
+              {/* P5-T1 — the month band. Without it the day ticks below name a day number and a
+                  weekday and nothing else, so the same "7" appears in July and in August with no
+                  way to tell them apart. */}
+              {monthBands.length > 0 && (
+                <div className="pm-gantt__daxis-months" aria-hidden>
+                  {monthBands.map((mb) => (
+                    <span key={mb.key} className="pm-gantt__daxis-month" style={{ left: `${mb.pct}%`, width: `${mb.widthPct}%` }}>{mb.label}</span>
+                  ))}
+                </div>
+              )}
+              <div className="pm-gantt__daxis-track">
+                {headerTicks.map((tk) => (
+                  <span key={tk.iso} className="pm-gantt__daxis-tick" style={{ left: `${tk.pct}%` }}>
+                    {tk.labelled ? (
+                      tk.label ? (
+                        <span className="pm-gantt__daxis-d">{tk.label}</span>
+                      ) : (
+                        <>
+                          {showWeekday && <span className="pm-gantt__daxis-wd">{weekdayAbbr(tk.iso)}</span>}
+                          <span className="pm-gantt__daxis-d">{dayOfMonth(tk.iso)}</span>
+                        </>
+                      )
+                    ) : null}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
@@ -1315,14 +1429,14 @@ export function Gantt(props: GanttProps) {
           </div>
         )}
 
-        {showBurndown && burndown.length > 0 && !windowActive && (
+        {showBurndown && viewBurndown.length > 0 && (
           <>
             <div className="pm-gantt__bdrow">
               <span className="pm-gantt__bdlabel">Burndown</span>
               <div className="pm-gantt__bdtrack">
                 <svg className="pm-gantt__bdsvg" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Burndown chart: ideal versus actual remaining work">
-                  <polyline className="pm-gantt__bdline pm-gantt__bdline--ideal" points={bdPoints(burndown, "idealPct")} />
-                  <polyline className="pm-gantt__bdline pm-gantt__bdline--actual" points={bdPoints(burndown, "actualPct")} />
+                  <polyline className="pm-gantt__bdline pm-gantt__bdline--ideal" points={bdPoints(viewBurndown, "idealPct")} />
+                  <polyline className="pm-gantt__bdline pm-gantt__bdline--actual" points={bdPoints(viewBurndown, "actualPct")} />
                 </svg>
               </div>
             </div>
@@ -1357,9 +1471,13 @@ export function Gantt(props: GanttProps) {
             <div className="pm-gantt__group" key={g.key}>
               {grouped && g.label !== "" && (
                 <button type="button" className="pm-gantt__group-head" aria-expanded={!isCollapsed} onClick={() => toggleCollapsed(g.key)}>
-                  <span className="pm-gantt__disc" aria-hidden>{isCollapsed ? "▸" : "▾"}</span>
-                  <span className="pm-gantt__group-label">{g.label}</span>
-                  <span className="pm-gantt__group-count">{g.bars.length}</span>
+                  {/* P5-B5 — the head spans the whole scrolled width, so its TEXT is what scrolls
+                      away; the inner run is what has to freeze, not the button. */}
+                  <span className="pm-gantt__group-headline">
+                    <span className="pm-gantt__disc" aria-hidden>{isCollapsed ? "▸" : "▾"}</span>
+                    <span className="pm-gantt__group-label">{g.label}</span>
+                    <span className="pm-gantt__group-count">{g.bars.length}</span>
+                  </span>
                 </button>
               )}
               {/* P4-H2 — the project bar: authored range alongside the task-derived envelope
@@ -1380,6 +1498,15 @@ export function Gantt(props: GanttProps) {
                 const derivedLabel = pb.derivedStart || pb.derivedEnd
                   ? `${pb.derivedStart ? fmt(pb.derivedStart) : "—"} to ${pb.derivedEnd ? fmt(pb.derivedEnd) : "—"}`
                   : null;
+                // P5-T1 — THE SLIP. Decision 12 calls the gap between the commitment and where the
+                // work actually sits the slippage signal, but the gap was only ever implied: two
+                // hairline bars 12px apart, and the reader had to measure it by eye. It is a
+                // number, so it is rendered as one. Only an OVERRUN counts — a project whose work
+                // finishes inside its commitment draws no lane, so the mark can only mean bad news.
+                const slipDays = pb.authoredEnd && pb.derivedEnd && pb.derivedEnd > pb.authoredEnd
+                  ? Math.round((Date.parse(pb.derivedEnd) - Date.parse(pb.authoredEnd)) / DAY)
+                  : 0;
+                const slip = slipDays > 0 ? projectRangeGeometry(pb.authoredEnd, pb.derivedEnd, effStart, effDays) : null;
                 return (
                   <div className="pm-gantt__row pm-gantt__projectbar-row">
                     <div className="pm-gantt__labelcell">
@@ -1394,6 +1521,7 @@ export function Gantt(props: GanttProps) {
                         {authoredLabel ? `Authored ${authoredLabel}.` : "No authored range yet."}
                         {" "}
                         {derivedLabel ? `Actual work spans ${derivedLabel}.` : "No dated tasks yet."}
+                        {slipDays > 0 ? ` ${slipDays} day${slipDays === 1 ? "" : "s"} past the committed end.` : ""}
                       </span>
                     </div>
                     <div className="pm-gantt__track pm-gantt__projectbar-track" aria-hidden>
@@ -1410,6 +1538,20 @@ export function Gantt(props: GanttProps) {
                           style={{ left: `${derived.offsetPct}%`, width: `${derived.widthPct}%` }}
                           title={derivedLabel ? `Actual work: ${derivedLabel}` : undefined}
                         />
+                      )}
+                      {slip && (
+                        <>
+                          <span
+                            className="pm-gantt__slip"
+                            style={{ left: `${slip.offsetPct}%`, width: `${slip.widthPct}%` }}
+                            title={`${slipDays} day${slipDays === 1 ? "" : "s"} past the committed end`}
+                          />
+                          {/* Clamped so a slip running to the right edge doesn't push its own
+                              number off the axis — the label is the payload, not the bar. */}
+                          <span className="pm-gantt__slip-label" style={{ left: `${Math.min(slip.offsetPct + slip.widthPct, 88)}%` }}>
+                            +{slipDays}d
+                          </span>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1456,9 +1598,11 @@ export function Gantt(props: GanttProps) {
         {undatedGroups.map((g) => (
           <div className="pm-gantt__group pm-gantt__group--empty" key={g.key}>
             <div className="pm-gantt__group-head pm-gantt__group-head--static">
-              <span className="pm-gantt__disc" aria-hidden>▸</span>
-              <span className="pm-gantt__group-label">{g.label}</span>
-              <span className="pm-gantt__group-note">{g.note}</span>
+              <span className="pm-gantt__group-headline">
+                <span className="pm-gantt__disc" aria-hidden>▸</span>
+                <span className="pm-gantt__group-label">{g.label}</span>
+                <span className="pm-gantt__group-note">{g.note}</span>
+              </span>
             </div>
           </div>
         ))}
@@ -1475,9 +1619,11 @@ export function Gantt(props: GanttProps) {
         )}
       </div>
 
+      </div>
+
       {toast && <p className="pm-board__toast" style={{ marginTop: 10 }} role="status">{toast}</p>}
       <div className="pm-sr-only" aria-live="polite">{live}</div>
       {pending && <span className="pm-sr-only" aria-live="polite">Saving…</span>}
-    </div>
+    </>
   );
 }

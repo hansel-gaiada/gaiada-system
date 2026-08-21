@@ -1239,8 +1239,23 @@ export function aggregateFlow(
   for (const { statuses } of perProject) {
     for (const s of statuses) if (!colorByLabel.has(s.label)) colorByLabel.set(s.label, s.color);
   }
+  // The done/blocked flags are unioned by label, not dropped. Hardcoding them false meant a
+  // department-scope flow chart could not tell its consumer which band was Blocked — the label
+  // said so and the data did not (P5-C1). A label counts as blocked/done if ANY project that uses
+  // it marks it so, the same "first project carrying the label wins" spirit the colour above uses,
+  // but taking the safer side: a band that is blocked anywhere is worth flagging everywhere.
+  const flagsByLabel = new Map<string, { isDone: boolean; isBlocked: boolean }>();
+  for (const { statuses: own } of perProject) {
+    for (const s of own) {
+      const cur = flagsByLabel.get(s.label) ?? { isDone: false, isBlocked: false };
+      flagsByLabel.set(s.label, { isDone: cur.isDone || s.isDone, isBlocked: cur.isBlocked || s.isBlocked });
+    }
+  }
   const statuses: ProjectStatus[] = labels.map((label, i) => ({
-    id: label, label, color: colorByLabel.get(label) ?? "#999999", isDone: false, isBlocked: false, position: i,
+    id: label, label, color: colorByLabel.get(label) ?? "#999999",
+    isDone: flagsByLabel.get(label)?.isDone ?? false,
+    isBlocked: flagsByLabel.get(label)?.isBlocked ?? false,
+    position: i,
   }));
 
   const byDate = new Map<string, Record<string, number>>();
@@ -1261,7 +1276,11 @@ export function aggregateFlow(
   return { points, statuses };
 }
 
-export interface FlowBand { statusId: string; label: string; color: string }
+// `isBlocked` rides along because the chart needs a SHAPE for that band, not just a hue: the
+// blocked band sits next to Done, and red-on-green is the pair a deuteranope loses (P5-C1). The
+// consumer must not have to re-derive it by string-matching `statusId === "blocked"` — that is
+// exactly what fails at department scope, where `aggregateFlow` keys bands by LABEL.
+export interface FlowBand { statusId: string; label: string; color: string; isBlocked: boolean }
 export interface FlowSeries { dates: string[]; bands: FlowBand[]; counts: number[][]; stacked: number[][] }
 const EMPTY_FLOW_SERIES: FlowSeries = { dates: [], bands: [], counts: [], stacked: [] };
 
@@ -1275,7 +1294,7 @@ const EMPTY_FLOW_SERIES: FlowSeries = { dates: [], bands: [], counts: [], stacke
 export function flowSeries(points: FlowPoint[], statuses: ProjectStatus[]): FlowSeries {
   if (points.length === 0) return EMPTY_FLOW_SERIES;
   const ordered = [...statuses].sort((a, b) => a.position - b.position);
-  const bands: FlowBand[] = ordered.map((s) => ({ statusId: s.id, label: s.label, color: s.color }));
+  const bands: FlowBand[] = ordered.map((s) => ({ statusId: s.id, label: s.label, color: s.color, isBlocked: s.isBlocked }));
   const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
   const byDate = new Map(sorted.map((p) => [p.date, p.counts]));
   const dates: string[] = [];

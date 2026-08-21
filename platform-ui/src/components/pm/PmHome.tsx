@@ -98,8 +98,15 @@ function Avatar({ name }: { name: string | null }) {
 }
 
 function StatusPill({ label, color }: { label: string; color: string }) {
+  // P5-C1 — a dot carrying the status hue, with the label in the page's own text colour, rather
+  // than a filled pill with one shared ink on every hue. The re-stepped status ladder (tokens/pm.css)
+  // is a validated mid-lightness set, and no single ink clears 4.5:1 across all five of it in either
+  // theme — measured: dark ink runs 3.98–8.12 in light mode, white runs 2.17–4.42. The pattern was
+  // always the fragile one; the rule it breaks is that text wears text tokens and a coloured mark
+  // beside it carries the identity.
   return (
-    <span className="pm-home__status" style={{ background: color }}>
+    <span className="pm-home__status">
+      <span className="pm-home__status-dot" style={{ background: color }} aria-hidden />
       {label}
     </span>
   );

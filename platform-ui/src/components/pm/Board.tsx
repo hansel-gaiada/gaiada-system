@@ -71,6 +71,77 @@ interface MoveMenu {
   anchor: { x: number; y: number };
 }
 
+// ---- drag auto-scroll (P5-B1) ----------------------------------------------
+// The board scrolls sideways whenever the columns outrun the viewport, and on a five-column
+// department board Done is routinely off-screen. During an HTML5 drag the browser will not scroll
+// that container for you: the pointer is captured by the drag, wheel/trackpad events go nowhere,
+// and there is no way to reach a column you cannot see — the card had to be dropped back where it
+// came from and moved through the ⇅ Move menu instead. So the container scrolls itself while the
+// pointer sits near an edge, the same affordance every board tool has.
+//
+// Driven by requestAnimationFrame rather than by the `dragover` event itself, deliberately:
+// `dragover` fires on pointer MOVEMENT (and only lazily, ~every 350ms, when the pointer is
+// stationary), so a user holding the card still at the edge — exactly what someone does when they
+// are waiting for the board to come to them — would get a stutter instead of a scroll. dragover
+// only updates the direction; the frame loop does the scrolling.
+const EDGE_PX = 110;        // how close to an edge starts the scroll
+const EDGE_MAX_PX = 24;     // top speed, per frame, at the very edge
+
+interface AutoScrollState { raf: number | null; dx: number; dy: number }
+
+// Distance-proportional speed: a nudge into the edge zone creeps, the last few pixels race. A flat
+// speed is either too slow to cross a wide board or too fast to stop on the column you want.
+function edgeVelocity(pos: number, min: number, max: number, enabled: boolean): number {
+  if (!enabled) return 0;
+  if (pos > max - EDGE_PX) return Math.ceil(((pos - (max - EDGE_PX)) / EDGE_PX) * EDGE_MAX_PX);
+  if (pos < min + EDGE_PX) return -Math.ceil((((min + EDGE_PX) - pos) / EDGE_PX) * EDGE_MAX_PX);
+  return 0;
+}
+
+// `onDragOver` is attached to the SCROLLER, and the columns' own dragover handlers deliberately
+// don't stop propagation, so every move over any drop target reaches this. `stop` must be called
+// on drop and on dragend — a loop left running would keep scrolling a board nobody is dragging on.
+function useDragAutoScroll(
+  ref: React.RefObject<HTMLDivElement | null>,
+  onScrolled?: () => void,
+  axis: "x" | "xy" = "x",
+) {
+  const state = useRef<AutoScrollState>({ raf: null, dx: 0, dy: 0 });
+
+  const stop = useCallback(() => {
+    const s = state.current;
+    if (s.raf !== null) cancelAnimationFrame(s.raf);
+    s.raf = null; s.dx = 0; s.dy = 0;
+  }, []);
+
+  const step = useCallback(() => {
+    const el = ref.current;
+    const s = state.current;
+    if (!el || (s.dx === 0 && s.dy === 0)) { stop(); return; }
+    if (s.dx !== 0) el.scrollLeft += s.dx;
+    if (s.dy !== 0) el.scrollTop += s.dy;
+    onScrolled?.();
+    s.raf = requestAnimationFrame(step);
+  }, [ref, stop, onScrolled]);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const s = state.current;
+    s.dx = edgeVelocity(e.clientX, r.left, r.right, true);
+    s.dy = edgeVelocity(e.clientY, r.top, r.bottom, axis === "xy");
+    if ((s.dx !== 0 || s.dy !== 0) && s.raf === null) s.raf = requestAnimationFrame(step);
+    else if (s.dx === 0 && s.dy === 0) stop();
+  }, [ref, axis, step, stop]);
+
+  // A drag abandoned outside the window fires no drop, and an unmount mid-drag fires nothing at
+  // all; both would leave the loop running against a detached node.
+  useEffect(() => stop, [stop]);
+
+  return { onDragOver, stop };
+}
+
 export function Board<K extends string>({ columns, move, movePick, colorColumns, blockedIds, taskHrefBase, taskTags, taskUrgency }: Props<K>) {
   const taskHref = (id: string) => (taskHrefBase ? `${taskHrefBase}/${id}` : `/tasks/${id}`);
   const showToast = (msg: string) => { setToast(msg); window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 4000); };
@@ -107,6 +178,10 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
     return () => ro.disconnect();
     // `columns` so adding/removing a column (a filter change, a drag) re-measures.
   }, [measureOverflow, columns]);
+
+  // Carrying a card toward either edge scrolls the board — without it a column that starts
+  // off-screen (Done, on most department boards) simply cannot be dropped into.
+  const autoScroll = useDragAutoScroll(scrollRef, measureOverflow);
 
   function findTask(id: string): PmTask | undefined {
     for (const c of columns) {
@@ -207,6 +282,10 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
       ref={scrollRef}
       className="pm-board-scroll erp-scroll"
       onScroll={measureOverflow}
+      onDragOver={autoScroll.onDragOver}
+      onDrop={autoScroll.stop}
+      onDragEnd={autoScroll.stop}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) autoScroll.stop(); }}
     >
       {toast && <p className="pm-board__toast" role="alert">{toast}</p>}
       <div aria-live="polite" className="pm-sr-only">{live}</div>
@@ -227,6 +306,7 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
             onDragLeave={() => setDropCol((s) => (s === col.key ? null : s))}
             onDrop={(e) => {
               e.preventDefault();
+              autoScroll.stop();
               const id = dragId.current;
               dragId.current = null;
               setDropCol(null);
@@ -259,7 +339,7 @@ export function Board<K extends string>({ columns, move, movePick, colorColumns,
                   tags={taskTags?.[t.id] ?? []}
                   urgencyTier={taskUrgency?.[t.id]}
                   onDragStart={(id) => { dragId.current = id; setDraggingId(id); }}
-                  onDragEnd={() => setDraggingId(null)}
+                  onDragEnd={() => { autoScroll.stop(); setDraggingId(null); }}
                   moveBtnRef={(el) => { if (el) moveBtnRefs.current.set(t.id, el); else moveBtnRefs.current.delete(t.id); }}
                   onOpenMove={(btn) => openMoveMenu(t.id, btn)}
                 />
@@ -356,6 +436,10 @@ export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLa
   const router = useRouter();
   const [, startTransition] = useTransition();
   const dragRef = useRef<{ taskId: string; rowKey: string } | null>(null);
+  // The grid scrolls on BOTH axes (it is capped at 72vh), so a drag near any edge has to be able
+  // to reach an off-screen column AND an off-screen row.
+  const gridScrollRef = useRef<HTMLDivElement | null>(null);
+  const autoScroll = useDragAutoScroll(gridScrollRef, undefined, "xy");
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropCell, setDropCell] = useState<{ rowKey: string; colKey: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -449,7 +533,14 @@ export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLa
   }
 
   return (
-    <div className="pm-grid-scroll erp-scroll">
+    <div
+      ref={gridScrollRef}
+      className="pm-grid-scroll erp-scroll"
+      onDragOver={autoScroll.onDragOver}
+      onDrop={autoScroll.stop}
+      onDragEnd={autoScroll.stop}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) autoScroll.stop(); }}
+    >
       {toast && <p className="pm-board__toast" role="alert">{toast}</p>}
       <div aria-live="polite" className="pm-sr-only">{live}</div>
       <div className="pm-grid" style={{ gridTemplateColumns: `200px repeat(${columns.length}, 280px)` }}>
@@ -473,6 +564,7 @@ export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLa
                 onDragLeave={() => setDropCell((s) => (s && s.rowKey === row.key && s.colKey === col.key ? null : s))}
                 onDrop={(e) => {
                   e.preventDefault();
+                  autoScroll.stop();
                   const drag = dragRef.current;
                   dragRef.current = null;
                   setDropCell(null);
@@ -491,7 +583,7 @@ export function BoardGrid({ rows, columnMove, columnMovePick, rowMove, rowAxisLa
                     tags={taskTags?.[t.id] ?? []}
                     urgencyTier={taskUrgency?.[t.id]}
                     onDragStart={(id) => { dragRef.current = { taskId: id, rowKey: row.key }; setDraggingId(id); }}
-                    onDragEnd={() => setDraggingId(null)}
+                    onDragEnd={() => { autoScroll.stop(); setDraggingId(null); }}
                     moveBtnRef={(el) => { if (el) moveBtnRefs.current.set(t.id, el); else moveBtnRefs.current.delete(t.id); }}
                     onOpenMove={(btn) => openMoveMenu(t.id, row.key, btn)}
                   />

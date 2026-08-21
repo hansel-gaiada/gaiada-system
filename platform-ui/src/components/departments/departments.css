@@ -711,3 +711,14 @@ a.dept-proj__name:hover { opacity: 0.6; }
 .serviced-block__row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .serviced-block__company { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
 .serviced-block__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
+
+/* P5-T1 — the Timeline fact line. Replaces the card title "Timeline" (the active sub-tab already
+   says that) and its right-aligned "N projects scheduled" with the four figures a department head
+   opens this page for: how much is scheduled, how much of it is late, and the worst slip against
+   a commitment. Sentence case, not the uppercase eyebrow — these are facts to read, not a label. */
+.dept-timeline__facts {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0;
+  margin: 0 0 12px; font: 400 13px var(--font-body); color: var(--erp-ink-70);
+}
+.dept-timeline__fact { display: inline-flex; align-items: baseline; }
+.dept-timeline__fact-sep { padding: 0 8px; color: var(--erp-ink-50); }

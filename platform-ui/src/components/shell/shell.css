@@ -36,7 +36,11 @@
 .erp-usermenu { position: relative; }
 .erp-usermenu__trigger { width: 100%; background: transparent; border: none; border-top: 0.5px solid var(--line-soft); cursor: pointer; color: var(--text-primary); font-family: var(--font-body); transition: background 0.2s var(--erp-ease); }
 .erp-usermenu__trigger:hover { background: var(--tint-hover); }
-.erp-usermenu__pop { position: absolute; left: 12px; right: 12px; min-width: 180px; bottom: calc(100% + 6px); background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; z-index: 50; box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
+.erp-usermenu__pop { position: absolute; left: 12px; right: 12px; min-width: 180px; bottom: calc(100% + 6px); background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; z-index: 50; box-shadow: var(--elev-overlay); transform-origin: bottom center; animation: erp-rise 0.16s var(--erp-ease); }
+/* Out is shorter than in, deliberately: arriving is information, leaving is acknowledgement, and a
+   dismissal that takes as long as the reveal reads as lag. */
+@keyframes erp-fall { to { opacity: 0; transform: translateY(4px) scale(0.99); } }
+.erp-usermenu__pop--closing { pointer-events: none; animation: erp-fall 0.11s var(--erp-ease) forwards; }
 .erp-usermenu__item { display: block; width: 100%; text-align: left; background: transparent; border: none; cursor: pointer; padding: 11px 14px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; transition: background 0.2s var(--erp-ease); }
 .erp-usermenu__item + .erp-usermenu__item, .erp-usermenu__pop form { border-top: 0.5px solid var(--erp-hairline-soft); }
 .erp-usermenu__item:hover { background: var(--tint-hover); }
@@ -239,3 +243,46 @@ html[data-sidebar="collapsed"] .erp-railmenu .erp-navbtn span { display: inline;
   .erp-crumb { padding: 6px 0; }
   .filter-chip { min-height: 44px; }
 }
+
+/* ---- Appearance switch, in the account menu (P5-S1) -------------------------
+   A three-stop segmented control, matching the Gantt's Day/Week/Month rather than importing a
+   rounded pill-with-a-knob: the model has three values (auto/light/dark, lib/prefs.ts) and the
+   suite already owns this shape. Square, hairline-joined, the chosen stop in the house bronze —
+   the same "this one is active" answer every other control in the app gives. */
+.erp-themeswitch {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 14px 13px;
+  border-top: 0.5px solid var(--erp-hairline-soft);
+}
+.erp-themeswitch__label {
+  font: 700 9px var(--font-body);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-subtle);
+}
+.erp-themeswitch__stops { display: flex; }
+.erp-themeswitch__stop {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  font: 700 9px var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0.5px solid var(--line-control);
+  cursor: pointer;
+  transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease);
+}
+.erp-themeswitch__stop + .erp-themeswitch__stop { margin-left: -0.5px; }
+.erp-themeswitch__stop:hover { color: var(--text-primary); }
+.erp-themeswitch__stop[aria-checked="true"] {
+  color: var(--text-on-accent);
+  background: var(--erp-accent);
+  border-color: var(--erp-accent);
+}
+.erp-themeswitch__stop:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; z-index: 1; position: relative; }

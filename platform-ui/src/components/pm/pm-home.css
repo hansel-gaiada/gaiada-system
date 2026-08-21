@@ -103,9 +103,11 @@
 .pm-home__project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90px; }
 
 .pm-home__status {
+  display: inline-flex; align-items: center; gap: 5px;
   font: 700 9px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--pm-status-ink); border-radius: var(--pm-radius-pill); padding: 1px 6px;
+  color: var(--pm-text);
 }
+.pm-home__status-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: var(--pm-radius-pill); }
 
 .pm-home__due { color: var(--pm-text-faint); }
 

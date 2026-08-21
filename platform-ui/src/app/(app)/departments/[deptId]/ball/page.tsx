@@ -89,17 +89,20 @@ export default async function DepartmentBallPage({ params, searchParams }: { par
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
-        <div style={{ font: "700 10px var(--font-body)", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--erp-ink-50)" }}>{PM_TERMS.ball}</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/pipeline" className="lux-btn lux-btn--ghost lux-btn--sm">Delivery Pipeline</Link>
-          <Link href="/projects" className="lux-btn lux-btn--ghost lux-btn--sm">All projects</Link>
-        </div>
-      </div>
-
-      <Card style={{ marginBottom: 16 }}>
-        <form className="lux-filters" method="get" aria-label="Ball focus">
-          <label className="lux-filters__field">
+      {/* ONE control strip, the same `.pm-boardbar` the sibling Overview board uses (minus its
+          Group-by selector — this whole tab IS the ball grouping). This page still carried the
+          layout that board page's own comment records replacing there: an eyebrow row with two
+          buttons, then a full-width Card holding a SINGLE select whose Apply button sat ~700px
+          away at the far end of the row (`.lux-filters__actions` is `margin-left: auto`), then a
+          third full-width Card holding a collapsed — so entirely empty-looking — Filters
+          disclosure. Measured on the running page, the first column began at y=565 of a 1000px
+          viewport. Same controls, same GET-form contract, one row; and it inherits the strip's
+          single control height rather than keeping a second, differently-sized set of chrome in
+          the same console. */}
+      <div className="pm-boardbar">
+        <span className="type-eyebrow pm-boardbar__label">{PM_TERMS.ball}</span>
+        <form className="pm-boardbar__form" method="get" aria-label="Ball focus">
+          <label className="pm-boardbar__field">
             <span>Focus</span>
             <select name="focus" defaultValue={encodeBoardFocus(focus)}>
               <option value="dept">Whole dept</option>
@@ -112,16 +115,14 @@ export default async function DepartmentBallPage({ params, searchParams }: { par
           {selectedTagLabels.map((l) => <input key={l} type="hidden" name="tags" value={l} />)}
           {selectedBallIds.map((id) => <input key={id} type="hidden" name="ball" value={id} />)}
           {selectedResponsibleIds.map((id) => <input key={id} type="hidden" name="responsible" value={id} />)}
-          <div className="lux-filters__actions">
-            <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
-            {focus.mode !== "dept" && (
-              <a href={`/departments/${deptId}/ball`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
-            )}
-          </div>
+          <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Apply</button>
+          {focus.mode !== "dept" && (
+            <a href={`/departments/${deptId}/ball`} className="lux-btn lux-btn--ghost lux-btn--sm">Reset</a>
+          )}
         </form>
-      </Card>
 
-      <FacetFilters
+        <FacetFilters
+        bare
         basePath={`/departments/${deptId}/ball`}
         hidden={{ focus: encodeBoardFocus(focus) }}
         groups={[
@@ -135,7 +136,13 @@ export default async function DepartmentBallPage({ params, searchParams }: { par
           { key: "ball", label: PM_TERMS.ball, selected: selectedBallIds, options: ballOptions },
           { key: "responsible", label: PM_TERMS.responsible, selected: selectedResponsibleIds, options: responsibleOptions },
         ]}
-      />
+        />
+
+        <div className="pm-boardbar__links">
+          <Link href="/pipeline" className="lux-btn lux-btn--ghost lux-btn--sm">Delivery Pipeline</Link>
+          <Link href="/projects" className="lux-btn lux-btn--ghost lux-btn--sm">All projects</Link>
+        </div>
+      </div>
 
       {!canPassBall && (
         <Card style={{ marginBottom: 16 }}>

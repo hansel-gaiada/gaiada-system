@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Me } from "@/lib/platform";
-import { getSidebarState } from "@/lib/prefs";
+import { getPrefs, getSidebarState } from "@/lib/prefs";
 import { navFor } from "./nav";
 import { NavLink } from "./NavLink";
 import { NavGroupSection } from "./NavGroupSection";
@@ -13,6 +13,7 @@ import { Eyebrow } from "@/components/ui";
 export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[] }) {
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const collapsed = (await getSidebarState()) === "collapsed";
+  const { theme } = await getPrefs();
   return (
     <SidebarState initial={collapsed}>
       <aside className="erp-side" id="app-nav">
@@ -44,7 +45,7 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
             ),
           )}
         </nav>
-        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} />
+        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} theme={theme} />
       </aside>
     </SidebarState>
   );

@@ -56,7 +56,19 @@ button { font-family: inherit; }
 .erp-quiet:hover { opacity: 1; }
 
 @keyframes erp-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* The CENTRED toast only. The `-50%` is that toast's own centring transform carried through the
+   animation (`.lux-toast` is `left: 50%`), which is why this keyframe cannot be the house's generic
+   "a panel appeared" motion: applied to anything not centred it drags the element half its own
+   width to the left for the whole animation and snaps it back at the end. Six surfaces were using
+   it that way. `erp-railmenu-in` in shell.css already exists because someone hit this once. */
 @keyframes erp-toast { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* The house's "a panel appeared beside its trigger" motion. Rise plus a 1% scale, and the scale is
+   the part that does the work: each consumer sets its own `transform-origin`, so the panel grows
+   out of the EDGE IT BELONGS TO — the account menu out of the user card below it, a dropdown out
+   of the control above it — instead of arriving from nowhere. No X translate, so it is safe on any
+   element regardless of how it is positioned. */
+@keyframes erp-rise { from { opacity: 0; transform: translateY(6px) scale(0.99); } to { opacity: 1; transform: none; } }
 
 /* 2px at 2px offset: a 1px bronze hairline on the cream page was too faint to
    locate at a glance, which is the entire job of a focus ring. */
