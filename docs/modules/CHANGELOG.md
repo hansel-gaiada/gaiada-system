@@ -3493,6 +3493,35 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
 - **Unreleased / next:** identity writes, org-structure endpoints.
 
 ## platform-ui
+### [0.28.5] - 2026-08-21 - IN PROGRESS (AGN-3: a reader that swallowed everything, and the rule now pinned)
+Readiness-bar **criterion 5** — "Explicit refusal ... Never an empty list that reads as 'no data'",
+whose stated failure signal is literally "403/404 collapsed into `[]` by the reader". The plan's action
+item 3 says to sweep every `safe()`/`skipMissing()` call site, and records what the defect already
+cost: **the client portal told staff "your kickoff is being processed"** when the read had been refused.
+- **The audit found SIX near-duplicate helpers with different rules**, which is how they drifted apart
+  unnoticed: `adminData.skipMissing` (404/405 — correct), `people.safe` (**a bare `catch {}`**),
+  `meetings`/`pipeline`/`webdevChangeRequests` (404 + **403**), `portal-data` (404 + 403, deliberate
+  and documented in-file for staff browsing `/portal`).
+- **`people.ts` fixed**, because its defect needs no design decision: the bare catch treated a 5xx, a
+  network timeout, a JSON parse error and an outright bug in that file identically to "there is no
+  such row" — across all seven panels of the person page. An empty panel is a CLAIM ("this person has
+  no tasks") made on evidence that says nothing of the kind. Narrowed to `adminData`'s shape: absence
+  degrades, everything else reaches the error boundary and gets reported.
+- ⚠ **403 is still degraded, deliberately and now tracked.** Making a denial explicit needs somewhere
+  to render it (action item 4, "one component rendering a typed deny reason"). Rethrowing it today
+  would swap a quietly-empty panel for a crashed page: worse for the viewer, no more honest.
+- **`readerDegrade.test.ts` pins the rule by sweeping the SOURCE**, not by calling the helpers — each
+  is private to its module, so a behavioural test reaches only what a module exports, while a source
+  sweep also catches the seventh copy pasted from the worst existing one. Positive control first (a
+  sweep matching nothing would pass vacuously), no bare catches, every 403-degrader on an allow-list
+  WITH a reason, and no STALE entries — so a fixed file cannot shelter a regression behind an old
+  exemption. That last check caught my own list wrongly naming `webdevProvisionedSites-data.ts`, which
+  is in fact a model implementation; it and `it-accounts.ts`'s discriminated
+  `ok | unavailable | forbidden` are what the remaining four should converge on.
+- Gates: 5/5 new; platform-ui `src/lib` regression **1877/1877 across 71 files**; `tsc` clean.
+- ⚠ Housekeeping note: `0.28.0`–`0.28.4` have **no entries in this file** (the row in MODULES.md
+  moved without them). Not backfilled here — that is other sessions' work to describe, and inventing
+  it would be worse than recording the gap.
 ### [0.27.0] - 2026-08-20 - IN PROGRESS (P2-10 / P2-11 / P2-12-FE: the three Phase 2 surfaces)
 Shared layer first, because all three write the same endpoints: `lib/iam.ts` (readers),
 `lib/iamActions.ts` (every write plus ONE translation of the typed refusal vocabulary),
