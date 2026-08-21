@@ -54,6 +54,12 @@ export interface MockPublisherState {
    *  reached the engine (e.g. that `media` carries resolved `{id, url?}` refs, never the composer's
    *  raw `{fileId}` descriptors) rather than only that a call happened. */
   lastScheduleRequest?: VariantDispatch;
+  /** SMM-38 phase 38d — the `network` `uploadMedia` was last called with (types.ts's own header:
+   *  the port widened this call to carry it so a driver serving more than one network can tell
+   *  which upload protocol to use). The mock does not branch on it (one generic fake upload for
+   *  every network, matching Postiz's own real shape) but records it so a test can assert the
+   *  CALLER passed the right one, the same reasoning as `lastScheduleRequest` above. */
+  lastUploadNetwork?: string;
 }
 
 export function newMockPublisherState(): MockPublisherState {
@@ -147,8 +153,9 @@ export function createMockPublisher(
       record("getPostStatus", org);
       return ids.map((id) => state.posts.get(id) ?? { providerPostId: id, state: "unknown" });
     },
-    async uploadMedia(org: OrgHandle, file): Promise<{ id: string; url?: string }> {
+    async uploadMedia(org: OrgHandle, file, network): Promise<{ id: string; url?: string }> {
       record("uploadMedia", org);
+      state.lastUploadNetwork = network;
       if (state.failUploadFilenames?.has(file.filename)) {
         throw new SocialPublisherError("publisher_http_error", `mock upload refused ${file.filename}`);
       }

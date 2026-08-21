@@ -271,7 +271,17 @@ async function resolveEngineMedia(
     try {
       ref = await invokePublisher(
         { op: "uploadMedia", org: handle, network, costUsd: 0 },
-        () => driver.uploadMedia(handle, { filename: file.filename, contentType: file.contentType, bytes }),
+        // SMM-38 phase 38d — `uploadMedia` now carries the variant's own network (types.ts's own
+        // header: the port widened this call so a driver serving more than one network, e.g.
+        // `direct`'s LinkedIn+YouTube, can tell which upload protocol to use). `network` is already
+        // this function's own parameter; the cast mirrors line ~479's identical
+        // `chain.network as VariantDispatch["network"]` idiom used to build the `schedulePost`
+        // request just below in this same file.
+        () => driver.uploadMedia(
+          handle,
+          { filename: file.filename, contentType: file.contentType, bytes },
+          network as VariantDispatch["network"],
+        ),
       );
     } catch (err) {
       const detail = err instanceof SocialPublisherError ? `${err.code}: ${err.message}` : (err as Error)?.message ?? "unknown upload error";

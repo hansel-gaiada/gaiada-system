@@ -104,7 +104,7 @@ export function runPublisherContractSuite(label: string, opts: PublisherContract
         ["getQuota", () => d.getQuota(CONTRACT_ORG, integration)],
         ["cancelPost", () => d.cancelPost(CONTRACT_ORG, "contract-post-id")],
         ["getPostStatus", () => d.getPostStatus(CONTRACT_ORG, ["contract-post-id"])],
-        ["uploadMedia", () => d.uploadMedia(CONTRACT_ORG, { filename: "contract.png", contentType: "image/png", bytes: new Uint8Array() })],
+        ["uploadMedia", () => d.uploadMedia(CONTRACT_ORG, { filename: "contract.png", contentType: "image/png", bytes: new Uint8Array() }, integration.network)],
         ["getAccountMetrics", () => d.getAccountMetrics(CONTRACT_ORG, integration.id, { from: "2026-01-01", to: "2026-01-02" })],
         ["getPostMetrics", () => d.getPostMetrics(CONTRACT_ORG, ["contract-post-id"])],
       ];

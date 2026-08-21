@@ -77,6 +77,24 @@ Per-module changes made between cuts, recorded here so they are not lost the way
 `0031a`/`0086a`/`0087a`/`0089a` were (see the LOG GAPs below) — no tag exists yet for these, so no row
 is added to the App release log table until one is cut.
 
+- **2026-08-21 — SMM-38 phase 38d**, `social-media 0.5.8 -> 0.5.9` (IN PROGRESS). YouTube on the
+  `direct` driver. Resolved the `uploadMedia(org, file)` network-routing collision 38c named by
+  widening the port to `uploadMedia(org, file, network)` — updated in `types.ts`, `postiz.ts`,
+  `direct.ts`, `mock-driver.ts`, `publisher-contract.ts`, and the one call site
+  (`dispatch.ts#resolveEngineMedia`). New `publisher/youtube-client.ts` (Google token exchange, the
+  resumable-upload protocol, `commentThreads.list` — deliberately NOT reusing
+  `core/google-oauth/token-endpoint-client.ts`, a different Google Cloud app), `publisher/youtube-oauth.ts`
+  + `youtube-oauth.controller.ts` (mirrors `linkedin-oauth.ts`'s signed-state/readiness/controller
+  shape exactly, `STATE_PREFIX="yts1"`), `publisher/youtube-quota.ts` (self-tracked accounting
+  against SMM-37's three real buckets — cited constants for the caps, an in-memory per-day counter
+  for `used`, since Google exposes no live "remaining quota" read). `direct.ts`'s
+  `DIRECT_CAPABILITIES` gains `quota_probe`; YouTube gets `media_upload`/`inbox_read`/`quota_probe`
+  but deliberately NOT `schedule` (a `videos.insert` call IS the post for this driver — no separate
+  publish step). `listComments` tells LinkedIn/YouTube apart by the network's OWN id shape
+  (`urn:li:...` vs. a bare video id), a narrower, deliberate alternative to widening that port method
+  too. No migration. Test counts: **470/0/5** (baseline **420/0/5**, measured directly — not the
+  ticket brief's stated figure). Full detail: `docs/modules/MODULES.md`'s social-media 0.5.9 entry,
+  `docs/plans/smm-tracker.md`'s PD row.
 - **2026-08-21 — SMM-38 phase 38c**, `social-media 0.5.7 -> 0.5.8` (IN PROGRESS). LinkedIn on the
   `direct` driver — the phase that unblocks P2's inbox. OAuth grant flow (new
   `publisher/linkedin-oauth.ts` + `linkedin-oauth.controller.ts`, tenant-agnostic callback mirroring

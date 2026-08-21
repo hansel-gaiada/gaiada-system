@@ -80,6 +80,10 @@ import { SocialReportsController } from "./modules/social/social-reports.control
 // is tenant-agnostic at a FIXED path, mirroring SearchGoogleOauthCallbackController below for the
 // identical reason (no wildcard redirect_uri at the issuer).
 import { LinkedInOAuthController, LinkedInOAuthCallbackController } from "./modules/social/linkedin-oauth.controller";
+// SMM-38 phase 38d — YouTube's OAuth grant flow, same shape and same reasoning as
+// `LinkedInOAuthController`/`LinkedInOAuthCallbackController` immediately above (see that file's own
+// header and `youtube-oauth.controller.ts`'s own header for why two controllers).
+import { YouTubeOAuthController, YouTubeOAuthCallbackController } from "./modules/social/youtube-oauth.controller";
 import { LoansController } from "./modules/hr/loans.controller";
 import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
@@ -132,6 +136,9 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // `LinkedInOAuthCallbackController` is tenant-agnostic at a fixed path, same reason as
     // SearchGoogleOauthCallbackController immediately below.
     LinkedInOAuthController, LinkedInOAuthCallbackController,
+    // SMM-38 phase 38d: YouTube's OAuth grant flow — same reasoning as the LinkedIn pair immediately
+    // above.
+    YouTubeOAuthController, YouTubeOAuthCallbackController,
     // SM-25a: the Google OAuth callback is tenant-agnostic on purpose (Google permits no wildcard
     // redirect URIs — see the file header) and so cannot mount under SearchController's
     // `api/:tenantId/modules/search` prefix. Registered as its own controller, mounted at the fixed
