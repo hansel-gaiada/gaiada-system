@@ -30,7 +30,7 @@ not afterwards.
 |---|---|---|
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
-| P2 inbox + client approval | **4** (SMM-16 landed 2026-08-21) | 6 |
+| P2 inbox + client approval | **5** (SMM-17 landed 2026-08-21) | 6 |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
 | P3 content ops | **5** (+1 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
@@ -142,7 +142,7 @@ commit made in the same turn" cross-session hazard — the merge orchestrator re
 | SMM-32 | Client review portal UI: preview + approve / request-changes | ✅ **merged** | UI DEV-VERIFIED — 2392 / 0 / 0 platform-ui, `tsc` clean; browser-driven (see evidence below) |
 | SMM-15 | Inbox sync (`pullInbox`, idempotent upsert) | ✅ **merged** | backend DEV-VERIFIED, evidence below — **502 / 0 / 5** (baseline 494/0/5), `tsc` clean |
 | SMM-16 | AI triage: sentiment/category/urgency, spike detection, SLA | ✅ **merged** | backend DEV-VERIFIED, evidence below |
-| SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ⬜ | SMM-15 (now unblocked); should set `neverAutoRetry` |
+| SMM-17 | Reply flow: drafts → WS4 → send (own registry entry) | ✅ **merged** | backend DEV-VERIFIED, evidence below |
 | SMM-18 | Inbox tab UI: triage queue, thread view, SLA timers | ⬜ | SMM-15 (now unblocked)/16/17 |
 
 **SMM-15 evidence (2026-08-21, medior).** Worktree was already at the SMM-38e closing-pass merge
@@ -368,6 +368,148 @@ not tied to a post) gets neither an SLA target nor a notification path — count
 never silently dropped, left to SMM-17/18; (3) spike detection has no persistent dedup; (4) spike
 notification resolves an account's engagement as "most recently created active engagement for that
 client" when a client has more than one — a documented simplification, not a schema guarantee.
+
+**SMM-17 evidence (2026-08-21, senior-be).** Worktree was NINE seats behind at cut time — `git log
+--oneline -1` did not match `main`'s tip (SMM-15's own merge, SMM-16's own merge, and an unrelated
+monitoring ticket had all landed) — `git merge main` (fast-forward, clean) pulled `inbox-sync-job.ts`,
+`inbox-triage-job.ts` and the `202608211200_social_inbox_triage.sql` migration in before any of this
+ticket's own code was written, stated rather than silently assumed, per this file's own repeated
+cross-session-hazard note.
+
+**No migration.** 0105's own schema for `social_inbox_messages` — `direction`/`body`/`status`
+(`draft|in_review|approved|sent|failed`)/`approval_id`/`args_sha256`/`external_id` plus the
+`sim_sent_reply_has_approval` CHECK and the partial `ux_social_inbox_messages_approval` unique index —
+already anticipated exactly this flow ("outbound replies are one-shot-gated exactly like publishes",
+0105's own table-10/11 header). The one net-new dial is `tool_scope.inbox.reply` (a boolean,
+additive to 0105's existing example `tool_scope` shape) — jsonb, so no migration.
+
+**Reuses SMM-09's pattern, not a reimplementation.** New `reply-precondition.ts` mirrors
+`publish-precondition.ts` structurally: `SOCIAL_REPLY_TOOL = "social.sendReply"`,
+`SOCIAL_REPLY_TOOL_CLASSIFICATION = {...SOCIAL_PUBLISH_TOOL_CLASSIFICATION}` (spread, never retyped —
+those two literals are the D14 gate), its own `REPLY_REFUSAL` vocabulary (10 tokens, kept apart from
+`PUBLISH_REFUSAL`/`DISPATCH_REFUSAL`/`CLIENT_REVIEW_REFUSAL` — never folded in), a four-stage chain
+(`scope → hash → unconsumed → retention`, replacing publish's `quota`/`budget`/`creator_info` with a
+single `retention` stage a text reply actually needs), `replyLockKey` (the messageId — the unit of
+the outbound act, mirroring `publishLockKey`'s variantId reasoning verbatim), and its own
+`declareSocialModuleScope` self-declaration. New `reply-dispatch.ts` mirrors `dispatch.ts`'s two-phase
+shape (lock + precondition re-run with no network I/O, then the network call OUTSIDE the transaction,
+then ONE guarded UPDATE stamping `approval_id` + `external_id` + `status='sent'` together) — its own
+small `REPLY_DISPATCH_REFUSAL` vocabulary (`approval_not_resolvable`/`reply_stamp_race_lost`/
+`capability_unsupported`/`reply_send_failed`), reusing `resolveDispatchOrgHandle` (the SAME
+(network, capability) switch `inbox-sync-job.ts` already resolves `inbox_read` through) rather than
+a plain `openOrg`, so a future config override or a future `direct` `sendReply` implementation routes
+correctly with no change here. `core/approval-executables.ts`'s new SMM-17 section registers
+`social.sendReply` with `lockKey: socialReplyLockKey`, `precondition: socialReplyPrecondition`
+(a thin adapter over `evaluateReplyPrecondition`) and **`neverAutoRetry: true`** — independently
+re-derived (not copied on the assumption "publish does it so reply should too"): a reply is an
+outbound public write whose landed-or-not is unobservable in the ambiguous window
+(`hub_unreachable`/`tool_error`), so an unattended second attempt is a coin-flip on a duplicate public
+reply, exactly the property that makes publish opt out too. `cerbos/policies/resource_mcp_tool.yaml`'s
+executable-tool list gets `social.sendReply` alongside `social.publishPost` (D14-13's both-halves-move-
+together doctrine) — no metered twin exists for replies, so there is no bar to register.
+
+**The retention question, answered — this ticket's own named design question.** If a draft reply
+quotes or embeds the comment it answers, that quoted text is subject to LinkedIn's SAME 48h
+activity-content cap the source comment carries (the SMM-16 precedent, applied to a copy instead of a
+derived label). Free text cannot be reliably inspected for a quote, so the answer mirrors D-22's
+TikTok doctrine: FAIL CLOSED ON UNKNOWN. The precondition's `retention` stage refuses
+`source_content_purged` the instant the THREAD's `activity_content_purged_at` is set, whether or not
+the reply's own text happens to quote anything — reusing the EXISTING column SMM-36's purger already
+maintains; no new column, no second job. Proven direct (registry test C8/C9), through the real
+executor (D2/D3) and through the real dispatch function and the real HTTP endpoint alike (all four
+layers refuse/pass identically).
+
+**A real, pre-existing defect found and fixed in SMM-36's purger, not introduced by this ticket.**
+`inbox-retention-job.ts`'s two per-message purge UPDATEs (profile + activity windows) matched ANY
+message row past the age threshold with no `direction` filter — correct while every row was inbound
+(all SMM-15/16 ever wrote), but wrong the instant an outbound reply row exists on the SAME table: our
+own authored reply text is not a member's social-activity content LinkedIn's cap is about, and wiping
+it — including on an ALREADY-SENT reply, which is our own historical record — would be an over-broad
+application of a rule about someone else's data. Fixed with `m.direction = 'in'` on both UPDATEs;
+proven by a new case seeding a 60h-old (past both windows) outbound 'sent' reply alongside an inbound
+message on the same thread and asserting the outbound row's body/author_handle survive untouched while
+the thread's own `activity_content_purged_at` still fires on schedule.
+
+**Unsupported vs failed, at dispatch.** `reply-dispatch.ts` checks
+`driver.capabilities.has("inbox_reply") && typeof driver.sendReply === "function"` BEFORE ever
+calling, the same "unsupported vs empty" discipline `inbox-sync-job.ts` uses for `listComments` — an
+unsupported network refuses `capability_unsupported` and a genuinely failed send refuses
+`reply_send_failed`, proven as two distinct, never-conflated outcomes (`reply-dispatch.test.ts`
+(T2)/(T3)). The mock driver's default shape (no `withInbox`) has neither `sendReply` nor
+`inbox_reply` — matching Postiz's real, documented answer (spike §8b) — and `direct.ts`'s own header
+still names `sendReply` as absent, out of THIS phase's scope (SMM-38's own future phase, not this
+ticket's); every test here drives the mock, never a real network, per D-23.
+
+**Single-use grant verified, replay refused, two independent mechanisms — same shape as publish.**
+(1) the approval's own `execution_status='pending'→'executing'` single-use claim (the executor's, not
+this ticket's code) makes a redelivered `decided` event or a retry-endpoint call on an already-
+executed row a no-op; (2) the DOMAIN side — `social_inbox_messages.external_id`/`status='sent'` — 
+makes a SECOND, never-executed approval filed for a message that already sent refuse `already_sent`
+before ever reaching the hub. Both proven through the real executor (registry test F1/F2) and through
+the real dispatch function directly (`reply-dispatch.test.ts` T6).
+
+**Endpoints added** (all under `/api/:tenantId/modules/social/`, `social.controller.ts`):
+`POST threads/:threadId/messages` (create draft, Cerbos `assign`), `PATCH .../messages/:messageId`
+(edit — EDIT INVALIDATES APPROVAL, same D-15 statement shape as `updateVariant`), 
+`POST .../messages/:messageId/approve` (mark approved, idempotent, `assign`),
+`GET .../messages/:messageId/send-preconditions` (dry run, `read`, mirrors
+`getVariantPublishPreconditions`), `POST .../messages/:messageId/send` (**the D14 dispatch endpoint**,
+`reply` — reachable in the ordinary flow ONLY through the executor's re-drive, exactly like
+`dispatchPublish`), `GET threads/:threadId/messages` (list, `read`, for verification — SMM-18's own
+triage-queue UI is not duplicated here). Five new MCP tools declared in `index.ts`
+(`social.createReplyDraft`/`updateReplyDraft`/`approveReplyDraft`/`checkReplySendPreconditions`/
+`SOCIAL_REPLY_TOOL`), matching this controller's own "every capability is an McpToolDef with the SAME
+authorize() call" doctrine. Cerbos split matches `resource_social_inbox.yaml`'s (SMM-30) own
+documented split verbatim: drafting/editing/approving rides `assign` ("a draft is a row in our DB...
+never this action"), sending rides `reply` — and BOTH `social_staff` and `social_manager` hold both
+(the inbox is the agency's working surface, unlike publish's manager-only tier — proven end to end by
+a staff persona completing the full draft→send loop over real HTTP).
+
+**The `message`-vs-`error` trap, asserted on the live endpoint.** `sendReply`'s refusal rides
+`message`, never `error`, mirroring `dispatchPublish`'s own documented trap-avoidance — proven against
+the real running app (`social-reply.test.ts`), not just the filter in isolation.
+
+**Anything the spec did not answer, named rather than silently decided:** (1) there is no dedicated
+"approve" endpoint for `social_post_variants` (publish's own equivalent state transition) anywhere in
+this codebase yet — SMM-17 built one for `social_inbox_messages` because the reply flow has nothing
+else to test end-to-end against, but that gap on the publish side is unrelated and out of this
+ticket's scope, flagged rather than silently fixed; (2) no metered-reply path exists or was
+considered — D-14's money split is specific to publishing, and nothing in the addendum proposes a
+metered reply, so `social.sendReply` has no barred twin; (3) SMM-18 (inbox tab UI) still owns the real
+triage-queue read surface — `listThreadMessages` here is a verification convenience, not a queue.
+
+**Test counts: 559 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `d14-smm-17-social-reply-registry.test.ts` + `social-client-review-portal.controller.test.ts` (the
+exact four-file set SMM-16 measured its own 522/0/5 baseline against). **+37 new**: 22 in the new
+`d14-smm-17-social-reply-registry.test.ts`, 6 in `reply-dispatch.test.ts`, 8 in
+`social-reply.test.ts`, 1 in `inbox-retention-job.test.ts`'s new direction-fix case — arithmetic
+matches exactly (522+37=559), and this pass RE-RAN THE SAME FOUR-FILE SET TWICE independently (once
+mid-fix, once final) landing on 559/0/5 both times.
+
+Baseline was attempted **measured directly**, not just cited: `git stash -u` cleanly stashed every
+file this ticket touched (both modified and new/untracked — the sandbox's git-safety layer did NOT
+refuse it this time, unlike the SMM-16 seat's own experience), the three-file baseline set was re-run
+against the stashed-clean tree, and it came back **495 passed, one file crashed
+(`publisher/provisioning.test.ts`'s `afterAll` threw `Cannot read properties of undefined (reading
+'close')` — `app` itself was never assigned, meaning `buildApp()` in that file's OWN `beforeAll`
+failed on the unmodified tree), 32 skipped** — a file that passed 27/27 in every one of this ticket's
+OWN runs, on code this ticket never touches, failing only on the stashed tree. Read as exactly the
+phantom-failure class this file names by name (**shared test Postgres + a loaded machine**), not a
+real regression, and NOT trusted as the baseline number. The stash was popped back immediately
+(`git stash pop`, clean, all nine touched files + five new files restored intact) rather than
+re-attempted a second time, given this file's own instruction to re-run alone rather than fight the
+environment repeatedly. **SMM-16's own previously-measured 522/0/5 for this identical set** is used
+instead, corroborated by the exact +37 arithmetic above and by two independent clean 559/0/5 runs of
+the full set WITH this ticket's changes present — if 522 were wrong, that arithmetic would not land
+on the same number twice.
+
+All five new/touched test files also re-run ALONE (each green, matching their in-context counts:
+22/22, 6/6, 8/8, 10/10 for `inbox-retention-job.test.ts`), ruling out both the shared-test-Postgres
+and the in-process shared-mock phantom-failure classes this file names. `tsc --noEmit` clean.
+`lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps` all green (no
+migration — still 129 files). `test:iam-chain-alignment` not re-run — no Cerbos policy CHANGED
+behaviour (`resource_social_inbox.yaml`'s `assign`/`reply`/`read` actions already existed, unedited;
+`resource_mcp_tool.yaml`'s executable-tool list is mcp-hub-side and not exercised by this suite).
 
 **SMM-31 evidence (2026-08-20, senior-be):** schema/IAM already seeded (0105/0106) — no migration, no
 Cerbos change this pass. Built: staff request/read/withdraw (`social.controller.ts`, idempotent

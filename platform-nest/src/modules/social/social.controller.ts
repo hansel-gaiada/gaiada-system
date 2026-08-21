@@ -33,6 +33,7 @@ import {
   NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import type { PoolClient } from "pg";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
 import { authorize, writeActivity } from "../../core/http";
@@ -40,7 +41,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { DEFAULT_TOOL_SCOPE, DEFAULT_USAGE_BUDGET_USD } from "./index";
-import { variantArgsSha256, variantPublishArgs } from "./canonical-args";
+import { variantArgsSha256, variantPublishArgs, replyDispatchArgs, replyArgsSha256 } from "./canonical-args";
 // SMM-09 — the publish gate. The controller imports the SAME evaluator the D14 registry entry runs
 // (core/approval-executables.ts), never a UI-friendly second copy of the rules.
 import {
@@ -54,6 +55,11 @@ import { evaluatePublishPreconditionWithClientReview } from "./client-review";
 // intake for the reconcile flow. Both are thin: the domain logic (the transactional stamp, the
 // idempotent apply) lives in `dispatch.ts`/`post-status-sync-job.ts`, never re-implemented here.
 import { dispatchApprovedPublish } from "./dispatch";
+// SMM-17 — the reply gate, built by reusing SMM-09's pattern (see reply-precondition.ts's header).
+import {
+  SOCIAL_REPLY_TOOL, REPLY_PRECONDITION_STAGES, evaluateReplyPrecondition,
+} from "./reply-precondition";
+import { dispatchApprovedReply } from "./reply-dispatch";
 import { reconcileOneProviderPost } from "./post-status-sync-job";
 import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
 import { completeViaGateway } from "./gateway-client";
@@ -85,6 +91,11 @@ const POST_STATUSES = new Set([
  *  provider or already public, and editing the row would desynchronise us from the network — the
  *  content is out there, and our copy would start lying about what was posted. */
 const EDITABLE_VARIANT_STATUSES = new Set(["draft", "in_review", "approved"]);
+/** SMM-17 — the SAME editable set, for a reply message instead of a variant. `failed` joins it for
+ *  the identical reason `updateVariant`'s own CASE includes it: a reply whose send attempt failed
+ *  must be editable and re-approvable, never permanently stuck (there is no other path back to
+ *  `draft` for it). `sent` is the one truly immutable state — the message already went out. */
+const EDITABLE_MESSAGE_STATUSES = new Set(["draft", "in_review", "approved", "failed"]);
 
 /** Criterion 2: a refusal an agent can branch on. The snake_case TOKEN goes in `message`, which the
  *  global HttpErrorFilter renames to `error` on the way out — so the response is
@@ -1603,6 +1614,225 @@ export class SocialController {
       throw new ConflictException({ message: verdict.reason });
     }
     return { ok: true, providerPostId: verdict.providerPostId, network: verdict.network };
+  }
+
+  // ==================================================== INBOX REPLY FLOW (SMM-17) =============
+  //
+  // draft -> WS4 approval -> send, reusing SMM-09's pattern (`reply-precondition.ts`'s own header).
+  // Cerbos actions per `resource_social_inbox.yaml` (SMM-30): drafting/editing/approving a reply
+  // rides `assign` ("a draft is a row in our DB and rides assign/read plus the AI path" — that
+  // file's own words); `reply` is reserved for the one action that decides a reply is SENT, exactly
+  // mirroring `publish` on `social_post`. `social.inbox.reply` (0106) is the permission already
+  // granted to social_manager/social_staff/manager/company_admin/platform_admin — no IAM change
+  // needed for this ticket.
+
+  /** Shared: load an outbound message row FOR UPDATE, scoped to this thread. Returns null on a
+   *  miss (wrong id, wrong thread, or an INBOUND row — a reply is edited only through its own row,
+   *  never through the comment it answers). */
+  private async loadReplyForUpdate(
+    c: PoolClient, threadId: string, messageId: string,
+  ): Promise<{ id: string; threadId: string; accountId: string; body: string; status: string; approvalId: string | null } | null> {
+    const { rows } = await c.query<{
+      id: string; thread_id: string; account_id: string; body: string; status: string; approval_id: string | null;
+    }>(
+      `SELECT m.id, m.thread_id, t.account_id, m.body, m.status, m.approval_id
+         FROM social_inbox_messages m
+         JOIN social_inbox_threads t ON t.id = m.thread_id AND t.tenant_id = m.tenant_id
+        WHERE m.id = $1 AND m.thread_id = $2 AND m.direction = 'out'
+        FOR UPDATE OF m`,
+      [messageId, threadId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return { id: row.id, threadId: row.thread_id, accountId: row.account_id, body: row.body, status: row.status, approvalId: row.approval_id };
+  }
+
+  /** Create a draft reply on a thread. A draft is OUR row, never sent, never network-visible —
+   *  `assign`, not `reply` (see this section's header). */
+  @Post("threads/:threadId/messages")
+  @HttpCode(201)
+  async createReplyDraft(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("threadId") threadId: string,
+    @Body() body: { body?: string },
+  ) {
+    await authorize(req.principal, { kind: "social_inbox", id: threadId, tenantId, module: "social" }, "assign");
+    const text = (body?.body ?? "").trim();
+    if (!text) refuse("empty_body");
+
+    const id = newId();
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const { rows } = await c.query<{ account_id: string }>(
+          `SELECT account_id FROM social_inbox_threads WHERE id = $1 AND deleted_at IS NULL`,
+          [threadId],
+        );
+        if (!rows[0]) return { kind: "not_found" as const };
+        const accountId = rows[0].account_id;
+        const argsSha = replyArgsSha256({ tenantId, id, threadId, accountId, body: text });
+        await c.query(
+          `INSERT INTO social_inbox_messages
+             (id, tenant_id, thread_id, direction, body, status, source, args_sha256, origin_site)
+           VALUES ($1,$2,$3,'out',$4,'draft','reply',$5,$6)`,
+          [id, tenantId, threadId, text, argsSha, config.originSite],
+        );
+        return { kind: "ok" as const, accountId, argsSha };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("inbox thread not found");
+    await writeActivity(tenantId, req.principal.userId, "created", "social_inbox_message", id, { threadId });
+    return { id, threadId, body: text, status: "draft", argsSha256: result.argsSha };
+  }
+
+  /** Edit a draft reply. STATE LAW mirrors `updateVariant`'s exactly (D-15): the hash moves, and any
+   *  previously-spent grant is dropped in the SAME statement, reverting to `draft` — an edit must
+   *  never leave an approval pointing at content nobody approved. */
+  @Patch("threads/:threadId/messages/:messageId")
+  async updateReplyDraft(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("threadId") threadId: string, @Param("messageId") messageId: string,
+    @Body() body: { body?: string },
+  ) {
+    await authorize(req.principal, { kind: "social_inbox", id: messageId, tenantId, module: "social" }, "assign");
+    if (body?.body === undefined) refuse("no_fields");
+    const text = body.body.trim();
+    if (!text) refuse("empty_body");
+
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const row = await this.loadReplyForUpdate(c, threadId, messageId);
+        if (!row) return { kind: "not_found" as const };
+        if (!EDITABLE_MESSAGE_STATUSES.has(row.status)) return { kind: "refuse" as const, reason: "message_not_editable" };
+
+        const argsSha = replyArgsSha256({ tenantId, id: row.id, threadId: row.threadId, accountId: row.accountId, body: text });
+        const wasApproved = row.approvalId !== null || row.status === "approved";
+        await c.query(
+          `UPDATE social_inbox_messages
+              SET body = $1, args_sha256 = $2, approval_id = NULL,
+                  status = CASE WHEN status IN ('in_review','approved','failed') THEN 'draft' ELSE status END,
+                  updated_at = now()
+            WHERE id = $3`,
+          [text, argsSha, messageId],
+        );
+        return { kind: "ok" as const, argsSha, wasApproved };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("reply draft not found");
+    if (result.kind === "refuse") refuse(result.reason);
+    await writeActivity(tenantId, req.principal.userId, "updated", "social_inbox_message", messageId, {
+      threadId, approvalInvalidated: result.wasApproved,
+    });
+    return { id: messageId, threadId, body: text, argsSha256: result.argsSha, approvalInvalidated: result.wasApproved };
+  }
+
+  /** Move a draft to `approved` — the staff sign-off BEFORE a send is ever proposed. Still `assign`:
+   *  this is bookkeeping on our own row, not the outbound act itself (`reply`). Idempotent: an
+   *  already-`approved` message re-approves as a no-op rather than erroring, mirroring the client-
+   *  review portal's own "repeat decide while already decided" idempotency. */
+  @Post("threads/:threadId/messages/:messageId/approve")
+  @HttpCode(200)
+  async approveReplyDraft(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("threadId") threadId: string, @Param("messageId") messageId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_inbox", id: messageId, tenantId, module: "social" }, "assign");
+
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const row = await this.loadReplyForUpdate(c, threadId, messageId);
+        if (!row) return { kind: "not_found" as const };
+        if (row.status === "approved") return { kind: "already" as const };
+        if (row.status !== "draft" && row.status !== "in_review") {
+          return { kind: "refuse" as const, reason: "message_not_editable" };
+        }
+        if (!row.body.trim()) return { kind: "refuse" as const, reason: "empty_body" };
+        await c.query(`UPDATE social_inbox_messages SET status = 'approved', updated_at = now() WHERE id = $1`, [messageId]);
+        return { kind: "ok" as const };
+      },
+      { modules: ["social"] },
+    );
+    if (result.kind === "not_found") throw new NotFoundException("reply draft not found");
+    if (result.kind === "refuse") refuse(result.reason);
+    if (result.kind === "ok") {
+      await writeActivity(tenantId, req.principal.userId, "approved", "social_inbox_message", messageId, { threadId });
+    }
+    return { id: messageId, threadId, status: "approved" };
+  }
+
+  /** A DRY RUN of the D14 reply precondition — mirrors `getVariantPublishPreconditions` exactly, for
+   *  a message instead of a variant. Publishes nothing, sends nothing, consumes no approval. */
+  @Get("threads/:threadId/messages/:messageId/send-preconditions")
+  async getReplySendPreconditions(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("threadId") threadId: string, @Param("messageId") messageId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_inbox", id: messageId, tenantId, module: "social" }, "read");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const row = await this.loadReplyForUpdate(c, threadId, messageId);
+        if (!row) return { found: false as const };
+        const args = replyDispatchArgs({ tenantId, id: row.id, threadId: row.threadId, accountId: row.accountId, body: row.body });
+        return { found: true as const, verdict: await evaluateReplyPrecondition(c, args as unknown as Record<string, unknown>) };
+      },
+      { modules: ["social"] },
+    );
+    if (!result.found) throw new NotFoundException("reply draft not found");
+    const verdict = result.verdict;
+    return {
+      ok: verdict.ok,
+      ...(verdict.ok ? {} : { stage: verdict.stage, reason: verdict.reason }),
+      stages: REPLY_PRECONDITION_STAGES,
+      tool: SOCIAL_REPLY_TOOL,
+    };
+  }
+
+  /** THE SEND ENDPOINT — `social.sendReply`'s `pathTemplate` fronts this (./index.ts). Reachable in
+   *  the ordinary flow ONLY through the D14 executor's re-drive, the SAME shape `dispatchPublish`
+   *  above is (that handler's own header note applies here verbatim: never called directly by a
+   *  human or an agent in the ordinary flow). `reply` — not `assign` — is the Cerbos action, matching
+   *  `publish` on `social_post`: this is the act itself, not the bookkeeping around it. */
+  @Post("threads/:threadId/messages/:messageId/send")
+  @HttpCode(200)
+  async sendReply(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
+    @Param("threadId") threadId: string, @Param("messageId") messageId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_inbox", id: messageId, tenantId, module: "social" }, "reply");
+    const verdict = await dispatchApprovedReply(tenantId, messageId, req.principal.userId);
+    if (!verdict.ok) {
+      // Criterion 2: the SAME snake_case token vocabulary `getReplySendPreconditions` reports,
+      // riding `message` — never `error` — matching `dispatchPublish`'s own documented trap-avoidance.
+      throw new ConflictException({ message: verdict.reason });
+    }
+    return { ok: true, externalId: verdict.externalId, network: verdict.network };
+  }
+
+  /** List a thread's messages (inbound + outbound) — plain `read`, for verifying the flow above
+   *  without raw SQL. SMM-18 owns the real triage-queue UI this endpoint is not trying to be. */
+  @Get("threads/:threadId/messages")
+  async listThreadMessages(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("threadId") threadId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_inbox", id: threadId, tenantId, module: "social" }, "read");
+    const { rows } = await withTenants(
+      [tenantId],
+      (c) => c.query<{
+        id: string; direction: string; body: string; status: string; source: string;
+        externalId: string | null; postedAt: Date | null; createdAt: Date;
+      }>(
+        `SELECT id, direction, body, status, source, external_id AS "externalId",
+                posted_at AS "postedAt", created_at AS "createdAt"
+           FROM social_inbox_messages WHERE thread_id = $1 ORDER BY created_at ASC`,
+        [threadId],
+      ),
+      { modules: ["social"] },
+    );
+    return { threadId, messages: rows };
   }
 
   // ==================================================== RECONCILE WEBHOOK INTAKE (SMM-10) =====
