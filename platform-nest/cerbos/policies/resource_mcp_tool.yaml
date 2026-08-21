@@ -152,6 +152,29 @@ resourcePolicy:
               # Splitting the two conjuncts is what makes this correct rather than merely different:
               # scope stays an n8n question, impact becomes an attendance question, and neither
               # borrows the other's predicate.
+              #
+              # 🚨 THE LIST BELOW CARRIES NO INLINE COMMENTS, AND MUST NOT. This is a YAML FOLDED
+              # SCALAR (`>`): every line inside it is CEL source, not YAML, so a `//` line is fed to
+              # the CEL parser verbatim. CEL has no `//` comment form, so it truncates the
+              # expression and the whole policy set fails to compile with `mismatched input '<EOF>'
+              # expecting ']'`. That is what happened on 2026-08-20 (3fe025a) and it sat on `main`
+              # undetected, because the running Cerbos container had started BEFORE the commit and
+              # was still serving the last good policy — health green, tests green, policy broken.
+              # Cerbos does not hot-reload, so a stale container hides exactly this.
+              # Put the rationale HERE, above the scalar, as YAML `#` comments.
+              #
+              # WHY EACH NAME IS LISTED (the notes that were inline, preserved):
+              #  • `social.publishPost` — SMM-09's D14 executable, write:true/impact:high.
+              #  • `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee` — P2-07's JML
+              #    writes. Listed because D14-13's impact conjunct is what lets the EXECUTOR's
+              #    branded approvalId call re-enter the hub for a medium/high tool. An entry in
+              #    approval-executables.ts without a name here would pass its precondition and then
+              #    be denied at the door — the loop closes on paper and fails in practice.
+              #  • `iam.grantRole` / `iam.revokeRoleGrant` / `iam.assignPosition` /
+              #    `iam.unassignPosition` — owner decision 2026-08-20, the four direct IAM writes.
+              #    See approval-executables.ts's own block for what the decision rested on and what
+              #    still bounds them: the ceiling, the single writer and the self-target DENY are
+              #    all unchanged.
               - expr: >
                   !request.principal.attr.isUnattended ||
                   ((!request.resource.attr.write ||
@@ -161,20 +184,7 @@ resourcePolicy:
                      request.resource.attr.approvalId != "" &&
                      request.resource.attr.name in ["deploy.staging", "deploy.production", "webdev.provisionSite",
                                                     "social.publishPost",
-                                                    // P2-07: JML's three writes. Listed here because
-                                                    // D14-13's impact conjunct is what lets the
-                                                    // EXECUTOR's branded approvalId call re-enter the
-                                                    // hub for a medium/high tool. An entry in
-                                                    // approval-executables.ts without a name here
-                                                    // would pass its precondition and then be denied
-                                                    // at the door — the loop would close on paper and
-                                                    // fail in practice.
                                                     "hr.hireEmployee", "hr.transferEmployee",
                                                     "hr.terminateEmployee",
-                                                    // Owner decision 2026-08-20: the four direct IAM
-                                                    // writes. See approval-executables.ts's own block
-                                                    // for what the decision rested on and what still
-                                                    // bounds them — the ceiling, the single writer and
-                                                    // the self-target DENY are all unchanged.
                                                     "iam.grantRole", "iam.revokeRoleGrant",
                                                     "iam.assignPosition", "iam.unassignPosition"])))
