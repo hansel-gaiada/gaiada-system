@@ -96,6 +96,17 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     // `principal.companies` is empty and `variables.inTenant` is FALSE for every resource.
     exec = await createUser("owner@cr-staff.test");
     await grantRole(exec, roleExec, "global", null);
+    // MON-00c: the exec rule gained `&& variables.inRoot`, and a root resolves from
+    // `users.home_company_id` OR a membership. This fixture has no membership BY DESIGN, so it
+    // resolved no root at all and the trap below started 403'ing — which would have read as "the
+    // trap is closed" when in fact it was never exercised.
+    //
+    // `home_company_id` is exactly the right anchor here because it does NOT create a membership:
+    // the trap's premise (and the assertion inside it, which counts company_memberships +
+    // client_contacts and expects ZERO) stays literally true. So the trap still proves what it was
+    // written to prove — an exec reaches these rows WITHOUT belonging to the company — while now
+    // also requiring what MON-00c added: that the company be in the exec's own root.
+    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, exec]);
 
     plainMember = await createUser("member@cr-staff.test");
     await addMembership(co, plainMember);
@@ -257,7 +268,7 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     expect(await crRow(cr.id)).toMatchObject({ status: "new", route: null });
   });
 
-  it("TRAP #4: a group_executive with NO membership row is ALLOWED read AND triage (the exec rule is notLow-only)", async () => {
+  it("TRAP #4: a group_executive with NO membership row is ALLOWED read AND triage (the exec rule needs notLow + inRoot, never inTenant)", async () => {
     // Proof the fixture really is membership-less: `inTenant` is `resource.tenantId in
     // principal.companies`, and `companies` is built only from company_memberships/client_contacts.
     const memberships = await adminPool().query(
