@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -69,7 +70,10 @@ export default async function EmployeePage({ params }: { params: Params }) {
   const emp = await getEmployee(viewerId, tenant, userId, me);
   if (!emp) return shell("Person not found", <EmptyNote>No person with that id in this company.</EmptyNote>);
 
-  const { profile, isSelf, tasks, projects, timeEntries, identityLinks, activity, placement } = emp;
+  const { profile, isSelf, tasks, projects, timeEntries, identityLinks, activity, placement, refusals } = emp;
+  // AGN-3: a KPI is a claim. When the read behind one was refused, the honest tile is a dash — "0
+  // open tasks" asserts something about this person on the strength of being told nothing about them.
+  const kpi = (key: keyof typeof refusals, value: string) => (refusals[key] ? "—" : value);
 
   // P2-10 — the employment record and the seats someone could be moved into. Both degrade to
   // null/empty, which is honest: no record and no seats are ordinary states, not failures.
@@ -108,10 +112,18 @@ export default async function EmployeePage({ params }: { params: Params }) {
       />
 
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginBottom: 20 }}>
-        <KpiTile label="Open tasks" value={String(openTasks)} foot={`${tasks.length} assigned`} />
-        <KpiTile label="Projects owned" value={String(projects.length)} />
-        <KpiTile label="Hours logged" value={hours(totalMinutes)} foot={`${timeEntries.length} entries`} />
-        <KpiTile label="Linked channels" value={String(identityLinks.length)} />
+        <KpiTile
+          label="Open tasks"
+          value={kpi("tasks", String(openTasks))}
+          foot={refusals.tasks ? "not readable" : `${tasks.length} assigned`}
+        />
+        <KpiTile label="Projects owned" value={kpi("projects", String(projects.length))} />
+        <KpiTile
+          label="Hours logged"
+          value={kpi("timeEntries", hours(totalMinutes))}
+          foot={refusals.timeEntries ? "not readable" : `${timeEntries.length} entries`}
+        />
+        <KpiTile label="Linked channels" value={kpi("identityLinks", String(identityLinks.length))} />
       </div>
 
       <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
@@ -154,7 +166,14 @@ export default async function EmployeePage({ params }: { params: Params }) {
 
       <div style={{ marginTop: 20 }}>
         <Card title="Organization" headerRight={<Link href={`/companies/${tenant}/org`} style={{ font: "400 12px var(--font-body)", color: "var(--erp-accent)", textDecoration: "none" }}>View org chart →</Link>}>
-          {placement.length === 0 ? (
+          {refusals.placement ? (
+            <ReadRefusal
+              subject="this person's placement in the org structure"
+              kind={refusals.placement!.kind}
+              reason={refusals.placement!.kind === "unavailable" ? refusals.placement!.reason : undefined}
+              inline
+            />
+          ) : placement.length === 0 ? (
             <EmptyNote>Not placed in the company org structure yet.</EmptyNote>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, font: "400 14px var(--font-body)", color: "var(--text-primary)" }}>
@@ -222,7 +241,14 @@ export default async function EmployeePage({ params }: { params: Params }) {
           )}
         </Card>
         <Card title="Linked channels">
-          {identityLinks.length === 0 ? (
+          {refusals.identityLinks ? (
+            <ReadRefusal
+              subject="this person's linked channels"
+              kind={refusals.identityLinks!.kind}
+              reason={refusals.identityLinks!.kind === "unavailable" ? refusals.identityLinks!.reason : undefined}
+              inline
+            />
+          ) : identityLinks.length === 0 ? (
             <EmptyNote>No WhatsApp / Telegram identities linked.</EmptyNote>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -241,7 +267,14 @@ export default async function EmployeePage({ params }: { params: Params }) {
 
       <div style={{ marginTop: 20 }}>
         <Card title="Recent activity">
-          {activity.length === 0 ? (
+          {refusals.activity ? (
+            <ReadRefusal
+              subject="this person's recent activity"
+              kind={refusals.activity!.kind}
+              reason={refusals.activity!.kind === "unavailable" ? refusals.activity!.reason : undefined}
+              inline
+            />
+          ) : activity.length === 0 ? (
             <EmptyNote>No recent activity.</EmptyNote>
           ) : (
             <HairlineTable

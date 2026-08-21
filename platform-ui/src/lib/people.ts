@@ -7,7 +7,8 @@ import "server-only";
 // Access: an employee page is visible to the employee themselves, a superadmin
 // (platform_admin) or an owner (group_executive) — see canViewEmployee. The UI
 // gate is defence-in-depth; the backend RLS/Cerbos is the real boundary.
-import type { Me } from "./platform";
+import { PlatformError, type Me } from "./platform";
+import { readResult } from "./readResult";
 import { isElevated } from "@/components/shell/nav";
 import {
   listMembers,
@@ -35,7 +36,14 @@ export interface EmployeeProfile {
   roles: { role: string; scopeType: string; scopeId: string | null }[];
 }
 
+/** Which panels could not be read, and why. `null` = the read succeeded (so an empty panel is real). */
+export type PanelKey = "tasks" | "projects" | "timeEntries" | "identityLinks" | "activity" | "placement";
+export type PanelRefusal = { kind: "forbidden" } | { kind: "unavailable"; reason: string };
+
 export interface Employee {
+  /** AGN-3: a refused panel is no longer indistinguishable from an empty one. The page renders a
+   *  `<ReadRefusal>` per entry and shows a dash instead of a confident 0 in the matching KPI. */
+  refusals: Partial<Record<PanelKey, PanelRefusal>>;
   profile: EmployeeProfile;
   isSelf: boolean;
   tasks: Task[];
@@ -67,11 +75,34 @@ export function findPlacement(root: OrgNode, userId: string): OrgPlacementStep[]
   return chain ? chain.filter((s) => s.kind !== "company") : [];
 }
 
+/**
+ * ── SCOPE NARROWED TWICE (AGN-3) ─────────────────────────────────────────────────────────────────
+ *
+ * Started as `catch { return fallback }` — no discrimination at all — which swallowed a 500, a
+ * timeout, a JSON parse error and an outright bug in this file identically to "there is no such
+ * row", across all seven panels. An empty panel is a CLAIM ("this person has no tasks") and it was
+ * being made on no evidence whatsoever.
+ *
+ * Then narrowed to absence + 403. Now the SIX PANELS no longer use this at all: they went to
+ * `readResult` and report their refusals to the page (see `Employee.refusals`). What is left is the
+ * one place degrading is genuinely correct — `resolveProfile`'s FALLBACK CHAIN, which tries `/users`
+ * (carries roles) and falls back to `/members` (available to any member). A 403 on the first is not
+ * a failure there; it is the reason the second exists.
+ *
+ * 🔴 RESIDUAL, RECORDED: if BOTH reads are refused, `getEmployee` returns null and the page says
+ * "Person not found" — the same conflation, one level up. `canViewEmployee` gates the page first, so
+ * a viewer should not normally reach it, which is why this is a residual rather than a live defect.
+ * Closing it means resolveProfile returning a ReadResult too; not done here to keep this change to
+ * the panels it claims to fix.
+ */
 async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
   try {
     return await p;
-  } catch {
-    return fallback;
+  } catch (e) {
+    if (e instanceof PlatformError && (e.status === 404 || e.status === 405 || e.status === 403)) {
+      return fallback;
+    }
+    throw e;
   }
 }
 
@@ -102,16 +133,32 @@ export async function getEmployee(u: string, t: string, userId: string, me: Me):
 
   const isSelf = me.userId === userId;
 
-  const [allTasks, allProjects, timeEntries, allLinks, activity, org] = await Promise.all([
-    safe(listTasks(u, t), []),
-    safe(listProjects(u, t), []),
-    safe(listTimeEntries(u, t, isSelf ? { mine: true } : { userId }), []),
-    safe(listIdentityLinks(u, t), []),
-    safe(getAudit(u, t, { actorId: userId, limit: 25 }), []),
-    safe(getOrgStructure(u, t, { id: t, name: profile.name, type: null }), null),
+  // AGN-3: each panel now reports WHICH non-answer it got. Previously every one of these degraded a
+  // 403 to [] and the page rendered "0 open tasks" / "no linked channels" as fact — a claim about
+  // this person built on a refusal to tell us anything about them.
+  const [tasksR, projectsR, timeR, linksR, activityR, orgR] = await Promise.all([
+    readResult(listTasks(u, t), { absentAsEmpty: [] }),
+    readResult(listProjects(u, t), { absentAsEmpty: [] }),
+    readResult(listTimeEntries(u, t, isSelf ? { mine: true } : { userId }), { absentAsEmpty: [] }),
+    readResult(listIdentityLinks(u, t), { absentAsEmpty: [] }),
+    readResult(getAudit(u, t, { actorId: userId, limit: 25 }), { absentAsEmpty: [] }),
+    readResult(getOrgStructure(u, t, { id: t, name: profile.name, type: null }), { absentAsEmpty: null }),
   ]);
+  const refusals: Partial<Record<PanelKey, PanelRefusal>> = {};
+  const take = <T,>(key: PanelKey, r: Awaited<ReturnType<typeof readResult<T>>>, fallback: T): T => {
+    if (r.kind === "ok") return r.data;
+    refusals[key] = r.kind === "forbidden" ? { kind: "forbidden" } : { kind: "unavailable", reason: r.reason };
+    return fallback;
+  };
+  const allTasks = take("tasks", tasksR, []);
+  const allProjects = take("projects", projectsR, []);
+  const timeEntries = take("timeEntries", timeR, []);
+  const allLinks = take("identityLinks", linksR, []);
+  const activity = take("activity", activityR, []);
+  const org = take("placement", orgR, null);
 
   return {
+    refusals,
     profile,
     isSelf,
     tasks: allTasks.filter((task) => task.assignee_id === userId),

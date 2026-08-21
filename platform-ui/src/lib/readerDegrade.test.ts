@@ -17,9 +17,9 @@
 // the regex now covers all three and this note exists to make the next rename obvious.
 //
 // WHY IT READS THE SOURCE INSTEAD OF CALLING THE HELPERS. There are SIX near-duplicate helpers
-// (`safe` in people/portal-data/webdevChangeRequests, `skipMissing` in adminData, `settle` in
-// queue.ts — meetings.ts and pipeline.ts no longer have one: AGN-3 migrated them onto
-// `readResult` and deleted their copies),
+// (`safe` in people/portal-data, `skipMissing` in adminData, `settle` in queue.ts — meetings.ts,
+// pipeline.ts and webdevChangeRequests-data.ts no longer have one: AGN-3 migrated them onto
+// `readResult` and deleted their copies. people.ts keeps one for a genuine FALLBACK CHAIN only),
 // each private to its own module and each with SUBTLY DIFFERENT rules —
 // which is exactly how they drifted apart unnoticed. A behavioural test could only reach the ones a
 // module chooses to export; a source sweep sees all of them, including the seventh someone adds next
@@ -46,10 +46,13 @@ const DEGRADES_403_KNOWN: Record<string, string> = {
     "DELIBERATE and documented in-file: a staff member browsing /portal is not a client contact, so " +
     "the LIST routes teach rather than refuse. The one reasoned exception, not an oversight.",
   "people.ts":
-    "TRACKED, not accepted. Narrowed from a bare `catch {}` (which swallowed 500s, timeouts and " +
-    "parse errors too) to absence + 403. Rethrowing 403 needs the plan's action item 4 (a shared typed-refusal component) " +
-    "first, or a quietly-empty panel becomes a crashed page — worse for the viewer, no more honest.",
-  "webdevChangeRequests-data.ts": "PRE-EXISTING. Not yet swept; same action-item-4 dependency.",
+    "NOW A FALLBACK CHAIN, not a panel degrade — the reason changed, so this entry did too. Its six " +
+    "PANELS moved to readResult and report refusals to the page (KPIs show a dash, panels render " +
+    "<ReadRefusal>). What still swallows a 403 is `resolveProfile`, which tries /users (carries " +
+    "roles) and falls back to /members (any member can read it): a 403 on the first is not a " +
+    "failure there, it is why the second exists. 🔴 Residual, recorded at the helper: if BOTH are " +
+    "refused, getEmployee returns null and the page says 'Person not found' — the same conflation " +
+    "one level up, mitigated by canViewEmployee gating the page first.",
 };
 
 /**
@@ -93,7 +96,7 @@ describe("AGN-3 · the reader-degrade invariant", () => {
     expect(
       found.length,
       "no safe()/skipMissing() helpers matched — the sweep is broken, not the estate clean",
-    ).toBeGreaterThanOrEqual(4);
+    ).toBeGreaterThanOrEqual(3);
   });
 
   it("🔴 no NEW helper swallows every error — a bare `catch` hides 500s, timeouts and outright bugs", () => {

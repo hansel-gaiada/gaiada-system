@@ -34,9 +34,16 @@ export async function getChangeRequestDetailAction(
 ): Promise<{ ok: true; row: ChangeRequestDetail } | { ok: false; error: string }> {
   const ctx = await requireSession();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const row = await getChangeRequest(ctx.userId, tenant, id);
-  if (!row) return { ok: false, error: "Change request not found (or you don't have access)." };
-  return { ok: true, row };
+  // AGN-3: this message — "not found (OR you don't have access)" — was the ambiguity written out in
+  // prose, because the reader genuinely could not tell which had happened. It can now, so the drawer
+  // stops guessing on the user's behalf.
+  const res = await getChangeRequest(ctx.userId, tenant, id);
+  if (res.kind === "forbidden") return { ok: false, error: "You don't have access to this change request." };
+  if (res.kind === "unavailable") {
+    return { ok: false, error: `This change request cannot be read right now — that is not the same as it being absent. (${res.reason})` };
+  }
+  if (!res.data) return { ok: false, error: "Change request not found." };
+  return { ok: true, row: res.data };
 }
 
 /** The whole disposition — decline or convert — mirroring the controller's single `triage` action.

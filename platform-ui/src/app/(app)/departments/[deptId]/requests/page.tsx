@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
@@ -26,7 +27,17 @@ export default async function ChangeRequestsPage({ params }: { params: Params })
   const { deptId } = await params;
   if (!tenant) notFound();
 
-  const rows = await listChangeRequests(userId, tenant);
+  // AGN-3: the queue is this tab's subject. A denied reader used to get the teach-state ("no
+  // requests yet"), which is the one reading of an empty queue that was never true for them. An
+  // ALLOWED-but-empty queue still shows the teach-state, which is MI-05's actual acceptance criterion.
+  const rowsResult = await listChangeRequests(userId, tenant);
+  if (rowsResult.kind === "forbidden") {
+    return <ReadRefusal subject="this department's change requests" kind="forbidden" />;
+  }
+  if (rowsResult.kind === "unavailable") {
+    return <ReadRefusal subject="The change-request queue" kind="unavailable" reason={rowsResult.reason} />;
+  }
+  const rows = rowsResult.data;
   const canTriage = can(me, "pm.manage", tenant);
 
   const actions = {
