@@ -21,6 +21,8 @@ if not ADMIN_PW:
     sys.exit("set KEYCLOAK_ADMIN_PASSWORD (the Keycloak bootstrap admin password)")
 
 # Emails MUST match the platform's seeded users (see platform-nest seed) for email-linking to work.
+# [email, firstName] or [email, firstName, password]. The third element is OPTIONAL and overrides
+# DEV_PW for that one account — the shared default stays in place for everyone else.
 USERS = [
     ("owner@gaiada-creative.test", "Ayu"),
     ("pm@gaiada-creative.test", "Budi"),
@@ -28,6 +30,10 @@ USERS = [
     ("copy@gaiada-creative.test", "Dewi"),
     ("approver@gaiada-creative.test", "Eka"),
     ("exec@gaiada.test", "Gaiada"),
+    # The roster (platform-nest src/seed/roster.ts) makes this the primary day-to-day login;
+    # seed:agency creates it as the agency superadmin. It was missing here, so SSO could not
+    # reach the account the rest of the seed treats as the main one.
+    ("hansel@gaiada.com", "Clement", "Clement91"),
 ]
 
 
@@ -53,10 +59,12 @@ if st != 200:
     sys.exit(f"admin login failed: {st} {tok}")
 T = tok["access_token"]
 
-for email, first in USERS:
+for entry in USERS:
+    email, first = entry[0], entry[1]
+    pw = entry[2] if len(entry) > 2 else DEV_PW
     u = {"username": email, "email": email, "emailVerified": True, "enabled": True,
          "firstName": first, "requiredActions": [],
-         "credentials": [{"type": "password", "value": DEV_PW, "temporary": False}]}
+         "credentials": [{"type": "password", "value": pw, "temporary": False}]}
     st, _ = req("POST", f"/admin/realms/{REALM}/users", token=T, data=u)
     if st == 201:
         print(f"created {email}")
@@ -66,7 +74,7 @@ for email, first in USERS:
         users[0].update({"emailVerified": True, "enabled": True, "requiredActions": []})
         req("PUT", f"/admin/realms/{REALM}/users/{uid}", token=T, data=users[0])
         req("PUT", f"/admin/realms/{REALM}/users/{uid}/reset-password", token=T,
-            data={"type": "password", "value": DEV_PW, "temporary": False})
+            data={"type": "password", "value": pw, "temporary": False})
         print(f"updated {email}")
     else:
         print(f"FAILED {email}: {st}")
