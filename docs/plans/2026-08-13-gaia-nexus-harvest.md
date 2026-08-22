@@ -2,6 +2,18 @@
 
 **Date:** 2026-08-13 · **Status:** PLANNED (nothing built) · **Source repo:** `Gaia-Digital-Agency/gaia-nexus` @ default branch (shallow clone, 2026-08-13)
 
+> **⚠ SUPERSEDED IN PART — 2026-08-23 (owner ruling: "forget about those nexus import. we are
+> independent of that anyway. so we need to build ours properly.").** This document's Track B
+> framing — importing/mirroring Nexus's shape via **SM-71..SM-74** — is superseded by
+> [`2026-08-23-seo-audit-capability.md`](2026-08-23-seo-audit-capability.md), which designs the
+> ERP's own audit capability on its merits and rules on each old ticket's substance individually
+> (§8 there). **SM-70 landed and stays as an inert, opt-in tool; do not build further on it.**
+> Note also that the identifiers SM-71..SM-75 were independently re-allocated by
+> `docs/blueprints/seo-sem-execution-tracker.md` to unrelated, since-landed work — the numbers
+> below are burnt; do not resurrect them. Track A's MON-01..08 numbering was likewise superseded
+> by `docs/blueprints/monitoring-program.md`'s MON-10..23. The rest of this document (the Nexus
+> assessment, §8–§12 rulings, and the workload evidence) stands unchanged as history.
+
 ---
 
 ## 0. Headline
