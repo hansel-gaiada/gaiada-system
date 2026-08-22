@@ -62,13 +62,35 @@ const DEGRADES_403_KNOWN: Record<string, string> = {
  */
 const BARE_CATCH_KNOWN: Record<string, string> = {
   "queue.ts":
-    "`settle()` — documented at length on the helper itself. The queue aggregates six independent " +
-    "sources and UX-2 §1.5 requires that one dead source must not blank it, which genuinely " +
-    "conflicts with 'never render a list you cannot vouch for'. Its callers' readers now return " +
-    "ReadResult, so this catches only transport failures. 🔴 KNOWN CONSEQUENCE: the queue can be " +
-    "SHORT without saying so, and on a 'work waiting for you' surface an empty one reads as 'you " +
-    "are done'. The fix is a queue-level partial-result indicator, not another try/catch.",
+    "`settle()` — still catches broadly, by design, but the SILENCE is gone. UX-2 §1.5 requires that " +
+    "one dead source must not blank the queue, so the try/catch stays; what changed (AGN-3) is that " +
+    "each source NAMES itself, a failed one lands in `EnvelopeCompany.partialSources`, and " +
+    "EnvelopeBanner renders 'This list is incomplete — treat an empty or short result as unknown " +
+    "rather than settled'. Surviving a dead source is no longer indistinguishable from succeeding, " +
+    "which was the actual defect.",
 };
+
+
+/**
+ * A bare catch is one that does not DISCRIMINATE — it has a catch clause and never inspects what it
+ * caught, so a 403, a 500 and a parse error are one outcome.
+ *
+ * ⚠ The first version matched `catch {` followed IMMEDIATELY by `return`, which was a shape test
+ * masquerading as a semantic one. When AGN-3 added a `lost.push(source)` line before the return in
+ * `queue.ts`'s `settle()`, that helper stopped being detected at all — the check went quiet on a
+ * helper that still catches everything. Keyed on the absence of `instanceof` instead, which is the
+ * property that actually matters.
+ */
+function isBareCatch(body: string): boolean {
+  // NO REGEX HERE, ON PURPOSE. Two successive attempts to write a word boundary in this predicate
+  // produced literal BACKSPACE bytes instead, giving a pattern that matches nothing — so the check
+  // went silently green while queue.ts's bare catch sat directly in front of it. That is the same
+  // trap driversFor() in capability-inventory.test.ts documents, reintroduced twice by the tooling
+  // writing this file. A substring test cannot be mis-escaped, and "does this helper contain a
+  // catch clause" needs nothing cleverer.
+  return body.includes("catch") && !body.includes("instanceof");
+}
+
 
 interface Helper {
   file: string;
@@ -101,7 +123,7 @@ describe("AGN-3 · the reader-degrade invariant", () => {
 
   it("🔴 no NEW helper swallows every error — a bare `catch` hides 500s, timeouts and outright bugs", () => {
     const bare = helpers()
-      .filter((h) => /catch\s*(\(\s*\w*\s*\))?\s*\{\s*return/.test(h.body) && !/instanceof/.test(h.body))
+      .filter((h) => isBareCatch(h.body))
       .map((h) => h.file)
       .filter((f) => !(f in BARE_CATCH_KNOWN));
     expect(
@@ -115,7 +137,7 @@ describe("AGN-3 · the reader-degrade invariant", () => {
   it("the bare-catch allow-list has no stale entries either", () => {
     const bare = new Set(
       helpers()
-        .filter((h) => /catch\s*(\(\s*\w*\s*\))?\s*\{\s*return/.test(h.body) && !/instanceof/.test(h.body))
+        .filter((h) => isBareCatch(h.body))
         .map((h) => h.file),
     );
     expect(Object.keys(BARE_CATCH_KNOWN).filter((f) => !bare.has(f))).toEqual([]);

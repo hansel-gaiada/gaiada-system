@@ -68,6 +68,15 @@ export default async function EmployeePage({ params }: { params: Params }) {
   if (!tenant) return shell("Person", <EmptyNote>Select a company from the top bar.</EmptyNote>);
 
   const emp = await getEmployee(viewerId, tenant, userId, me);
+  // AGN-3: "Person not found" used to cover a refusal too — a claim about the estate derived from a
+  // statement about the viewer. Both profile reads being refused tells us nothing about whether this
+  // person exists, so we say that instead of inventing an absence.
+  if (emp === "refused") {
+    return shell(
+      "Not available to you",
+      <ReadRefusal subject="this person's record" kind="forbidden" inline />,
+    );
+  }
   if (!emp) return shell("Person not found", <EmptyNote>No person with that id in this company.</EmptyNote>);
 
   const { profile, isSelf, tasks, projects, timeEntries, identityLinks, activity, placement, refusals } = emp;

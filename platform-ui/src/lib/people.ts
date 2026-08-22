@@ -108,8 +108,22 @@ async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
 
 // Resolve the employee's profile: prefer /users (carries roles); fall back to
 // the members list (always available to members) with empty roles.
-async function resolveProfile(u: string, t: string, userId: string): Promise<EmployeeProfile | null> {
-  const users = await safe(listUsers(u, t), []);
+/**
+ * AGN-3 residual, now closed. Both reads are a FALLBACK CHAIN — `/users` carries roles, `/members` is
+ * readable by any member — so a 403 on the first is not a failure, it is why the second exists. The
+ * defect was what happened when BOTH were refused: this returned null, `getEmployee` returned null,
+ * and the page rendered "Person not found". That is a claim about the ESTATE ("no such person")
+ * derived from a statement about the VIEWER ("you may not look"), and the two are unrelated.
+ *
+ * `"refused"` is a third outcome distinct from null: null still means "read fine, no such person".
+ */
+async function resolveProfile(
+  u: string,
+  t: string,
+  userId: string,
+): Promise<EmployeeProfile | null | "refused"> {
+  const usersR = await readResult(listUsers(u, t), { absentAsEmpty: [] });
+  const users = usersR.kind === "ok" ? usersR.data : [];
   const row = users.find((x) => x.id === userId);
   if (row) {
     return {
@@ -121,14 +135,22 @@ async function resolveProfile(u: string, t: string, userId: string): Promise<Emp
       roles: row.roles.map((r) => ({ role: r.role, scopeType: r.scopeType, scopeId: r.scopeId })),
     };
   }
-  const members = await safe(listMembers(u, t), []);
+  const membersR = await readResult(listMembers(u, t), { absentAsEmpty: [] });
+  const members = membersR.kind === "ok" ? membersR.data : [];
   const m = members.find((x) => x.user_id === userId);
-  if (!m) return null;
-  return { id: m.user_id, name: m.name, email: m.email, title: m.title, status: "active", roles: [] };
+  if (m) {
+    return { id: m.user_id, name: m.name, email: m.email, title: m.title, status: "active", roles: [] };
+  }
+  // Neither read found them. Only now does it matter WHY: if both were refused we know nothing about
+  // whether this person exists, and must not say they do not.
+  if (usersR.kind !== "ok" && membersR.kind !== "ok") return "refused";
+  return null;
 }
 
-export async function getEmployee(u: string, t: string, userId: string, me: Me): Promise<Employee | null> {
+export async function getEmployee(u: string, t: string, userId: string, me: Me): Promise<Employee | null | "refused"> {
   const profile = await resolveProfile(u, t, userId);
+  // "refused" propagates so the page can distinguish it from a genuine absence.
+  if (profile === "refused") return "refused";
   if (!profile) return null;
 
   const isSelf = me.userId === userId;

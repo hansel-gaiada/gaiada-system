@@ -30,33 +30,32 @@ import type { PmHomeProps, PmHomeTask, PmHomeStatusGroup } from "@/components/pm
 import type { PmCounterValues } from "@/components/pm/PmCounters";
 
 /**
- * ⚠ A THIRD NAME FOR THE DEGRADE PATTERN, AND A KNOWN LIMITATION (AGN-3).
+ * ⚠ A THIRD NAME FOR THE DEGRADE PATTERN — and the limitation it used to carry is now CLOSED.
  *
  * The reader-degrade sweep looked for `safe()` and `skipMissing()`; this is the same shape called
- * `settle()`, which is why it was missed for so long — and its original comment described the whole
- * defect chain approvingly: "The underlying readers already degrade 404/403 to [] themselves; this
- * is the outer net for anything else." Those readers no longer do (AGN-3 gave them `ReadResult`),
- * so this net now catches only genuine transport failures, which is what it should always have been.
+ * `settle()`, which is why it went unnoticed. Its original comment described the whole defect chain
+ * approvingly: "The underlying readers already degrade 404/403 to [] themselves; this is the outer
+ * net for anything else." Those readers no longer do, so this net now catches only what it should.
  *
- * WHY IT IS KEPT AT ALL: the queue aggregates six independent sources, and UX-2 §1.5 is explicit
- * that one dead source must not blank the whole queue. That requirement is right, and it conflicts
- * with "never render an empty list you cannot vouch for" — so both cannot be fully satisfied by a
- * helper at this level.
+ * WHY IT STILL EXISTS: the queue aggregates six independent sources and UX-2 §1.5 requires that one
+ * dead source must not blank it. That is right, and it used to conflict with "never render a list you
+ * cannot vouch for" — the queue could come back SHORT and say nothing, and on a "work waiting for
+ * you" surface a short queue reads as "this is all of it" while an empty one reads as "you are done".
  *
- * 🔴 THE LIMITATION, STATED RATHER THAN HIDDEN: this queue can be SHORT without saying so. A refused
- * or failed source drops out, the remaining items render, and nothing tells the viewer that "work
- * waiting for you" is now a partial answer. For a QUEUE that is a consequential silence — the whole
- * point of the surface is that an empty one means "you are done". Fixing it needs a queue-level
- * partial-result indicator (which sources answered), not another try/catch; that is a surface change
- * and is deliberately NOT smuggled in here. Tracked in `readerDegrade.test.ts`'s known list.
+ * Resolved by keeping the resilience and dropping the silence: a failed source is NAMED into
+ * `partialSources`, `EnvelopeBanner` renders it, and the caller can tell an honest empty queue from
+ * an incomplete one. The try/catch stays because a leg must still survive; what changed is that
+ * surviving is no longer indistinguishable from succeeding.
  */
-async function settle<T>(p: Promise<T[]>): Promise<T[]> {
+async function settle<T>(source: string, p: Promise<T[]>, lost: string[]): Promise<T[]> {
   try {
     return await p;
   } catch {
+    lost.push(source);
     return [];
   }
 }
+
 
 function fromApproval(a: ApprovalItem, decidable: boolean): QueueItem {
   return {
@@ -231,17 +230,25 @@ export async function getMyWorkQueue(
     companies.map(async (c) => {
       try {
         const decidable = can(me, "approvals.decide", c.id);
+        // AGN-3: every source names itself, so a leg that survives a dead source reports WHICH one it
+        // lost instead of quietly returning a shorter queue.
+        const lost: string[] = [];
         const [approvals, automation, gates, tasks, pmTasks, notifications] = await Promise.all([
-          settle(getPendingApprovals(userId, [c])),
-          settle(listAutomationApprovals(userId, c.id, { status: "pending" })),
-          // AGN-3: `listInternalPendingGates` now returns a discriminated result. Unwrapped here
-          // because the queue deliberately survives one dead source (UX-2 §1.5) — but see the
-          // KNOWN LIMITATION on `settle()` below: the queue still cannot say it is INCOMPLETE, so a
-          // refused gates read silently shortens "work waiting for you" rather than flagging it.
-          settle(listInternalPendingGates(userId, c.id).then((r) => (r.kind === "ok" ? r.data : []))),
-          settle(getMyTasks(userId, c.id)),
-          settle(listAllPmTasks(userId, c.id, { assignee: "me" })),
-          settle(listNotifications(userId, c.id, true)),
+          settle("approvals", getPendingApprovals(userId, [c]), lost),
+          settle("automation approvals", listAutomationApprovals(userId, c.id, { status: "pending" }), lost),
+          // A refused gate read is a REFUSAL, not an empty gate list, so it is reported as a lost
+          // source rather than unwrapped into [].
+          settle(
+            "pipeline gates",
+            listInternalPendingGates(userId, c.id).then((r) => {
+              if (r.kind !== "ok") throw new Error(r.kind === "forbidden" ? "forbidden" : r.reason);
+              return r.data;
+            }),
+            lost,
+          ),
+          settle("my tasks", getMyTasks(userId, c.id), lost),
+          settle("PM tasks", listAllPmTasks(userId, c.id, { assignee: "me" }), lost),
+          settle("mentions", listNotifications(userId, c.id, true), lost),
         ]);
         const rows: QueueItem[] = [
           ...approvals.map((a) => fromApproval(a, decidable)),
@@ -251,7 +258,7 @@ export async function getMyWorkQueue(
           ...pmTasks.filter((t) => t.status !== "done").map((t) => fromPmTask(t, c)),
           ...notifications.filter(isMentionEligible).map((n) => fromMention(n, c)),
         ];
-        return { company: c, ok: true, rows };
+        return { company: c, ok: true, rows, partialSources: lost };
       } catch {
         return { company: c, ok: false, rows: [] as QueueItem[], reason: "error" as const };
       }
@@ -418,7 +425,12 @@ export async function getPmHomeData(u: string, t: string, today: string): Promis
   // a `commented` work-activity row within the window, joined back to the comment's own body for
   // the excerpt (the activity row itself never carries the text — only `payload.commentId`).
   const since = isoDaysAgo(today, HOME_ACTIVITY_WINDOW_DAYS);
-  const activity = await settle(listWorkActivity(u, t, { since, limit: 200 }));
+  // This is the PM-home projection, not the queue envelope: it has nowhere to render a lost-source
+  // note, and a missing activity feed costs an "active tasks" column rather than hiding work the
+  // viewer owes. The discarded name is collected so the call still type-checks against the same
+  // helper — one settle(), one contract, rather than a second helper for the loose case.
+  const activityLost: string[] = [];
+  const activity = await settle("work activity", listWorkActivity(u, t, { since, limit: 200 }), activityLost);
   const commentedByTask = new Map<string, WorkActivityRow>();
   for (const row of activity) {
     if (row.verb !== "commented" || row.objectKind !== "pm_task") continue;
@@ -433,7 +445,8 @@ export async function getPmHomeData(u: string, t: string, today: string): Promis
       const row = commentedByTask.get(tk.id)!;
       const commentId = typeof row.payload?.commentId === "string" ? row.payload.commentId : undefined;
       if (!commentId) return;
-      const comments = await settle(listTaskComments(u, t, tk.id));
+      // Per-task comment fetch for an excerpt; a loss costs the excerpt, nothing owed.
+      const comments = await settle("task comments", listTaskComments(u, t, tk.id), activityLost);
       const c = comments.find((cm: Comment) => cm.id === commentId);
       if (c) extraByTaskId.set(tk.id, { excerpt: excerpt(c.body), author: c.author_name ?? undefined });
     }),
@@ -457,7 +470,8 @@ export async function getPmHomeData(u: string, t: string, today: string): Promis
  *  authored/commented on" (no endpoint, no notification type), so this returns "not available"
  *  rather than a fabricated 0 — see `PmCounters.tsx`'s header and this ticket's report. */
 export async function getPmCounters(u: string, t: string, userId: string, today: string): Promise<PmCounterValues> {
-  const mine = await settle(listAllPmTasks(u, t, { assignee: "me" }));
+  const mineLost: string[] = [];
+  const mine = await settle("my PM tasks", listAllPmTasks(u, t, { assignee: "me" }), mineLost);
   let ball = 0;
   let responsible = 0;
   let overdue = 0;

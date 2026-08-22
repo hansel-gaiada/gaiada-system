@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -26,6 +27,12 @@ export default async function EditEmployeePage({ params }: { params: Params }) {
   }
 
   const emp = await getEmployee(viewerId, tenant, userId, me);
+  // A refused read is not a 404. `notFound()` here would tell an editor the person does not exist
+  // when the truth is that they may not read them — and on an EDIT route that is worse, because the
+  // natural next action is to create a duplicate.
+  if (emp === "refused") {
+    return <ReadRefusal subject="this person's record" kind="forbidden" />;
+  }
   if (!emp) notFound();
   const { profile } = emp;
   const action = updateEmployeeAction.bind(null, userId);

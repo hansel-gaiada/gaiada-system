@@ -13,6 +13,16 @@ export interface EnvelopeCompany {
   name: string;
   included: boolean;
   reason?: "no_access" | "not_served" | "suspended" | "error";
+  /**
+   * AGN-3: sources that FAILED for a company that is otherwise included. `included: false` covers
+   * "you saw none of this company"; this covers the quieter and more dangerous case — you saw SOME
+   * of it and nothing said so.
+   *
+   * It matters most on a work queue: an empty one reads as "you are done", and a short one reads as
+   * "this is all of it". Neither is safe to imply when a source was refused or unreachable, so the
+   * names are carried here and rendered by `EnvelopeBanner`.
+   */
+  partialSources?: string[];
 }
 
 export interface Envelope<T> {
@@ -60,7 +70,14 @@ export function normalizeEnvelope<T>(raw: unknown, fallback: Envelope<T> = { ite
 // one envelope — the shape every client-side fan-out (a per-company loop that
 // can't move server-side yet) should converge on instead of ad hoc arrays.
 export function mergeLegs<T>(
-  legs: { company: { id: string; name: string }; ok: boolean; rows: T[]; reason?: EnvelopeCompany["reason"] }[],
+  legs: {
+    company: { id: string; name: string };
+    ok: boolean;
+    rows: T[];
+    reason?: EnvelopeCompany["reason"];
+    /** Sources that failed while the leg still returned rows — see EnvelopeCompany.partialSources. */
+    partialSources?: string[];
+  }[],
 ): Envelope<T> {
   return {
     items: legs.flatMap((l) => l.rows),
@@ -69,6 +86,13 @@ export function mergeLegs<T>(
       name: l.company.name,
       included: l.ok,
       reason: l.ok ? undefined : (l.reason ?? "error"),
+      // Only meaningful for an INCLUDED leg: an excluded one already says it showed nothing.
+      partialSources: l.ok && l.partialSources?.length ? l.partialSources : undefined,
     })),
   };
+}
+
+/** True when any company was excluded OR came back incomplete — i.e. the result understates reality. */
+export function isUnderstated(companies: EnvelopeCompany[]): boolean {
+  return companies.some((c) => !c.included || (c.partialSources?.length ?? 0) > 0);
 }
