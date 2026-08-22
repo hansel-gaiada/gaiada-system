@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.16` — 2026-08-22 — SMM-26: MCP agent surface audited + `smm-agent-content-brief`
+
+**Audited (no code change needed — the invariant already held)**
+- All 34 declared `social.*` MCP tools, walked one by one, for what an `assurance:"low"`
+  automation/agent principal actually gets from `mcp-hub/src/policy.ts#authorize`'s impact gate.
+  12 reads execute unattended; 15 `write:true,impact:"low"` tools (draft rows / knowledge pointers /
+  mirrored registry state only) run unattended by design; 4 `impact:"medium"` writes
+  (`setEngagementScope`, `requestClientReview`, `provisionPublisherOrg`, `deliverReport`) correctly
+  suspend into WS4; the 3 real publish/send tools (`social.publishPost`/`social.publishPostMetered`/
+  `social.sendReply`) are the pinned `write:true,impact:"high"` classification and always suspend.
+  Full per-tool table: `docs/plans/smm-tracker.md`'s SMM-26 evidence block.
+
+**Added**
+- `content-brief.ts` (new file) — the `smm-agent-content-brief` flow: one call drafts N idea posts
+  (`source='agent'`, count defaults to the engagement's own `tool_scope.posting.cadencePerWeek`) and
+  one caption-drafted variant per connected+enabled-network account. Reuses SMM-19's own
+  `ai-drafts.ts`/`gateway-client.ts`/`knowledge-client.ts` path — no second AI/knowledge route.
+- `POST engagements/:engagementId/agent-content-brief` + MCP tool `social.draftContentBrief`
+  (`write:true,impact:"low"`) — every write is a draft row; can never dispatch, publish or send.
+- `config.social.contentBrief.maxVariantsPerCall` (default 20) — a self-imposed cap on one call's
+  own (idea × account) gateway-call volume, never a claimed vendor limit.
+
+**Found and named, not fixed (a follow-up, not improvised)**
+- The v1.0 design's "weekly per opted-in engagement" scheduled sweep for this flow was NOT built:
+  a principal-less scheduled job cannot legitimately call WS8's per-principal-scoped `/search`
+  (the tenant pre-filter needs a resolvable caller identity) without either leaving drafts
+  permanently ungrounded or borrowing a human's identity dishonestly. Needs an architect decision on
+  an automation service identity for RAG-grounded scheduled jobs generally.
+
+Test counts: `src/modules/social` + the three `d14-smm-{09,17,22}-social-*-registry.test.ts` files —
+**599 / 0 / 5** (baseline for this exact set, measured directly by stashing: 591; +8 new, all in the
+new `content-brief.test.ts`). Full detail: `docs/plans/smm-tracker.md`'s SMM-26 evidence block,
+`docs/modules/MODULES.md`'s social-media `0.5.16` entry.
+
 ### social-media `0.5.15` — 2026-08-22 — SMM-22: X metering live — the money path
 
 **Added**

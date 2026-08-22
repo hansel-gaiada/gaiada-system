@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.15` | IN PROGRESS | Social Media | 2026-08-22 |
+| social-media | `0.5.16` | IN PROGRESS | Social Media | 2026-08-22 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,92 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.15` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.16` · IN PROGRESS
+
+**0.5.16 (2026-08-22, senior-be) — SMM-26: the MCP agent surface audited and hardened, and the
+`smm-agent-content-brief` flow built.** Worktree was ONE MERGE BEHIND at cut time (`git log --oneline
+-1` did not match local `main`'s tip — SMM-22's own X-metering landing plus the AGN-7 hub commit had
+merged); `git merge main` (fast-forward, clean) pulled `usage-ledger.ts`/`module-scope.ts` and the
+SMM-22 metered-publish tool in before any of this ticket's own code was written.
+
+**The audit came first: all 34 declared tools, walked one by one, for what an `assurance:"low"`
+automation/agent principal actually gets.** `mcp-hub/src/policy.ts#authorize`'s impact gate —
+`isUnattended(principal) && tool.write && tool.impact !== "low"` suspends into WS4 unless a verified
+D14 grant already covers the call — is what decides this, not `minAssurance` (every one of the 34
+tools is `minAssurance:"low"`, so that half of the gate never discriminates among them here).
+**Verdict: the invariant already held, with no hole.** 12 reads execute unattended (nothing to
+suspend). 15 writes are `impact:"low"` — every one persists a draft row, a knowledge pointer, or
+mirrored connector-registry state, never a live-network act — and run unattended by design, matching
+D14's own "low-impact writes run unattended" rule. 4 writes are `impact:"medium"`
+(`setEngagementScope`, `requestClientReview`, `provisionPublisherOrg`, `deliverReport`) and correctly
+suspend an unattended caller. The 2 real publish/send tools
+(`social.publishPost`/`social.publishPostMetered`/`social.sendReply` — 3 tools, one shared
+classification) are the pinned `write:true,impact:"high"` constant (`SOCIAL_PUBLISH_TOOL_CLASSIFICATION`,
+spread everywhere, never retyped) and always suspend an unattended call, reachable in the ordinary
+flow only through the D14 executor's own re-drive. No automation-allowlist entry in
+`mcp-hub/src/automation-policy.ts` scopes any n8n workflow to a `social.*` tool at all today, so the
+only unattended-caller SHAPE this surface meets in practice is an AGENT acting for a human
+(`principal.agent` set, `isUnattended` true via that path, not `isAutomation`) — the exact shape D14's
+own 2026-08-20 fix (`agent-attribution-gate`) closed. **Nothing was reclassified**; the full
+per-tool table is in `docs/plans/smm-tracker.md`'s SMM-26 evidence block.
+
+**The `smm-agent-content-brief` flow: "brief in, drafts out, nothing published," built in
+`platform-nest`, not n8n.** New `content-brief.ts` composes SMM-19's own idea-drafting
+(`draftPostIdeas`) and caption-drafting (`draftPostVariantCaption`) paths into ONE call: N idea posts
+(`source='agent'`, an honest attribution distinct from `draftPostIdeas`'s own `source='ai'` — 0105's
+`social_posts.source` CHECK has admitted `'agent'` since SMM-01 and it had sat unused until this
+ticket) — count defaults to the engagement's OWN `tool_scope.posting.cadencePerWeek`, never an
+invented number — each with one caption-drafted variant per connected account whose network the
+engagement has enabled. Every write is a draft row; the tool (`social.draftContentBrief`,
+`write:true,impact:"low"`) can never dispatch, publish or send. Idempotent per (idea, account): a
+retry finds an existing variant for that pairing and skips both the gateway call and the write,
+proven by driving it twice and asserting a second gateway caption call never fires. Never a silent
+$0: an unpriced X pairing is skipped and counted (`variantsSkipped.unpriced_network`), matching
+`createVariant`'s own discipline. A self-imposed `config.social.contentBrief.maxVariantsPerCall`
+(default 20) bounds one call's own gateway-call volume — an N-ideas × M-accounts request has no
+natural ceiling otherwise — never a claimed vendor limit.
+
+**Deliberately NOT built: the v1.0 design's "weekly per opted-in engagement" scheduled sweep.**
+`smm-design.md` §10 named this flow as an n8n-scheduled "WS8 agent goal" (image generation dropped by
+the addendum, D-17); three precedents in this SAME module (SMM-15/16/17's `inbox-sync-job.ts`/
+`inbox-triage-job.ts`) already established that despite the v1.0 design table's own framing, this
+module's periodic sweeps live in `platform-nest` as scheduled loops, not n8n workflows — followed
+here too. But a genuinely scheduled, PRINCIPAL-LESS sweep cannot legitimately call WS8's own
+per-principal-scoped `/search` (`knowledge-client.ts`'s own header: the tenant pre-filter needs a
+resolvable caller identity) without either shipping permanently-ungrounded drafts or borrowing a
+human's identity dishonestly (breaking the `actor_id NULL` honesty precedent SMM-16's own webhook
+fix set). Named as a follow-up requiring an architect decision on an automation service identity for
+RAG-grounded scheduled jobs generally — not improvised here. What ships instead is the ON-DEMAND,
+principal-driven MCP tool/HTTP endpoint (`POST engagements/:engagementId/agent-content-brief`), which
+gets FULL RAG grounding via the caller's own OBO userId, exactly like every other AI-drafting
+endpoint in this module.
+
+**THE CROSS-CLIENT LEAK TEST, and what it proves.** Unlike SMM-19's single-item `draftPostVariantCaption`,
+this flow drafts MULTIPLE ideas × accounts in ONE call — the new risk is a batching bug that lets one
+iteration's grounding facts leak into another's prompt. `content-brief.test.ts` seeds two DIFFERENT
+clients under the SAME tenant with distinctive corpus markers, runs the flow for BOTH back to back
+against one shared mocked gateway/knowledge transcript, and asserts every prompt containing one
+client's marker never contains the other's, in both directions, across the WHOLE transcript (idea
+AND caption prompts alike) — proving both that SMM-19's existing per-call WS8 scope isolation holds
+through this new composite, and that this file's own per-idea/per-variant loop never accumulates a
+shared prompt or a shared knowledge-hit list across iterations.
+
+No migration (0105's `social_posts.source` CHECK already admitted `'agent'`; no new table). `main.ts`
+— nothing to hand over; no new scheduled loop, no new module registration (same "no line to apply"
+shape SMM-22 reported). `mcp-hub` gap found but not fixed (read-only file surface): none — the
+existing impact-gate mechanism was already sufficient; reported as a gap only if this audit found a
+hole, which it did not.
+
+Test counts: **599 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `d14-smm-17-social-reply-registry.test.ts` + `d14-smm-22-social-metered-publish-registry.test.ts`
+(directly measured baseline for this exact set, by stashing: **591 / 0 / 5** — SMM-22's own landed
+figure, reproduced; +8 new, all in the new `content-brief.test.ts`, also re-run ALONE afterward — 8/8
+green both times, ruling out the shared-test-Postgres phantom-failure class this program names). `tsc
+--noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps` all
+green (no migration — still 130 files). `test:iam-chain-alignment` **25/25** (no Cerbos policy or
+catalog change — every permission/action this ticket's new endpoint uses already existed and is
+already catalogued). `platform-ui` untouched (off-limits file surface; no UI change this pass). Full
+detail: `docs/plans/smm-tracker.md`'s SMM-26 evidence block.
 
 **0.5.15 (2026-08-22, senior-be) — SMM-22: X metering live — the money path, held back deliberately
 all session.** Worktree started 6 commits behind `main` (missing SMM-17's own landing entirely);

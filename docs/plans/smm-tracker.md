@@ -33,8 +33,11 @@ not afterwards.
 | P2 inbox + client approval | **6** | 6 ✅ |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
 | P3 content ops | **8** (+1 partial: SMM-25 e2e) | 8 |
-| P4 agents + assistant | 0 | 3 |
+| P4 agents + assistant | **1** | 3 |
 | Decision-gated | — | 3 (1 dead) |
+
+**Note (2026-08-22, senior-be, SMM-26):** the MCP agent surface audit + `smm-agent-content-brief`
+flow landed — see this file's SMM-26 evidence block (P4 table below). Module `social-media 0.5.16`.
 
 **Note (2026-08-22, senior-be, SMM-22):** X metering landed — see this file's SMM-22 evidence block
 (P3 table below). The scoreboard's P3 row above is now updated to 8/8 landed (SMM-25's own e2e
@@ -1763,13 +1766,178 @@ needs that Cerbos entry too (D14-13's own doctrine), and adding it as a side eff
 felt like exactly the silent half-unbar this ticket was told not to do; named as a follow-up for
 whoever first sets `SOCIAL_METERED_PUBLISH_ENABLED=true` for real.
 
-## P4 — agents + assistant ⬜
+## P4 — agents + assistant 🟡
 
 | # | Ticket | State |
 |---|---|---|
-| SMM-26 | MCP agent surface for automation principals (OBO, D14); agents draft, never publish | ⬜ |
+| SMM-26 | MCP agent surface for automation principals (OBO, D14); agents draft, never publish | ✅ **merged** |
 | SMM-27 | Best-time-to-post: classical stats + suggestion chip | ⬜ |
 | SMM-35 | Assistant integration via ASST-23 propose → confirm → approve | ⬜ |
+
+**SMM-26 evidence (2026-08-22, senior-be).** Worktree was ONE MERGE BEHIND at cut time — `git log
+--oneline -1` did not match local `main`'s tip (SMM-22's own X-metering merge, plus an unrelated
+AGN-7 hub commit, had landed) — `git merge main` (fast-forward, clean) pulled `usage-ledger.ts`,
+`module-scope.ts` and the SMM-22 metered-publish tool in before any of this ticket's own code was
+written, stated rather than assumed, per this file's own repeated cross-session-hazard note.
+
+**The audit, not an assumption — all 34 declared tools, mechanically re-verified, not hand-counted
+twice.** `mcp-hub/src/policy.ts#authorize`'s impact gate is the ONLY thing that discriminates among
+these tools for an unattended caller: `isUnattended(principal) && tool.write && tool.impact !==
+"low"` suspends into WS4 unless a verified D14 grant already covers the call (`grantAuthorizesTool`).
+`minAssurance` never discriminates here — all 34 (and the new 35th) are `minAssurance:"low"`, so
+every one clears the assurance-rank check trivially for a `low` principal; the classification is
+entirely carried by `write`/`impact`. `isUnattended` is `isAutomation(provider) || !!principal.agent`
+(`mcp-hub/src/principal.ts`) — and **no `social.*` tool appears in ANY `AUTOMATION_ALLOWLIST` entry**
+(`mcp-hub/src/automation-policy.ts`), so the only unattended-caller SHAPE this surface meets in
+practice today is an AGENT acting for a human (`principal.agent` set), never a scheduled n8n workflow —
+exactly the shape the 2026-08-20 `agent-attribution-gate` fix closed (before it, an agent-driven call
+carrying the human's own `provider` skipped the impact gate entirely; after it, `principal.agent`
+alone is what makes `isUnattended` true for that caller).
+
+| # | Tool | write/impact | For an `assurance:"low"` automation/agent principal |
+|---|---|---|---|
+| 1 | `social.listEngagements` | read | Executes — a read is never gated by impact |
+| 2 | `social.getEngagementScope` | read | Executes |
+| 3 | `social.createEngagement` | write, low | Executes unattended — an empty container, gated separately by `.setEngagementScope`/`.connect` |
+| 4 | `social.setEngagementScope` | write, **medium** | **Suspends into WS4** — the money-and-blast-radius dial |
+| 5 | `social.listPosts` | read | Executes |
+| 6 | `social.createPost` | write, low | Executes unattended — cannot reach a live account without a variant + validation + human approval |
+| 7 | `social.addPostVariant` | write, low | Executes unattended — writes per-network content, never dispatches |
+| 8 | `social.validateVariant` | read | Executes |
+| 9 | `social.importNativePost` | write, low | Executes unattended — bookkeeping for something ALREADY public; can never carry an approval |
+| 10 | `social.ingestBrandCorpus` | write, low | Executes unattended — REPLACES the client's knowledge-corpus pointer (see the named finding below) |
+| 11 | `social.draftPostVariant` | write, low | Executes unattended — writes a DRAFT row, re-runs validation/hash, never dispatches |
+| 12 | `social.draftPostIdeas` | write, low | Executes unattended — `status='idea'` rows only |
+| 13 | `social.checkPublishPreconditions` | read | Executes — dry-run only, no network call, consumes no approval |
+| 14 | `social.requestClientReview` | write, **medium** | **Suspends** — the FIRST moment a variant becomes visible outside the tenant |
+| 15 | `social.getClientReview` | read | Executes |
+| 16 | `social.withdrawClientReview` | write, low | Executes unattended — purely corrective, never notifies the client |
+| 17 | `social.publishPost` | write, **high** | **Suspends** — THE D14 gate; reachable in the ordinary flow only through the executor's re-drive |
+| 18 | `social.publishPostMetered` | write, **high** (spread from the SAME constant) | **Suspends** — identical to #17, plus barred from auto-exec by default regardless (`meteredPublishEnabled`) |
+| 19 | `social.getUsage` | read | Executes — makes no network call, consumes no budget |
+| 20 | `social.createReplyDraft` | write, low | Executes unattended — a draft reply, never sent, never network-visible |
+| 21 | `social.updateReplyDraft` | write, low | Executes unattended — edit invalidates any existing grant (D-15) |
+| 22 | `social.approveReplyDraft` | write, low | Executes unattended — bookkeeping sign-off on OUR OWN row, not the outbound act |
+| 23 | `social.checkReplySendPreconditions` | read | Executes |
+| 24 | `social.sendReply` | write, **high** (spread) | **Suspends** — same D14 shape as `publishPost`, reusing the identical classification |
+| 25 | `social.listAccounts` | read | Executes — never calls the publisher |
+| 26 | `social.getPublisherStatus` | read | Executes — makes no network call |
+| 27 | `social.provisionPublisherOrg` | write, **medium** | **Suspends** — the wrong-account-publish-nightmare row |
+| 28 | `social.syncConnectorRegistry` | write, low | Executes unattended — mirrors STATE ABOUT connections that already exist, never a token |
+| 29 | `social.draftReport` | write, low | Executes unattended — `status='draft'` only, no client visibility |
+| 30 | `social.listReports` | read | Executes |
+| 31 | `social.getReport` | read | Executes |
+| 32 | `social.editReport` | write, low | Executes unattended — internal narrative edit / submit-for-review, no client visibility |
+| 33 | `social.approveReport` | write, low | Executes unattended — internal staff sign-off, never the client-visible act (delivery is #34) |
+| 34 | `social.deliverReport` | write, **medium** | **Suspends** — outward-facing and unretractable, same ground `search.deliverReport` uses |
+
+**Tally: 12 reads, 15 low-impact writes (all draft rows / knowledge pointers / mirrored registry
+state, none reach a live network), 4 medium-impact writes (all correctly suspend), 3 high-impact
+writes sharing ONE pinned classification constant (all correctly suspend, all unreachable in the
+ordinary flow except through the D14 executor's own re-drive). 12+15+4+3 = 34.**
+
+**Verdict: the invariant already held. Nothing was reclassified.** Every write that can put content
+in front of a client, spend money, or reach a live network is `impact` ≥ `medium` and suspends an
+unattended caller. Every `impact:"low"` write is confined to our own rows (drafts, mirrored
+registry state, a knowledge-corpus pointer) with no path to a network call.
+
+**One finding, named rather than silently fixed or silently ignored: `social.ingestBrandCorpus`'s
+own REPLACE semantics.** `knowledge-client.ts#ingestBrandKnowledge` REPLACES the client's entire
+brand-voice corpus on every call (WS8's own D9.2 upsert-by-scope contract) and hardcodes
+`provenance: "human"` on every ingested chunk — a label that is TRUE when a human pastes approved
+copy into the endpoint, and NOT verified true when an agent calls the SAME tool with its own
+generated text (nothing stops that — the endpoint accepts any `chunks: string[]`). This is a
+DATA-PROVENANCE finding, not a D14 authz hole: `write:true,impact:"low"` is still the right
+classification (the blast radius is "future drafts ground on possibly-agent-authored text," not a
+live-network act or client exposure), so no reclassification is warranted, and D-13's binding design
+(WS8 owns the corpus; this module stores only pointers) means a provenance-tagging fix touches a
+schema/contract WS8 and this module both need to agree on — outside a single ticket's authority to
+improvise. Named here and in `knowledge-client.ts`'s own header for whoever next touches that file.
+
+**The `smm-agent-content-brief` flow — "brief in, drafts out, nothing published."** Built in
+`platform-nest` (new `content-brief.ts`), not n8n. Composes SMM-19's own `draftPostIdeas`/
+`draftPostVariantCaption` paths into ONE call: N idea posts (`source='agent'` — 0105's own
+`social_posts.source` CHECK has admitted `'agent'` since SMM-01, unused until now; an HONEST
+distinction from `draftPostIdeas`'s own `source='ai'`, since nobody prompted any one of these ideas
+directly) — count defaults to the engagement's OWN `tool_scope.posting.cadencePerWeek`, never an
+invented number — each with one caption-drafted variant per connected account whose network the
+engagement has enabled (or an explicit `accountIds` subset). New MCP tool `social.draftContentBrief`
+(`write:true,impact:"low"` — the SAME ground `draftPostIdeas`/`draftPostVariant` already stand on).
+New endpoint `POST engagements/:engagementId/agent-content-brief`; `authorize()` calls the SAME TWO
+actions (`create` on `social_post`, `update` on `social_post`) a caller composing this by hand
+through the existing granular tools would already trigger — batched once each per request, the SAME
+batching `draftPostIdeas` itself already uses for its own `create` check across N created rows.
+
+**Why NOT the v1.0 design's n8n-scheduled "weekly per opted-in engagement" sweep — reasoned, not
+skipped.** `smm-design.md` §10 named this flow as an n8n-triggered "WS8 agent goal" (image generation
+dropped by the addendum, D-17). Three precedents in THIS module (SMM-15/16/17's `inbox-sync-job.ts`/
+`inbox-triage-job.ts`) already established that despite that same design table's own framing, this
+module's periodic sweeps live in `platform-nest` as scheduled loops, not n8n workflows — followed
+here too, for consistency. But a genuinely scheduled, PRINCIPAL-LESS sweep cannot legitimately call
+WS8's own per-principal-scoped `/search` (`knowledge-client.ts`'s own header: the tenant pre-filter
+needs a resolvable caller identity via OBO) without either shipping permanently-ungrounded drafts or
+borrowing a human's identity dishonestly — the same "honest attribution" property SMM-16's own
+`actor_id NULL` fix established for job-driven writes. **Named as a follow-up requiring an architect
+decision on an automation service identity for RAG-grounded scheduled jobs generally — not
+improvised here.** What ships instead is the ON-DEMAND, principal-driven MCP tool/HTTP endpoint,
+which gets FULL RAG grounding via the caller's own OBO userId, exactly like every other AI-drafting
+endpoint in this module.
+
+**Idempotency and "never a silent $0", both proven, not asserted.** Idea posts are idempotent via the
+SAME caller-supplied `ids` array `draftPostIdeas` already supports. Variants have no equivalent
+caller-supplied id (an N-ideas × M-accounts request has no natural per-pairing id to expose) —
+idempotency instead rests on checking whether a variant ALREADY EXISTS for (postId, accountId)
+BEFORE ever calling the gateway or writing a row: proven by driving the SAME request twice with the
+SAME idea `ids` and asserting the retry's variant is reported `created:false, draftedVia:"existing"`
+with NO second caption-drafting prompt sent. `estimateCostUsd` is computed BEFORE a variant is
+written, exactly like `createVariant`'s own discipline (defect class #4) — an X pairing with no
+configured price is skipped and counted (`variantsSkipped.unpriced_network`), proven by seeding a
+connected `x` account with no `SOCIAL_X_PER_POST_COST_USD` configured and asserting zero rows land
+for that pairing. A self-imposed `config.social.contentBrief.maxVariantsPerCall` (default 20) bounds
+one call's own (idea × account) gateway-call volume — proven by setting it to 1 against 2 enabled
+accounts and asserting exactly 1 variant is created, 1 reported `call_volume_cap`.
+
+**THE CROSS-CLIENT LEAK TEST, and exactly what it proves.** Unlike SMM-19's single-item
+`draftPostVariantCaption`, this flow drafts MULTIPLE ideas × accounts in ONE call — the NEW risk this
+ticket introduces is a batching bug that lets one iteration's grounding facts leak into another's
+prompt, not (only) the cross-tenant-search risk SMM-19's own test already covers. `content-brief.
+test.ts`'s dedicated leak test seeds TWO DIFFERENT clients under the SAME tenant with distinctive
+corpus markers, runs the flow for BOTH back to back against ONE shared mocked gateway/knowledge
+transcript, and asserts every prompt containing one client's marker NEVER contains the other's, in
+BOTH directions, across the WHOLE transcript (idea-generation AND caption-drafting prompts alike) —
+proving (a) SMM-19's existing per-call WS8 scope isolation still holds through this new composite,
+and (b) this file's own per-idea/per-variant loop never accumulates a shared prompt or a shared
+knowledge-hit list across iterations, which is the property unique to this ticket's new N×M
+orchestration. Every WS8 `/search` call in the transcript is also asserted to have asked for exactly
+one client's own scope, never the other's.
+
+**`mcp-hub` gap found but not fixed: none.** The read-only audit found the existing impact-gate
+mechanism already sufficient for this entire 34-tool surface; there was no hub-side change to report
+as a gap.
+
+**Anything the spec did not answer, named rather than silently decided:** (1) the scheduled/n8n half
+of the flow (see above); (2) `social.ingestBrandCorpus`'s provenance-labeling finding (see above);
+(3) whether an agent-driven content brief should notify anyone when it lands (SMM-31's own
+`social.client_review.requested` notification precedent does not apply here — nothing here is
+client-visible yet) — left unbuilt, since nothing in the addendum asks for one and inventing a
+notification channel felt like exactly the "silent half-feature" this program's own discipline warns
+against.
+
+**Test counts: 599 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `d14-smm-17-social-reply-registry.test.ts` + `d14-smm-22-social-metered-publish-registry.test.ts`.
+Baseline **measured directly by stashing**: `git stash -u` cleanly stashed both modified and new/
+untracked files, the four-file set was re-run against the clean tree and came back **591 / 0 / 5** —
+matching SMM-22's own previously-stated figure exactly, so trusted rather than re-litigated. Popped
+clean, all five touched/new files restored intact. **+8 new**, all in the new `content-brief.test.ts`
+— arithmetic matches exactly (591+8=599). `content-brief.test.ts` was ALSO re-run ALONE twice (before
+and after two test-only fixes — a wrong expected caption-body string and a `prompts` array not
+cleared before a retry assertion, both test bugs, not implementation bugs) — 8/8 green both times,
+ruling out the shared-test-Postgres and in-process shared-mock phantom-failure classes this file
+names. `tsc --noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/
+`lint:postiz-deps` all green (no migration — still 130 files). `test:iam-chain-alignment` **25/25** —
+no Cerbos policy or catalog change; every permission (`social.post.{create,update}`) and Cerbos
+action this ticket's new endpoint uses already existed and was already catalogued (0106).
+`platform-ui` untouched (off-limits file surface this ticket).
 
 ## Decision-gated — do not mobilise
 
@@ -1811,19 +1979,20 @@ whoever first sets `SOCIAL_METERED_PUBLISH_ENABLED=true` for real.
 
 ---
 
-## What is actually left (2026-08-22, updated same day by SMM-22's own pass)
+## What is actually left (2026-08-22, updated same day by SMM-26's own pass)
 
-**37 tickets merged.** P0, P1, P2, P3 and the whole `direct`-driver wave are all closed now that
-SMM-22 (X metering) has landed — see its own evidence block above. Module `0.5.15`;
-`src/modules/social` + the three `d14-smm-{09,17,22}-social-*-registry.test.ts` files 591/0/5,
-`platform-ui` 2592/0/0 (both this pass's own directly-measured figures, not carried over from an
-earlier session's stale count — see SMM-22's evidence block for the full arithmetic).
+**38 tickets merged.** P0, P1, P2, P3, the whole `direct`-driver wave, and SMM-26 (the first P4
+ticket) are all closed. Module `0.5.16`; `src/modules/social` + the three
+`d14-smm-{09,17,22}-social-*-registry.test.ts` files 599/0/5 (this pass's own directly-measured
+figure — see SMM-26's evidence block below for the full arithmetic). `platform-ui` untouched this
+pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 
 | Remaining | Note |
 |---|---|
 | **SMM-22 follow-ups** | Usage panel not browser-driven (unit/type-checked only); `resource_mcp_tool.yaml` not updated for the (currently unused) agent/automation-origin metered-tool re-drive case; X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
 | **SMM-25** full-stack e2e | 🟡 partial — the DEMO_MODE social fixture landed in SMM-14; the Playwright console suite has not |
-| **SMM-26 / 27 / 35** | P4: MCP agent surface, best-time-to-post, assistant integration |
+| **SMM-26 follow-up** | the v1.0 design's "weekly per opted-in engagement" scheduled sweep for the content-brief flow was deliberately NOT built — needs an architect decision on an automation service identity before a principal-less job can legitimately call WS8's per-principal-scoped RAG search |
+| **SMM-27 / 35** | P4: best-time-to-post, assistant integration |
 | **SMM-29 / 34** | Decision-gated (ClipsAI; generative images, waiting on `render-gateway-go` to leave `0.0.0`) |
 
 **Small follow-ups the seats named rather than silently absorbed:**
@@ -1883,7 +2052,16 @@ asset-library endpoints with **NO** `{modules:["social"]}` at all, because neith
 not, since the wall those tables actually carry is the plain tenant wall only. Its own new
 `social_post_variants`/`social_engagements` queries DO carry the declaration, proven by tests that
 assert a materialized `files` row, a changed `args_sha256`, and a real status transition — not a
-`.resolves.not.toThrow()`.
+`.resolves.not.toThrow()`. SMM-26's new `content-brief.ts` self-declares in EVERY one of its own
+`withTenants` transactions (engagement read, account resolution, recent-posts read, idea write,
+per-pairing existence check, variant write) — the SAME `declareSocialModuleScope` idiom `dispatch.ts`/
+`reply-dispatch.ts` use rather than a caller-supplied `{modules:['social']}` option, since this file
+(unlike the controller) has no `withTenants` call site it can guarantee carries one. Not pinned by a
+dedicated "delete the call and watch it fail" regression this pass, but every one of
+`content-brief.test.ts`'s own assertions already depends on the declaration being present: a real
+`social_posts`/`social_post_variants` row materializes and is read back after every call, which reads
+"0 rows, idea/variant never created" the instant any one `declareSocialModuleScope` call is dropped —
+the same shape SMM-23/SMM-38c's own un-pinned-but-load-bearing GUC calls rely on.
 
 **2. Registered but never invoked (one occurrence).** `main.ts`'s `startConsumerLoop([...])` omitted
 `"social_post_variant"`, so SMM-13's handlers existed, were registered, and were never reached. Its
