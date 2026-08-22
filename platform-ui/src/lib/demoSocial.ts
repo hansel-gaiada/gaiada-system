@@ -489,6 +489,28 @@ const POSTS_SEED: DemoPost[] = [
       },
     ],
   },
+  // SMM-25 QA — a fixture gap closed, not a new scenario invented: BEST_TIME_SEED already carried
+  // an `'unsupported'` row for `soc-acc-tiktok-1` (SMM-27's own seed), but NO variant anywhere in
+  // POSTS_SEED ever targeted that account, so the Composer's BestTimeChip could never actually
+  // render its fourth state in a browser — only `not_yet_computed`/`insufficient_evidence`/
+  // `suggested` were reachable. This one draft variant makes all FOUR states drivable by simply
+  // opening the Composer, matching this fixture's own "every state reachable with no live action"
+  // discipline stated throughout this file.
+  {
+    id: "soc-post-10", engagementId: "soc-eng-1", campaignId: null,
+    title: "TikTok cross-post — best-time unsupported", brief: null,
+    source: "human", status: "draft", scheduledAt: null, customFields: {},
+    createdBy: "u-pm", createdAt: "2026-08-19T10:00:00Z", updatedAt: "2026-08-19T10:00:00Z",
+    variants: [
+      {
+        id: "soc-var-11", accountId: "soc-acc-tiktok-1", network: "tiktok", handle: "northwindtraders",
+        body: "Cross-posting the autumn teaser to TikTok.", firstComment: null, media: [],
+        settings: {}, validation: PASS, argsSha256: "sha256-demo-0011",
+        approvalId: null, nativeImport: false, scheduledAt: null, status: "draft",
+        publishedUrl: null, publishedAt: null, lastError: null, estimatedCostUsd: 0,
+      },
+    ],
+  },
 ];
 
 // ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ──────────────
