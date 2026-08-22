@@ -846,6 +846,23 @@ const configBase = {
         spikeMinRecentCount: Number(process.env.SOCIAL_INBOX_SPIKE_MIN_RECENT ?? 5),
       },
     },
+    // SMM-26 — the `smm-agent-content-brief` flow (content-brief.ts). Deliberately ONE knob, not a
+    // scheduled-loop block like `inboxPull`/`triage` above: this ticket ships the ON-DEMAND,
+    // principal-driven MCP tool/endpoint only (one engagement per call, real RAG grounding via the
+    // caller's own OBO userId) — NOT the v1.0 design's "weekly per opted-in engagement" scheduled
+    // sweep, because a principal-less scheduled sweep cannot legitimately call WS8's per-principal-
+    // scoped `/search` (knowledge-client.ts's own header: the tenant pre-filter needs a resolvable
+    // caller identity) without either leaving drafts permanently ungrounded or borrowing a human's
+    // identity dishonestly — both named as follow-ups requiring an architect decision on an
+    // automation service identity, not improvised here.
+    //
+    // `maxVariantsPerCall` bounds how many (idea, account) pairings ONE call will draft — an N-ideas
+    // x M-enabled-networks request has no natural ceiling otherwise. A SELF-IMPOSED budget on THIS
+    // request's own gateway-call/latency cost, never a claimed vendor rate limit — same idiom as
+    // `inboxPull.maxPostsPerAccountPerRun`/`triage.maxThreadsPerTenantPerRun` above.
+    contentBrief: {
+      maxVariantsPerCall: Number(process.env.SOCIAL_CONTENT_BRIEF_MAX_VARIANTS_PER_CALL ?? 20),
+    },
     // SMM-22 — X metering (design D-9, addendum). The stop-loss chain's tenant + global tiers, X's
     // own per-post price, and the barred-twin unbar gate. Mirrors search's own moneyEnv/numericEnv
     // convention byte-for-byte (design's own words: "byte-for-byte the SEO pattern").

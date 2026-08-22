@@ -68,6 +68,10 @@ import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSn
 import { resolveXPricing, readUsageSnapshot } from "./usage-ledger";
 import { completeViaGateway } from "./gateway-client";
 import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./knowledge-client";
+// SMM-26 — the smm-agent-content-brief flow's own DB/AI orchestration; this controller validates
+// the request shape and calls authorize(), content-brief.ts owns everything past that (see its
+// own header for why authorize() never lives there).
+import { runContentBrief } from "./content-brief";
 import {
   buildCaptionPrompt, parseCaptionDraft, buildIdeaPrompt, parseIdeaDraft,
   MAX_KNOWLEDGE_HITS, MAX_BRAND_INGEST_CHUNKS, MAX_IDEA_COUNT,
@@ -2141,6 +2145,48 @@ export class SocialController {
       if (c.created) await writeActivity(tenantId, req.principal.userId, "created", "social_post", c.id, { source: "ai", ideaDraft: true });
     }
     return { ideas: created, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef) };
+  }
+
+  // ============================== SMM-26: THE `smm-agent-content-brief` FLOW =================
+  // "Brief in, drafts out, nothing published." ONE call composes SMM-19's own idea-drafting
+  // (draftPostIdeas) and caption-drafting (draftPostVariantCaption) paths for a WHOLE content
+  // brief in one shot — content-brief.ts owns the DB/AI orchestration, this method validates the
+  // request shape and calls authorize() (criterion 1: authorize() lives ONLY here, never in the
+  // domain file). `source='agent'` on every created post, never 'ai' — see content-brief.ts's own
+  // comment on why that is an honest distinction, not a cosmetic one.
+  @Post("engagements/:engagementId/agent-content-brief")
+  @HttpCode(201)
+  async agentContentBrief(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("engagementId") engagementId: string,
+    @Body() body: { brief?: string; campaignId?: string; count?: number; ids?: string[]; accountIds?: string[]; wantImage?: boolean } = {},
+  ) {
+    if (body?.wantImage) refuse("image_generation_unavailable"); // D-17 — no image path, ever.
+    if (body.count !== undefined && (!Number.isInteger(body.count) || body.count < 1 || body.count > MAX_IDEA_COUNT)) refuse("invalid_count");
+    if (body.ids !== undefined && body.ids.some((id) => !UUID_RE.test(id))) refuse("invalid_id");
+    if (body.accountIds !== undefined && (!Array.isArray(body.accountIds) || body.accountIds.some((id) => !UUID_RE.test(id)))) refuse("invalid_id");
+    // Same TWO actions a caller composing this by hand would trigger (draftPostIdeas' own `create`
+    // plus addPostVariant's/draftPostVariantCaption's own `update`) — checked up front, once each,
+    // rather than once per row: the SAME batching `draftPostIdeas` itself already uses for its own
+    // `create` check when it writes N idea rows in one call.
+    await authorize(req.principal, { kind: "social_post", tenantId, module: "social" }, "create");
+    await authorize(req.principal, { kind: "social_post", tenantId, module: "social" }, "update");
+
+    const result = await runContentBrief(tenantId, engagementId, req.principal.userId, {
+      brief: body.brief, campaignId: body.campaignId, count: body.count, ids: body.ids, accountIds: body.accountIds,
+    });
+    if (result.kind === "not_found") throw new NotFoundException("social engagement not found");
+    if (result.kind === "refuse") refuse(result.reason);
+
+    for (const idea of result.ideas) {
+      if (idea.created) await writeActivity(tenantId, req.principal.userId, "created", "social_post", idea.id, { source: "agent", contentBrief: true });
+      for (const v of idea.variants) {
+        if (v.created) await writeActivity(tenantId, req.principal.userId, "created", "social_post_variant", v.variantId, { source: "agent", aiDrafted: true, contentBrief: true });
+      }
+    }
+    return {
+      ok: true, ideas: result.ideas, draftedVia: result.draftedVia, groundedOn: result.groundedOn,
+      accountsConsidered: result.accountsConsidered, variantsSkipped: result.variantsSkipped,
+    };
   }
 
   // ============================================ PUBLISHER ORGS + CONNECTOR REGISTRY (SMM-05) ==

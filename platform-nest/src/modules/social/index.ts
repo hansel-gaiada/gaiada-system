@@ -470,6 +470,42 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "engagementId"],
       },
     },
+    // ── SMM-26: THE `smm-agent-content-brief` FLOW — "brief in, drafts out, nothing published" ───
+    // Composes `draftPostIdeas` + `draftPostVariant`'s own drafting paths into ONE call: N idea
+    // posts, each with a caption-drafted variant per connected+enabled network. write+impact:'low' —
+    // the SAME ground `draftPostIdeas`/`draftPostVariant` already stand on: every write here is a
+    // draft row, never a live network call. `source='agent'` on every created post (never 'ai') is
+    // the honest distinction from `draftPostIdeas`: nobody prompted any one of these ideas directly,
+    // an automation/agent principal's own brief did.
+    {
+      name: "social.draftContentBrief",
+      description:
+        "Run the smm-agent-content-brief flow for one engagement: draft N idea posts (count defaults "
+        + "to the engagement's OWN tool_scope.posting.cadencePerWeek) and, for each idea, one "
+        + "caption-drafted variant per connected account whose network the engagement has enabled "
+        + "(or an explicit `accountIds` subset). Every write is a draft row with status='idea'/'draft' "
+        + "— this tool can never dispatch, publish or send. Idempotent per (idea, account): a variant "
+        + "that already exists for a pairing is left untouched and reported, never redrafted. Refuses "
+        + "'image_generation_unavailable' if asked to generate an image: no such backend exists.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/agent-content-brief",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement to draft a content brief for." },
+          brief: { type: "string", description: "Optional campaign goal/topic to steer the ideas." },
+          campaignId: { type: "string", description: "Optional campaign to group the ideas under." },
+          count: { type: "number", description: "How many ideas to draft (default: the engagement's own posting.cadencePerWeek, max 10)." },
+          ids: { type: "array", items: { type: "string" }, description: "Optional caller-supplied uuids, one per idea, matching the resolved count — the idempotency key for a retry." },
+          accountIds: { type: "array", items: { type: "string" }, description: "Optional explicit subset of connected accounts to draft variants for; defaults to every connected account whose network the engagement has enabled." },
+        },
+        required: ["tenantId", "engagementId"],
+      },
+    },
     // ── SMM-05: the publisher seam ─────────────────────────────────────────────────────────────
     // Tool parity for all three endpoints, same authorize() calls. Note there is no publish tool
     // here and there must not be one until SMM-09 — a declared MCP tool whose endpoint does not
