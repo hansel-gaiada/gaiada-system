@@ -30,9 +30,9 @@ not afterwards.
 |---|---|---|
 | P0 foundation | **6** | 6 ✅ |
 | P1 publish loop | **12** | 12 ✅ |
-| P2 inbox + client approval | **5** (SMM-17 landed 2026-08-21) | 6 |
+| P2 inbox + client approval | **6** | 6 ✅ |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
-| P3 content ops | **5** (+1 partial) | 8 |
+| P3 content ops | **7** (+1 partial: SMM-25 e2e) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
@@ -82,7 +82,6 @@ before any network call, backed by ONE map on `direct.ts` shared with its own pe
 a second hand-maintained list. `youtube:media_upload=direct` moves from "reported unsafe" to
 "principle-safe, credential-gated only" — the SAME D-23 gap every other flip in this wave already
 carries. Module: `social-media 0.5.11 · IN PROGRESS`.
-| PD `direct` driver (SMM-38) | **1 (38a)** | 5 phases |
 | P3 content ops | 2 (+2 partial) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
@@ -1647,6 +1646,33 @@ legal edit under the SAME editability law, so no new backend surface was needed 
 | **D-23** | Platform-app reviews **deferred to staging** — a phase boundary, not a blocker |
 
 ---
+
+## What is actually left (2026-08-22)
+
+**36 tickets merged.** P0, P1, P2 and the whole `direct`-driver wave are closed. Module `0.5.14`;
+`src/modules/social` 503/503, `platform-ui` 2574/2574.
+
+| Remaining | Note |
+|---|---|
+| **SMM-22** X metering | The money path. Held back deliberately all session — it widens SMM-09's budget stage and touches `dispatch.ts`, and it is the one ticket where a mistake costs real money |
+| **SMM-25** full-stack e2e | 🟡 partial — the DEMO_MODE social fixture landed in SMM-14; the Playwright console suite has not |
+| **SMM-26 / 27 / 35** | P4: MCP agent surface, best-time-to-post, assistant integration |
+| **SMM-29 / 34** | Decision-gated (ClipsAI; generative images, waiting on `render-gateway-go` to leave `0.0.0`) |
+
+**Small follow-ups the seats named rather than silently absorbed:**
+- `social.client_review.withdrawn` has no registered event handler, unlike `.requested`/`.decided`
+- `metrics-job.ts` reads `process.env` directly instead of `config.ts` (it was held out of that file to avoid a three-way collision)
+- The report narrative has no runtime numeric guard — only the prompt constrains a hallucinated figure
+- The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series
+- OAuth state is HMAC-signed and time-boxed but not DB-backed single-use
+- Spike detection has no persistent dedup, so a sustained spike re-fires each tick
+- `listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide
+- No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)
+
+**Not ours to finish:** the platform-app reviews (D-23 — Meta's Business Verification is the only serial
+prerequisite), the D-21 fork exception (granted, unapplied), and whether `DISABLE_REGISTRATION` blocks a
+first-time Google SSO sign-in on Postiz's login page. **Every platform app credential in the estate is
+empty**, so nothing in this module touches a live network until those land.
 
 ## Recurring defect classes — check every ticket against these
 
