@@ -10,7 +10,8 @@ import { config } from "../config";
 import { migrate } from "../db/migrate";
 import { createRole, grantRole, addMembership } from "../testing/fixtures";
 import { seedDepartmentsAndHr, type SeededDepartments } from "./departments";
-import { EMPLOYEES, AGENCY_DEPTS } from "./roster";
+import { AGENCY_DEPTS, STAFF } from "./roster";
+import { seedPositions } from "./positions";
 
 // ── THE REAL ESTATE (corrected 2026-08-22, owner-supplied + verified against public sources) ─────
 // `Sanur Resort` was a placeholder and wrong on two counts: the resort is VICEROY BALI and it is in
@@ -214,13 +215,26 @@ export async function seedAgency(): Promise<SeededAgency> {
   await seedDecidedApprovals(tenantId, campaignId, users);
   // Employees: create/resolve accounts + memberships, and collect org placements.
   const placements: Placements = {};
-  for (const [email, name, title, target] of EMPLOYEES) {
-    const id = await ensureUser(email, name, title);
+  // email -> users.id, so seedPositions can attach seats without re-resolving 25 accounts.
+  const rosterIds = new Map<string, string>();
+  for (const s of STAFF) {
+    const id = await ensureUser(s.email, s.name, s.title);
     await addMembership(tenantId, id);
     await grantRole(id, roleMember, "company", tenantId);
-    (placements[target] ??= []).push({ id, name });
+    // Graded by LEVEL rather than flat `member` for everyone, which is what this loop did before and
+    // which left the agency with no managers at all — every head and manager the owner named could
+    // see the app but authorize nothing above an IC. `member` is still granted to all of them:
+    // `manager` is additive here, not a replacement, and several policies key off member.
+    if (s.level === "gm" || s.level === "head" || s.level === "manager") {
+      await grantRole(id, roleManager, "company", tenantId);
+    }
+    rosterIds.set(s.email, id);
+    (placements[s.target] ??= []).push({ id, name: s.name });
   }
   await seedOrgStructures(tenantId, resortId, users, placements);
+  // The same roster as SEATS (0109's position machinery, empty until now). Runs after the org tree
+  // because a seat's unit_node_id has to name a node that exists.
+  await seedPositions(tenantId, rosterIds, users.admin);
   await seedPm(tenantId, projects[0], users);
   await seedIt(tenantId, resortId);
   await seedInvoices(tenantId, clients[0]);

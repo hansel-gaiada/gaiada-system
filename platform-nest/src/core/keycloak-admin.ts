@@ -263,6 +263,31 @@ export async function setPassword(userId: string, password: string, fetchImpl: F
   if (!res.ok) throw new KeycloakAdminError("setPassword", res.status);
 }
 
+/** Set a TEMPORARY password — Keycloak raises its own UPDATE_PASSWORD screen at first login.
+ *
+ *  ⚠ THE OPPOSITE CHOICE FROM `setPassword()` ABOVE, AND BOTH ARE CORRECT. That one is for the IT
+ *  reset-password flow, where an admin reads a generated one-off to someone (often mid-support-call)
+ *  and a forced reset screen is an unexplained extra step. This one is for BOOTSTRAP credentials: a
+ *  value that is shared, known to more than one person, or written down somewhere. There, surviving
+ *  first use is the defect — so the forced change is the entire point.
+ *
+ *  Deliberately a separate function rather than a `temporary` flag on `setPassword`: a boolean
+ *  parameter at the call site reads as a detail, and the existing callers would all have had to pass
+ *  it. Two named functions make the choice legible in the caller and impossible to flip by accident. */
+export async function setPasswordTemporary(userId: string, password: string, fetchImpl: FetchImpl = fetch): Promise<void> {
+  const res = await adminFetch(
+    `/users/${encodeURIComponent(userId)}/reset-password`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "password", value: password, temporary: true }),
+    },
+    "setPasswordTemporary",
+    fetchImpl,
+  );
+  if (!res.ok) throw new KeycloakAdminError("setPasswordTemporary", res.status);
+}
+
 /** Disable an account — what REVOKING a client contact does at the IdP.
  *
  *  Disable, never DELETE: the platform `users` row and its audit trail (who signed what, when) must
