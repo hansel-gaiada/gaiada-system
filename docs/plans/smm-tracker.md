@@ -2538,6 +2538,22 @@ load-bearing for a test it never mentions.
 
 ## Cross-session hazards
 
+- **A `git status` snapshot goes STALE WITHIN MINUTES here — re-take it immediately before staging.**
+  On 2026-08-23 I listed the dirty tree (108 other-session files), confirmed `docs/modules/CHANGELOG.md`
+  and `MODULES.md` were both clean, did ~20 minutes of work, then staged them by explicit path — and
+  swept another session's uncommitted `search-marketing 0.5.2` / SM-76 entry (~56 lines) into commit
+  `8a9b74a`. Staging individual files is necessary but **not sufficient**: the file you verified as
+  clean can acquire someone else's edits before you reach `git add`. Nothing was lost (their content
+  is intact in `HEAD`, and `main` was never pushed), but the attribution is wrong in history.
+  Also caught in the same `git add`: `platform-nest/src/rbac/iam-trap4-group-executive-split.test.ts`
+  was **already in the index** from another session and came along even though I never named it —
+  `git diff --cached --name-only` after staging, and comparing the count to what you intended, is the
+  check that catches both. Do that every time.
+- **Another session's uncommitted migration can turn `lint:migration-rls` red in YOUR tree.** On
+  2026-08-23 `202608230230_iam15_remove_group_executive.sql` (untracked, IAM-15's in-flight work)
+  flagged a `DELETE on "position_roles"` with no per-tenant GUC. It is NOT on `main`, so CI is not
+  red — but the gate reads the whole `migrations/` directory, so a red local lint is not proof that
+  *your* change is at fault. Check `git status` on the flagged file before debugging it.
 - **Migration numbering is CLOSED at `0118`.** New migrations are `YYYYMMDDHHMM_snake_case.sql` (UTC) —
   `platform-nest/scripts/lint-migration-names.mjs` enforces it. Duplicate prefixes are *functionally*
   safe (the ledger keys on full filename); **never rename an applied migration.**
