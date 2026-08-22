@@ -67,8 +67,20 @@ describe.skipIf(!TEST_URL)("Assistant module (ASST-05)", () => {
   it("module registration: assistant's ModuleContract carries the ASST-05 shape", () => {
     expect(getModule("assistant")).toBe(assistantModule);
     expect(assistantModule.migrations).toEqual(["0079_module_assistant.sql", "0084_assistant_handoffs.sql"]);
-    // Deliberately empty in phases 0-1 (see index.ts's header) — not a placeholder omission.
-    expect(assistantModule.mcpTools).toEqual([]);
+    // WAS deliberately empty in phases 0-1, and this pin recorded that on purpose. It changed in
+    // 2026-08-22 for a reason the pin should now enforce instead: `orchestrator.ask` exists ONLY
+    // because `POST :tenantId/assistant/ask` was built first. The order is the invariant — a tool
+    // here with no endpoint behind it is the "advertise what you cannot serve" hazard index.ts warns
+    // about — so this asserts the tool AND its path, not merely a count.
+    expect(assistantModule.mcpTools.map((t) => t.name)).toEqual(["orchestrator.ask"]);
+    const ask = assistantModule.mcpTools[0];
+    expect(ask.pathTemplate, "a registered tool must name the endpoint that serves it").toBe(
+      "/api/:tenantId/assistant/ask",
+    );
+    expect(ask.write, "ask creates a thread + two messages and spends model budget").toBe(true);
+    // `low` is a judgement recorded in index.ts: `medium` would suspend every ask for approval and
+    // make the tool useless, while the AI gateway's daily/per-tenant caps already bound the spend.
+    expect(ask.impact).toBe("low");
     expect(assistantModule.rollupProviders).toEqual([]);
   });
 

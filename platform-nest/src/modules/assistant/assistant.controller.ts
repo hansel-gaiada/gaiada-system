@@ -1293,4 +1293,161 @@ export class AssistantController {
     if (!resolved) throw new NotFoundException("this citation has no resolvable destination");
     return resolved;
   }
+
+  /**
+   * ── ASST/AGN-6 · `POST :tenantId/assistant/ask` — the SYNCHRONOUS ask/answer surface ────────────
+   *
+   * The plan's deferred "ERP ask/answer surface", built because exit-bar criterion 1 requires the
+   * assistant to be reachable as a capability rather than only as a chat-UI side channel. Until now
+   * this module contributed ZERO MCP tools and that was CORRECT — it had no authorized execution path
+   * of its own, and registering a tool without one is the "advertise what you cannot serve" hazard
+   * its own contract file warns about. This is that path; the tool is registered only now it exists.
+   *
+   * ⚠ WHY THIS IS NOT THE SSE ROUTE WITH A DIFFERENT WRITER. A tool call is request/response: there
+   * is no client to stream to, no disconnect to detect, no stop button, and no session-resume frame
+   * to relay. Those are the bulk of the stream handler and none of them apply here. What IS shared is
+   * reused rather than copied — `assembleContext`, `reserveGeneration`, `relayGeneration` and
+   * `persistGenerationOutcome` are the same functions the chat surface calls, so a turn taken through
+   * this route is recorded identically to one taken in the UI.
+   *
+   * ⚠ IT CREATES A REAL THREAD, deliberately. An answer with no thread would be an audit hole: the
+   * question, the answer, the token spend and the serving provider all land on the same rows the chat
+   * surface uses, so an agent's conversation is exactly as reviewable afterwards as a human's — which
+   * is the point of the attribution work this sits on top of.
+   */
+  @Post(":tenantId/assistant/ask")
+  @HttpCode(200)
+  async ask(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { question?: string; threadId?: string; title?: string },
+  ) {
+    const ownerId = req.principal.userId;
+    if (!ownerId) throw new BadRequestException("an authenticated user is required");
+
+    const question = typeof body?.question === "string" ? body.question.trim() : "";
+    if (!question) throw new BadRequestException("question is required");
+    if (question.length > MAX_MESSAGE_CONTENT_LENGTH) {
+      throw new BadRequestException(`question exceeds max length (${MAX_MESSAGE_CONTENT_LENGTH})`);
+    }
+
+    // Reuse an existing thread when asked (multi-turn), else open one. Either way the SAME Cerbos
+    // actions the chat surface uses are checked — `create` / `message` — so this route can never be
+    // a way around the thread policy.
+    let threadId = typeof body?.threadId === "string" && body.threadId ? body.threadId : "";
+    if (threadId) {
+      const existing = await withTenants([tenantId], (c) => fetchThread(c, threadId), { modules: ["assistant"] });
+      if (!existing) throw new NotFoundException("thread not found");
+      await authorize(
+        req.principal,
+        { kind: "assistant_thread", id: threadId, tenantId, ownerId: existing.ownerUserId },
+        "message",
+      );
+    } else {
+      await authorize(req.principal, { kind: "assistant_thread", tenantId, ownerId }, "create");
+      threadId = newId();
+      const title = typeof body?.title === "string" ? body.title.trim().slice(0, 500) || null : question.slice(0, 120);
+      await withTenants(
+        [tenantId],
+        (c) =>
+          c.query(
+            `INSERT INTO assistant_threads (id, tenant_id, owner_user_id, title, origin_site) VALUES ($1, $2, $3, $4, $5)`,
+            [threadId, tenantId, ownerId, title, config.originSite],
+          ),
+        { modules: ["assistant"] },
+      );
+    }
+
+    const thread = await withTenants([tenantId], (c) => fetchThread(c, threadId), { modules: ["assistant"] });
+    if (!thread) throw new NotFoundException("thread not found");
+
+    // The user turn and the assistant placeholder, under the same advisory lock the chat surface
+    // takes — so an ask and a concurrent UI send on one thread cannot interleave their seqs.
+    const turn = await withTenants(
+      [tenantId],
+      async (c) => {
+        await lockAssistantThread(c, threadId);
+        const pending = await c.query(
+          `SELECT 1 FROM assistant_messages WHERE thread_id = $1 AND role = 'assistant' AND content IS NULL AND error_kind IS NULL LIMIT 1`,
+          [threadId],
+        );
+        if (pending.rows.length > 0) throw new ConflictException("a turn is already in flight for this thread");
+        const next = await c.query<{ n: string }>(
+          `SELECT COALESCE(MAX(seq), 0)::text AS n FROM assistant_messages WHERE thread_id = $1`,
+          [threadId],
+        );
+        const userSeq = Number(next.rows[0].n) + 1;
+        await c.query(
+          `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, origin_site)
+           VALUES ($1, $2, $3, $4, 'user', $5, $6)`,
+          [newId(), tenantId, threadId, userSeq, question, config.originSite],
+        );
+        const asstId = newId();
+        await c.query(
+          `INSERT INTO assistant_messages (id, tenant_id, thread_id, seq, role, content, parts, origin_site)
+           VALUES ($1, $2, $3, $4, 'assistant', NULL, '[]'::jsonb, $5)`,
+          [asstId, tenantId, threadId, userSeq + 1, config.originSite],
+        );
+        return { messageId: asstId, seq: userSeq + 1 };
+      },
+      { modules: ["assistant"] },
+    );
+
+    const generation = reserveGeneration(threadId, turn.messageId);
+    if (!generation) throw new ConflictException("a generation is already active for this thread");
+
+    let citations: ContextCitation[] = [];
+    let result: Awaited<ReturnType<typeof relayGeneration>>;
+    try {
+      const assembled = await withTenants(
+        [tenantId],
+        (c) => assembleContext(c, threadId, thread, turn.seq, { tenantId }),
+        { modules: ["assistant"] },
+      );
+      citations = assembled.citations;
+      if (assembled.compactionUpdate) {
+        await withTenants(
+          [tenantId],
+          (c) => persistCompactionUpdate(c, threadId, assembled.compactionUpdate!),
+          { modules: ["assistant"] },
+        );
+      }
+      // No-op emit: a tool caller has nowhere to stream to. `relayGeneration` accumulates the full
+      // text into `result.text` regardless, which is exactly what request/response wants.
+      result = await relayGeneration(generation, {
+        tenantId,
+        prompt: assembled.prompt,
+        provider: thread.brainProvider ?? undefined,
+        providerSession: thread.hermesSessionId ?? undefined,
+        emit: { token: () => {}, meta: () => {}, session: () => {}, usage: () => {}, done: () => {}, error: () => {} },
+      });
+    } finally {
+      releaseGeneration(threadId);
+    }
+
+    await persistGenerationOutcome({ tenantId, threadId, messageId: turn.messageId, result, citations });
+
+    // A failed generation is reported as a typed REFUSAL, never as an empty answer — the same
+    // criterion-5 reasoning the UI sweep applied all session: `""` would read as "the assistant had
+    // nothing to say", which is a different and false claim from "the generation failed".
+    if (result.outcome !== "done") {
+      return {
+        ok: false as const,
+        threadId,
+        messageId: turn.messageId,
+        errorKind: result.errorKind ?? "unknown",
+        partialAnswer: result.text || null,
+      };
+    }
+    return {
+      ok: true as const,
+      threadId,
+      messageId: turn.messageId,
+      answer: result.text,
+      provider: result.provider ?? null,
+      model: result.model ?? null,
+      tokens: result.tokensEstimate,
+      citations: citations.map((c) => c.sourceRef),
+    };
+  }
 }

@@ -7,13 +7,14 @@
 // Design: docs/blueprints/assistant-foundation.md §4 (data model), §6 (authorization).
 //
 // ── LEFT DELIBERATELY EMPTY (do not fill with a placeholder — see each reason) ───────────────────
-//  - `mcpTools`: STILL EMPTY AFTER ASST-17 (the Phase-3 tool broker), and that is the correct end
-//    state, not a leftover. `mcpTools` is what a module CONTRIBUTES to the hub's catalogue
-//    (aggregated by `GET /mcp/tool-defs`); the assistant is a tool CONSUMER — `modules/assistant/
-//    broker.ts` calls the hub's existing catalogue under the chatting user's OBO envelope and owns
-//    no tool of its own. Registering something here would advertise a tool this module has no
-//    authorized execution path behind, which is the same "advertise what you cannot serve" hazard
-//    the original note warned about.
+//  - `mcpTools`: EMPTY UNTIL 2026-08-22, and the reason it was empty is worth keeping. This module is
+//    primarily a tool CONSUMER — `broker.ts` calls the hub's existing catalogue under the chatting
+//    user's OBO envelope — so registering anything here would have advertised a tool with no
+//    authorized execution path behind it: the "advertise what you cannot serve" hazard.
+//    `orchestrator.ask` is registered now ONLY because that path was built first
+//    (`POST :tenantId/assistant/ask`, the synchronous ask/answer surface). The order mattered: the
+//    tool exists because the endpoint does, not the other way round. Everything else below stays
+//    empty for its own stated reason.
 //  - `rollupProviders`: no metric surface is specified for the assistant in blueprint phases 0-1;
 //    a future ticket can add one (e.g. thread/message counts) if a department dashboard wants it.
 //    Registering an empty-metric provider now would just be dead weight in syncMetricDefinitions().
@@ -40,7 +41,47 @@ export const assistantModule: ModuleContract = {
   // permission declarations.
   permissions: [],
   customFieldTargets: [],
-  mcpTools: [],
+  mcpTools: [
+    {
+      name: "orchestrator.ask",
+      description:
+        "Ask the ERP assistant a question and get an answer synchronously. Creates (or continues) a " +
+        "real assistant thread, so the question, answer, token spend and serving provider are as " +
+        "reviewable afterwards as a human's chat turn.",
+      // `verified`, not `low`: this spends model budget and writes a thread. An unverified envelope
+      // (an unrecognised WhatsApp number, say) has no business opening one.
+      minAssurance: "verified",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/assistant/ask",
+      write: true,
+      // ⚠ IMPACT: `low`, and this is a judgement worth stating rather than burying.
+      //
+      // It IS a write (a thread, two messages, token spend), so it is flagged as one — an unflagged
+      // mutation escapes the D14 gate entirely, which impact-registry.test.ts fails the build over.
+      //
+      // But `medium` would suspend EVERY ask for a human decision, which makes the tool useless for
+      // its purpose: an agent that must get approval before asking a question cannot use the answer
+      // to decide anything. The spend guard for this already exists and is not D14's — the AI gateway
+      // is the only key-holder and enforces daily + per-tenant caps. Per-PRINCIPAL budgets remain
+      // deferred (plan, alongside Hermes-first routing), so the honest position is: gateway caps
+      // bound the cost, the gate bounds the consequence, and asking a question has no consequence to
+      // suspend. Revisit if per-principal budgets land or if a persona can spend without a ceiling.
+      impact: "low",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" },
+          question: { type: "string", description: "The question to ask. Required." },
+          threadId: {
+            type: "string",
+            description: "Continue an existing thread instead of opening one — pass the threadId a previous ask returned.",
+          },
+          title: { type: "string", description: "Optional title for a new thread; defaults to the question's first 120 chars." },
+        },
+        required: ["tenantId", "question"],
+      },
+    },
+  ],
   rollupProviders: [],
   uiManifest: [
     { label: "Assistant", path: "/assistant" },

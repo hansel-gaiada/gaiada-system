@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **92** capabilities across **14** owners
-- **52** writes · 40 reads
-- Writes by impact: **high 9** · medium 16 · low 27
+- **95** capabilities across **15** owners
+- **54** writes · 41 reads
+- Writes by impact: **high 10** · medium 16 · low 28
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -28,13 +28,6 @@ fails the build on one.
 
 An endpoint of — means the tool is declared but not callable over the hub (no
 `pathTemplate`), which the hub skips outright. Those are stubs awaiting their dispatch work.
-
-## Registered modules exposing NO capabilities
-
-Listed explicitly: an absent row would read as "module does not exist" rather than
-"module reaches no agent". Readiness-bar criterion 1 (tool parity) fails for each.
-
-- **assistant** — registered in main.ts, contributes 0 MCP tools
 
 ## Golden cases — does a test drive the real endpoint?
 
@@ -47,6 +40,7 @@ unfalsifiable after.
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
 | agency | `agency` | 7 |
+| assistant | `assistant` | 13 |
 | automation-console | `admin/automation` | 2 |
 | billing | `invoices` | 2 |
 | clients | `clients` | 4 |
@@ -67,6 +61,7 @@ unfalsifiable after.
 |---|---|---|---|---|---|
 | agency | `agency.listCampaigns` | `GET` | `/api/:tenantId/modules/agency/campaigns` | read | — |
 | agency | `agency.pendingApprovals` | `GET` | `/api/:tenantId/modules/agency/approvals/pending` | read | — |
+| assistant | `orchestrator.ask` | `POST` | `/api/:tenantId/assistant/ask` | write | `low` |
 | automation-console | `automation.listWorkflows` | `GET` | `/api/admin/automation/workflows` | read | — |
 | billing | `billing.listInvoices` | `GET` | `/api/:tenantId/invoices` | read | — |
 | clients | `clients.listClients` | `GET` | `/api/:tenantId/clients` | read | — |
@@ -141,6 +136,7 @@ unfalsifiable after.
 | social | `social.getEngagementScope` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | read | — |
 | social | `social.getPublisherStatus` | `GET` | `/api/:tenantId/modules/social/publisher/status` | read | — |
 | social | `social.getReport` | `GET` | `/api/:tenantId/modules/social/reports/:id` | read | — |
+| social | `social.getUsage` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/usage` | read | — |
 | social | `social.importNativePost` | `POST` | `/api/:tenantId/modules/social/posts/import-native` | write | `low` |
 | social | `social.ingestBrandCorpus` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/brand-corpus/ingest` | write | `low` |
 | social | `social.listAccounts` | `GET` | `/api/:tenantId/modules/social/accounts` | read | — |
@@ -149,6 +145,7 @@ unfalsifiable after.
 | social | `social.listReports` | `GET` | `/api/:tenantId/modules/social/reports` | read | — |
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
+| social | `social.publishPostMetered` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish-metered` | write | `high` |
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
 | social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
