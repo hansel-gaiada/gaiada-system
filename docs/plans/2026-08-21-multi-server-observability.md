@@ -17,6 +17,10 @@ permission ceiling ("we will set it up when we are ready"); `gda-aicenter`+`sumo
 servers) are slated for future consolidation onto one box (noted, not designed). Options analysis
 for zero-touch signal sources (CloudPanel / Hostinger / underlying provider) plus how this joins the
 IT device topology and a future Network page: **§13–§15**. §12 and OQ-6/7/8 amended in place below.
+**2026-08-23 owner ruling (§16): the monitoring IA is THREE SEPARATE PAGES** — servers
+(`/systems/observability`), devices (the existing `/it/topology`), network (`/it/network`, does not
+exist yet). MSO-17 AMENDED in place, MSO-19–22 + OQ-9/10 added, the Network page fully specified
+in §16. Binding cross-reference: `docs/blueprints/monitoring-program.md` §9.
 **Related:** [`docs/blueprints/monitoring-program.md`](../blueprints/monitoring-program.md) (the
 two-plane ruling, §0) · [`docs/plans/2026-08-18-observability-relocation.md`](2026-08-18-observability-relocation.md)
 (§9–§13 execution record) · `docs/FRONTEND-BFF-CONTRACT.md` **§20.1a** (the API contract this design
@@ -860,7 +864,9 @@ easiest way to accidentally blend "our office WAN" with "the internet-facing hos
 clients' sites live on," which is exactly the Plane A/B merge this program is bound never to do
 (monitoring-program.md §0). The IT department's own design of that page (including whatever the
 office-network-and-it-discovery-gap UniFi integration ends up needing) is out of scope for this
-integrator doc beyond flagging that boundary.
+integrator doc beyond flagging that boundary. **SUPERSEDED 2026-08-23: no longer out of scope —
+the owner ratified the three-page IA and this doc now carries the Network page's full
+specification (§16); MSO-17 is amended in place in §15.**
 
 ### 14.1 The genuinely hard part: one Plane A host carries many Plane B properties
 
@@ -938,7 +944,7 @@ doc.
 | **MSO-14** | senior-integrator · **opus·medium** — a stolen provider credential has account-wide reach per §13(b); getting the ingestion/credential-handling wrong here is a security incident, not a re-run | Hub-side poller: calls Hostinger `VPS.getMetricsV1` on a schedule for each `provider-api`-tier host, converts CPU/RAM/disk/network/uptime into the same host-labeled series shape the estate endpoint already expects (or a parallel field set if the shapes don't reconcile — do not force-fit into `HostHealth` if the semantics differ); token never logged, stored per the established secret pattern, read from env not committed config | Live pull against the real Hostinger API for at least one confirmed host, values sane against what hPanel's own UI shows for the same window; token handling reviewed against `golang-security`/secrets-management norms before merge | MSO-12, MSO-13 |
 | **MSO-15** | medior (senior-fe reviews) · seat default | Console tier rendering, extending the MSO-06 amendment: a `provider-api` badge distinct from both `agent` and `blackbox`, with copy that credits the reading to the provider ("Hostinger-reported," not "measured by us") so an operator never mistakes third-party telemetry for our own instrumentation | Fixture-driven: a `provider-api` host is visually distinct from both other tiers in every state (fresh/stale/dark) | MSO-14 shape (fixtures may lead the backend) |
 | **MSO-16** | **architect** — cross-plane schema touch, explicitly BLOCKED pending ratification per this seat's own contract-question rule | Design + ratify the `hosting_host_key` cross-reference (§14.1): schema (which side owns the column — Plane B's `search_properties`/`monitors`, read by a Plane A-staff-scoped query), the exact staff-only exposure surface, and the "never tenant-visible, never an auth join" invariant as a pinned test, not prose | Architect-ratified design note in `docs/blueprints/monitoring-program.md` (Plane B owns the column) or a cross-doc addendum here (Plane A reads it); a test asserting no tenant-scoped route can ever return `hosting_host_key` or any host identity derived from it | §14.1's design as a starting point; MSO-13 (tier vocabulary) |
-| **MSO-17** | medior · seat default | New tenant-scoped **Network** page in the IT department (`/it/network`), extending the existing device registry — subnet/VLAN/WAN-uplink/AP-level view, same Cerbos gate family as `device` (or a new resource if the IT department's own design calls for one). Explicitly does NOT render `helios`/`delphi`/`wp hostinger` or anything Plane A | Driven in a browser against a live BE; a Plane A host never appears on this page (adversarial check in the QA pass) | IT department's own design call on office-network-and-it-discovery-gap (UniFi) — not this program |
+| **MSO-17** | medior (senior-fe reviews) · seat default — **AMENDED 2026-08-23 (§16): fully specified; the former "IT department's own design call" dependency is resolved by §16.2–§16.6** | Network page **v1** per §16: new IT tab `/it/network` consuming ONLY the existing `GET /api/:t/it/topology` payload (no new endpoint in v1) — wireless segments by SSID, wired segment, infrastructure chain (gateway → AP/switch), per-segment device counts + status rollup; discovery-freshness banner as the LEAD element (same discipline as `/it/topology`'s it-sync banner); "not observed"/"not collected" states per §16.5; authz = existing `ModuleEnabledGuard("it")` + Cerbos `device:read` data, **no new Cerbos action** (§16.3). Explicitly does NOT render `helios`/`delphi`/`wp hostinger`, `infra_hosts`, the WireGuard mesh, ERP inter-service links, or client-site status (§16.2) | Driven in a browser against the live BE and against a dead-collector fixture — in the latter every segment renders UNKNOWN and cannot be read as green; a Plane A host name appears nowhere in the page's data path (MSO-22 pins it); `nav.ts` + `docs/sidebar-nav-map.md` + the IT layout tab strip updated in the same commit | §16 (this doc); real data arrives only with MSO-19 — the page ships honest-empty before that, exactly as `/it/topology` does today |
 | **MSO-18** | devops · seat default, **BLOCKED on an owner timeline** | Plan (not execute) the `gda-aicenter`+`sumopod` consolidation's observability fallout per §12.0: which `infra_hosts` row retires vs is repurposed, whether the WireGuard hub relocates, whether pre-merge series history stays queryable under the old `host` label. Explicitly: do not design or execute the consolidation itself | A short addendum to this doc naming the plan, written only after the owner names a timeline | Owner timeline (unset) |
 
 ### 15.1 What is still needed from the owner (consolidated)
@@ -955,3 +961,198 @@ doc.
    `delphi`/`wp hostinger` blackbox probing — required before MSO-11 can send its first packet.
 6. A rough timeline for the `gda-aicenter`+`sumopod` consolidation (§12.0, MSO-18) — not needed to
    design it, only to know when to plan the hub-relocation/row-retirement work.
+
+---
+
+## 16. 2026-08-23 owner ruling — the monitoring IA is THREE SEPARATE PAGES; the Network page specified (MSO-17)
+
+**Ruling (owner, 2026-08-23, binding):** the monitoring interface is **three separate pages,
+deliberately not merged**:
+
+1. **Server monitoring** — the Plane A estate console this program is building:
+   `/systems/observability`.
+2. **Devices monitoring** — the **existing** IT topology surface: `/it/topology` (with its
+   `/it/devices` registry tab).
+3. **Network monitoring** — a **Network page that DOES NOT EXIST YET**: `/it/network`, specified in
+   §16.2–§16.6 and built as MSO-17 (amended in place, §15).
+
+"Servers", "devices" and "network" share vocabulary but are three different nouns with different
+data, different tenancy and different audiences; separate pages is the correct answer and it
+preserves the two-plane boundary (monitoring-program.md §0). **Recorded with its date so nobody
+later "helpfully" consolidates them** — a merged "everything monitoring" page is exactly how Gaia
+Nexus ended up with fake gauges, and §14 named the blur risk before the owner ruled. Plane B
+`/monitoring` (clients' properties — the sellable module) is a **fourth** surface owned by
+monitoring-program.md §3–§5; it sits outside this ruling and must not be folded into any of the
+three either. The binding cross-reference lives in the blueprint (monitoring-program.md §9), so a
+session that reads only the blueprint still hits the ruling.
+
+**Fleet facts (owner-confirmed 2026-08-22, restated because this section will be read alone):**
+`helios` = production, `delphi` = staging, `wp hostinger` = the WordPress-projects host; all three
+host **client web projects the agency builds** (Plane A boxes carrying Plane B payloads, §14.1).
+`gda-aicenter` + `sumopod` are the ERP's own servers, slated for eventual consolidation onto one
+box (MSO-18, blocked on an owner timeline). Passive lookup — NOT owner-confirmed — places
+`helios`/`delphi` on Hostinger's own network (AS47583, `srv####.hstgr.cloud` rDNS; §13(c)).
+
+### 16.1 The three pages — what each shows, and what each must never show
+
+| | 1 · Server monitoring | 2 · Devices monitoring | 3 · Network monitoring |
+|---|---|---|---|
+| **Route** | `/systems/observability` (exists) | `/it/topology` + `/it/devices` (exists) | `/it/network` (**does not exist** — MSO-17) |
+| **Shows** | Machines **we operate or rent to run the platform and the hosting business**: the `infra_hosts` estate by tier (agent: node/containers/datastores; blackbox: probe results; provider-api later), Alertmanager alerts, freshness as the lead signal | The **tenant's own office hardware**: registered + discovered devices, uplink graph (gateway → AP/switch → device), heartbeats, discovery freshness | The **tenant's own network fabric** as a first-class noun: WAN uplink, wireless segments (SSIDs), wired segment, subnets/VLANs, per-segment counts + rollups, discovery freshness (§16.2) |
+| **Data source** | `infra_hosts` (GLOBAL, no `tenant_id`, read via `withGlobal`) + remote Prometheus (`10.88.0.2:19090`) + Alertmanager | `it_devices` / `it_device_links` / `it_discovery_runs` (all `tenant_id` + FORCE RLS), fed by push from the (unbuilt) `it-site-collector` | v1: the existing `GET /api/:t/it/topology` payload, regrouped; v2: network-entity rows (MSO-20) — same tables/tenancy family as column 2 |
+| **Tenancy** | **Plane A: staff-only, non-tenant.** Never sellable | Tenant-scoped ERP department feature (sellable), RLS-enforced | Tenant-scoped, identical to column 2 |
+| **Authorization** | `AuthGuard` + `isElevated` (`src/admin/observability.controller.ts:180`); nav under Systems | `ModuleEnabledGuard("it")` + Cerbos `device:read` (any member); writes `device:create/update/delete` (company-admin / IT staff) | Same as column 2 — **ruled: no new Cerbos action** (§16.3) |
+| **MUST NOT show** | Any `it_devices` row — office printers/APs/workstations/CCTV/office NAS of ANY tenant. Any Plane B monitor/property status. (The one sanctioned cross-plane element — the MSO-16 "properties on this host" card — remains BLOCKED on architect ratification; this ruling does not unblock it) | Any `infra_hosts` machine — `gda-aicenter`, `sumopod`, `helios`, `delphi`, `wp hostinger` NEVER appear here, even though colloquially they are "GDA's servers". Client-site uptime (Plane B) | The WireGuard mesh, `infra_hosts`, the hosting network `helios`/`delphi` sit on, ERP inter-service connectivity, client-site reachability — each ruled to its own home in §16.2 |
+
+**The trap, named:** `it_devices` and `infra_hosts` both colloquially contain "machines", both
+vocabularies say "server", "network" and "monitoring" — and `it_devices.kind` literally includes
+`'server'`. The word is not the discriminator. **A machine WE operate to run the platform or the
+hosting business is an `infra_hosts` row and renders only on page 1; a machine that is the
+tenant's own asset in the tenant's own office is an `it_devices` row and renders only on pages
+2–3.** `kind='server'` exists for genuine office hardware (an on-prem NAS, a local test box) — it
+is not a licence to register cloud VPSes as devices, and the estate console is not a licence to
+render a tenant's office NAS as infrastructure.
+
+**How a hurried implementer tells them apart at a glance — four checks, any one suffices:**
+
+1. **The route group.** `/systems/*` = ours, staff, no company switcher. `/it/*` = a tenant
+   department page, company switcher applies.
+2. **The table shape (structural, not convention).** `infra_hosts` has NO `tenant_id` and is read
+   via `withGlobal` with a justification comment; the IT tables carry `tenant_id` + FORCE RLS. A
+   row WITH `tenant_id` cannot be served by the estate endpoint; a row WITHOUT one cannot be
+   served under `/api/:tenantId/*`. (Do not lean on RLS's zero-row behaviour to hide a wrong join
+   — it hides the design error exactly as silently, [[migration-backfill-rls-trap]].)
+3. **The noun test.** Has `env` / `monitoring_tier` / a Prometheus `host` label → infra host. Has
+   `ssid` / `uplink_mac` / `device_class` → office device.
+4. **The litmus question.** "Would a paying SaaS tenant ever be allowed to see this row?" Their
+   own office devices: yes. Our hosts: never.
+
+MSO-22 (§16.7) pins checks 1–2 as tests so the ruling survives sessions that read none of this.
+
+### 16.2 What "network monitoring" means on page 3 — the candidates, ruled
+
+Four different things answer to the phrase; only one belongs on the page:
+
+| Candidate | Ruling | Where it lives instead |
+|---|---|---|
+| **The office LAN** — `10.10.0.0/22` behind the UniFi OS gateway at `10.10.0.1` (~58 live hosts measured 2026-08-03, [[office-network-and-it-discovery-gap]]) | ✅ **THIS PAGE.** The only network the tenant itself owns | — |
+| **The WireGuard mesh** (hub `10.88.0.2` ↔ agent hosts) | ❌ Plane A transport | Its health IS the estate console's lead signal already — freshness + `RemoteWriteStalled` (§6, §8). A dedicated mesh view, if the fleet ever earns one, goes on page 1, never tenant-side |
+| **ERP inter-service connectivity** (container ↔ container) | ❌ Plane A application observability | Grafana/Tempo + the WS9 synthetic prober; the ERP console deliberately links out rather than re-implementing (blueprint §5.1) |
+| **External reachability of client sites** | ❌ Plane B product | `/monitoring` — literally the monitoring module's job (http/tcp/dns/tls drivers, blueprint §3). Reachability of OUR hosts is the estate console's blackbox tier (MSO-11) — also not this page |
+
+One page, one noun, one plane. If any ❌ row ever renders on `/it/network`, the two-plane boundary
+is broken; MSO-17's acceptance and MSO-22's pin both assert it.
+
+### 16.3 Tenancy and authorization — resolved, no straddle
+
+The page is **tenant-scoped IT**, same plane and same gates as the topology page. The straddle
+risk was real — "network monitoring" naively includes the WireGuard mesh, which is Plane A, and a
+page carrying both would put staff infrastructure behind a tenant gate or tenant data on a staff
+console. It is resolved by **ruling the mesh (and everything else Plane A) off the page** (§16.2),
+not by inventing a mixed-tenancy page. There is deliberately no shared *data* component between
+pages 1 and 3: what they may share is a rendering idiom (freshness banners, UNKNOWN styling),
+which lives in shared UI components; they must never share a data source, an endpoint, or a gate —
+and a shared idiom is not a reason to merge the pages.
+
+**Authorization ruling: reuse Cerbos `device:read`; no new action, no new resource.** v1 renders
+the same rows the device surface already authorizes; the principals who can read the device list
+can already infer the network from it, so a separate permission would be a fake boundary with real
+drift cost — an unlisted Cerbos action is a silent DENY and needs a restart to land
+(it.controller.ts's own IT-05 header note, [[cerbos-new-policy-needs-restart]]). If the owner ever
+wants network visibility narrower than device visibility, `it.network.read` is one catalog+policy
+migration away; do not pre-create it.
+
+### 16.4 Data sources — what exists, what does not
+
+**Exists (verified in-repo this pass):** `it_devices` (with `ssid`, `is_wired`,
+`uplink_mac`/`uplink_port`, free-text `network`/`site`, `device_class`, `external_id`),
+`it_device_links` (resolved edges, one uplink per child), `it_discovery_runs` (freshness + BYOD
+aggregate) — migration `0071`, FORCE RLS on all three; `GET /api/:t/it/topology` (devices + links
++ lastRun, server-computed); `POST /api/:t/it/discovery/report` (push ingest — classification is
+recomputed server-side and BYOD rows are dropped **server-side** unless
+`config.itDiscovery.persistByod`, so the privacy gate does not depend on collector correctness);
+derived status + dark-by-default reaper; the `/it/topology` UI with its it-sync freshness banner;
+DEMO fixtures.
+
+**Does not exist — in dependency order:**
+
+1. **`it-site-collector` — the only real feed, for pages 2 AND 3.** The ERP cannot poll the
+   office: `10.10.0.1` is RFC1918 behind NAT, verified HTTP 000 from `gda-aicenter` — discovery is
+   push-only, and no pusher has ever run. Blocked on OQ-9 (UniFi Integration API key + an
+   always-on office host). Until it ships, both pages truthfully render "Not connected".
+2. **Network entities as data.** Nothing models an SSID, subnet, VLAN or WAN uplink as a row;
+   `network` is a free-text device column. v1 therefore derives segments from device rows; v2
+   (MSO-20) makes them rows.
+3. **Network-level signals in the report shape.** `DiscoveryReport` carries devices only — no WAN
+   state, no per-AP radio/client stats, no DHCP pool, no ISP latency.
+4. **Contract rows.** BFF contract §6 covers devices; **§6a** (network reads) lands with MSO-20.
+5. **A capability inventory of the UniFi Integration API on this UDM.**
+   `/proxy/network/integration/v1/sites` returned 401 (the API exists; a key is needed); which
+   network-level facts v1 of that API actually serves is UNVERIFIED. MSO-19 records the inventory
+   empirically **before** MSO-20's schema is designed — do not design tables for data the API may
+   not serve.
+
+### 16.5 Honesty requirements (binding, testable)
+
+The estate-wide rule — a thing we cannot observe renders UNKNOWN, never healthy — applied to the
+surface most prone to violating it: **an un-probed link looks identical to a working one.** Plus
+one structural fact that makes fabrication uniquely easy here: **the ERP is completely blind to
+the office network** (NAT, §16.4 item 1), so ANY reachability-flavoured signal computed
+server-side would be fiction by construction. Everything on this page is collector-reported or
+absent.
+
+1. **Feed freshness is the page's lead element** — same discipline as `/it/topology`'s it-sync
+   banner. Dead collector ⇒ the whole page carries the stale banner and every segment greys with
+   its age; last-known-good must LOOK old, never current.
+2. **Not reported this run ⇒ "not observed", never green.** Presence in inventory is not health.
+3. **Liveness comes from the controller's client table only, never ICMP** — measured undercount
+   is 5× (12 of 58 hosts answered ping).
+4. **Empty is a claim** ([[empty-list-is-a-claim]]): "no segments known" states collector status,
+   not network status, and must not render as a green all-clear.
+5. **Tri-state, same as §12.3:** measured / expected-but-missing (fault — alarming) /
+   not-collected-by-design (v1 collects no WAN stats — calm, but explicitly not knowledge).
+
+### 16.6 Phasing — what is worth building first when the data source does not exist
+
+```
+Phase 0  MSO-19  it-site-collector v1           ← the root data gate; also un-blinds /it/topology
+Phase 1  MSO-17  /it/network v1 (derived view)  ← buildable NOW against fixtures + honest empty state
+         MSO-22  IA boundary pin tests          ← cheap, immediate, independent
+Phase 2  MSO-20  network entities as data + §6a ← gated on MSO-19's empirical API inventory
+Phase 3  MSO-21  page v2: WAN card + events     ← gated on MSO-20
+```
+
+MSO-17 and MSO-19 are independent and can run in parallel: the page ships with the honest
+"Not connected" state exactly as the topology page does today, and lights up the day the
+collector first reports. Building MSO-20's schema before MSO-19 has run against the real
+controller is explicitly forbidden by §16.4 item 5.
+
+### 16.7 Tickets (MSO-17 amended in place in §15; these are new)
+
+| # | Tier · model | Scope | Done when | Depends on |
+|---|---|---|---|---|
+| **MSO-19** | devops · seat default | `it-site-collector` v1 per the 2026-08-03 design doc (§4/§9, `docs/superpowers/specs/2026-08-03-it-network-discovery-design.md`): office-side agent polling the UniFi Integration API (revocable `X-API-KEY`) → `POST /api/:t/it/discovery/report` on an interval, over TLS; BYOD posture unchanged (server-side drop; collector ships the controller's client table and classifies nothing itself); purge the live tenant's 8 seeded fiction rows first (design doc §12 SQL, per OQ-9c); append an **empirical inventory of what the Integration API actually serves on this UDM** to the design doc (feeds MSO-20) | Live run from the office host against the real controller; `/it/topology` (and `/it/network` once built) shows the real `10.10.0.x` estate; stopping the collector turns the feed stale within the reaper window; the API inventory is written down | OQ-9 (key + host + purge approval), OQ-10 (which tenant it posts to) |
+| **MSO-20** | senior-be + senior-db · seat default | Network entities as data: extend `DiscoveryReport` with a network block (WAN uplink state, per-AP radio/client stats, subnets/VLANs — exactly what MSO-19's inventory confirmed the API serves, nothing speculative); timestamp-named migration for `it_networks`(+stats) with `tenant_id` + FORCE RLS; `GET /api/:t/it/network`; BFF contract **§6a** rows (⛔ PENDING until QA flips them) | Applies on a throwaway DB; `lint:withtenants` + `lint:migration-rls` green; `app.inject` suite; null-vs-zero discipline — a missing WAN reading is `null`+reason, never 0/up (unit tests mock an empty report and assert no coercion; the worked in-repo model is `estate-observability.ts`) | MSO-19 (inventory), MSO-17 (a consumer exists) |
+| **MSO-21** | medior (senior-fe reviews) · seat default | Page v2: WAN uplink card, per-segment utilization, `network.wan.down` / `network.segment.dark` outbox events with the **registration pin shipped with the taxonomy, not after** (blueprint §4.2 lesson); dedupe against existing `device.offline` events so one dead AP does not notify twice | Driven in a browser; events land in `/admin/audit` + the notification bell; the pin test asserts the new entity types are registered end-to-end | MSO-20 |
+| **MSO-22** | junior · seat default | The IA boundary pin, as tests: (i) nothing under `platform-nest/src/modules/it/` references `infra_hosts` or `withGlobal`; (ii) the estate observability controller never selects from `it_devices`/`it_device_links`; (iii) in platform-ui, `(app)/it/**` imports nothing from `lib/observability*` and `(app)/systems/observability/**` imports nothing from `lib/it` | Tests green; each failure message quotes the 2026-08-23 ruling and points at §16.1 | — (land any time; before MSO-17 merges is ideal) |
+
+Recommended model·effort: **all seat default, no Opus flags** — none of these tickets carries the
+hazard class that has justified Opus elsewhere in this doc (no authz redesign — §16.3 deliberately
+reuses an existing gate; no concurrency or migration-integrity hazard; MSO-20's tri-state
+discipline has a worked in-repo model). The riskiest surface — the UniFi credential and the BYOD
+privacy gate — is bounded by server-side enforcement that already exists.
+
+### 16.8 What only the owner can answer (this section's additions; §10 / §15.1 items unchanged)
+
+- **OQ-9 — collector prerequisites.** (a) Mint a UniFi Integration API key on the office UniFi OS
+  console (revocable `X-API-KEY`) — and state whether it is read-only-scoped, which the 2026-08-03
+  design assumed but never verified. (b) Name the always-on office host the collector runs on.
+  (c) Approve purging the live tenant's 8 seeded fiction devices (design doc §12 SQL) before the
+  first real report, so real discovery is not merged into fiction.
+- **OQ-10 — which company owns the office-network data.** The physical office serves
+  shared-service departments across the holding's siblings ([[erp-holding-os-vision]]), but the
+  collector posts to exactly ONE `:tenantId`, and RLS makes that choice the visibility boundary
+  for pages 2–3. GDA is the default until ruled otherwise; if the answer is "the holding", that is
+  a deliberate decision to make office-network visibility follow DnA Holding membership rather
+  than GDA membership — either is buildable, but it must be chosen, not inherited from whoever
+  writes the collector's config file.

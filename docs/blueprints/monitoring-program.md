@@ -1,6 +1,6 @@
 # Monitoring program — Plane A operations + Plane B property monitoring
 
-**Date:** 2026-08-13 · **Status:** Plane A **DEV-VERIFIED** · Plane B **UI PROTOTYPED, backend PLANNED** · **Owner decisions:** ratified 2026-08-13
+**Date:** 2026-08-13 · **Status:** Plane A **DEV-VERIFIED** · Plane B **UI PROTOTYPED, backend PLANNED** · **Owner decisions:** ratified 2026-08-13 · monitoring-IA three-page ruling 2026-08-23 (**§9**)
 **Companion:** [`docs/plans/2026-08-13-gaia-nexus-harvest.md`](../plans/2026-08-13-gaia-nexus-harvest.md) (why this exists)
 
 ---
@@ -500,6 +500,38 @@ migration files named inline (head = 0107 committed). Compose behaviour is read 
 consolidated and deployed, and every figure in §2.1 was verified by query, not estimated. §3–§7 remain
 design; no backend code exists. The Plane B UI in §5 was built and driven in a browser under
 `DEMO_MODE=1`, but has never run against a real backend, because there is not one.
+
+---
+
+## 9. Owner ruling 2026-08-23 — the monitoring IA is THREE SEPARATE PAGES (binding)
+
+**The monitoring interface is three separate pages, deliberately not merged** (owner, 2026-08-23):
+
+| Page | Route | Noun | Data | Tenancy |
+|---|---|---|---|---|
+| **Server monitoring** | `/systems/observability` (exists) | machines WE operate/rent — the ERP + hosting estate | `infra_hosts` (global, non-tenant) + Prometheus/Alertmanager | Plane A — staff-only (`isElevated`) |
+| **Devices monitoring** | `/it/topology` + `/it/devices` (exists) | the tenant's own office hardware | `it_devices`/`it_device_links`/`it_discovery_runs` (FORCE RLS) | tenant-scoped IT department |
+| **Network monitoring** | `/it/network` — **does not exist yet** | the tenant's own network fabric (office LAN only) | same IT tables (v1 derived); network entities later | tenant-scoped IT department |
+
+"Servers", "devices" and "network" share vocabulary but are three different nouns with different
+data, different tenancy and different audiences. **Do not consolidate them.** A merged "everything
+monitoring" page is how Nexus got its fake gauges, and merging page 1 with pages 2–3 would breach
+this document's own §0 two-plane rule outright. Plane B `/monitoring` (§3–§5 here — the sellable
+client-property product) is a FOURTH surface, outside this ruling, and is not folded into any of
+the three either.
+
+**The trap this ruling exists to kill:** `it_devices.kind` includes `'server'`, and both
+vocabularies say "server / network / monitoring". The discriminator is operatorship + data plane,
+never the word: our machines (`gda-aicenter`, `sumopod`, `helios`, `delphi`, `wp hostinger`) render
+ONLY on the staff estate console and must never appear as tenant devices; a tenant's office NAS is
+a device and must never appear on the estate console. Structurally: `infra_hosts` has no
+`tenant_id` (read via `withGlobal`), the IT tables have `tenant_id` + FORCE RLS — a row cannot be
+served by the wrong page's endpoint without breaking that shape.
+
+Full ruling, at-a-glance discriminators, the Network page's complete specification, tickets
+(MSO-17 amended in place, MSO-19–22 new) and owner questions (OQ-9/OQ-10):
+[`docs/plans/2026-08-21-multi-server-observability.md`](../plans/2026-08-21-multi-server-observability.md)
+**§16**. The boundary is pinned by MSO-22's tests, not just by this prose.
 
 ---
 
