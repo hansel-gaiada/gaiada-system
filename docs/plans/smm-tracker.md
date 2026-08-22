@@ -33,8 +33,12 @@ not afterwards.
 | P2 inbox + client approval | **6** | 6 ✅ |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
 | P3 content ops | **8** (+1 partial: SMM-25 e2e) | 8 |
-| P4 agents + assistant | **1** | 3 |
+| P4 agents + assistant | **2** | 3 |
 | Decision-gated | — | 3 (1 dead) |
+
+**Note (2026-08-22, medior, SMM-35):** the assistant's "social summary" read landed; NO social write
+is reachable from `/assistant` this pass (a named cross-repo gap, not a silent skip) — see this
+file's SMM-35 evidence block (P4 table below). Module `social-media 0.5.17`.
 
 **Note (2026-08-22, senior-be, SMM-26):** the MCP agent surface audit + `smm-agent-content-brief`
 flow landed — see this file's SMM-26 evidence block (P4 table below). Module `social-media 0.5.16`.
@@ -1772,7 +1776,144 @@ whoever first sets `SOCIAL_METERED_PUBLISH_ENABLED=true` for real.
 |---|---|---|
 | SMM-26 | MCP agent surface for automation principals (OBO, D14); agents draft, never publish | ✅ **merged** |
 | SMM-27 | Best-time-to-post: classical stats + suggestion chip | ⬜ |
-| SMM-35 | Assistant integration via ASST-23 propose → confirm → approve | ⬜ |
+| SMM-35 | Assistant integration via ASST-23 propose → confirm → approve | 🟡 **partial, merged** — summary read only; no social write reachable from chat this pass (see evidence) |
+
+**SMM-35 evidence (2026-08-22, medior).** Worktree was CURRENT at cut time — `git log --oneline -1`
+already matched `main`'s tip; `git merge main` fast-forwarded cleanly with only unrelated docs/infra
+commits (an observability plan doc + an onboarding runbook), none touching `src/modules/social/**`
+or `src/modules/assistant/**`. `content-brief.ts`/`usage-ledger.ts` were both present, confirmed
+before writing any code.
+
+**Read the two required docs first, as instructed.** `docs/superpowers/plans/2026-08-06-asst-23-
+unblock-design.md` (the binding ASST-23 design — propose/confirm/approve, T1–T6/T2b/T3a/T3b, all
+landed per `broker.ts`/`assistant.controller.ts`/`write-intents.ts`'s own code) and `assistant.
+controller.ts` + `capabilities.ts` (where the mechanism actually lives). Confirmed by reading the
+code, not the doc's own claims: `assistant_write_intents` holds the real `tool_args`; `confirmWriteIntent`
+claims a `draft` row atomically (`status='draft' AND expires_at > now()`); the thread `GET`'s
+lazy-reap flips a past-expiry draft to `expired` and scrubs `tool_args` to NULL in the same statement
+(`assistant.controller.ts` lines ~403–406, `write-intents.ts`'s `reapExpiredIntents`).
+
+**Exactly which social writes are reachable from `/assistant`, and what a confirm causes: NONE, this
+pass.** Two different reasons for two different tools, not one blanket "writes are risky" excuse:
+- **`social.publishPost`/`social.publishPostMetered`/`social.sendReply`** — excluded on SECURITY
+  grounds, independent of file surface. All three are the pinned `write:true,impact:"high"`
+  classification and already real D14-registry executables (`core/approval-executables.ts`'s
+  `registerSocialExecutableApprovals()`/`registerSocialReplyExecutableApprovals()`) for the
+  automation/agent-origin suspend path. Wiring either into a chat-confirm flow would be a SECOND,
+  WEAKER route to a public, irreversible act — a human clicking "confirm" in a chat thread is not a
+  more scrutinized gate than the existing approvals-inbox review, and the module's own standing
+  invariant since SMM-26 ("agents draft, never publish") forbids it outright. Not built, and this is
+  the legitimate "no" the ticket invited.
+- **`social.draftContentBrief`** (`write:true,impact:"low"`, SMM-26 — genuinely low-stakes: every
+  write is a draft row, never a live-network act, never client-visible) — excluded for a STRUCTURAL
+  reason, not a risk judgment. The assistant broker (`platform-nest/src/modules/assistant/
+  broker.ts`) can only drive a chat turn through an agent BOTH it (`ASSISTANT_AGENT_TOOLS`/
+  `ASSISTANT_AGENT_WRITE_TOOLS`) AND `ai-agents/src/specialists.ts` declare together — `ai-agents` is
+  a SEPARATE project (this repo's own "not a monorepo" rule) and was never listed in this ticket's
+  file surface ("Yours" names only `platform-nest` paths; `src/modules/assistant/**` only "if
+  genuinely required, say so loudly" — `ai-agents/**` is not mentioned at all). Per this file's own
+  standing binding policy for the assistant surface — `task-filer`'s own header: "every assistant
+  write becomes a proposal, never a silent commit," which is WHY `task-filer` declares `pm.createTask`
+  `high_write` despite its genuinely-low hub tier — a hypothetical social write-agent would have to
+  make the SAME honest divergence (declare `social.draftContentBrief` `high_write` regardless of its
+  low hub impact) AND clear D13's eval-provider enrollment gate (a live run against the shared,
+  weekly-rate-limited Ollama Cloud quota, per this program's own standing note on that resource)
+  before `runWriteAgent` would let it execute past `forced_read_only`. That is a new AgentDef, a
+  `RERUN_CAPABLE_HIGH_WRITES`/`ASSISTANT_FACING_AGENTS` guard update, eval cases, and a live
+  enrollment run — `ai-agents/**` work sized and scoped like the original ASST-23 design's own T2
+  ticket (`senior-be`, its own dedicated wave), not a medior platform-nest ticket's file surface.
+  Reaching into `ai-agents/**` unilaterally, spending shared eval quota unilaterally, or declaring an
+  impact tier unilaterally were all judged out of bounds here — named as a follow-up ticket
+  recommendation (a `social-drafter` AgentDef mirroring `task-filer`'s pattern), not improvised.
+
+**T3b's confirm/expiry/scrub machinery needs ZERO changes to carry a future social intent — verified
+by reading the code, not assumed.** `assistant_write_intents`/`confirmWriteIntent`/
+`dismissWriteIntent`/the lazy-reap-on-GET path (`write-intents.ts`) are keyed generically on
+`tool_call_id`/`tool_name`/`agent` — nothing in that machinery is PM-specific. The day an `ai-agents`
+def declares a social `high_write` tool and `ASSISTANT_AGENT_WRITE_TOOLS` gains an entry for it, the
+existing confirm/dismiss endpoints, the 1-hour default TTL (`config.assistantIntentTtlMs`), and the
+"expiry scrubs `tool_args` to NULL" lazy reap all apply unchanged. **This ticket touched none of
+`src/modules/assistant/**`** because none of it needed touching — there is no new agent name to
+mirror into `ASSISTANT_AGENT_TOOLS`/`ASSISTANT_AGENT_WRITE_TOOLS` when no `ai-agents` def exists yet.
+
+**The capabilities panel: verified by reading the formula, not hand-registered.** `capabilities.ts`'s
+header states it plainly and this ticket confirmed it against the code: `tools` is `visibleToolsFor
+(user) ∩ tenant's module gates` — every declared `social.*` MCP tool (all 35 pre-existing + this
+ticket's new `social.getEngagementSummary`) appears in the panel by construction once the `social`
+module is enabled for a tenant and Cerbos allows the calling user, with zero code added to
+`capabilities.ts` for any of them. Only `toolAgents` (the write-turn agent PICKER) is a hand-maintained
+mirror — and this ticket adds no entry there, honestly, because it adds no chat-invocable write agent.
+
+**The summary half — "social summary" spanning engagements, posts, inbox threads, metrics, usage —
+and how an absent number is never reported as zero.** New `assistant-summary.ts` +
+`GET engagements/:engagementId/assistant-summary` + MCP tool `social.getEngagementSummary` (read,
+`minAssurance:"low"`, the SAME Cerbos `read` action `listEngagements`/`getEngagementScope` already
+use on `social_engagement` — no new permission, no Cerbos edit). Composes: post counts by status
+(real counts of our own rows), open/escalated inbox thread counts (same), each connected+in-scope
+account's LATEST KNOWN follower reading (reusing `reports.ts`'s `latestKnown`/`sumKnown` verbatim —
+`null`, never `0`, when that account's metrics were never pulled), and the engagement's usage
+snapshot (`usage-ledger.ts`'s `readUsageSnapshot`, reused verbatim — its own already-correct
+`null`-when-tenant-cap-unconfigured is inherited unchanged). Three distinct absences proven, not just
+documented: (1) zero `social_metrics_daily` rows for an account ⇒ `followers: null`, `asOfDate: null`
+— proven by `(A1)`; (2) a row whose `followers` column is itself `NULL` (the pull ran, that field
+wasn't in it) ⇒ still `followers: null` but `everPulled: true` (distinct from "never pulled at all")
+— proven by `(A2)`; (3) a REAL zero (no posts, no open threads) renders as an honest `0`, never
+withheld — proven by `(A3)`, matching `reports.ts`'s own "counts of our own rows are not subject to
+this rule" carve-out.
+
+**A scoping bug found by the tests, not shipped.** The first draft loaded "every CONNECTED account
+for this client" for the metrics/inbox halves — a live test (two engagements sharing `clientA`, each
+scoped to a different network) caught a same-client account leaking across engagements. Fixed by
+re-deriving `content-brief.ts`'s OWN `networks[a.network] === true` filter against the engagement's
+`tool_scope.networks` (never re-invented): `social_accounts` belongs to the CLIENT, not the
+engagement, so two engagements sharing a client must not have one's summary silently include the
+other's accounts/metrics/inbox threads just because they share a client.
+
+**A real node-postgres date bug found by the tests, not shipped.** `social_metrics_daily.date` (SQL
+`date`) defaults to node-postgres parsing into a JS `Date` at LOCAL midnight; converting that to
+ISO/UTC via `.toISOString()` silently shifts the reported calendar day backward whenever the process's
+local timezone sits behind UTC — caught live (a test expecting "today" got "yesterday"). Fixed by
+reading the column as `date::text`/`to_char(...)` in SQL and never constructing a JS `Date` from it.
+
+**THE CROSS-CLIENT LEAK TEST, and exactly what it proves.** `assistant-summary.test.ts`'s dedicated
+test seeds TWO engagements under DIFFERENT clients (same tenant) with distinctive post titles, inbox
+thread counts (1 vs. 2, deliberately different so a swap would be caught, not just a duplicate), and
+follower readings (111 vs. 999), drives both summaries back to back against the SAME running app, and
+asserts every count, account id, and follower reading in one engagement's response is absent from the
+other's, in BOTH directions — proving the per-engagement `client_id`+`tool_scope.networks` scoping
+this file adds holds under a live read, not merely in a single-tenant happy path. This is the
+harder-than-cross-tenant case the ticket named: two clients under the SAME tenant, exactly where a
+missing `WHERE` clause or an unscoped join would leak.
+
+**Test counts: 605 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `d14-smm-17-social-reply-registry.test.ts` + `d14-smm-22-social-metered-publish-registry.test.ts`,
+this session's own full run. Baseline directly measured (a fresh full run of the same four-file set,
+before this ticket's new file existed in the run): **599 / 0 / 5** — SMM-26's own previously-stated
+figure, reproduced rather than trusted blind. **+6 new**, all in the new `assistant-summary.test.ts`
+— arithmetic matches exactly (599+6=605). `assistant-summary.test.ts` was ALSO re-run ALONE twice
+(once after the scoping-bug fix, once after the date-bug fix) — 6/6 green both times, ruling out the
+shared-test-Postgres and cross-test-pollution phantom-failure classes this file names (the SAME two
+real bugs above were caught by exactly that "re-run alone" discipline, not by the full-suite run).
+`tsc --noEmit` clean on this session's own touched files — `platform-nest/src/modules/social/
+assistant-summary.ts`, `assistant-summary.test.ts`, `social.controller.ts`, `index.ts`. The
+pre-existing `src/rbac/role-permission-bundles.db.test.ts` failure is another session's uncommitted,
+mid-edit file, per this ticket's own briefing — not touched, not this ticket's to fix, and does not
+block this measurement. No migration (every read is against 0105's existing tables — no new table,
+no ALTER). No Cerbos edit (the one new `authorize()` call reuses the `read` action on
+`social_engagement`, already granted to every role that can read the engagement today).
+`platform-ui`/`src/rbac/**`/`scripts/generate-role-bundles.mjs`/`src/main.ts` untouched (off-limits
+file surface). `src/modules/assistant/**` untouched (see above — nothing needed touching).
+
+**Anything the spec did not answer, named rather than silently decided:** (1) whether `pm.createDoc`/
+`task-filer`'s own precedent for "which write tier for chat" generalizes to social is answered above
+(yes, structurally — but the ai-agents-side work to act on it is out of this ticket's authority);
+(2) whether a future social write-agent should also propose `social.requestClientReview` or
+`social.setEngagementScope` (both `impact:"medium"`, both already correctly suspend an automation/
+agent caller at the hub) was not evaluated — the ticket named `draftContentBrief` as the interesting
+case and this evidence block follows that lead; a follow-up scoping a social write-agent should widen
+the tool list at its own discretion, not inherit this pass's narrow read; (3) whether the capabilities
+panel should visually distinguish "a tool exists" from "a tool is reachable via a chat write-agent
+today" (`tools` vs. `toolAgents` in `capabilities.ts`) is a `platform-ui` question, off-limits here.
 
 **SMM-26 evidence (2026-08-22, senior-be).** Worktree was ONE MERGE BEHIND at cut time — `git log
 --oneline -1` did not match local `main`'s tip (SMM-22's own X-metering merge, plus an unrelated

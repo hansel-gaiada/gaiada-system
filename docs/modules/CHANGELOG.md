@@ -11,6 +11,50 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.17` — 2026-08-22 — SMM-35: assistant "social summary" read; no social write reachable from chat this pass
+
+**Added**
+- `assistant-summary.ts` (new file) + `GET engagements/:engagementId/assistant-summary` + MCP tool
+  `social.getEngagementSummary` (read, `minAssurance:"low"`, Cerbos `read` on `social_engagement` —
+  no new permission) — one engagement's post-status counts, open/escalated inbox counts, each
+  connected+in-scope account's latest KNOWN follower reading, and metered-usage snapshot. Reuses
+  `reports.ts`'s `sumKnown`/`latestKnown` and `usage-ledger.ts`'s `readUsageSnapshot` verbatim — no
+  second copy of either discipline.
+- Absent-vs-zero, proven not just stated: a connected account with no `social_metrics_daily` row
+  ever reports `followers: null`/`everPulled: false`, never a fabricated `0`; a row whose `followers`
+  reading is itself `NULL` still reports `null` but flips `everPulled: true` (pulled, that field
+  wasn't); a genuine zero (no posts, no open threads) renders as a real `0` — these are OUR OWN rows,
+  the one carve-out `reports.ts`'s own header already draws.
+- Accounts/inbox are scoped to the engagement's OWN `tool_scope.networks`, mirroring
+  `content-brief.ts`'s account-resolution rule — `social_accounts` belongs to the CLIENT, not the
+  engagement, so two engagements sharing a client must not leak each other's accounts/metrics/inbox
+  into one summary.
+- Cross-client leak test (`assistant-summary.test.ts`): two engagements under different clients,
+  each with its own post/thread/follower marker, driven back to back against the same running app —
+  every count, account id, and follower reading in one engagement's summary is asserted absent from
+  the other's.
+
+**Found and named, not built (a real cross-repo gap, not improvised around)**
+- No social WRITE (drafting or publish) is wired to a chat-invocable agent this pass. `social.
+  publishPost`/`sendReply` are excluded deliberately: both are `impact:"high"`, already D14-registry
+  executables for the automation/agent-origin suspend path, and exposing them to chat would be a
+  second, weaker route to an irreversible public act — never built. `social.draftContentBrief`
+  (SMM-26, `write:true,impact:"low"`) is excluded not by risk but by a genuine cross-repo dependency:
+  the assistant broker (`platform-nest/src/modules/assistant/broker.ts`) can only drive a turn
+  through an agent BOTH it and `ai-agents/src/specialists.ts` declare — the assistant's own binding
+  policy (every write becomes a proposal, `task-filer`'s own header) means any new social agent must
+  declare the tool `high_write` and pass D13's eval-provider enrollment (a live run against the
+  shared, rate-limited Ollama Cloud quota) before it can execute past `forced_read_only`. That is
+  `ai-agents/**` work, outside this ticket's file surface (never listed as "yours") and sized like
+  the original ASST-23 design's own T2 ticket (`senior-be`). Recommended as a follow-up ticket, not
+  improvised here.
+
+Test counts: `src/modules/social` + the three `d14-smm-{09,17,22}-social-*-registry.test.ts` files —
+**605 / 0 / 5** (baseline for this exact set, this session's own full run: 599; +6 new, all in the
+new `assistant-summary.test.ts`, also re-run ALONE — 6/6 green). `tsc --noEmit` clean on this
+session's own touched files. No migration, no Cerbos change, `src/modules/assistant/**` untouched.
+Full detail: `docs/plans/smm-tracker.md`'s SMM-35 evidence block.
+
 ### social-media `0.5.16` — 2026-08-22 — SMM-26: MCP agent surface audited + `smm-agent-content-brief`
 
 **Audited (no code change needed — the invariant already held)**
