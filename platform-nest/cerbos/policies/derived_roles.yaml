@@ -2158,3 +2158,56 @@ derivedRoles:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "portal.approve_post" &&
               g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+
+    # ══════════ IAM-14b (2026-08-22) — integration_connection, SELF-SCOPED MIRROR ONLY ══════════
+    # Wired for `owner`, which is permission-native (IAM-04c §3: zero policy rules), so without a
+    # perm arm it reaches this kind not at all.
+    #
+    # ⚠ THE COMPANY TIER IS DELIBERATELY *NOT* MIRRORED, and the reason is measured rather than
+    # assumed: `member` and `viewer` BOTH hold all four `core.integration_connection.*` keys in
+    # role-permission-bundles.json — they earn them through the self-scoped `owns` rule, and the flat
+    # `perms` array cannot tell that apart from company_admin's unconditional hold (derived_roles.yaml's
+    # own IAM-04a header). An unconditional mirror would therefore hand any plain member company-wide
+    # management of EVERY person's connections and the at-rest credential vault behind them. That is
+    # the Pattern-B over-grant `permission-arm-hazard-scan.test.ts` exists to catch, on the worst
+    # possible kind to get it wrong.
+    #
+    # These four are safe precisely because they add nothing: `owns` keeps each to the caller's own
+    # row, which member/viewer already reach through the role arm. The gain is that `owner` (and any
+    # future permission-native role) manages its OWN links instead of being denied outright.
+    #
+    # Closing owner's COMPANY-tier gap needs the key split, not a wider condition — a distinct
+    # catalog key for "manage anyone's connection" that member/viewer do not hold. Recorded in
+    # 2026-08-22-iam-phase3-readiness.md rather than improvised here.
+    - name: perm_integration_connection_read_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.integration_connection.read" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_integration_connection_create_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.integration_connection.create" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_integration_connection_update_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.integration_connection.update" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_integration_connection_delete_self
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.integration_connection.delete" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

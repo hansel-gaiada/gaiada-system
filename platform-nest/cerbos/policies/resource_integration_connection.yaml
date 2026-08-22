@@ -48,7 +48,44 @@ resourcePolicy:
         match:
           expr: "variables.inTenant && variables.notLow && variables.owns"
 
-    # ══════════ IAM-04-B5 (2026-08-12) — NO permission arm wired on this kind at all. ══════════
+    # ══════════ IAM-14b (2026-08-22) — SELF-SCOPED permission arm, and ONLY that ══════════
+    # Each rule carries `variables.owns`, so a permission holder reaches exactly their OWN connection
+    # row — never anyone else's, never a company-owned one. That is what makes adding these safe on a
+    # Pattern-B kind: they grant member/viewer nothing they did not already have through the role arm
+    # above, while giving a PERMISSION-NATIVE role (`owner`, IAM-04c §3 — zero policy rules) its own
+    # links instead of nothing at all.
+    #
+    # The unconditional company tier stays unmirrored on purpose — see derived_roles.yaml's IAM-14b
+    # block for the measurement: member and viewer hold all four keys, so an unconditional mirror
+    # would give a plain member the whole company's connections and credential vault.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_integration_connection_read_self"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_integration_connection_create_self"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_integration_connection_update_self"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_integration_connection_delete_self"]
+      condition:
+        match:
+          expr: "variables.inTenant && variables.notLow && variables.owns"
+
+    # ══════════ IAM-04-B5 (2026-08-12) — why the COMPANY tier is still unmirrored ══════════
+    # (Superseded in part by IAM-14b above, which added the SELF-scoped half. The reasoning below
+    # is why the unconditional half remains absent, and it is unchanged.)
     # EVERY one of this kind's four actions (read/create/update/delete) is Pattern-B: the
     # member/viewer self-scoped `owns` rule immediately above coexists with the company_admin/
     # manager unconditional rule above it on the SAME four actions — there is no action left that is
