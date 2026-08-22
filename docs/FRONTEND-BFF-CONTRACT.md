@@ -3333,14 +3333,40 @@ Contract notes:
 5. **Disk queries must stay identical to the `DiskSpaceLow` alert expression.** The console and the
    pager reading different series is worse than having only one of them.
 
-### 20.1a Estate view — multi-host Plane A (MSO program, 2026-08-21) — 🟡 PROTOTYPED (BACKEND, MSO-05, 2026-08-21) — design: `docs/plans/2026-08-21-multi-server-observability.md`
+### 20.1a Estate view — multi-host Plane A (MSO program, 2026-08-21) — 🟡 PROTOTYPED (BACKEND MSO-05 + UI MSO-06, 2026-08-22) — design: `docs/plans/2026-08-21-multi-server-observability.md`
 
 Supersedes §20.1's single-host response **via expand/contract** (note 6). Same route, same gate,
 same plane: staff-only, never tenant-scoped, never merged with §20 Plane B.
 
 | Method | Path | Gate | Returns | Status |
 |---|---|---|---|---|
-| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `EstateObservabilitySnapshot` | 🟡 BACKEND PROTOTYPED — `platform-nest/src/admin/observability.controller.ts` + `estate-observability.ts`; UI consumer (MSO-06) not this ticket's scope. Promote to ✅ only after QA (MSO-07) |
+| GET | `/api/admin/observability` | **platform admin** (`isElevated`) — NOT tenant-scoped | `EstateObservabilitySnapshot` | 🟡 PROTOTYPED end-to-end — backend: `platform-nest/src/admin/observability.controller.ts` + `estate-observability.ts` (MSO-05); UI: `platform-ui/src/lib/observability.ts` + `components/systems/Observability{Console,HostTable,Drilldown}.tsx` (MSO-06, 2026-08-22) now consumes `hosts[]`/`estate`/`alerts` exclusively — no legacy §20.1 single-host field is read. Driven in DEMO_MODE against a 7-host fixture (`lib/demoFixtures.ts`) exercising every branch below; NOT yet driven against the live backend (no server involved in MSO-06). Promote to ✅ only after QA (MSO-07) |
+
+**MSO-06 UI notes (what the console does with each field, 2026-08-22):**
+
+- **Freshness is the lead cell**, rendered before health in both the per-host row and its own KPI
+  strip (fresh/stale/dark/never counts from `estate.hosts`), and is never re-derived client-side —
+  the UI only adds elapsed wall-clock time to the server's `lastSampleAgeSeconds` for the ticking
+  "Xm ago" display (`liveSampleAgeSeconds`), never reclassifies `state`.
+- **Expected-but-dark vs never-registered vs onboarding-pending are three distinct row treatments**
+  (`hostAlarmState`): an `active`+`dark`/`never` host renders a board-level critical banner
+  ("N expected hosts stopped reporting") plus a rust left-border on its row; an `onboarding`+`never`
+  host renders as calm "expected-pending", no banner; a `registered:false` host renders its own
+  warn-toned banner ("N unregistered hosts sending data") plus an amber left-border — both drift
+  directions are visible simultaneously, neither is folded into the other.
+- **`RemoteWriteStalled` (active, any host or unattributed) renders a whole-board critical banner**
+  above everything else, independent of and stacked with the `available:false` banner (both can be
+  true at once per note 9).
+- **`containersRunning` is read from the field, not hardcoded** — the drilldown's "Per-container
+  metrics" card prints `value` when non-null and otherwise `note` verbatim, so it will start
+  showing real counts the day MON-09n closes (note 11) without a second UI edit.
+- **`alertsActive`/`alertsSuppressed: null`** render as an em dash with the `alertsNote` reason in
+  the KPI tile's hint, never as `0`.
+- **`env` drives a real filter/grouping** in the host table (replacing the old "not tagged"
+  placeholder that meant "the backend hasn't built this field yet") plus an `envDrift` badge when a
+  host's own series report a different `env` than the inventory.
+- Not rendered as a distinct UI element: the raw `role` string beyond a small italic label next to
+  the host name — no dedicated column, kept dense per the table's existing density budget.
 
 **MSO-04 (the `infra_hosts` inventory table) was built BY THIS TICKET**, not under its own MSO-04
 ticket — it had not landed when MSO-05 started, and MSO-05's non-negotiable #3 (expected-but-dark

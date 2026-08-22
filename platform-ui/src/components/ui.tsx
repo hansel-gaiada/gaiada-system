@@ -97,6 +97,11 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   // "degraded" takes the attention family rather than progress — a partial failure is a failure.
   // "maintenance"/"unknown" take idle: honest "not currently evidence of health", never a green.
   up: "ok", down: "critical", degraded: "critical", maintenance: "idle", unknown: "idle",
+  // MSO-06 — Plane A `infra_hosts.status` (contract §20.1a). "onboarding" is expected-pending
+  // (bronze, same family as other in-flight states), NOT idle — an idle/champagne badge reads as
+  // "inactive/nothing to see", which is the wrong message for a host that is actively being brought
+  // up. "decommissioned" takes idle: retired on purpose, not a failure.
+  onboarding: "progress", decommissioned: "idle",
 };
 function familyOf(s: string): StatusFamily {
   return STATUS_FAMILY[normalizeStatus(s)] ?? "progress";

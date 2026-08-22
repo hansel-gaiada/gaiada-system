@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getObservability } from "@/lib/observability-data";
-import { hostRowFromSnapshot } from "@/lib/observability";
+import { hostRowFromEstateHost } from "@/lib/observability";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ObservabilityConsole } from "@/components/systems/ObservabilityConsole";
@@ -9,29 +9,22 @@ import { ObservabilityConsole } from "@/components/systems/ObservabilityConsole"
 export const metadata = { title: "Observability" };
 export const dynamic = "force-dynamic";
 
-// PLANE A — this box (or boxes, see below), staff only. The client-facing property monitoring is
+// PLANE A — our own infrastructure, staff only. The client-facing property monitoring is
 // /monitoring (Plane B), a different module with different tenancy; the two never merge
 // (monitoring-program.md §8.1).
 //
-// MON-10 — rebuilt as a dense, sortable/filterable HOST TABLE (ObservabilityHostTable) with a
-// per-host drilldown (ObservabilityDrilldown), because the audience is an on-call engineer
-// triaging, not a dashboard browser: "which host is unhappy, since when, is it getting worse, what
-// do I look at next" beats a wall of KPI cards, and it has to scale past one box without a rebuild.
-//
-// TODAY there is exactly ONE real endpoint (`GET /api/admin/observability`, `lib/observability-
-// data.ts`) and it answers for exactly one, unnamed box — no hostname, no environment tag. Rather
-// than fabricate either (the recurring "frontend-first drift" failure this codebase keeps naming),
-// `hostRowFromSnapshot` produces a single `HostRow` with `environment: null` and the generic label
-// "This box", and the table/drilldown render that honestly ("not tagged", with the reason on
-// hover) instead of inventing a name. `HostRow` (lib/observability.ts) is written host-shaped for
-// exactly this reason: when a multi-host, environment-tagged endpoint exists, only this file's
-// mapping changes.
+// MSO-06 — consumes the estate shape (contract §20.1a, `EstateObservabilitySnapshot`): many hosts,
+// merged against the `infra_hosts` inventory so a host that stopped reporting still appears, plus
+// unregistered hosts derived from series with no inventory row. Superseded MON-10's single
+// synthesized "This box" row — `hostRowFromEstateHost` now maps a REAL `HostSnapshot` per host,
+// carrying real `env`/`role`/`status`/`freshness` instead of the old `environment: null` placeholder.
 export default async function ObservabilityPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const snap = await getObservability(userId);
 
-  // null = 403/404. "You may not see this" is NOT "the box is unmonitored", so it gets its own words.
+  // null = 403/404. "You may not see this" is NOT "the estate is unmonitored", so it gets its own
+  // words.
   if (!snap) {
     return (
       <>
@@ -45,19 +38,29 @@ export default async function ObservabilityPage() {
     );
   }
 
-  // `available:false` (Prometheus unset/unreachable) is no longer a page-level dead end: it becomes
-  // a single host row in the "not measured" tier, with the reason attached, flowing through the
-  // same table + drilldown as every other state. That is the multi-host-honest behaviour — some
-  // hosts can be reachable while one is dark, and the table is where that has to show up.
-  const rows = [hostRowFromSnapshot(snap)];
+  // `available` covers ONLY the central Prometheus (contract §20.1a note 5). `hosts`/`estate` are
+  // null exactly when it is false — there is nothing host-shaped to list. Alertmanager is fetched
+  // independently (note 9) so `alerts`/`alertsNote`/`estate?.alertsActive` can still be populated
+  // here even when Prometheus itself is unreadable — the console must not go dark on alerts just
+  // because it went dark on hosts.
+  const rows = (snap.hosts ?? []).map((h) => hostRowFromEstateHost(h, snap.alerts));
 
   return (
     <>
       <PageHeader
         title="Observability"
-        subtitle="Our infrastructure's health — staff-only, not tenant-scoped. Grouped/filtered by environment once that's wired; today this is the one box the backend can see."
+        subtitle="Our infrastructure's health, estate-wide — staff-only, not tenant-scoped. Freshness is the lead signal: a host can look calm on stale data."
       />
-      <ObservabilityConsole rows={rows} />
+      <ObservabilityConsole
+        rows={rows}
+        available={snap.available}
+        reason={snap.reason ?? null}
+        grafanaHint={snap.grafanaHint}
+        collectedAt={snap.collectedAt}
+        estate={snap.estate}
+        alerts={snap.alerts}
+        alertsNote={snap.alertsNote ?? null}
+      />
     </>
   );
 }

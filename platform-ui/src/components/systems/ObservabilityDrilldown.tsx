@@ -2,32 +2,46 @@ import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "./EmptyNote";
 import { formatDateTime } from "@/lib/format";
 import {
-  ageSeconds,
   diskProjectionNote,
   fmt,
   formatAge,
-  freshnessTier,
+  FRESHNESS_LABEL,
+  hostAlarmState,
   levelLabel,
+  liveSampleAgeSeconds,
   utilLevel,
   type HostRow,
 } from "@/lib/observability";
 import "./observability.css";
 
-// MON-10 — the selected host's full breakdown, below the dense table. This is where the original
-// single-host page's panels (resource pressure / datastores / alerts) now live, plus two additions
-// the table can't fit: the disk trend and the estate-wide per-container-metrics limitation, which
-// must render EVERY time (never silently dropped) because cAdvisor's per-container discovery is
-// broken estate-wide today (MON-09n) — see the card's own comment below.
+// MON-10 / MSO-06 — the selected host's full breakdown, below the dense table. Now sourced from a
+// real per-host `HostSnapshot` (contract §20.1a) rather than the single synthesized "this box" row:
+// `host`/`targets`/`datastores` are `null` when the host is not currently live (`freshness.state`
+// is `dark`/`never`), which is a DIFFERENT fact from `available:false` (that was "we can't reach
+// Prometheus at all"; this is "this one host's instant vectors are empty past staleness").
 
-export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number }) {
-  const age = ageSeconds(row.collectedAt, now);
-  const fresh = freshnessTier(age);
+export function ObservabilityDrilldown({
+  row,
+  collectedAt,
+  now,
+  grafanaHint,
+}: {
+  row: HostRow;
+  collectedAt: string;
+  now: number;
+  grafanaHint: string;
+}) {
+  const age = liveSampleAgeSeconds(row.freshness, collectedAt, now);
+  const fresh = row.freshness.state;
+  const isLive = fresh === "fresh" || fresh === "stale";
+  const alarm = hostAlarmState(row);
   const h = row.host;
 
   const cpu = utilLevel(h?.cpuBusyPct.value ?? null);
   const mem = utilLevel(h?.memUsedPct.value ?? null);
   const disk = utilLevel(h?.diskUsedPct.value ?? null);
   const diskNote = h ? diskProjectionNote(h.diskFreeGb, h.diskFreeGb24h) : null;
+  const loadPerCore = h && h.load1.value !== null && h.cores.value ? h.load1.value / h.cores.value : null;
 
   const pgDown = (row.datastores?.postgres ?? []).filter((d) => !d.up);
   const redisDown = (row.datastores?.redis ?? []).filter((d) => !d.up);
@@ -36,16 +50,29 @@ export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number
     <div>
       <div className="obs-drill__head">
         <span className="obs-drill__label">{row.label}</span>
-        {row.environment ? (
-          <span className="obs-env">{row.environment}</span>
+        {row.role && <span className="obs-role">{row.role}</span>}
+        {row.registered ? (
+          <span className="obs-env-wrap">
+            <span className="obs-env">{row.env}</span>
+            {row.envDrift && <span className="obs-env-drift">env drift</span>}
+          </span>
         ) : (
-          <span className="obs-env obs-env--unset">not tagged</span>
+          <span className="obs-env obs-env--unregistered">unregistered</span>
         )}
+        {row.status && <StatusBadge label={row.status} />}
         <StatusBadge label={levelLabel(row.tier)} />
       </div>
+
       <p className="obs-drill__meta">
-        Snapshot generated {formatAge(age)} ({fresh}) — {formatDateTime(row.collectedAt)}.{" "}
-        {fresh !== "fresh" && (
+        Freshness: <strong className={`obs-fresh obs-fresh--${fresh}`}>{FRESHNESS_LABEL[fresh]}</strong> — last sample{" "}
+        {formatAge(age)}
+        {isLive && ` (as of ${formatDateTime(collectedAt)})`}.{" "}
+        {!isLive && (
+          <strong style={{ color: "var(--status-critical-fg)" }}>
+            No usable reading right now — every figure below is historical or absent, not current.
+          </strong>
+        )}
+        {isLive && fresh === "stale" && (
           <strong style={{ color: "var(--status-warning-fg)" }}>
             This reading is older than it looks calm about — treat every figure below as that much
             out of date.
@@ -53,11 +80,49 @@ export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number
         )}
       </p>
 
-      {!row.available ? (
+      {!row.registered && (
+        <div style={{ marginBottom: 16 }}>
+          <EmptyNote>
+            This host has no matching <code>infra_hosts</code> row — it is sending series with a{" "}
+            <code>host</code> label the inventory does not recognize. Either register it (if it is
+            ours) or investigate why an unknown source is remote-writing into this estate.
+          </EmptyNote>
+        </div>
+      )}
+
+      {row.registered && alarm === "expected-pending" && (
+        <div style={{ marginBottom: 16 }}>
+          <EmptyNote>
+            Onboarding — this host is provisioned in the inventory but has not sent a sample yet.
+            Expected-pending, not an incident.
+          </EmptyNote>
+        </div>
+      )}
+
+      {row.registered && alarm === "stopped-reporting" && (
+        <div style={{ marginBottom: 16 }}>
+          <EmptyNote>
+            This host is marked <strong>active</strong> in the inventory but has gone dark. That
+            combination — expected to report, currently silent — is exactly what the inventory merge
+            exists to surface; a live-series-only view would have dropped this host from the board
+            entirely instead of flagging it.
+          </EmptyNote>
+        </div>
+      )}
+
+      {row.status === "decommissioned" && (
+        <div style={{ marginBottom: 16 }}>
+          <EmptyNote>
+            Decommissioned — still shown while its series age out of the freshness lookback, then it
+            will drop off the board on its own.
+          </EmptyNote>
+        </div>
+      )}
+
+      {!isLive ? (
         <EmptyNote>
-          <strong>Cannot read this host&apos;s metrics.</strong> {row.reason}
-          <br />
-          Full dashboards: <code>{row.grafanaHint}</code>
+          No live metrics for this host — its instant vectors are empty past Prometheus&apos;s own
+          staleness window. Full dashboards (if the box has ever reported): <code>{grafanaHint}</code>
         </EmptyNote>
       ) : (
         <div className="obs-drill__grid">
@@ -68,7 +133,8 @@ export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number
                 ["CPU", fmt(h?.cpuBusyPct, "%"), <StatusBadge key="c" label={levelLabel(cpu)} />],
                 ["Memory", fmt(h?.memUsedPct, "%"), <StatusBadge key="m" label={levelLabel(mem)} />],
                 ["Disk", fmt(h?.diskUsedPct, "%"), <StatusBadge key="d" label={levelLabel(disk)} />],
-                ["Load (1m)", fmt(h?.load1), ""],
+                ["Cores", fmt(h?.cores), ""],
+                ["Load (1m)", loadPerCore !== null ? `${fmt(h?.load1)} (${loadPerCore.toFixed(2)}/core)` : fmt(h?.load1), ""],
                 ["Uptime", fmt(h?.uptimeDays, "d"), ""],
               ]}
             />
@@ -103,7 +169,12 @@ export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number
           </Card>
 
           <Card title="Datastores" hint="Reported by the exporters, per instance.">
-            {(row.datastores?.postgres.length ?? 0) + (row.datastores?.redis.length ?? 0) === 0 ? (
+            {!row.datastores ? (
+              <EmptyNote>
+                This host ships no Postgres/Redis exporters — nothing to measure here, distinct from
+                a measured-and-down instance.
+              </EmptyNote>
+            ) : (row.datastores.postgres.length + row.datastores.redis.length === 0) ? (
               <EmptyNote>
                 No datastore metrics at all — the exporters are not reporting. That is a blind spot,
                 not a clean bill of health.
@@ -113,10 +184,10 @@ export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number
                 <HairlineTable
                   columns={[{ label: "Datastore" }, { label: "Instance" }, { label: "State" }]}
                   rows={[
-                    ...(row.datastores?.postgres ?? []).map((d, i) => [
+                    ...row.datastores.postgres.map((d, i) => [
                       "Postgres", d.instance, <StatusBadge key={`p${i}`} label={d.up ? "active" : "critical"} />,
                     ]),
-                    ...(row.datastores?.redis ?? []).map((d, i) => [
+                    ...row.datastores.redis.map((d, i) => [
                       "Redis", d.instance, <StatusBadge key={`r${i}`} label={d.up ? "active" : "critical"} />,
                     ]),
                   ]}
@@ -133,48 +204,55 @@ export function ObservabilityDrilldown({ row, now }: { row: HostRow; now: number
 
           <Card
             title="Firing alerts"
-            hint="The always-on Watchdog heartbeat is excluded — showing it would put a permanent red on a healthy host."
+            hint="From Alertmanager, independently of Prometheus — includes silence/inhibition state. The always-on Watchdog heartbeat is excluded."
           >
-            {(row.alerts ?? []).length === 0 ? (
-              <EmptyNote>Nothing firing.</EmptyNote>
+            {row.alerts.length === 0 ? (
+              <EmptyNote>Nothing firing or suppressed for this host.</EmptyNote>
             ) : (
               <HairlineTable
-                columns={[{ label: "Alert" }, { label: "Severity" }]}
-                rows={(row.alerts ?? []).map((a, i) => [
+                columns={[{ label: "Alert" }, { label: "State" }, { label: "Severity" }]}
+                rows={row.alerts.map((a, i) => [
                   a.name,
+                  // "suspended" (idle/champagne family) on purpose — a SILENCED alert must read as
+                  // calm/muted, not as another shade of critical-red, or the console teaches
+                  // operators the exact wrong lesson about what a silence means.
+                  <StatusBadge key={`s${i}`} label={a.state === "suppressed" ? "suspended" : "active"} />,
                   <StatusBadge key={`a${i}`} label={a.severity === "page" ? "critical" : "at risk"} />,
                 ])}
               />
             )}
           </Card>
+        </div>
+      )}
 
-          {/* KNOWN-UNAVAILABLE, ESTATE-WIDE, TODAY — not a per-request live read. cAdvisor's
-              per-container discovery is broken on every box in this estate: the Docker factory
-              registers and docker.sock is readable, but no series carries a `name` label, so
-              `count(container_last_seen{name!=""})` is 0 (MON-09n, docs/blueprints/monitoring-
-              program.md §2.8). This card is a standing fact, cited rather than fetched, and is
-              shown unconditionally so the gap reads as "known and reasoned about", never as a
-              panel that was simply never built. */}
-          <Card title="Per-container metrics">
+      {/* Always rendered, live or not: the estate-wide MON-09n limitation. Sourced from the row's
+          OWN `containersRunning` Reading rather than hardcoded prose, so this card stops describing
+          a fixed limitation on its own the day the backend starts sending a real value (contract
+          §20.1a note 11 — revisit when MON-09n closes) instead of needing a second edit here. */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="Per-container metrics">
+          {row.containersRunning.value !== null ? (
+            <p style={{ margin: 0, fontSize: 13 }}>
+              <strong>{row.containersRunning.value}</strong> containers running.
+            </p>
+          ) : (
             <p className="obs-limitation">
               <span className="obs-limitation__head">
                 <span className="obs-dot obs-dot--unknown" aria-hidden="true" />
                 Not measured — known estate-wide limitation
               </span>
-              cAdvisor&apos;s per-container discovery is broken on every host in this estate: the
-              containerd snapshotter breaks its RW-layer lookup, so no series carries a container{" "}
-              <code>name</code> label and per-container CPU/memory cannot be computed
-              (<code>count(container_last_seen{"{"}name!=&quot;&quot;{"}"}</code>) is 0
-              — see MON-09n). This is not this host&apos;s reading; it is true everywhere until the
-              cAdvisor fault is fixed. Host-level CPU/memory above are unaffected.
+              {/* The backend's own `note` string carries no trailing punctuation — join defensively
+                  rather than assume one, so this never reads as one run-on sentence. */}
+              {(row.containersRunning.note ?? "No reason given").replace(/[.\s]*$/, "")}. Host-level
+              CPU/memory above are unaffected.
             </p>
-          </Card>
-        </div>
-      )}
+          )}
+        </Card>
+      </div>
 
       <p style={{ marginTop: 20, fontSize: 13, opacity: 0.7 }}>
         This is a summary. Dashboards, log search and traces live in Grafana:{" "}
-        <code>{row.grafanaHint}</code>. Client website monitoring is a separate surface under
+        <code>{grafanaHint}</code>. Client website monitoring is a separate surface under
         Business → Monitoring.
       </p>
     </div>

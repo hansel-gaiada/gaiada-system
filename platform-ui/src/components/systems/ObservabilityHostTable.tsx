@@ -2,34 +2,43 @@
 import { useMemo, useState } from "react";
 import { Eyebrow } from "@/components/ui";
 import {
-  ageSeconds,
+  alarmRank,
   fmt,
   formatAge,
-  freshnessTier,
-  tierRank,
+  liveSampleAgeSeconds,
   utilLevel,
-  type Freshness,
+  FRESHNESS_LABEL,
+  hostAlarmState,
+  type HostAlarmState,
+  type HostFreshnessState,
   type HostRow,
   type Tier,
 } from "@/lib/observability";
 import "./observability.css";
 
-// MON-10 — the dense, sortable, filterable host table. Built to answer an on-call engineer's actual
-// first question ("which host is unhappy, since when, is it getting worse") without scrolling past
-// ~20 rows, and to scale from today's ONE real host to N without touching this file: it operates
-// entirely on `HostRow[]` (lib/observability.ts), which is deliberately shaped for a future
-// multi-host endpoint to fill in directly.
+// MON-10 / MSO-06 — the dense, sortable, filterable host table. Built to answer an on-call
+// engineer's actual first question ("which host is unhappy, since when, is it getting worse")
+// without scrolling past ~20 rows. Now driven by the real estate endpoint (§20.1a): every row is a
+// real host from `infra_hosts` merged with live series, so the table has to carry TWO axes that
+// must never collapse into one — health (`tier`) and freshness (`HostRow.freshness`) — plus a third,
+// row-level alarm state (`hostAlarmState`) that is what actually decides whether a host reads as
+// "the dangerous kind of fine".
 //
 // A bespoke <table> rather than the shared `DataTable`/`SearchableTable`: those take plain-string
 // cells (or a `format` enum), and this table needs a genuine 4-tier status dot plus tier-coloured
-// figures in nearly every column — richer than "text | status | date | number" supports. It reuses
-// the same interaction shape (sortable header buttons, live count, hairline visual language) rather
-// than inventing a new one; see observability.css's header comment.
+// figures in nearly every column — richer than "text | status | date | number" supports.
 
-type SortKey = "tier" | "label" | "environment" | "cpu" | "mem" | "disk" | "load" | "uptime" | "targets" | "datastores" | "alerts" | "freshness";
+type SortKey = "alarm" | "label" | "environment" | "freshness" | "cpu" | "mem" | "disk" | "load" | "uptime" | "targets" | "datastores" | "alerts";
 
 const TIER_LABEL: Record<Tier, string> = { ok: "Healthy", warn: "At risk", critical: "Critical", unknown: "Not measured" };
-const FRESH_LABEL: Record<Freshness, string> = { fresh: "fresh", aging: "aging", stale: "stale" };
+const ALARM_LABEL: Record<HostAlarmState, string> = {
+  reporting: "Reporting",
+  "expected-pending": "Onboarding",
+  "stopped-reporting": "Stopped reporting",
+  "decommissioned-muted": "Decommissioned",
+  unregistered: "Unregistered",
+};
+const FRESH_DOT: Record<HostFreshnessState, string> = { fresh: "ok", stale: "warn", dark: "critical", never: "unknown" };
 
 function TierDot({ tier }: { tier: Tier }) {
   return <span className={`obs-dot obs-dot--${tier}`} aria-hidden="true" />;
@@ -64,15 +73,40 @@ function MetricCell({ r, suffix }: { r: { value: number | null; note?: string | 
   );
 }
 
-function EnvBadge({ environment }: { environment: string | null }) {
-  if (environment === null) {
+/** Environment + registry cell. `registered:false` is visibly abnormal regardless of env; an
+ *  `envDrift` host still shows its real (inventory) env plus a drift flag — the inventory is
+ *  authoritative, per contract §20.1a. */
+function EnvCell({ row }: { row: HostRow }) {
+  if (!row.registered) {
     return (
-      <span className="obs-env obs-env--unset" title="Not sent by the backend yet — the multi-host/environment contract is unbuilt (see docs/FRONTEND-BFF-CONTRACT.md §20.1)">
-        not tagged
+      <span className="obs-env obs-env--unregistered" title="Series arriving with no infra_hosts row">
+        unregistered
       </span>
     );
   }
-  return <span className="obs-env">{environment}</span>;
+  return (
+    <span className="obs-env-wrap">
+      <span className="obs-env">{row.env}</span>
+      {row.envDrift && (
+        <span className="obs-env-drift" title="This host's series report a different env label than the inventory">
+          drift
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Freshness cell — the LEAD signal (contract §20.1a note 1), a separate axis from `tier`. `dark`
+ *  and `never` render bold and impossible to mistake for calm; `stale` is bold amber precisely
+ *  because it is the state that otherwise looks fine. */
+function FreshnessCell({ row, collectedAt, now }: { row: HostRow; collectedAt: string; now: number }) {
+  const age = liveSampleAgeSeconds(row.freshness, collectedAt, now);
+  const state = row.freshness.state;
+  return (
+    <span className={`obs-fresh obs-fresh--${state}`} title={`${FRESHNESS_LABEL[state]} — ${formatAge(age)}`}>
+      <TierDot tier={FRESH_DOT[state] as Tier} /> {FRESHNESS_LABEL[state]} · {formatAge(age)}
+    </span>
+  );
 }
 
 function numOrNull(r: { value: number | null } | undefined): number | null {
@@ -93,25 +127,28 @@ export function ObservabilityHostTable({
   rows,
   selectedId,
   onSelect,
+  collectedAt,
   now,
 }: {
   rows: HostRow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  collectedAt: string;
   /** Injected so ages are stable across a render pass and testable — see the console's useEffect ticker. */
   now: number;
 }) {
   const [query, setQuery] = useState("");
   const [envFilter, setEnvFilter] = useState<string>("__all__");
   const [tierFilter, setTierFilter] = useState<Tier | "__all__">("__all__");
-  const [sortKey, setSortKey] = useState<SortKey>("tier");
+  const [freshnessFilter, setFreshnessFilter] = useState<HostFreshnessState | "__all__">("__all__");
+  const [sortKey, setSortKey] = useState<SortKey>("alarm");
   const [dir, setDir] = useState<1 | -1>(1);
 
   const environments = useMemo(() => {
     const set = new Set<string>();
-    let hasUnset = false;
-    for (const r of rows) (r.environment === null ? (hasUnset = true) : set.add(r.environment));
-    return { known: [...set].sort(), hasUnset };
+    let hasUnregistered = false;
+    for (const r of rows) (r.registered && r.env ? set.add(r.env) : (hasUnregistered = true));
+    return { known: [...set].sort(), hasUnregistered };
   }, [rows]);
 
   const tierCounts = useMemo(() => {
@@ -120,29 +157,38 @@ export function ObservabilityHostTable({
     return c;
   }, [rows]);
 
+  const freshnessCounts = useMemo(() => {
+    const c: Record<HostFreshnessState, number> = { fresh: 0, stale: 0, dark: 0, never: 0 };
+    for (const r of rows) c[r.freshness.state]++;
+    return c;
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (tierFilter !== "__all__" && r.tier !== tierFilter) return false;
-      if (envFilter === "__unset__" && r.environment !== null) return false;
-      else if (envFilter !== "__all__" && envFilter !== "__unset__" && r.environment !== envFilter) return false;
+      if (freshnessFilter !== "__all__" && r.freshness.state !== freshnessFilter) return false;
+      if (envFilter === "__unregistered__" && r.registered) return false;
+      else if (envFilter !== "__all__" && envFilter !== "__unregistered__" && r.env !== envFilter) return false;
       if (!needle) return true;
       const haystack = [
         r.label,
-        r.environment ?? "",
+        r.env ?? "",
+        r.role ?? "",
         ...(r.targets?.downJobs ?? []),
-        ...(r.alerts ?? []).map((a) => a.name),
+        ...r.alerts.map((a) => a.name),
       ].join(" ").toLowerCase();
       return haystack.includes(needle);
     });
-  }, [rows, query, envFilter, tierFilter]);
+  }, [rows, query, envFilter, tierFilter, freshnessFilter]);
 
   const sorted = useMemo(() => {
     const accessor = (r: HostRow): number | string => {
       switch (sortKey) {
-        case "tier": return tierRank(r.tier);
+        case "alarm": return alarmRank(r);
         case "label": return r.label.toLowerCase();
-        case "environment": return (r.environment ?? "￿").toLowerCase(); // unset sorts last ascending
+        case "environment": return (r.registered ? r.env ?? "" : "￿").toLowerCase(); // unregistered sorts last ascending
+        case "freshness": return liveSampleAgeSeconds(r.freshness, collectedAt, now) ?? Number.MAX_SAFE_INTEGER;
         case "cpu": return numOrNull(r.host?.cpuBusyPct) ?? Number.NaN;
         case "mem": return numOrNull(r.host?.memUsedPct) ?? Number.NaN;
         case "disk": return numOrNull(r.host?.diskUsedPct) ?? Number.NaN;
@@ -153,8 +199,7 @@ export function ObservabilityHostTable({
           const down = (r.datastores?.postgres ?? []).filter((d) => !d.up).length + (r.datastores?.redis ?? []).filter((d) => !d.up).length;
           return down;
         }
-        case "alerts": return r.alerts?.length ?? -1;
-        case "freshness": return ageSeconds(r.collectedAt, now);
+        case "alerts": return r.alerts.length;
         default: return 0;
       }
     };
@@ -166,7 +211,7 @@ export function ObservabilityHostTable({
       return numCompare(Number.isNaN(a.k) ? null : a.k, Number.isNaN(b.k) ? null : b.k, dir);
     });
     return withKey.map((x) => x.r);
-  }, [filtered, sortKey, dir, now]);
+  }, [filtered, sortKey, dir, collectedAt, now]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setDir((d) => (d === 1 ? -1 : 1));
@@ -189,7 +234,7 @@ export function ObservabilityHostTable({
           <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Filter hosts</Eyebrow>
           <input
             type="search"
-            aria-label="Filter hosts by name, environment, down job or alert"
+            aria-label="Filter hosts by name, environment, role, down job or alert"
             placeholder="Search hosts…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -201,9 +246,25 @@ export function ObservabilityHostTable({
           <select aria-label="Filter by environment" value={envFilter} onChange={(e) => setEnvFilter(e.target.value)}>
             <option value="__all__">All environments</option>
             {environments.known.map((e) => <option key={e} value={e}>{e}</option>)}
-            {environments.hasUnset && <option value="__unset__">Not tagged</option>}
+            {environments.hasUnregistered && <option value="__unregistered__">Unregistered</option>}
           </select>
         </label>
+
+        <div className="obs-chips" role="group" aria-label="Filter by freshness">
+          {(["__all__", "dark", "never", "stale", "fresh"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`obs-chip${freshnessFilter === f ? " obs-chip--active" : ""}`}
+              aria-pressed={freshnessFilter === f}
+              onClick={() => setFreshnessFilter(f)}
+            >
+              {f !== "__all__" && <span className={`obs-chip__dot obs-dot--${FRESH_DOT[f]}`} />}
+              {f === "__all__" ? "All freshness" : FRESHNESS_LABEL[f]}
+              {f !== "__all__" ? ` (${freshnessCounts[f]})` : ""}
+            </button>
+          ))}
+        </div>
 
         <div className="obs-chips" role="group" aria-label="Filter by health tier">
           {(["__all__", "critical", "warn", "unknown", "ok"] as const).map((t) => (
@@ -215,7 +276,7 @@ export function ObservabilityHostTable({
               onClick={() => setTierFilter(t)}
             >
               {t !== "__all__" && <span className={`obs-chip__dot obs-dot--${t}`} />}
-              {t === "__all__" ? "All" : TIER_LABEL[t]}
+              {t === "__all__" ? "All health" : TIER_LABEL[t]}
               {t !== "__all__" ? ` (${tierCounts[t]})` : ` (${rows.length})`}
             </button>
           ))}
@@ -230,8 +291,9 @@ export function ObservabilityHostTable({
         <table className="obs-table">
           <thead>
             <tr>
-              <Header label="Status" sortKeyFor="tier" />
+              <Header label="Status" sortKeyFor="alarm" />
               <Header label="Host" sortKeyFor="label" />
+              <Header label="Freshness" sortKeyFor="freshness" />
               <Header label="Environment" sortKeyFor="environment" />
               <Header label="CPU" sortKeyFor="cpu" align="right" />
               <Header label="Mem" sortKeyFor="mem" align="right" />
@@ -241,22 +303,25 @@ export function ObservabilityHostTable({
               <Header label="Targets" sortKeyFor="targets" align="right" />
               <Header label="Datastores" sortKeyFor="datastores" align="right" />
               <Header label="Alerts" sortKeyFor="alerts" align="right" />
-              <Header label="Freshness" sortKeyFor="freshness" align="right" />
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
               <tr><td className="obs-empty-row" colSpan={12}>No hosts match this filter.</td></tr>
             ) : sorted.map((r) => {
-              const age = ageSeconds(r.collectedAt, now);
-              const fresh = freshnessTier(age);
+              const alarm = hostAlarmState(r);
               const dsDown = (r.datastores?.postgres ?? []).filter((d) => !d.up).length + (r.datastores?.redis ?? []).filter((d) => !d.up).length;
               const dsTotal = (r.datastores?.postgres.length ?? 0) + (r.datastores?.redis.length ?? 0);
-              const alertCount = r.alerts?.length ?? 0;
+              const alertCount = r.alerts.length;
               return (
                 <tr
                   key={r.id}
-                  className={r.id === selectedId ? "obs-row--selected" : undefined}
+                  className={[
+                    r.id === selectedId ? "obs-row--selected" : "",
+                    alarm === "stopped-reporting" ? "obs-row--stopped" : "",
+                    alarm === "unregistered" ? "obs-row--unregistered" : "",
+                    alarm === "decommissioned-muted" ? "obs-row--muted" : "",
+                  ].filter(Boolean).join(" ") || undefined}
                   onClick={() => onSelect(r.id)}
                   tabIndex={0}
                   // Deliberately NOT role="button" — that would override the native "row" role and
@@ -264,29 +329,40 @@ export function ObservabilityHostTable({
                   // (announcing each cell against its column header). `aria-label` is a global ARIA
                   // attribute and is honoured on an implicit "row" role, so the row still gets one
                   // accessible name for its activation semantics without losing table structure.
-                  aria-label={`${r.label}, ${TIER_LABEL[r.tier]}${r.id === selectedId ? ", selected" : ""}. Activate to view details.`}
+                  aria-label={`${r.label}, ${ALARM_LABEL[alarm]}, ${TIER_LABEL[r.tier]}${r.id === selectedId ? ", selected" : ""}. Activate to view details.`}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(r.id); }
                   }}
                 >
-                  <td><TierCell tier={r.tier} /></td>
-                  <td style={{ color: "var(--text-primary)", fontWeight: 700 }}>{r.label}</td>
-                  <td><EnvBadge environment={r.environment} /></td>
-                  <td className="obs-table--right">{r.host ? <MetricCell r={r.host.cpuBusyPct} suffix="%" /> : "—"}</td>
-                  <td className="obs-table--right">{r.host ? <MetricCell r={r.host.memUsedPct} suffix="%" /> : "—"}</td>
-                  <td className="obs-table--right">{r.host ? <MetricCell r={r.host.diskUsedPct} suffix="%" /> : "—"}</td>
-                  <td className="obs-table--right">{r.host ? fmt(r.host.load1) : "—"}</td>
-                  <td className="obs-table--right">{r.host ? fmt(r.host.uptimeDays, "d") : "—"}</td>
+                  <td>
+                    <TierCell tier={r.tier} />
+                    {alarm !== "reporting" && (
+                      <span className={`obs-alarm-badge obs-alarm-badge--${alarm}`}>{ALARM_LABEL[alarm]}</span>
+                    )}
+                  </td>
+                  <td style={{ color: "var(--text-primary)", fontWeight: 700 }}>
+                    {r.label}
+                    {r.role && <span className="obs-role">{r.role}</span>}
+                  </td>
+                  <td><FreshnessCell row={r} collectedAt={collectedAt} now={now} /></td>
+                  <td><EnvCell row={r} /></td>
+                  <td className="obs-table--right">{r.host ? <MetricCell r={r.host.cpuBusyPct} suffix="%" /> : <span className="obs-metric--dim">—</span>}</td>
+                  <td className="obs-table--right">{r.host ? <MetricCell r={r.host.memUsedPct} suffix="%" /> : <span className="obs-metric--dim">—</span>}</td>
+                  <td className="obs-table--right">{r.host ? <MetricCell r={r.host.diskUsedPct} suffix="%" /> : <span className="obs-metric--dim">—</span>}</td>
+                  <td className="obs-table--right">{r.host ? fmt(r.host.load1) : <span className="obs-metric--dim">—</span>}</td>
+                  <td className="obs-table--right">{r.host ? fmt(r.host.uptimeDays, "d") : <span className="obs-metric--dim">—</span>}</td>
                   <td className="obs-table--right">
                     {r.targets ? (
                       <span style={{ color: r.targets.down > 0 ? "var(--status-critical-fg)" : "var(--ink-muted)", fontWeight: r.targets.down > 0 ? 700 : 400 }}>
                         {r.targets.up}/{r.targets.up + r.targets.down}
                       </span>
-                    ) : "—"}
+                    ) : <span className="obs-metric--dim">no data</span>}
                   </td>
                   <td className="obs-table--right">
-                    {dsTotal === 0 ? (
-                      <span className="obs-metric--dim">not measured</span>
+                    {!r.datastores ? (
+                      <span className="obs-metric--dim">n/a</span>
+                    ) : dsTotal === 0 ? (
+                      <span className="obs-metric--dim">none shipped</span>
                     ) : (
                       <span style={{ color: dsDown > 0 ? "var(--status-critical-fg)" : "var(--ink-muted)", fontWeight: dsDown > 0 ? 700 : 400 }}>
                         {dsTotal - dsDown}/{dsTotal}
@@ -296,11 +372,6 @@ export function ObservabilityHostTable({
                   <td className="obs-table--right">
                     <span style={{ color: alertCount > 0 ? "var(--status-warning-fg)" : "var(--ink-muted)", fontWeight: alertCount > 0 ? 700 : 400 }}>
                       {alertCount}
-                    </span>
-                  </td>
-                  <td className="obs-table--right">
-                    <span className={`obs-fresh obs-fresh--${fresh}`} title={`Snapshot generated ${formatAge(age)} (${FRESH_LABEL[fresh]})`}>
-                      {formatAge(age)}
                     </span>
                   </td>
                 </tr>

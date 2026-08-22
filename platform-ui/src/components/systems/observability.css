@@ -1,8 +1,23 @@
 /* Observability host table + drilldown (MON-10). Hairline design language, extends the `.dt`/
    `.sys-*` conventions in data.css/systems.css rather than forking them — no new visual system. */
 
+/* ── Estate-level banners (MSO-06) — RemoteWriteStalled / Prometheus down / stopped-reporting /
+   unregistered. Loud on purpose: these are the "the board itself cannot be trusted right now" or
+   "a host you expect is gone" facts, so they sit above the fleet summary, not inside it. */
+.obs-banner { padding: 12px 16px; margin-bottom: 12px; border: 0.5px solid var(--erp-hairline); font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.obs-banner strong { font-weight: 700; }
+.obs-banner--critical { background: var(--status-critical-bg); border-color: var(--status-critical-line); }
+.obs-banner--warn { background: var(--status-warning-bg); border-color: var(--status-warning); }
+
+/* Estate-wide known limitation (containersRunning), rendered as a persistent one-liner rather than
+   a full card in the fleet header — the drilldown carries the per-host detail. */
+.obs-limitation-inline { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+
 /* ── Fleet summary strip ─────────────────────────────────────────────────────────────────────── */
 .obs-fleet { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 16px; }
+/* Freshness is the LEAD signal (contract §20.1a note 1) — this strip renders FIRST, above the
+   health/alerts strip, so it cannot be scrolled past as an afterthought. */
+.obs-fleet--freshness { margin-bottom: 10px; }
 
 /* ── Toolbar: search + environment + tier filter chips ──────────────────────────────────────── */
 .obs-toolbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; }
@@ -64,18 +79,40 @@
 .obs-metric { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-data); font-variant-numeric: tabular-nums; color: var(--text-primary); }
 .obs-metric--dim { color: var(--erp-ink-50); font-style: italic; font-family: var(--font-body); }
 
-/* Environment: a real tag is a plain label; "not tagged" is visually a DIFFERENT thing — dashed
-   border, muted, no color implying good/bad — so it never gets misread as a legitimate value. */
+/* Environment: now a REAL inventory-backed value (contract §20.1a) — a plain label, capitalized.
+   "unregistered" is visually a DIFFERENT thing — dashed border, warning-toned, since a series with
+   no inventory row is drift that needs eyes, not a placeholder waiting on a future contract. */
+.obs-env-wrap { display: inline-flex; align-items: center; gap: 6px; }
 .obs-env { display: inline-flex; align-items: center; padding: 2px 8px; font: 600 11px var(--font-body); letter-spacing: 0.03em; border: 0.5px solid var(--erp-hairline); color: var(--text-primary); text-transform: capitalize; }
-.obs-env--unset { border-style: dashed; color: var(--erp-ink-50); font-style: italic; text-transform: none; }
+.obs-env--unregistered { border-style: dashed; border-color: var(--status-warning); color: var(--status-warning-fg); font-style: italic; text-transform: none; }
+.obs-env-drift { display: inline-flex; align-items: center; padding: 1px 6px; font: 700 10px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--status-warning-fg); border: 0.5px dashed var(--status-warning); }
 
-/* Freshness: independent of health tier on purpose (see observability.ts's `Freshness` doc). Aging
-   uses the same amber as a warn metric; stale uses rust — staleness IS a critical-grade fact even
-   when every reading it's attached to looks calm. */
-.obs-fresh { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.obs-role { display: inline-block; margin-left: 8px; font: 400 11px var(--font-body); color: var(--erp-ink-50); font-style: italic; }
+
+/* Freshness — the LEAD signal (contract §20.1a note 1), independent of health tier. `stale` uses
+   the same amber as a warn metric; `dark` uses rust — a dark host must be impossible to mistake for
+   calm. `never` gets its own (idle) tone: it is not "broken", it may simply be an onboarding host
+   that hasn't sent its first sample yet — the alarm badge (obs-alarm-badge) is what escalates that
+   when the inventory says the host should already be active. */
+.obs-fresh { font-family: var(--font-data); font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 5px; }
 .obs-fresh--fresh { color: var(--erp-ink-50); }
-.obs-fresh--aging { color: var(--status-warning-fg); font-weight: 700; }
-.obs-fresh--stale { color: var(--status-critical-fg); font-weight: 700; }
+.obs-fresh--stale { color: var(--status-warning-fg); font-weight: 700; }
+.obs-fresh--dark { color: var(--status-critical-fg); font-weight: 700; }
+.obs-fresh--never { color: var(--status-idle-fg); font-weight: 700; }
+
+/* Row-level alarm badge — riding alongside the health-tier dot in the Status column, because a
+   `dark`/`never`/`unregistered` host can be health-tier "unknown" (nothing to measure) while still
+   being the single most important row on the board. Text-only differences from StatusBadge's
+   family palette would be too subtle here; these get their own left-accent treatment on the row. */
+.obs-alarm-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; font: 700 10px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; border: 0.5px solid currentColor; }
+.obs-alarm-badge--stopped-reporting { color: var(--status-critical-fg); }
+.obs-alarm-badge--unregistered { color: var(--status-warning-fg); }
+.obs-alarm-badge--expected-pending { color: var(--status-idle-fg); }
+.obs-alarm-badge--decommissioned-muted { color: var(--erp-ink-50); }
+
+.obs-table tbody tr.obs-row--stopped td:first-child { border-left: 3px solid var(--status-critical); }
+.obs-table tbody tr.obs-row--unregistered td:first-child { border-left: 3px solid var(--status-warning); }
+.obs-table tbody tr.obs-row--muted td { opacity: 0.55; }
 
 /* ── Drilldown: the selected host's full breakdown ───────────────────────────────────────────── */
 .obs-drill__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -94,3 +131,11 @@
 .obs-refresh { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .obs-refresh__label { display: inline-flex; align-items: center; gap: 6px; font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 .obs-refresh__stamp { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+
+/* ── Estate-level (unattributed) alerts list — app-level alerts with no host label ──────────────── */
+.obs-alert-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.obs-alert-list__item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0.5px solid var(--erp-hairline); font: 400 13px var(--font-body); }
+.obs-alert-list__item--active { border-left: 3px solid var(--status-critical); }
+.obs-alert-list__item--suppressed { border-left: 3px solid var(--erp-hairline); opacity: 0.7; }
+.obs-alert-list__name { font-weight: 700; color: var(--text-primary); }
+.obs-alert-list__meta { font: 400 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.04em; color: var(--erp-ink-50); }

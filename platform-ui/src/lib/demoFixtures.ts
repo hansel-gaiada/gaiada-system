@@ -1831,30 +1831,140 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // MON — monitoring board (Plane B: client properties + services). Read-only fixtures
   // (lib/demoMonitoring.ts); seeded with a down/degraded/stale/maintenance/unknown spread so every
   // branch of the board is drivable in a browser without the backend module existing.
-  // MON-09i - Plane A admin console (/systems/observability). Seeded with a box under real
-  // pressure, NOT an idle one: disk at 78% with a downward projection, one scrape target down and
-  // one Postgres instance unreachable. Those are the exact conditions the page exists to make
-  // visible, and a demo showing a healthy box would prove none of them render.
+  // MSO-06 — Plane A admin console (/systems/observability), estate shape (contract §20.1a).
+  // Seeded with SEVEN hosts covering every non-negotiable branch this ticket exists to render —
+  // a demo showing one calm box would prove none of them:
+  //   - gda-aicenter (production, erp-core): fresh, but disk at 78.4% with a downward 24h
+  //     projection and one scrape target + one Postgres instance down — under real pressure.
+  //   - sumopod (ops, observability-hub): fresh and healthy, but its SERIES report env "staging"
+  //     while the inventory says "ops" — the envDrift badge case.
+  //   - staging-01 (staging, app-staging): STALE — still has readings (they are historical, not
+  //     absent), which is the "looks calm on old data" trap note 1 warns about.
+  //   - edge-02 (production, edge-worker): status active but freshness DARK — an expected,
+  //     provisioned, active host that stopped reporting. RemoteWriteStalled is attributed to this
+  //     host, which is also why the whole-board banner fires in this fixture.
+  //   - newhost-04 (dev, onboarding-node): status onboarding, freshness NEVER — expected-pending,
+  //     not an incident, and must not read like edge-02's alarm.
+  //   - old-box (production, legacy): status decommissioned, freshness stale — muted, not alarming,
+  //     still visible until its series age out.
+  //   - mystery-host: NOT in the inventory at all (registered:false) — a series arrived with a host
+  //     label nobody provisioned, the OTHER drift direction from edge-02/newhost-04.
+  // alertsActive/alertsSuppressed are measured numbers (2 / 1), not null — the null case (Alertmanager
+  // unreadable) is covered by observability.test.ts rather than the demo, since DEMO_MODE has no way
+  // to also demonstrate "the backend could not reach Alertmanager" without a second scenario knob.
   if (p === "/api/admin/observability" && method.toUpperCase() === "GET") {
+    const now = new Date();
     return { status: 200, json: {
       available: true,
       grafanaHint: "http://localhost:3001 (via SSH tunnel)",
-      host: {
-        cpuBusyPct: { value: 24.6, note: null },
-        memUsedPct: { value: 56.1, note: null },
-        diskUsedPct: { value: 78.4, note: null },
-        diskFreeGb: { value: 11.0, note: null },
-        diskFreeGb24h: { value: 9.7, note: null },
-        load1: { value: 1.02, note: null },
-        uptimeDays: { value: 19.3, note: null },
+      collectedAt: now.toISOString(),
+      hosts: [
+        {
+          key: "gda-aicenter", displayName: "gda-aicenter", env: "production", role: "erp-core",
+          registered: true, status: "active", envDrift: false,
+          freshness: { state: "fresh", lastSampleAgeSeconds: 22 },
+          host: {
+            cpuBusyPct: { value: 24.6, note: null }, cores: { value: 4, note: null },
+            memUsedPct: { value: 56.1, note: null }, diskUsedPct: { value: 78.4, note: null },
+            diskFreeGb: { value: 11.0, note: null }, diskFreeGb24h: { value: 9.7, note: null },
+            load1: { value: 1.02, note: null }, uptimeDays: { value: 19.3, note: null },
+          },
+          targets: { up: 13, down: 1, downJobs: ["blackbox-http"] },
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: {
+            postgres: [{ instance: "postgres-exporter:9187", up: true }, { instance: "postgres-exporter-bot:9187", up: false }],
+            redis: [{ instance: "redis-exporter:9121", up: true }, { instance: "redis-exporter-bot:9121", up: true }],
+          },
+        },
+        {
+          key: "sumopod", displayName: "sumopod", env: "ops", role: "observability-hub",
+          registered: true, status: "active", envDrift: true,
+          freshness: { state: "fresh", lastSampleAgeSeconds: 9 },
+          host: {
+            cpuBusyPct: { value: 7.8, note: null }, cores: { value: 8, note: null },
+            memUsedPct: { value: 29.4, note: null }, diskUsedPct: { value: 21.9, note: null },
+            diskFreeGb: { value: 340.0, note: null }, diskFreeGb24h: { value: 341.0, note: null },
+            load1: { value: 0.14, note: null }, uptimeDays: { value: 41.7, note: null },
+          },
+          targets: { up: 5, down: 0, downJobs: [] },
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: null,
+        },
+        {
+          key: "staging-01", displayName: "staging-01", env: "staging", role: "app-staging",
+          registered: true, status: "active", envDrift: false,
+          freshness: { state: "stale", lastSampleAgeSeconds: 340 },
+          host: {
+            cpuBusyPct: { value: 11.5, note: null }, cores: { value: 2, note: null },
+            memUsedPct: { value: 18.2, note: null }, diskUsedPct: { value: 31.0, note: null },
+            diskFreeGb: { value: 60.0, note: null }, diskFreeGb24h: { value: 59.5, note: null },
+            load1: { value: 0.08, note: null }, uptimeDays: { value: 6.1, note: null },
+          },
+          targets: { up: 4, down: 0, downJobs: [] },
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: { postgres: [{ instance: "postgres-exporter:9187", up: true }], redis: [] },
+        },
+        {
+          key: "edge-02", displayName: "edge-02", env: "production", role: "edge-worker",
+          registered: true, status: "active", envDrift: false,
+          freshness: { state: "dark", lastSampleAgeSeconds: 912 },
+          host: null, targets: null,
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: null,
+        },
+        {
+          key: "newhost-04", displayName: "newhost-04", env: "dev", role: "onboarding-node",
+          registered: true, status: "onboarding", envDrift: false,
+          freshness: { state: "never", lastSampleAgeSeconds: null },
+          host: null, targets: null,
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: null,
+        },
+        {
+          key: "old-box", displayName: "old-box", env: "production", role: "legacy",
+          registered: true, status: "decommissioned", envDrift: false,
+          freshness: { state: "stale", lastSampleAgeSeconds: 480 },
+          host: {
+            cpuBusyPct: { value: 2.1, note: null }, cores: { value: 2, note: null },
+            memUsedPct: { value: 12.0, note: null }, diskUsedPct: { value: 44.0, note: null },
+            // 80.2 -> 80.5, deliberately FLAT/growing (not the exact 0.2 GB/day boundary — that
+            // landed on the wrong side of `diskProjectionNote`'s <=0.2 cutoff due to plain
+            // floating-point subtraction, e.g. `80.0 - 79.8 === 0.20000000000000284` in JS, which
+            // silently counted this muted/decommissioned host in the "trending down" KPI). A
+            // decommissioned host should read as boring on this axis, not sneak into an attention tile.
+            diskFreeGb: { value: 80.2, note: null }, diskFreeGb24h: { value: 80.5, note: null },
+            load1: { value: 0.02, note: null }, uptimeDays: { value: 120.4, note: null },
+          },
+          targets: { up: 2, down: 0, downJobs: [] },
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: null,
+        },
+        {
+          key: "mystery-host", displayName: "mystery-host", env: null, role: null,
+          registered: false, status: null, envDrift: false,
+          freshness: { state: "fresh", lastSampleAgeSeconds: 41 },
+          host: {
+            cpuBusyPct: { value: 63.0, note: null }, cores: { value: 2, note: null },
+            memUsedPct: { value: 71.0, note: null }, diskUsedPct: { value: 55.0, note: null },
+            diskFreeGb: { value: 30.0, note: null }, diskFreeGb24h: { value: 29.6, note: null },
+            load1: { value: 1.9, note: null }, uptimeDays: { value: 0.3, note: null },
+          },
+          targets: { up: 1, down: 0, downJobs: [] },
+          containersRunning: { value: null, note: "per-container discovery broken estate-wide (MON-09n): cAdvisor cannot enumerate containers under the containerd snapshotter" },
+          datastores: null,
+        },
+      ],
+      estate: {
+        hosts: { total: 7, fresh: 3, stale: 2, dark: 1, never: 1 },
+        alertsActive: 2,
+        alertsSuppressed: 1,
       },
-      targets: { up: 13, down: 1, downJobs: ["blackbox-http"] },
-      datastores: {
-        postgres: [{ instance: "postgres-exporter:9187", up: true }, { instance: "postgres-exporter-bot:9187", up: false }],
-        redis: [{ instance: "redis-exporter:9121", up: true }, { instance: "redis-exporter-bot:9121", up: true }],
-      },
-      alerts: [{ name: "GatewayBudgetNearCap", severity: "ticket" }],
-      collectedAt: new Date().toISOString(),
+      alerts: [
+        { name: "RemoteWriteStalled", severity: "page", state: "active", host: "edge-02" },
+        { name: "DiskWillFillIn24h", severity: "page", state: "active", host: "gda-aicenter" },
+        { name: "GatewayBudgetNearCap", severity: "ticket", state: "suppressed", host: null },
+      ],
+      alertsNote: null,
     } };
   }
 
