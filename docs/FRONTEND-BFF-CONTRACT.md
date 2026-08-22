@@ -2985,7 +2985,18 @@ spread from `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` so the `write:true, impact:"hig
 retyped. The stale sentence was believed over the code by a later seat, which is exactly the failure
 mode the top of this file warns about. **`social.publishPost` IS declared.**
 
-`social.publishPostMetered` is BARRED and must never be declared at all — that has not changed.
+⚠ **CORRECTED 2026-08-23 (security follow-up, found while closing SMM-22's Cerbos gap).** This line
+used to end here saying "`social.publishPostMetered` is BARRED and must never be declared at all —
+that has not changed." That was true when SMM-09 wrote it and stopped being true when SMM-22
+(2026-08-22) built the metered tool's own real endpoint and declared it (see the `publish-metered`
+row below, itself already correctly marked **BUILT**) — the SAME stale-comment class independently
+found and fixed in `modules/social/index.ts`'s own import-block comment that pass. What is STILL
+true, and is the actual load-bearing fact: `social.publishPostMetered` remains BARRED FROM
+AUTO-EXECUTION in `core/approval-executables.ts` by default (`SOCIAL_METERED_PUBLISH_ENABLED`
+defaults false) and remains deliberately ABSENT from `cerbos/policies/resource_mcp_tool.yaml`'s
+executable-tool bracket, so an agent/automation-origin re-drive of it can never auto-execute —
+config flag or no. See that policy file's own dated SMM-22 block and `docs/plans/smm-tracker.md`'s
+"Security follow-ups closed" evidence block for the live-Cerbos proof.
 
 **The publish gate (SMM-09) — BUILT.** Cerbos kind `social_post`. This is the D14
 executable-approval spine SMM-10/17/22/31 consume. Design: addendum D-14 (publish executes on

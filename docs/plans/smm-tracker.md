@@ -36,6 +36,18 @@ not afterwards.
 | P4 agents + assistant | **3** (+1 partial: SMM-35 summary-read only) | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
+**Note (2026-08-23, senior-be, security follow-ups):** two of the "small follow-ups the seats named
+rather than silently absorbed" are now closed — see this file's own evidence block below (just above
+"What is actually left"). (A) OAuth state single-use: `social_oauth_states` + `oauth-state.ts`
+replace LinkedIn's/YouTube's signed-but-replayable state; proven RED (pre-fix replay succeeded
+repeatedly) then GREEN (replay now refused, typed, never a generic 500) — and a real, independent bug
+found in the same pass: `YouTubeOAuthStateError` was never registered in `main.ts`'s filter list,
+so a bad YouTube callback state escaped as a body-less 500. (B) SMM-22's Cerbos gap: live-probed as
+ALREADY denied before any edit (the tool's simple absence from `resource_mcp_tool.yaml`'s bracket
+already refuses an agent/automation-origin metered re-drive, with or without a grant) — closed as
+documentation + a regression test pinning that denial, stated plainly as hardening rather than a
+live hole. Module `social-media 0.5.19`.
+
 **Note (2026-08-23, medior, SMM-27):** best-time-to-post landed — a classical-stats sweep +
 suggestion chip, deliberately NOT an AI ticket. This is the LAST unbuilt ticket in the department:
 P4 is now 3/3 landed (SMM-35 remains its own named partial — see that ticket's own note below). See
@@ -811,9 +823,10 @@ builds the `direct`-shaped `OrgHandle` `schedulePost`/`uploadMedia` need — see
    driver-wide; LinkedIn/YouTube coverage differs per method today via an in-method gate, which
    works but is a per-method discipline someone has to remember for every future network, not a
    structural guarantee.
-4. **The OAuth state's DB-backed single-use gap** — named, not silently decided as unnecessary; a
-   future pass wanting full parity with the Google flow's atomic consume would add a small state
-   table.
+4. ~~**The OAuth state's DB-backed single-use gap**~~ **CLOSED 2026-08-23** — see "Security
+   follow-ups closed" evidence block. Named, not silently decided as unnecessary, when this ticket
+   shipped; a future pass wanting full parity with the Google flow's atomic consume would add a small
+   state table — that pass landed.
 
 Test counts: **413 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
 + `social-client-review-portal.controller.test.ts` (baseline measured directly in THIS worktree,
@@ -2270,6 +2283,92 @@ action this ticket's new endpoint uses already existed and was already catalogue
 
 ---
 
+## Security follow-ups closed (2026-08-23, senior-be)
+
+Two of the "small follow-ups the seats named rather than silently absorbed" (below), both closed in
+one pass. Neither was speculative; both were named honestly by the seats that shipped the code they
+sit in.
+
+**A — OAuth state single-use (SMM-38c/38d's own named gap).** `linkedin-oauth.ts`/`youtube-oauth.ts`
+minted an HMAC-signed, time-boxed `state` with NO database row and NO atomic single-use enforcement
+— both files' own headers said so explicitly, and flagged a DB-backed table as "a follow-up, not
+silently decided as unnecessary." Closed:
+- New table `social_oauth_states` (`migrations/202608221751_social_oauth_states.sql`) — THIRD RLS
+  wall, byte-identical predicate to `social_oauth_tokens` (202608201519); reasoned deliberately
+  tenant-scoped (not core, unlike `google_oauth_states`/0076 — nothing outside `social` mints or
+  consumes this shape); purges EVERY row (consumed or not) past `expires_at`, a documented departure
+  from `google_oauth_states`' own keep-consumed-forever policy since this table's consumed rows carry
+  no comparable audit value (`social_accounts`/`social_oauth_tokens` already record it durably).
+- New shared module `publisher/oauth-state.ts` — `parseSocialOAuthStateToken` (sync, HMAC-only, no
+  DB, for the pre-authorize tenantId check) + `consumeSocialOAuthState` (async, the atomic
+  `UPDATE ... WHERE consumed_at IS NULL AND expires_at > now() RETURNING`), mirroring
+  `core/google-oauth/state.ts`'s own proven mint/parse/consume split rather than inventing a second
+  scheme. Both callback controllers updated: parse → Cerbos `connect` check → consume → complete.
+- **RED (captured before the fix, then reverted):** `git stash` on the six changed files restored
+  the ORIGINAL `linkedin-oauth.ts`; a throwaway test minted one state and called
+  `parseLinkedInOAuthState` on it three times — **all three succeeded identically**
+  (`{tenantId:"tenant-1",accountId:"account-1"}` every time), proving no single-use enforcement
+  existed. `git stash pop` restored the fix; the probe file was deleted (not committed).
+- **GREEN:** `oauth-state.test.ts`, **10/10 passed**. Covers: mint→consume round trip; a SECOND
+  consume of the same token refused (`SocialOAuthStateError`, reason
+  `unknown_expired_or_consumed`), including three further replay attempts, all refused identically;
+  two CONCURRENT consume attempts on the same token — exactly one wins (`Promise.allSettled`, 1
+  fulfilled / 1 rejected — the atomic UPDATE, not check-then-act); tampered signature
+  (`bad_signature`); malformed token; expired-but-unconsumed (same collapsed reason as a replay, by
+  design — never a state-existence oracle); network-mismatch (a linkedin state presented at the
+  youtube consume call is refused AND burned by that presentation — a retry against the correct
+  network then replays); cross-tenant isolation; the `oauth_states` purge seam (deletes a
+  consumed-and-expired row, alongside the built-in `inbox` purger in the same transaction).
+- **Found and fixed in the same pass (not asked for, but directly "never a generic 500"):**
+  `YouTubeOAuthStateError` was never added to `main.ts`'s global filter list — only
+  `LinkedInOAuthStateError` was. A malformed/forged/expired YouTube callback state escaped as a
+  **body-less 500** (the exact bug class platform-nest's CLAUDE.md names as having recurred four
+  times). Consolidating both networks onto one `SocialOAuthStateError` (registered once) closes this
+  by construction — there is no longer a second class to forget.
+- **Named, not fixed (out of scope):** `created_by` is stored on the new table for audit but not
+  compared against the calling principal at consume time — `core/google-oauth/state.ts`'s own
+  login-CSRF defense (`principal_mismatch`) does that comparison; this table does not yet. A small,
+  separate follow-up.
+- Full platform-nest social suite re-run: **531 passed / 0 failed / 5 skipped** (36 files; the 5
+  skips are `social-reports.test.ts`'s own pre-existing, unrelated self-skip). `tsc --noEmit` clean.
+  `npm run lint:migration-names` / `lint:migration-rls` both green (134 files scanned).
+
+**B — SMM-22's Cerbos gap for an agent/automation-origin metered-tool re-drive.** Stated plainly,
+per this ticket's own instruction not to invent work: **this was NOT a live authorization hole.**
+Live-probed against a standalone Cerbos (`ghcr.io/cerbos/cerbos:0.54.0`) serving this worktree's
+UNMODIFIED `resource_mcp_tool.yaml`, via `POST /api/check/resources`:
+- An n8n/automation-origin principal (`isAutomation:true`, in the tool's own `automationScope`,
+  `assurance:"low"`) calling `social.publishPostMetered` (`write:true`/`impact:"high"` since SMM-22
+  gave it a real endpoint) WITH a plausible `approvalId` attribute → **EFFECT_DENY**.
+- An agent-origin principal (`isAutomation:false`, `isUnattended:true` via the agent marker,
+  `assurance:"low"`) with the SAME shape → **EFFECT_DENY**.
+Both denied simply because the tool's name is absent from the policy's executable-tool bracket —
+D14-13's grant-lift disjunct cannot fire without a bracket entry, and nothing else in the policy
+would let an unattended, high-impact write through. **What was actually missing**: any
+SMM-22-specific documentation of this exclusion (the file's only relevant prose predated SMM-22's
+real tool declaration and had gone stale — the identical staleness independently found in
+`modules/social/index.ts`'s own import-block comment, "stays undeclared and barred", fixed in the
+same pass) and any regression test proving the denial for this real tool name. Closed:
+- A dated SMM-22 block added to `resource_mcp_tool.yaml`, naming `social.publishPostMetered`
+  explicitly, explaining the money-spending reasoning, and warning against ever adding the name to
+  the bracket without the separate, reviewed runbook step `core/approval-executables.ts`'s own
+  header already names for turning `SOCIAL_METERED_PUBLISH_ENABLED` on.
+- Five new LIVE-Cerbos tests in `mcp-hub/src/cerbos.test.ts` (against the REAL tool name, hand-
+  registered with its real classification, not a synthetic stand-in): automation-origin DENY with a
+  verified grant (proving the in-code engine ALONE would have allowed it — only the policy's
+  explicit list still refuses); agent-origin DENY with a verified grant; both origins' DENY with NO
+  grant (today's unchanged suspend behaviour, pinned so a future edit cannot silently flip it); and a
+  verified HUMAN's own direct call is unaffected (ALLOW, D14 never applied to an attended caller).
+- Full mcp-hub suite: **273 passed / 0 failed** (20 files, includes the 5 new tests — up from the
+  pre-existing 29 in this same describe block). `tsc --noEmit` clean. Cerbos policy compiled clean
+  (`docker run ghcr.io/cerbos/cerbos:0.54.0 compile /policies`) both BEFORE and AFTER the edit — the
+  edit is comment-only, no CEL/rule change, so this also demonstrates the folded-scalar `//`-comment
+  trap this exact file broke on once (2026-08-20) was not repeated.
+- `npm run test:iam-chain-alignment` (platform-nest): **25/25 passed** — no permission-catalog/Cerbos/
+  module-declared-permission drift introduced (no permission NAME changed).
+
+---
+
 ## What is actually left (2026-08-22, updated same day by SMM-26's own pass)
 
 **38 tickets merged.** P0, P1, P2, P3, the whole `direct`-driver wave, and SMM-26 (the first P4
@@ -2280,7 +2379,7 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 
 | Remaining | Note |
 |---|---|
-| **SMM-22 follow-ups** | Usage panel not browser-driven (unit/type-checked only); `resource_mcp_tool.yaml` not updated for the (currently unused) agent/automation-origin metered-tool re-drive case; X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
+| **SMM-22 follow-ups** | Usage panel not browser-driven (unit/type-checked only); ~~`resource_mcp_tool.yaml` not updated for the agent/automation-origin metered-tool re-drive case~~ **CLOSED 2026-08-23, senior-be — see "Security follow-ups closed" evidence block above** (was already correctly denied; closed as documentation + regression test); X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
 | **SMM-25** full-stack e2e | 🟡 partial — the DEMO_MODE social fixture landed in SMM-14; the Playwright console suite has not |
 | **SMM-26 follow-up** | the v1.0 design's "weekly per opted-in engagement" scheduled sweep for the content-brief flow was deliberately NOT built — needs an architect decision on an automation service identity before a principal-less job can legitimately call WS8's per-principal-scoped RAG search |
 | **SMM-27** | ✅ merged 2026-08-23 — see this file's own SMM-27 evidence block (P4 table above); the last unbuilt ticket in the department |
@@ -2292,7 +2391,9 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 - `metrics-job.ts` reads `process.env` directly instead of `config.ts` (it was held out of that file to avoid a three-way collision)
 - The report narrative has no runtime numeric guard — only the prompt constrains a hallucinated figure
 - The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series
-- OAuth state is HMAC-signed and time-boxed but not DB-backed single-use
+- ~~OAuth state is HMAC-signed and time-boxed but not DB-backed single-use~~ **CLOSED 2026-08-23,
+  senior-be — see "Security follow-ups closed" evidence block above** (`social_oauth_states` +
+  `oauth-state.ts`, RED-then-GREEN proven)
 - Spike detection has no persistent dedup, so a sustained spike re-fires each tick
 - `listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide
 - No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)

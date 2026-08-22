@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.18` | IN PROGRESS | Social Media | 2026-08-23 |
+| social-media | `0.5.19` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,56 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.18` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.19` · IN PROGRESS
+
+**0.5.19 (2026-08-23, senior-be) — two SECURITY-SHAPED follow-ups closed, both named honestly by
+earlier seats: OAuth state single-use (SMM-38c/38d), and SMM-22's Cerbos gap for an agent/automation-
+origin metered-tool re-drive.** See `docs/plans/smm-tracker.md`'s own evidence blocks for full
+red-then-green detail; summarized here.
+
+**Follow-up A — LinkedIn/YouTube `direct`-driver OAuth `state` is now DB-backed and atomically
+single-use.** The signed-but-replayable state both files' own headers named as a deliberate,
+follow-up-flagged simplification is closed: new table `social_oauth_states`
+(`migrations/202608221751_social_oauth_states.sql`, THIRD RLS wall, same predicate as
+`social_oauth_tokens`), new shared module `publisher/oauth-state.ts` (mint/parse/consume, mirroring
+`core/google-oauth/state.ts`'s own proven pattern) replacing the two per-network signed-only
+implementations. RED (pre-fix, captured via a stashed round-trip against the original
+`mintLinkedInOAuthState`/`parseLinkedInOAuthState`): the SAME signed state verified successfully on
+a 2nd and 3rd presentation — no single-use enforcement existed. GREEN (post-fix,
+`oauth-state.test.ts`, 10/10): a 2nd `consumeSocialOAuthState` call on an already-consumed token is
+refused with a typed `SocialOAuthStateError("unknown_expired_or_consumed")`, never a silent 2nd
+success and never a generic 500; two concurrent consume attempts on the SAME token resolve to
+exactly one winner (the atomic `UPDATE...WHERE consumed_at IS NULL` — a database-enforced property,
+not check-then-act); network-mismatch and cross-tenant cases also verified. **Found and fixed in the
+same pass:** `YouTubeOAuthStateError` was never registered in `main.ts`'s filter list at all — a
+malformed/forged/expired YouTube callback state escaped as a body-less 500 (the same bug class
+platform-nest's own CLAUDE.md names as having recurred four times). Consolidating both networks'
+state errors into one `SocialOAuthStateError` closes this by construction. **Named, not silently
+decided:** `created_by` is stored on the new table for audit but not yet compared against the
+calling principal at consume time — `core/google-oauth/state.ts`'s own login-CSRF defense does that
+comparison and this table does not yet, a separate, small follow-up. Full platform-nest social suite
+re-run clean after the change: **531/531 passed, 5 skipped** (an unrelated, pre-existing
+`social-reports.test.ts` self-skip), 36 files.
+
+**Follow-up B — SMM-22's Cerbos gap, closed as documentation+test hardening of an ALREADY-correct
+denial, not a live authorization hole (stated plainly, per this ticket's own instruction not to
+invent work).** Live probes against a standalone Cerbos instance serving the UNMODIFIED policy
+showed `social.publishPostMetered` (write:true/impact:high since SMM-22 gave it a real endpoint) was
+ALREADY denied for both an n8n/automation-origin caller and an agent-origin caller
+(`principal.attr.isUnattended` via the agent marker), each presenting a plausible `approvalId` — the
+tool is simply absent from `resource_mcp_tool.yaml`'s executable-tool bracket, and D14-13's
+grant-lift disjunct cannot fire without a bracket entry. What WAS missing: any documentation of this
+specific tool's exclusion post-SMM-22 (the file's only relevant header text predated the tool's real
+declaration and had gone stale — the SAME staleness independently found and fixed in
+`modules/social/index.ts`'s own import-block comment), and any regression test proving it. Closed by
+adding a dated SMM-22 block to `resource_mcp_tool.yaml` naming the tool explicitly and warning
+against ever adding it to the bracket without the separate, reviewed runbook step
+`core/approval-executables.ts`'s own header already names, plus five new LIVE-Cerbos tests in
+`mcp-hub/src/cerbos.test.ts` (against the REAL tool name, not a synthetic stand-in) proving DENY for
+both caller shapes with and without a verified grant, and that a verified HUMAN's own direct call is
+unaffected. Full mcp-hub suite: **273/273 passed** (20 files); `tsc --noEmit` clean in both
+platform-nest and mcp-hub. Cerbos policy set compiled clean (`cerbos compile /policies`, image
+`ghcr.io/cerbos/cerbos:0.54.0`) both before and after the edit.
 
 **0.5.18 (2026-08-23, medior) — SMM-27: best-time-to-post, a CLASSICAL STATS job + a suggestion
 chip — the last unbuilt ticket in the department.** Worktree was ONE MERGE BEHIND at cut time

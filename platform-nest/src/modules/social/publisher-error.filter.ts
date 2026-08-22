@@ -25,7 +25,7 @@ import { ArgumentsHost, Catch, ExceptionFilter } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { SocialPublisherError } from "./publisher/types";
 import { OAuthTokenError } from "./publisher/oauth-tokens";
-import { LinkedInOAuthStateError } from "./publisher/linkedin-oauth";
+import { SocialOAuthStateError } from "./publisher/oauth-state";
 
 /** Status per refusal kind, chosen so a caller can tell the four genuinely different situations
  *  apart, because each needs a different human response:
@@ -90,6 +90,14 @@ export class SocialPublisherErrorFilter implements ExceptionFilter {
 // surface it over HTTP, so this is where that gap closes — same reasoning as the filter above
 // (a plain Error escaping a module is a body-less 500), same "default to 503, not 500" discipline
 // for anything added to either vocabulary later.
+//
+// ⚠ FOUND-AND-FIXED WHILE CLOSING THE STATE-REPLAY FOLLOW-UP: this `@Catch()` used to name
+// `LinkedInOAuthStateError` only — `YouTubeOAuthStateError` was never registered anywhere in
+// `main.ts`'s filter list, so a malformed/forged/expired YouTube callback state escaped as a
+// body-less 500 (platform-nest's own CLAUDE.md names this exact bug class as having recurred four
+// times before this). Consolidating both networks' state errors into ONE `SocialOAuthStateError`
+// (`./publisher/oauth-state.ts`) closes this by construction — there is no longer a second class to
+// forget to register.
 const OAUTH_TOKEN_STATUS_BY_CODE: Record<string, number> = {
   // No live grant / a revoked or expired one: well-formed request, the STATE forbids it — 409,
   // matching `org_not_provisioned`'s own family in the table above.
@@ -101,13 +109,13 @@ const OAUTH_TOKEN_STATUS_BY_CODE: Record<string, number> = {
   oauth_vault_not_configured: 503,
 };
 
-@Catch(OAuthTokenError, LinkedInOAuthStateError)
+@Catch(OAuthTokenError, SocialOAuthStateError)
 export class SocialOAuthErrorFilter implements ExceptionFilter {
-  catch(exception: OAuthTokenError | LinkedInOAuthStateError, host: ArgumentsHost): void {
+  catch(exception: OAuthTokenError | SocialOAuthStateError, host: ArgumentsHost): void {
     const reply = host.switchToHttp().getResponse<FastifyReply>();
-    const status = exception instanceof LinkedInOAuthStateError
-      // A forged/expired/malformed state is a bad REQUEST, not a server or data-state fact — 400,
-      // the same status client-invites.ts's own ClientInviteError uses for the identical shape.
+    const status = exception instanceof SocialOAuthStateError
+      // A forged/expired/consumed/malformed state is a bad REQUEST, not a server or data-state fact —
+      // 400, the same status client-invites.ts's own ClientInviteError uses for the identical shape.
       ? 400
       : (OAUTH_TOKEN_STATUS_BY_CODE[exception.code] ?? 503);
     void reply.status(status).send({ error: exception.message, code: exception.code });

@@ -266,6 +266,13 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
   const noScopeWf: Principal = { provider: "n8n", externalId: "wf:d14-13-noscope", assurance: "low" };
   const moneyWf: Principal = { provider: "n8n", externalId: "wf:d14-13-money", assurance: "low" };
   const driftWf: Principal = { provider: "n8n", externalId: "wf:d14-13-drift", assurance: "low" };
+  // SMM-22 security follow-up — an in-scope AUTOMATION (n8n) caller for the metered social tool...
+  const meteredWf: Principal = { provider: "n8n", externalId: "wf:d14-13-metered-social", assurance: "low" };
+  // ...and an AGENT-origin caller: `isAutomation` is false (provider is NOT "n8n") but `agent` is
+  // set, so `isUnattended` is still true via the OTHER disjunct (`principal.ts#isUnattended`) — this
+  // is the caller shape the 2026-08-20 fix (this file's own header, "THE CO-AUTHOR"/"isUnattended")
+  // exists for, and Task B's own wording ("agent/automation-origin") names both shapes explicitly.
+  const meteredAgent: Principal = { provider: "whatsapp", externalId: "agent-caller-1", assurance: "low", agent: "agent-1" };
   const realAuditFile = config.auditFile;
   // A verified, non-automation principal (assurance "verified" comes from the platform IdP, never
   // from an OBO envelope — mintPrincipal can only ever produce "low", so construct it directly).
@@ -276,11 +283,16 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
     AUTOMATION_ALLOWLIST["wf:d14-13-noscope"] = ["ping"];
     AUTOMATION_ALLOWLIST["wf:d14-13-money"] = ["search.setBudget"];
     AUTOMATION_ALLOWLIST["wf:d14-13-drift"] = ["deploy.canary"];
+    // SMM-22 security follow-up — deliberately IN scope, so the ONLY thing that can still refuse
+    // this caller is the impact-gate's grant-lift bracket, not the automation-scope conjunct. A
+    // test that left this workflow unscoped would prove nothing about the bracket specifically.
+    AUTOMATION_ALLOWLIST["wf:d14-13-metered-social"] = ["social.publishPostMetered"];
   });
   afterAll(() => {
     delete AUTOMATION_ALLOWLIST["wf:d14-13-noscope"];
     delete AUTOMATION_ALLOWLIST["wf:d14-13-money"];
     delete AUTOMATION_ALLOWLIST["wf:d14-13-drift"];
+    delete AUTOMATION_ALLOWLIST["wf:d14-13-metered-social"];
     rmSync(TEST_AUDIT_DIR, { recursive: true, force: true });
   });
 
@@ -292,6 +304,13 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
     // policy list) and a hypothetical FUTURE registry addition the policy does not yet list.
     registerTool({ name: "search.setBudget", description: "spends a client's ad budget", minAssurance: "low", write: true, impact: "high", inputSchema: { type: "object" }, handler: async () => "BUDGET-CHANGED" });
     registerTool({ name: "deploy.canary", description: "registry-only, not in the policy list", minAssurance: "low", write: true, impact: "high", inputSchema: { type: "object" }, handler: async () => "CANARY-DEPLOYED" });
+    // SMM-22 security follow-up — the REAL tool name and REAL classification
+    // (`SOCIAL_PUBLISH_METERED_TOOL_CLASSIFICATION`, platform-nest/src/modules/social/publish-precondition.ts),
+    // hand-registered here the SAME way `search.setBudget`/`deploy.canary` are above: mcp-hub's own
+    // registry in this test file does not pull live from platform-nest's `/mcp/tool-defs`, so the
+    // fixture must carry the real name+shape for the LIVE policy file to evaluate against, exactly
+    // as it would for the real aggregated tool-def.
+    registerTool({ name: "social.publishPostMetered", description: "publish an approved variant on a metered network", minAssurance: "low", write: true, impact: "high", inputSchema: { type: "object" }, handler: async () => "PUBLISHED-METERED" });
     config.cerbosUrl = LIVE_CERBOS;
     config.approvalGrantSecret = GRANT_SECRET;
     resetGrantNonceCache();
@@ -473,6 +492,63 @@ describe.skipIf(!liveReachable)("D14-13 — LIVE resource_mcp_tool.yaml policy",
     it("non-automation principals decide IDENTICALLY with and without a grant (D14 never applied to them)", async () => {
       const without = await livePolicyAllows(human, "webdev.provisionSite");
       const withGrant = await livePolicyAllows(human, "webdev.provisionSite", mintVerified("webdev.provisionSite", PROVISION_ARGS));
+      expect(withGrant).toBe(without);
+      expect(without).toBe(true);
+    });
+  });
+
+  // ── SMM-22 security follow-up — social.publishPostMetered's own money-tool matrix ─────────────
+  //
+  // The tool SPENDS REAL MONEY per call (X is the only metered network live in v1; OQ-2 separately
+  // disabled X on the $0 `social.publishPost` path). Unlike `search.setBudget` above (a SYNTHETIC
+  // stand-in the test registers just to exercise "a money tool absent from the list"),
+  // `social.publishPostMetered` is a REAL tool this estate has actually declared since SMM-22
+  // (`modules/social/index.ts`) — so this block is the difference between "the pattern works in
+  // the abstract" and "the pattern still holds for the specific tool the ticket named". See
+  // `resource_mcp_tool.yaml`'s own SMM-22 dated block for the policy-side reasoning this pins.
+  describe("SMM-22 — social.publishPostMetered (money-spending twin, absent from the policy list on purpose)", () => {
+    const METERED_ARGS = { tenantId: "tenant-1", variantId: "variant-1" };
+
+    it("DENY: AUTOMATION (n8n) origin, workflow-scoped, WITH a verified grant for this exact call " +
+       "— the in-code engine alone would ALLOW (the grant lifts its impact branch); only the " +
+       "policy's explicit list can still refuse, and it does", async () => {
+      const grant = mintVerified("social.publishPostMetered", METERED_ARGS);
+      expect(await livePolicyAllows(meteredWf, "social.publishPostMetered", grant)).toBe(false);
+      const { authorize } = await import("./policy");
+      expect(authorize(meteredWf, "social.publishPostMetered", mintVerified("social.publishPostMetered", METERED_ARGS)).allow).toBe(true);
+      const d = await authorizeCall(meteredWf, "social.publishPostMetered", mintVerified("social.publishPostMetered", METERED_ARGS));
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toBe("denied by policy: social.publishPostMetered");
+    });
+
+    it("DENY: AGENT origin (isAutomation false, agent-driven — the 2026-08-20 caller shape), WITH a " +
+       "verified grant — an agent can never out-rank the human it serves, and it cannot buy its " +
+       "way past this list either", async () => {
+      const grant = mintVerified("social.publishPostMetered", METERED_ARGS);
+      expect(await livePolicyAllows(meteredAgent, "social.publishPostMetered", grant)).toBe(false);
+      const d = await authorizeCall(meteredAgent, "social.publishPostMetered", grant);
+      expect(d.allow).toBe(false);
+    });
+
+    it("DENY: AUTOMATION origin, no grant at all ⇒ today's exact behaviour (suspend) — unchanged by " +
+       "this follow-up, asserted so a future edit cannot silently flip suspend into a silent allow", async () => {
+      expect(await livePolicyAllows(meteredWf, "social.publishPostMetered")).toBe(false);
+      const d = await authorizeCall(meteredWf, "social.publishPostMetered");
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toMatch(/suspend.*high-impact write/);
+    });
+
+    it("DENY: AGENT origin, no grant at all", async () => {
+      expect(await livePolicyAllows(meteredAgent, "social.publishPostMetered")).toBe(false);
+      const d = await authorizeCall(meteredAgent, "social.publishPostMetered");
+      expect(d.allow).toBe(false);
+    });
+
+    it("ALLOW: a VERIFIED HUMAN (assurance:'verified', not unattended) may still call it directly " +
+       "— D14's impact gate never applied to an attended caller in the first place; this follow-up " +
+       "closes an automation/agent re-drive gap, not the ordinary human path", async () => {
+      const without = await livePolicyAllows(human, "social.publishPostMetered");
+      const withGrant = await livePolicyAllows(human, "social.publishPostMetered", mintVerified("social.publishPostMetered", METERED_ARGS));
       expect(withGrant).toBe(without);
       expect(without).toBe(true);
     });
