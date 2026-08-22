@@ -10,12 +10,15 @@
 //    other specialist failures land on the blackboard as data for the planner
 // Durable/resumable execution (Temporal) is the target state; v1 is in-process and
 // every abnormal end is a typed error carrying the blackboard — never a placeholder.
+import { randomUUID } from "node:crypto";
 import {
   runAgent,
   ApprovalRequiredError,
   type AgentDef,
   type AgentDeps,
+  type AgentStep,
   type Envelope,
+  type EmitStep,
 } from "./agent";
 import { isWriteCapable, runWriteAgent } from "./write-agent";
 
@@ -38,6 +41,58 @@ export interface BlackboardEntry {
 export interface OrchestratorRun {
   outcome: string;
   blackboard: BlackboardEntry[];
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// S0 (agent event spine, 2026-08-22) — delegation as a real edge, not blackboard prose.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Today a specialist the supervisor spawns leaves ONLY a `BlackboardEntry` (status + a truncated
+// summary string) — no run id, no timing, no persisted `agent_runs` row at all. The floor plan's
+// conclusion (`docs/superpowers/plans/2026-08-22-agent-floor-plan.md` §2): "delegation exists only as
+// prose in the blackboard jsonb" — that is what blocks an animated delegation graph.
+//
+// `DelegationTracking` is an OPTIONAL hook bag (every field optional; the whole object may be omitted)
+// that lets a caller — `runner/service.ts`'s `processGoal`, the only production caller that has DB
+// access — observe each specialist run as a first-class thing with its OWN id, timing and step
+// transcript, tagged with the SUPERVISOR's run id as `parentRunId`. `orchestrator.ts` itself gains no DB
+// dependency: it only calls hooks the caller supplies, exactly as it already threads `AgentDeps` without
+// owning a Gateway/hub connection.
+export interface SpecialistRunRecord {
+  runId: string;
+  parentRunId: string;
+  specialist: string;
+  task: string;
+  /** Coarse: "ok" mirrors a `BlackboardEntry` of status "ok"; "failed" collapses every abnormal end
+   *  caught here (`ToolNotAllowedError`, `ModelProtocolError`, a specialist's own `BudgetExhaustedError`,
+   *  or any other thrown error) — the SAME set the existing catch block already turns into blackboard
+   *  data. The caller maps this onto its own richer status vocabulary if it has one (see
+   *  `runner/service.ts`, which maps "failed" to the `unknown_error` `TraceStatus` — the orchestrator
+   *  does not know, and must not guess, a finer classification than the blackboard already captures). */
+  status: "ok" | "failed";
+  outcome: string;
+  steps: AgentStep[];
+  startedAt: number;
+  endedAt: number;
+}
+
+export interface DelegationTracking {
+  /** Mint a run id for a specialist about to be spawned. Defaults to `crypto.randomUUID()` when
+   *  omitted — a caller only needs to supply this if it wants control over the id shape (no production
+   *  caller does; tests may, to assert a specific value). */
+  newRunId?: () => string;
+  /** Build an `EmitStep` scoped to ONE specialist's run id, so its steps stream on their own sequence,
+   *  distinct from the supervisor's own planner-step stream (`opts.emit` below). Omitted ⇒ the
+   *  specialist runs with no observer, exactly as before this ticket. */
+  emitFor?: (runId: string) => EmitStep;
+  /** Called once per specialist run that reaches an end THIS function can observe: success, or the
+   *  existing "everything else is data" catch (a caught failure recorded on the blackboard). NOT called
+   *  on the three whole-goal-aborting rethrows (`GoalSuspendedError`, `ApprovalRequiredError`,
+   *  `GoalBudgetExhaustedError`) — those carry the goal's blackboard, not a clean single-specialist step
+   *  transcript, and inventing one here would be exactly the kind of guess this ticket's honesty rule
+   *  forbids. The in-flight EVENTS for that specialist still exist (via `emitFor`'s stream) even when no
+   *  final `agent_runs` row is persisted for it — see the S0 deploy notes for this scope boundary. */
+  onSpecialistRun?: (rec: SpecialistRunRecord) => void | Promise<void>;
 }
 
 export class UnknownSpecialistError extends Error {
@@ -141,8 +196,23 @@ export async function runOrchestrator(
   goal: string,
   envelope: Envelope,
   rawDeps: AgentDeps,
-  opts: { tenantId?: string; servingProvider?: string } = {},
+  opts: {
+    tenantId?: string;
+    servingProvider?: string;
+    /** S0 — this run's own id, used only to tag `delegate` events and as `parentRunId` on every
+     *  specialist it spawns. Defaults to `crypto.randomUUID()`; no production caller needs to supply
+     *  one unless it wants to correlate this value with something recorded elsewhere BEFORE calling in
+     *  (e.g. `runner/service.ts` mints it first so the same id also names the supervisor's own
+     *  observation record). */
+    runId?: string;
+    /** S0 — optional in-flight observer for the SUPERVISOR's own planner-step events. See agent.ts's
+     *  `EmitStep` doc. */
+    emit?: EmitStep;
+    /** S0 — optional delegation-tracking hooks. See `DelegationTracking`'s doc above. */
+    delegation?: DelegationTracking;
+  } = {},
 ): Promise<OrchestratorRun> {
+  const runId = opts.runId ?? randomUUID();
   const blackboard: BlackboardEntry[] = [];
   const notes: string[] = [];
   const seen = new Set<string>();
@@ -154,7 +224,9 @@ export async function runOrchestrator(
   for (;;) {
     if (plannerSteps >= def.maxPlannerSteps) throw new GoalBudgetExhaustedError("plannerSteps", blackboard);
     plannerSteps++;
+    const plannerStart = Date.now();
     const raw = await deps.complete(plannerPrompt(def, goal, blackboard, notes));
+    await opts.emit?.({ kind: "model", detail: raw.slice(0, 200), durationMs: Date.now() - plannerStart });
 
     const action = parsePlannerAction(raw);
     if (!action) {
@@ -180,11 +252,16 @@ export async function runOrchestrator(
     seen.add(key);
     subRuns++;
 
+    const childRunId = opts.delegation?.newRunId?.() ?? randomUUID();
+    const childEmit = opts.delegation?.emitFor?.(childRunId);
+    await opts.emit?.({ kind: "delegate", detail: `assign ${name}: ${task} -> run ${childRunId}` });
+    const subStartedAt = Date.now();
+
     try {
       if (isWriteCapable(specialist)) {
         // Route write-capable specialists through the D13 provider gate + D14 approval filing.
         const provider = opts.servingProvider ?? deps.lastProvider?.() ?? "echo";
-        const res = await runWriteAgent(specialist, task!, envelope, deps, opts.tenantId ?? "", provider);
+        const res = await runWriteAgent(specialist, task!, envelope, deps, opts.tenantId ?? "", provider, { emit: childEmit });
         if (res.status === "suspended") {
           // D14: a high_write suspends the WHOLE goal — now with a durable approval on file.
           // T2b note: the orchestrator never passes `fileOnSuspend:false` (out of this ticket's
@@ -195,15 +272,32 @@ export async function runOrchestrator(
         }
         const note = res.status === "forced_read_only" ? ` [read-only: ${res.reason}]` : "";
         blackboard.push({ specialist: name!, task: task!, status: "ok", summary: res.run.outcome + note });
+        await opts.delegation?.onSpecialistRun?.({
+          runId: childRunId, parentRunId: runId, specialist: name!, task: task!,
+          status: "ok", outcome: res.run.outcome + note, steps: res.run.steps,
+          startedAt: subStartedAt, endedAt: Date.now(),
+        });
       } else {
-        const run = await runAgent(specialist, task!, envelope, deps);
+        const run = await runAgent(specialist, task!, envelope, deps, childEmit);
         blackboard.push({ specialist: name!, task: task!, status: "ok", summary: run.outcome });
+        await opts.delegation?.onSpecialistRun?.({
+          runId: childRunId, parentRunId: runId, specialist: name!, task: task!,
+          status: "ok", outcome: run.outcome, steps: run.steps,
+          startedAt: subStartedAt, endedAt: Date.now(),
+        });
       }
     } catch (err) {
       // A suspension/budget exhaustion is a HUMAN decision — it suspends the whole goal (D14).
       if (err instanceof GoalSuspendedError || err instanceof ApprovalRequiredError || err instanceof GoalBudgetExhaustedError) throw err;
       // Everything else is data: the planner decides how to proceed with a failed subtask.
-      blackboard.push({ specialist: name!, task: task!, status: "failed", summary: (err as Error).message });
+      const message = (err as Error).message;
+      blackboard.push({ specialist: name!, task: task!, status: "failed", summary: message });
+      const steps = (err as { steps?: AgentStep[] })?.steps ?? [];
+      await opts.delegation?.onSpecialistRun?.({
+        runId: childRunId, parentRunId: runId, specialist: name!, task: task!,
+        status: "failed", outcome: message, steps,
+        startedAt: subStartedAt, endedAt: Date.now(),
+      });
     }
   }
 }

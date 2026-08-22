@@ -16,6 +16,7 @@ import {
   type AgentDeps,
   type AgentStep,
   type Envelope,
+  type EmitStep,
 } from "../agent";
 
 export type TraceStatus =
@@ -62,6 +63,10 @@ export async function traceRun(
   envelope: Envelope,
   deps: AgentDeps,
   clock: () => number = Date.now,
+  /** S0 — optional in-flight event observer, forwarded to `runAgent` unchanged. See agent.ts's
+   *  `EmitStep` doc. Omitted by both eval call sites (`harness.ts`, `contract.ts`), which never need a
+   *  live event stream — only `runner/service.ts` supplies one. */
+  emit?: EmitStep,
 ): Promise<AgentTrace> {
   const startedAt = clock();
   const base = {
@@ -73,7 +78,7 @@ export async function traceRun(
     startedAt,
   };
   try {
-    const run = await runAgent(def, goal, envelope, deps);
+    const run = await runAgent(def, goal, envelope, deps, emit);
     return {
       ...base,
       status: "ok",

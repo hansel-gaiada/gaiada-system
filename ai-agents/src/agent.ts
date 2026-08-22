@@ -228,6 +228,46 @@ export interface AgentStep {
   detail: string;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// S0 (agent event spine, 2026-08-23) — an IN-FLIGHT observer, additive to `AgentStep`.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `steps[]` above is accumulated and only reaches a caller once the whole run ends (`AgentRun.steps`,
+// serialised into `agent_runs.steps` by `runner/store.ts` after `processGoal` finishes) — the exact gap
+// `docs/superpowers/plans/2026-08-22-agent-floor-plan.md` §4 S0 names as the thing blocking any honest
+// animation: "no event, no motion" (§1) cannot be satisfied by a transcript nobody sees until the motion
+// would already be over.
+//
+// `EmitStep` is an OPTIONAL, fire-and-forget observer threaded (not required) through `runAgent` /
+// `runWriteAgent` / `traceRun` / `runOrchestrator`, called at the SAME boundaries that already push onto
+// `steps[]` — one call site pushes to both. It carries no run/goal/tenant identity: those are known only
+// to the CALLER (`runner/service.ts`'s `processGoal`, which already knows the goal/tenant it claimed and
+// mints the run id), never to this framework-level module, which has and must keep zero DB/transport
+// dependencies (this file's own header: "no direct DB access ... here"). The caller's `emit` closure
+// captures those ids and its own per-run monotonic `seq` counter and persists to `agent_run_events`.
+//
+// Absence (the parameter omitted, as every pre-S0 caller does) is BYTE-IDENTICAL to today: nothing here
+// changes `steps[]`, `AgentRun`, or any thrown error's shape. This is the "write an event at each step
+// boundary instead of accumulating" instruction from the S0 spec, applied without touching what was
+// already proven correct.
+export type StepEventKind = "model" | "tool" | "delegate" | "approval_wait" | "error";
+
+export interface StepEvent {
+  kind: StepEventKind;
+  detail: string;
+  /** Wall-clock time the boundary this event reports on took, when the caller can measure it (a model
+   *  completion, a tool call, an approval consultation). Omitted for boundaries with no single
+   *  measurable span (e.g. `delegate`, which `orchestrator.ts` emits when it PICKS a specialist, not
+   *  after one runs). */
+  durationMs?: number;
+}
+
+/** Never throws by contract: a persistence failure in the caller's closure must not abort or slow an
+ *  agent run (see `runner/service.ts`'s `makeEmitter`, which wraps every call in try/catch). `void`
+ *  because `runAgent` awaits it only to preserve ordering (so events land in `seq` order), not because a
+ *  failure here should ever propagate. */
+export type EmitStep = (evt: StepEvent) => void | Promise<void>;
+
 /** D14-10 — one `high_write` that a decided approval resolved during this run. Present so a caller can
  *  tell "the goal completed and a human-approved write actually happened" from "the goal completed
  *  doing only reads", and so `consumed` (the result came from a PRIOR execution) is visible rather
@@ -352,6 +392,9 @@ export async function runAgent(
   goal: string,
   envelope: Envelope,
   deps: AgentDeps,
+  /** S0 — optional in-flight event observer. See this file's `EmitStep` doc; omitted by every caller
+   *  that predates it, which is byte-identical to before. */
+  emit?: EmitStep,
 ): Promise<AgentRun> {
   const steps: AgentStep[] = [];
   const transcript: string[] = [];
@@ -371,14 +414,23 @@ export async function runAgent(
     approvals.length ? { outcome, steps, approvals } : { outcome, steps };
 
   for (;;) {
-    if (modelCalls >= def.maxSteps) throw new BudgetExhaustedError("steps", steps);
+    if (modelCalls >= def.maxSteps) {
+      await emit?.({ kind: "error", detail: "per-run step budget exhausted — run suspended, nothing committed" });
+      throw new BudgetExhaustedError("steps", steps);
+    }
     modelCalls++;
+    const modelStart = Date.now();
     const raw = await deps.complete(buildPrompt(def, goal, transcript));
-    steps.push({ kind: "model", detail: raw.slice(0, 200) });
+    const modelDetail = raw.slice(0, 200);
+    steps.push({ kind: "model", detail: modelDetail });
+    await emit?.({ kind: "model", detail: modelDetail, durationMs: Date.now() - modelStart });
 
     const action = parseAction(raw);
     if (!action) {
-      if (protocolRetries++ >= 1) throw new ModelProtocolError(steps);
+      if (protocolRetries++ >= 1) {
+        await emit?.({ kind: "error", detail: "model failed to produce a valid action twice — run aborted" });
+        throw new ModelProtocolError(steps);
+      }
       transcript.push("SYSTEM: your last reply was not a valid JSON action. Reply with one JSON object only.");
       continue;
     }
@@ -408,6 +460,7 @@ export async function runAgent(
         );
         continue;
       }
+      await emit?.({ kind: "error", detail: `tool not on the agent's allow-list: ${tool}` });
       throw new ToolNotAllowedError(tool, steps);
     }
     // D14-12 — reconcile against the hub registry BEFORE the gate below sees it, stricter of the two
@@ -419,11 +472,19 @@ export async function runAgent(
       const args = action.args ?? {};
       // D14-10 — CONSULT BEFORE THROWING. With no resolver wired this is `{ match: "none" }`, i.e.
       // exactly the pre-ticket line: `throw new ApprovalRequiredError(...)`.
+      const consultStart = Date.now();
       const resolution: ApprovalResolution = deps.resolveApproval
         ? await deps.resolveApproval({ agentName: def.name, toolName: tool, toolArgs: args })
         : { match: "none" };
+      const consultMs = Date.now() - consultStart;
 
-      if (resolution.match === "none") throw new ApprovalRequiredError(tool, impact, args, steps);
+      if (resolution.match === "none") {
+        // No decided approval binds this call — the run suspends awaiting one. This IS the honest
+        // "unknown" state §1 rule 5 of the agent-floor plan names: a run with no progress since this
+        // point is not stalled, it is waiting on a human.
+        await emit?.({ kind: "approval_wait", detail: `${tool} (${impact}) awaiting human approval`, durationMs: consultMs });
+        throw new ApprovalRequiredError(tool, impact, args, steps);
+      }
 
       if (resolution.match === "executed") {
         // The platform ran it (or replayed a prior run's stored result). The runner NEVER calls the
@@ -440,6 +501,7 @@ export async function runAgent(
         // approval-specific spelling would corrupt every trace rather than enrich it. The precise
         // fact lives in `approvals` above.
         steps.push({ kind: "tool", detail: `${tool} ok` });
+        await emit?.({ kind: "tool", detail: `${tool} ok`, durationMs: consultMs });
         transcript.push(
           `TOOL ${tool}(${JSON.stringify(args)}) => ${resolution.result.slice(0, 2000)}` +
             (resolution.truncated ? " [result truncated]" : "") +
@@ -455,6 +517,7 @@ export async function runAgent(
         toolCalls++;
         approvals.push({ tool, approvalId: resolution.approvalId, outcome: "rejected" });
         steps.push({ kind: "tool", detail: `${tool} failed` });
+        await emit?.({ kind: "tool", detail: `${tool} failed`, durationMs: consultMs });
         // `resolution.reason` is deliberately NOT interpolated — see the type's doc. The model needs
         // exactly two facts: it was refused by a human, and re-asking is not an option.
         transcript.push(
@@ -464,6 +527,11 @@ export async function runAgent(
         continue;
       }
 
+      await emit?.({
+        kind: "error",
+        detail: `tool ${tool} has an approved decision (${resolution.approvalId}) that cannot be resumed: ${resolution.match}`,
+        durationMs: consultMs,
+      });
       throw new ApprovalNotResumableError(
         tool,
         resolution.approvalId,
@@ -473,17 +541,23 @@ export async function runAgent(
       );
     }
 
-    if (toolCalls >= def.maxToolCalls) throw new BudgetExhaustedError("toolCalls", steps);
+    if (toolCalls >= def.maxToolCalls) {
+      await emit?.({ kind: "error", detail: "per-run tool-call budget exhausted — run suspended, nothing committed" });
+      throw new BudgetExhaustedError("toolCalls", steps);
+    }
     toolCalls++;
+    const toolStart = Date.now();
     try {
       // The co-author is stamped HERE, from the agent's own definition, rather than trusted from the
       // caller: `runAgent`'s callers pass the human's envelope (correctly), and an attribution field
       // that depends on every call site remembering it is one that will be missing where it matters.
       const result = await deps.callTool(tool, action.args ?? {}, { ...envelope, agent: `agent:${def.name}` });
       steps.push({ kind: "tool", detail: `${tool} ok` });
+      await emit?.({ kind: "tool", detail: `${tool} ok`, durationMs: Date.now() - toolStart });
       transcript.push(`TOOL ${tool}(${JSON.stringify(action.args ?? {})}) => ${result.slice(0, 2000)}`);
     } catch (err) {
       steps.push({ kind: "tool", detail: `${tool} failed` });
+      await emit?.({ kind: "tool", detail: `${tool} failed`, durationMs: Date.now() - toolStart });
       transcript.push(`TOOL ${tool} FAILED: ${(err as Error).message}`);
     }
   }

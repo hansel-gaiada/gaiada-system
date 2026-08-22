@@ -21,6 +21,7 @@ import {
   type AgentDeps,
   type AgentRun,
   type Envelope,
+  type EmitStep,
 } from "../agent";
 import {
   runOrchestrator,
@@ -29,6 +30,7 @@ import {
   GoalSuspendedError,
   PlannerProtocolError,
   type OrchestratorDef,
+  type SpecialistRunRecord,
 } from "../orchestrator";
 import { runWriteAgent, type WriteAgentResult, type SuspendedIntent } from "../write-agent";
 import { traceRun, type AgentTrace, type TraceStatus } from "../evals/trace";
@@ -38,6 +40,7 @@ import { episodeFromTrace, type Episode } from "../memory/episodic";
 import { liveDeps, tenantContext, envelopeContext, startRegistryImpactBootstrap } from "../deps";
 import { PgGoalStore, type GoalStore, type FinishGoalPatch, type BudgetCaps, type RunInput } from "./store";
 import { GoalQueue } from "./queue";
+import { publishRunEvent, subscribeTenant } from "./events-bus";
 
 export const runnerConfig = {
   port: Number(process.env.RUNNER_PORT ?? 3006),
@@ -55,6 +58,14 @@ export const runnerConfig = {
   // every other approval). Default ~15 min per the design's own number.
   intentTtlMs: Number(process.env.AGENT_INTENT_TTL_MS ?? 15 * 60 * 1000),
 };
+
+// S0 (agent event spine) — SSE tuning, the SAME numbers `portal-stream.controller.ts` uses (the proven
+// pattern this ticket is told to copy): a 25s heartbeat resets a proxy's read-timeout clock (nginx's
+// default `proxy_read_timeout` is 60s), and a 30-minute hard cap forces a periodic reconnect rather than
+// an indefinitely-open connection.
+const EVENTS_HEARTBEAT_MS = 25_000;
+const EVENTS_MAX_CONNECTION_MS = 30 * 60 * 1000;
+const EVENTS_RETRY_MS = 5_000;
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -200,6 +211,59 @@ function runInputFromTrace(t: AgentTrace, goalId: string, tenantId: string, prov
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// S0 (agent event spine, 2026-08-22) — the ONE place `AgentStep`'s in-flight sibling gets persisted.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `agent.ts` / `orchestrator.ts` / `write-agent.ts` only ever CALL an `EmitStep` — none of them touch
+// Postgres (this file's own header: "no direct DB access ... here" is a property of the whole service,
+// not just the framework files). This closure is where that boundary is crossed: it owns the per-run
+// monotonic `seq` counter the DB's `(run_id, seq)` uniqueness constraint enforces, persists each event,
+// and republishes the EXACT persisted row to the in-process SSE bus (`events-bus.ts`) so a live
+// subscriber sees the SAME value a `GET /runs/:id/events?since=` poller would.
+//
+// FAIL-SOFT BY DESIGN: a persistence failure here is caught and logged, never thrown — an agent run must
+// never fail, slow, or change behaviour because its OBSERVABILITY write hiccuped. This mirrors every
+// other "never blocks a run" boundary in this codebase (D14-12's registry-impact cache, D13's mismatch
+// warning): the thing being observed is more important than the observation.
+function makeEmitter(
+  store: GoalStore,
+  ids: { runId: string; goalId: string; tenantId: string; parentRunId?: string | null },
+): EmitStep {
+  let seq = 0;
+  return async (evt) => {
+    seq++;
+    try {
+      const row = await store.insertEvent({
+        runId: ids.runId,
+        goalId: ids.goalId,
+        tenantId: ids.tenantId,
+        seq,
+        kind: evt.kind,
+        detail: evt.detail,
+        durationMs: evt.durationMs ?? null,
+        parentRunId: ids.parentRunId ?? null,
+      });
+      publishRunEvent(ids.tenantId, row);
+    } catch (err) {
+      console.warn(
+        `[agent-runner] failed to persist run event (run ${ids.runId} seq ${seq}, kind ${evt.kind}): ` +
+          `${(err as Error).message} — the step itself is unaffected, only its event-stream record is lost`,
+      );
+    }
+  };
+}
+
+/** S0 — map `orchestrator.ts`'s coarse `SpecialistRunRecord.status` onto the `agent_runs.status`
+ *  (`TraceStatus`) vocabulary. The orchestrator only ever knows "ok" or "everything else is data"
+ *  (`failed`) — see `SpecialistRunRecord`'s own doc for why it does not attempt a finer classification —
+ *  so `"failed"` maps to `unknown_error`, the same catch-all `traceRun`'s `classifyError` uses for a
+ *  thrown value it does not recognize. This is a genuine "we know it failed, not exactly how" case, not
+ *  a guess dressed up as one of the more specific TraceStatus values. */
+function specialistRunStatus(status: SpecialistRunRecord["status"]): TraceStatus {
+  return status === "ok" ? "ok" : "unknown_error";
+}
+
 export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
   const cfg = { ...runnerConfig, ...deps.config };
   const store = deps.store;
@@ -224,6 +288,33 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
   // lazily evicted on that same read (no background sweep — see the design's §7.2.3 "lazy reap" idiom,
   // applied here to the analogous in-memory case).
   const suspendedIntentsById = new Map<string, { intent: SuspendedIntent; expiresAt: number }>();
+  // S0 (agent event spine) — `activeRunsByGoal`: which run ids are CURRENTLY executing for a goal.
+  // EPHEMERAL, per-process, never persisted — same shape as `suspendedIntentsById` above, for the same
+  // reason: a runner restart already kills every in-flight run (`sweepInterrupted` on boot), so this map
+  // is exactly as durable as the thing it describes.
+  //
+  // WHY THIS EXISTS: a top-level run's `agent_runs` row (and a supervisor-spawned specialist's) is only
+  // inserted once that run ENDS — that was true before this ticket and stays true (additive-only: no
+  // existing insert timing changes). So `GET /goals/:id`'s `runs[]` is empty for the ENTIRE duration of a
+  // goal's first run, and a client has no way to learn a run's id — the one thing it needs to poll
+  // `GET /runs/:id/events` or open the SSE stream — until that run is already over, which defeats the
+  // whole purpose of an in-flight endpoint. This map is what `GET /goals/:id` merges in as
+  // `activeRunIds`, closing that gap without changing when any row is written.
+  const activeRunsByGoal = new Map<string, Set<string>>();
+  function trackRunStart(goalId: string, runId: string): void {
+    let set = activeRunsByGoal.get(goalId);
+    if (!set) {
+      set = new Set();
+      activeRunsByGoal.set(goalId, set);
+    }
+    set.add(runId);
+  }
+  function trackRunEnd(goalId: string, runId: string): void {
+    const set = activeRunsByGoal.get(goalId);
+    if (!set) return;
+    set.delete(runId);
+    if (set.size === 0) activeRunsByGoal.delete(goalId);
+  }
 
   const app = Fastify({ logger: fastifyLoggerOption() as never });
 
@@ -278,11 +369,60 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
       // having to pass it explicitly (D14-10's contract deliberately omits it — see agent.ts's doc).
       patch = await tenantContext.run(g.tenantId, () => envelopeContext.run(envelope, async (): Promise<FinishGoalPatch> => {
         if (g.agent === reg.supervisor.name || g.agent === "supervisor") {
-          const run = await runOrchestrator(reg.supervisor, g.goal, envelope, counted, {
-            tenantId: g.tenantId,
-            servingProvider: provider ?? undefined,
-          });
+          // S0 — minted BEFORE the run (was: after it finished, purely for the observation record) so
+          // the SAME id can tag every in-flight planner/delegate event this goal's supervisor level
+          // emits. No behaviour change: it is still exactly one id, used exactly once, for the same
+          // purpose it always was — just visible to `runOrchestrator` from the start instead of only to
+          // `recordObservation` at the end.
           const runId = randomUUID();
+          const emit = makeEmitter(store, { runId, goalId: g.id, tenantId: g.tenantId });
+          trackRunStart(g.id, runId);
+          let run: Awaited<ReturnType<typeof runOrchestrator>>;
+          try {
+            run = await runOrchestrator(reg.supervisor, g.goal, envelope, counted, {
+              tenantId: g.tenantId,
+              servingProvider: provider ?? undefined,
+              runId,
+              emit,
+              delegation: {
+                emitFor: (childRunId) => {
+                  trackRunStart(g.id, childRunId);
+                  return makeEmitter(store, { runId: childRunId, goalId: g.id, tenantId: g.tenantId, parentRunId: runId });
+                },
+                onSpecialistRun: async (rec) => {
+                  // S0 — turns a supervisor-spawned specialist into a REAL `agent_runs` row with a
+                  // `parent_run_id` edge, where before this ticket it left only blackboard prose (see
+                  // orchestrator.ts's `DelegationTracking` doc). Additive: the supervisor's own goal-level
+                  // result below (`status: "ok", blackboard, ...`) is unchanged byte-for-byte by this.
+                  trackRunEnd(g.id, rec.runId);
+                  const toolsCalled = rec.steps.filter((s) => s.kind === "tool").map((s) => s.detail.replace(/ (ok|failed)$/, ""));
+                  await store.insertRun({
+                    runId: rec.runId,
+                    goalId: g.id,
+                    tenantId: g.tenantId,
+                    agent: rec.specialist,
+                    status: specialistRunStatus(rec.status),
+                    outcome: rec.outcome,
+                    steps: rec.steps,
+                    modelCalls: rec.steps.filter((s) => s.kind === "model").length,
+                    toolCalls: rec.steps.filter((s) => s.kind === "tool").length,
+                    toolsCalled,
+                    provider,
+                    startedAt: rec.startedAt,
+                    endedAt: rec.endedAt,
+                    parentRunId: rec.parentRunId,
+                  });
+                },
+              },
+            });
+          } finally {
+            // Blanket-clear rather than untracking just `runId`: a goal-aborting rethrow
+            // (GoalSuspendedError/ApprovalRequiredError/GoalBudgetExhaustedError) skips
+            // `onSpecialistRun` by design (see `DelegationTracking`'s doc), which would otherwise leave
+            // that child's id "active" forever — nothing for this goal is in flight once the
+            // supervisor's own call has returned OR thrown, so the whole set is gone with it.
+            activeRunsByGoal.delete(g.id);
+          }
           await recordObservation(
             {
               v: 1, runId, agent: reg.supervisor.name, envelope, goal: g.goal, status: "ok",
@@ -301,7 +441,19 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           // default-path goal identical whether or not it was ever inserted.
           const fileOnSuspend = goalOptionsById.get(g.id)?.fileOnSuspend ?? true;
           goalOptionsById.delete(g.id);
-          const res = await runWriteAgent(writeDef, g.goal, envelope, counted, g.tenantId, provider ?? "echo", { fileOnSuspend });
+          // S0 — minted BEFORE the run (was: after, only when `completed`/`forced_read_only`) so events
+          // can stream while the write agent is still executing, including a goal that ends up
+          // `suspended` (no `agent_runs` row either way for that outcome — unchanged from before this
+          // ticket; only the in-flight EVENTS are new for that path, tagged to a runId with no row).
+          const runId = randomUUID();
+          const emit = makeEmitter(store, { runId, goalId: g.id, tenantId: g.tenantId });
+          trackRunStart(g.id, runId);
+          let res: WriteAgentResult;
+          try {
+            res = await runWriteAgent(writeDef, g.goal, envelope, counted, g.tenantId, provider ?? "echo", { fileOnSuspend, emit });
+          } finally {
+            trackRunEnd(g.id, runId);
+          }
           if (res.status === "suspended" && res.filed === null) {
             // T2b: park the intent (incl. REAL args) in-memory only — never in `patch`/the goal row.
             suspendedIntentsById.set(g.id, { intent: res.intent, expiresAt: Date.now() + cfg.intentTtlMs });
@@ -309,7 +461,6 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
           const mapped = mapWriteResult(res);
           if (res.status === "completed" || res.status === "forced_read_only") {
             const traceStatus: TraceStatus = "ok";
-            const runId = randomUUID();
             const trace = traceFromRun(runId, writeDef, g.goal, envelope, traceStatus, res.run, startedAt, Date.now());
             await store.insertRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
             await recordObservation(trace, g.tenantId, provider);
@@ -320,7 +471,14 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
         const readDef = reg.specialists[g.agent];
         // (agent was validated at POST time; readDef is present here)
         const runId = randomUUID();
-        const trace = await traceRun(runId, readDef, g.goal, envelope, counted);
+        const emit = makeEmitter(store, { runId, goalId: g.id, tenantId: g.tenantId });
+        trackRunStart(g.id, runId);
+        let trace: AgentTrace;
+        try {
+          trace = await traceRun(runId, readDef, g.goal, envelope, counted, undefined, emit);
+        } finally {
+          trackRunEnd(g.id, runId);
+        }
         await store.insertRun(runInputFromTrace(trace, g.id, g.tenantId, provider));
         await recordObservation(trace, g.tenantId, provider);
         return mapTrace(trace);
@@ -415,11 +573,17 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     // non-null first is what stops a wrong-tenant request from ever reaching this lookup at all — the
     // existing 404-before-probing guarantee extends to `suspendedIntent` for free, not by a second check.
     const entry = suspendedIntentsById.get(req.params.id);
+    // S0 — ADDITIVE field, always present (unlike `suspendedIntent`, which is omitted when absent): the
+    // run ids currently executing for this goal, so a client can discover what to poll/subscribe to
+    // WHILE the goal is still running — see `activeRunsByGoal`'s doc for why `runs[]` alone cannot do
+    // this. Empty for a queued/terminal goal, same tenant-scoping as everything else on this response
+    // (keyed by the ALREADY-tenant-checked goal id above, same guard as `suspendedIntent`'s).
+    const activeRunIds = [...(activeRunsByGoal.get(req.params.id) ?? [])];
     if (entry) {
-      if (Date.now() < entry.expiresAt) return { ...goal, suspendedIntent: entry.intent };
+      if (Date.now() < entry.expiresAt) return { ...goal, suspendedIntent: entry.intent, activeRunIds };
       suspendedIntentsById.delete(req.params.id); // lazy TTL eviction — no background sweep (see the map's doc)
     }
-    return goal;
+    return { ...goal, activeRunIds };
   });
 
   app.get<{ Params: { id: string }; Querystring: { tenant?: string } }>("/runs/:id", async (req, reply) => {
@@ -429,6 +593,87 @@ export function buildRunnerApp(deps: RunnerDeps): FastifyInstance {
     const run = await store.getRun(req.params.id, tenant);
     if (!run) return reply.code(404).send({ error: "run not found" });
     return run;
+  });
+
+  // S0 (agent event spine) — the polling half of the pair. `since` is the last `seq` the caller already
+  // has; omitted/0 returns the run's whole history so far. See `GoalStore.listEvents`'s doc for why this
+  // deliberately does NOT 404 a wrong-tenant or not-yet-existent run the way `GET /runs/:id` does — an
+  // in-flight run frequently has no `agent_runs` row yet, and gating this endpoint on one existing would
+  // defeat the reason it exists.
+  app.get<{ Params: { id: string }; Querystring: { tenant?: string; since?: string } }>("/runs/:id/events", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    const tenant = req.query?.tenant;
+    if (!tenant || !UUID_RE.test(tenant)) return reply.code(400).send({ error: "tenant (uuid) required" });
+    const since = Math.max(Number(req.query?.since ?? 0) || 0, 0);
+    const events = await store.listEvents(req.params.id, tenant, since);
+    return { events };
+  });
+
+  // S0 — the live half: SSE modelled on `platform-nest/src/core/portal-stream.controller.ts` (the
+  // proven pattern this ticket is told to copy) — same heartbeat interval, same connection-lifetime cap,
+  // same `retry:`/`hello`/heartbeat/`bye` frame shapes. It differs in ONE respect the header comment on
+  // `events-bus.ts` explains: fan-out is a bare in-process EventEmitter, not Redis, because this service
+  // (unlike the portal) runs its whole goal queue in one process today — there is no cross-process
+  // "someone else's write" case yet to solve for.
+  //
+  // Bearer-gated like every other route here, NOT open like `/health`: a raw browser `EventSource`
+  // cannot set an Authorization header, so this is reached by a server-side proxy holding the runner
+  // token (e.g. a future `platform-ui` route under the single-egress rule) — never directly by a
+  // browser. That proxy is explicitly OUT OF SCOPE for this ticket (see the S0 deploy notes).
+  app.get<{ Params: { id: string }; Querystring: { tenant?: string; since?: string } }>("/runs/:id/events/stream", async (req, reply) => {
+    if (!authorized(req)) return reply.code(401).send({ error: "unauthorized" });
+    const tenant = req.query?.tenant;
+    if (!tenant || !UUID_RE.test(tenant)) return reply.code(400).send({ error: "tenant (uuid) required" });
+    const runId = req.params.id;
+    const since = Math.max(Number(req.query?.since ?? 0) || 0, 0);
+
+    // Tell Fastify this handler owns the response from here on — it must not attempt to serialize or
+    // send anything itself once we start writing to `reply.raw` (the documented escape hatch for a
+    // hand-rolled streaming response; see Fastify's `reply.hijack()`).
+    reply.hijack();
+    const raw = reply.raw;
+    raw.writeHead(200, {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    });
+
+    const write = (line: string): void => {
+      if (!raw.destroyed) raw.write(line);
+    };
+
+    write(`retry: ${EVENTS_RETRY_MS}\n`);
+    write(`event: hello\ndata: ${JSON.stringify({ mode: "live", at: new Date().toISOString() })}\n\n`);
+
+    // Catch-up BEFORE subscribing live: replay whatever is already persisted since `since`, so there is
+    // no gap between the history a client already has and the live feed it is about to join. Ordering
+    // matters here for the SAME reason `agent.ts` awaits every `emit?.()` call — a client must never see
+    // a live event before the backlog that precedes it.
+    const backlog = await store.listEvents(runId, tenant, since);
+    for (const ev of backlog) write(`event: step\ndata: ${JSON.stringify(ev)}\n\n`);
+
+    const unsubscribe = subscribeTenant(tenant, (row) => {
+      if (row.runId !== runId) return; // this bus fans out per-TENANT; filter to the one run requested
+      write(`event: step\ndata: ${JSON.stringify(row)}\n\n`);
+    });
+
+    const heartbeat = setInterval(() => write(`: ping ${Date.now()}\n\n`), EVENTS_HEARTBEAT_MS);
+    heartbeat.unref?.();
+
+    const lifetime = setTimeout(() => {
+      write(`event: bye\ndata: ${JSON.stringify({ reason: "rotate" })}\n\n`);
+      raw.end();
+    }, EVENTS_MAX_CONNECTION_MS);
+    lifetime.unref?.();
+
+    const cleanup = (): void => {
+      clearInterval(heartbeat);
+      clearTimeout(lifetime);
+      unsubscribe();
+    };
+    raw.on("close", cleanup);
+    raw.on("error", cleanup);
   });
 
   app.post<{ Params: { id: string }; Querystring: { tenant?: string } }>("/goals/:id/cancel", async (req, reply) => {

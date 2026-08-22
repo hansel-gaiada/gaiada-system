@@ -8,6 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { buildRunnerApp, type AgentRegistry } from "./service";
 import type {
   GoalStore, GoalInput, GoalRunContext, FinishGoalPatch, GoalListItem, GoalDetail, RunInput, RunRow, CancelResult,
+  RunEventInput, RunEventRow,
 } from "./store";
 import { EpisodicStore } from "../memory/episodic";
 import { ObservabilityCollector } from "../obs/collector";
@@ -41,6 +42,10 @@ interface Rec extends GoalInput {
 class MemGoalStore implements GoalStore {
   goals = new Map<string, Rec>();
   runs: RunInput[] = [];
+  // S0 — in-memory mirror of `agent_run_events`, good enough to prove ordering/seq/tenant-filtering
+  // without a real Postgres (the DB-backed guarantees — uniqueness, append-only — are proven separately
+  // in `store.test.ts` against `PgGoalStore`).
+  events: RunEventRow[] = [];
   private n = 0;
   async init(): Promise<void> {}
   seed(partial: Partial<Rec> & { status: Rec["status"] }): string {
@@ -98,6 +103,7 @@ class MemGoalStore implements GoalStore {
     const runs = this.runs.filter((r) => r.goalId === id && r.tenantId === tenantId).map((r) => ({
       runId: r.runId, agent: r.agent, status: r.status, outcome: r.outcome, modelCalls: r.modelCalls,
       toolCalls: r.toolCalls, provider: r.provider, startedAt: r.startedAt, endedAt: r.endedAt,
+      parentRunId: r.parentRunId ?? null,
     }));
     return { ...this.list(g), blackboard: g.blackboard, runs };
   }
@@ -107,7 +113,7 @@ class MemGoalStore implements GoalStore {
     return {
       runId: r.runId, goalId: r.goalId, tenantId: r.tenantId, agent: r.agent, status: r.status, outcome: r.outcome,
       steps: r.steps, modelCalls: r.modelCalls, toolCalls: r.toolCalls, toolsCalled: r.toolsCalled,
-      provider: r.provider, startedAt: r.startedAt, endedAt: r.endedAt,
+      provider: r.provider, startedAt: r.startedAt, endedAt: r.endedAt, parentRunId: r.parentRunId ?? null,
     };
   }
   async cancel(id: string, tenantId: string): Promise<CancelResult> {
@@ -122,6 +128,20 @@ class MemGoalStore implements GoalStore {
     let n = 0;
     for (const g of this.goals.values()) if (g.status === "queued" || g.status === "running") { g.status = "interrupted"; n++; }
     return n;
+  }
+  async insertEvent(e: RunEventInput): Promise<RunEventRow> {
+    const row: RunEventRow = {
+      eventId: randomUUID(), ts: new Date().toISOString(),
+      runId: e.runId, goalId: e.goalId, tenantId: e.tenantId, seq: e.seq, kind: e.kind,
+      detail: e.detail, durationMs: e.durationMs ?? null, parentRunId: e.parentRunId ?? null,
+    };
+    this.events.push(row);
+    return row;
+  }
+  async listEvents(runId: string, tenantId: string, sinceSeq: number): Promise<RunEventRow[]> {
+    return this.events
+      .filter((e) => e.runId === runId && e.tenantId === tenantId && e.seq > sinceSeq)
+      .sort((a, b) => a.seq - b.seq);
   }
 }
 
@@ -659,5 +679,198 @@ describe("agent-runner service", () => {
     const { app: appNoEpisodic } = build({ deps: scripted(['{"final":"x"}']) });
     const r404 = await appNoEpisodic.inject({ method: "GET", url: `/episodes?tenant=${TENANT}&runIds=x`, headers: AUTH });
     expect(r404.statusCode).toBe(404);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // S0 (agent event spine, 2026-08-22) — GET /runs/:id/events, activeRunIds, and the whole point:
+  // events land WHILE a goal is still running, not only once it finishes.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  describe("S0: agent event spine", () => {
+    it("GET /runs/:id/events returns the full step history in ascending seq order once a run completes", async () => {
+      const { app } = build({
+        deps: scripted([`{"tool": "x.read", "args": {}}`, `{"final": "all good"}`]),
+      });
+      const { id } = (await trigger(app, { goal: "report", agent: "reader" })).json() as { id: string };
+      await idle(app);
+      const g = (await goalStatus(app, id)).json() as GoalDetail;
+      const runId = g.runs[0].runId;
+
+      const res = await app.inject({ method: "GET", url: `/runs/${runId}/events?tenant=${TENANT}`, headers: AUTH });
+      expect(res.statusCode).toBe(200);
+      const { events } = res.json() as { events: Array<{ seq: number; kind: string; detail: string }> };
+      // model (turn 1) -> tool ok (x.read) -> model (final) — exactly the steps[] boundaries, in order.
+      expect(events.map((e) => e.kind)).toEqual(["model", "tool", "model"]);
+      expect(events.map((e) => e.seq)).toEqual([1, 2, 3]);
+      expect(events[1].detail).toBe("x.read ok");
+
+      // `since` narrows to strictly-after.
+      const since2 = (await app.inject({ method: "GET", url: `/runs/${runId}/events?tenant=${TENANT}&since=2`, headers: AUTH })).json() as { events: unknown[] };
+      expect(since2.events).toHaveLength(1);
+    });
+
+    it("GET /runs/:id/events is tenant-scoped: a wrong tenant reads an EMPTY list (never another tenant's rows, never a 404 that would gate on agent_runs existing)", async () => {
+      const { app } = build({ deps: scripted([`{"final": "ok"}`]) });
+      const { id } = (await trigger(app, { goal: "report", agent: "reader" })).json() as { id: string };
+      await idle(app);
+      const g = (await goalStatus(app, id)).json() as GoalDetail;
+      const runId = g.runs[0].runId;
+      const wrong = (await app.inject({ method: "GET", url: `/runs/${runId}/events?tenant=${OTHER}`, headers: AUTH })).json() as { events: unknown[] };
+      expect(wrong.events).toEqual([]);
+      const mine = (await app.inject({ method: "GET", url: `/runs/${runId}/events?tenant=${TENANT}`, headers: AUTH })).json() as { events: unknown[] };
+      expect(mine.events.length).toBeGreaterThan(0);
+    });
+
+    it("bearer-gated like every other route (not open like /health)", async () => {
+      const { app } = build({ deps: scripted([`{"final": "ok"}`]) });
+      const noAuth = await app.inject({ method: "GET", url: `/runs/whatever/events?tenant=${TENANT}` });
+      expect(noAuth.statusCode).toBe(401);
+    });
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════════
+    // THE ENTIRE POINT: events exist WHILE the goal is still `running` — not reconstructed after the
+    // fact. This test only passes if `agent.ts` emits synchronously, in flight, exactly as designed: a
+    // step boundary blocked on a never-resolving gate must never prevent the boundaries BEFORE it from
+    // already being visible over the real HTTP surface (`GET /goals/:id` for discovery via
+    // `activeRunIds`, `GET /runs/:id/events` for the events themselves).
+    // ══════════════════════════════════════════════════════════════════════════════════════════════════
+    it("proves IN-FLIGHT emission: events for a run's completed steps are visible over HTTP while the goal's own status is still 'running'", async () => {
+      let releaseSecondTurn!: () => void;
+      const gate = new Promise<void>((r) => { releaseSecondTurn = r; });
+      let turn = 0;
+      const deps: AgentDeps = {
+        complete: async () => {
+          turn++;
+          if (turn === 1) return `{"tool": "x.read", "args": {}}`; // resolves immediately
+          await gate; // turn 2 blocks here until the test releases it — the goal stays "running"
+          return `{"final": "done"}`;
+        },
+        callTool: async () => "ok",
+        lastProvider: () => undefined,
+      };
+      const { app } = build({ deps });
+      const { id } = (await trigger(app, { goal: "slow report", agent: "reader" })).json() as { id: string };
+
+      // Discover the in-flight run id through the PUBLIC API (activeRunIds), never by reaching into
+      // service internals — this is the exact gap `activeRunIds` exists to close (see its own doc:
+      // `agent_runs` for this run does not exist yet at all, because it is only inserted once the run
+      // ENDS, unchanged from before this ticket).
+      let runId: string | undefined;
+      let sawRunningWithEvents = false;
+      for (let i = 0; i < 200 && !sawRunningWithEvents; i++) {
+        const g = (await goalStatus(app, id)).json() as GoalDetail & { activeRunIds: string[] };
+        if (g.activeRunIds.length > 0) {
+          runId = g.activeRunIds[0];
+          const evRes = await app.inject({ method: "GET", url: `/runs/${runId}/events?tenant=${TENANT}`, headers: AUTH });
+          const { events } = evRes.json() as { events: Array<{ kind: string; detail: string }> };
+          // The FIRST turn's model+tool events must already be persisted and queryable — while `g.status`
+          // is STILL "running", not "ok"/"failed"/anything terminal.
+          if (events.length >= 2 && g.status === "running") {
+            expect(g.status).toBe("running");
+            expect(events.map((e) => e.kind)).toEqual(["model", "tool"]);
+            expect(events[1].detail).toBe("x.read ok");
+            sawRunningWithEvents = true;
+            break;
+          }
+        }
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      expect(sawRunningWithEvents).toBe(true); // if this is false, emission is NOT in-flight — a real failure, not a flake
+      expect(runId).toBeTruthy();
+
+      // Let the goal finish and confirm the FINAL state is consistent with what we saw mid-flight.
+      releaseSecondTurn();
+      await idle(app);
+      const finalGoal = (await goalStatus(app, id)).json() as GoalDetail & { activeRunIds: string[] };
+      expect(finalGoal.status).toBe("ok");
+      expect(finalGoal.activeRunIds).toEqual([]); // nothing left in flight once the goal is terminal
+      const finalEvents = (await app.inject({ method: "GET", url: `/runs/${runId}/events?tenant=${TENANT}`, headers: AUTH })).json() as { events: unknown[] };
+      expect(finalEvents.events.length).toBe(3); // model, tool, model(final) — the whole transcript now
+    });
+
+    it("a supervisor-delegated specialist gets its OWN agent_runs row with parentRunId set to the supervisor's run, discoverable via GET /runs/:childId, with its own in-flight events", async () => {
+      const sup: OrchestratorDef = {
+        name: "supervisor", systemPrompt: "sup", specialists: { reader },
+        maxPlannerSteps: 5, maxSubRuns: 3, goalBudget: { modelCalls: 20, toolCalls: 20 },
+      };
+      const { app } = build({
+        reg: registry({ supervisor: sup }),
+        deps: scripted([
+          `{"assign": {"specialist": "reader", "task": "status"}}`,
+          `{"final": "1 open task"}`, // the specialist's OWN final
+          `{"final": "done"}`, // the planner's final
+        ]),
+      });
+      const { id } = (await trigger(app, { goal: "delegate a read", agent: "supervisor" })).json() as { id: string };
+      await idle(app);
+      const g = (await goalStatus(app, id)).json() as GoalDetail;
+      expect(g.status).toBe("ok");
+      // The blackboard still records the delegation as prose (unchanged) — AND now a real agent_runs row
+      // exists for it, which is what S0 adds.
+      expect(g.runs).toHaveLength(1);
+      const childRun = g.runs[0];
+      expect(childRun.agent).toBe("reader");
+      expect(childRun.parentRunId).toBeTruthy();
+
+      const runDetail = (await app.inject({ method: "GET", url: `/runs/${childRun.runId}?tenant=${TENANT}`, headers: AUTH })).json() as RunRow;
+      expect(runDetail.parentRunId).toBe(childRun.parentRunId);
+      expect(runDetail.steps.length).toBeGreaterThan(0);
+
+      const evRes = (await app.inject({ method: "GET", url: `/runs/${childRun.runId}/events?tenant=${TENANT}`, headers: AUTH })).json() as { events: unknown[] };
+      expect(evRes.events.length).toBeGreaterThan(0); // the specialist's own steps streamed too
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // S0 — the SSE half, over a REAL listening socket (Fastify's `inject()` cannot exercise a hand-rolled
+  // `reply.hijack()` stream that never calls `raw.end()` on its own — it waits for the response to
+  // finish). This test starts the app on an ephemeral port, connects with `node:http`, reads the
+  // `hello` + at least one live `step` frame, then aborts — proving the wiring genuinely streams
+  // store-backed events, not just that the route exists.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  describe("S0: SSE /runs/:id/events/stream", () => {
+    it("streams a hello frame, then a live step frame for an event inserted while the connection is open", async () => {
+      const { app, store } = build({ deps: scripted([`{"final": "x"}`]) });
+      await app.listen({ port: 0, host: "127.0.0.1" });
+      const addr = app.server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+
+      const http = await import("node:http");
+      const frames: string[] = [];
+      let clientReq: import("node:http").ClientRequest | undefined;
+      const gotHello = new Promise<void>((resolveHello) => {
+        const req = http.get(
+          { host: "127.0.0.1", port, path: `/runs/probe-run/events/stream?tenant=${TENANT}`, headers: AUTH },
+          (res) => {
+            let buf = "";
+            res.on("data", (chunk: Buffer) => {
+              buf += chunk.toString("utf8");
+              if (buf.includes("event: hello")) resolveHello();
+              const parts = buf.split("\n\n");
+              buf = parts.pop() ?? "";
+              for (const p of parts) if (p.trim()) frames.push(p);
+            });
+            res.on("error", () => {});
+          },
+        );
+        req.on("error", () => {});
+        clientReq = req;
+      });
+      await gotHello;
+
+      // Insert a real event via the store WHILE the connection is open — mirrors exactly what
+      // `makeEmitter` does mid-run, without needing a full goal run's timing to line up with the test.
+      const row = await store.insertEvent({ runId: "probe-run", goalId: randomUUID(), tenantId: TENANT, seq: 1, kind: "model", detail: "live probe" });
+      const { publishRunEvent } = await import("./events-bus");
+      publishRunEvent(TENANT, row);
+
+      // Poll the captured frames for the live one (bounded wait).
+      let sawStep = false;
+      for (let i = 0; i < 100 && !sawStep; i++) {
+        if (frames.some((f) => f.includes("event: step") && f.includes("live probe"))) sawStep = true;
+        else await new Promise((r) => setTimeout(r, 5));
+      }
+      clientReq?.destroy(); // release the socket before the suite's afterEach closes the app
+      expect(sawStep).toBe(true);
+    });
   });
 });

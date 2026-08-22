@@ -38,6 +38,7 @@ import {
   type ApprovalConsumption,
   type Envelope,
   type Impact,
+  type EmitStep,
 } from "./agent";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -225,6 +226,9 @@ export interface WriteAgentOptions {
    * same branch below.
    */
   fileOnSuspend?: boolean;
+  /** S0 — optional in-flight event observer, forwarded to BOTH `runAgent` calls below (the D13
+   *  forced-read-only projection and the normal path) unchanged. See agent.ts's `EmitStep` doc. */
+  emit?: EmitStep;
 }
 
 /**
@@ -287,7 +291,7 @@ export async function runWriteAgent(
   if (isWriteCapable(def) && !(def.evaledProviders ?? []).includes(effectiveProvider)) {
     // D13: this provider has not been evaled for this write-capable agent — force read-only.
     const because = mismatch ? ` (declared "${servingProvider}", Gateway served "${observed}")` : "";
-    const run = await runAgent(readOnlyProjection(def), goal, envelope, deps);
+    const run = await runAgent(readOnlyProjection(def), goal, envelope, deps, opts.emit);
     return {
       status: "forced_read_only",
       run,
@@ -295,7 +299,7 @@ export async function runWriteAgent(
     };
   }
   try {
-    const run = await runAgent(def, goal, envelope, deps);
+    const run = await runAgent(def, goal, envelope, deps, opts.emit);
     // D14-10: surface the consumed/executed approvals when there were any. `run.approvals` is absent
     // on every run that resolved nothing, so this stays undefined for all pre-existing behaviour.
     return run.approvals?.length ? { status: "completed", run, resumed: run.approvals } : { status: "completed", run };

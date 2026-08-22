@@ -10,6 +10,7 @@ import {
   MAX_OFF_LIST_ATTEMPTS,
   type AgentDef,
   type AgentDeps,
+  type StepEvent,
 } from "./agent";
 import { statusReporter, taskFiler } from "./specialists";
 
@@ -194,5 +195,85 @@ describe("agent runner (WS8 step 1 + D14)", () => {
   it("malformed model output gets one nudge, then a typed protocol error", async () => {
     const deps = scripted(["sure! here's what I think...", "still not json"]);
     await expect(runAgent(def, "x", envelope, deps)).rejects.toThrow(ModelProtocolError);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // S0 (agent event spine, 2026-08-22) — `emit` fires IN FLIGHT, one call per `steps[]` boundary, in
+  // order. This is the "write an event at each step boundary instead of accumulating" contract: a caller
+  // watching only `emit` (never touching the returned `AgentRun`) must be able to reconstruct the same
+  // step sequence `steps[]` carries.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  describe("S0: EmitStep — in-flight, per-boundary, ordered", () => {
+    it("emits one 'model' event per model call and one 'tool' event per tool call, in the SAME order steps[] records them, before the run resolves", async () => {
+      const events: StepEvent[] = [];
+      const deps = scripted(
+        [`{"tool": "projects.list", "args": {}}`, `{"final": "1 active project: Rebrand"}`],
+        () => JSON.stringify([{ name: "Rebrand" }]),
+      );
+      const run = await runAgent(def, "status?", envelope, deps, (e) => {
+        events.push(e);
+      });
+      // The events line up 1:1 with steps[] in kind and (for the tool step) detail — proving `emit` is
+      // not a summary computed after the fact, but literally paired with each push at the boundary.
+      expect(events.map((e) => e.kind)).toEqual(["model", "tool", "model"]);
+      expect(events[1].detail).toBe("projects.list ok");
+      expect(run.steps.map((s) => s.kind)).toEqual(["model", "tool", "model"]);
+    });
+
+    it("emit is awaited BEFORE the run proceeds — proven by a slow, order-recording emitter never observing steps out of sequence", async () => {
+      const seen: number[] = [];
+      let n = 0;
+      const slowEmit = async (): Promise<void> => {
+        const mine = ++n;
+        await new Promise((r) => setTimeout(r, mine === 1 ? 15 : 0)); // first call is slow
+        seen.push(mine);
+      };
+      const deps = scripted(
+        [`{"tool": "projects.list", "args": {}}`, `{"final": "ok"}`],
+        () => "[]",
+      );
+      await runAgent(def, "x", envelope, deps, slowEmit);
+      // If `emit` were fire-and-forget (not awaited), the slow FIRST call could resolve after later
+      // ones, and `seen` would come back out of order despite being pushed in call order. Awaiting each
+      // call is what keeps this deterministic.
+      expect(seen).toEqual([1, 2, 3]);
+    });
+
+    it("emits an 'approval_wait' event before suspending on a high_write with no resolver wired — the honest 'why did this stop' fact, not a bare timeout", async () => {
+      const events: StepEvent[] = [];
+      const deps = scripted([`{"tool": "tasks.create", "args": {"title": "t"}}`]);
+      await expect(runAgent(def, "x", envelope, deps, (e) => { events.push(e); })).rejects.toThrow(ApprovalRequiredError);
+      expect(events.at(-1)).toMatchObject({ kind: "approval_wait" });
+      expect(events.at(-1)!.detail).toContain("tasks.create");
+    });
+
+    it("emits an 'error' event immediately before a terminal typed throw (budget exhaustion)", async () => {
+      const events: StepEvent[] = [];
+      const deps = scripted([`{"tool": "projects.list", "args": {}}`]); // loops forever
+      await expect(runAgent(def, "x", envelope, deps, (e) => { events.push(e); })).rejects.toThrow(BudgetExhaustedError);
+      expect(events.at(-1)!.kind).toBe("error");
+    });
+
+    it("runAgent does NOT swallow a throwing emitter — the fail-soft guard belongs to the CALLER (runner/service.ts's makeEmitter), not this framework function", async () => {
+      // `runAgent` deliberately does not wrap `emit?.()` in its own try/catch: doing so here would hide
+      // a broken observer from the one place (`makeEmitter`) that is supposed to log and swallow it.
+      // This test pins that boundary so a future edit doesn't quietly move the guard into the wrong
+      // layer — see this file's `EmitStep` doc ("never throws by contract" is a promise `makeEmitter`
+      // keeps, not one `runAgent` enforces).
+      await expect(
+        runAgent(def, "x", envelope, scripted([`{"final": "done"}`]), () => {
+          throw new Error("emitter boom");
+        }),
+      ).rejects.toThrow("emitter boom");
+      // A well-behaved (non-throwing) emitter on an otherwise-identical run is unaffected.
+      const run = await runAgent(def, "x2", envelope, scripted([`{"final": "done"}`]), () => {});
+      expect(run.outcome).toBe("done");
+    });
+
+    it("omitting emit entirely is byte-identical to every pre-S0 call site", async () => {
+      const deps = scripted([`{"final": "ok"}`]);
+      const run = await runAgent(def, "x", envelope, deps);
+      expect(run).toEqual({ outcome: "ok", steps: [{ kind: "model", detail: '{"final": "ok"}' }] });
+    });
   });
 });
