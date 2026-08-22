@@ -2687,6 +2687,28 @@ load-bearing for a test it never mentions.
 
 ## Cross-session hazards
 
+- **⚠ A git worktree does NOT isolate you from the shared Cerbos container, and that invalidates every
+  authz test result taken in one.** `gaiada-cerbos-1` bind-mounts
+  `<main checkout>/platform-nest/cerbos/policies` — the MAIN working tree, dirty or not — so a detached
+  worktree at a known-good commit is still judged against whatever policy files the main checkout
+  currently holds, including another session's half-finished edits. On 2026-08-23 a full backend run in
+  a clean worktree returned **89 failures across 24 files**, every one of them in `rbac/`, `core/`,
+  `admin/`, `modules/reports/` or `modules/search/` — i.e. exactly the Cerbos-dependent suites — while
+  another session was mid-way through IAM-15 (removing `group_executive`, 30+ policy files modified,
+  role bundles not yet regenerated). One of the failing files was literally the test that session was
+  deleting. **Zero failures were in `src/modules/social/`.**
+  The fix is a private Cerbos on its own ports over YOUR OWN policy directory:
+  `docker run -d --name cerbos-verify -p <httpFree>:3592 -p <grpcFree>:3593 -v "<worktree>/platform-nest/cerbos/policies:/policies:ro" ghcr.io/cerbos/cerbos:0.54.0 server --set=storage.disk.directory=/policies`
+  then `CERBOS_URL=http://localhost:<httpFree>`. On Git Bash prefix the command with `MSYS_NO_PATHCONV=1`
+  or the `-v` path is mangled (that is where the stray `platform-nest/cerbos/policies;C` directory came
+  from — empty, untracked, harmless, but that is its origin).
+  Note also that the shared container is being *actively driven* by other sessions' test runs at any
+  moment, so even with clean policies its audit log and timing are not yours alone.
+- **The test DATABASE, by contrast, isolates correctly by construction.** `src/testing/setup.ts` names
+  each test file's database from a hash of its FILE PATH, so a worktree's absolute paths differ from the
+  main checkout's and two sessions cannot collide. That is why DB-backed suites behave in a worktree
+  while Cerbos-backed ones do not — worth knowing before blaming the database.
+
 - **⚠ Playwright `reuseExistingServer: true` makes e2e results in this shared checkout MEANINGLESS
   unless you set `E2E_PORT`.** `playwright.config.ts` reuses whatever already listens on port 3005
   outside CI, and in this repo that is routinely ANOTHER SESSION'S dev server running THEIR branch.
