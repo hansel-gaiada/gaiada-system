@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.34.0` | IN PROGRESS | WS1 | 2026-08-21 |
-| platform-ui | `0.40.0` | IN PROGRESS | WS5 | 2026-08-23 |
+| platform-nest | `0.35.0` | IN PROGRESS | WS1 | 2026-08-23 |
+| platform-ui | `0.41.0` | IN PROGRESS | WS5 | 2026-08-23 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.11.0` | PROTOTYPED | WS2 | 2026-08-20 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -43,7 +43,7 @@ versions below; the running build reports it at `GET /health`.
 | observability | `0.6.1` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.8.6` | PROTOTYPED | WS10 | 2026-08-06 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
-| ai-agents | `0.7.2` | PROTOTYPED | WS8 | 2026-08-20 |
+| ai-agents | `0.8.0` | PROTOTYPED | WS8 | 2026-08-23 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |

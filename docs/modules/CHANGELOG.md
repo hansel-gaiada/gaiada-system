@@ -38,7 +38,7 @@ the merged commit, on a private `E2E_PORT`. That last detail is load-bearing: se
 cross-session hazard on `reuseExistingServer`, which caused a false "regression on main" conclusion
 earlier in this same pass before being traced to a foreign dev server on port 3005.
 
-### core `IAM-15` — 2026-08-23 — `group_executive` is removed (D-7)
+### platform-nest `0.35.0` · platform-ui `0.41.0` · ai-agents `0.8.0` — 2026-08-23 — IAM-15: `group_executive` is removed (D-7)
 
 **Removed**
 - The role's entire reach: **54 `group_executive`-only rules across 46 Cerbos policies**, its derived
@@ -1297,6 +1297,56 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.063.0139a` - 2026-08-23 - Phase 3 closes: the platform has one elevated tier again
+
+Manifest (counter +13, 0126 -> 0139): `platform-nest 0.34.0 -> 0.35.0`, `platform-ui 0.29.1 ->
+0.41.0` (two bumps: 0.40.0's Phase-2 shell wave, then IAM-15), `ai-agents 0.7.2 -> 0.8.0`,
+`social-media 0.5.18 -> 0.5.25` (seven bumps), `reports 0.3.1 -> 0.3.2`, `search-marketing 0.5.1 ->
+0.5.2`.
+
+⚠ **THIS CUT IS MOSTLY NOT IAM-15.** Ten of the thirteen module bumps are other sessions' work that
+had accumulated uncut since `0126a` — the social-media wave, SM-76's site-audit v2 + search IAM, the
+platform-ui Phase-2 shell, and the reports/search bumps. A tag builds `main`, so tagging for one
+ticket ships everything on the tip. Recorded here explicitly because the headline names one ticket
+and the manifest names eleven, and a future reader reconstructing this build should not have to
+diff the commit range to discover that.
+
+**What IAM-15 itself changes, and it is a NARROWING:** `group_executive` (D-7) is deleted — 54
+Cerbos rules across 46 policies, the derived role, its 134-key bundle, its persona, and the role row,
+with a migration that revokes every grant and bumps `session_version` so live tokens cannot retain
+reach. Eight production paths narrowed with it: `isElevated`, service-assignment re-consent, report
+seal notifications, automation-approval deciders, the person-axis company_wide tier, the
+wildcard-bypass disclosure, cross-company knowledge-graph elevation, and rollup reads. Nobody real
+loses access — the estate's only holder was the `exec@gaiada.test` seed fixture.
+
+Phase 3 is complete: IAM-13 (no-op), IAM-14 (`owner`), IAM-16 (two-person appointment) and IAM-15
+have all landed. The estate now has exactly one elevated platform tier (`platform_admin`) plus
+`owner` beside it on the business axis.
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.35.0`** | wa-chat-bot | `0.9.2` | **search-marketing** | **`0.5.2`** |
+| **platform-ui** | **`0.41.0`** | **ai-agents** | **`0.8.0`** | **social-media** | **`0.5.25`** |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | **reports** | **`0.3.2`** |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+**Verification this cut rests on:** the full platform-nest suite green on this exact tip — 5809
+passed / 0 failed across 397 files — plus platform-ui 2705/2705, `cerbos compile` clean, and a live
+PDP probe confirming `group_executive` went ALLOW -> DENY while `platform_admin` stayed ALLOW (the
+control that distinguishes a working removal from a policy set that failed to load). That suite run
+covers the other sessions' backend work on this tip too, which is the main reason cutting from a
+shared tip is defensible here.
+
+**Not verified by this cut:** the infra/observability changes and anything untracked at cut time
+(hermes-config, mcp-hub's risk.ts) — the former ships as config, the latter is not committed and so
+is not in the build at all.
 
 ### `Alpha 01.062.0126a` - 2026-08-23 - the observability split deploys, and the estate learns to page itself
 
