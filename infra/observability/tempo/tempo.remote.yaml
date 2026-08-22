@@ -24,9 +24,11 @@ compactor:
     # anyone has investigated here. Raise it again when there is disk to spare, but measure
     # first -- trimming the metric store would have freed almost nothing and lost the series
     # the alerts actually run on.
-    block_retention: 336h # 14 days -- this host has ~105 G free, versus the 72h
-    # emergency cut on gda-aicenter where tempo-data (4 GB) was the dominant consumer
-    # of a nearly-full 49 G disk. Room is exactly what this migration bought.
+    # 2026-08-23: owner decision -- 72h everywhere, not 336h. Extra disk headroom on this box
+    # (~105 G free vs gda-aicenter's ~9 G) was never a reason to keep traces three times longer;
+    # 3 days still covers every incident anyone has investigated (see the note above). Now
+    # matches infra/observability/tempo/tempo.yaml exactly -- the two hosts no longer disagree.
+    block_retention: 72h
 
 storage:
   trace:
