@@ -2548,13 +2548,21 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   `oauth-state.ts`, RED-then-GREEN proven)
 - ~~Spike detection has no persistent dedup, so a sustained spike re-fires each tick~~
   — **CLOSED 2026-08-23** (module `0.5.21`). The dedup state is the `outbox_events` log itself: every
-  emit is already durably recorded, it is never pruned, and `idx_outbox_events_entity` already indexes
+  emit is already durably recorded and `idx_outbox_events_entity` already indexes
   the exact lookup — so no new table, and no second store of "did we already say this" to keep in
   agreement with the log that decides what was emitted. Cooldown is DERIVED
   (`spikeWindowMinutes * (spikeBaselineWindows + 1)`, the point the burst ages out of its own
   baseline) rather than a fresh constant, per this module's convention that these thresholds must
   never read as measured. `spikes` and `suppressed` are counted SEPARATELY — collapsing them would
   make a sustained spike look like it had stopped. Proven red-then-green.
+  **Latent coupling, found by re-checking my own claim rather than by a test:** I first wrote that
+  `outbox_events` "is never pruned". It is — `sync-engine-go/internal/gc/tombstone.go#purgeTombstones`
+  deletes from it. The dedup survives for a NARROWER reason than I claimed: that GC matches only
+  `(payload->>'_deleted') = 'true'`, and a spike payload has no `_deleted` key, so the comparison is
+  `NULL = 'true'` and never matches. If that GC is ever widened to prune by age or relayed status, this
+  dedup silently weakens and needs its own store. Recorded in the code at the point of use. Worth
+  generalising: "table X is never cleaned up" is a claim about a DIFFERENT service in this program, and
+  `sync-engine-go` owns deletions on tables `platform-nest` treats as append-only.
 - ~~`listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide~~
   — **CLOSED 2026-08-23** (module `0.5.24`), though not where the note pointed. The `urn:li:` test was
   never the weak part — LinkedIn's wire format mandates that prefix. The weak part was the FALLBACK:

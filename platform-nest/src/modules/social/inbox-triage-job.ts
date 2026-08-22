@@ -410,10 +410,19 @@ async function loadAccountWindowCounts(
  *
  *  DEDUP (was a named follow-up, now closed): a sustained spike used to re-fire on EVERY sweep tick
  *  for as long as it lasted, so one burst became a stream of identical bells. The dedup state is the
- *  `outbox_events` log itself — every emit is already durably recorded there, it is never pruned, and
+ *  `outbox_events` log itself — every emit is already durably recorded there, and
  *  `idx_outbox_events_entity (tenant_id, entity_type, entity_id)` already indexes exactly the lookup
  *  needed. That is deliberately NOT a new table: a second store of "did we already say this" would
  *  have to be kept in agreement with the log that actually decides what was emitted.
+ *
+ *  ⚠ ONE LATENT COUPLING, stated because it is not obvious and I initially got it wrong: this relies on
+ *  spike events STAYING in `outbox_events`. There IS a garbage collector that deletes from that table —
+ *  `sync-engine-go/internal/gc/tombstone.go#purgeTombstones` — but its predicate is narrowly
+ *  `(payload->>'_deleted') = 'true'`, i.e. tombstones only. A spike payload has no `_deleted` key, so
+ *  the comparison is `NULL = 'true'` → NULL → never matched, and these rows are not eligible today.
+ *  If that GC is ever widened to prune by age or by relayed status, THIS DEDUP SILENTLY WEAKENS: a
+ *  pruned announcement reads as "never announced" and the spike re-fires. Widen that GC and you must
+ *  give this a store of its own.
  *
  *  A suppressed spike is counted as `suppressed`, never silently skipped — the caller can tell
  *  "quiet because nothing is spiking" from "quiet because we already said so", which are different

@@ -159,11 +159,18 @@ dark-by-default job quietly starts running in an environment that tried to disab
   and one burst became a stream of identical bells. `runTenantSpikeDetection` now suppresses a
   re-announcement inside a cooldown.
 - **The dedup state is the `outbox_events` log itself**, not a new table. Every emit is already
-  durably recorded there, it is never pruned, and `idx_outbox_events_entity
+  durably recorded there and `idx_outbox_events_entity
   (tenant_id, entity_type, entity_id)` already indexes exactly the lookup needed. A purpose-built
   dedup table would be a second store of "did we already say this" that has to be kept in agreement
   with the log that actually decides what was emitted. `outbox_events` is a CORE table, so the
   surrounding `declareSocialModuleScope` is inert for it and the tenant wall alone applies.
+- **Correction to this entry's original wording** (2026-08-23, same pass): it claimed `outbox_events`
+  "is never pruned". That is not true — `sync-engine-go/internal/gc/tombstone.go#purgeTombstones`
+  deletes from it. The dedup is nonetheless sound, for a narrower reason: that GC's predicate is
+  `(payload->>'_deleted') = 'true'`, so it only ever removes tombstones, and a spike payload has no
+  `_deleted` key (`NULL = 'true'` → NULL → never matched). Recorded as a **latent coupling** in the
+  code: if that GC is ever widened to prune by age or relayed status, this dedup silently weakens —
+  a pruned announcement reads as "never announced" and the spike re-fires.
 
 **Honest counting** — a suppressed spike is counted as `suppressed`, and `spikes` still counts what
 is genuinely elevated right now. Collapsing them would make a sustained spike look like it had
