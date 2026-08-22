@@ -1248,6 +1248,38 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 ## social-media — SMM · Organic Publishing · `0.5.18` · IN PROGRESS
 
+**0.5.18 (2026-08-23, qa) — SMM-25: the Playwright console suite, the department's whole-merge-gate
+ticket — no product code touched, so the version number does not move.** New
+`platform-ui/e2e/social-console.spec.ts` (13 tests) + a new `social` project in
+`playwright.config.ts`, over DEMO_MODE (`src/lib/demoSocial.ts`) — the addendum's original
+"full-stack e2e + Playwright suite + DEMO_MODE fixtures" row split honestly: fixtures already
+existed (SMM-14, extended since), and live full-stack e2e is undrivable by anyone today (every
+platform app credential in the estate is empty, app reviews deferred to staging, D-23) — this pass
+delivers the committed DEMO_MODE suite, stated as exactly that, never presented as live verification.
+
+Covers all four department routes (`calendar`/`composer`/`inbox`/`analytics`, `dept-4`) plus the
+client-review portal, asserting the honest-absence-state DISTINCTIONS this module spent its build
+establishing (quota unknown vs not-modeled vs known-at-cap; best-time's four states; triage's four
+states via an actual CSS check, not just four strings; the `purged` compliance framing via a
+computed-color check; KPI-omitted-as-em-dash vs a whole account absent from the table; the
+drag-to-reschedule warning naming an exact approved-variant count before the drop commits, captured
+via `page.once("dialog", …)`; the AGPL footer present on Social Media and absent elsewhere). One
+fixture gap found and closed additively: `demoSocial.ts` had an `'unsupported'` best-time row
+(`soc-acc-tiktok-1`, SMM-27's own seed) with no variant anywhere ever targeting that account, so the
+Composer could never render that fourth chip state — closed with one new post/variant
+(`soc-post-10`/`soc-var-11`). One state named as UNREACHABLE in DEMO_MODE rather than forced:
+`platform_app_not_registered`'s own panel is gated on `inboxSurface !== "available"`, which
+`demoSocial.ts` hardcodes to `"available"` ON PURPOSE (so the triage/SLA/reply-gate scenarios stay
+visible) — flipping it needs a toggle threaded through `lib/social.ts`/the inbox page, both off this
+ticket's file surface; unit coverage already exists. Zero product defects found — every first-pass
+test failure was a locator scoped too broadly across a page that legitimately renders one fact twice
+(a triage-chip caption; a portal status pill+caption; a stage-code badge inside a longer sentence
+containing the same substring; a post literally titled "…now stale" defeating a page-wide regex) or
+one genuine cross-test race in the new suite itself (two tests sharing one `globalThis` demo row
+under `fullyParallel`, fixed with `test.describe.configure({ mode: "serial" })`). Re-run twice after
+fixing (8-worker parallel, 32.6s; 1-worker serial, 49.4s) — 13/13 both times. `platform-ui`:
+2615/2615 vitest (155 files), `tsc --noEmit` clean, both measured directly this pass.
+
 **0.5.18 (2026-08-23, medior) — SMM-27: best-time-to-post, a CLASSICAL STATS job + a suggestion
 chip — the last unbuilt ticket in the department.** Worktree was ONE MERGE BEHIND at cut time
 (`git log --oneline -1` did not match `main`'s tip — SMM-35's own merge had landed); `git merge
