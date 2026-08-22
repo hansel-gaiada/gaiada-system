@@ -10,6 +10,13 @@ MSO-09/10/11 added (PLANNED)** ·
 **Owner ask:** "we need to see more servers in there. we are having lots of servers for staging,
 production etc." — the ERP's Systems → Observability console must become a multi-host,
 multi-environment view.
+**2026-08-22 (later, same day):** owner named fleet roles — `delphi`=STAGING, `helios`=PRODUCTION,
+`wp hostinger`=the WordPress-projects host; all three host **web projects the agency builds for
+clients**, not our own ERP infra — and reframed observe-only as a **timing** choice, not a
+permission ceiling ("we will set it up when we are ready"); `gda-aicenter`+`sumopod` (the ERP's own
+servers) are slated for future consolidation onto one box (noted, not designed). Options analysis
+for zero-touch signal sources (CloudPanel / Hostinger / underlying provider) plus how this joins the
+IT device topology and a future Network page: **§13–§15**. §12 and OQ-6/7/8 amended in place below.
 **Related:** [`docs/blueprints/monitoring-program.md`](../blueprints/monitoring-program.md) (the
 two-plane ruling, §0) · [`docs/plans/2026-08-18-observability-relocation.md`](2026-08-18-observability-relocation.md)
 (§9–§13 execution record) · `docs/FRONTEND-BFF-CONTRACT.md` **§20.1a** (the API contract this design
@@ -472,6 +479,12 @@ any visibility of `helios`/`delphi` at all.
    to probes exactly as it applies to agents; an unnamed service simply stays invisible, and
    §12.3's console will honestly show only what you name. Also confirm ICMP is acceptable
    (some providers rate-limit or flag it).
+   **AMENDED 2026-08-22 (later, same day):** still open, still blocking MSO-11 — this pass did not
+   name a probe list (that would require the owner or would require crawling, which is exactly the
+   opt-in rule this OQ itself protects). What changed is confidence about WHO answers ICMP/TCP/HTTP
+   probes of these two hosts at all: passive lookup (§13(c)) places both `helios` and `delphi` on
+   Hostinger's own network, which is consistent with, but does not replace, the owner naming actual
+   endpoints.
 7. **OQ-7 — Read-only SSH polling: NOT adopted; you may override (§12.2 has the full trade).**
    Architect recommendation is NO: the safe form (dedicated user + forced-command key) requires
    modifying `authorized_keys` ON the host — prohibited by your own ruling — and the unsafe form
@@ -480,11 +493,34 @@ any visibility of `helios`/`delphi` at all.
    UNKNOWN — nobody will see a disk filling there. If you want that visibility before granting
    full control, say so explicitly and we design the forced-command variant as a one-time,
    owner-authorized modification.
+   **AMENDED 2026-08-22 (later, same day, per §12.0):** the recommendation stays NO **for now** —
+   nothing here withdraws the "prohibited for now" ruling. What changes is that the honest cost above
+   may be smaller than it reads: §13(b) found evidence (passive lookup, not host contact) that
+   `helios`/`delphi` likely sit on Hostinger's own VPS product, which — if confirmed — exposes
+   CPU/RAM/disk/network/uptime through Hostinger's own API with **zero host contact of any kind**,
+   recovering most of the disk/memory/CPU blindness this OQ describes **without** the credential
+   trade-off SSH-polling forces. See §13 for the full trade (a Hostinger API token is not
+   read-only-scoped either, so it is not a free lunch — just a different, possibly smaller, blast
+   radius than a shell credential). This OQ (self-execute a command on the box) stays closed; §13's
+   provider-API path is evaluated as its own option, not as a variant of this one.
 8. **OQ-8 — Zero-touch side channels for `helios`/`delphi`.** (a) Who hosts each box, and does
    the provider's panel expose a read-only metrics/status API (CPU/RAM/disk) we may consume from
    the hub with a scoped token? That would recover some of §12.4's UNOBTAINABLE column without
    touching the hosts. (b) Do the boxes already expose any status/metrics endpoint you know of
    that we may read? We will not probe to find out.
+   **ANSWERED IN PART 2026-08-22 (later, same day) — see §13 for the full analysis.** (a) Passive,
+   no-host-contact lookup (WHOIS/ASN/rDNS via third-party registries — zero packets to `helios` or
+   `delphi` themselves) places both on ASN AS47583 ("Hostinger International Limited") with
+   `srv####.hstgr.cloud` reverse DNS — Hostinger's own default hostname pattern for its KVM VPS
+   product. High confidence this means Hostinger IS the underlying provider (not a reseller of a
+   further hypervisor), **not confirmed by the owner**. If confirmed, Hostinger's own public API has
+   a documented `VPS.getMetricsV1` endpoint (CPU/RAM/disk/network/uptime) — see §13(b) for the token
+   scoping caveat before treating this as free. (b) "Cloud panel" is very likely `cloudpanel.io`
+   (CloudPanel CE) self-installed on the VPS — common on Hostinger KVM VPS — but it has **no official
+   REST API** (confirmed via CloudPanel's own feature-request board: a "Panel REST API" is requested,
+   not shipped) and no documented metrics CLI subcommand; only a human dashboard behind a login whose
+   blast radius is the whole box. Still open: which Hostinger account each of `helios`/`delphi`/
+   `wp hostinger` sits under (one token vs three), and each host's actual plan tier.
 
 ---
 
@@ -519,6 +555,35 @@ agents).
 control over a host, that is a NEW dated ruling; the host then goes through MSO-03 unchanged
 (`infra_hosts.monitoring_tier` flips `blackbox` → `agent`; the probes stay — they remain useful
 under the agent tier).
+
+### 12.0 2026-08-22 (later, same day) — reframed: a timing choice, not a permanent ceiling
+
+**Owner, verbatim:** *"we want full detail on the servers and we will set it up when we are ready."*
+Full-detail (agent tier) is the **intended destination** for every server the agency operates,
+including `helios`/`delphi`; blackbox is the **interim** state while the owner schedules the work,
+not a permanent architectural boundary. This changes nothing structural in §12.1–§12.6 below — agent
+installation on `helios`/`delphi` stays PROHIBITED **for now**, the CHECK constraint in §12.5 stays
+fail-closed, the runbook's never-touch list stays in force — but it changes the question this
+section exists to answer: no longer *"may we ever see more than a probe?"* (yes, later, on the
+owner's schedule) but **"what is the cheapest safe path to full detail, and what do we get for free
+in the interim, without installing anything or touching the host?"** §13 answers that with an
+options analysis; §15 turns it into tickets.
+
+**Also ratified this pass — fleet roles and a planned consolidation, not designed here:**
+`delphi` = STAGING, `helios` = PRODUCTION, `wp hostinger` = the WordPress-projects host; all three
+are the agency's OWN servers (not a third party's — the 2026-08-21 ownership correction in §1/§2.3
+stands) and all three host **web projects the agency builds for clients** — i.e. they are Plane A
+boxes (our infrastructure) that carry Plane B payloads (clients' websites). §14 works out what that
+means for the UI. Separately, `gda-aicenter` and `sumopod` (the ERP's own servers, both `agent` tier
+today) are slated to be **consolidated onto one server** — the owner's plan, not this program's.
+That has monitoring implications this doc records but does not design: today's hub-and-spoke
+(§2, hub = `sumopod`) and the `infra_hosts` rows for both boxes assume two independent hosts, and a
+merge would retire or repurpose one row, potentially relocate the WireGuard hub (the OQ-3 revisit
+trigger — "if the fleet outgrows a handful of hosts, move the hub" — anticipates hub relocation for
+growth, not for a merge down to one box, so this is a new case for whoever plans it) and needs a
+decision on whether pre-merge history for the retired host's series stays queryable. Tracked as
+MSO-18 (§15), blocked on the owner naming a timeline — **do not design the consolidation itself**,
+per this pass's own instructions.
 
 ### 12.1 Agentless options, honestly
 
@@ -659,3 +724,234 @@ unregistered-host surfacing already catches the drift if one doesn't.
 Nothing was probed, pinged, or SSH'd — not `helios`, not `delphi`, not `gda-ce01`, not the live
 estate. This section is design from repo + docs only. The first packet our estate ever sends
 toward `helios`/`delphi` is MSO-11's, after OQ-6 names the targets.
+
+---
+
+## 13. 2026-08-22 (later, same day) — options analysis: zero-touch signal sources for `helios`/`delphi`/`wp hostinger`
+
+**Method note, stated once so it is not repeated per row below:** everything in this section is
+desk research — repo docs, this program's own prior findings, and passive third-party lookups
+(WHOIS/ASN/reverse-DNS via public registries and route-collector mirrors) that send **zero packets
+to `helios`, `delphi`, or the Hostinger WP host** — those queries go to registry/route-collector
+servers, not to the target boxes, the same category of research as reading a vendor's own docs. No
+host in the never-touch list was pinged, port-scanned, SSHed into, or authenticated against. Anything
+below marked ⚠ **UNVERIFIED / GENERAL KNOWLEDGE** is not backed by a fetched primary source in this
+pass — flagged that way deliberately, because §13(b)/(c) below feed a credential decision.
+
+### 13(a) CloudPanel
+
+**Is "cloud panel" cloudpanel.io, or the provider's own console? Genuinely ambiguous — not resolved
+this pass.** Given §13(c)'s finding that both boxes sit on Hostinger's own network, the more likely
+reading is literally `cloudpanel.io` (CloudPanel CE, the free open-source panel) self-installed on
+the VPS — Hostinger's KVM VPS provisioning flow commonly offers CloudPanel as a one-click OS/app
+template ⚠ **UNVERIFIED / GENERAL KNOWLEDGE, not confirmed for these two specific boxes**. The other
+reading — the owner means Hostinger's own hPanel/"VPS panel" colloquially — is equally plausible from
+the phrase alone. **First step: ask the owner for the login URL or a screenshot** (CloudPanel
+defaults to `https://<ip-or-host>:8443`; hPanel is `https://hpanel.hostinger.com/...`) rather than
+guess further.
+
+| Question | Finding | Source / confidence |
+|---|---|---|
+| Does it expose an API? | **No official REST API.** CloudPanel ships a CLI (`clpctl`) but no HTTP API; a "Panel REST API" is an open, unbuilt feature request on CloudPanel's own board | `feature-requests.cloudpanel.io` (fetched via search), CloudPanel v2 docs (`root-user-commands`/`site-user-commands`, fetched via search snippets — the pages themselves 404'd on direct fetch in this pass, so the exact command list is not independently confirmed, only search-indexed excerpts of it) |
+| Exportable stats / metrics endpoint? | None found. `clpctl` commands found (`user:add`, `db:backup`, `db:export`, `user:reset:password`, `cloudflare:update:ips`, `cloudpanel:enable:basic-auth`, `system:permissions:reset`) are site/user/db/security management, not a stats query | Same as above — a metrics subcommand may exist and simply wasn't in the indexed excerpts; treat "none found" as "none confirmed," not "confirmed absent" |
+| What signals, what granularity? | CPU %, memory %, disk usage, load average (1/5/15m) on a **web dashboard graph** per CloudPanel's own marketing/tutorial pages | `cloudpanel.io/blog`, `/tutorial` pages ⚠ **GENERAL MARKETING CONTENT, not API/technical docs** — exact retention window and sampling interval not stated anywhere found |
+| Credential + blast radius | The CLI (`clpctl`) requires **root SSH on the box** and can reset ANY panel user's password, manage every site/database, and toggle server-wide security settings. The web dashboard login is a CloudPanel account; if the owner's own super-admin login were reused for an unattended reader, the blast radius is functionally identical to the SSH case §12.2 already ruled out — a stolen credential controls every site and database on the box, not just a graph | Derived from confirmed `clpctl` command list above; the "reuse-personal-login" trap is this program's own §12.2 reasoning applied to a second credential type |
+| Tri-state landing | `not-collected-for-tier` today (no machine feed exists to collect from) | — |
+
+**Honest naming of the fragile option, because it would otherwise sound bright:** the dashboard *is*
+a web page a logged-in browser renders from underlying HTTP calls, and in principle those calls could
+be reverse-engineered and polled by a script holding the owner's login. **This is explicitly NOT
+recommended.** It is an undocumented, unversioned internal endpoint with no stability contract; it
+would need updating on every CloudPanel upgrade with no changelog to trigger the update; and it
+requires standing use of the same credential class §13's blast-radius row just described. Naming it
+here so nobody proposes it later as if it were a normal integration.
+
+**Recommendation (a): do not invest here.** CloudPanel's sanctioned interface is a human dashboard
+behind a credential that can reconfigure the whole box. If the owner specifically wants CloudPanel's
+own numbers, the correct spend is watching/voting CloudPanel's own REST-API feature request, not
+building a scraper against a moving target.
+
+### 13(b) Hostinger
+
+**Finding, passive lookup, not host contact (confidence: high but owner-unconfirmed):** both
+`helios` (187.77.116.133) and `delphi` (72.61.142.88) resolve, via public WHOIS/ASN registries, to
+**AS47583 "Hostinger International Limited"** (org "Hostinger Operations UAB"), and their
+reverse-DNS names — `srv1700943.hstgr.cloud` and `srv1761905.hstgr.cloud` respectively — match
+Hostinger's own default auto-assigned hostname pattern for its **KVM VPS** product. This is new
+information this program did not have before: `helios` and `delphi` most likely run ON Hostinger's
+own infrastructure, the same provider family as `wp hostinger`. **Not confirmed by the owner** — the
+rDNS pattern is a strong but not certain signal (a custom hostname could coincidentally match, though
+that is an unlikely coincidence for a Hostinger-specific domain). Confirm by checking whether all
+three appear as line items in one Hostinger hPanel account.
+
+| Question | Finding | Source / confidence |
+|---|---|---|
+| Does the API expose usage metrics? | **Yes, for VPS specifically.** Hostinger's public API (`developers.hostinger.com`, currently **BETA**, no stated SLA) documents `VPS.getMetricsV1(virtualMachineId, date_from, date_to)` returning CPU, memory, disk, network, and uptime | Hostinger's own docs/support pages (fetched) + the endpoint's own reference page (fetched via a third-party MCP-tool mirror of the same OpenAPI spec — secondary source, but describing Hostinger's own published schema) |
+| Granularity / retention? | **Not found in this pass.** Neither source states sampling interval or max queryable range | Flagged UNKNOWN rather than guessed — would need an actual authenticated call to observe |
+| What does the WP-hosting tier permit? | A `Websites` API endpoint exists (list/manage sites, filter by domain/status) but **no resource-usage-metrics endpoint was found for shared/managed hosting** comparable to the VPS one — the metrics endpoint found is explicitly scoped to VPS. Hostinger's own "resource usage" help pages for shared/Business/Agency plans describe a **human hPanel page only** (bandwidth, disk quota, CPU seconds — typical shared-hosting quota stats), with no confirmed API path | Search-indexed Hostinger support articles; **genuinely open** — if `wp hostinger` turns out itself to be a VPS (plausible now, given the ASN finding above applies to the same provider family), the VPS metrics API may apply to it too. Confirm plan tier before assuming either way |
+| Credential + blast radius | **No read-only or per-resource scoping was found to exist.** Hostinger's own docs state a token "will have the same permissions as the owning user" — i.e., whatever the hPanel account itself can do: manage every VPS, every website, DNS, domains, and (unconfirmed but plausible) billing. Tokens *can* be set to expire, which bounds exposure over time but does not narrow *what* the token can do while live. This is a wide blast radius, structurally similar in kind (though narrower in immediate mechanism) to the SSH-key reuse trap §12.2 already ruled out — a stolen Hostinger token is not "read a graph," it is "everything the account owner can click in hPanel, plus API-only actions" | Hostinger's own support article on the API (fetched) |
+| Tri-state landing | If adopted: `measured` for CPU/RAM/disk/network/uptime, landing under a **new** `monitoring_tier` value (§15, MSO-13) distinct from `blackbox` — it is not a probe, it is provider-reported telemetry, and conflating the two tiers would hide that the signal source is a third party's word, not our own measurement | — |
+
+**Recommendation (b): this is the most promising interim answer found in this pass**, conditional on
+two owner confirmations (below) and an explicit, eyes-open acceptance of the token's account-wide
+blast radius — treat a Hostinger API token exactly as carefully as a root credential, never log it,
+store it the way `CREDENTIALS.local.md`/secret patterns already require, and set an expiry.
+
+### 13(c) The underlying cloud provider
+
+**Answered, in effect, by (b).** The passive ASN/rDNS lookup places both hosts on Hostinger's own
+network under Hostinger's own naming convention — there is no evidence of a distinct third-party
+hypervisor provider "beneath" Hostinger to query separately (i.e., this does not look like Hostinger
+reselling AWS/DigitalOcean/a hyperscaler's VPS product under the hood; industry-general knowledge is
+that Hostinger operates its own infrastructure ⚠ **UNVERIFIED for this specific case, not re-derived
+from a primary source in this pass**). So there is no additional hypervisor-level metrics API to chase
+beyond Hostinger's own — §13(b) IS the answer to (c) as far as this research can reach.
+
+**What cannot be determined without the owner:** (i) whether `helios`, `delphi`, and `wp hostinger`
+sit under one Hostinger account or several (determines whether one token covers all three); (ii) each
+host's actual plan/product tier (KVM VPS vs shared/managed WordPress hosting) — plan tier gates
+whether `VPS.getMetricsV1` applies at all; (iii) whether Hostinger's account system offers any
+reduced-privilege team member/sub-token role that would narrow the blast radius in 13(b) — nothing
+found in this pass says yes or no, and it is worth asking Hostinger support directly rather than
+inferring further from public docs.
+
+### 13.1 Recommendation, first step
+
+1. **Zero-cost, zero-risk first move:** ask the owner to confirm (i) which login "cloud panel" means
+   (URL or screenshot) for `helios`/`delphi`, (ii) whether all three hosts are one Hostinger account,
+   and (iii) each host's plan tier. Nothing below should be built before this, because it changes
+   which of 13(a)/(b) even applies.
+2. **If confirmed as Hostinger VPS:** mint one Hostinger API token (accepting 13(b)'s blast radius as
+   a documented, deliberate risk — not a surprise later), call `VPS.getMetricsV1` for `helios`/
+   `delphi` (and `wp hostinger` if it is also a VPS) from the hub on a schedule, feed the result into
+   a **new** `monitoring_tier` value (§15, MSO-13/14) so the console never conflates provider-reported
+   telemetry with our own probes or our own agent-collected metrics. This closes most of §12.4's
+   UNOBTAINABLE column (disk/memory/CPU/uptime) for these hosts with **zero packets to the guest OS**
+   — no SSH, no agent, no exporter — only ordinary HTTPS calls to Hostinger's own API, which is not
+   "touching the host" any more than opening hPanel in a browser is.
+3. **Do not build a CloudPanel scraper.** No official feed exists, and the credential available for
+   it carries the same blast-radius class as SSH access.
+4. **For `wp hostinger`, if it is confirmed genuinely shared hosting** (not a VPS): the ceiling stays
+   the existing blackbox probe tier (MSO-11) plus the `Websites` API's non-metrics fields (enabled
+   state, domain list) as cheap inventory metadata — not a performance signal. Revisit only if
+   Hostinger's docs (or support) later confirm a resource-usage endpoint for that tier.
+
+---
+
+## 14. How this joins the existing surfaces — Plane A estate, IT device topology, and a future Network page
+
+**The subtlest point in this whole design, named as such rather than glossed over.** The owner wants
+"servers, tools, services, devices" all monitored, with devices on the existing topology surface and
+network on its own page. Those words span **three different nouns that must not blur into one page**:
+
+| Noun | What it is | Where it lives today | Scope |
+|---|---|---|---|
+| **Host** (`infra_hosts`) | A machine **we or a provider operate** — `gda-aicenter`, `sumopod`, and now `helios`/`delphi`/`wp hostinger` | Plane A estate view, MSO-05/06 (`/systems/observability`) | Staff-only (`isElevated`), **non-tenant** |
+| **Device** (`it_devices`/`it_device_links`) | A piece of hardware **inside a tenant's own office** — a switch, an AP, a printer, a CCTV camera, a workstation | IT department's existing device registry + topology (`platform-nest/src/modules/it/`, `/it`) | **Tenant-scoped** (RLS on `tenant_id`), Cerbos resource `device` — a sellable ERP department feature, not "our infra" in the Plane A sense even when the tenant happens to be GDA itself |
+| **Property/monitor** (`search_properties`, future `monitors`) | A **client's website or service being watched for uptime** | Plane B, `docs/blueprints/monitoring-program.md` §3 (`/monitoring`, staff cross-client board; `/portal/status`, client-facing) | Tenant **and** client scoped (RLS), sellable, Cerbos-gated |
+
+None of these three should merge, and none of the three pages should try to render another's noun.
+The IT device/topology page already exists and needs no change here — it is a tenant's own office LAN,
+untouched by this program. A new **Network** page, per the owner's ask that network get its own page,
+belongs in the **same tenant-scoped IT department** as an extension of that noun — a subnet/VLAN/
+WAN-uplink/AP-level view layered over the device inventory (e.g. `/it/network`), not a Plane A page.
+**It must not become the place `helios`/`delphi`/`wp hostinger` get rendered** — that is the single
+easiest way to accidentally blend "our office WAN" with "the internet-facing hosting network our
+clients' sites live on," which is exactly the Plane A/B merge this program is bound never to do
+(monitoring-program.md §0). The IT department's own design of that page (including whatever the
+office-network-and-it-discovery-gap UniFi integration ends up needing) is out of scope for this
+integrator doc beyond flagging that boundary.
+
+### 14.1 The genuinely hard part: one Plane A host carries many Plane B properties
+
+`helios`/`delphi`/`wp hostinger` are Plane A hosts (§12.0) that **host CLIENT websites** — Plane B
+payloads. Concretely: `helios` (production web-hosting) may carry client A's site and client B's
+site at once; those clients may be different `clients` rows under one tenant (GDA) today, or — once
+the platform serves unrelated SaaS tenants (monitoring-program.md §1) — different tenants entirely.
+So one non-tenant `infra_hosts` row can correspond to **N** tenant+client-scoped `monitors`/
+`search_properties` rows, potentially spanning tenant boundaries. That is exactly the shape MON-00
+(monitoring-program.md §1.2) already exists to guard: hierarchy-aware rollups may never cross a root
+company, and a naive host↔property join is precisely the kind of cross-client aggregate MON-00 is
+gating.
+
+**How to express the relationship without merging the planes — recommended, PLANNED, not built:**
+
+- **A one-directional, staff-only, informational cross-reference — never a join that carries
+  authorization, never surfaced tenant-side.** On the Plane A host detail view (staff `isElevated`,
+  non-tenant), a card reading "Known Plane B properties on this host" — populated by a staff-scoped
+  aggregate query run under the SAME cross-client authority the Plane B Operations board already uses
+  (`monitoring.read` already aggregates across every client for staff — this is not a new authority
+  boundary, it reuses one that exists). It answers exactly one operational question — *"if this box
+  goes down, whose sites are affected"* — and nothing else.
+- **Data source: explicit metadata, not live correlation.** Add a nullable
+  `hosting_host_key text REFERENCES infra_hosts(key)` column to `search_properties` (and later
+  `monitors`) — verified today, `0116_module_monitoring.sql`'s `monitors` table has **no such
+  column**, so this is genuinely new, not an oversight to wire up. Populated manually at provisioning
+  time by whoever stands up a client's site; needs no live DNS/IP correlation at read time (avoiding
+  the SSRF-adjacent pattern monitoring-program.md §3.5 already treats as a hazard elsewhere). Drift
+  (a site quietly moved to a different host and nobody updated the column) is caught the same way
+  §3.2 already surfaces `infra_hosts` drift: the blackbox probe's resolved IP (MSO-11, once OQ-6 names
+  targets) can be compared against the row's declared host and flagged, not silently trusted.
+- **Hard boundary, stated so it cannot be built the wrong way by a future session:** this
+  cross-reference is READ-ONLY staff metadata. It must **never** be exposed through any
+  tenant-scoped endpoint, must **never** let a `monitoring.read` holder on the client side see which
+  physical box — or which other tenants/clients — share it (that leaks agency infrastructure, e.g.
+  "your site shares a VPS with a stranger's," to a client), and must **never** become an authorization
+  join anywhere. It is a blast-radius view for staff, nothing else.
+- **This spans both planes' schemas and is therefore a contract question, not a call this integrator
+  doc settles.** Adding `hosting_host_key` touches Plane B's `monitors`/`search_properties` tables
+  (owned by the monitoring-program.md design, not this MSO plan) while reading Plane A's `infra_hosts`
+  (owned here) — the kind of cross-cutting schema decision that needs an explicit architect ratification
+  before a migration lands on either side, per this seat's own rule to STOP on contract questions.
+  **BLOCKED on architect sign-off** — ticketed as MSO-16 (§15) rather than assumed.
+
+### 14.2 Summary sketch
+
+```
+Plane A (staff-only, non-tenant)              Plane B (tenant+client RLS)          IT dept (tenant RLS)
+─────────────────────────────────              ──────────────────────────           ────────────────────
+/systems/observability                         /monitoring (staff board)            /it (devices + topology)
+  infra_hosts: gda-aicenter, sumopod              search_properties, monitors          it_devices, it_device_links
+    (agent tier)                                    per tenant+client                    per tenant (office LAN)
+  infra_hosts: helios, delphi, wp-hostinger    /portal/status (client)              /it/network (NEW — subnet/
+    (blackbox / provider-api tier, §13)          per client, public slug              WAN/AP view, same tenant scope)
+        │
+        └── "known properties hosted here" ──▶ staff-only informational card (§14.1)
+            (MSO-16, BLOCKED on architect — new hosting_host_key column, Plane B side)
+```
+
+Nothing above merges a table, an RLS policy, or a Cerbos resource across the vertical lines; the only
+cross-plane element is the one read-only, staff-gated informational card, and even that is not built
+without an architect ratifying the schema touch on the Plane B side.
+
+---
+
+## 15. Tickets (this pass) and open owner questions
+
+Numbering continues §9/§12.6. Seat default unless flagged; tier · model·effort as elsewhere in this
+doc.
+
+| # | Tier · model | Scope | Done when | Depends on |
+|---|---|---|---|---|
+| **MSO-12** | devops · seat default | Spike, mostly owner-driven: confirm with the owner (i) which login "cloud panel" means for `helios`/`delphi` (URL/screenshot), (ii) whether `helios`/`delphi`/`wp hostinger` share one Hostinger account, (iii) each host's plan tier (VPS vs shared). If VPS confirmed, obtain one Hostinger API token from the owner (accepting §13(b)'s blast radius explicitly, in writing, before it is created) | Three confirmations recorded in this doc; token (if any) stored per the repo's secret pattern, never logged, expiry set | — |
+| **MSO-13** | senior-db · seat default | `infra_hosts` migration: add `monitoring_tier` value `provider-api` (a THIRD tier alongside `agent`/`blackbox` — provider-reported telemetry is not our own measurement and must not be labeled as either existing tier), plus `external_ref jsonb` (or a narrower typed column) to hold the provider's own identifier (e.g. Hostinger `virtualMachineId`) keyed off `infra_hosts.key` | Applies on a throwaway DB; `lint:withtenants` + `lint:migration-rls` green; a `provider-api` row with no `external_ref` fails a check constraint (fail-closed, same discipline as MSO-09's off-mesh constraint) | MSO-12 (needs the confirmed facts to seed correctly) |
+| **MSO-14** | senior-integrator · **opus·medium** — a stolen provider credential has account-wide reach per §13(b); getting the ingestion/credential-handling wrong here is a security incident, not a re-run | Hub-side poller: calls Hostinger `VPS.getMetricsV1` on a schedule for each `provider-api`-tier host, converts CPU/RAM/disk/network/uptime into the same host-labeled series shape the estate endpoint already expects (or a parallel field set if the shapes don't reconcile — do not force-fit into `HostHealth` if the semantics differ); token never logged, stored per the established secret pattern, read from env not committed config | Live pull against the real Hostinger API for at least one confirmed host, values sane against what hPanel's own UI shows for the same window; token handling reviewed against `golang-security`/secrets-management norms before merge | MSO-12, MSO-13 |
+| **MSO-15** | medior (senior-fe reviews) · seat default | Console tier rendering, extending the MSO-06 amendment: a `provider-api` badge distinct from both `agent` and `blackbox`, with copy that credits the reading to the provider ("Hostinger-reported," not "measured by us") so an operator never mistakes third-party telemetry for our own instrumentation | Fixture-driven: a `provider-api` host is visually distinct from both other tiers in every state (fresh/stale/dark) | MSO-14 shape (fixtures may lead the backend) |
+| **MSO-16** | **architect** — cross-plane schema touch, explicitly BLOCKED pending ratification per this seat's own contract-question rule | Design + ratify the `hosting_host_key` cross-reference (§14.1): schema (which side owns the column — Plane B's `search_properties`/`monitors`, read by a Plane A-staff-scoped query), the exact staff-only exposure surface, and the "never tenant-visible, never an auth join" invariant as a pinned test, not prose | Architect-ratified design note in `docs/blueprints/monitoring-program.md` (Plane B owns the column) or a cross-doc addendum here (Plane A reads it); a test asserting no tenant-scoped route can ever return `hosting_host_key` or any host identity derived from it | §14.1's design as a starting point; MSO-13 (tier vocabulary) |
+| **MSO-17** | medior · seat default | New tenant-scoped **Network** page in the IT department (`/it/network`), extending the existing device registry — subnet/VLAN/WAN-uplink/AP-level view, same Cerbos gate family as `device` (or a new resource if the IT department's own design calls for one). Explicitly does NOT render `helios`/`delphi`/`wp hostinger` or anything Plane A | Driven in a browser against a live BE; a Plane A host never appears on this page (adversarial check in the QA pass) | IT department's own design call on office-network-and-it-discovery-gap (UniFi) — not this program |
+| **MSO-18** | devops · seat default, **BLOCKED on an owner timeline** | Plan (not execute) the `gda-aicenter`+`sumopod` consolidation's observability fallout per §12.0: which `infra_hosts` row retires vs is repurposed, whether the WireGuard hub relocates, whether pre-merge series history stays queryable under the old `host` label. Explicitly: do not design or execute the consolidation itself | A short addendum to this doc naming the plan, written only after the owner names a timeline | Owner timeline (unset) |
+
+### 15.1 What is still needed from the owner (consolidated)
+
+1. Which login is "cloud panel" — a URL or screenshot for `helios`/`delphi` (§13(a), §13.1 step 1).
+2. Do `helios`, `delphi`, and `wp hostinger` share one Hostinger account, or separate accounts/
+   resellers (§13(b)/(c))?
+3. Each host's actual Hostinger plan tier — KVM VPS vs shared/managed WordPress (§13(b)) — this gates
+   whether `VPS.getMetricsV1` applies at all.
+4. Explicit go-ahead to mint a Hostinger API token, having read §13(b)'s blast-radius trade (no
+   read-only scoping was found to exist) — or, if the owner wants to ask Hostinger support whether a
+   reduced-privilege team-member token exists, that answer first.
+5. OQ-6 (still open, unchanged by this pass): the actual probe list (URLs/ports) for `helios`/
+   `delphi`/`wp hostinger` blackbox probing — required before MSO-11 can send its first packet.
+6. A rough timeline for the `gda-aicenter`+`sumopod` consolidation (§12.0, MSO-18) — not needed to
+   design it, only to know when to plan the hub-relocation/row-retirement work.
