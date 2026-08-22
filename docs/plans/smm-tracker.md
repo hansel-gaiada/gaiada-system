@@ -2565,6 +2565,16 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   that stays the architect's call. Also corrected a fixture (`"yt-video-1"`, 3 uses) that no real
   YouTube id could look like; a fixture that cannot exist is part of why the fallback read as safe.
 - No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)
+  — **STILL OPEN, and deliberately not built on 2026-08-23.** It is the only one of these eight that is
+  a FEATURE GAP rather than a defect, and it cannot be built without decisions that are not mine to
+  make: who may approve (a `social.post.approve` permission does not exist in the catalog, and
+  `docs/PERMISSION-CONTRACT.md` is a frozen Phase 1 contract, so adding one is a contract change);
+  whether approval is a distinct state on `social_post_variants` or a D14 executable approval like the
+  metered publish path; and what invalidates it (the caption/hashtag write path already recomputes
+  `args_sha256` and invalidates client sign-off, so an approval that does not follow that same state
+  law would be the second, divergent copy of it). Every other item on this list was closable by
+  reasoning from the code; this one needs an owner or architect decision first. The seven above are
+  closed — see each struck entry.
 
 **Not ours to finish:** the platform-app reviews (D-23 — Meta's Business Verification is the only serial
 prerequisite), the D-21 fork exception (granted, unapplied), and whether `DISABLE_REGISTRATION` blocks a
