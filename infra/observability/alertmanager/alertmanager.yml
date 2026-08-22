@@ -33,7 +33,29 @@ route:
       group_interval: 1m
       repeat_interval: 1m
       continue: false
-    # Pages hit every human transport immediately.
+    # MSO-02 / OQ-2 (owner: "use the best way n safest", answered 2026-08-21): production PAGES,
+    # staging/dev/ops are TICKET-ONLY — never a page. Alert fatigue is the failure mode that makes
+    # real pages get ignored: a staging box waking someone at 3am does not make the estate safer,
+    # it trains the responder to treat the pager as noise, which is precisely how a genuine
+    # production page gets snoozed later. This branches on the `env` label MSO-01 landed on every
+    # series (and therefore on every host-scoped alert), so ONE rule file keeps covering every
+    # host regardless of environment — the routing tree branches on env, the rules stay
+    # env-agnostic (design doc §8). Matched BEFORE the generic severity="page" route below so it
+    # takes precedence for exactly the environments it names.
+    #
+    # No `env` label at all (app-level alerts with no host attribution, e.g. SyntheticJourneyFailing,
+    # MailSendFailureRateHigh, or the legacy RemoteWriteStalled cross-check which sets env:
+    # production statically) deliberately falls through to the generic page route below and pages
+    # — the fail-safe direction the D15 dead-man's-switch philosophy already takes: an alert this
+    # estate cannot attribute to an environment is treated as production-worthy rather than
+    # silently downgraded.
+    - matchers: ['severity="page"', 'env=~"staging|dev|ops"']
+      receiver: default-multi
+      group_wait: 30s
+      repeat_interval: 4h
+      continue: false
+    # Pages hit every human transport immediately. Reaches here for env="production" and for any
+    # page-severity alert carrying no env label at all (see comment above).
     - matchers: ['severity="page"']
       receiver: page-all
       group_wait: 10s

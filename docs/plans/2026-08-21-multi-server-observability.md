@@ -1,8 +1,10 @@
 # Multi-server Plane A observability (MSO)
 
-**Date:** 2026-08-21 · **Status:** IN PROGRESS — MSO-00/01 DEV-VERIFIED live; MSO-04 (`infra_hosts`)
+**Date:** 2026-08-21 · **Status:** IN PROGRESS — MSO-00/01 DEV-VERIFIED live; MSO-02 (per-host
+alerts + env routing) PROTOTYPED — promtool/amtool-verified against the remote and against a live
+true condition, NOT YET DEPLOYED to the remote box (see §8 status note); MSO-04 (`infra_hosts`)
 and MSO-05 (estate endpoint) PROTOTYPED, backend only, unit + live-DB tested, not yet consumed by a
-UI; OQ-2/3/4 ANSWERED below (§10); MSO-02/03/06/07/08 still PLANNED ·
+UI; OQ-2/3/4 ANSWERED below (§10); MSO-03/06/07/08 still PLANNED ·
 **Owner ask:** "we need to see more servers in there. we are having lots of servers for staging,
 production etc." — the ERP's Systems → Observability console must become a multi-host,
 multi-environment view.
@@ -291,20 +293,77 @@ Following the `available:false + reason` precedent already in the controller:
 
 ## 8. Alerting changes (MSO-02)
 
-- **`RemoteWriteStalled` generalizes per host:**
-  `(time() - max by (host) (last_over_time(timestamp(up{host!=""})[48h:1m]))) > 600`, `for: 0m`,
-  severity `page`, description carrying the same "quiet estate = UNKNOWN, not healthy" wording. The
-  existing single-host `absent_over_time` rule is kept until the label cutover proves out, then
-  retired (two rules briefly, drift-safe direction).
+**Status (2026-08-22): PROTOTYPED, verified against the remote (10.88.0.2:19090 /
+`gaiada-obs-prometheus-1`, `gaiada-obs-alertmanager-1` on SumoPod), committed to the repo, NOT YET
+deployed to the box.** Repo is ahead of the running config — see the status note at the end of this
+section for exactly what applying it involves and why it was deliberately not done unattended.
+
+- **`RemoteWriteStalled` generalizes per host, and carries `env` too (a deliberate departure from
+  the literal expression first sketched above):**
+  `(time() - max by (host, env) (last_over_time(timestamp(up{host!=""})[48h:1m]))) > 600`, `for: 0m`,
+  severity `page`, description carrying the same "quiet estate = UNKNOWN, not healthy" wording.
+  `by (host, env)` instead of `by (host)`: env is a functional dependent of host (one env per host,
+  same collector `external_labels`, §4), so grouping by both adds no new split of a host's series —
+  it only carries `env` into the alert's own labels, which the env-based routing this section adds
+  needs (`max by (host)` alone would drop `env` and the alert could not be routed by environment at
+  all). The estate endpoint's own freshness query stays `by (host)` only because it joins to
+  `infra_hosts` in application code instead (contract note 10) — a Prometheus alert has no such
+  join available to it.
+  The existing single-host `absent_over_time` rule is kept, renamed `RemoteWriteStalledLegacySingleHost`
+  with a static `env: production` label, as a belt-and-suspenders cross-check until the generalized
+  rule has run a full cycle on the remote without disagreeing with it, then retired (two rules
+  briefly, drift-safe direction).
   Known bound: a host dark longer than the 48 h lookback drops out of the expression — the console's
   inventory-driven `never` state is the long-horizon catch, and the alert's own firing→resolved
   transition is itself a page.
-- **Env-aware routing:** Alertmanager routes on the `env` label — production ⇒ page transports,
-  staging/dev ⇒ ticket-only receiver (exact policy is OQ-2). Rules themselves stay env-agnostic; the
-  label rides in from external_labels so one rule file keeps covering every host (the pattern the
-  remote prometheus config already established for the shared `node` job).
-- All rule changes go through `infra/scripts/lint-observability.sh` (promtool) plus a live-probe of
-  the loaded rules — a loaded rule file is not a served rule file on this estate.
+- **`DiskSpaceLow`/`DiskWillFillIn24h`/`PostgresDown`/`RedisDown` generalize by inheritance, not by
+  aggregation.** None of these four use a `by (...)` clause, so once MSO-01 stamped `host`/`env`
+  onto every series via the collector's `external_labels`, these rules already carried host/env
+  through unchanged — the fix here is adding `host!=""` (exclude pre-cutover unlabeled series) and,
+  for the two disk rules, `mountpoint="/"` to close contract note 10's flagged divergence: the
+  estate endpoint's disk queries (`observability.controller.ts`'s `FS` constant) already pinned
+  `mountpoint="/"`, the alert rules had not. Verified live this narrows correctly, not just
+  theoretically — `gda-aicenter` only ever reports `/` and a tiny `/boot/efi` vfat partition that
+  should never drive a disk alert, and `sumopod` only reports `/`.
+- **Env-aware routing — DEV-VERIFIED against the remote Alertmanager, both directions:**
+  `amtool config routes test` against the rendered config resolves `severity=page,env=production` →
+  `page-all`, `severity=page,env=staging` → `default-multi`, `severity=page,env=dev` →
+  `default-multi`, `severity=page,env=ops` → `default-multi` (all four `infra_hosts.env` CHECK
+  values), `severity=page` with no `env` label at all → `page-all` (fail-safe: an alert this estate
+  cannot attribute to an environment pages rather than silently downgrading), `severity=watchdog` →
+  `deadmansswitch` (unaffected), `severity=ticket,env=production` → `default-multi` (ticket severity
+  is never upgraded to a page by being in production — env sets a paging *ceiling*, not a floor).
+  Rules themselves stay env-agnostic; the label rides in from `external_labels` so one rule file
+  keeps covering every host (the pattern the remote prometheus config already established for the
+  shared `node` job).
+- **Real live case this caught in the act of verifying it:** at verification time `sumopod`
+  (`env=ops`) was genuinely at 14.6% free on `/` — `DiskSpaceLow`'s new expression matches it live
+  today, and the env-routing test above confirms it resolves to `default-multi` (ticket), not
+  `page-all` — exactly the outcome OQ-2 calls for on an `ops` host, and a live demonstration of why
+  this ticket exists rather than a synthetic one.
+- All rule changes went through `promtool check rules` (19 rules before → 20 after, both SUCCESS)
+  plus a new `infra/observability/prometheus/rules/alerts_test.yml` (`promtool test rules`, 5 test
+  groups, all green) run against the remote's own `prom/prometheus:v3.1.0` image, and `amtool
+  check-config` / `amtool config routes test` against the remote's own `prom/alertmanager:v0.28.0`
+  image — all via scratch copies inside the containers (`docker cp` to `/tmp`), never by touching
+  the live mounted `/etc/prometheus/rules/alerts.yml` or `/etc/alertmanager/alertmanager.yml`. No
+  container was restarted; `docker ps -a` on SumoPod shows identical uptimes before and after.
+  `infra/scripts/lint-observability.sh` was also run locally (YAML-parse fallback path, promtool/
+  amtool not installed on this workstation) — 0 YAML failures across `infra/observability/**`
+  including the new files; its unrelated Grafana-dashboard JSON-check step fails on this Windows
+  workstation on a pre-existing path-translation bug (`C:\c\Users\...`), reproducible on `main`
+  before this change and not touched by it.
+  **A loaded rule file is not a served rule file on this estate** (design principle, restated): the
+  repo change above is verified but **not yet applied to the remote**. Applying it is a separate,
+  explicit step — `rsync -az infra/observability/ sumopod:~/gaiada-obs/infra/observability/`
+  followed by `docker restart gaiada-obs-prometheus-1 gaiada-obs-alertmanager-1` (bind-mounted
+  config does not hot-reload on content change alone, per the 2026-08-18 relocation doc's own
+  finding) — deliberately not run unattended here because it touches the live production paging
+  path for a shared, already-imperfect checkout, and because `RemoteWriteStalled`'s DEV-VERIFIED
+  legacy form is the one alert that would notice if the swap itself went wrong. Recommend running it
+  as its own reviewed step, watching for the `sumopod` `DiskSpaceLow` ticket appearing in Telegram/
+  email (confirms the new rule fired for real, live) and the absence of any new page for it
+  (confirms the routing held).
 
 ---
 
@@ -317,7 +376,7 @@ full re-run.
 |---|---|---|---|---|
 | **MSO-00** | devops · **opus·medium** — compose surgery on the live estate; a mistake here recreates the §2.3 outage class and there is one shot per deploy cycle | Kill the resurrection: split `docker-compose.observability.yml` into a collection-only file for `gda-aicenter` (collector + exporters + synthetic-prober); storage services (prometheus/grafana/loki/tempo/alertmanager/render/ntfy) leave the `gda-aicenter` file set entirely (obs-remote.yml already owns them). Update `COMPOSE_FILES` repo variable in the same change. Decommission the resurrected containers **and volumes** on the box; absorb MON-09h (retire `alertmanager-mail/otel-metrics/loki/obs-local` compose files or mark dev-only) | After the **next tag deploy**, zero storage containers on `gda-aicenter` (`docker ps` proof); remote still receiving (16 `up` series pre-MSO-01); measured disk delta recorded in the plan doc | — |
 | **MSO-01** | devops · seat default | Host/env external labels per §4, incl. remote self-scrape labels and the dashboard `$host` variable | `count by (host)(up)` shows every job under a host; **zero** host-less groups after the 5 m staleness window; rules still loaded and matching (promtool + live `/api/v1/rules` probe); dashboard renders both hosts | MSO-00 |
-| **MSO-02** | devops · seat default | Per-host `RemoteWriteStalled` + env-based Alertmanager routing per §8 | promtool unit tests: labeled dark host fires, live host doesn't; routing tree verified with `amtool config routes test` for each env; live rule probe on the remote | MSO-01, OQ-2 |
+| **MSO-02** | devops · seat default | Per-host `RemoteWriteStalled`/`DiskSpaceLow`/`DiskWillFillIn24h`/`PostgresDown`/`RedisDown` + env-based Alertmanager routing per §8 — 🟡 PROTOTYPED 2026-08-22, verified against the remote, **not yet deployed** (repo ahead of the box; see §8 status note for the exact deploy commands withheld pending an explicit go) | promtool unit tests: labeled dark host fires, live host doesn't (`alerts_test.yml`, 5 groups green); routing tree verified with `amtool config routes test` for each of the 4 `infra_hosts.env` values, both directions (production pages, staging/dev/ops don't); live rule probe on the remote (`gaiada-obs-prometheus-1`/`gaiada-obs-alertmanager-1`, scratch-copy method, no restart) | MSO-01, OQ-2 |
 | **MSO-03** | devops · seat default | Agent bundle `docker-compose.obs-agent.yml` + collector template + `infra/runbooks/onboard-server.md` (wg peer procedure incl. hub-side commands and the wg_ip ledger, verification checklist, the §2.3 never-list verbatim) | Dry-run onboarding of the first owner-approved host (OQ-5) end-to-end by following ONLY the runbook: labeled series arrive, disk rules match the host, `docker ps -a` diff on the target box shows exactly ours | MSO-01, OQ-1/OQ-5 |
 | **MSO-04** | senior-db · seat default | `infra_hosts` migration + seed (§3.1) — global table, linter-clean, seed idempotent (`ON CONFLICT (key) DO UPDATE`) | Applies on a throwaway DB; `lint:withtenants` + `lint:migration-rls` green; re-running the seed churns nothing | — (parallel) |
 | **MSO-05** | senior-be · **opus·medium** — per-field null-vs-zero discipline across ~12 fields and three upstreams (Prometheus, Alertmanager, DB) is exactly the class this estate has repeatedly shipped wrong; a re-run costs more than starting strong | Estate snapshot per contract §20.1a: `by (host)` aggregate queries (O(signals), never O(hosts×signals)), freshness state machine, Alertmanager v2 client + `ALERTMANAGER_URL` config, `withGlobal` inventory join, unregistered/never-reported surfacing, legacy fields kept for one release (expand phase) | Every §20.1a field note satisfied against a live probe; unit tests mock empty vectors and assert **no field ever coerces to 0**; `app.inject` suite over the endpoint; contract §20.1a rows flipped to 🟡/✅ only by QA | MSO-01, MSO-04 |

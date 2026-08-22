@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **87** capabilities across **14** owners
-- **48** writes · 39 reads
-- Writes by impact: **high 8** · medium 16 · low 24
+- **92** capabilities across **14** owners
+- **52** writes · 40 reads
+- Writes by impact: **high 9** · medium 16 · low 27
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -35,6 +35,31 @@ Listed explicitly: an absent row would read as "module does not exist" rather th
 "module reaches no agent". Readiness-bar criterion 1 (tool parity) fails for each.
 
 - **assistant** — registered in main.ts, contributes 0 MCP tools
+
+## Golden cases — does a test drive the real endpoint?
+
+Readiness-bar **criterion 7** / exit-bar criterion 5. Its failure signal is mechanical —
+"No test drives the real endpoint" — so this is DERIVED (route family from each tool's own
+`pathTemplate`, then a scan for suites that call `app.inject` against it), never asserted.
+A hand-kept list of which departments have an eval is true the day it is written and
+unfalsifiable after.
+
+| Owner | Route families | Suites driving the real endpoint |
+|---|---|---|
+| agency | `agency` | 7 |
+| automation-console | `admin/automation` | 2 |
+| billing | `invoices` | 2 |
+| clients | `clients` | 4 |
+| core | `positions` · `role-grants` | 3 |
+| hr | `hr` | 10 |
+| it | `it` | 4 |
+| knowledge | `knowledge` | 2 |
+| monitoring | `monitoring` | 2 |
+| pm | `pm` | 9 |
+| reports | `checkins` · `reports` | 15 |
+| search | `search` | 16 |
+| social | `social` | 9 |
+| webdev | `webdev` | 4 |
 
 ## Capabilities
 
@@ -100,10 +125,13 @@ Listed explicitly: an absent row would read as "module does not exist" rather th
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | social | `social.addPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants` | write | `low` |
+| social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |
 | social | `social.approveReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/approve` | write | `low` |
 | social | `social.checkPublishPreconditions` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/publish-preconditions` | read | — |
+| social | `social.checkReplySendPreconditions` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send-preconditions` | read | — |
 | social | `social.createEngagement` | `POST` | `/api/:tenantId/modules/social/engagements` | write | `low` |
 | social | `social.createPost` | `POST` | `/api/:tenantId/modules/social/posts` | write | `low` |
+| social | `social.createReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages` | write | `low` |
 | social | `social.deliverReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/deliver` | write | `medium` |
 | social | `social.draftPostIdeas` | `POST` | `/api/:tenantId/modules/social/posts/draft-ideas` | write | `low` |
 | social | `social.draftPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants/:variantId/draft-caption` | write | `low` |
@@ -122,8 +150,10 @@ Listed explicitly: an absent row would read as "module does not exist" rather th
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
 | social | `social.requestClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | write | `medium` |
+| social | `social.sendReply` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/send` | write | `high` |
 | social | `social.setEngagementScope` | `PATCH` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | write | `medium` |
 | social | `social.syncConnectorRegistry` | `POST` | `/api/:tenantId/modules/social/publisher-orgs/:clientId/sync` | write | `low` |
+| social | `social.updateReplyDraft` | `PATCH` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId` | write | `low` |
 | social | `social.validateVariant` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/validation` | read | — |
 | social | `social.withdrawClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review/withdraw` | write | `low` |
 | webdev | `webdev.provisionSite` | `POST` | `/api/:tenantId/modules/webdev/provision` | write | `medium` |

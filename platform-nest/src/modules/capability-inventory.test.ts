@@ -33,7 +33,7 @@
 // treatment; this one is the estate-wide, always-current spine. Neither replaces the other, and this
 // file does not pretend to the columns it cannot compute.
 import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { resetModules, registerModule, allModules } from "./registry";
 import { allCoreTools, resetCoreTools, registerIamCoreTools } from "../core/core-tools";
@@ -62,6 +62,8 @@ const ALL_MODULES = [
   reportsModule, webdevModule, socialModule,
 ];
 
+interface GoldenRow { owner: string; families: string[]; drivers: number }
+
 interface Row {
   owner: string;
   tool: string;
@@ -77,7 +79,7 @@ function cell(v: string | undefined, fallback = "—"): string {
   return v && v.length ? `\`${v}\`` : fallback;
 }
 
-function render(rows: Row[], silentModules: string[]): string {
+function render(rows: Row[], silentModules: string[], golden: GoldenRow[]): string {
   const writes = rows.filter((r) => r.kind === "write");
   const byImpact = (i: string) => writes.filter((r) => r.impact === `\`${i}\``).length;
   const lines: string[] = [];
@@ -126,6 +128,20 @@ function render(rows: Row[], silentModules: string[]): string {
     for (const k of silentModules) lines.push(`- **${k}** — registered in main.ts, contributes 0 MCP tools`);
     lines.push("");
   }
+  lines.push("## Golden cases — does a test drive the real endpoint?");
+  lines.push("");
+  lines.push("Readiness-bar **criterion 7** / exit-bar criterion 5. Its failure signal is mechanical —");
+  lines.push("\"No test drives the real endpoint\" — so this is DERIVED (route family from each tool's own");
+  lines.push("`pathTemplate`, then a scan for suites that call `app.inject` against it), never asserted.");
+  lines.push("A hand-kept list of which departments have an eval is true the day it is written and");
+  lines.push("unfalsifiable after.");
+  lines.push("");
+  lines.push("| Owner | Route families | Suites driving the real endpoint |");
+  lines.push("|---|---|---|");
+  for (const g of golden) {
+    lines.push(`| ${g.owner} | ${g.families.map((f) => `\`${f}\``).join(" · ")} | ${g.drivers} |`);
+  }
+  lines.push("");
   lines.push("## Capabilities");
   lines.push("");
   lines.push("| Owner | Tool | Method | Endpoint | Kind | Impact |");
@@ -137,7 +153,55 @@ function render(rows: Row[], silentModules: string[]): string {
   return lines.join("\n");
 }
 
+
+/**
+ * ── GOLDEN CASES (readiness-bar criterion 7 / exit-bar criterion 5) ──────────────────────────────
+ *
+ * "One golden case. A fixture exercising the capability end-to-end, usable as an eval case later."
+ * Its failure signal is precise and mechanical: **"No test drives the real endpoint."** So this is
+ * derived, not asserted — a hand-kept list of which departments have an eval is exactly the kind of
+ * claim that is true on the day it is written and unfalsifiable thereafter.
+ *
+ * MATCHING ON THE PATH, NOT ON A NAME. An earlier attempt keyed this on the module key and produced
+ * a confident wrong answer: `billing` reported ZERO coverage because its endpoints live at
+ * `/invoices`, and `automation-console` reported none because its one route is `/api/admin/...` and
+ * a `:tenantId` pattern silently skipped it. Both were fine all along. The route family is therefore
+ * taken from the tool's own `pathTemplate` — the same registry the rest of this file trusts.
+ */
+function routeFamily(pathTemplate: string): string | null {
+  const parts = pathTemplate.replace(/^\/api\//, "").split("/").filter(Boolean);
+  if (parts[0] === "admin") return parts[1] ? `admin/${parts[1]}` : null;
+  const rest = parts.filter((p) => !p.startsWith(":") && p !== "modules");
+  return rest[0] ?? null;
+}
+
+function allTestSources(dir: string, out: string[] = []): string[] {
+  for (const e of readdirSync(dir)) {
+    const full = join(dir, e);
+    if (statSync(full).isDirectory()) allTestSources(full, out);
+    else if (e.endsWith(".test.ts")) out.push(full);
+  }
+  return out;
+}
+
+/** Test files that drive `family` over the REAL HTTP surface (`app.inject`), not a mocked service. */
+function driversFor(family: string, sources: { path: string; text: string }[]): string[] {
+  return sources
+    // Two escaping traps, both hit while writing this:
+    //  1. `\\b` not `\b` — inside a template literal a lone \b is a BACKSPACE character, not a word
+    //     boundary, so the pattern matched nothing and reported every module as uncovered.
+    //  2. The family must start a PATH SEGMENT. Without the leading `/`, family `it` matched inside
+    //     `audit` and inflated it to 17 suites. An over-count is not a harmless cosmetic error here:
+    //     this table's whole purpose is to be believed about coverage.
+    .filter(
+      (s) =>
+        s.text.includes("app.inject") && new RegExp(`/api/(?:[^"\`']*/)?${family}\\b`).test(s.text),
+    )
+    .map((s) => s.path);
+}
+
 let rendered: string;
+let golden: GoldenRow[];
 
 describe("AGN-6 · capability inventory is generated, not remembered", () => {
   beforeAll(() => {
@@ -165,7 +229,25 @@ describe("AGN-6 · capability inventory is generated, not remembered", () => {
     // Stable order so the artifact does not churn on registration order alone.
     rows.sort((a, b) => (a.owner === b.owner ? a.tool.localeCompare(b.tool) : a.owner.localeCompare(b.owner)));
     const silent = allModules().filter((m) => m.mcpTools.length === 0).map((m) => m.key).sort();
-    rendered = render(rows, silent);
+
+    const sources = allTestSources(join(__dirname, "..")).map((path) => ({
+      path,
+      text: readFileSync(path, "utf8"),
+    }));
+    const owners = [...new Set(rows.map((r) => r.owner))].sort();
+    golden = owners.map((owner) => {
+      const families = [
+        ...new Set(
+          rows
+            .filter((r) => r.owner === owner && r.endpoint !== "—")
+            .map((r) => routeFamily(r.endpoint.replace(/`/g, "")))
+            .filter((f): f is string => !!f),
+        ),
+      ].sort();
+      const drivers = new Set(families.flatMap((f) => driversFor(f, sources)));
+      return { owner, families, drivers: drivers.size };
+    });
+    rendered = render(rows, silent, golden);
 
     if (process.env.UPDATE_INVENTORY === "1") writeFileSync(ARTIFACT, rendered, "utf8");
   });
@@ -196,6 +278,19 @@ describe("AGN-6 · capability inventory is generated, not remembered", () => {
           `answer failure this inventory exists to prevent`,
       ).toContain(`**${k}** — registered in main.ts, contributes 0 MCP tools`);
     }
+  });
+
+  it("🔴 every owner with a callable capability has at least one golden case", () => {
+    // Criterion 7's failure signal, enforced. An owner whose tools are all informational-only (no
+    // pathTemplate) has no route family and is skipped — there is no real endpoint to drive, which
+    // is a criterion-1 problem already reported above, not a missing eval.
+    const uncovered = golden.filter((g) => g.families.length > 0 && g.drivers === 0).map((g) => g.owner);
+    expect(
+      uncovered,
+      "these owners expose callable capabilities that NO suite drives over the real HTTP surface. " +
+        "A capability with no end-to-end fixture cannot be used as an eval case, and its behaviour " +
+        "under an agent is untested by construction.",
+    ).toEqual([]);
   });
 
   it("every row names an owner and a tool — a nameless capability is unauditable", () => {

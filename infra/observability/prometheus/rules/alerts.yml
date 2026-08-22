@@ -28,28 +28,45 @@ groups:
       # (Prometheus 15d + Loki 7d + Tempo 7d), and a full disk has already rolled back a healthy
       # release once. `docker system df` showed ~0 reclaimable, so pruning is NOT a recovery lever
       # here — the only warning we get is this rule. Fires long before the write fails.
+      #
+      # MSO-02: generalized per host. `host!=""` excludes any pre-MSO-01 unlabeled series (they
+      # wash out of the 30d retention window on their own — see design doc §4 cutover note) and
+      # `mountpoint="/"` matches the estate endpoint's FS selector byte-for-byte (`FS` constant in
+      # observability.controller.ts) so the alert and the console board can never disagree about
+      # which filesystem they mean (contract note 10 flagged this divergence; closed here). Every
+      # other label (host, env, instance, mountpoint) rides through unchanged — this expr does no
+      # aggregation, so the alert inherits whatever host/env the series already carries from the
+      # collector's external_labels (MSO-01).
       - alert: DiskSpaceLow
         expr: |
-          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}
-           / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) < 0.15
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/",host!=""}
+           / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/",host!=""}) < 0.15
         for: 10m
         labels:
           severity: page
         annotations:
-          summary: "Disk below 15% free on {{ $labels.mountpoint }}"
-          description: "{{ $labels.instance }}:{{ $labels.mountpoint }} has {{ $value | humanizePercentage }} free. Prune is not a lever on this box — reduce retention (Prometheus --storage.tsdb.retention.time, loki retention_period, tempo block_retention) or grow the volume."
+          summary: "Disk below 15% free on {{ $labels.host }}:{{ $labels.mountpoint }}"
+          description: "{{ $labels.host }} ({{ $labels.instance }}:{{ $labels.mountpoint }}) has {{ $value | humanizePercentage }} free. Prune is not a lever on this box — reduce retention (Prometheus --storage.tsdb.retention.time, loki retention_period, tempo block_retention) or grow the volume."
 
       # --- Predictive: linear-extrapolate the last 6h of usage. Catches a runaway log/trace
       # producer while there is still time to act, which a static threshold does not.
+      #
+      # MSO-02: the predict_linear() core here MUST stay IDENTICAL to the estate endpoint's disk
+      # projection query (observability.controller.ts, `diskProjResult`:
+      # `predict_linear(node_filesystem_avail_bytes${FS}[6h], 24 * 3600)` before its display-only
+      # /1024/1024/1024 conversion, which does not change the <0 sign this rule tests). Same reason
+      # as the freshness/RemoteWriteStalled pairing below: if the console's projection and this
+      # rule's projection can diverge, the board and the pager tell different stories about the
+      # same host. `host!=""`/`mountpoint="/"` per the DiskSpaceLow comment above.
       - alert: DiskWillFillIn24h
         expr: |
-          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"}[6h], 24*3600) < 0
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs",mountpoint="/",host!=""}[6h], 24 * 3600) < 0
         for: 30m
         labels:
           severity: page
         annotations:
-          summary: "{{ $labels.mountpoint }} projected to fill within 24h"
-          description: "Trend over the last 6h projects {{ $labels.instance }}:{{ $labels.mountpoint }} full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
+          summary: "{{ $labels.host }}:{{ $labels.mountpoint }} projected to fill within 24h"
+          description: "Trend over the last 6h projects {{ $labels.host }} ({{ $labels.instance }}:{{ $labels.mountpoint }}) full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
 
       # --- Datastores. MON-09k: these were completely unwatched, and the gap hid a real fault.
       # postgres-exporter and redis-exporter both pointed at container hostnames that are never
@@ -57,23 +74,28 @@ groups:
       # long as the stack had been running. Prometheus showed BOTH TARGETS UP the whole time --- the
       # exporter was healthy, the database was simply unreachable to it, and no rule read the value.
       # A scrape target being up is not a check passing. These two rules are what make that visible.
+      #
+      # MSO-02: `host!=""` matches the estate endpoint's `pg_up{host!=""}`/`redis_up{host!=""}`
+      # queries (observability.controller.ts) and excludes pre-cutover unlabeled series. No
+      # aggregation is used, so host/env ride through from the series unchanged — each instance's
+      # own host/env label is what the receiver routes on.
       - alert: PostgresDown
-        expr: pg_up == 0
+        expr: pg_up{host!=""} == 0
         for: 2m
         labels:
           severity: page
         annotations:
-          summary: "Postgres unreachable from the exporter ({{ $labels.instance }})"
-          description: "pg_up=0 for 2m. Either the database is down, or the exporter DSN points somewhere the database is not (PG_HOST). Check `docker logs` on the exporter before assuming an outage."
+          summary: "Postgres unreachable from the exporter on {{ $labels.host }} ({{ $labels.instance }})"
+          description: "pg_up=0 for 2m on {{ $labels.host }}. Either the database is down, or the exporter DSN points somewhere the database is not (PG_HOST). Check `docker logs` on the exporter before assuming an outage."
 
       - alert: RedisDown
-        expr: redis_up == 0
+        expr: redis_up{host!=""} == 0
         for: 2m
         labels:
           severity: page
         annotations:
-          summary: "Redis unreachable from the exporter ({{ $labels.instance }})"
-          description: "redis_up=0 for 2m. As with Postgres, suspect the exporter address (REDIS_URL, including its password) before concluding Redis is down --- a hostname without credentials connects and then fails every command."
+          summary: "Redis unreachable from the exporter on {{ $labels.host }} ({{ $labels.instance }})"
+          description: "redis_up=0 for 2m on {{ $labels.host }}. As with Postgres, suspect the exporter address (REDIS_URL, including its password) before concluding Redis is down --- a hostname without credentials connects and then fails every command."
 
       # --- MON-09r: the blind spot the 2026-08-18 relocation CREATED, closed here.
       #
@@ -90,14 +112,55 @@ groups:
       # absent_over_time() rather than absent(): absent() fires on a single missed evaluation,
       # which a routine restart or scrape hiccup would trigger. 10m of continuous absence is a
       # genuine feed outage.
-      - alert: RemoteWriteStalled
+      #
+      # MSO-02: kept as the gda-aicenter-specific legacy form, belt-and-suspenders alongside the
+      # generalized rule below, per design doc §8 ("kept until the label cutover proves out, then
+      # retired — two rules briefly, drift-safe direction"). Retire once the generalized rule below
+      # has run a full cycle on the remote without disagreeing with this one.
+      - alert: RemoteWriteStalledLegacySingleHost
         expr: absent_over_time(up{job="otel-collector-self"}[10m])
         for: 0m
         labels:
           severity: page
+          env: production
         annotations:
-          summary: "No metrics received from gda-aicenter for 10m"
-          description: "The remote_write feed has stopped: the collector is not reporting. Suspect the WireGuard link (10.88.0.1 <-> 10.88.0.2) or the collector itself. IMPORTANT: while this fires, every other alert in this file is meaningless rather than reassuring - their series are absent, so they cannot fire. Treat a quiet estate during this alert as UNKNOWN, not healthy."
+          summary: "No metrics received from gda-aicenter for 10m (legacy single-host rule)"
+          description: "The remote_write feed has stopped: the collector is not reporting. Suspect the WireGuard link (10.88.0.1 <-> 10.88.0.2) or the collector itself. IMPORTANT: while this fires, every other alert in this file is meaningless rather than reassuring - their series are absent, so they cannot fire. Treat a quiet estate during this alert as UNKNOWN, not healthy. Superseded by the per-host RemoteWriteStalled rule below; kept temporarily as a cross-check (MSO-02, design doc §8)."
+
+      # --- MSO-02: RemoteWriteStalled generalized per host.
+      #
+      # The legacy rule above only ever covered gda-aicenter (job="otel-collector-self" exists
+      # nowhere else) and, being absent_over_time(), fires with NO labels at all when it fires —
+      # an absent series carries none of the identity that was on the metric before it vanished.
+      # That made it structurally unable to say WHICH host went dark or route by env, exactly the
+      # gap this ticket exists to close (contract note 10).
+      #
+      # This form instead tracks freshness positively: for every host, the age (now - last sample
+      # timestamp) of its `up` series over a 48h lookback. It is the SAME shape and the SAME 600s
+      # ("10m") dark boundary as the estate endpoint's freshness query
+      # (`max by (host) (last_over_time(timestamp(up{host!=""})[48h:1m]))`,
+      # observability.controller.ts / estate-observability.ts) — deliberately, per design doc §6/§8:
+      # if the console's freshness state and this alert's firing state can disagree, the board and
+      # the pager tell two different stories about the same host. The only departure from the
+      # controller's literal expression is grouping `by (host, env)` instead of `by (host)`: env is
+      # a functional dependent of host (one env per host, stamped by the same collector
+      # external_labels, MSO-01 §4), so this adds no new grouping key that could split a host's
+      # series in two — it only carries env through so Alertmanager can route on it (OQ-2). The
+      # controller does not need env from Prometheus because it joins to `infra_hosts` in
+      # application code instead; a Prometheus alert has no such join available to it.
+      #
+      # Known bound (design doc §8, unchanged by this generalization): a host dark longer than the
+      # 48h lookback drops out of the expression entirely — the console's inventory-driven "never"
+      # state is the long-horizon catch for that case, not this alert.
+      - alert: RemoteWriteStalled
+        expr: |
+          (time() - max by (host, env) (last_over_time(timestamp(up{host!=""})[48h:1m]))) > 600
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "No fresh metrics from {{ $labels.host }} for over 10m"
+          description: "{{ $labels.host }} (env={{ $labels.env }}) has gone dark: its most recent `up` sample is over 600s old. Suspect the WireGuard link (10.88.0.1 <-> 10.88.0.2) for a remote host, or the collector/exporter itself. IMPORTANT: while this fires for a host, every other host-scoped alert for it is meaningless rather than reassuring — its series are stale/absent, so they cannot fire. Treat a quiet host during this alert as UNKNOWN, not healthy. This alert is never excluded from the estate console's rollup (design doc §6) — it renders as a whole-board banner, not a per-host row."
 
       # --- Event backbone: any dead-letter is worth a ticket (data path is dropping events).
       - alert: EventBackboneDeadLetters

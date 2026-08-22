@@ -1,0 +1,126 @@
+# MSO-02: promtool unit tests for the per-host generalization of alerts.yml.
+#
+# Scope is deliberately narrow: the rules this ticket touched (RemoteWriteStalled, DiskSpaceLow,
+# DiskWillFillIn24h, PostgresDown, RedisDown), proving (a) a labeled host that goes dark/breaches
+# fires WITH host+env in its labels, and (b) a labeled host that stays healthy does not fire.
+# Run: `promtool test rules infra/observability/prometheus/rules/alerts_test.yml`
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- RemoteWriteStalled: a host whose `up` series stops updating must fire, carrying host+env;
+  # a host whose `up` series keeps arriving must not.
+  - interval: 1m
+    input_series:
+      # gda-aicenter stays fresh for the whole test window.
+      - series: 'up{host="gda-aicenter",env="production",job="otel-collector-self",instance="otel-collector:8888"}'
+        values: "1x60" # one sample per minute for 60m, never stops
+      # sumopod (a stand-in "dark" host) stops reporting after minute 5.
+      - series: 'up{host="sumopod",env="ops",job="prometheus",instance="localhost:9090"}'
+        values: "1x5 _x55" # 5 fresh samples, then absent for the rest of the window
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: RemoteWriteStalled
+        exp_alerts: [] # not dark yet — under the 600s/10m boundary
+      - eval_time: 20m
+        alertname: RemoteWriteStalled
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              host: sumopod
+              env: ops
+            exp_annotations:
+              summary: "No fresh metrics from sumopod for over 10m"
+              description: "sumopod (env=ops) has gone dark: its most recent `up` sample is over 600s old. Suspect the WireGuard link (10.88.0.1 <-> 10.88.0.2) for a remote host, or the collector/exporter itself. IMPORTANT: while this fires for a host, every other host-scoped alert for it is meaningless rather than reassuring — its series are stale/absent, so they cannot fire. Treat a quiet host during this alert as UNKNOWN, not healthy. This alert is never excluded from the estate console's rollup (design doc §6) — it renders as a whole-board banner, not a per-host row."
+      - eval_time: 60m
+        alertname: RemoteWriteStalled
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              host: sumopod
+              env: ops
+            exp_annotations:
+              summary: "No fresh metrics from sumopod for over 10m"
+              description: "sumopod (env=ops) has gone dark: its most recent `up` sample is over 600s old. Suspect the WireGuard link (10.88.0.1 <-> 10.88.0.2) for a remote host, or the collector/exporter itself. IMPORTANT: while this fires for a host, every other host-scoped alert for it is meaningless rather than reassuring — its series are stale/absent, so they cannot fire. Treat a quiet host during this alert as UNKNOWN, not healthy. This alert is never excluded from the estate console's rollup (design doc §6) — it renders as a whole-board banner, not a per-host row."
+        # gda-aicenter must NOT be in this alert's firing set at any of the above times.
+
+  # --- DiskSpaceLow: per-host, root filesystem only, host/env carried through unaggregated.
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{host="gda-aicenter",env="production",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "50x15" # comfortably above 15% the whole time (paired with size below)
+      - series: 'node_filesystem_size_bytes{host="gda-aicenter",env="production",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "100x15"
+      - series: 'node_filesystem_avail_bytes{host="sumopod",env="ops",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "5x15" # 5% free the whole time — below the 15% threshold
+      - series: 'node_filesystem_size_bytes{host="sumopod",env="ops",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "100x15"
+      # A non-root mountpoint on the low-disk host must NOT alert (mountpoint="/" pinning).
+      - series: 'node_filesystem_avail_bytes{host="sumopod",env="ops",instance="node-exporter:9100",mountpoint="/boot/efi",fstype="vfat"}'
+        values: "1x15"
+      - series: 'node_filesystem_size_bytes{host="sumopod",env="ops",instance="node-exporter:9100",mountpoint="/boot/efi",fstype="vfat"}'
+        values: "100x15"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: DiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              host: sumopod
+              env: ops
+              mountpoint: "/"
+              fstype: ext4
+              instance: "node-exporter:9100"
+            exp_annotations:
+              summary: "Disk below 15% free on sumopod:/"
+              description: "sumopod (node-exporter:9100:/) has 5% free. Prune is not a lever on this box — reduce retention (Prometheus --storage.tsdb.retention.time, loki retention_period, tempo block_retention) or grow the volume."
+
+  # --- PostgresDown / RedisDown: host/env carried through with no aggregation.
+  - interval: 1m
+    input_series:
+      - series: 'pg_up{host="gda-aicenter",env="production",instance="postgres-exporter:9187"}'
+        values: "1x5"
+      - series: 'redis_up{host="gda-aicenter",env="production",instance="redis-exporter:9121"}'
+        values: "0x5" # down the whole window
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: RedisDown
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              host: gda-aicenter
+              env: production
+              instance: "redis-exporter:9121"
+            exp_annotations:
+              summary: "Redis unreachable from the exporter on gda-aicenter (redis-exporter:9121)"
+              description: "redis_up=0 for 2m on gda-aicenter. As with Postgres, suspect the exporter address (REDIS_URL, including its password) before concluding Redis is down --- a hostname without credentials connects and then fails every command."
+      - eval_time: 4m
+        alertname: PostgresDown
+        exp_alerts: []
+
+  # --- DiskWillFillIn24h: predict_linear projection, per host, root filesystem only.
+  - interval: 1m
+    input_series:
+      # sumopod: steady decline (100 units/min) — 6h of history so the [6h] regression window is
+      # fully populated, currently still well above zero but projected deep negative at +24h.
+      - series: 'node_filesystem_avail_bytes{host="sumopod",env="ops",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "50000-100x400"
+      # gda-aicenter: flat — never projected to fill, must never fire.
+      - series: 'node_filesystem_avail_bytes{host="gda-aicenter",env="production",instance="node-exporter:9100",mountpoint="/",fstype="ext4"}'
+        values: "50000x400"
+    alert_rule_test:
+      - eval_time: 390m
+        alertname: DiskWillFillIn24h
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              host: sumopod
+              env: ops
+              mountpoint: "/"
+              fstype: ext4
+              instance: "node-exporter:9100"
+            exp_annotations:
+              summary: "sumopod:/ projected to fill within 24h"
+              description: "Trend over the last 6h projects sumopod (node-exporter:9100:/) full within 24h. Usual cause: a service logging at volume into Loki, or trace sampling turned up."
