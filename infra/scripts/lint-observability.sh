@@ -12,8 +12,17 @@ have() { command -v "$1" >/dev/null 2>&1; }
 echo "=== observability config-lint ==="
 
 # 1) Prometheus rules + scrape config (promtool if present).
+#    `*_test.yml` files are promtool UNIT TEST fixtures (rule_files/tests keys) — a different
+#    schema from a rule group file, so they go through `promtool test rules`, never
+#    `promtool check rules` (which rejects them: "field rule_files not found in type
+#    rulefmt.RuleGroups").
 if have promtool; then
-  promtool check rules "$OBS"/prometheus/rules/*.yml || fail=1
+  for f in "$OBS"/prometheus/rules/*.yml; do
+    case "$f" in
+      *_test.yml) promtool test rules "$f" || fail=1 ;;
+      *) promtool check rules "$f" || fail=1 ;;
+    esac
+  done
   promtool check config "$OBS/prometheus/prometheus.yml" || fail=1
 else
   echo "promtool not found — skipping deep Prometheus check (YAML parse still runs below)"
