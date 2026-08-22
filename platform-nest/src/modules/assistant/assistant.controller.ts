@@ -40,7 +40,7 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { assembleContext, persistCompactionUpdate, type ContextCitation } from "./context";
 import {
-  abortForClientDisconnect, citationParts, estimateTokens, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sessionResumeMismatchParts, sseLine, usageMetaParts,
+  abortForClientDisconnect, citationParts, estimateTokens, persistGenerationOutcome, relayGeneration, releaseGeneration, reserveGeneration, requestStop, sessionResumeMismatchParts, sseLine, usageMetaParts,
 } from "./stream";
 import {
   ASSISTANT_AGENT_TOOLS, DEFAULT_TOOL_AGENT, persistToolCalls, readTurnMode, runToolTurn, turnModePart, type ToolTurnResult,
@@ -885,37 +885,12 @@ export class AssistantController {
     // `result.sessionResumed === false` (a real, known mismatch) — `[]` for every other case
     // (true, or absent on an older gateway), so an ordinary turn's persisted shape is byte-
     // identical to before this ticket.
-    const parts = JSON.stringify([...usageMetaParts(result), ...citationParts(citations), ...sessionResumeMismatchParts(result)]);
-    await withTenants(
-      [tenantId],
-      async (c) => {
-        if (result.outcome === "done") {
-          await c.query(
-            `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, provider = $4, model = $5, parts = $6::jsonb WHERE id = $7`,
-            [result.text, result.tokensEstimate, result.latencyMs, result.provider ?? null, result.model ?? null, parts, messageId],
-          );
-        } else {
-          await c.query(
-            `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, error_kind = $4, provider = $5, model = $6, parts = $7::jsonb WHERE id = $8`,
-            [result.text, result.tokensEstimate, result.latencyMs, result.errorKind ?? "unknown", result.provider ?? null, result.model ?? null, parts, messageId],
-          );
-        }
-        // ASST-16: persist the terminal `event: session` (if any) so turn 2 can resume the SAME
-        // Hermes conversation — see the relayGeneration call above's `providerSession` input.
-        // `COALESCE($2, hermes_session_id)` deliberately never CLEARS an existing session id when
-        // this particular turn didn't report one (e.g. the hint fell through to a non-hermes
-        // provider mid-thread without an explicit brain switch, or hermes itself failed before
-        // reaching its terminal frame) — only an explicit brainProvider PATCH (above) clears it.
-        await c.query(
-          `UPDATE assistant_threads
-             SET total_tokens = total_tokens + $1, last_message_at = now(), updated_at = now(),
-                 hermes_session_id = COALESCE($2, hermes_session_id)
-             WHERE id = $3`,
-          [result.tokensEstimate, result.providerSession ?? null, id],
-        );
-      },
-      { modules: ["assistant"] },
-    );
+    // Persist the outcome. Extracted to stream.ts so `orchestrator.ask` shares it rather than
+    // copying two UPDATEs whose column list, error-kind fallback and COALESCE(hermes_session_id)
+    // semantics all have to stay identical. No lock needed: this UPDATE is addressed by the
+    // placeholder's own id (never re-derives a seq), so it cannot race sendMessage's seq allocation
+    // — only a NEW sendMessage, which clearing `content IS NULL` here is what unblocks.
+    await persistGenerationOutcome({ tenantId, threadId: id, messageId, result, citations });
 
     if (!raw.destroyed) raw.end();
   }

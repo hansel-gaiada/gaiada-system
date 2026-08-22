@@ -51,6 +51,7 @@
 // always NULL for a streamed reply) and record `usageSource: 'provider' | 'estimate'` so nothing
 // ever presents the ~4-chars/token estimate as if it were a measurement.
 import { config } from "../../config";
+import { withTenants } from "../../db";
 
 // ─────────────────────────────────────── low-level SSE parsing ───────────────────────────────────
 
@@ -731,4 +732,62 @@ export type AssistantSseEvent =
 
 export function sseLine(event: AssistantSseEvent, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+/**
+ * ── THE ONE GENUINELY SHARED PART OF A GENERATION'S TAIL (2026-08-22) ─────────────────────────────
+ *
+ * Extracted so a SECOND caller can exist without a second copy of it. `orchestrator.ask` needs the
+ * same outcome persisted as the SSE route does; everything else the stream handler does around
+ * `relayGeneration` is SSE-specific (frame writing, client-disconnect, stop, resume relay) and is
+ * deliberately NOT extracted — pulling 300 lines of that shape into a shared function to serve one
+ * new caller would risk the chat surface to save duplication that does not exist.
+ *
+ * This part, though, IS duplication if copied: two UPDATE statements whose column list, error-kind
+ * fallback and `COALESCE(hermes_session_id)` semantics all have to stay identical, plus the three
+ * `parts` builders. A divergence here would surface as "one entry point records turns differently
+ * from the other", which is exactly the class of bug nobody finds by reading.
+ *
+ * Behaviour is byte-identical to the inline version it replaces; the SSE route is its first caller.
+ */
+export async function persistGenerationOutcome(input: {
+  tenantId: string;
+  threadId: string;
+  messageId: string;
+  result: RelayResult;
+  citations: { sourceRef: string; text: string }[];
+}): Promise<void> {
+  const { tenantId, threadId, messageId, result, citations } = input;
+  const parts = JSON.stringify([
+    ...usageMetaParts(result),
+    ...citationParts(citations),
+    ...sessionResumeMismatchParts(result),
+  ]);
+  await withTenants(
+    [tenantId],
+    async (c) => {
+      if (result.outcome === "done") {
+        await c.query(
+          `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, provider = $4, model = $5, parts = $6::jsonb WHERE id = $7`,
+          [result.text, result.tokensEstimate, result.latencyMs, result.provider ?? null, result.model ?? null, parts, messageId],
+        );
+      } else {
+        await c.query(
+          `UPDATE assistant_messages SET content = $1, tokens = $2, latency_ms = $3, error_kind = $4, provider = $5, model = $6, parts = $7::jsonb WHERE id = $8`,
+          [result.text, result.tokensEstimate, result.latencyMs, result.errorKind ?? "unknown", result.provider ?? null, result.model ?? null, parts, messageId],
+        );
+      }
+      // `COALESCE($2, hermes_session_id)` never CLEARS an existing session id when this turn did not
+      // report one — only an explicit brainProvider PATCH does. Preserved verbatim from the inline
+      // version, because that asymmetry is load-bearing for turn-2 resume.
+      await c.query(
+        `UPDATE assistant_threads
+           SET total_tokens = total_tokens + $1, last_message_at = now(), updated_at = now(),
+               hermes_session_id = COALESCE($2, hermes_session_id)
+           WHERE id = $3`,
+        [result.tokensEstimate, result.providerSession ?? null, threadId],
+      );
+    },
+    { modules: ["assistant"] },
+  );
 }
