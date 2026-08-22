@@ -1,8 +1,41 @@
 /* =====================================================================
-   Luxury Minimalist Design System — Typography Scale
-   Display family : Cormorant Garamond (H1–H3, serif heritage)
-   Utility family : Inter (body, eyebrows, labels, UI)
+   Dark-First Design System — Typography Scale
+   Display family : Cormorant Garamond (H1, H2, print/login/empty-state only)
+   Utility family : Inter (body, eyebrows, labels, UI, and now H3/card titles)
    Letter-spacing : Normal = 0em · Wide = 0.30em (editorial tracking)
+
+   Phase 1 redesign (2026-08-22): dense-dashboard scale, approved per
+   docs/design/2026-08-22-ui-redesign-design-language.md §8.2. Cormorant
+   is demoted out of H3 — a serif repeated 10-40 times per dashboard page
+   (every card title) reads slow to scan next to the dense Inter data
+   below it; H3 becomes Inter Semibold. Cormorant keeps H1/H2 (the rare,
+   large, brand-carrying headings a user reads once per screen) plus
+   print/login/empty-state, which are out of this file's reach (no class
+   here is consumed by those surfaces directly).
+
+   No font files added or removed — both families stay self-hosted
+   variable woff2, 400-700, ~85KB total (see tokens/fonts.css). Narrowing
+   Cormorant's USE doesn't shrink its BYTES: it is one variable font
+   covering the whole 400-700 range regardless of which weights CSS asks
+   for, so payload is unchanged by this pass.
+
+   --weight-heading is the dark-mode optical-weight compensation: light
+   text on a dark ground blooms and reads heavier than the same weight on
+   light, so this token resolves to 700 in light and 600 in dark (see the
+   dark-theme blocks below) using the SAME variable font file — no new
+   asset, just a different point on its existing weight axis. This file
+   is not covered by tokens.test.ts's colour dark-block parity guard (it
+   carries no colour), so the two dark blocks below are kept in sync by
+   hand — trivial here, only one token differs.
+
+   NOTE: `.type-h1/.type-h2/.type-h3/.type-body-*` and the `--h1-size`
+   etc. scale tokens below have NO consumer anywhere in src/ today (only
+   this file references them) — they are pre-existing dead scaffolding,
+   not wired into any page. Updated anyway per the approved spec so a
+   future consumer gets the dense scale, not the editorial one. The one
+   REAL, rendered heading this pass touches is `.lux-card__title` in
+   ui.css (the actual card-title primitive every department page uses),
+   which is edited separately to match the H3 row below.
    ===================================================================== */
 
 :root {
@@ -11,26 +44,43 @@
   /* ---- Weights (Figma → CSS) -------------------------------------- */
   --weight-regular: 400;   /* Regular — global baseline */
   --weight-bold:    700;   /* Bold */
+  --weight-heading: 700;   /* H1/H2 only — dark theme overrides to 600, see below */
 
   /* ---- Tracking --------------------------------------------------- */
   --track-normal: 0em;
   --track-wide:   0.10em;
 
-  /* ---- Scale matrix (size / line-height) -------------------------- */
-  --h1-size: 40px;  --h1-line: 60px;   /* Hero title           */
-  --h2-size: 32px;  --h2-line: 50px;   /* Section title        */
-  --h3-size: 24px;  --h3-line: 40px;   /* Subsection / card    */
+  /* ---- Scale matrix (size / line-height) — dense dashboard, not
+     editorial marketing. See spec §8.2 for the full before/after table. */
+  --h1-size: 28px;  --h1-line: 36px;   /* Page title (Cormorant)         */
+  --h2-size: 22px;  --h2-line: 30px;   /* Section title (Cormorant)      */
+  --h3-size: 16px;  --h3-line: 22px;   /* Card title (Inter Semibold — was 24px Cormorant) */
 
-  --body-lg-size:   18px;  --body-lg-line:   30px;  /* subtitles / openers   */
-  --body-md-size:   16px;  --body-md-line:   25px;  /* descriptions / cards  */
-  --body-sm-size:   14px;  --body-sm-line:   25px;  /* nav, buttons, labels  */
-  --caption-size:   12px;  --caption-line:   18px;  /* tags, errors, ©       */
+  --body-lg-size:   16px;  --body-lg-line:   26px;  /* prose / long-form help text */
+  --body-md-size:   14px;  --body-md-line:   22px;  /* default UI/table text */
+  --body-sm-size:   12.5px; --body-sm-line:  20px;  /* nav, buttons, labels  */
+  --caption-size:   11px;  --caption-line:   16px;  /* tags, micro-labels, © */
+
+  /* ---- Data/numeric face — Inter, always tabular (see globals.css's
+     .tabular rule). New tiers for the dense scale; --font-data unchanged. */
+  --data-lg-size: 26px;  --data-lg-line: 1.05;   /* KPI headline figure (was a bare 30px literal in ui.css) */
+  --data-md-size: 18px;  --data-md-line: 1.15;   /* secondary figure */
+  --data-sm-size: 13px;  --data-sm-line: 1.2;    /* table numeric cell */
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    --weight-heading: 600;
+  }
+}
+html[data-theme="dark"] {
+  --weight-heading: 600;
 }
 
 /* ---- Type primitives (utility classes mirroring the matrix) ------- */
 .type-h1 {
   font-family: var(--font-display);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-heading);
   font-size: var(--h1-size);
   line-height: var(--h1-line);
   letter-spacing: var(--track-normal);
@@ -38,15 +88,15 @@
 }
 .type-h2 {
   font-family: var(--font-display);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-heading);
   font-size: var(--h2-size);
   line-height: var(--h2-line);
   letter-spacing: var(--track-normal);
   color: var(--text-primary);
 }
 .type-h3 {
-  font-family: var(--font-display);
-  font-weight: var(--weight-bold);
+  font-family: var(--font-body);
+  font-weight: 600;
   font-size: var(--h3-size);
   line-height: var(--h3-line);
   letter-spacing: var(--track-normal);

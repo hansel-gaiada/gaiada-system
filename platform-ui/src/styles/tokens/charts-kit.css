@@ -1,36 +1,28 @@
 /* Report chart kit palette (TR-16) — the TOKEN layer for `components/reports/charts/`.
-   Extracted from that kit's charts.css 2026-08-03: the declarations are unchanged
-   (same selectors, same values, same order), they just live in the token layer now,
-   which is the only place in this codebase a raw colour literal is allowed to appear
-   (styles/tokens.test.ts's "components never hardcode a colour literal" guard). Keeping
-   them under src/components/ meant the kit's own palette read to that guard as forty-odd
-   hardcoded violations — indistinguishable from a component author sneaking a hex in.
-   The alternative was adding charts.css to the guard's exception list, which would have
-   bought green CI by making the guard blind to that whole directory forever.
+   This is the LIVE palette: 19 files under components/reports/** wrap themselves in
+   `.rc-viz` and consume var(--rc-*) from it. The near-identical global `--rc-*` copy in
+   tokens/colors.css exists for the rare `--rc-*` consumer outside that wrapper and is
+   kept in sync with this file by hand (both are edited together whenever one changes).
 
-   Imported by charts.css itself, NOT by globals.css: the kit is only pulled in by the
-   chart components that need it, so pages with no charts still ship none of this.
+   Phase 1 redesign (2026-08-22, docs/design/2026-08-22-ui-redesign-design-language.md
+   §11 + amendment-01): series are rebuilt to share HUE AND ORDER with the promoted
+   --cat-1..8 categorical ramp (tokens/colors.css) instead of the old dataviz-skill
+   default palette — a user who has learned "amber tag = Finance" now sees the same
+   amber if Finance gets a chart series. Exact lightness/saturation is re-tuned per
+   medium: --rc-series-N is the STROKE/legend-swatch value (full chroma, small-mark
+   use); --rc-series-N-area (amendment 01) is the BAR/AREA-BODY value, chroma pulled
+   toward --rc-surface so a filled bar doesn't read as crayon at size. Wiring actual
+   bar/area chart components to prefer -area for fills (while legend swatches and line
+   strokes keep the full-chroma value) is downstream component work, out of this
+   token-layer pass's file scope — the tokens exist now so that work is unblocked.
 
-   GAP THIS FILE HAS TO CLOSE ITSELF: platform-ui has no site-wide dark theme yet (no
-   `--surface-card`/`--text-primary` carries a dark value anywhere in styles/tokens/*).
-   Rather than block on that, the kit is SELF-CONTAINED: it reuses the site's existing
-   ink/surface tokens for chrome (so charts look native to the "luxury minimalist"
-   system) and defines its own light/dark step for the one thing the site has no
-   validated version of — a categorical hue ramp for series identity. Both a
-   `prefers-color-scheme` query and a `[data-theme]` override are wired now (the dual
-   mechanism `dataviz`'s palette.md prescribes) so the kit lights up correctly the
-   INSTANT app-wide dark mode lands — nothing here needs revisiting then. There is no
-   in-app theme toggle to exercise the dark branch live today; verified instead by
-   forcing `data-theme="dark"` (see the TR-16 report).
-
-   Categorical hues are the `dataviz` skill's documented, pre-validated default 8-hue
-   palette (references/palette.md) — deliberately NOT the site's existing TAG_COLOR_HEX
-   (lib/tagColors.ts): that palette was validated for WCAG *text* contrast only, at a
-   muted desaturation chosen for quiet tag chips, and would not clear the categorical
-   chroma floor or CVD separation checks a chart series needs. Swapping in a bespoke
-   bronze/champagne-family 8-hue ramp (re-validated with scripts/validate_palette.js) is
-   a reasonable follow-up if Gaiada wants brand-matched chart hues later — nothing else
-   in the kit would need to change, per the skill's "swap the palette file" contract. */
+   Chrome tokens (--rc-surface/-text-*/-grid/-axis/-tooltip-*/-focus) already alias the
+   site's real dark theme (tokens/colors.css) rather than hand-duplicating literals for
+   dark, matching the pattern the rest of the kit uses — the historical note about "no
+   site-wide dark theme yet" that used to justify a fully independent light/dark step
+   here no longer applies now that colors.css has one; kept as two blocks below only
+   because `--rc-series-N`/`-area` still need their own chart-tuned values distinct from
+   the chip-tuned --cat-N/-area they derive from. */
 
 .rc-viz {
   color-scheme: light;
@@ -44,15 +36,26 @@
   --rc-tooltip-border: var(--erp-hairline);
   --rc-focus: var(--erp-accent);
 
-  /* categorical — fixed order, never cycled (dataviz color-formula.md check 1) */
-  --rc-series-1: #2a78d6; /* blue */
-  --rc-series-2: #eb6834; /* orange */
-  --rc-series-3: #1baf7a; /* aqua */
-  --rc-series-4: #eda100; /* yellow */
-  --rc-series-5: #e87ba4; /* magenta */
-  --rc-series-6: #008300; /* green */
-  --rc-series-7: #4a3aa7; /* violet */
-  --rc-series-8: #e34948; /* red */
+  /* categorical — fixed order, never cycled (dataviz color-formula.md check 1).
+     Hue/order shared with --cat-1..8; deepened here for 2px-stroke legibility. */
+  --rc-series-1: #b42254; /* pink   — cat-1 hue, 5.95:1 vs card */
+  --rc-series-2: #2273b4; /* blue   — cat-2 hue, 4.70:1 vs card */
+  --rc-series-3: #866913; /* amber  — cat-3 hue, 4.85:1 vs card */
+  --rc-series-4: #7b8613; /* lime   — cat-4 hue, 3.73:1 vs card (honest limitation: yellow-family
+                              hues can't darken further without turning olive — pair with a point
+                              marker/dash pattern, never rely on stroke colour alone at this weight) */
+  --rc-series-5: #518613; /* green  — cat-5 hue, 4.12:1 vs card */
+  --rc-series-6: #b44522; /* orange — cat-6 hue, 5.14:1 vs card */
+  --rc-series-7: #9f22b4; /* purple — cat-7 hue, 5.84:1 vs card */
+  --rc-series-8: #2283b4; /* slate  — cat-8 hue, 3.95:1 vs card */
+  --rc-series-1-area: color-mix(in srgb, var(--rc-series-1) 62%, var(--rc-surface));
+  --rc-series-2-area: color-mix(in srgb, var(--rc-series-2) 62%, var(--rc-surface));
+  --rc-series-3-area: color-mix(in srgb, var(--rc-series-3) 62%, var(--rc-surface));
+  --rc-series-4-area: color-mix(in srgb, var(--rc-series-4) 62%, var(--rc-surface));
+  --rc-series-5-area: color-mix(in srgb, var(--rc-series-5) 62%, var(--rc-surface));
+  --rc-series-6-area: color-mix(in srgb, var(--rc-series-6) 62%, var(--rc-surface));
+  --rc-series-7-area: color-mix(in srgb, var(--rc-series-7) 62%, var(--rc-surface));
+  --rc-series-8-area: color-mix(in srgb, var(--rc-series-8) 62%, var(--rc-surface));
 
   /* status — fixed, reserved, never themed */
   --rc-good: #0ca30c;
@@ -73,16 +76,24 @@
     --rc-axis: #383835;
     --rc-tooltip-bg: #1a1a19;
     --rc-tooltip-border: rgba(255, 255, 255, 0.1);
-    --rc-focus: #3987e5;
+    --rc-focus: #71d2d6;
 
-    --rc-series-1: #3987e5;
-    --rc-series-2: #d95926;
-    --rc-series-3: #199e70;
-    --rc-series-4: #c98500;
-    --rc-series-5: #d55181;
-    --rc-series-6: #008300;
-    --rc-series-7: #9085e9;
-    --rc-series-8: #e66767;
+    --rc-series-1: #de7397; /* pink   — 5.42:1 vs card */
+    --rc-series-2: #73aede; /* blue   — 6.84:1 vs card */
+    --rc-series-3: #dec373; /* amber  — 9.40:1 vs card */
+    --rc-series-4: #d4de73; /* lime   — 11.21:1 vs card */
+    --rc-series-5: #acde73; /* green  — 10.40:1 vs card */
+    --rc-series-6: #de8c73; /* orange — 6.27:1 vs card */
+    --rc-series-7: #ce73de; /* purple — 5.52:1 vs card */
+    --rc-series-8: #73bade; /* slate  — 7.59:1 vs card */
+    --rc-series-1-area: color-mix(in srgb, var(--rc-series-1) 62%, var(--rc-surface));
+    --rc-series-2-area: color-mix(in srgb, var(--rc-series-2) 62%, var(--rc-surface));
+    --rc-series-3-area: color-mix(in srgb, var(--rc-series-3) 62%, var(--rc-surface));
+    --rc-series-4-area: color-mix(in srgb, var(--rc-series-4) 62%, var(--rc-surface));
+    --rc-series-5-area: color-mix(in srgb, var(--rc-series-5) 62%, var(--rc-surface));
+    --rc-series-6-area: color-mix(in srgb, var(--rc-series-6) 62%, var(--rc-surface));
+    --rc-series-7-area: color-mix(in srgb, var(--rc-series-7) 62%, var(--rc-surface));
+    --rc-series-8-area: color-mix(in srgb, var(--rc-series-8) 62%, var(--rc-surface));
 
     --rc-good: #0ca30c;
     --rc-warning: #fab219;
@@ -101,16 +112,24 @@
   --rc-axis: #383835;
   --rc-tooltip-bg: #1a1a19;
   --rc-tooltip-border: rgba(255, 255, 255, 0.1);
-  --rc-focus: #3987e5;
+  --rc-focus: #71d2d6;
 
-  --rc-series-1: #3987e5;
-  --rc-series-2: #d95926;
-  --rc-series-3: #199e70;
-  --rc-series-4: #c98500;
-  --rc-series-5: #d55181;
-  --rc-series-6: #008300;
-  --rc-series-7: #9085e9;
-  --rc-series-8: #e66767;
+  --rc-series-1: #de7397;
+  --rc-series-2: #73aede;
+  --rc-series-3: #dec373;
+  --rc-series-4: #d4de73;
+  --rc-series-5: #acde73;
+  --rc-series-6: #de8c73;
+  --rc-series-7: #ce73de;
+  --rc-series-8: #73bade;
+  --rc-series-1-area: color-mix(in srgb, var(--rc-series-1) 62%, var(--rc-surface));
+  --rc-series-2-area: color-mix(in srgb, var(--rc-series-2) 62%, var(--rc-surface));
+  --rc-series-3-area: color-mix(in srgb, var(--rc-series-3) 62%, var(--rc-surface));
+  --rc-series-4-area: color-mix(in srgb, var(--rc-series-4) 62%, var(--rc-surface));
+  --rc-series-5-area: color-mix(in srgb, var(--rc-series-5) 62%, var(--rc-surface));
+  --rc-series-6-area: color-mix(in srgb, var(--rc-series-6) 62%, var(--rc-surface));
+  --rc-series-7-area: color-mix(in srgb, var(--rc-series-7) 62%, var(--rc-surface));
+  --rc-series-8-area: color-mix(in srgb, var(--rc-series-8) 62%, var(--rc-surface));
 
   --rc-good: #0ca30c;
   --rc-warning: #fab219;
@@ -126,16 +145,16 @@
 @media print {
   .rc-viz {
     color-scheme: light;
-    --rc-surface: #fcfcfb;
-    --rc-text-primary: #0b0b0b;
+    --rc-surface: #f9f7f3;
+    --rc-text-primary: #0c0b08;
     --rc-text-secondary: #52514e;
     --rc-text-muted: #898781;
     --rc-grid: #e1e0d9;
     --rc-axis: #c3c2b7;
-    --rc-tooltip-bg: #fcfcfb;
+    --rc-tooltip-bg: #f9f7f3;
     --rc-tooltip-border: rgba(11, 11, 11, 0.1);
-    --rc-series-1: #2a78d6; --rc-series-2: #eb6834; --rc-series-3: #1baf7a; --rc-series-4: #eda100;
-    --rc-series-5: #e87ba4; --rc-series-6: #008300; --rc-series-7: #4a3aa7; --rc-series-8: #e34948;
+    --rc-series-1: #b42254; --rc-series-2: #2273b4; --rc-series-3: #866913; --rc-series-4: #7b8613;
+    --rc-series-5: #518613; --rc-series-6: #b44522; --rc-series-7: #9f22b4; --rc-series-8: #2283b4;
     --rc-good: #0ca30c; --rc-warning: #fab219; --rc-serious: #ec835a; --rc-critical: #d03b3b;
     --rc-delta-up-good: #006300;
   }

@@ -1,5 +1,5 @@
 /* =====================================================================
-   Luxury Minimalist Design System — Color System  ·  3-Tier Design Tokens
+   Dark-First Luxury Design System — Color System  ·  3-Tier Design Tokens
    ---------------------------------------------------------------------
    TIER 1  Primitives  — raw, immutable reference values
    TIER 2  Brand        — the editable brand variables (live panel)
@@ -10,6 +10,31 @@
    variables. Re-point the brand layer and the whole system re-renders.
    Append your own --brand-* variables below without breaking hierarchy.
 
+   Phase 1 redesign (2026-08-22, docs/design/2026-08-22-ui-redesign-design-
+   language.md + amendment-01): dark is now the PRIMARY designed theme.
+   Four structural additions over the previous "luxury minimalist" system:
+     1. A systematic 12-step warm-neutral ramp (--n-1..--n-12) backs every
+        surface tier. Ink/line stay alpha-based on purpose (§2.3 of the
+        spec) — an alpha blend composites correctly against whichever
+        surface it lands on; a flat hex would need a separate validated
+        value per surface tier.
+     2. Six named surfaces (sunken/canvas/card/raised/overlay/modal) with a
+        real elevation scale (--elev-1/2/overlay/4). Dark elevation is
+        LUMINANCE-led (each tier is a literal step up --n-*) because shadow
+        is nearly invisible on a dark ground; light stays SHADOW-led.
+     3. Interactive colour (--accent, a bronze-adjacent teal) is now
+        independent of the decorative brand colour (--brand-color-primary,
+        still bronze) — see RULES below. status-progress/status-idle no
+        longer alias --accent/--accent-secondary for the same reason.
+     4. The 8-tone categorical ramp (--cat-1..8, promoted verbatim from the
+        PM island's validated Repsona palette) is now the app-wide identity
+        scale for tags, chart series, department/module and company
+        identity — see tokens/pm.css for the alias mapping.
+     Amendment 01 (2026-08-22): --cat-1..8 was validated only for small
+     ink-on-fill use (chips, dots). Large area fills (chart bars/areas,
+     full-width buttons) need a chroma-pulled AREA tier — see --cat-N-area
+     and --accent-fill below.
+
    RULES FOR COMPONENT AUTHORS
    1. Never write a raw hex or rgba() in a component. If the color you
       need has no token, add a Tier-3 alias here — that is the only way
@@ -19,6 +44,15 @@
       `--status-x-fg` is the TEXT value (darkened to clear 4.5:1 on the
       page surface). Using the graphic value as a label color fails AA.
    3. Text ink comes from the --ink-* ramp, never from an ad-hoc alpha.
+   4. `--accent` is INTERACTIVE (buttons, links, focus, selection) and is
+      never the same value as `--brand-color-primary` (DECORATIVE:
+      wordmark, dividers, avatar fills). Never point one at the other —
+      tokens.test.ts asserts they differ, in both themes, permanently.
+   5. `--cat-N` is for CHIP/DOT/RAIL-sized fills (full chroma, needs to be
+      identifiable at a glance). `--cat-N-area` is for BAR/BANNER/BLOCK-
+      sized fills (chroma pulled toward the surface so it doesn't read as
+      crayon at size). Same rule for `--accent` (small controls) vs
+      `--accent-fill` (full-width/large solid buttons).
    ===================================================================== */
 
 :root {
@@ -27,9 +61,9 @@
   /* ---- TIER 1 · Primitives ---------------------------------------- */
   --primitive-off-white:   #F4F1EA;  /* premium warm linen          */
   --primitive-off-black:   #1A1916;  /* matte editorial near-black  */
-  --primitive-bronze:      #6E5A43;  /* burnished accent            */
-  --primitive-champagne:   #A39174;  /* secondary highlight         */
-  --primitive-paper:       #FBFAF6;  /* raised card surface         */
+  --primitive-bronze:      #6E5A43;  /* burnished accent — DECORATIVE brand only, never interactive */
+  --primitive-champagne:   #A39174;  /* secondary highlight — DECORATIVE brand only */
+  --primitive-paper:       #FBFAF6;  /* legacy raised-card reference (superseded by --n-12; kept, unused by name below, for any external consumer) */
   --primitive-line:        #1A1916;  /* hairline reference          */
 
   /* Status primitives. `rust` was already the app's de-facto alarm color
@@ -39,14 +73,19 @@
   --primitive-azure:       #3E7CB1;  /* informational / neutral-cool   */
   --primitive-amber:       #9C6F1F;  /* caution / simulated / seeded   */
   --primitive-crimson:     #B3261E;  /* destructive                    */
+  --primitive-idle:        #817055;  /* status-idle graphic (light) — retuned darker than champagne so
+                                         the graphic tier clears 3:1 on --n-11 (champagne itself is 2.50:1,
+                                         see status family notes below). Same hue family as champagne,
+                                         darkened, not a different colour. */
 
   /* Dark-theme primitives — same hue families, lifted for a dark surface.
      Warm near-blacks (not blue-black) so the editorial identity survives. */
-  --primitive-ink-page:       #14120E;  /* dark page canvas            */
-  --primitive-ink-card:       #1D1B16;  /* dark card surface           */
-  --primitive-ink-raised:     #26231D;  /* dark overlay / menu surface */
-  --primitive-bone:           #E8E3D6;  /* dark-theme text (dimmed to cut glare) */
-  --primitive-bronze-lift:    #C9A87C;  /* accent, legible on dark     */
+  --primitive-ink-page:       #14120E;  /* dark page canvas — byte-identical to --n-2, kept for legacy refs */
+  --primitive-ink-card:       #1D1B16;  /* legacy dark card reference (superseded by --n-4 below) */
+  --primitive-ink-raised:     #26231D;  /* legacy dark raised reference (superseded by --n-5 below) */
+  --primitive-bone:           #E8E3D6;  /* dark-theme text (dimmed to cut glare) — KEPT as the ink base;
+                                            see the ink-ramp comment below for why this is not --n-12 */
+  --primitive-bronze-lift:    #C9A87C;  /* accent, legible on dark — DECORATIVE brand only */
   --primitive-champagne-lift: #B8A585;
   --primitive-rust-lift:      #E0834A;
   --primitive-sage-lift:      #6FB088;
@@ -54,22 +93,111 @@
   --primitive-amber-lift:     #D6A63C;
   --primitive-crimson-lift:   #E5675C;
 
-  /* ---- TIER 2 · Brand (EDITABLE — wired to the live token panel) -- */
-  --brand-color-primary:   var(--primitive-bronze);     /* accents, buttons, signature */
-  --brand-color-secondary: var(--primitive-champagne);  /* secondary highlights        */
-  --brand-color-bg:        var(--primitive-off-white);  /* layout background           */
+  /* ---- Warm-neutral 12-step ramp (Phase 1) -------------------------
+     One hue family (H 40-44deg — the constant already shared by every
+     primitive above), monotonically increasing WCAG relative luminance.
+     Low numbers = the dark end (dark is primary); high numbers = the
+     light end. Surfaces map onto this ramp directly (see TIER 3 below);
+     ink/line stay alpha-based on purpose (see the ink-ramp comment). */
+  --n-1:  #0c0b08;  /* dark: sunken (recessed wells, code blocks, board troughs) */
+  --n-2:  #14120e;  /* dark: canvas — identical to --primitive-ink-page */
+  --n-3:  #1b1813;  /* dark: sunken-soft (zebra stripe, nested card-in-card) */
+  --n-4:  #23201a;  /* dark: card */
+  --n-5:  #2f2b23;  /* dark: raised (menus, dropdowns, popovers) */
+  --n-6:  #3d382f;  /* dark: overlay / modal surface */
+  --n-7:  #565043;  /* mid-neutral divider, either theme */
+  --n-8:  #837863;  /* disabled/placeholder baseline, either theme */
+  --n-9:  #aea38f;  /* light: border baseline */
+  --n-10: #d2cbbc;  /* light: sunken (recessed wells) */
+  --n-11: #ece8df;  /* light: canvas — close kin of the legacy off-white */
+  --n-12: #f9f7f3;  /* light: card / raised — close kin of the legacy paper */
+
+  /* Interactive colour — deliberately NOT the brand colour (RULE 4 above).
+     A deep teal/verdigris: "the patina bronze forms," kin to the brand
+     without being confusable with it (149deg from bronze, 26deg from
+     status-info azure, 41deg from status-ok sage). Light uses ONE value
+     for both graphic (border/fill) and text use: 124 existing components
+     already consume --accent/--erp-accent generically for backgrounds,
+     borders AND text colour with no split, so Phase 1 ships the value
+     that is safe for the most demanding case (text, >=4.5:1) rather than
+     splitting graphic/text tiers the way --status-* does — that split
+     needs an audit of all 124 call sites into "graphic use" vs "text use"
+     first, which is Phase 2+ scope. Dark converges the same way status
+     colours already do (the lifted value clears 4.5:1 as text on its own). */
+  --primitive-teal:      #146e71;  /* light — 4.91:1 vs --n-11, 5.61:1 vs --n-12, white-on-fill 6.00:1 */
+  --primitive-teal-lift: #71d2d6;  /* dark  — 10.59:1 vs --n-2, 6.59:1 vs --n-6 (worst case) */
+
+  /* ---- 8-tone categorical ramp (promoted verbatim from tokens/pm.css,
+     2026-08-06 provenance and ink-on-fill validation — see that file's
+     header). App-wide identity scale: PM tags/board, chart series,
+     department/module identity, per-company identity rail. Same value in
+     BOTH themes on purpose (mid-lightness pastel + one ink colour reads
+     cleanly on either a light or a dark card without retuning — already
+     proven in PM's shipped dark-first board). No dark-block entry needed
+     for that reason, same as the PM tone ramp before it. ----------------
+
+     Amendment 01 (2026-08-22): --cat-N was validated for ink-ON-FILL use
+     only (chips, dots — small, full chroma). Large-area fills (chart
+     bars/areas, banners, big blocks) need chroma pulled toward the
+     surface or they read as crayon at size — that is --cat-N-area, a
+     formula (not a new literal) so it re-derives per theme automatically
+     via --surface-card and needs no dark-block entry either, same
+     technique as --pm-line-soft below. */
+  --cat-1: #F06292;  /* pink   — ink-on-fill 6.44:1 */
+  --cat-2: #42A5F5;  /* blue   — ink-on-fill 7.43:1 */
+  --cat-3: #FFC107;  /* amber  — ink-on-fill 12.07:1 */
+  --cat-4: #CDDC39;  /* lime   — ink-on-fill 13.02:1 */
+  --cat-5: #8BC34A;  /* green  — ink-on-fill 9.37:1 */
+  --cat-6: #FF7043;  /* orange — ink-on-fill 7.17:1 */
+  --cat-7: #BA68C8;  /* purple — ink-on-fill 5.53:1 (the floor) */
+  --cat-8: #90A4AE;  /* slate  — ink-on-fill 7.60:1 */
+  --cat-on: #0c0b08;  /* the one ink colour used on every --cat-N fill, both themes */
+  --cat-1-line: color-mix(in srgb, var(--cat-1) 55%, transparent);
+  --cat-2-line: color-mix(in srgb, var(--cat-2) 55%, transparent);
+  --cat-3-line: color-mix(in srgb, var(--cat-3) 55%, transparent);
+  --cat-4-line: color-mix(in srgb, var(--cat-4) 55%, transparent);
+  --cat-5-line: color-mix(in srgb, var(--cat-5) 55%, transparent);
+  --cat-6-line: color-mix(in srgb, var(--cat-6) 55%, transparent);
+  --cat-7-line: color-mix(in srgb, var(--cat-7) 55%, transparent);
+  --cat-8-line: color-mix(in srgb, var(--cat-8) 55%, transparent);
+  /* AREA tier (amendment 01) — chart bar/area body, banner ground, large block
+     fill. Chip/dot/rail/legend-swatch/sparkline-stroke uses stay on --cat-N. */
+  --cat-1-area: color-mix(in srgb, var(--cat-1) 62%, var(--surface-card));
+  --cat-2-area: color-mix(in srgb, var(--cat-2) 62%, var(--surface-card));
+  --cat-3-area: color-mix(in srgb, var(--cat-3) 62%, var(--surface-card));
+  --cat-4-area: color-mix(in srgb, var(--cat-4) 62%, var(--surface-card));
+  --cat-5-area: color-mix(in srgb, var(--cat-5) 62%, var(--surface-card));
+  --cat-6-area: color-mix(in srgb, var(--cat-6) 62%, var(--surface-card));
+  --cat-7-area: color-mix(in srgb, var(--cat-7) 62%, var(--surface-card));
+  --cat-8-area: color-mix(in srgb, var(--cat-8) 62%, var(--surface-card));
+
+  /* ---- TIER 2 · Brand (EDITABLE — wired to the live token panel) --
+     DECORATIVE only as of Phase 1: wordmark, dividers, avatar fills,
+     print masthead, empty-state accents. Never used for anything
+     interactive — that is --accent (above). */
+  --brand-color-primary:   var(--primitive-bronze);     /* accents, signature — decorative only */
+  --brand-color-secondary: var(--primitive-champagne);  /* secondary highlights — decorative only */
+  --brand-color-bg:        var(--n-11);                 /* layout background (was --primitive-off-white; --n-11 is its systematized kin) */
   --brand-color-text-dark: var(--primitive-off-black);  /* premium editorial text      */
   --brand-logo-text:       "SYROWATKA"; /* @kind other */  /* wordmark fallback */
   --brand-logo-source:     none; /* @kind other */                  /* image url() set via panel */
 
   /* ---- TIER 3 · Semantic aliases (consumed by all components) ----- */
 
-  /* Surfaces. `inverse` is the deliberate contrast panel (toasts, dark
-     cards, org-chart holding boxes) — it inverts in dark mode too, where
-     it becomes a LIFTED surface rather than a darker one. */
+  /* Six named surfaces, luminance-ordered on the --n-* ramp:
+     sunken < canvas < card < raised < overlay/modal. Light theme keeps
+     raised/overlay/modal FLAT-IDENTICAL to card (all --n-12) — on light,
+     shadow (--elev-*) does the differentiating; a flat luminance step
+     between three near-white tones would be imperceptible anyway. Dark
+     climbs a real luminance step per tier because shadow is nearly
+     invisible on a dark ground — see --elev-* below for the inset-
+     highlight + de-emphasized-shadow mechanism that supports it. */
   --surface-page:     var(--brand-color-bg);
-  --surface-card:     var(--primitive-paper);
-  --surface-raised:   #FFFDF8;                        /* menus, popovers, dropdowns */
+  --surface-sunken:   var(--n-10);                    /* NEW: recessed wells, board troughs */
+  --surface-card:     var(--n-12);
+  --surface-raised:   var(--n-12);                    /* menus, popovers, dropdowns */
+  --surface-overlay:  var(--n-12);                    /* NEW: popover/tooltip tier, --elev-overlay pairs with this */
+  --surface-modal:    var(--n-12);                    /* NEW: dialogs, --elev-4 + --scrim pair with this */
   --surface-chrome:   var(--brand-color-bg);          /* sidebar + top bar          */
   --surface-inverse:  var(--primitive-off-black);
   --text-on-inverse:  var(--primitive-off-white);
@@ -83,29 +211,39 @@
 
   /* Neutral washes — untinted fills for tracks, skeletons, code blocks.
      Distinct from --tint-* which are accent-tinted (hover/selection). */
-  --wash:        rgb(26 25 22 / 0.05);
-  --wash-strong: rgb(26 25 22 / 0.09);
+  --wash:        rgb(12 11 8 / 0.05);
+  --wash-strong: rgb(12 11 8 / 0.09);
 
   --text-primary:     var(--brand-color-text-dark);
   --text-on-accent:   var(--brand-color-bg);
-  --accent:           var(--brand-color-primary);
-  --accent-secondary: var(--brand-color-secondary);
+  --accent:           var(--primitive-teal);          /* INTERACTIVE — see RULE 4 in the file header */
+  --accent-fg:         var(--primitive-teal);          /* text-safe tier; same value as --accent in light (already >=4.5:1 as text) */
+  --accent-fill:       color-mix(in srgb, var(--accent) 94%, #000);  /* amendment 01 — full-width/large solid buttons only */
+  --accent-secondary: var(--brand-color-secondary);    /* DECORATIVE only — champagne, no longer aliased by any status */
   --hairline:         var(--brand-color-text-dark);
 
   /* Ink ramp — the ONLY source of text color. Alphas are chosen so every
-     tier clears WCAG AA (4.5:1) on --surface-page; `faint` is the sole
-     exception and is reserved for non-informational glyphs (em-dash
-     placeholders, disabled affordances) that carry no meaning alone. */
-  --ink-strong: rgb(26 25 22);            /* 16.9:1 — headings, primary text */
-  --ink-body:   rgb(26 25 22 / 0.86);     /* 11.0:1 — long-form body         */
-  --ink-muted:  rgb(26 25 22 / 0.70);     /*  6.2:1 — secondary/meta text    */
-  --ink-subtle: rgb(26 25 22 / 0.62);     /*  4.6:1 — small caps labels      */
-  --ink-faint:  rgb(26 25 22 / 0.45);     /*  3.3:1 — decorative only        */
+     tier clears WCAG AA (4.5:1) on its WORST-CASE surface (the light
+     surface farthest from --n-1 in luminance, i.e. --n-10 sunken);
+     `faint` is the sole exception and is reserved for non-informational
+     glyphs (em-dash placeholders, disabled affordances) that carry no
+     meaning alone. Base colour is unchanged from the legacy system
+     (off-black) — only `--ink-subtle` moves (0.62 -> 0.66) to restore
+     AA against the new --n-10 sunken surface introduced in Phase 1;
+     every other tier already cleared the new worst case at its existing
+     alpha and is left untouched. */
+  --ink-strong: rgb(26 25 22);            /* 10.89:1 vs --n-10 — headings, primary text */
+  --ink-body:   rgb(26 25 22 / 0.86);     /*  7.93:1 vs --n-10 — long-form body         */
+  --ink-muted:  rgb(26 25 22 / 0.70);     /*  5.14:1 vs --n-10 — secondary/meta text    */
+  --ink-subtle: rgb(26 25 22 / 0.66);     /*  4.54:1 vs --n-10 — small caps labels (was 0.62 / 4.07:1, failed AA on the new surface) */
+  --ink-faint:  rgb(26 25 22 / 0.45);     /*  2.62:1 vs --n-10 — decorative only        */
 
   /* Structure. `--line-control` is the interactive-boundary tier: input
      underlines, select borders, ghost-button outlines. WCAG 1.4.11 wants
-     3:1 for those, which the decorative hairlines below deliberately miss. */
-  --line-control: rgb(26 25 22 / 0.55);   /* 3.7:1 — form control borders */
+     3:1 for those, which the decorative hairlines below deliberately miss.
+     All four values already clear their target against the new --n-10
+     worst-case surface at the legacy alpha — no change needed here. */
+  --line-control: rgb(26 25 22 / 0.55);   /* 3.38:1 vs --n-10 — form control borders */
   --line-strong:  rgb(26 25 22 / 0.30);   /* emphasis dividers            */
   --line:         rgb(26 25 22 / 0.16);   /* default hairline             */
   --line-soft:    rgb(26 25 22 / 0.10);   /* nested / inner hairline      */
@@ -114,25 +252,37 @@
   --tint-hover:  color-mix(in srgb, var(--accent) 6%, transparent);
   --tint-active: color-mix(in srgb, var(--accent) 10%, transparent);
 
-  /* Status — graphic value (3:1, for dots/bars/borders/fills) … */
+  /* Status — graphic value (3:1, for dots/bars/borders/fills) …
+     critical/ok/info/warning/danger are UNCHANGED values: recomputed
+     against the new --n-11 canvas (2026-08-22 fix pass) they already
+     clear 3:1 (3.61 / 4.06 / 3.64 / 3.65 / 5.35:1) with real margin, so
+     no hue was touched. progress/idle are DECOUPLED from --accent/
+     --accent-secondary (RULE 4) — routed straight to their own
+     primitives so re-pointing the interactive or brand colour never
+     again silently repaints a status meaning. idle's value also moves
+     (champagne itself is 2.50:1 vs --n-11, below the 3:1 floor — see
+     --primitive-idle above) to a darkened kin at 3.92:1. neutral's
+     alpha also moves (0.28 -> 0.48) for the same reason: 1.90:1 -> 3.32:1. */
   --status-critical: var(--primitive-rust);
   --status-ok:       var(--primitive-sage);
   --status-info:     var(--primitive-azure);
   --status-warning:  var(--primitive-amber);
   --status-danger:   var(--primitive-crimson);
-  --status-progress: var(--accent);            /* in-flight / open / pending  */
-  --status-idle:     var(--accent-secondary);  /* draft / archived / inactive */
-  --status-neutral:  rgb(26 25 22 / 0.28);     /* unranked / not-yet-due      */
+  --status-progress: var(--primitive-bronze);   /* was var(--accent) — decoupled, same bronze value, 5.36:1 vs --n-11 */
+  --status-idle:     var(--primitive-idle);     /* was var(--accent-secondary)/champagne (2.50:1) — decoupled + retuned, 3.92:1 */
+  --status-neutral:  rgb(26 25 22 / 0.48);      /* was 0.28 (1.90:1) — retuned to 3.32:1 vs --n-11 */
 
-  /* … and text value (4.5:1 on --surface-page). Darker than the graphic
-     tier; the graphic values above all land between 2.7:1 and 4.0:1. */
-  --status-critical-fg: #A0511F;  /* 5.1:1 */
-  --status-ok-fg:       #3C6449;  /* 6.0:1 */
-  --status-info-fg:     #2F6390;  /* 5.7:1 */
-  --status-warning-fg:  #8A5E13;  /* 5.1:1 */
-  --status-danger-fg:   var(--primitive-crimson); /* 5.8:1 — already passes */
-  --status-progress-fg: var(--accent);            /* 5.9:1 — already passes */
-  --status-idle-fg:     #77664B;  /* 5.0:1 — champagne is 2.7:1, unusable as text */
+  /* … and text value (4.5:1 on the surface the badge actually renders on
+     — canvas or card; --n-10 sunken is not a realistic text location for
+     a status label, so it is not the worst case used here, unlike the
+     ink ramp above which genuinely does render everywhere). */
+  --status-critical-fg: #A0511F;  /* 4.65:1 vs --n-11 */
+  --status-ok-fg:       #3C6449;  /* 5.52:1 vs --n-11 */
+  --status-info-fg:     #2F6390;  /* 5.19:1 vs --n-11 */
+  --status-warning-fg:  #8A5E13;  /* 4.65:1 vs --n-11 */
+  --status-danger-fg:   var(--primitive-crimson); /* 5.35:1 — already passes */
+  --status-progress-fg: var(--primitive-bronze);  /* was var(--accent) — must not silently become teal; converges w/ graphic, 5.36:1 */
+  --status-idle-fg:     #77664B;  /* 4.54:1 vs --n-11 — champagne is 2.50:1, unusable as text */
 
   /* Status washes — tinted backgrounds for banners and chips. */
   --status-critical-bg:   color-mix(in srgb, var(--status-critical) 10%, transparent);
@@ -141,11 +291,19 @@
   --status-ok-bg:         color-mix(in srgb, var(--status-ok) 10%, transparent);
   --status-info-bg:       color-mix(in srgb, var(--status-info) 10%, transparent);
 
-  /* Elevation. The page stays flat by design (0 radius, hairlines only);
-     this single tier exists ONLY for layers that float above it, so a
-     dropdown is distinguishable from the content behind it. */
-  --elev-overlay: 0 6px 18px -8px rgb(26 25 22 / 0.28), 0 1px 2px rgb(26 25 22 / 0.10);
-  --scrim: rgb(26 25 22 / 0.40);
+  /* Elevation. Four named tiers + scrim. `--elev-overlay` keeps its exact
+     legacy name (not renamed to --elev-3) so the shipped consumers
+     (.lux-toast, .erp-usermenu__pop, .erp-railmenu, .erp-new__menu) need
+     no edit — only the surface colour under them changes. Light is
+     shadow-led (warm-tinted off --n-1, not pure black, to match the ramp's
+     hue); dark is grounding-only here because dark elevation's PRIMARY
+     cue is the luminance step between --n-* surface tiers above, not
+     these shadows — see the dark block for the inset-highlight mechanism. */
+  --elev-1:       0 1px 2px rgb(12 11 8 / 0.06), 0 1px 1px rgb(12 11 8 / 0.04);          /* card */
+  --elev-2:       0 4px 10px -4px rgb(12 11 8 / 0.14), 0 1px 2px rgb(12 11 8 / 0.08);    /* raised */
+  --elev-overlay: 0 10px 24px -8px rgb(12 11 8 / 0.20), 0 2px 4px rgb(12 11 8 / 0.10);   /* popover, tooltip, menu */
+  --elev-4:       0 20px 48px -12px rgb(12 11 8 / 0.28), 0 4px 8px rgb(12 11 8 / 0.14);  /* modal */
+  --scrim: rgb(12 11 8 / 0.40);
 
   /* Opacity rhythm — used for hover fades, captions, icon rest state */
   --opacity-muted:    0.60; /* @kind other */   /* captions, ©, icon rest   */
@@ -153,17 +311,19 @@
   --opacity-hairline: 0.18; /* @kind other */   /* hairline over light bg   */
 
   /* ── Chart palette (--rc-*) ────────────────────────────────────────────────
-     Moved here from components/reports/charts/charts.css, which had grown a
-     second token layer of its own: raw hex declared outside this file means two
-     places to change a colour, and — the real cost — the dark-block parity test
-     below could not see them, so a series colour was free to differ between an
-     OS-dark user and one who pinned dark.
+     Rebuilt (2026-08-22) against the categorical ramp instead of the old
+     dataviz-skill default palette: series now share HUE AND ORDER with
+     --cat-1..8, so a user who has learned "amber tag = Finance" sees the
+     same amber if Finance gets a chart series. Exact L/S is re-tuned per
+     medium (a thin 2px stroke and a filled chip need different values to
+     both read correctly) — that is expected, not drift.
 
-     The chrome values alias the brand tokens (a chart's surface IS a card). The
-     eight series values are their own scale and stay literal on purpose: they
-     must be distinguishable from EACH OTHER, which is a different requirement
-     from the brand palette and cannot be derived from it. Consumers reference
-     var(--rc-*) only; the raw values live here, like every other colour. */
+     Amendment 01: --rc-series-N is the STROKE/LEGEND-SWATCH value (full
+     chroma, chip-sized use). --rc-series-N-area is the BAR/AREA-BODY
+     value (chroma pulled toward --rc-surface) — wiring actual chart
+     components (components/reports/charts/*.tsx) to pick the right one
+     per element is downstream of this token-layer pass; both tokens
+     exist now so that work is unblocked. */
   --rc-surface:        var(--surface-card);
   --rc-text-primary:   var(--text-primary);
   --rc-text-secondary: var(--erp-ink-60);
@@ -174,14 +334,24 @@
   --rc-tooltip-border: var(--erp-hairline);
   --rc-focus:          var(--erp-accent);
 
-  --rc-series-1: #2a78d6; /* blue */
-  --rc-series-2: #eb6834; /* orange */
-  --rc-series-3: #1baf7a; /* aqua */
-  --rc-series-4: #eda100; /* yellow */
-  --rc-series-5: #e87ba4; /* magenta */
-  --rc-series-6: #008300; /* green */
-  --rc-series-7: #4a3aa7; /* violet */
-  --rc-series-8: #e34948; /* red */
+  --rc-series-1: #b42254; /* pink,   cat-1 hue deepened — 5.95:1 vs card */
+  --rc-series-2: #2273b4; /* blue,   cat-2 hue deepened — 4.70:1 vs card */
+  --rc-series-3: #866913; /* amber,  cat-3 hue deepened — 4.85:1 vs card */
+  --rc-series-4: #7b8613; /* lime,   cat-4 hue deepened — 3.73:1 vs card (honest limitation: yellow-family hues can't
+                              darken further without turning olive; never the sole conveyor of meaning at this weight —
+                              pair with a point marker or dash pattern) */
+  --rc-series-5: #518613; /* green,  cat-5 hue deepened — 4.12:1 vs card */
+  --rc-series-6: #b44522; /* orange, cat-6 hue deepened — 5.14:1 vs card */
+  --rc-series-7: #9f22b4; /* purple, cat-7 hue deepened — 5.84:1 vs card */
+  --rc-series-8: #2283b4; /* slate,  cat-8 hue deepened — 3.95:1 vs card */
+  --rc-series-1-area: color-mix(in srgb, var(--rc-series-1) 62%, var(--rc-surface));
+  --rc-series-2-area: color-mix(in srgb, var(--rc-series-2) 62%, var(--rc-surface));
+  --rc-series-3-area: color-mix(in srgb, var(--rc-series-3) 62%, var(--rc-surface));
+  --rc-series-4-area: color-mix(in srgb, var(--rc-series-4) 62%, var(--rc-surface));
+  --rc-series-5-area: color-mix(in srgb, var(--rc-series-5) 62%, var(--rc-surface));
+  --rc-series-6-area: color-mix(in srgb, var(--rc-series-6) 62%, var(--rc-surface));
+  --rc-series-7-area: color-mix(in srgb, var(--rc-series-7) 62%, var(--rc-surface));
+  --rc-series-8-area: color-mix(in srgb, var(--rc-series-8) 62%, var(--rc-surface));
 
   --rc-good:          #0ca30c;
   --rc-warning:       #fab219;
@@ -200,6 +370,15 @@
      · auto   → follows prefers-color-scheme (no data-theme attribute)
      · light  → pinned light, even if the OS is dark
      · dark   → pinned dark, even if the OS is light
+
+   --cat-N / --cat-N-line / --cat-N-area and --rc-series-N-area are NOT
+   redeclared here on purpose — they are either theme-invariant (--cat-N)
+   or a formula against a token that already flips (--cat-N-area,
+   --rc-series-N-area both mix against --surface-card/--rc-surface, which
+   ARE redeclared below) — same technique --pm-line-soft already used.
+   Redeclaring them here would grow the parity guard's surface for no
+   benefit; the guard's `declaredVars` count check only requires the two
+   blocks to AGREE on whatever they DO declare, not to declare everything.
    ===================================================================== */
 
 @media (prefers-color-scheme: dark) {
@@ -208,23 +387,29 @@
 
     --brand-color-primary:   var(--primitive-bronze-lift);
     --brand-color-secondary: var(--primitive-champagne-lift);
-    --brand-color-bg:        var(--primitive-ink-page);
+    --brand-color-bg:        var(--n-2);
     --brand-color-text-dark: var(--primitive-bone);
 
-    --surface-card:     var(--primitive-ink-card);
-    --surface-raised:   var(--primitive-ink-raised);
-    --surface-chrome:   #100E0A;   /* chrome recedes below the content canvas */
+    --surface-sunken:   var(--n-1);
+    --surface-card:     var(--n-4);
+    --surface-raised:   var(--n-5);
+    --surface-overlay:  var(--n-6);
+    --surface-modal:    var(--n-6);
+    --surface-chrome:   var(--n-1);   /* chrome recedes below the content canvas */
     --surface-inverse:  #2E2A22;
     --text-on-inverse:  var(--primitive-off-white);
     --wash:        rgb(232 227 214 / 0.06);
     --wash-strong: rgb(232 227 214 / 0.10);
     /* The accent is now light, so text sitting ON it must be dark. */
     --text-on-accent:   var(--primitive-off-black);
+    --accent:            var(--primitive-teal-lift);
+    --accent-fg:         var(--primitive-teal-lift);   /* converges with graphic, same as --status-*-fg already does in dark */
+    --accent-fill:       color-mix(in srgb, var(--accent) 86%, var(--n-1));  /* amendment 01 */
 
     --ink-strong: rgb(232 227 214);
     --ink-body:   rgb(232 227 214 / 0.84);
     --ink-muted:  rgb(232 227 214 / 0.68);
-    --ink-subtle: rgb(232 227 214 / 0.58);
+    --ink-subtle: rgb(232 227 214 / 0.62);  /* was 0.58 / 4.20:1 vs the new --n-6 — bumped to clear 4.5:1 (4.57:1) */
     --ink-faint:  rgb(232 227 214 / 0.40);
 
     --line-control: rgb(232 227 214 / 0.48);
@@ -240,7 +425,9 @@
     --status-info:     var(--primitive-azure-lift);
     --status-warning:  var(--primitive-amber-lift);
     --status-danger:   var(--primitive-crimson-lift);
-    --status-neutral:  rgb(232 227 214 / 0.26);
+    --status-progress: var(--primitive-bronze-lift);   /* was var(--accent) — decoupled */
+    --status-idle:     var(--primitive-champagne-lift); /* was var(--accent-secondary) — decoupled, value unchanged (already passes dark) */
+    --status-neutral:  rgb(232 227 214 / 0.42);        /* was 0.26 (2.16:1 vs the new --n-6) — bumped to 3.30:1 */
 
     /* On a dark surface the lifted graphic values already clear 4.5:1, so
        text and graphic tiers converge — no separate darkened -fg needed. */
@@ -249,6 +436,7 @@
     --status-info-fg:     var(--primitive-azure-lift);
     --status-warning-fg:  var(--primitive-amber-lift);
     --status-danger-fg:   var(--primitive-crimson-lift);
+    --status-progress-fg: var(--primitive-bronze-lift); /* was var(--accent) — decoupled */
     --status-idle-fg:     var(--primitive-champagne-lift);
 
     --status-critical-bg:   color-mix(in srgb, var(--status-critical) 16%, transparent);
@@ -257,8 +445,11 @@
     --status-ok-bg:         color-mix(in srgb, var(--status-ok) 16%, transparent);
     --status-info-bg:       color-mix(in srgb, var(--status-info) 16%, transparent);
 
-    --elev-overlay: 0 10px 28px -10px rgb(0 0 0 / 0.70), 0 1px 2px rgb(0 0 0 / 0.40);
-    --scrim: rgb(0 0 0 / 0.60);
+    --elev-1:       inset 0 1px 0 rgb(249 247 243 / 0.03), 0 1px 2px rgb(0 0 0 / 0.30);
+    --elev-2:       inset 0 1px 0 rgb(249 247 243 / 0.05), 0 4px 12px -4px rgb(0 0 0 / 0.45);
+    --elev-overlay: inset 0 1px 0 rgb(249 247 243 / 0.06), 0 10px 28px -8px rgb(0 0 0 / 0.60);
+    --elev-4:       inset 0 1px 0 rgb(249 247 243 / 0.08), 0 22px 56px -12px rgb(0 0 0 / 0.75);
+    --scrim: rgb(0 0 0 / 0.65);
 
     /* Chart palette — dark. Lifted series colours: the light-mode values are too dark to read
        against an ink surface. Kept byte-identical between the two dark blocks below. */
@@ -270,16 +461,16 @@
     --rc-axis:           #383835;
     --rc-tooltip-bg:     #1a1a19;
     --rc-tooltip-border: rgba(255, 255, 255, 0.1);
-    --rc-focus:          #3987e5;
+    --rc-focus:          #71d2d6;
 
-    --rc-series-1: #3987e5;
-    --rc-series-2: #d95926;
-    --rc-series-3: #199e70;
-    --rc-series-4: #c98500;
-    --rc-series-5: #d55181;
-    --rc-series-6: #008300;
-    --rc-series-7: #9085e9;
-    --rc-series-8: #e66767;
+    --rc-series-1: #de7397; /* pink,   6.44 hue -> lifted, 5.42:1 vs card */
+    --rc-series-2: #73aede; /* blue,   6.84:1 vs card */
+    --rc-series-3: #dec373; /* amber,  9.40:1 vs card */
+    --rc-series-4: #d4de73; /* lime,   11.21:1 vs card */
+    --rc-series-5: #acde73; /* green,  10.40:1 vs card */
+    --rc-series-6: #de8c73; /* orange, 6.27:1 vs card */
+    --rc-series-7: #ce73de; /* purple, 5.52:1 vs card */
+    --rc-series-8: #73bade; /* slate,  7.59:1 vs card */
 
     --rc-good:          #0ca30c;
     --rc-warning:       #fab219;
@@ -295,22 +486,28 @@ html[data-theme="dark"] {
 
   --brand-color-primary:   var(--primitive-bronze-lift);
   --brand-color-secondary: var(--primitive-champagne-lift);
-  --brand-color-bg:        var(--primitive-ink-page);
+  --brand-color-bg:        var(--n-2);
   --brand-color-text-dark: var(--primitive-bone);
 
-  --surface-card:     var(--primitive-ink-card);
-  --surface-raised:   var(--primitive-ink-raised);
-  --surface-chrome:   #100E0A;   /* chrome recedes below the content canvas */
+  --surface-sunken:   var(--n-1);
+  --surface-card:     var(--n-4);
+  --surface-raised:   var(--n-5);
+  --surface-overlay:  var(--n-6);
+  --surface-modal:    var(--n-6);
+  --surface-chrome:   var(--n-1);   /* chrome recedes below the content canvas */
   --surface-inverse:  #2E2A22;
   --text-on-inverse:  var(--primitive-off-white);
   --text-on-accent:   var(--primitive-off-black);
+  --accent:            var(--primitive-teal-lift);
+  --accent-fg:         var(--primitive-teal-lift);
+  --accent-fill:       color-mix(in srgb, var(--accent) 86%, var(--n-1));
   --wash:        rgb(232 227 214 / 0.06);
   --wash-strong: rgb(232 227 214 / 0.10);
 
   --ink-strong: rgb(232 227 214);
   --ink-body:   rgb(232 227 214 / 0.84);
   --ink-muted:  rgb(232 227 214 / 0.68);
-  --ink-subtle: rgb(232 227 214 / 0.58);
+  --ink-subtle: rgb(232 227 214 / 0.62);
   --ink-faint:  rgb(232 227 214 / 0.40);
 
   --line-control: rgb(232 227 214 / 0.48);
@@ -326,13 +523,16 @@ html[data-theme="dark"] {
   --status-info:     var(--primitive-azure-lift);
   --status-warning:  var(--primitive-amber-lift);
   --status-danger:   var(--primitive-crimson-lift);
-  --status-neutral:  rgb(232 227 214 / 0.26);
+  --status-progress: var(--primitive-bronze-lift);
+  --status-idle:     var(--primitive-champagne-lift);
+  --status-neutral:  rgb(232 227 214 / 0.42);
 
   --status-critical-fg: var(--primitive-rust-lift);
   --status-ok-fg:       var(--primitive-sage-lift);
   --status-info-fg:     var(--primitive-azure-lift);
   --status-warning-fg:  var(--primitive-amber-lift);
   --status-danger-fg:   var(--primitive-crimson-lift);
+  --status-progress-fg: var(--primitive-bronze-lift);
   --status-idle-fg:     var(--primitive-champagne-lift);
 
   --status-critical-bg:   color-mix(in srgb, var(--status-critical) 16%, transparent);
@@ -341,8 +541,11 @@ html[data-theme="dark"] {
   --status-ok-bg:         color-mix(in srgb, var(--status-ok) 16%, transparent);
   --status-info-bg:       color-mix(in srgb, var(--status-info) 16%, transparent);
 
-  --elev-overlay: 0 10px 28px -10px rgb(0 0 0 / 0.70), 0 1px 2px rgb(0 0 0 / 0.40);
-  --scrim: rgb(0 0 0 / 0.60);
+  --elev-1:       inset 0 1px 0 rgb(249 247 243 / 0.03), 0 1px 2px rgb(0 0 0 / 0.30);
+  --elev-2:       inset 0 1px 0 rgb(249 247 243 / 0.05), 0 4px 12px -4px rgb(0 0 0 / 0.45);
+  --elev-overlay: inset 0 1px 0 rgb(249 247 243 / 0.06), 0 10px 28px -8px rgb(0 0 0 / 0.60);
+  --elev-4:       inset 0 1px 0 rgb(249 247 243 / 0.08), 0 22px 56px -12px rgb(0 0 0 / 0.75);
+  --scrim: rgb(0 0 0 / 0.65);
 
   /* Chart palette — dark. Lifted series colours: the light-mode values are too dark to read
      against an ink surface. Kept byte-identical between the two dark blocks below. */
@@ -354,16 +557,16 @@ html[data-theme="dark"] {
   --rc-axis:           #383835;
   --rc-tooltip-bg:     #1a1a19;
   --rc-tooltip-border: rgba(255, 255, 255, 0.1);
-  --rc-focus:          #3987e5;
+  --rc-focus:          #71d2d6;
 
-  --rc-series-1: #3987e5;
-  --rc-series-2: #d95926;
-  --rc-series-3: #199e70;
-  --rc-series-4: #c98500;
-  --rc-series-5: #d55181;
-  --rc-series-6: #008300;
-  --rc-series-7: #9085e9;
-  --rc-series-8: #e66767;
+  --rc-series-1: #de7397;
+  --rc-series-2: #73aede;
+  --rc-series-3: #dec373;
+  --rc-series-4: #d4de73;
+  --rc-series-5: #acde73;
+  --rc-series-6: #de8c73;
+  --rc-series-7: #ce73de;
+  --rc-series-8: #73bade;
 
   --rc-good:          #0ca30c;
   --rc-warning:       #fab219;
@@ -379,23 +582,23 @@ html[data-theme="dark"] {
    whichever dark block was active on screen. */
 @media print {
   html {
-    --rc-surface:        #fcfcfb;
-    --rc-text-primary:   #0b0b0b;
+    --rc-surface:        #f9f7f3;
+    --rc-text-primary:   #0c0b08;
     --rc-text-secondary: #52514e;
     --rc-text-muted:     #898781;
     --rc-grid:           #e1e0d9;
     --rc-axis:           #c3c2b7;
-    --rc-tooltip-bg:     #fcfcfb;
+    --rc-tooltip-bg:     #f9f7f3;
     --rc-tooltip-border: rgba(11, 11, 11, 0.1);
 
-    --rc-series-1: #2a78d6;
-    --rc-series-2: #eb6834;
-    --rc-series-3: #1baf7a;
-    --rc-series-4: #eda100;
-    --rc-series-5: #e87ba4;
-    --rc-series-6: #008300;
-    --rc-series-7: #4a3aa7;
-    --rc-series-8: #e34948;
+    --rc-series-1: #b42254;
+    --rc-series-2: #2273b4;
+    --rc-series-3: #866913;
+    --rc-series-4: #7b8613;
+    --rc-series-5: #518613;
+    --rc-series-6: #b44522;
+    --rc-series-7: #9f22b4;
+    --rc-series-8: #2283b4;
 
     --rc-good:          #0ca30c;
     --rc-warning:       #fab219;

@@ -1,8 +1,11 @@
-/* Primitives — every rule obeys: 0 radius, hairlines, token colours only.
-   Shadows appear on floating layers ONLY (--elev-overlay); the page is flat. */
-.lux-card { background: var(--surface-card); border: 0.5px solid var(--erp-hairline); padding: 22px; display: flex; flex-direction: column; min-width: 0; }
+/* Primitives — hairlines + token colours only. Radius/shadow are now legal
+   (Phase 1 retires the zero-radius/no-shadow law) but ONLY through
+   var(--radius-*)/var(--elev-*) — a literal number here fails the guard the
+   same way a literal colour would. Shadows still appear on floating layers
+   ONLY (--elev-overlay); the page itself stays flat. */
+.lux-card { background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); padding: var(--card-padding); display: flex; flex-direction: column; min-width: 0; }
 .lux-card--dark { background: var(--surface-inverse); color: var(--text-on-inverse); border-color: transparent; }
-.lux-card__title { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 20px; }
+.lux-card__title { margin: 0; font-family: var(--font-body); font-weight: 600; font-size: var(--h3-size); line-height: var(--h3-line); }
 .lux-card__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
 
 .lux-btn { border: 0.5px solid var(--erp-accent); cursor: pointer; font-family: var(--font-body); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; transition: background 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease), opacity 0.2s var(--erp-ease); }
@@ -20,14 +23,14 @@
 .lux-badge { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
 .lux-badge__dot { width: 6px; height: 6px; border-radius: 50%; } /* the dot is the system's one sanctioned circle */
 
-.lux-kpi { background: var(--surface-card); border: 0.5px solid var(--erp-hairline); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
-.lux-kpi__value { font-family: var(--font-data); font-weight: 700; font-size: 30px; line-height: 1.05; letter-spacing: -0.015em; }
+.lux-kpi { background: var(--surface-card); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); padding: var(--card-padding); display: flex; flex-direction: column; gap: 12px; }
+.lux-kpi__value { font-family: var(--font-data); font-weight: 700; font-size: var(--data-lg-size); line-height: var(--data-lg-line); letter-spacing: -0.015em; }
 .lux-kpi__delta { display: flex; align-items: center; gap: 6px; font: 400 12px var(--font-body); }
 
 .lux-table { display: flex; flex-direction: column; min-width: 0; }
-.lux-table__head, .lux-table__row { display: grid; grid-template-columns: var(--lux-tcols, 2fr 1fr 1fr 1fr); align-items: center; padding: 12px 22px; }
+.lux-table__head, .lux-table__row { display: grid; grid-template-columns: var(--lux-tcols, 2fr 1fr 1fr 1fr); align-items: center; padding-inline: var(--card-padding); }
 .lux-table__head { border-bottom: 0.5px solid var(--erp-hairline); padding-top: 0; padding-bottom: 9px; }
-.lux-table__row { border-bottom: 0.5px solid var(--erp-hairline-soft); transition: background 0.2s var(--erp-ease); }
+.lux-table__row { min-height: var(--row-height); border-bottom: 0.5px solid var(--erp-hairline-soft); transition: background 0.2s var(--erp-ease); }
 .lux-table__row:hover { background: var(--tint-hover); }
 .lux-table__cell--right { justify-self: end; text-align: right; }
 /* Figures in a shared column need identical advance widths or the digits

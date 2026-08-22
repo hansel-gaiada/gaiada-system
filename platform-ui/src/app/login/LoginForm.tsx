@@ -1,13 +1,32 @@
 "use client";
 import { useActionState } from "react";
 import { login } from "./actions";
-import { Eyebrow, Button } from "@/components/ui";
+import { Eyebrow } from "@/components/ui";
 
 const SSO_ERRORS: Record<string, string> = {
   sso: "That sign-in attempt expired. Please try again.",
   token: "Couldn't complete sign-in with the identity provider.",
   provision: "Signed in, but no matching account exists on this platform.",
 };
+
+// Shown only once the identity panel itself is hidden at the narrow-viewport
+// breakpoint (see login.css) — carries the brand mark so the form column is
+// never brand-less on its own.
+function BrandMark() {
+  return (
+    <div className="auth-form__brand">
+      <span className="auth-form__wordmark">SYROWATKA</span>
+      <Eyebrow className="auth-form__brand-eyebrow">Operating Platform</Eyebrow>
+    </div>
+  );
+}
+
+const FOOTER_NOTE = (
+  <p className="auth-form__foot">
+    Can&apos;t get in? That&apos;s almost always a position that hasn&apos;t been set up for you
+    yet, not a password problem — ask whoever manages your team&apos;s roster to check it.
+  </p>
+);
 
 export function LoginForm({
   returnTo,
@@ -20,49 +39,76 @@ export function LoginForm({
 }) {
   const [state, action, pending] = useActionState(login, null);
 
+  const ssoErrorBanner = ssoError && (
+    <p className="auth-form__error" role="alert">
+      {SSO_ERRORS[ssoError] ?? "Sign-in failed. Please try again."}
+    </p>
+  );
+
   // SSO-only: no email box at all. The dev-login server action is disabled in this mode, so
   // showing the field would invite the one interaction guaranteed to fail.
   if (ssoOnly) {
     return (
-      <div style={{ width: 380, maxWidth: "calc(100vw - 40px)", background: "var(--surface-card)", border: "0.5px solid var(--erp-hairline)", padding: 40, display: "flex", flexDirection: "column", gap: 20 }}>
-        <div>
-          <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "0.14em" }}>SYROWATKA</div>
-          <Eyebrow style={{ opacity: 0.55, marginTop: 7, display: "block" }}>Operating Platform</Eyebrow>
+      <div className="auth-form">
+        <BrandMark />
+        <div className="auth-form__head">
+          <h1 className="auth-form__title">Sign in</h1>
+          <p className="auth-form__lede">Use your workspace identity to continue.</p>
         </div>
-        {ssoError && (
-          <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.8 }}>
-            {SSO_ERRORS[ssoError] ?? "Sign-in failed. Please try again."}
-          </p>
-        )}
-        <a href={`/auth/login?return=${encodeURIComponent(returnTo)}`} style={{ textAlign: "center", textDecoration: "none", background: "var(--text-primary)", color: "var(--surface-card)", padding: "12px 12px", font: "500 13px var(--font-body)", letterSpacing: "0.04em" }}>
+        {ssoErrorBanner}
+        <a href={`/auth/login?return=${encodeURIComponent(returnTo)}`} className="auth-btn auth-btn--primary">
           Sign in with SSO
         </a>
+        {FOOTER_NOTE}
       </div>
     );
   }
 
   return (
-    <form action={action} style={{ width: 380, maxWidth: "calc(100vw - 40px)", background: "var(--surface-card)", border: "0.5px solid var(--erp-hairline)", padding: 40, display: "flex", flexDirection: "column", gap: 20 }}>
-      <div>
-        <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "0.14em" }}>SYROWATKA</div>
-        <Eyebrow style={{ opacity: 0.55, marginTop: 7, display: "block" }}>Operating Platform</Eyebrow>
+    <form action={action} className="auth-form">
+      <BrandMark />
+      <div className="auth-form__head">
+        <h1 className="auth-form__title">Sign in</h1>
+        <p className="auth-form__lede">
+          Most staff use single sign-on. Use your work email only if SSO isn&apos;t set up for you yet.
+        </p>
       </div>
       <input type="hidden" name="return" value={returnTo} />
-      <label style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <Eyebrow style={{ fontSize: 10, opacity: 0.6 }}>Email</Eyebrow>
-        <input name="email" type="email" autoComplete="email" required
-          style={{ border: "none", borderBottom: "0.5px solid var(--line-control)", background: "transparent", outline: "none", padding: "8px 2px", font: "400 14px var(--font-body)", color: "var(--text-primary)" }} />
-      </label>
-      {state?.error && <p style={{ margin: 0, font: "400 13px var(--font-body)", color: "var(--erp-accent)", opacity: 0.8 }}>{state.error}</p>}
-      <Button type="submit" size="md" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</Button>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, opacity: 0.4 }}>
-        <span style={{ flex: 1, height: 1, background: "var(--erp-hairline)" }} />
-        <Eyebrow style={{ fontSize: 9 }}>or</Eyebrow>
-        <span style={{ flex: 1, height: 1, background: "var(--erp-hairline)" }} />
-      </div>
-      <a href={`/auth/login?return=${encodeURIComponent(returnTo)}`} style={{ textAlign: "center", textDecoration: "none", border: "0.5px solid var(--erp-hairline)", padding: "10px 12px", font: "500 13px var(--font-body)", letterSpacing: "0.04em", color: "var(--text-primary)" }}>
-        Sign in with SSO (Keycloak)
+      {ssoErrorBanner}
+      <a href={`/auth/login?return=${encodeURIComponent(returnTo)}`} className="auth-btn auth-btn--primary">
+        Sign in with SSO
       </a>
+      <div className="auth-divider">
+        <span />
+        <Eyebrow className="auth-divider__label">or</Eyebrow>
+        <span />
+      </div>
+      <label className="auth-field">
+        <Eyebrow className="auth-field__label">Email</Eyebrow>
+        {/* The accessible name comes from the wrapping <label>'s Eyebrow text
+            ("Email") — several e2e specs resolve this input via getByLabel("Email"),
+            so the placeholder is an example only and must never become the label. */}
+        <input
+          name="email"
+          type="email"
+          autoComplete="email"
+          placeholder="you@gaiada.com"
+          required
+          className="auth-field__input"
+        />
+      </label>
+      {state?.error && (
+        <p className="auth-form__error" role="alert">
+          {state.error}
+        </p>
+      )}
+      {/* Secondary, deliberately: SSO above is the primary path most staff take.
+          Two identical full-width accent buttons on one screen give the reader no
+          steer about which door to use. */}
+      <button type="submit" className="auth-btn auth-btn--secondary" disabled={pending}>
+        {pending ? "Signing in…" : "Sign in"}
+      </button>
+      {FOOTER_NOTE}
     </form>
   );
 }

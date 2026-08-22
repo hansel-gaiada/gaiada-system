@@ -7,9 +7,14 @@
    and a per-component import would load it many times. See tokens/pm.css header. */
 @import "./tokens/pm.css";
 
-/* Design-system hard rules: zero radius, hairline borders, opacity hovers.
-   Shadows exist in exactly ONE place — --elev-overlay, for layers that float
-   above the page (menus, popovers, toasts). The page itself stays flat. */
+/* Design-system rules (Phase 1, 2026-08-22): hairline borders and opacity
+   hovers stay; the zero-radius / no-shadow law is RETIRED. Radius and
+   elevation are now legal everywhere, but only through the token layer —
+   `border-radius` must resolve to `var(--radius-*)` (tokens/spacing.css)
+   and `box-shadow` must resolve to `var(--elev-*)` (tokens/colors.css); a
+   literal radius or shadow value in component CSS is banned by
+   tokens.test.ts exactly the way a literal colour already is. This file
+   itself still declares neither — it never needed to. */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--surface-page); color: var(--text-primary); font-family: var(--font-body); }
 button { font-family: inherit; }

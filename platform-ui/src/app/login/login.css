@@ -1,0 +1,355 @@
+/* =====================================================================
+   Sign-in surface — Phase 1 redesign (2026-08-22)
+   ---------------------------------------------------------------------
+   Two-column layout: a static identity/company panel (left, --surface-
+   chrome) and the actual sign-in form (right, --surface-page — the "canvas"
+   tier per docs/design/2026-08-22-ui-redesign-design-language.md §3; this
+   codebase names that token --surface-page, not --surface-canvas).
+
+   Shared by /login (LoginForm.tsx + page.tsx) AND /step-up (page.tsx) —
+   the `.auth-*` prefix (not `.login-*`) is deliberate so re-auth reads as
+   the same product, not a second screen, per the redesign brief.
+
+   Tokens only: every colour/radius/shadow below resolves through
+   var(--n-*|--surface-*|--ink-*|--line-*|--accent*|--brand-*|--radius-*|
+   --elev-*) per §2-4 and amendment-01 (2026-08-22-amendment-01-area-tier.md)
+   — a full-width solid button uses --accent-fill, never bare --accent,
+   because full chroma at that area reads as candy, not considered (the
+   amendment's whole point). This file is outside tokens.test.ts's component
+   CSS scan (it lives under src/app/login/, not src/components/), but the
+   no-literal discipline is followed anyway rather than relying on the
+   guard's reach.
+   ===================================================================== */
+
+/* ---- Two-column shell -------------------------------------------------- */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(320px, 34%) 1fr;
+  background: var(--surface-page);
+}
+
+/* ---- Left column: identity panel ---------------------------------------
+   --surface-chrome ground + a 2px bronze-to-transparent rule along the top
+   edge. Real content, not decoration: the entity list below tells a new
+   joiner what the group is before they have any access to it. */
+.auth-identity {
+  position: relative;
+  background: var(--surface-chrome);
+  padding: var(--space-64) var(--space-48);
+  display: flex;
+  flex-direction: column;
+  /* Centred, not space-between. On a tall desktop viewport space-between pushed
+     the headline to the ceiling and the roster to the floor with ~400px of void
+     between them, which read as a rendering fault rather than composition. */
+  justify-content: center;
+  gap: var(--space-64);
+  overflow: hidden;
+  /* In light theme --surface-chrome and --surface-page sit close together, so
+     without this the two columns blur into one empty field. Dark separates them
+     on luminance alone and does not need it, but the rule is harmless there. */
+  border-right: 1px solid var(--line);
+}
+.auth-identity::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand-color-primary), transparent);
+}
+
+.auth-identity__top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  max-width: 380px;
+}
+.auth-identity__eyebrow { color: var(--ink-muted); }
+
+/* One of the few surfaces where Cormorant keeps an operational role (§8:
+   H1/H2 + print/login/empty-state are the named exceptions to the H3 serif
+   demotion) — sized larger than the in-app --h1-size because this is a
+   once-per-session hero line, not a repeated dashboard page title. */
+.auth-identity__headline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: var(--weight-heading);
+  font-size: clamp(28px, 2.6vw, 40px);
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+.auth-identity__headline em {
+  font-style: italic;
+  color: var(--brand-color-primary);
+}
+.auth-identity__lede {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--ink-muted);
+  max-width: 38ch;
+}
+
+.auth-identity__entities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.auth-entity {
+  display: grid;
+  grid-template-columns: 3px 1fr auto;
+  align-items: center;
+  gap: var(--space-12);
+  padding-block: var(--space-12);
+  border-top: 1px solid var(--line-soft);
+}
+.auth-entity__rail {
+  align-self: stretch;
+  border-radius: var(--radius-2);
+}
+.auth-entity__name {
+  font-family: var(--font-body);
+  font-size: var(--body-sm-size);
+  line-height: var(--body-sm-line);
+  color: var(--ink-body);
+}
+.auth-entity__year {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-size: var(--body-sm-size);
+  color: var(--ink-subtle);
+  text-align: right;
+}
+
+/* ---- Right column: the form ---------------------------------------------
+   --surface-page ground, vertically centred. */
+.auth-formcol {
+  background: var(--surface-page);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-24);
+}
+.auth-form {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+/* Compact brand mark — hidden on desktop (the identity panel already
+   carries the brand); shown once the identity panel itself is hidden below
+   the narrow-viewport breakpoint (see media query below), and always shown
+   on the standalone /step-up card via .auth-card__brand instead. */
+.auth-form__brand { display: none; flex-direction: column; gap: var(--space-4); }
+.auth-form__wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.1em;
+  color: var(--text-primary);
+}
+.auth-form__brand-eyebrow { color: var(--ink-muted); }
+
+.auth-form__head { display: flex; flex-direction: column; gap: var(--space-8); }
+/* "Sign in" — Inter 600, NOT Cormorant. §8 demotes the serif out of
+   operational headings; a sign-in heading a user reads every session is
+   closer to a repeated card title than a once-per-visit page title. */
+.auth-form__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+.auth-form__lede {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--ink-muted);
+}
+
+.auth-form__error {
+  margin: 0;
+  font: 400 13px var(--font-body);
+  color: var(--status-danger-fg);
+}
+
+/* ---- Buttons --------------------------------------------------------------
+   A local class rather than ui.css's `.lux-btn--solid` (which still points
+   at bare --accent): that primitive is shared app-wide, and this page is
+   the one full-width consumer amendment-01 is actually about — --accent-fill
+   is deepened specifically so a full-width fill reads considered, not candy. */
+.auth-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-sm);
+  height: var(--control-height);
+  padding-inline: var(--space-16);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--body-sm-size);
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.2s var(--erp-ease);
+}
+.auth-btn--primary {
+  background: var(--accent-fill);
+  color: var(--text-on-accent);
+}
+.auth-btn--primary:hover:not(:disabled) { opacity: 0.9; }
+
+/* The email path is the fallback, so its button is quiet. Rendering it in the
+   same accent fill as the SSO button above made two equal primaries and told
+   the reader nothing about which door to use. */
+.auth-btn--secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--line-control);
+}
+.auth-btn--secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.auth-btn:disabled { opacity: 0.5; cursor: default; }
+
+.auth-divider { display: flex; align-items: center; gap: var(--space-12); opacity: 0.6; }
+/* Must exclude the label. `Eyebrow` renders its own <span>, so a bare
+   `.auth-divider span` also painted the word "or" as a 1px rule with its text
+   overflowing — three rules on screen instead of two. */
+.auth-divider > span:not(.auth-divider__label) { flex: 1; height: 1px; background: var(--line); }
+.auth-divider__label { color: var(--ink-subtle); flex: none; }
+
+.auth-field { display: flex; flex-direction: column; gap: var(--space-8); }
+.auth-field__label { color: var(--ink-muted); }
+
+/* A real field, not the old underline idiom. The borderless floating input was
+   correct under the retired zero-radius/hairline law; on the new surface model
+   it reads as a broken control — an isolated 1px rule floating in an otherwise
+   empty column, with nothing to mark it as somewhere you can type. Now it is a
+   filled, bordered, radiused box like every other control in the system. */
+.auth-field__input {
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  outline: none;
+  padding: var(--space-12) var(--space-16);
+  font: 400 14px var(--font-body);
+  color: var(--text-primary);
+}
+.auth-field__input::placeholder { color: var(--ink-faint); }
+.auth-field__input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.auth-form__foot {
+  margin: 0;
+  font: 400 12px/1.55 var(--font-body);
+  color: var(--ink-subtle);
+}
+
+/* ---- Standalone card (used by /step-up) --------------------------------
+   No identity-panel companion there, so it gets its own centred single-
+   column shell + a raised card rather than the two-column grid above. */
+.auth-single {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-page);
+  padding: var(--space-24);
+}
+.auth-card {
+  width: 460px;
+  max-width: 100%;
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-1);
+  padding: var(--space-32);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+.auth-card__brand { display: flex; flex-direction: column; gap: var(--space-4); }
+.auth-card__eyebrow { color: var(--accent); }
+.auth-card__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+.auth-card__body {
+  margin: 0;
+  font: 400 14px/1.6 var(--font-body);
+  color: var(--ink-muted);
+}
+.auth-card__return {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-12) var(--space-16);
+  background: var(--tint-hover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.auth-card__return-label { color: var(--ink-muted); }
+.auth-card__return-value {
+  font: 400 13px var(--font-body);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.auth-card__foot {
+  margin: 0;
+  font: 400 12px/1.55 var(--font-body);
+  color: var(--ink-subtle);
+}
+
+/* ---- Responsive: collapse to one column --------------------------------
+   901-1024: unchanged two-column (34% still comfortably >= 320px min).
+   641-900: stack, identity panel ABOVE the form, entity list dropped (not
+   enough vertical room to keep it and still centre the form above the
+   fold). <=640: identity panel HIDDEN outright; the compact brand mark
+   inside the form panel carries identity instead.
+   Row template is `auto 1fr` rather than two `auto` rows so the form
+   column keeps vertically centring itself in whatever space is left under
+   the (possibly zero-height, once hidden below 640px) identity panel —
+   without it the shell's min-height:100vh would leave a dead gap under a
+   short, top-anchored form on a tall phone. `.auth-formcol` is pinned to
+   `grid-row: 2` (the "1fr" track) explicitly: once the identity panel is
+   `display: none` below 640px it is removed from grid flow entirely, and
+   auto-placement would otherwise drop the one remaining item into row 1
+   (the "auto" track) rather than row 2. `grid-row: -1` is NOT a safe
+   substitute for "the last explicit row" here — it places the item AFTER
+   both explicit tracks in a new implicit row, which left the empty "1fr"
+   track collapsing to a dead gap ABOVE the form instead of centring it. */
+@media (max-width: 900px) {
+  .auth-shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .auth-identity {
+    padding: var(--space-32) var(--space-24);
+    gap: var(--space-24);
+  }
+  .auth-identity__entities { display: none; }
+  .auth-formcol { grid-row: 2; padding: var(--space-32) var(--space-24); }
+}
+
+@media (max-width: 640px) {
+  .auth-identity { display: none; }
+  .auth-form__brand { display: flex; }
+}

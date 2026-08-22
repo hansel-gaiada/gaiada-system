@@ -1,12 +1,24 @@
 /* =====================================================================
-   Luxury Minimalist Design System — Spacing, Layout & Component Primitives
+   Dark-First Design System — Spacing, Layout, Radius & Density
    ---------------------------------------------------------------------
-   STRICT OCD COMPLIANCE: no decimals, no odd values, no arbitrary
-   numbers. Every gap, pad and rhythm step resolves to a token below.
+   Phase 1 redesign (2026-08-22): the editorial 10/15/20/30/40/50/60/100
+   scale below is KEPT VERBATIM — departments.css (out of this pass's
+   scope) already consumes --space-10/--space-20 directly, and the
+   section/canvas geometry further down is dead code today (no `.Section`/
+   `.Canvas` class is used anywhere in src/app) so there is nothing to gain
+   by touching it. The new 4pt-grid additions use VALUE-named tokens
+   (--space-N = Npx) to match that existing naming convention rather than
+   the spec's multiplier-index naming (--space-1 = 4px) — an index scheme
+   would collide with the legacy --space-10/--space-20 names for
+   different pixel values, which is worse than a naming mismatch with the
+   spec document. --space-20 and --space-40 already exist above and are
+   already 4pt-aligned, so they double as grid steps; only the gaps are
+   added below.
    ===================================================================== */
 
 :root {
-  /* ---- Primitive spacing scale ------------------------------------ */
+  /* ---- Primitive spacing scale (legacy editorial scale, kept for
+     departments.css and any other untouched consumer) ---------------- */
   --space-10:  10px;
   --space-15:  15px;   /* internal card content only */
   --space-20:  20px;
@@ -16,7 +28,40 @@
   --space-60:  60px;
   --space-100: 100px;
 
-  /* ---- Canvas & section geometry ---------------------------------- */
+  /* ---- 4pt-grid scale (Phase 1 addition) — dense-dashboard spacing.
+     Fills the gaps around the legacy scale above (--space-20/--space-40
+     already sit on this grid and are reused, not duplicated). */
+  --space-4:  4px;
+  --space-8:  8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-32: 32px;
+  --space-48: 48px;
+  --space-64: 64px;
+  --space-80: 80px;
+
+  /* ---- Radius scale (Phase 1 — retires the zero-radius law) --------
+     Restrained, not decorative: 8-16px on a card reads "designed," not
+     "consumer app." Buttons/inputs get the smallest usable radius so a
+     dense row of them doesn't turn into a field of pills. Every
+     border-radius in component CSS must resolve to one of these —
+     tokens.test.ts bans a literal radius number the same way it already
+     bans a literal colour (see the guard-test doc comment there). */
+  --radius-2:    2px;    /* checkbox, tiny chip corner */
+  --radius-4:    4px;    /* input underline-to-box transition, small chip */
+  --radius-8:    8px;    /* button, form control, small card */
+  --radius-12:   12px;   /* card, panel */
+  --radius-16:   16px;   /* modal, large panel, popover */
+  --radius-pill: 999px;  /* tags, status pills, avatars */
+  --radius-none: 0;      /* intentional flat edges: table-inside-card, full-bleed banners */
+  --radius-sm: var(--radius-4);
+  --radius-md: var(--radius-8);
+  --radius-lg: var(--radius-16);
+
+  /* ---- Canvas & section geometry (dead code — no consumer in src/app;
+     kept unchanged, not part of this pass) --------------------------- */
   --canvas-width:        1440px;   /* desktop / 16:9 slide canvas      */
   --section-max-width:   1340px;   /* centered content boundary        */
   --section-pad-inline:  50px;     /* L / R inner padding (40 tablet · 20 mobile) */
@@ -35,11 +80,22 @@
   --button-height-md:   40px;   /* normal button                      */
   --button-height-sm:   35px;   /* small button (mandatory in cards)  */
   --nav-item-gap:       55px;   /* consistent 50–60px nav rhythm       */
-  --card-padding:       30px;   /* symmetrical card inset             */
-  --card-gap:           20px;   /* gap between adjacent cards         */
   --icon-size:          20px;   /* perfect 20×20 square               */
   --hairline-weight:    0.5px;  /* separators & input underline       */
   --input-underline:    0.5px;  /* borderless floating field          */
+
+  /* ---- Density modes (Phase 1) — a REAL token-level mode, replacing the
+     five hand-tweaked selectors that used to live in shell.css. This
+     block is the "comfortable" default (no [data-density] attribute
+     needed); .erp-app[data-density="compact"/"spacious"] in shell.css
+     override these same names. --card-padding/--card-gap already existed
+     as fixed values (30px/20px) — departments.css already consumes
+     --card-gap directly, so making it density-aware is a pure upgrade,
+     no rule change required there. --row-height/--control-height are new. */
+  --card-padding:    var(--space-20);  /* ui.css previously hardcoded 22px independently — now unified onto this token */
+  --card-gap:        var(--space-16);  /* was a fixed 20px */
+  --row-height:      40px;
+  --control-height:  40px;
 
   /* ---- Motion — restrained, editorial (no bounce) ----------------- */
   --ease-luxury: cubic-bezier(0.22, 0.61, 0.36, 1);  /* @kind other */
