@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`Alpha 01.049.0101a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`Alpha 01.062.0126a`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.

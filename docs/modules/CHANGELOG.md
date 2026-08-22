@@ -842,6 +842,39 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.062.0126a` - 2026-08-23 - the observability split deploys, and the estate learns to page itself
+
+Manifest (counter +7, 0119 -> 0126): `platform-nest 0.33.0 -> 0.34.0` (MSO-05), `social-media
+0.5.12 -> 0.5.18` (six bumps -- SMM-16, SMM-17, SMM-22, SMM-26, SMM-35, SMM-27, each landed as its
+own module version). Cut by the overnight release session on top of `alpha-01.061.0119a`'s tip,
+covering the 52-commit queue CI had not yet gated as one build. Multiple migrations ship with this
+cut (search-finding states, IAM-16's two-person appointment, SMM-27's best-time table among them) --
+see the commit range for the full list rather than this entry, which tracks the module manifest.
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.34.0`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.1` |
+| platform-ui | `0.29.1` | ai-agents | `0.7.2` | **social-media** | **`0.5.18`** |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.1` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+**What is in it, at the infra/observability level (the reason this cut was queued):** MSO-00 (the
+observability compose split stops the storage/alerting containers being resurrected on gda-aicenter
+on every release), MSO-05 (the multi-host estate endpoint), MSO-06 (the fleet console rebuilt against
+it), and MON-19/20 (the monitor create/update/delete + incident-ack write API). Plus IAM-16's
+two-person appointment (D-9) and the SMM-16..27 social-media wave (inbox triage, reply flow, X
+metering, MCP agent surface, assistant summary read, best-time-to-post).
+
+**Not independently re-verified module-by-module by this cut** -- this entry records the manifest
+per rule 2; the deploy verification (health, container diff, host-label/partition checks) is in the
+infra deploy log/runbook, not repeated here.
+
 ### `Alpha 01.061.0119a` - 2026-08-21 - the company report stops repeating itself
 
 Manifest (counter +1, 0118 -> 0119): `platform-ui 0.29.0 -> 0.29.1`. No migration.
