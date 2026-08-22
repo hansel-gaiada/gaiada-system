@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.19` | IN PROGRESS | Social Media | 2026-08-23 |
+| social-media | `0.5.20` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1268,7 +1268,7 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.19` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.20` · IN PROGRESS
 
 **0.5.18 (2026-08-23, qa) — SMM-25: the Playwright console suite, the department's whole-merge-gate
 ticket — no product code touched, so the version number does not move.** New

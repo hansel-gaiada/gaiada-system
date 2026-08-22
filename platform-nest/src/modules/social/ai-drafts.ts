@@ -305,6 +305,10 @@ export interface ReportNarrativeGroundingFacts {
 export interface ReportNarrativeDraftResult {
   text: string;
   draftedVia: "ai" | "fallback";
+  /** Digit-runs the model stated that no grounding fact accounts for. Present ONLY when the AI
+   *  draft was REJECTED for them (`draftedVia` is then `'fallback'`), so a caller can log WHY the
+   *  deterministic text was used — a rejected narrative and a gateway hiccup must not look alike. */
+  rejectedNumbers?: string[];
 }
 
 export function buildReportNarrativePrompt(facts: ReportNarrativeGroundingFacts): string {
@@ -465,8 +469,71 @@ function fallbackReportNarrative(facts: ReportNarrativeGroundingFacts): string {
   return lines.join(" ");
 }
 
-/** Parse the gateway's /complete response for a report narrative. NEVER throws — see file header
- *  for why this can only validate JSON shape, not numeric provenance. */
+// ── NUMERIC PROVENANCE GUARD ────────────────────────────────────────────────────────────────────
+//
+// The file header above states that no runtime guard can STRIP a hallucinated number out of
+// free-form prose. That remains true — prose cannot be repaired. But it does not follow that an
+// ungrounded number has to be SHIPPED: detecting one and refusing the draft is a different act from
+// rewriting it, and a performance report is a client-facing document where a dull-but-true summary
+// beats a fluent invented one. This is the same "the platform owns the limit, the model's output is
+// advisory" discipline `applyHashtagStrategy` already enforces, applied at the one choke point every
+// narrative passes through.
+//
+// DELIBERATELY STRICT, and it will produce false positives. A model writing "the top 3 posts" or
+// "across 4 networks" states a digit no KPI accounts for, and that draft is rejected even though it
+// is not wrong. The trade is accepted knowingly: the cost of a false positive is a deterministic
+// narrative (which states only given numbers, verbatim), and the cost of a false negative is an
+// invented figure in front of a client. `rejectedNumbers` is reported rather than swallowed so the
+// rate is observable — if it turns out to be noisy in practice, that is a tuning decision made on
+// evidence, not a reason to leave the hole open now.
+
+/** Every digit-run any grounding fact accounts for. Sources include the KPI values AND their
+ *  labels/units, top-post impressions and dates, the period label, and the client/engagement names
+ *  (a name like "Studio 54" legitimately puts a digit in the prose). */
+function groundedNumericTokens(facts: ReportNarrativeGroundingFacts): Set<string> {
+  const out = new Set<string>();
+  const push = (v: unknown): void => {
+    if (v === null || v === undefined) return;
+    for (const m of String(v).matchAll(/\d+(?:\.\d+)?/g)) {
+      const tok = m[0];
+      out.add(tok);
+      // A model may render 12.7 as "12" (truncated) or "13" (rounded); both trace to a real fact, so
+      // neither should be called an invention.
+      if (tok.includes(".")) {
+        const n = Number(tok);
+        out.add(String(Math.trunc(n)));
+        out.add(String(Math.round(n)));
+      }
+    }
+  };
+  for (const k of facts.kpis) { push(k.value); push(k.label); push(k.unit); }
+  for (const p of facts.topPosts) { push(p.impressions); push(p.publishedAt); push(p.network); }
+  push(facts.periodLabel);
+  push(facts.clientName);
+  push(facts.engagementName);
+  return out;
+}
+
+/** Digit-runs in `text` that `facts` cannot account for. Empty means every number in the prose is
+ *  traceable. Thousands separators are normalised away first, so a KPI of 1234 rendered "1,234"
+ *  matches rather than reading as the two inventions "1" and "234". */
+export function findUngroundedNumbers(text: string, facts: ReportNarrativeGroundingFacts): string[] {
+  const grounded = groundedNumericTokens(facts);
+  const normalised = text.replace(/(?<=\d),(?=\d{3}(?!\d))/g, "");
+  const bad: string[] = [];
+  for (const m of normalised.matchAll(/\d+(?:\.\d+)?/g)) {
+    const tok = m[0];
+    if (grounded.has(tok)) continue;
+    if (tok.includes(".") && grounded.has(String(Math.trunc(Number(tok))))) continue;
+    if (!bad.includes(tok)) bad.push(tok);
+  }
+  return bad;
+}
+
+/** Parse the gateway's /complete response for a report narrative. NEVER throws. Validates JSON
+ *  shape AND numeric provenance: a draft stating a number no grounding fact accounts for is
+ *  rejected in favour of the deterministic fallback, with the offending digit-runs returned in
+ *  `rejectedNumbers` so the caller can record WHY (see `findUngroundedNumbers`). */
 export function parseReportNarrativeDraft(raw: string | null, facts: ReportNarrativeGroundingFacts): ReportNarrativeDraftResult {
   if (raw) {
     const match = raw.match(/\{[\s\S]*\}/);
@@ -474,7 +541,14 @@ export function parseReportNarrativeDraft(raw: string | null, facts: ReportNarra
       try {
         const parsed = JSON.parse(match[0]) as { narrative?: unknown };
         const text = typeof parsed.narrative === "string" ? parsed.narrative.trim() : "";
-        if (text.length > 0) return { text, draftedVia: "ai" };
+        if (text.length > 0) {
+          // The ONE place narrative numeric provenance is enforced. A draft that states a number no
+          // grounding fact accounts for is REJECTED outright, not patched: see the guard's own header
+          // for why refusing is legitimate where stripping is not, and why this is deliberately strict.
+          const rejectedNumbers = findUngroundedNumbers(text, facts);
+          if (rejectedNumbers.length === 0) return { text, draftedVia: "ai" };
+          return { text: fallbackReportNarrative(facts), draftedVia: "fallback", rejectedNumbers };
+        }
       } catch {
         /* malformed JSON -> fall through to the deterministic default below */
       }

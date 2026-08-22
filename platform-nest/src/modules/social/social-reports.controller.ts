@@ -253,7 +253,7 @@ export class SocialReportsController {
     } catch {
       raw = null; // fail-soft: a gateway hiccup drafts the deterministic fallback, never blocks report creation
     }
-    const { text: narrativeText, draftedVia } = parseReportNarrativeDraft(raw, narrativeFacts);
+    const { text: narrativeText, draftedVia, rejectedNumbers } = parseReportNarrativeDraft(raw, narrativeFacts);
     // Frozen alongside the numbers (reports.ts's own header on `narrativeSource`) so a later read
     // never claims an AI narrative that a gateway hiccup actually fell back from.
     frozen.narrativeSource = draftedVia === "ai" ? "ai" : "deterministic";
@@ -269,6 +269,12 @@ export class SocialReportsController {
     );
     await writeActivity(tenantId, req.principal.userId, "created", "social_report", id, {
       engagementId, kind, period, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef),
+      // Recorded so a REJECTED narrative is distinguishable from a gateway hiccup: both land as
+      // draftedVia:'fallback', but only one means the model stated a number nothing grounded.
+      // Absent (not `[]`) when nothing was rejected — an empty array would read as "checked and
+      // clean" on the AI path and "checked and clean" on the fallback path alike, which is exactly
+      // the absent-vs-zero conflation this module refuses.
+      ...(rejectedNumbers && rejectedNumbers.length > 0 ? { narrativeRejectedNumbers: rejectedNumbers } : {}),
     });
     return { id, status: "draft", metrics: frozen, narrativeMd: narrativeText, draftedVia, groundedOn: knowledgeHits.map((h) => h.sourceRef) };
   }

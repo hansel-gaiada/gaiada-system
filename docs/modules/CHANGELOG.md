@@ -11,6 +11,50 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.20` — 2026-08-23 — the report narrative can no longer state an invented number
+
+**Fixed**
+- The AI report narrative was the one AI output in this module with **no runtime guard**. The prompt
+  told the model never to state a number it was not given; nothing checked that it obeyed, so an
+  invented figure passed `parseReportNarrativeDraft` (which validated JSON shape only) and landed in
+  a client-facing report. `findUngroundedNumbers` now traces every digit-run in the prose back to a
+  grounding fact, and a draft that states an untraceable number is **rejected** in favour of the
+  deterministic fallback — which states only the given numbers, verbatim.
+- The prior reasoning for having no guard was that nothing can *strip* a hallucinated number out of
+  free-form prose. That is still true, and is not the same claim: prose cannot be repaired, but it
+  can be **declined**. Enforced at the single choke point every narrative passes through, the same
+  "the platform owns the limit, the model's output is advisory" discipline `applyHashtagStrategy`
+  already applies to hashtag counts.
+
+**Deliberate trade-offs, recorded rather than smoothed over**
+- The guard is **strict and will produce false positives** — "the top 6 posts" states a digit no KPI
+  accounts for and is rejected even though it is not wrong. Accepted knowingly: a false positive
+  costs a dull-but-true narrative, a false negative puts a fabricated figure in front of a client.
+  `rejectedNumbers` is reported, not swallowed, so the real rate is observable and any future
+  loosening is an evidence-based decision.
+- Thousands separators are normalised first (a KPI of `12480` rendered `12,480` must not read as the
+  two inventions `1` and `480` — the most likely false positive of all), and a decimal KPI grounds
+  both its truncated and rounded renderings (`3.7%` → `3` or `4`), because a model reporting `4%` for
+  a 3.7% rate is restating a given fact.
+- A side effect of that decimal allowance: an incidental small integer can pass when it happens to
+  equal the truncation of a decimal KPI, so "the top 3 posts" is accepted while "the top 6 posts" is
+  not. Found by writing the strictness test, asserted explicitly in `ai-drafts.test.ts` so it is not
+  rediscovered later as a phantom bug.
+- A **rejected** draft and a **gateway hiccup** both surface as `draftedVia: 'fallback'`; only the
+  rejection carries `rejectedNumbers`, and the controller records it on the activity row so the two
+  are distinguishable. Deliberately **absent** rather than `[]` when nothing was rejected — an empty
+  array would read identically on the checked-and-clean and the never-checked paths, which is the
+  absent-vs-zero conflation this module refuses everywhere else.
+
+**Not changed** — the wire contract. `narrativeSource` stays `'ai' | 'deterministic'` and
+`draftedVia` stays `'ai' | 'fallback'`; `lib/reports.ts` in `platform-ui` is canonical for the
+`ReportDocument` shape, so widening either would be a UI + FRONTEND-BFF-CONTRACT change and is not
+needed to close the hole.
+
+**Tests** — `ai-drafts.test.ts` 41/0/0 (+12), pure unit, no DB. `social-reports.test.ts` and
+`social-ai-drafts.test.ts` 15/0/0 unchanged and green, confirming no existing report fixture was
+relying on an ungrounded narrative passing.
+
 ### social-media `0.5.19` — 2026-08-23 — a retracted client ask is now told to the client
 
 **Fixed**

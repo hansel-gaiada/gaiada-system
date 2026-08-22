@@ -9,6 +9,7 @@ import {
   applyHashtagStrategy, buildCaptionPrompt, parseCaptionDraft, buildIdeaPrompt, parseIdeaDraft,
   MAX_IDEA_COUNT, type CaptionGroundingFacts, type IdeaGroundingFacts, type HashtagStrategy,
   buildTriagePrompt, parseTriageDraft, type TriageGroundingFacts,
+  findUngroundedNumbers, parseReportNarrativeDraft, type ReportNarrativeGroundingFacts,
 } from "./ai-drafts";
 import { maxHashtagsFor } from "./media-rules";
 
@@ -237,5 +238,113 @@ describe("buildTriagePrompt / parseTriageDraft (SMM-16)", () => {
   it("returns result:null when any one of the three axes is missing entirely", () => {
     const raw = JSON.stringify({ sentiment: "positive", category: "praise" }); // no urgency
     expect(parseTriageDraft(raw)).toEqual({ result: null, draftedVia: "unavailable" });
+  });
+});
+
+// ── numeric provenance guard ────────────────────────────────────────────────────────────────────
+// The report narrative was the one AI output with NO runtime guard: the prompt told the model never
+// to state an ungiven number, and nothing checked. These pin the guard that now refuses such a
+// draft. Note what is deliberately NOT claimed: this cannot repair prose, only decline to ship it.
+
+const narrativeFacts: ReportNarrativeGroundingFacts = {
+  engagementName: "Acme Social",
+  clientName: "Acme Coffee",
+  periodLabel: "2026-07-01 – 2026-07-31",
+  kpis: [
+    { label: "Impressions", value: 12480, unit: "impressions" },
+    { label: "Engagement rate", value: 3.7, unit: "%" },
+  ],
+  topPosts: [{ network: "instagram", publishedAt: "2026-07-14", impressions: 5120 }],
+  knowledgeHits: [],
+};
+
+describe("findUngroundedNumbers — narrative numeric provenance", () => {
+  it("accepts a narrative that states only given numbers", () => {
+    const text = "Impressions reached 12480 over the period, with an engagement rate of 3.7%.";
+    expect(findUngroundedNumbers(text, narrativeFacts)).toEqual([]);
+  });
+
+  it("accepts thousands separators — 12,480 traces to the KPI 12480, not to '12' and '480'", () => {
+    // Without normalisation this is the guard's worst false-positive: the single most likely way a
+    // model renders a large KPI would be flagged as two inventions.
+    expect(findUngroundedNumbers("Impressions reached 12,480.", narrativeFacts)).toEqual([]);
+  });
+
+  it("accepts a truncated or rounded rendering of a decimal KPI (3.7 -> '3' or '4')", () => {
+    expect(findUngroundedNumbers("Engagement held around 4%.", narrativeFacts)).toEqual([]);
+    expect(findUngroundedNumbers("Engagement held around 3%.", narrativeFacts)).toEqual([]);
+  });
+
+  it("accepts dates from the period label and from a top post", () => {
+    const text = "Across 2026-07-01 to 2026-07-31, the strongest post landed 2026-07-14.";
+    expect(findUngroundedNumbers(text, narrativeFacts)).toEqual([]);
+  });
+
+  it("CATCHES an invented figure — the whole point", () => {
+    const text = "Impressions reached 12480, and followers grew by 431 this period.";
+    expect(findUngroundedNumbers(text, narrativeFacts)).toEqual(["431"]);
+  });
+
+  it("reports each invented figure once, in order of appearance", () => {
+    const text = "We saw 900 new followers, 12480 impressions, 41 shares and 900 again.";
+    expect(findUngroundedNumbers(text, narrativeFacts)).toEqual(["900", "41"]);
+  });
+
+  it("is DELIBERATELY strict: an ungrounded incidental count is rejected too", () => {
+    // Documented trade-off, not an oversight. "6" is not WRONG here, but the guard cannot tell an
+    // innocuous count from an invented metric, and the cost of erring the other way is a fabricated
+    // figure in a client-facing report. Asserted so a future reader sees this was chosen rather than
+    // missed — and so loosening it is a visible decision, not a silent drift.
+    expect(findUngroundedNumbers("The top 6 posts drove most of it.", narrativeFacts)).toEqual(["6"]);
+  });
+
+  it("the decimal allowance WIDENS the grounded set — a small integer can pass incidentally", () => {
+    // Found by writing the strictness test above with "3" and watching it come back clean. The
+    // rounding/truncation allowance for 3.7 puts BOTH "3" and "4" in the grounded set, so an
+    // incidental "the top 3 posts" is accepted while "the top 6 posts" is not. That is a real,
+    // slightly arbitrary edge of this design, recorded here rather than left for someone to
+    // rediscover as a phantom bug: the allowance is still worth having, because a model rendering a
+    // 3.7% rate as "4%" is reporting a given fact, not inventing one.
+    expect(findUngroundedNumbers("The top 3 posts drove most of it.", narrativeFacts)).toEqual([]);
+    expect(findUngroundedNumbers("The top 4 posts drove most of it.", narrativeFacts)).toEqual([]);
+  });
+});
+
+describe("parseReportNarrativeDraft — the guard is wired at the choke point", () => {
+  it("passes a clean AI narrative through as draftedVia:'ai' with no rejectedNumbers", () => {
+    const raw = JSON.stringify({ narrative: "Impressions reached 12480 this period." });
+    const out = parseReportNarrativeDraft(raw, narrativeFacts);
+    expect(out.draftedVia).toBe("ai");
+    expect(out.text).toContain("12480");
+    // ABSENT, not an empty array — see the controller's own comment on why [] would conflate
+    // "checked and clean" with "not checked".
+    expect(out.rejectedNumbers).toBeUndefined();
+  });
+
+  it("REJECTS a narrative with an invented number and falls back, naming what it rejected", () => {
+    const raw = JSON.stringify({ narrative: "Followers grew by 431 and reach doubled." });
+    const out = parseReportNarrativeDraft(raw, narrativeFacts);
+    expect(out.draftedVia).toBe("fallback");
+    expect(out.rejectedNumbers).toEqual(["431"]);
+    // The invented figure must not survive anywhere in the shipped text.
+    expect(out.text).not.toContain("431");
+    // And the fallback still states the real numbers rather than going silent.
+    expect(out.text).toContain("12480");
+  });
+
+  it("a gateway hiccup and a rejected draft are DISTINGUISHABLE, though both are 'fallback'", () => {
+    const hiccup = parseReportNarrativeDraft(null, narrativeFacts);
+    const rejected = parseReportNarrativeDraft(
+      JSON.stringify({ narrative: "Followers grew by 431." }), narrativeFacts);
+    expect(hiccup.draftedVia).toBe("fallback");
+    expect(rejected.draftedVia).toBe("fallback");
+    // The ONLY thing that separates them — which is why the controller records it.
+    expect(hiccup.rejectedNumbers).toBeUndefined();
+    expect(rejected.rejectedNumbers).toEqual(["431"]);
+  });
+
+  it("still never throws on malformed JSON", () => {
+    expect(() => parseReportNarrativeDraft("not json at all", narrativeFacts)).not.toThrow();
+    expect(parseReportNarrativeDraft("not json at all", narrativeFacts).draftedVia).toBe("fallback");
   });
 });

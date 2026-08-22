@@ -2420,7 +2420,16 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   "never notifies the client", which is now false — corrected in place, with the surviving ground
   being that a withdrawal notice creates no NEW outward exposure).
 - `metrics-job.ts` reads `process.env` directly instead of `config.ts` (it was held out of that file to avoid a three-way collision)
-- The report narrative has no runtime numeric guard — only the prompt constrains a hallucinated figure
+- ~~The report narrative has no runtime numeric guard — only the prompt constrains a hallucinated figure~~
+  — **CLOSED 2026-08-23** (module `0.5.20`). `findUngroundedNumbers` traces every digit-run in the
+  narrative back to a grounding fact; an untraceable number REJECTS the AI draft in favour of the
+  deterministic fallback. The old reasoning ("nothing can strip a hallucinated number out of prose")
+  was true but answered a different question — prose cannot be repaired, yet it can be declined.
+  Strict by choice: "the top 6 posts" is rejected though not wrong, because a false positive costs a
+  dull narrative and a false negative puts an invented figure in front of a client. `rejectedNumbers`
+  is recorded on the activity row so a rejection is distinguishable from a gateway hiccup (both are
+  `draftedVia:'fallback'`) and so the false-positive rate is observable rather than assumed. Wire
+  contract untouched.
 - The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series
 - OAuth state is HMAC-signed and time-boxed but not DB-backed single-use
 - Spike detection has no persistent dedup, so a sustained spike re-fires each tick
