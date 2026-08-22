@@ -31,7 +31,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { generate, serialize, REAL_ROLES } from "../../scripts/generate-role-bundles.mjs";
+import { generate, serialize, REAL_ROLES, PERMISSION_NATIVE_ROLES } from "../../scripts/generate-role-bundles.mjs";
 
 const BUNDLES_PATH = join(__dirname, "role-permission-bundles.json");
 const CATALOG_PATH = join(__dirname, "permission-catalog.json");
@@ -55,6 +55,15 @@ function loadCatalog(): CatalogEntry[] {
   return (JSON.parse(readFileSync(CATALOG_PATH, "utf8")).permissions as CatalogEntry[]);
 }
 
+/** Every role the artifact declares: derived ones plus the permission-native ones added after
+ *  derivation (IAM-14's `owner`). Both halves come from the generator, so this cannot drift from it.
+ *
+ *  ⚠ The DB read below MUST use this rather than REAL_ROLES. It filtered to REAL_ROLES before, which
+ *  silently excluded `owner` from the read while `_meta.counts.totalPairs` included it — a 264-row
+ *  gap that read as "the database is missing rows" when the rows were there and the QUERY was not
+ *  asking for them. Comparing two differently-scoped totals is the bug, not the data. */
+const ALL_BUNDLED_ROLES = [...REAL_ROLES, ...PERMISSION_NATIVE_ROLES];
+
 async function loadDbBundle(): Promise<Map<string, Set<string>>> {
   const { rows } = await adminPool().query<{ role_name: string; perm_key: string }>(
     `SELECT r.name AS role_name, p.key AS perm_key
@@ -62,10 +71,10 @@ async function loadDbBundle(): Promise<Map<string, Set<string>>> {
        JOIN roles r ON r.id = rp.role_id
        JOIN permissions p ON p.id = rp.permission_id
       WHERE r.company_id IS NULL AND r.name = ANY($1)`,
-    [REAL_ROLES as unknown as string[]],
+    [ALL_BUNDLED_ROLES as unknown as string[]],
   );
   const out = new Map<string, Set<string>>();
-  for (const r of REAL_ROLES) out.set(r, new Set());
+  for (const r of ALL_BUNDLED_ROLES) out.set(r, new Set());
   for (const row of rows) out.get(row.role_name)?.add(row.perm_key);
   return out;
 }
@@ -100,8 +109,12 @@ describe.skipIf(!TEST_URL)("IAM-05b-1 · role-permission-bundles.json artifact",
   // `role-bundle-completeness.db.test.ts` (every seeded `roles` row has a non-empty bundle, derived
   // live from the DB with an EMPTY exemption allowlist) — that guard cannot go stale by construction.
   it("sanity: the artifact declares exactly the built-in roles the generator covers", () => {
-    expect(Object.keys(checkedInDoc.roles).sort()).toEqual([...REAL_ROLES].sort());
-    expect(checkedInDoc._meta.counts.roles).toBe(REAL_ROLES.length);
+    // IAM-14: `owner` is PERMISSION-NATIVE — it has no Cerbos rules, so it cannot be derived from
+    // policy and is added after derivation. Both lists come from the generator so this test cannot
+    // drift from it; restating either here is how the two would disagree.
+    const expected = [...REAL_ROLES, ...PERMISSION_NATIVE_ROLES].sort();
+    expect(Object.keys(checkedInDoc.roles).sort()).toEqual(expected);
+    expect(checkedInDoc._meta.counts.roles).toBe(expected.length);
   });
 
   it("(a) REGEN-NO-DIFF: regenerating from the same source (Cerbos policies + catalog) reproduces the checked-in file byte-for-byte", () => {
@@ -152,7 +165,10 @@ describe.skipIf(!TEST_URL)("IAM-05b-1 · role-permission-bundles.json artifact",
   it("(b) DB PARITY: the artifact's per-role permission sets equal role_permissions (0094), for all 18 roles", async () => {
     const dbBundle = await loadDbBundle();
     const mismatches: string[] = [];
-    for (const role of REAL_ROLES) {
+    // Includes `owner`: its DB rows and its artifact entry must agree like any other bundle. It is
+    // exempt from the MIRROR-REACH invariant (no role arm to compare against) but NOT from this one,
+    // which compares the artifact to the database and applies unchanged.
+    for (const role of ALL_BUNDLED_ROLES) {
       const artifactSet = new Set(checkedInDoc.roles[role] ?? []);
       const dbSet = dbBundle.get(role) ?? new Set<string>();
       const missingFromArtifact = [...dbSet].filter((k) => !artifactSet.has(k)).sort();
@@ -171,7 +187,11 @@ describe.skipIf(!TEST_URL)("IAM-05b-1 · role-permission-bundles.json artifact",
   it("(b) DB PARITY: per-role and total pair counts match the artifact's own _meta.counts", async () => {
     const dbBundle = await loadDbBundle();
     let total = 0;
-    for (const role of REAL_ROLES) {
+    // ALL_BUNDLED_ROLES, not REAL_ROLES: `_meta.counts.totalPairs` counts every bundle the artifact
+    // declares, `owner` included. Summing only the derived roles compared 1174 against 1438 and read
+    // as "the database is missing 264 rows" — the rows were there (probed directly), the SUM was
+    // scoped differently from the number it was checked against.
+    for (const role of ALL_BUNDLED_ROLES) {
       const dbCount = dbBundle.get(role)?.size ?? 0;
       total += dbCount;
       expect(checkedInDoc._meta.counts.perRole[role], `role "${role}" count mismatch`).toBe(dbCount);

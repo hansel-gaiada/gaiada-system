@@ -87,6 +87,12 @@ const REAL_ROLES = [
   "monitoring_staff", "monitoring_manager",
 ];
 
+/** Roles with NO Cerbos rules, whose reach is their bundle alone (IAM-04c §3). `owner` is the first.
+ *  They cannot be DERIVED from policy — the parse finds no rule naming them — so they are added
+ *  after derivation and must be excluded from any check that compares a bundle against role-arm
+ *  reach (see iam-04-reg1-mirror-reach-invariant.test.ts's exemption and why it stays narrow). */
+export const PERMISSION_NATIVE_ROLES = ["owner"];
+
 const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",
   "resource_search_keyword", "resource_search_ledger", "resource_search_audit",
@@ -392,6 +398,48 @@ export function generate() {
     totalPairs += keys.length;
   }
 
+  // ── IAM-14 · `owner` (D-8) — DERIVED, not hand-listed ───────────────────────────────────────────
+  //
+  // `owner` has ZERO Cerbos rules by design (IAM-04c §3: "the first permission-native role — a
+  // platform-managed bundle over the grantable catalog, scoped per owned company, enforced
+  // exclusively through the IAM-04 permission-matching path"). So nothing above can derive it: the
+  // parse finds no rule naming it.
+  //
+  // Its envelope is defined as company_admin's, and that is a substantive claim, not a shortcut:
+  //
+  //  1. D-8 says "everything business + role authoring in owned companies; NO platform/system
+  //     controls". `company_admin` IS that set for ONE company — it already carries
+  //     core.role_grant.create/revoke/decide_override and the full core.position.* set, which is
+  //     D-5's role authoring.
+  //  2. The 19 keys `platform_admin` holds and `company_admin` does not are exactly what owner must
+  //     NOT reach, and they are not all "platform" in the obvious sense — checking them one by one
+  //     is why this is defined by INCLUSION rather than by excluding a guessed list:
+  //       · portal.{read,decide,sign,pay,approve_post,request_change,update_profile} — the
+  //         staff/client TRUST boundary (design §7). An owner reaching these is the portal leak
+  //         path; excluding them is the whole reason this is not a wildcard.
+  //       · social.platform_app.{read,admin} — platform OAuth app credentials, not a business asset.
+  //       · core.rollup.read, core.service_assignment.reconcile — cross-company operator surfaces.
+  //       · reports.appraisal.* / reports.checkin.submit — SELF-scoped: a person submits their own
+  //         appraisal/checkin. An owner gets these as an employee if they are one, never as owner.
+  //       · hr.case.cancel — deliberately left out; company_admin does not have it either, so
+  //         including it would make owner MORE than "everything company_admin can do", which is not
+  //         what D-8 says.
+  //  3. Deriving it from company_admin means it CANNOT DRIFT. A new policy rule that widens
+  //     company_admin widens owner in the same regeneration; one that narrows it narrows owner. A
+  //     hand-listed envelope for "the highest-risk role in the system" would be stale the first time
+  //     anyone touched a policy, and nothing would say so.
+  //
+  // What distinguishes `owner` from `company_admin` is therefore SCOPE, not reach: the same business
+  // envelope held across every company in a holding, rather than one. That is the D-8 sentence
+  // ("may hold one company, several, or the holding") expressed as grants, and it is why owner is on
+  // the elevated fence while company_admin is not.
+  // Exported (below) so the artifact's own tests do not have to restate this list and drift from it.
+  if (!roles.company_admin) {
+    throw new Error("generate-role-bundles: company_admin missing — cannot derive the owner envelope");
+  }
+  roles.owner = [...roles.company_admin];
+  totalPairs += roles.owner.length;
+
   const doc = {
     _meta: {
       title: "Gaiada role -> permission bundles (IAM-05b-1)",
@@ -425,9 +473,15 @@ export function generate() {
         "here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against " +
         "the live `role_permissions_reject_relationship` DB trigger (0093).",
       counts: {
-        roles: REAL_ROLES.length,
+        // `Object.keys(roles)`, not REAL_ROLES.length: `owner` is derived below rather than parsed
+        // from policy, so counting the input list would under-report the artifact by one and the
+        // file would misstate its own contents.
+        roles: Object.keys(roles).length,
         totalPairs,
-        perRole: Object.fromEntries(REAL_ROLES.map((r) => [r, roles[r].length])),
+        // Keyed off `roles`, not REAL_ROLES: a permission-native role added after derivation
+        // (`owner`) must appear in perRole too, or the artifact declares a bundle it does not
+        // count and every consumer comparing the two reads it as a missing 264 rows.
+        perRole: Object.fromEntries(Object.keys(roles).map((r) => [r, roles[r].length])),
         selfScopedPairs: Object.values(selfScoped).reduce((n, ks) => n + ks.length, 0),
       },
     },

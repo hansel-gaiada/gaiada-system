@@ -105,10 +105,34 @@ function keyFor(catalog: any[], kind: string, action: string): string | undefine
   return catalog.find((c) => c.cerbosKind === kind && c.cerbosAction === action)?.key;
 }
 
+/**
+ * ── IAM-14: `owner` IS EXEMPT, AND THE EXEMPTION IS NARROW BY CONSTRUCTION ───────────────────────
+ *
+ * This invariant compares a mirror's reach against the holder's ROLE-ARM reach, to catch a flat
+ * `perms` mirror granting more than a resource-attribute-conditioned rule would (the `hr_manager` /
+ * `module == "hr"` regression in this file's header).
+ *
+ * `owner` has NO role-arm rules AT ALL — it is the first permission-native role (IAM-04c §3: "no
+ * wildcard rule, no per-kind policy rules at all ... enforced exclusively through the IAM-04
+ * permission-matching path"). So the comparison has no left-hand side: every mirror would look like
+ * a widening, and the invariant would report 40+ failures that all say the same thing — "owner has
+ * no role-arm reach" — which is the design, not a regression.
+ *
+ * ⚠ WHY THIS DOES NOT BLIND THE CHECK, which is the only question that matters when a guard is
+ * loosened. Owner's bundle is not independent: `owner-role.db.test.ts` pins it EQUAL to
+ * `company_admin`'s, in both the database and the JSON artifact. `company_admin` is NOT exempt here
+ * and is checked against every mirror. So owner's reach is bounded by a set this same invariant
+ * verifies — the exemption removes a comparison that cannot be made, not one that was protecting
+ * anything. If someone widens owner beyond company_admin, owner-role.db.test.ts fails; if they widen
+ * company_admin, this file fails.
+ */
+const PERMISSION_NATIVE_ROLES: ReadonlySet<string> = new Set(["owner"]);
+
 function holdersOf(bundles: Record<string, string[]>, key: string): string[] {
   return Object.entries(bundles)
     .filter(([, keys]) => keys.includes(key))
-    .map(([role]) => role);
+    .map(([role]) => role)
+    .filter((role) => !PERMISSION_NATIVE_ROLES.has(role));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
