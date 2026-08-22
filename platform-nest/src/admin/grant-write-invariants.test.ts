@@ -209,13 +209,18 @@ describe.skipIf(!TEST_URL)("P2-04 — GrantWriteService invariants (design §6.3
       ).rejects.toThrow(/not_ui_grantable/);
     });
 
-    it("BOUNDARY (deliberate): the legacy origin is still a door to the elevated tier (§6.3.6)", async () => {
-      // Design §6.3.6, verbatim: "the only doors to the elevated tier remain the existing
-      // global-scope-guarded admin path and seeds". `global-only-role-scope.test.ts` pins the
-      // live endpoint's side of this. Closing it here is IAM-16's ticket, not this one's.
+    it("🔴 IAM-16 — the legacy origin is NO LONGER a door to the elevated tier", async () => {
+      // This assertion was `.resolves.toBeTruthy()` until 2026-08-23, with a comment reading "Closing
+      // it here is IAM-16's ticket, not this one's". This IS that ticket, so it is inverted rather
+      // than removed — §6.3.6's "the only doors ... remain the existing global-scope-guarded admin
+      // path and seeds" was scoped to "until IAM-16's two-person appointment flow exists".
+      //
+      // The door that replaces it is the `two_person_appointment` origin (D-9: one platform_admin +
+      // one owner). Seeds remain a door and are not affected: `testing/fixtures.ts`'s `grantRole` is a
+      // raw INSERT that never reaches this choke point.
       await expect(
         check({ roleId: platformAdminRole, scopeType: "global", scopeId: null, origin: "legacy_admin" }),
-      ).resolves.toBeTruthy();
+      ).rejects.toThrow(/elevated_role_forbidden/);
     });
   });
 

@@ -122,11 +122,21 @@ describe.skipIf(!TEST_URL)("IAM-SEC-02/04 — a role is grantable only at scopes
     expect(res.body).toContain("org_unit scope");
   });
 
-  // ── the other direction: the guard must not over-refuse ───────────────────────────────────
-  it("still permits an elevated role at GLOBAL scope", () =>
-    assign(platformAdminRole, "global", null).then((res) => {
-      expect([200, 201]).toContain(res.statusCode);
-    }));
+  // ── IAM-16 — THIS PIN WAS REVERSED (2026-08-23), AND THE REVERSAL IS THE TICKET ────────────
+  // It used to read "still permits an elevated role at GLOBAL scope", holding open the door design
+  // §6.3.6 described as remaining "until IAM-16's two-person appointment flow exists". That flow now
+  // exists (`iam:appointment` + the `two_person_appointment` origin), so the door is shut and the
+  // assertion is inverted rather than deleted — an inverted pin records that the behaviour changed
+  // on purpose, where a deleted one would just look like lost coverage.
+  //
+  // ⚠ The refusal is only safe because appointment is reachable another way. Closing this with no
+  // replacement path would have made appointing a second platform_admin impossible, which is the
+  // failure the Phase-3 readiness assessment refused to ship.
+  it("🔴 REFUSES an elevated role at GLOBAL scope — the legacy admin door is closed", async () => {
+    const res = await assign(platformAdminRole, "global", null);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain("elevated_role_forbidden");
+  });
 
   it("still permits a NON-elevated role at company scope", () =>
     assign(managerRole, "company", tenant).then((res) => {

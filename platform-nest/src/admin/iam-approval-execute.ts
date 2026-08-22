@@ -25,16 +25,25 @@ import { emitEvent } from "../events/outbox.service";
 import { insertGrantRow } from "./grant-write.service";
 import { reconcileUser } from "./position-reconciler";
 
-/** The two IAM request kinds, keyed by `automation_approvals.workflow_id`. */
+/** The IAM request kinds, keyed by `automation_approvals.workflow_id`. */
 export const IAM_OVERRIDE_WORKFLOW = "iam:override";
 export const IAM_POSITION_ASSIGN_WORKFLOW = "iam:position_assign";
+/** IAM-16 / D-9 — an ELEVATED appointment (platform_admin, group_executive, owner — NOT `client`,
+ *  which is an interface boundary rather than a tier; see grant-write.service.ts ELEVATED_TIER). The one
+ *  path through the elevated fence, and the reason `legacy_admin`'s door could finally be closed. */
+export const IAM_APPOINTMENT_WORKFLOW = "iam:appointment";
 
 export function isIamRequest(origin: string, workflowId: string | null): boolean {
-  return origin === "iam" && (workflowId === IAM_OVERRIDE_WORKFLOW || workflowId === IAM_POSITION_ASSIGN_WORKFLOW);
+  return (
+    origin === "iam" &&
+    (workflowId === IAM_OVERRIDE_WORKFLOW ||
+      workflowId === IAM_POSITION_ASSIGN_WORKFLOW ||
+      workflowId === IAM_APPOINTMENT_WORKFLOW)
+  );
 }
 
 export interface IamExecutionResult {
-  kind: "override" | "position_assign";
+  kind: "override" | "position_assign" | "appointment";
   /** Present for an override: the `user_roles` row that was written (null when already held). */
   grantId?: string | null;
   expiresAt?: string;
@@ -97,6 +106,53 @@ export async function executeApprovedIamRequest(
     );
     await bumpSession(targetUserId);
     return { kind: "override", grantId, expiresAt };
+  }
+
+  // ── iam:appointment — IAM-16 / D-9's two-person appointment to an ELEVATED role ───────────────
+  if (workflowId === IAM_APPOINTMENT_WORKFLOW) {
+    const targetUserId = typeof args.targetUserId === "string" ? args.targetUserId : "";
+    const roleId = typeof args.roleId === "string" ? args.roleId : "";
+    if (!targetUserId || !roleId) {
+      throw new BadRequestException("appointment payload is malformed: targetUserId and roleId are required");
+    }
+
+    // The REQUESTER is read from the approval row, never from the payload. A caller-supplied
+    // requester id would let one principal name a second one it does not control and satisfy D-9's
+    // pair by assertion — the whole rule reduces to "who actually filed this request", and only the
+    // row knows that.
+    const req = await withGlobal((c) =>
+      c.query<{ requested_by: string | null }>(`SELECT requested_by FROM automation_approvals WHERE id = $1`, [
+        approvalId,
+      ]),
+    );
+    if (!req.rows[0]) throw new BadRequestException("appointment approval row not found");
+    const requesterUserId = req.rows[0].requested_by;
+
+    const grantId = await withGlobal((c) =>
+      insertGrantRow(c, {
+        origin: "two_person_appointment",
+        targetUserId,
+        roleId,
+        // An elevated appointment is normally global (the platform tier has no company). The payload
+        // decides, and `assertRoleScopeAllowed` still refuses a shape the role cannot hold.
+        scopeType: typeof args.scopeType === "string" ? args.scopeType : "global",
+        scopeId: typeof args.scopeId === "string" ? args.scopeId : null,
+        actorUserId: decider.userId,
+        actorPerms: decider.perms,
+        requesterUserId,
+        tenantId,
+        originApprovalId: approvalId,
+        // Global grants MUST stay untargeted: 0092's partial unique index means a targeted clause
+        // naming the 4-column arbiter raises an unhandled 23505 on a re-grant instead of no-opping.
+        // This is the same trap `assign-role-global-scope-idempotent.test.ts` pins for assignRole.
+        onConflict: "untargeted",
+      }),
+    );
+    await bumpSession(targetUserId);
+    // NO expiry, deliberately, unlike an override. §6.5's time-box exists because an override is an
+    // exception; an appointment is a standing office, and a platform_admin grant that silently lapsed
+    // in 90 days would be an outage rather than a safeguard. Revocation is the way out.
+    return { kind: "appointment", grantId };
   }
 
   // ── iam:position_assign — the dept head's assignment, once approved (owner end-state, §11.2) ──

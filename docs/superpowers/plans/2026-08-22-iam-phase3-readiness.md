@@ -115,3 +115,67 @@ No code was changed for Phase 3. Building `owner` against a dependency its own d
 or closing an appointment door that would leave one person unable to appoint anyone, would both be
 worse than reporting. The 151-file `group_executive` sweep was not started because doing it before
 IAM-16 discards today's protection for no gain.
+
+---
+
+# ADDENDUM — 2026-08-23: three of the four conclusions above are now SUPERSEDED
+
+The assessment above is kept verbatim rather than rewritten, because it recorded *why* work was
+refused and that reasoning is what made the unblock order safe. What follows is what actually
+happened next.
+
+## IAM-14 `owner` — SHIPPED
+
+The blocker was read too strictly. The design's "hard-depends on perm-arm coverage of its envelope,
+which is still partial" is about an **exclusion-generated** bundle. `owner`'s bundle is not generated
+by exclusion in the end: it is pinned **equal to `company_admin`'s** by an `INSERT..SELECT`, so there
+is no silent-wrongness channel — a divergence is a failed test, not an invisible over-grant. The 19
+keys `platform_admin` holds and `company_admin` does not were checked individually (not by prefix,
+which would have missed four of them) and each exclusion justified in the migration header.
+
+Also corrected: the owner's own reading of **D-6**. "Collapse `platform_admin` / `superadmin`" removes
+a duplicate NAME, never the capability. `platform_admin` remains the highest role in the system;
+`owner` sits **beside** it, not above, on a different axis (platform/system vs business ownership). A
+test pins that the estate's owner does NOT hold `platform_admin`, because an owner who held both would
+collapse the distinction D-9 depends on.
+
+## IAM-16 two-person appointment — SHIPPED
+
+The blocker here was real and *arithmetic*: D-9's pair is "1 superadmin + 1 owner", and the estate had
+exactly one elevated principal, so the rule was unsatisfiable. Seeding `owner` (IAM-14) plus a real
+holder (Anthony Syrowatka) made it satisfiable, and only then was closing the legacy door safe.
+
+What shipped: a `two_person_appointment` grant origin and an `iam:appointment` approval workflow,
+reusing the existing override machinery exactly as this document predicted ("IAM-16 needs a new
+*origin* the fence permits — not new approval plumbing"). The `legacy_admin` door is closed against
+the elevated tier, and **both** pins that held it open are inverted rather than deleted:
+`global-only-role-scope.test.ts` and `grant-write-invariants.test.ts` (the second was not identified
+above — it carried its own copy of the boundary case, with a comment saying closing it was IAM-16's
+ticket).
+
+Two things worth recording because they were nearly got wrong:
+
+- **The pair must span both TIERS, not merely be two people.** A "two distinct approvers" rule
+  satisfied by two holders of the same role is a rule one compromised tier can satisfy alone *once it
+  has two holders* — and appointing more holders is what this flow does, so it would bootstrap its own
+  weakening.
+- **`client` is NOT part of the tier set, and conflating them breaks client onboarding.** The elevated
+  fence lists `client` for a different reason than the other three — it is an interface/trust boundary,
+  not a tier. The first cut of the door closed `legacy_admin` against the whole fence and broke three
+  tests that pin client onboarding through exactly that path. `ui` keeps the full fence; `legacy_admin`
+  is closed against tiers only.
+
+Also deliberate: an appointment carries **no expiry**, unlike an override. §6.5's time-box exists
+because an override is an exception; an appointment is a standing office, and a `platform_admin` grant
+that silently lapsed after 90 days would be an outage rather than a safeguard.
+
+## IAM-13 — confirmed a no-op, no ticket needed
+
+Unchanged from above: the estate has exactly one elevated platform role, and appointability was
+IAM-16's remit, which is now delivered.
+
+## IAM-15 `group_executive` removal — STILL LAST, unchanged
+
+The reasoning above stands and is now stronger: MON-00c's root-bounding protects the estate while the
+role exists, and the sweep (64 policy + 87 TS files) should happen once. It is the only Phase 3 item
+still open.

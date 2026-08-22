@@ -89,7 +89,7 @@ import { assertRoleUiGrantable } from "../rbac/ui-grantable";
 import type { PermissionGrant } from "../rbac/principal";
 import { assertRoleScopeAllowed } from "./admin-identity.controller";
 
-export type GrantOrigin = "legacy_admin" | "ui" | "trusted_internal";
+export type GrantOrigin = "legacy_admin" | "ui" | "trusted_internal" | "two_person_appointment";
 
 /** Roles no Phase-2 surface may ever mint, at any scope (design §6.3.6, the "elevated fence").
  *  `owner` is listed ahead of its Phase-3 existence on purpose — the fence must already be closed
@@ -97,16 +97,39 @@ export type GrantOrigin = "legacy_admin" | "ui" | "trusted_internal";
  *  than the other three: it is not a tier, it is the staff/client interface boundary, which is a
  *  trust boundary rather than a permission sum (design §7's own wording).
  *
- *  ⚠ This fence binds the `ui` origin ONLY. Design §6.3.6 is explicit that the existing
- *  global-scope-guarded admin path REMAINS a door to the elevated tier until IAM-16's two-person
- *  appointment flow exists ("the only doors ... remain the existing global-scope-guarded admin
- *  path and seeds"). `global-only-role-scope.test.ts` pins that door open, both directions. */
+ *  ⚠ SINCE IAM-16 THIS FENCE BINDS `legacy_admin` TOO — the door named below is now CLOSED.
+ *  It previously bound `ui` only, because §6.3.6 said the global-scope-guarded admin path "REMAINS a
+ *  door to the elevated tier until IAM-16's two-person appointment flow exists". That flow now
+ *  exists, so `assignRole` and `inviteUser` can no longer mint an elevated role at any scope, and
+ *  `global-only-role-scope.test.ts` pins the refusal where it used to pin the door open.
+ *
+ *  The remaining doors are the `two_person_appointment` origin (D-9: one superadmin + one owner,
+ *  see `assertTwoPersonAppointment`) and seeds. Seeds are NOT a loophole left open by accident: they
+ *  bypass this choke point entirely — `testing/fixtures.ts`'s `grantRole` is a raw
+ *  `INSERT INTO user_roles` — which is also what made closing this door safe to do at all, since no
+ *  seed depended on it. */
 const PHASE2_ELEVATED_FENCE: ReadonlySet<string> = new Set([
   "platform_admin",
   "group_executive",
   "owner",
   "client",
 ]);
+
+/** IAM-16 — the subset of the fence that is an actual TIER, and therefore the subset D-9's two-person
+ *  appointment governs.
+ *
+ *  ⚠ `client` IS DELIBERATELY ABSENT, AND CONFLATING THE TWO SETS BREAKS CLIENT ONBOARDING. The fence
+ *  above lists `client` for a different reason than the other three — its own comment says so: it is
+ *  "not a tier, it is the staff/client interface boundary". Nobody is ever APPOINTED to `client`; the
+ *  legacy admin path (`assignRole` / `inviteUser` at company scope) is precisely how a client contact
+ *  is onboarded, and three tests pin that as intended behaviour:
+ *  "still permits client at COMPANY scope — the scope it is actually for", the inviteUser twin, and
+ *  the allow-list boundary case.
+ *
+ *  So `ui` keeps the FULL fence (a UI surface must mint neither a tier nor a client), while
+ *  `legacy_admin` is closed against tiers only. D-9's "1 superadmin + 1 owner" is a rule about
+ *  elevating a person's authority, which onboarding a customer contact is not. */
+const ELEVATED_TIER: ReadonlySet<string> = new Set(["platform_admin", "group_executive", "owner"]);
 
 export interface GrantSpec {
   origin: GrantOrigin;
@@ -139,6 +162,10 @@ export interface GrantSpec {
   expiresAt?: string | null;
   /** P2-08 — provenance for an override grant executed by an approval (design §6.5). */
   originApprovalId?: string | null;
+  /** IAM-16 — the principal who REQUESTED an elevated appointment, distinct from `actorUserId` (who
+   *  decided it). Only read by the `two_person_appointment` origin, and required there: D-9's rule is
+   *  about a PAIR, so an appointment that cannot name both halves is unwitnessed by definition. */
+  requesterUserId?: string | null;
   /** Preserved per-writer, NOT unified — see `insertGrantRow`. */
   onConflict: "untargeted" | "unique_columns";
 }
@@ -166,13 +193,16 @@ function assertNotSelfTarget(actorUserId: string | null | undefined, targetUserI
   }
 }
 
-/** §6.3.6 — the elevated fence, `ui` origin only. */
-function assertNotElevated(roleName: string): void {
-  if (PHASE2_ELEVATED_FENCE.has(roleName)) {
+/** §6.3.6 — the elevated fence. `which: "tier"` narrows it to the three real tiers, excluding
+ *  `client`; see `ELEVATED_TIER` for why that distinction is load-bearing. */
+function assertNotElevated(roleName: string, which: "fence" | "tier" = "fence"): void {
+  const set = which === "tier" ? ELEVATED_TIER : PHASE2_ELEVATED_FENCE;
+  if (set.has(roleName)) {
     throw new BadRequestException(
-      `elevated_role_forbidden: role "${roleName}" may not be granted from any Phase-2 surface at ` +
-        `any scope (design §6.3.6). The elevated tier stays reachable only through the existing ` +
-        `global-scope-guarded admin path and seeds until IAM-16's two-person appointment flow lands.`,
+      `elevated_role_forbidden: role "${roleName}" may not be granted from this surface at any scope ` +
+        `(design §6.3.6). Since IAM-16 the elevated tier is reachable only through a two-person ` +
+        `appointment (D-9: one platform_admin and one owner, filed as an 'iam:appointment' approval) ` +
+        `or a seed.`,
     );
   }
 }
@@ -254,6 +284,75 @@ async function assertWithinCeiling(c: PoolClient, spec: GrantSpec, roleName: str
   }
 }
 
+/** IAM-16 / D-9 — an elevated appointment needs TWO people, and they must be two DIFFERENT KINDS
+ *  of person: "1 superadmin + 1 owner".
+ *
+ *  ⚠ WHY THE PAIR HAS TO SPAN BOTH AXES, RATHER THAN JUST BE TWO ELEVATED PEOPLE. A "two distinct
+ *  approvers" rule satisfied by any two holders of the same role is a rule one compromised role can
+ *  satisfy alone once it has two holders — and appointing more holders is exactly what this flow
+ *  does, so it would bootstrap its own weakening. `platform_admin` and `owner` are deliberately
+ *  different axes (platform/system vs business ownership; IAM-14 keeps them disjoint and a seed test
+ *  pins that Anthony does NOT hold platform_admin). Requiring one of each means an appointment needs
+ *  agreement across that divide, which no single compromised tier can manufacture.
+ *
+ *  ⚠ THIS IS WHY THE TICKET WAS BLOCKED, AND THE BLOCK WAS ARITHMETIC. Until IAM-14 seeded `owner`,
+ *  the live estate had exactly ONE elevated principal, so this rule was unsatisfiable and closing the
+ *  legacy door would have made appointing a second `platform_admin` impossible — bricking the very
+ *  flow the rule protects. Two principal classes now exist, which is what makes the refusal below
+ *  safe rather than a lockout.
+ *
+ *  Requester ≠ decider is ALSO enforced structurally by the Cerbos DENY on `decide_override`, which
+ *  stays the authority. This is the clean-400 mirror, and it re-checks rather than assumes: this
+ *  function is reachable from any caller that constructs the origin, not only the approval path. */
+async function assertTwoPersonAppointment(c: PoolClient, spec: GrantSpec, roleName: string): Promise<void> {
+  const requester = spec.requesterUserId ?? null;
+  const decider = spec.actorUserId ?? null;
+
+  if (!requester || !decider) {
+    throw new BadRequestException(
+      `appointment_unwitnessed: granting "${roleName}" requires a two-person appointment (D-9) and ` +
+        `this write names ${!requester ? "no requester" : "no decider"} — an appointment that cannot ` +
+        `identify both halves of the pair has not been witnessed`,
+    );
+  }
+  if (requester === decider) {
+    throw new BadRequestException(
+      `appointment_not_two_person: the requester and the decider are the same principal, so "${roleName}" ` +
+        `would be appointed by one person (D-9 requires two)`,
+    );
+  }
+  // Neither seat may be the beneficiary. `assertNotSelfTarget` already refuses the DECIDER targeting
+  // themselves; the requester is a second path to the same self-escalation and is not covered by it.
+  if (requester === spec.targetUserId || decider === spec.targetUserId) {
+    throw new BadRequestException(
+      `appointment_self_escalation: the target of an elevated appointment may not also request or ` +
+        `decide it (D-9's no-self-escalation rule)`,
+    );
+  }
+
+  const { rows } = await c.query<{ user_id: string; name: string }>(
+    `SELECT ur.user_id, r.name
+       FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = ANY($1::uuid[]) AND r.name IN ('platform_admin', 'owner')`,
+    [[requester, decider]],
+  );
+  const rolesOf = (u: string) => new Set(rows.filter((r) => r.user_id === u).map((r) => r.name));
+  const req = rolesOf(requester);
+  const dec = rolesOf(decider);
+  // Either direction: the owner may request and the superadmin decide, or the reverse. D-9 names the
+  // composition of the pair, not which seat each holds.
+  const spans =
+    (req.has("platform_admin") && dec.has("owner")) || (req.has("owner") && dec.has("platform_admin"));
+
+  if (!spans) {
+    throw new BadRequestException(
+      `appointment_pair_incomplete: appointing "${roleName}" requires one platform_admin and one owner ` +
+        `(D-9). The requester holds [${[...req].join(", ") || "neither"}] and the decider holds ` +
+        `[${[...dec].join(", ") || "neither"}], which does not span both tiers`,
+    );
+  }
+}
+
 /**
  * THE guard. Runs the invariant set for `spec.origin` and writes NOTHING — so a caller may (and
  * `inviteUser` does) run it BEFORE any other write, keeping this program's standing "a refusal
@@ -276,6 +375,29 @@ export async function assertGrantAllowed(c: PoolClient, spec: GrantSpec): Promis
     // (3) allow-list, (4) elevated fence, (5) ceiling — Phase-2 surfaces only (design §6.3).
     await assertRoleUiGrantable(c, spec.roleId, roleName);
     assertNotElevated(roleName);
+    await assertWithinCeiling(c, spec, roleName);
+  }
+
+  // IAM-16 — the door closes. `legacy_admin` (assignRole / inviteUser, the company_admin admin
+  // console) may no longer mint an elevated role at any scope, now that the two-person path exists to
+  // replace it. Deliberately ONLY the fence and not the rest of the `ui` set: the allow-list and the
+  // ceiling are Phase-2 surface rules, and applying them here would be a behavioural change to the
+  // legacy console well outside this ticket, which is the kind of quiet widening this choke point's
+  // own comments warn against.
+  if (spec.origin === "legacy_admin") {
+    // TIER only — not the full fence. Closing this against `client` too would break client
+    // onboarding, which is the one thing this path legitimately mints outside staff roles.
+    assertNotElevated(roleName, "tier");
+  }
+
+  if (spec.origin === "two_person_appointment") {
+    // The fence is deliberately NOT run — being the one path THROUGH it is this origin's entire
+    // purpose. Everything else still applies, and the ceiling in particular: the decider must hold
+    // what they are granting, so an `owner` cannot decide a `platform_admin` appointment (owner does
+    // not carry platform_admin's 19 keys). In practice that makes the superadmin the decider and the
+    // owner the requester for platform-tier appointments — which is not a limitation to route around,
+    // it is what "nobody grants what they do not hold" means when the grant is the platform tier.
+    await assertTwoPersonAppointment(c, spec, roleName);
     await assertWithinCeiling(c, spec, roleName);
   }
   return roleName;
