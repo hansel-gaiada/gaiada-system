@@ -195,6 +195,10 @@ export interface DirectDriverOptions {
   quotaStore?: YouTubeQuotaStore;
 }
 
+/** YouTube's documented video-id shape: exactly 11 characters of [A-Za-z0-9_-]. `listComments` uses
+ *  it to tell a YouTube post id from an id it cannot route at all — see that method's own note. */
+const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+
 export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublisher {
   const li: LinkedInFetchOptions = { fetchImpl: opts.fetchImpl };
   const yt: YouTubeFetchOptions = { fetchImpl: opts.fetchImpl };
@@ -394,6 +398,27 @@ export function createDirectDriver(opts: DirectDriverOptions = {}): SocialPublis
     async listComments(org: OrgHandle, integrationId: string, since: Date): Promise<InboxItem[]> {
       if (integrationId.startsWith("urn:li:")) {
         return getPostComments(org.secret(), integrationId, since, li);
+      }
+      // FAIL CLOSED on an id this method cannot route. The `urn:li:` tell above is sound — LinkedIn's
+      // wire format mandates it — but the fallback was "anything that is not LinkedIn is YouTube",
+      // which is a weaker and different claim. The moment 0105 admits a third inbound network, that
+      // network's post ids would be handed to the YouTube API, producing an empty pull or a confusing
+      // upstream error rather than saying it could not tell them apart. The empty pull is the worst of
+      // the three: it is indistinguishable from "this post genuinely has no comments yet".
+      //
+      // A YouTube video id has exactly one documented shape: 11 characters of [A-Za-z0-9_-]. This
+      // `integrationId` is OUR OWN stored remote id for a post we published, so a value matching
+      // neither shape means a new network or corrupt data — never something to guess at. Widening the
+      // port with a real `network` parameter remains the clean long-term fix (see this method's
+      // header); refusing here is what makes deferring it safe rather than merely cheap.
+      if (!YOUTUBE_VIDEO_ID.test(integrationId)) {
+        throw new SocialPublisherError(
+          "capability_unsupported",
+          "listComments cannot route this post id to a network: it is neither a LinkedIn URN "
+            + "(urn:li:...) nor a YouTube video id (11 chars of A-Za-z0-9_-). This method infers the "
+            + "network from the id's own format because the port carries no `network` parameter here; "
+            + "a third inbound network needs that parameter added rather than a wider guess.",
+        );
       }
       const items = await listVideoCommentThreads(org.secret(), integrationId, since, yt);
       // commentThreads.list costs 1 unit against the 10,000/day pool (dossier §6.4) — recorded only

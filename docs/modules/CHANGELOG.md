@@ -11,6 +11,35 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.24` — 2026-08-23 — `listComments` refuses a post id it cannot route
+
+**Fixed**
+- `direct.ts#listComments` infers the network from the post id's own format, because the publisher
+  port carries no `network` parameter there. The `urn:li:` test is sound — LinkedIn's wire format
+  mandates that prefix — but the fallback was *"anything that is not LinkedIn is YouTube"*, which is a
+  weaker and different claim. The moment `0105` admits a third inbound network, that network's post
+  ids would have been handed to the YouTube API. The likeliest result, an **empty list**, is
+  indistinguishable from *"this post genuinely has no comments yet"* — the worst of the three possible
+  outcomes, and precisely the absent-vs-zero conflation this module refuses everywhere else.
+- Now fails closed: an id matching neither a LinkedIn URN nor YouTube's documented video-id shape
+  (exactly 11 characters of `[A-Za-z0-9_-]`) is refused with `capability_unsupported`, and the message
+  names *widening the port with a real `network` parameter* as the real fix, so whoever hits it is
+  pointed at the right change rather than at loosening the check. `integrationId` is our OWN stored
+  remote id for a post we published, so a value matching neither shape means a new network or corrupt
+  data — never something to guess at.
+
+**Test fixture corrected** — `direct.test.ts` used `"yt-video-1"` as a YouTube video id (3
+occurrences). No real YouTube id looks like that; they are exactly 11 characters. A fixture that could
+not exist is part of why the fallback read as safe, so it is now `"dQw4w9WgXcQ"`.
+
+**Not changed** — the port's signature. Widening it is the architect's call and remains the clean
+long-term answer (`direct.ts#listComments`'s own header says so); refusing is what makes deferring
+that safe rather than merely cheap.
+
+**Tests** — `direct.test.ts` 46/0/0 (+3: an Instagram-shaped numeric id, a foreign URN, and one
+asserting the refusal message actually names the missing `network` parameter). `inbox-sync-job.test.ts`
+8/0/0 unchanged.
+
 ### reports `0.3.2` — 2026-08-23 — a foreign producer's series and tables are no longer dropped
 
 **Fixed**

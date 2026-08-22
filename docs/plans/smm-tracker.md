@@ -2555,7 +2555,15 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   baseline) rather than a fresh constant, per this module's convention that these thresholds must
   never read as measured. `spikes` and `suppressed` are counted SEPARATELY — collapsing them would
   make a sustained spike look like it had stopped. Proven red-then-green.
-- `listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide
+- ~~`listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide~~
+  — **CLOSED 2026-08-23** (module `0.5.24`), though not where the note pointed. The `urn:li:` test was
+  never the weak part — LinkedIn's wire format mandates that prefix. The weak part was the FALLBACK:
+  "anything that is not LinkedIn is YouTube". A third network's ids would have gone to the YouTube API
+  and most likely returned an EMPTY LIST, which is indistinguishable from "no comments yet". Now fails
+  closed with `capability_unsupported` unless the id matches YouTube's documented 11-char shape, and
+  the message names widening the port as the real fix. The port signature is deliberately unchanged —
+  that stays the architect's call. Also corrected a fixture (`"yt-video-1"`, 3 uses) that no real
+  YouTube id could look like; a fixture that cannot exist is part of why the fallback read as safe.
 - No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)
 
 **Not ours to finish:** the platform-app reviews (D-23 — Meta's Business Verification is the only serial

@@ -454,7 +454,7 @@ describe("SMM-38d · listComments — YouTube's commentThreads.list, told apart 
      "filters by `since`, and records ONE unit against otherUnitsToday", async () => {
     const since = new Date("2026-08-01T00:00:00Z");
     const fetchImpl = vi.fn(async (url: string | URL) => {
-      expect(String(url)).toContain("/commentThreads?part=snippet&videoId=yt-video-1");
+      expect(String(url)).toContain("/commentThreads?part=snippet&videoId=dQw4w9WgXcQ");
       return new Response(
         JSON.stringify({
           items: [
@@ -486,11 +486,11 @@ describe("SMM-38d · listComments — YouTube's commentThreads.list, told apart 
       );
     }) as unknown as typeof fetch;
     const d = createDirectDriver({ fetchImpl });
-    const items = await d.listComments!(YOUTUBE_ORG, "yt-video-1", since);
+    const items = await d.listComments!(YOUTUBE_ORG, "dQw4w9WgXcQ", since);
     expect(items).toEqual([
       {
         externalId: "yt-comment-1",
-        externalThreadId: "yt-video-1",
+        externalThreadId: "dQw4w9WgXcQ",
         kind: "comment",
         authorHandle: "UC-viewer-1",
         authorName: "A Viewer",
@@ -532,3 +532,32 @@ runPublisherContractSuite("direct (youtube)", {
   build: () => createDirectDriver({ fetchImpl: unreachableFetch }),
   integration: { id: "yt-video-contract", network: "youtube", handle: "@contract" },
 });
+
+describe("SMM-38c · listComments routes by id shape, and REFUSES what it cannot route", () => {
+  it("an id that is neither a LinkedIn URN nor a YouTube video id is refused, not sent to YouTube", async () => {
+    // The old fallback was "anything that is not LinkedIn is YouTube". A third inbound network's post
+    // id would have been handed to the YouTube API — and the likeliest result, an empty list, is
+    // indistinguishable from "this post genuinely has no comments yet". Refusing names the ambiguity.
+    const d = createDirectDriver();
+    await expect(
+      d.listComments!(LINKEDIN_ORG, "1784512399201", new Date()),   // an Instagram-shaped numeric id
+    ).rejects.toMatchObject({ code: "capability_unsupported" });
+  });
+
+  it("refuses a URN from some OTHER network rather than treating it as YouTube", async () => {
+    const d = createDirectDriver();
+    await expect(
+      d.listComments!(LINKEDIN_ORG, "urn:tiktok:video:123", new Date()),
+    ).rejects.toMatchObject({ code: "capability_unsupported" });
+  });
+
+  it("the refusal names the port's missing `network` parameter as the real fix", async () => {
+    // So whoever hits this is pointed at widening the port, not at loosening the check.
+    const d = createDirectDriver();
+    await d.listComments!(LINKEDIN_ORG, "nope", new Date()).then(
+      () => { throw new Error("expected a refusal"); },
+      (e: Error) => { expect(e.message).toContain("network"); },
+    );
+  });
+});
+
