@@ -27,7 +27,7 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:personas`, `seed:portal-clients`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:personas`, `seed:portal-clients`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
@@ -94,28 +94,21 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | Service | Image / build | Profiles | Ports | depends_on |
 |---|---|---|---|---|
 | `ai-gateway` | — | — | — | — |
-| `alertmanager` | prom/alertmanager:v0.28.0 | — | `127.0.0.1:9093:9093` | alertmanager-render |
-| `alertmanager-render` | alpine:3.21 | — | — | — |
 | `blackbox-exporter` | prom/blackbox-exporter:v0.25.0 | — | — | — |
 | `bot` | — | — | — | — |
 | `bot-media-worker` | — | — | — | — |
 | `cadvisor` | gcr.io/cadvisor/cadvisor:v0.49.1 | — | — | — |
-| `grafana` | grafana/grafana:11.4.0 | — | `127.0.0.1:3001:3000` | prometheus, tempo, loki |
 | `knowledge` | — | — | — | — |
-| `loki` | grafana/loki:3.3.2 | — | — | — |
 | `mcp-hub` | — | — | — | — |
 | `node-exporter` | prom/node-exporter:v1.8.2 | — | — | — |
-| `ntfy` | binwiederhier/ntfy:v2.11.0 | — | — | — |
-| `otel-collector` | otel/opentelemetry-collector-contrib:0.116.1 | — | — | tempo, loki |
+| `otel-collector` | otel/opentelemetry-collector-contrib:0.116.1 | — | — | — |
 | `platform` | — | — | — | — |
-| `postgres-exporter` | quay.io/prometheuscommunity/postgres-exporter:v0.16.0 | — | — | prometheus |
+| `postgres-exporter` | quay.io/prometheuscommunity/postgres-exporter:v0.16.0 | — | — | — |
 | `postgres-exporter-bot` | quay.io/prometheuscommunity/postgres-exporter:v0.16.0 | — | — | — |
-| `prometheus` | prom/prometheus:v3.1.0 | — | `127.0.0.1:9090:9090` | — |
 | `redis-exporter` | oliver006/redis_exporter:v1.67.0 | — | — | — |
 | `redis-exporter-bot` | oliver006/redis_exporter:v1.67.0 | — | — | — |
 | `sync-central` | — | — | — | — |
 | `synthetic-prober` | ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-synthetic-prober:${GAIADA_TAG:-latest} | — | — | otel-collector |
-| `tempo` | grafana/tempo:2.7.0 | — | — | — |
 
 ### `infra/compose/docker-compose.build.yml`
 
@@ -165,11 +158,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202608210411_social_youtube_quota_usage.sql`
+- Head: `202608221409_iam14_owner_role.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 127 (121 legacy `NNNN_`, 6 timestamped)
+- Applied files on disk: 132 (121 legacy `NNNN_`, 11 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -468,7 +461,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `restore-drill.md`
+Runbooks (`infra/runbooks/`): `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `test-all.sh`, `wire-env.sh`
 
