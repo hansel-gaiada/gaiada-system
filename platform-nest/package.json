@@ -15,6 +15,7 @@
     "seed:claude-seats": "node dist/seed/claude-seats.js",
     "seed:search": "node dist/seed/search.js",
     "seed:portal-clients": "node dist/seed/portal-clients.js",
+    "import:nexus": "node dist/seed/nexus-import.js",
     "test": "vitest run",
     "test:mail-corpus": "vitest run src/mail",
     "test:iam-chain-alignment": "vitest run src/rbac/cerbos-catalog-alignment.test.ts src/rbac/permission-groups-catalog-parity.test.ts src/rbac/iam-07b-chain-meta.test.ts",

@@ -21,7 +21,12 @@ import { createHash } from "node:crypto";
 export const AUDIT_KINDS = ["technical", "cwv", "content", "links", "geo"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
-export const AUDIT_SOURCES = ["seonaut", "crawler", "unlighthouse", "ai"] as const;
+// 'nexus-import' (SM-70, migrations/202608201518_search_audits_nexus_import_source.sql): historical
+// analyst-authored Markdown harvested from the decommissioned Gaia Nexus portfolio tool. Deliberately
+// NOT added to search.controller.ts's `INGESTABLE_SOURCES` — it has no report-shape adapter (its
+// input is prose Markdown, not a CrawlerReport) and is written only by src/seed/nexus-import.ts's
+// direct-DB import, never through the HTTP ingest endpoint.
+export const AUDIT_SOURCES = ["seonaut", "crawler", "unlighthouse", "ai", "nexus-import"] as const;
 export type AuditSource = (typeof AUDIT_SOURCES)[number];
 
 export const FINDING_SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
