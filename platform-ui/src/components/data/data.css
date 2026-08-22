@@ -1,3 +1,21 @@
+/* Unified FilterBar (Phase 4, NEW — §6). Same visual grammar as the pre-existing
+   `.filter-chips`/`.filter-chip` idiom (dashboard.css) — a new, shared class name because this
+   is the target primitive for new call sites, not a rename of the old ones (those stay as-is). */
+.fb { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fb__chip { display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-pill); padding: 7px 14px; text-decoration: none; color: var(--text-primary); background: var(--surface-card); }
+.fb__chip:hover { background: var(--tint-hover); }
+.fb__chip--active { border-color: var(--erp-accent); color: var(--erp-accent); }
+.fb__label { font: 400 12px var(--font-body); }
+.fb__count { font: 700 12px var(--font-body); }
+.fb__search { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.fb__search-input { border: none; border-bottom: 0.5px solid var(--line-control); background: transparent; outline: none; padding: 7px 2px; min-width: 180px; font: 400 14px var(--font-body); color: var(--text-primary); }
+.fb__search-input:focus-visible { border-bottom-color: var(--erp-accent); }
+
+/* Bulk-action bar (Phase 4, NEW — §6). Floats above the table only while >=1 row is selected. */
+.bab { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 10px; background: var(--tint-active); border: 0.5px solid var(--erp-accent); border-radius: var(--radius-md); }
+.bab__count { font: 700 12px var(--font-body); color: var(--text-primary); }
+.bab__actions { display: flex; align-items: center; gap: 8px; }
+
 /* Data table — search/sort/paginate/export. Hairline design language. */
 .dt { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
 .dt__bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
@@ -7,19 +25,41 @@
 .dt__count { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
 
 .dt__scroll { overflow-x: auto; }
+.dt__sentinel { height: 1px; }
 .dt__table { width: 100%; border-collapse: collapse; font: 400 13.5px var(--font-body); }
-.dt__table thead th { text-align: left; padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card); position: sticky; top: 0; }
+.dt__table thead th { text-align: left; padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card); position: sticky; top: 0; transition: box-shadow 0.15s var(--erp-ease); }
+/* Sticky-header scroll shadow (design-language §10): flat at rest, one shadow tier once content
+   has scrolled beneath it — never a shadow before that. */
+.dt__table--scrolled thead th { box-shadow: var(--elev-1); }
 .dt__sort { border: none; background: transparent; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); display: inline-flex; align-items: center; gap: 6px; padding: 0; }
 .dt__sort:hover { color: var(--text-primary); }
 .dt__arrow { font-size: 8px; color: var(--erp-accent); width: 8px; }
 .dt__table thead th:not(:has(.dt__sort)) { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
-.dt__table tbody td { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); color: var(--erp-ink-70, var(--ink-muted)); vertical-align: middle; }
+/* Row height sourced from the density token — already density-aware via [data-density] in
+   shell.css, so a table just has to consume it, no separate density prop needed here. */
+.dt__table tbody tr { height: var(--row-height); }
+.dt__table tbody td { padding: 6px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); color: var(--erp-ink-70, var(--ink-muted)); vertical-align: middle; }
 .dt__table tbody tr:last-child td { border-bottom: none; }
 .dt__table tbody tr:hover td { background: var(--tint-hover); }
+.dt__row--selected td { background: var(--tint-active); }
 .dt--right { text-align: right; }
+/* Numeric cells: right-aligned + tabular figures so digits don't jitter column to column. */
+.dt--num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .dt__link { color: var(--text-primary); text-decoration: none; }
 .dt__link:hover { color: var(--erp-accent); }
 .dt__empty { text-align: center; padding: 28px 14px !important; color: var(--erp-ink-50); font-style: italic; }
+.dt__error { margin: 0; padding: 28px 14px; text-align: center; color: var(--status-critical-fg); font: 400 13px var(--font-body); }
+.dt__checkcell { width: 36px; padding-inline: 12px !important; }
 
-.dt__pager { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 10px 12px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.dt__pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-top: 0.5px solid var(--erp-hairline-soft); }
+.dt__pager-controls { display: flex; align-items: center; gap: 12px; }
 .dt__pageinfo { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
+
+/* Loading skeleton — reserves the table's exact shape (§7.1: skeleton, not a spinner, for
+   anything rendering inside an already-mounted shell whose layout is known in advance). */
+.dt__skeleton-row td { padding: 10px 14px; }
+.dt__skeleton { display: block; height: 12px; border-radius: var(--radius-4); background: var(--wash-strong); animation: dt-shimmer 1.2s ease-in-out infinite; }
+@keyframes dt-shimmer { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .dt__skeleton { animation: none; }
+}

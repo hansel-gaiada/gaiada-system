@@ -1,0 +1,43 @@
+/* Shared tab-strip primitive (Phase 4 unify target — §6). Visually matches the existing
+   `.sec-tabs`/`.sec-tab` shell convention (hairline underline, active = accent underline) without
+   depending on shell.css, which is frozen through Phase 2/3. */
+.ui-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 0.5px solid var(--line);
+  overflow-x: auto;
+}
+.ui-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  font: 700 12px var(--font-body);
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.ui-tab:hover { color: var(--text-primary); }
+.ui-tab--active { color: var(--text-primary); border-bottom-color: var(--accent); }
+
+.ui-subtabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  overflow-x: auto;
+}
+.ui-subtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font: 400 12.5px var(--font-body);
+  color: var(--ink-muted);
+  text-decoration: none;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+.ui-subtab:hover { background: var(--tint-hover); color: var(--text-primary); }
+.ui-subtab--active { background: var(--tint-active); color: var(--text-primary); font-weight: 700; }

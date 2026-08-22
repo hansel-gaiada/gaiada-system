@@ -85,9 +85,19 @@
 .lux-stat__label { font: 700 9px var(--font-body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-subtle); }
 .lux-stat__value { font: 700 22px/1.1 var(--font-body); color: var(--text-primary); font-variant-numeric: lining-nums tabular-nums; }
 
-.lux-toast { box-shadow: var(--elev-overlay); position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: var(--surface-inverse); color: var(--text-on-inverse); padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); display: flex; align-items: center; gap: 12px; }
+.lux-toast { box-shadow: var(--elev-overlay); position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: var(--surface-inverse); color: var(--text-on-inverse); padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); display: flex; align-items: center; gap: 12px; border-radius: var(--radius-md); }
 .lux-toast__undo { background: none; border: none; padding: 0; color: var(--accent-on-inverse); font: 700 12px var(--font-body); letter-spacing: 0.04em; text-decoration: underline; cursor: pointer; }
 .lux-toast__undo:hover { color: var(--text-on-inverse); }
+
+/* Toast QUEUE (Phase 4) — a fixed stack region; each `.lux-toast` inside it drops the standalone
+   fixed positioning (the stack itself is the fixed element) via the higher-specificity override
+   below. See ToastQueue.tsx for the provider/hook. */
+.lux-toast-stack { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: stretch; max-width: min(420px, calc(100vw - 32px)); }
+.lux-toast-stack .lux-toast { position: static; transform: none; }
+.lux-toast--error { border-left: 3px solid var(--status-critical); }
+.lux-toast__msg { flex: 1; }
+.lux-toast__dismiss { background: none; border: none; padding: 0; color: var(--ink-on-inverse-muted); font: 400 13px var(--font-body); cursor: pointer; line-height: 1; }
+.lux-toast__dismiss:hover { color: var(--text-on-inverse); }
 
 /* Reusable filter bar (audit, search, any GET-form filter row). */
 .lux-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }

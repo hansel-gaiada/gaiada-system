@@ -1,0 +1,178 @@
+/* Overlay primitives — Drawer, Modal, Menu/Popover (Phase 4, NEW per the component inventory,
+   §6). Token-only radius/shadow/colour, per the guard test. Scrim + panel share one z-index
+   stack (300/301) so a Modal and a Drawer never fight for stacking order if a future caller
+   nests one inside the other's action (not expected, but cheap to make safe). */
+
+.ov-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: default;
+  z-index: 300;
+  animation: ov-fade var(--dur-quick, 180ms) var(--erp-ease, ease);
+}
+
+.ov-modal-layer,
+.ov-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+}
+.ov-modal-layer {
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ov-drawer-layer {
+  justify-content: flex-end;
+}
+
+.ov-modal {
+  position: relative;
+  z-index: 301;
+  background: var(--surface-modal);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-4);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  animation: ov-rise var(--dur-base, 280ms) var(--erp-ease, ease);
+}
+.ov-modal--sm { width: min(420px, 100%); }
+.ov-modal--md { width: min(560px, 100%); }
+.ov-modal--lg { width: min(800px, 100%); }
+
+.ov-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: var(--card-padding);
+  border-bottom: 0.5px solid var(--line);
+}
+.ov-modal__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--h3-size);
+  line-height: var(--h3-line);
+  color: var(--text-primary);
+}
+.ov-modal__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-muted);
+  font: 400 14px var(--font-body);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.ov-modal__close:hover { color: var(--text-primary); background: var(--tint-hover); }
+.ov-modal__body { padding: var(--card-padding); }
+.ov-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: var(--card-padding);
+  border-top: 0.5px solid var(--line);
+}
+
+.ov-drawer {
+  position: relative;
+  z-index: 301;
+  height: 100%;
+  width: min(420px, 92vw);
+  background: var(--surface-overlay);
+  box-shadow: var(--elev-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  animation: ov-slide-in var(--dur-base, 280ms) var(--erp-ease, ease);
+}
+.ov-drawer--left { order: -1; animation-name: ov-slide-in-left; }
+
+.ov-drawer__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: var(--card-padding);
+  border-bottom: 0.5px solid var(--line);
+}
+.ov-drawer__title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: var(--h3-size);
+  line-height: var(--h3-line);
+  color: var(--text-primary);
+}
+.ov-drawer__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-muted);
+  font: 400 14px var(--font-body);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+.ov-drawer__close:hover { color: var(--text-primary); background: var(--tint-hover); }
+.ov-drawer__body { padding: var(--card-padding); flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-scrim, .ov-modal, .ov-drawer { animation: none; }
+}
+
+@keyframes ov-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ov-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes ov-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes ov-slide-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+
+/* Menu / popover — trigger + positioned panel, unifying UserMenu/NewMenu/RailCategory's three
+   independent outside-click + Escape + role="menu" implementations (§6, "Menu unify, NEW"). */
+.ov-menu { position: relative; display: inline-block; }
+.ov-menu__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  min-width: 190px;
+  z-index: 250;
+  background: var(--surface-raised);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-overlay);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: ov-rise var(--dur-quick, 180ms) var(--erp-ease, ease);
+}
+.ov-menu__panel--start { left: 0; }
+.ov-menu__panel--end { right: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .ov-menu__panel { animation: none; }
+}
+
+.ov-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font: 400 13px var(--font-body);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.ov-menu__item:hover, .ov-menu__item:focus-visible { background: var(--tint-hover); }
+.ov-menu__item--danger { color: var(--status-critical-fg); }
+.ov-menu__item[aria-checked="true"]::before { content: "✓ "; }
+.ov-menu__item[aria-checked="false"]::before { content: "  "; }
