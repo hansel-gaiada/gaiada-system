@@ -2712,8 +2712,43 @@ load-bearing for a test it never mentions.
   `PW=$(docker exec gaiada-test-pg-2 sh -c 'printf %s "$POSTGRES_PASSWORD"')` then
   `DATABASE_URL_TEST="postgresql://postgres:${PW}@localhost:55435/postgres"`. **Always report the skip
   count** — this is the second time in this module's history that "all green" meant "nothing ran".
-- **The full backend suite exceeds a 10-minute foreground call** (~28–42 min depending on contention).
+- **The full backend suite exceeds a 10-minute foreground call** (~28–56 min depending on contention).
   Run it backgrounded and write to a log; a foreground attempt is killed at the cap with no summary.
+- **The COMPLETE env needed for an honest backend run** — all four, or you get a wall of misleading
+  failures. Missing Postgres SKIPS silently; missing Cerbos fails every authz check; missing Redis
+  fails the PDF-export/print-token suites (`reports/tr29-reconciliation.db.test.ts` has a deliberate
+  PREFLIGHT for exactly this, whose own message says it exists "so nobody 'fixes' working code chasing
+  that wall again" — heed it rather than debugging past it):
+  ```
+  PW=$(docker exec gaiada-test-pg-2 sh -c 'printf %s "$POSTGRES_PASSWORD"')
+  DATABASE_URL_TEST="postgresql://postgres:${PW}@localhost:55435/postgres"   # NOT .env's 55433
+  CERBOS_URL="http://localhost:<your own instance>"                          # NOT the shared 3592
+  REDIS_URL_TEST="redis://localhost:56380"                                   # gaiada-redis-test-1
+  E2E_PORT=<verified free>                                                   # Playwright only
+  ```
+
+### Worked example — attributing 89 full-suite failures to zero of your own (2026-08-23)
+
+Kept because this took several hours and the method generalises. A full backend run on a clean
+detached worktree reported **89 failures / 24 files**. None were mine, and proving that took four steps:
+
+1. **Give yourself a private Cerbos** (the shared container mounts the MAIN tree's policies).
+   89 failures → **16**. That single step accounted for 82% of them.
+2. **Run the survivors at a commit that predates all your work.** At the session's base commit the
+   biggest cluster was **43/43 green**, which proves the failures were introduced in the range rather
+   than being ambient breakage.
+3. **Bisect to the commit, not to the session.** The `rbac/` cluster reproduced EXACTLY at another
+   session's committed `SM-76 … + IAM wave` — same 6 failures, same files — and stayed green at every
+   one of this session's own commits, checked individually.
+4. **Re-run the rest in ISOLATION.** 4 of the 5 remaining files passed alone at the merge commit, so
+   their full-run failures were contention artifacts, not defects. The single true residue was the
+   `REDIS_URL_TEST` preflight above — my missing env var, not anyone's code.
+
+**The generalisable rule:** a full-suite failure count in this repo is a claim about the *environment*
+until you have isolated the service, the commit, and the run order. Report the number only with those
+three pinned, and never attribute a failure to a session without reproducing it at that session's own
+commit.
+
 
 - **⚠ A git worktree does NOT isolate you from the shared Cerbos container, and that invalidates every
   authz test result taken in one.** `gaiada-cerbos-1` bind-mounts
