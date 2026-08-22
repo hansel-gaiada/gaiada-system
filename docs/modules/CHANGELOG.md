@@ -622,6 +622,80 @@ single-host live rules), MSO-06 (console UI consumption — a concurrent session
 server was touched; verification was against a stubbed Prometheus/Alertmanager and a disposable
 test database only.
 
+### platform-ui `0.40.0` — 2026-08-23 — the whole surface, redesigned
+
+A five-phase overhaul of the entire ERP surface, not an increment. The version jumps deliberately:
+every route in the app looks different, and the design system underneath it was replaced rather
+than extended.
+
+**Changed — the token layer (Phase 1)**
+- Dark is now the primary designed theme; light is derived. A 12-step warm neutral ramp
+  (`--n-1..12`) replaces ad-hoc surface hexes. `--n-2` is byte-identical to the shipped page
+  background — this systematises the existing identity rather than departing from it.
+- **Interactive split from decorative.** `--accent` previously meant the wordmark, every button,
+  the focus ring AND the "in progress" badge at once, so nobody could make buttons louder without
+  repainting what "in progress" means. Bronze is now decorative-only; a teal carries every click
+  target. A guard assertion makes the split permanent.
+- Elevation is luminance-led on dark and shadow-led on light — shadows are nearly invisible on a
+  dark surface, which is the usual mistake.
+- Radius scale, 4pt grid, and three real density modes at token level. The old `data-density`
+  flipped five hand-written selectors and never touched table rows, the one place density matters.
+- PM's 8-tone ramp promoted to `--cat-1..8` app-wide, plus an `-area` tier: chroma validated for
+  chips reads as crayon at chart scale.
+- `tokens/pm.css` reduced to pure `var()` aliases — zero colour literals, the mechanical proof the
+  Material island is gone.
+
+**Fixed — contrast, measured rather than assumed**
+- The spec predicted amber would fail the 3:1 non-text floor. Five hues already passed. The real
+  failures were `status-idle` at **2.50:1** and `status-neutral` at **1.90:1** (plus dark neutral at
+  2.16:1) — none of which anyone had flagged. Now 3.92 / 3.32 / 3.30:1.
+- Four PM controls painted `background: var(--pm-accent)` with `color: var(--pm-accent-fg)`, and
+  those tokens resolve to the same value in both themes: **text exactly the colour of its own
+  background**. Audited the whole tree afterwards; no other surface had it.
+- Urgency chips mixed their tint against `transparent`, so the effective colour drifted with
+  whatever surface the chip sat on — 3.90:1 on the light page. Now mixed against a fixed token.
+- Department rail headings used `opacity: 0.6` instead of a token, double-compositing alpha below
+  the AA floor.
+- `--ink-faint`, exempt from AA because it is for decorative glyphs only, was carrying real
+  readable content in the portal.
+- The Social Media queue filter was `role="tablist"`/`role="tab"` with **no `tabpanel`** — a real
+  WAI-ARIA violation, now a toggle-button group.
+- The portal header overlapped its own status text at 390px. It triggered no page scroll, which is
+  why an automated width check missed it; found by opening the screenshot.
+
+**Added — shell and scope (Phase 2)**
+- **ScopeBar**: Entity / Department / Period / Currency as real controls, with an explicit
+  "Whole group" option. Consolidated had been an implied default with no control at all. State
+  lives in the URL, so a scoped view is linkable.
+- **CompanySpine**: a tone-coded strip between nav and content making "which entity am I in, and
+  what else exists" a permanent ambient fact rather than a dropdown you must open to remember.
+- **Command palette** (Cmd/Ctrl-K), hand-rolled, RBAC-filtered, wired to the existing search reader.
+
+**Added — data surfaces (Phase 4)**
+- DataTable extended (sticky header, column control, sortable, numeric alignment, density-aware,
+  distinct error state), plus FilterBar, Pagination, BulkActionBar, Tabs, Menu, Drawer, Modal and a
+  ToastQueue — eight primitives replacing per-surface reimplementations. `/clients` is the
+  reference wiring.
+
+**Closed**
+- The guard's radius exception list shrank to `[]`. `creative`, `pipeline` and `portal` no longer
+  ship literal `border-radius`; the "zero radius" law had never actually been enforced outside
+  `globals.css`.
+
+**Constraint held throughout**: still exactly four runtime dependencies. Every primitive, overlay,
+chart and the command palette is hand-rolled.
+
+**Verified** — typecheck clean; token guard 22/22 with no assertion weakened; **169 files / 2705
+tests** green; `DEMO_MODE=1 next build` green; Playwright chromium 49/53, pm-unified 10/10
+unmodified, portal 8/8, social 14/14, smoke 1/1. Zero horizontal page scroll at 390px. The three
+remaining chromium failures were each re-run in isolation, fail identically there, and are
+pre-existing outside this work — left failing and reported rather than papered over.
+
+**Test-infra note for whoever runs these next**: Playwright projects share one `.next` directory,
+so they must run one at a time AND with `--workers=1`. `fullyParallel: true` plus a stateful
+in-process demo store makes parallel workers invent failures — 8/10 phantom failures on
+`pm-unified` that are all green serially.
+
 ### platform-ui `0.29.1` — 2026-08-21 — the company report said its own name twice
 
 **Fixed**
