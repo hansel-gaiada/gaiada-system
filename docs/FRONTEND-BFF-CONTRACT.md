@@ -3531,6 +3531,36 @@ that built this):**
     contributes to the freshness subquery, since it derives from the same metric — this is a
     defensive widening, found while writing the live-DB test for exactly this case).
 
+**Observe-only tier addendum (2026-08-22 owner ruling; design: MSO plan §12) — ⛔ PENDING
+(schema MSO-09 / backend MSO-10 / probes MSO-11; UI under the MSO-06 amendment):**
+
+13. **`monitoring_tier` becomes part of the contract.** `helios`/`delphi` are observe-only — no
+    agent may ever be installed on them — so an absent node-signal there is BY DESIGN, not a
+    fault. Additive fields (expand/contract as ever):
+    - `HostSnapshot.tier: "agent" | "blackbox" | null` — from `infra_hosts.monitoring_tier`;
+      `null` iff `registered:false`.
+    - `HostSnapshot.probes: { total: number; up: number; down: number; failing: { target:
+      string; kind: "icmp"|"tcp"|"http"|"tls" }[]; rttMsWorst: Reading; tls: { target: string;
+      daysToExpiry: number }[] | null } | null` — the blackbox tier's PRIMARY signal block, from
+      `probe_success` / `probe_duration_seconds` / `probe_ssl_earliest_cert_expiry` by `host`
+      label. Top-level `null` = no probes configured for this host (the normal state for
+      agent-tier hosts today) — never `{total:0,…}`; `tls: null` = no TLS probes configured,
+      distinct from measured expiry.
+    - `EstateSummary.hosts.byTier: { agent: number; blackbox: number }`.
+    - For `tier:"blackbox"`: `host`, `targets`, `datastores` are `null` and `containersRunning`
+      is `{value:null, note}` **with a tier-reason note** ("not collected: observe-only host —
+      owner ruling 2026-08-22; signal requires an on-host agent"). The UI renders these as
+      "not collected (observe-only)" — a THIRD visual state, distinct from both the dark-host
+      treatment (expected signals stopped: alarming) and healthy. Absence of node signals on a
+      `blackbox` host must produce ZERO fault indications; the identical absence on an `agent`
+      host stays alarming.
+    - **Reachability is `probe_success` only, never `up`.** A blackbox scrape job's `up`
+      measures the exporter answering the hub, so it stays `1` while the probed host is down;
+      deriving reachability from it renders a dead host green forever. `freshness` for a
+      `blackbox` host therefore means "probe results are arriving" (pipeline liveness) — a host
+      can be `fresh` and unreachable at once and must render as DOWN — and the strongest
+      renderable state for the tier is **"reachable — internals unknown"**, never "healthy".
+
 ---
 
 ## IAM Phase 2 — the routed override (P2-08 part B, 2026-08-19)

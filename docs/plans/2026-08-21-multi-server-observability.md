@@ -4,7 +4,9 @@
 alerts + env routing) PROTOTYPED — promtool/amtool-verified against the remote and against a live
 true condition, NOT YET DEPLOYED to the remote box (see §8 status note); MSO-04 (`infra_hosts`)
 and MSO-05 (estate endpoint) PROTOTYPED, backend only, unit + live-DB tested, not yet consumed by a
-UI; OQ-2/3/4 ANSWERED below (§10); MSO-03/06/07/08 still PLANNED ·
+UI; OQ-2/3/4 ANSWERED below (§10); MSO-03/06/07/08 still PLANNED; **2026-08-22 owner ruling
+(§12): `helios`/`delphi` are OBSERVE-ONLY — agent onboarding prohibited; MSO-03/08 amended,
+MSO-09/10/11 added (PLANNED)** ·
 **Owner ask:** "we need to see more servers in there. we are having lots of servers for staging,
 production etc." — the ERP's Systems → Observability console must become a multi-host,
 multi-environment view.
@@ -39,6 +41,12 @@ adds) · `infra/CLAUDE.md`
    prometheus/grafana/loki/tempo/alertmanager on `gda-aicenter` two days ago. That drift must be
    killed (MSO-00) before anything else lands, or the estate keeps paying for two stacks and every
    future probe of "what runs where" lies.
+6. **Scope ruling 2026-08-22 (owner), superseding part of this design:** `helios` and `delphi`
+   are **OBSERVE-ONLY** — we may collect information FROM them; we may NOT install, configure,
+   restart, or modify anything ON them. Installing node-exporter or an OTel collector IS a
+   modification, so the §2 agent bundle is out of scope for these two hosts. "Full control"
+   (MSO-03 onboarding) applies only to production hosts we fully own. Design, signal matrix,
+   schema change, and tickets: **§12**.
 
 ---
 
@@ -55,7 +63,7 @@ adds) · `infra/CLAUDE.md`
 | cAdvisor per-container discovery | `count(container_last_seen{name!=""})` | **empty result** — still broken estate-wide (MON-09n) |
 | Remote Alertmanager reachable over the tunnel | `curl 10.88.0.2:9093/api/v2/status`, `/alerts` | serving; only `Watchdog` active |
 | `RemoteWriteStalled` is single-host | `infra/observability/prometheus/rules/alerts.yml:93` | `absent_over_time(up{job="otel-collector-self"}[10m])` — keyed to one host's collector, does not generalize |
-| Known ssh estate on the operator machine | `~/.ssh/config` | `gda-aicenter`, `sumopod`, `aire-vps`, `gda-ai01`(+`gda-tunnel`, same IP), `gda-ce01`, `delphi`, `helios`. **CORRECTED 2026-08-21 by owner decision:** `delphi` and `helios` ARE the owner's and ARE authorized onboarding targets — an earlier session had them on a never-touch list believing they belonged to another company, and that belief was wrong. They are LIVE, so they wait for the MSO-03 runbook. **`gda-ce01` is OUT OF SCOPE** — owner: "we shouldnt have anything to do with gda-ce01" |
+| Known ssh estate on the operator machine | `~/.ssh/config` | `gda-aicenter`, `sumopod`, `aire-vps`, `gda-ai01`(+`gda-tunnel`, same IP), `gda-ce01`, `delphi`, `helios`. **CORRECTED 2026-08-21 by owner decision:** `delphi` and `helios` ARE the owner's and ARE authorized onboarding targets — an earlier session had them on a never-touch list believing they belonged to another company, and that belief was wrong. They are LIVE, so they wait for the MSO-03 runbook. **SUPERSEDED IN PART 2026-08-22 (owner, §12):** the ownership correction stands; the authorization does not — `delphi`/`helios` are now **OBSERVE-ONLY**, no longer onboarding targets for MSO-03/08. **`gda-ce01` is OUT OF SCOPE** — owner: "we shouldnt have anything to do with gda-ce01" |
 
 ### 1.1 The drift ruling: the resurrected local stack is NOT design
 
@@ -136,9 +144,20 @@ so agents cannot reach each other — least privilege by construction. ② `infr
 - **Never publish an exporter or the collector on `0.0.0.0`** — Docker DNAT precedes ufw. The
   agent bundle publishes **nothing**; the collector reaches exporters over the compose network and
   egresses over wg only.
-- **`delphi` and `helios` are another company's VPSes. Never install anything, never probe, never
-  scrape.** The inventory is explicit opt-in; nothing may enumerate `~/.ssh/config` or scan
-  `10.88.0.0/24` to "discover" hosts.
+- **CORRECTED 2026-08-22 (owner):** `delphi` and `helios` **are the owner's** — `delphi` is the
+  **staging** server for all projects, `helios` is **production**. The previous never-touch claim
+  here was wrong and contradicted §1 of this same document; it has been removed rather than left
+  to be re-derived. **SUPERSEDED LATER THE SAME DAY — 2026-08-22 owner ruling (§12):** an earlier
+  version of this correction went on to say they "are authorized onboarding targets and wait for
+  the MSO-03 runbook". That authorization is now REVOKED: *"for now we shouldnt do anything to
+  helios or delphi. we just want to have informations from it not actively control or modify it.
+  full control is for production."* They are **OBSERVE-ONLY** — collect information FROM them,
+  never install/configure/restart/modify anything ON them; the agent bundle, a WireGuard
+  peer/keypair, and any `authorized_keys` change are all modifications and are out of scope for
+  these two hosts. §12 designs the agentless tier that watches them instead.
+  **The opt-in rule still stands and is unrelated to ownership:** the inventory is explicit opt-in;
+  nothing may enumerate `~/.ssh/config` or scan `10.88.0.0/24` to "discover" hosts. `gda-ce01`
+  remains OUT OF SCOPE.
 - On shared boxes (SumoPod, and any box we do not exclusively own): every docker command scoped
   `-p gaiada-obs-agent`; no prune of any kind; `docker ps -a` diffed before/after, fresh baseline.
 - A hand-applied infra change has a maximum lifetime of one deploy (§2.5 of the monitoring
@@ -377,12 +396,12 @@ full re-run.
 | **MSO-00** | devops · **opus·medium** — compose surgery on the live estate; a mistake here recreates the §2.3 outage class and there is one shot per deploy cycle | Kill the resurrection: split `docker-compose.observability.yml` into a collection-only file for `gda-aicenter` (collector + exporters + synthetic-prober); storage services (prometheus/grafana/loki/tempo/alertmanager/render/ntfy) leave the `gda-aicenter` file set entirely (obs-remote.yml already owns them). Update `COMPOSE_FILES` repo variable in the same change. Decommission the resurrected containers **and volumes** on the box; absorb MON-09h (retire `alertmanager-mail/otel-metrics/loki/obs-local` compose files or mark dev-only) | After the **next tag deploy**, zero storage containers on `gda-aicenter` (`docker ps` proof); remote still receiving (16 `up` series pre-MSO-01); measured disk delta recorded in the plan doc | — |
 | **MSO-01** | devops · seat default | Host/env external labels per §4, incl. remote self-scrape labels and the dashboard `$host` variable | `count by (host)(up)` shows every job under a host; **zero** host-less groups after the 5 m staleness window; rules still loaded and matching (promtool + live `/api/v1/rules` probe); dashboard renders both hosts | MSO-00 |
 | **MSO-02** | devops · seat default | Per-host `RemoteWriteStalled`/`DiskSpaceLow`/`DiskWillFillIn24h`/`PostgresDown`/`RedisDown` + env-based Alertmanager routing per §8 — 🟡 PROTOTYPED 2026-08-22, verified against the remote, **not yet deployed** (repo ahead of the box; see §8 status note for the exact deploy commands withheld pending an explicit go) | promtool unit tests: labeled dark host fires, live host doesn't (`alerts_test.yml`, 5 groups green); routing tree verified with `amtool config routes test` for each of the 4 `infra_hosts.env` values, both directions (production pages, staging/dev/ops don't); live rule probe on the remote (`gaiada-obs-prometheus-1`/`gaiada-obs-alertmanager-1`, scratch-copy method, no restart) | MSO-01, OQ-2 |
-| **MSO-03** | devops · seat default | Agent bundle `docker-compose.obs-agent.yml` + collector template + `infra/runbooks/onboard-server.md` (wg peer procedure incl. hub-side commands and the wg_ip ledger, verification checklist, the §2.3 never-list verbatim) | Dry-run onboarding of the first owner-approved host (OQ-5) end-to-end by following ONLY the runbook: labeled series arrive, disk rules match the host, `docker ps -a` diff on the target box shows exactly ours | MSO-01, OQ-1/OQ-5 |
+| **MSO-03** | devops · seat default | Agent bundle `docker-compose.obs-agent.yml` + collector template + `infra/runbooks/onboard-server.md` (wg peer procedure incl. hub-side commands and the wg_ip ledger, verification checklist, the §2.3 never-list verbatim) — **AMENDED 2026-08-22 (§12):** `helios`/`delphi` are no longer eventual targets of this runbook (observe-only); runbook §0/§1/§2/§6/§9 updated with the dated reversal | Dry-run onboarding of the first owner-approved host (OQ-5) end-to-end by following ONLY the runbook: labeled series arrive, disk rules match the host, `docker ps -a` diff on the target box shows exactly ours | MSO-01, OQ-1/OQ-5 |
 | **MSO-04** | senior-db · seat default | `infra_hosts` migration + seed (§3.1) — global table, linter-clean, seed idempotent (`ON CONFLICT (key) DO UPDATE`) | Applies on a throwaway DB; `lint:withtenants` + `lint:migration-rls` green; re-running the seed churns nothing | — (parallel) |
 | **MSO-05** | senior-be · **opus·medium** — per-field null-vs-zero discipline across ~12 fields and three upstreams (Prometheus, Alertmanager, DB) is exactly the class this estate has repeatedly shipped wrong; a re-run costs more than starting strong | Estate snapshot per contract §20.1a: `by (host)` aggregate queries (O(signals), never O(hosts×signals)), freshness state machine, Alertmanager v2 client + `ALERTMANAGER_URL` config, `withGlobal` inventory join, unregistered/never-reported surfacing, legacy fields kept for one release (expand phase) | Every §20.1a field note satisfied against a live probe; unit tests mock empty vectors and assert **no field ever coerces to 0**; `app.inject` suite over the endpoint; contract §20.1a rows flipped to 🟡/✅ only by QA | MSO-01, MSO-04 |
 | **MSO-06** | medior (senior-fe reviews) · seat default | Console UI: estate board grouped by env, freshness as the lead cell, stale-greying ("as of Xm ago"), unavailable-with-reason blocks, unregistered/never-reported visibly abnormal, decommissioned muted, `RemoteWriteStalled` rendered as the whole-board banner; `lib/observability.ts` mirrors §20.1a | Driven in a browser against the live BE; a dark host demonstrably cannot render green; dark-theme + responsive from first commit | MSO-05 |
 | **MSO-07** | qa · seat default | Adversarial pass: stop the agent on a non-prod host → console `dark` ≤ 12 m and `RemoteWriteStalled` fires; mock-empty-Prometheus null audit (zero coerced 0s); inject an unlabeled/unknown-host series → unregistered row appears; AM down → `alerts:null` + reason; measured-zero case (0 firing alerts ≠ null) renders distinctly | All five drills pass **driven through the real surface**, screenshots/logs attached to the ticket | MSO-03, MSO-05, MSO-06 |
-| **MSO-08** | devops · seat default (repeat per host) | Onboard each remaining owner-approved host per runbook; add its `infra_hosts` row (status → active) | Console row `fresh`; disk rules verified matching the host's series via promtool test (never by filling a real disk); box-owner rules obeyed (`docker ps -a` diff) | MSO-03, OQ-1 |
+| **MSO-08** | devops · seat default (repeat per host) | Onboard each remaining owner-approved host per runbook; add its `infra_hosts` row (status → active) — **AMENDED 2026-08-22 (§12):** candidate universe excludes `helios`/`delphi` (observe-only) as well as `gda-ce01`; remaining candidates are whatever OQ-1 approves (`aire-vps`, `gda-ai01`, unnamed staging boxes) | Console row `fresh`; disk rules verified matching the host's series via promtool test (never by filling a real disk); box-owner rules obeyed (`docker ps -a` diff) | MSO-03, OQ-1 |
 
 **Status update (2026-08-21, MSO-05 ticket close-out):** MSO-04 and MSO-05 above both moved to
 🟡 PROTOTYPED in the same pass — MSO-04's `infra_hosts` table did not exist when MSO-05 started, and
@@ -403,6 +422,10 @@ Critical path: **MSO-00 → MSO-01 → MSO-05 → MSO-06 → MSO-07**, with MSO-
 MSO-01/—. Highest value per unit of effort: **MSO-00** (stops active waste and lies today) and
 **MSO-01** (unblocks everything multi-host).
 
+**2026-08-22:** the observe-only ruling adds **MSO-09/10/11** and amends MSO-06/07 — ticket
+table in §12.6; those tickets do not sit on this critical path, but MSO-11 is the only route to
+any visibility of `helios`/`delphi` at all.
+
 ---
 
 ## 10. Owner questions (genuinely owner-level; everything else is decided above)
@@ -411,7 +434,9 @@ MSO-01/—. Highest value per unit of effort: **MSO-00** (stops active waste and
    `aire-vps` (43.165.196.80), `gda-ai01` (34.143.206.68, the OpenClaw host), `gda-ce01`
    (34.158.47.112, **98 % disk — most urgent candidate**). Confirm env (production/staging/ops/dev)
    and role for each, and name any staging boxes not yet in ssh config ("lots of servers" implies
-   more than we can see). `delphi`/`helios` are treated as permanently out of scope — confirm.
+   more than we can see). `delphi`/`helios`: this question's original "permanently out of scope —
+   confirm" was corrected twice; final state (owner ruling 2026-08-22, §12): they are the owner's
+   boxes and are **OBSERVE-ONLY** — never onboarding targets, watched via §12's blackbox tier.
 2. **OQ-2 — Paging policy by environment — ANSWERED 2026-08-21 (owner: "use the best way n
    safest").** **PRODUCTION pages** (current transports, unchanged). **staging/dev/ops are
    ticket-only** — never a page. Rationale, written down because it is the whole point of the
@@ -441,6 +466,25 @@ MSO-01/—. Highest value per unit of effort: **MSO-00** (stops active waste and
    revisited absent that.
 5. **OQ-5 — First onboarding target** — ANSWERED 2026-08-21: NOT `gda-ce01`, which the owner has ruled out of scope entirely. Dry-run the runbook on `gda-aicenter` (already instrumented, and the box we can afford to be wrong about) BEFORE touching the live estate. The superseded recommendation read: `gda-ce01` — it is
    the box most likely to fill a disk unobserved, so it buys the most safety per hour of work.
+6. **OQ-6 — Probe list for `helios`/`delphi` (blocks MSO-11).** Name the endpoints we should
+   probe on each — URLs and/or ports (e.g. "https://<site> served from helios", "tcp/22",
+   "ICMP"). We will NOT port-scan or crawl to discover services — the §2.3 opt-in rule applies
+   to probes exactly as it applies to agents; an unnamed service simply stays invisible, and
+   §12.3's console will honestly show only what you name. Also confirm ICMP is acceptable
+   (some providers rate-limit or flag it).
+7. **OQ-7 — Read-only SSH polling: NOT adopted; you may override (§12.2 has the full trade).**
+   Architect recommendation is NO: the safe form (dedicated user + forced-command key) requires
+   modifying `authorized_keys` ON the host — prohibited by your own ruling — and the unsafe form
+   (reusing your personal key from the hub) hands whoever compromises the hub a shell on your
+   production. Cost of NO, stated honestly: disk/memory/CPU/reboots on `helios`/`delphi` stay
+   UNKNOWN — nobody will see a disk filling there. If you want that visibility before granting
+   full control, say so explicitly and we design the forced-command variant as a one-time,
+   owner-authorized modification.
+8. **OQ-8 — Zero-touch side channels for `helios`/`delphi`.** (a) Who hosts each box, and does
+   the provider's panel expose a read-only metrics/status API (CPU/RAM/disk) we may consume from
+   the hub with a scoped token? That would recover some of §12.4's UNOBTAINABLE column without
+   touching the hosts. (b) Do the boxes already expose any status/metrics endpoint you know of
+   that we may read? We will not probe to find out.
 
 ---
 
@@ -450,3 +494,168 @@ Every row in §1 was probed live on 2026-08-21 over `ssh gda-aicenter` (read-onl
 remote store/Alertmanager, via `curl` from that box across the WireGuard tunnel — the same path the
 platform console uses. Repo claims are read from the files named inline at commit `dd89e0e`. Nothing
 in this document has been executed; no server state was mutated.
+
+---
+
+## 12. 2026-08-22 owner ruling: `helios`/`delphi` are OBSERVE-ONLY — the agentless tier
+
+**Ruling (owner, 2026-08-22, verbatim):** *"for now we shouldnt do anything to helios or delphi.
+we just want to have informations from it not actively control or modify it. full control is for
+production."*
+
+**Binding interpretation.** `helios` and `delphi` are **observe-only**: we may collect information
+FROM them; we may NOT install, configure, restart, or modify anything ON them. Installing
+node-exporter or an OTel collector IS a modification — so the §2 agent bundle, a WireGuard
+peer/keypair, and everything in the MSO-03 runbook are **out of scope for these two hosts**.
+"Full control" (the agent path) applies only to production hosts we fully own — today
+`gda-aicenter` and `sumopod`. This supersedes, as of 2026-08-22: §1's "authorized onboarding
+targets" row, §2.3's same-day ownership correction (ownership stands; authorization does not),
+MSO-03's eventual-target list, and MSO-08's candidate universe. It does NOT reopen: `gda-ce01`
+(fully out of scope, unchanged), the Hostinger WP host (shared hosting — already Plane B, never
+an agent candidate), or the opt-in/no-scan rule (which applies to probes exactly as it applied to
+agents).
+
+**Graduation path, recorded so it is not re-litigated ad hoc:** when the owner later grants full
+control over a host, that is a NEW dated ruling; the host then goes through MSO-03 unchanged
+(`infra_hosts.monitoring_tier` flips `blackbox` → `agent`; the probes stay — they remain useful
+under the agent tier).
+
+### 12.1 Agentless options, honestly
+
+| Option | What it actually yields | What it costs / risks | Verdict |
+|---|---|---|---|
+| **(a) Blackbox probing from the hub** — ICMP/TCP/HTTP(S)/TLS probes of owner-named endpoints; blackbox exporter in the `gaiada-obs` project on SumoPod, scraped by the hub Prometheus | Reachability per endpoint, TCP/HTTP latency from our estate, HTTP status + body match on named URLs, TLS cert expiry. Genuinely zero-touch: the host sees ordinary network requests | One new container on the hub (scoped `-p gaiada-obs`; `cap_add: NET_RAW` only if ICMP is wanted). Tells us NOTHING about the inside of the box | **✅ ADOPTED — the observe-only tier** |
+| **(b) Read-only SSH polling** — an exporter on OUR side running `df`/`free`/`uptime` over SSH | Disk, memory, load, uptime — the internals (a) cannot see | Requires a standing credential on our hub that can execute commands on the owner's production; the safe setup itself modifies the host. Full trade in §12.2 | **❌ NOT ADOPTED** (owner may override — OQ-7) |
+| **(c) Consume something already exposed** — an existing metrics/status endpoint, or the hosting provider's metrics API | Provider APIs often expose CPU/RAM/disk-ish gauges with zero host contact; an existing endpoint costs nothing | Existence unknown — and we may not probe or scan to find out. Needs owner answers (OQ-8) | **OPEN — adopt if OQ-8 yields anything** |
+
+Probes originate from the **hub (SumoPod)**, not from `gda-aicenter`: watching the rest of the
+estate must not fate-share with the most complex monitored host, and the hub Prometheus scrapes
+the exporter locally (no remote_write leg to break). The existing `gda-aicenter` blackbox exporter
+keeps its WS9 job — synthetic probes of the ERP's own endpoints — different purpose, different job
+name (`blackbox-estate` is the new hub job). Observe-only hosts NEVER join the WireGuard mesh: no
+peer, no keypair, nothing — mesh membership requires a spoke config on the host, which is itself a
+modification, and the mesh is the full-control tier's transport.
+
+### 12.2 The SSH-polling ruling, with the security trade stated honestly
+
+**Is running read-only commands over SSH a "modification"?** Strictly, no: `df`/`free`/`uptime`
+change no config, install nothing, restart nothing — it is information-gathering, plus auth-log
+entries on their side. It is still NOT adopted, for two reasons that are about *capability*, not
+semantics:
+
+1. **The safe form requires the forbidden act.** A credential fit for unattended polling is a
+   dedicated user, or a forced-command `no-pty` key in `authorized_keys` restricted to one fixed
+   read-only script. Creating either **is editing files on the host** — a modification,
+   prohibited. There is no way to stand up constrained SSH polling without first touching the box.
+2. **The unsafe form manufactures exactly the capability the owner just withdrew.** Skipping that
+   setup means reusing the operator's personal full-shell key from the hub. Then whoever
+   compromises SumoPod — a box that also carries the owner's private production and our whole obs
+   stack — gains **interactive shell on `helios` (the owner's production) and `delphi`**. Today a
+   hub compromise yields metrics disclosure and one outbound wg route per spoke; with a stored key
+   it yields command execution on two more boxes. A standing remote-execution credential IS
+   "control", regardless of what the polling script happens to run.
+
+**So: not adopted.** The honest cost: disk/memory/CPU/reboots on these two hosts stay UNKNOWN —
+on an estate whose worst recorded incidents are silent disk fills, nobody will see a disk filling
+on `helios`. That blindness is rendered as blindness (§12.3), never as green. If the owner wants
+those signals before granting full control, the least-bad path is the forced-command variant as a
+one-time, explicitly owner-authorized modification — his call (OQ-7), recommendation NO.
+
+### 12.3 The honesty requirement — how an observe-only host renders
+
+An observe-only host has a structurally smaller signal set. The console MUST NOT render that as
+health. A host we can only probe is **"reachable — internals unknown"**, never "healthy". This
+estate has shipped absence-as-green 8+ times; the tier exists so absence can be typed. Three
+distinct facts, never collapsed: **measured** (a value), **expected-but-missing** (a fault —
+alarming), **not-collected-for-tier** (by design — calm, but explicitly not knowledge).
+
+- **`infra_hosts.monitoring_tier`** (§12.5) tells the API which signals are *expected* per host,
+  so an absent signal stops being ambiguous: absence of node metrics on a `blackbox` host produces
+  ZERO fault indications; the identical absence on an `agent` host stays alarming.
+- **Contract §20.1a gains an addendum (note 13, the contract file is the file of record):**
+  `HostSnapshot.tier`; a `probes` block (per-target `probe_success`, latency, TLS expiry) as the
+  observe-only tier's primary signal; `estate.hosts.byTier`. For `tier:"blackbox"` hosts,
+  `host`/`targets`/`datastores` are `null` and `containersRunning` carries a tier-reason note —
+  rendered as "not collected (observe-only)", a THIRD visual state distinct from both the
+  dark-host treatment (expected signals stopped) and healthy.
+- **Reachability is `probe_success` only — never `up`.** The `up` series of a blackbox scrape job
+  measures the EXPORTER answering the hub, so it stays `1` while the probed host is down; deriving
+  reachability from it would render a dead host green forever. This is the probe tier's version of
+  "a green scrape target means the exporter answered" (monitoring program §2.7), and it is the
+  trap MSO-10's unit tests must pin. `freshness` for a probe-fed host means exactly "probe results
+  are arriving" (pipeline liveness) — a host can be `fresh` and unreachable at once, and that must
+  render as DOWN, not calm.
+- The strongest state an observe-only host can reach on the board: **"reachable, cert OK, N/N
+  probes passing — internals unknown (observe-only)"**. It must be impossible to read disk or
+  memory health into that row, and impossible to confuse it with a full-signal green host.
+- **Alerting:** `EstateProbeDown` (`probe_success == 0`) rides the existing OQ-2 env routing —
+  `helios` (`env=production`) pages, `delphi` (`env=staging`) tickets. A page we cannot "fix" is
+  still the owner learning his production is unreachable, which is the entire point of this tier.
+  The generalized §8 freshness alert already covers a stalled probe *pipeline* (hub-side failure)
+  because probe series carry `host`/`env`; its description must say "signal feed stopped" —
+  wording honest for both tiers (MSO-11 adjusts wording only, not shape).
+
+### 12.4 Signal matrix — what each tier can and cannot see
+
+| Signal | agent tier (`gda-aicenter`, `sumopod`) | blackbox tier (`helios`, `delphi`) | ssh-poll (NOT adopted) | provider API (if OQ-8 yields one) |
+|---|---|---|---|---|
+| Reachability from our estate | implied by the feed | ✅ `probe_success` per named endpoint | ✅ | sometimes (status page) |
+| Latency (ICMP/TCP/HTTP) | ~ (app-level only) | ✅ `probe_duration_seconds` | crude | ✗ |
+| HTTP status / body match | ✅ (WS9 synthetic, own endpoints) | ✅ owner-named URLs only | ✅ | ✗ |
+| TLS cert expiry | ✅ | ✅ | ✅ | ✗ |
+| Disk used/free + fill projection | ✅ | ✗ **UNOBTAINABLE** | ✅ (`df`) | often (coarse gauge) |
+| Memory | ✅ | ✗ **UNOBTAINABLE** | ✅ (`free`) | often |
+| CPU / load | ✅ | ✗ **UNOBTAINABLE** | ✅ (`uptime`) | often |
+| Uptime / silent reboots | ✅ | ✗ (only outages we happened to probe through) | ✅ | sometimes |
+| Container / process state | ✅ pending MON-09n | ✗ **UNOBTAINABLE** | partial — needs docker-group, a bigger grant | ✗ |
+| Datastore health (`pg_up`-class) | ✅ | ✗ **UNOBTAINABLE** | awkward | ✗ |
+| Logs / traces | optional agent legs | ✗ | ✗ (tailing = heavy foothold) | ✗ |
+| Alertable conditions | full rule set | reachability, cert expiry, feed-stalled ONLY | — | — |
+
+The **UNOBTAINABLE** column is the price of the ruling and is accepted; the console states it per
+host rather than hiding it. No agentless mechanism recovers those signals — only an agent or
+on-host command execution can.
+
+### 12.5 Schema change (specified here; the migration is MSO-09's to write)
+
+Timestamp-named migration on the pattern of `202608211610_mso04_infra_hosts.sql`, in this order:
+
+1. `ALTER TABLE infra_hosts ADD COLUMN monitoring_tier text NOT NULL DEFAULT 'blackbox' CHECK
+   (monitoring_tier IN ('agent','blackbox'))` — **fail-closed default**: a new row is observe-only
+   until someone deliberately promotes it; a careless insert must never imply control. No third
+   value until the owner sanctions one (ssh-poll, if ever approved, is a new CHECK value by
+   migration — do not pre-create it).
+2. `UPDATE infra_hosts SET monitoring_tier = 'agent' WHERE key IN ('gda-aicenter','sumopod')` —
+   BEFORE step 3, so the new constraint cannot trip on a hand-set `wg_ip`.
+3. `ALTER TABLE infra_hosts ADD CONSTRAINT infra_hosts_observe_only_off_mesh CHECK
+   (monitoring_tier = 'agent' OR wg_ip IS NULL)` — the ruling as a structural invariant: an
+   observe-only host can never hold a mesh address, so "add it to the mesh just for probing"
+   fails in the database, not in a code review.
+4. Seed `helios` (env `production`, role `owner-projects`, status `onboarding`, tier `blackbox`,
+   `wg_ip` NULL) and `delphi` (env `staging`, otherwise identical), notes carrying the ruling
+   verbatim with its date; `ON CONFLICT (key) DO UPDATE` idempotent like the MSO-04 seed.
+   `status` flips to `active` only when MSO-11's probes are verified live — same discipline as
+   the runbook's §7.
+5. Column and constraint COMMENTs carry the ruling text and a pointer to this section.
+
+The API derives *expected-but-missing vs not-expected* from `monitoring_tier` — the tier is data,
+so an absent signal is typed instead of ambiguous. Probe target lists (which URLs/ports per host)
+stay CONFIG in `infra/observability/` keyed by `infra_hosts.key`, shipping with the obs stack like
+every other scrape config; every probed key MUST have an inventory row, and §3.2's
+unregistered-host surfacing already catches the drift if one doesn't.
+
+### 12.6 Tickets added/amended (numbering continues §9's; seat default unless flagged)
+
+| # | Tier · model | Scope | Done when | Depends on |
+|---|---|---|---|---|
+| **MSO-09** | senior-db · seat default | §12.5 migration: `monitoring_tier` (fail-closed default), off-mesh CHECK, promote the two agent hosts, seed `helios`/`delphi` observe-only rows | Applies on a throwaway DB; `lint:withtenants` + `lint:migration-rls` green; seed idempotent (re-run churns nothing); inserting a `blackbox` row with a `wg_ip` FAILS | — (parallel) |
+| **MSO-10** | senior-be · **opus·medium** — the measured / expected-missing / not-collected-for-tier tri-state plus the `up`-vs-`probe_success` trap is exactly the absence-as-green class this estate has shipped 8+ times; one wrong coercion silently renders an unwatchable host healthy | Estate API tier-awareness per contract §20.1a note 13: `tier` field, `probes` block (`probe_success`/`probe_duration_seconds`/`probe_ssl_earliest_cert_expiry` by `host`), per-tier expected-signal derivation, `estate.hosts.byTier`, tier-reason notes on not-collected fields; reachability NEVER derived from `up` | Unit tests pin: all-probes-green `blackbox` host is not representable as agent-green; `probe_success=0` + fresh pipeline ⇒ unreachable-and-fresh renders DOWN; absent node signals alarm on `agent` tier and produce zero fault indications on `blackbox` tier; `app.inject` suite green | MSO-09 (build against stubs; live verification needs MSO-11) |
+| **MSO-11** | devops · seat default | Hub-side prober: blackbox exporter container in `gaiada-obs` on SumoPod (scoped `-p`, publishes nothing, `NET_RAW` only if ICMP wanted), `blackbox-estate` scrape job with per-target `host`/`env` labels for OWNER-NAMED endpoints only (OQ-6); alerts `EstateProbeDown` (env-routed per OQ-2: helios pages, delphi tickets) + `TlsCertExpiringSoon` (ticket, ≤21 d); generalize the §8 freshness alert's description to "signal feed stopped" (tier-honest wording); coordinate with MSO-02's undeployed rule file so the box gets ONE reviewed rules deploy | Probes live for every OQ-6 endpoint; stopping the exporter turns both hosts `dark` ≤ 12 m and the feed-stalled alert fires; `amtool config routes test`: helios probe-down ⇒ page, delphi ⇒ ticket; `docker ps -a` diff on SumoPod shows exactly one added container | MSO-09, OQ-6; sequence with MSO-02's deploy |
+| **MSO-06 (amend)** | medior (senior-fe reviews) · seat default | Console tier rendering: "Observe-only" badge; strongest-state copy "reachable — internals unknown"; not-collected-for-tier treatment distinct from BOTH the dark-host treatment and healthy; `probes` card (per-target state, latency, cert days); `byTier` in the estate strip; demo fixture gains an observe-only host exercising every branch | Fixture-driven: an all-green observe-only host is visually distinct from an all-green agent host; no rendering path shows disk/memory/containers for a `blackbox` host as anything but "not collected (observe-only)" | MSO-10 shape (fixtures may lead the backend) |
+| **MSO-07 (amend)** | qa · seat default | Three added drills, driven through the real surface — NEVER against `helios`/`delphi` themselves: register a throwaway `blackbox` row probing a disposable target (a dead TEST-NET/RFC 5737 address for down; a controllable endpoint on `gda-aicenter` for up) | (i) target down ⇒ console shows unreachable and the alert routes by env; (ii) all-probes-green observe-only host never renders full-health; (iii) tier-absence produces no fault while agent-absence alarms; throwaway row removed afterwards | MSO-10, MSO-11, MSO-06 amend |
+
+### 12.7 What was deliberately NOT done in the pass that wrote this section
+
+Nothing was probed, pinged, or SSH'd — not `helios`, not `delphi`, not `gda-ce01`, not the live
+estate. This section is design from repo + docs only. The first packet our estate ever sends
+toward `helios`/`delphi` is MSO-11's, after OQ-6 names the targets.
