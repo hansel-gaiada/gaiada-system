@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **95** capabilities across **15** owners
-- **54** writes · 41 reads
-- Writes by impact: **high 10** · medium 16 · low 28
+- **98** capabilities across **15** owners
+- **55** writes · 43 reads
+- Writes by impact: **high 10** · medium 16 · low 29
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -40,7 +40,7 @@ unfalsifiable after.
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
 | agency | `agency` | 7 |
-| assistant | `assistant` | 13 |
+| assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 2 |
 | billing | `invoices` | 2 |
 | clients | `clients` | 4 |
@@ -52,7 +52,7 @@ unfalsifiable after.
 | pm | `pm` | 9 |
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
-| social | `social` | 9 |
+| social | `social` | 11 |
 | webdev | `webdev` | 4 |
 
 ## Capabilities
@@ -128,12 +128,15 @@ unfalsifiable after.
 | social | `social.createPost` | `POST` | `/api/:tenantId/modules/social/posts` | write | `low` |
 | social | `social.createReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages` | write | `low` |
 | social | `social.deliverReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/deliver` | write | `medium` |
+| social | `social.draftContentBrief` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/agent-content-brief` | write | `low` |
 | social | `social.draftPostIdeas` | `POST` | `/api/:tenantId/modules/social/posts/draft-ideas` | write | `low` |
 | social | `social.draftPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants/:variantId/draft-caption` | write | `low` |
 | social | `social.draftReport` | `POST` | `/api/:tenantId/modules/social/engagements/:engagementId/reports` | write | `low` |
 | social | `social.editReport` | `PATCH` | `/api/:tenantId/modules/social/reports/:id` | write | `low` |
+| social | `social.getBestTimeToPost` | `GET` | `/api/:tenantId/modules/social/accounts/:accountId/best-time` | read | — |
 | social | `social.getClientReview` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/client-review` | read | — |
 | social | `social.getEngagementScope` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/scope` | read | — |
+| social | `social.getEngagementSummary` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/assistant-summary` | read | — |
 | social | `social.getPublisherStatus` | `GET` | `/api/:tenantId/modules/social/publisher/status` | read | — |
 | social | `social.getReport` | `GET` | `/api/:tenantId/modules/social/reports/:id` | read | — |
 | social | `social.getUsage` | `GET` | `/api/:tenantId/modules/social/engagements/:engagementId/usage` | read | — |
