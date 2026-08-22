@@ -9,7 +9,9 @@ import { AccessDenied } from "@/components/social/AccessDenied";
 import { PostFieldsForm } from "@/components/social/PostFieldsForm";
 import { VariantCard } from "@/components/social/VariantCard";
 import { BackendPending } from "@/components/BackendPending";
-import { getPost, listAccounts, getEngagementScope, getClientReview, getAssetLibrary } from "@/lib/social";
+import { getPost, listAccounts, getEngagementScope, getClientReview, getAssetLibrary, getBestTimeToPost } from "@/lib/social";
+import type { BestTimeSuggestion } from "@/lib/socialShared";
+import { NOT_YET_COMPUTED_BEST_TIME } from "@/lib/socialShared";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string; postId: string }>;
@@ -76,6 +78,23 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
   // than each VariantCard re-fetching the same files/creative_assets rows.
   const assetLibrary = await getAssetLibrary(userId, tenant, post.engagementId);
 
+  // SMM-27 — best-time-to-post per variant's own account (a classical-stats read, keyed on
+  // accountId, never on the variant/post — the suggestion is a property of the ACCOUNT's own
+  // posting history, exactly like the quota strip above). A variant whose account lookup missed
+  // (deleted, or `accounts.forbidden`) gets the same honest `not_yet_computed`-shaped fallback
+  // rather than a fabricated one — there is nothing to ask the endpoint about.
+  const bestTimeByAccountId = new Map<string, BestTimeSuggestion>();
+  await Promise.all(
+    Array.from(new Set(post.variants.map((v) => v.accountId))).map(async (accountId) => {
+      if (!accountId || !accountById.has(accountId)) {
+        bestTimeByAccountId.set(accountId, NOT_YET_COMPUTED_BEST_TIME);
+        return;
+      }
+      const r = await getBestTimeToPost(userId, tenant, accountId);
+      bestTimeByAccountId.set(accountId, r.data);
+    }),
+  );
+
   return (
     <>
       <Card title={post.title}>
@@ -96,6 +115,7 @@ export default async function DepartmentComposerPostPage({ params }: { params: P
                 clientReview={reviewByVariantId.get(v.id)!} requiresClientOk={requiresClientOk}
                 canRequestReview={canRequestReview} canWithdrawReview={canWithdrawReview}
                 assetLibrary={assetLibrary.data} assetLibraryForbidden={assetLibrary.forbidden}
+                bestTime={bestTimeByAccountId.get(v.accountId)}
               />
             ))}
           </div>

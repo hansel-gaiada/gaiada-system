@@ -11,6 +11,42 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.18` — 2026-08-23 — SMM-27: best-time-to-post — classical stats job + suggestion chip
+
+**Added**
+- `best-time.ts` (new) — a deterministic, non-AI computation over SMM-21's `social_post_variants` +
+  `social_post_metrics`: buckets published, measured posts by UTC hour of `published_at`, engagement
+  score = sum of available likes/comments/shares/saves/clicks, picks the highest-average bucket that
+  clears `config.social.bestTime.minBucketPosts`. A post whose latest metrics snapshot is entirely
+  NULL is excluded from the sample — never counted as zero engagement.
+- `BestTimeStatus`: `not_yet_computed` / `insufficient_evidence` / `unsupported` / `suggested` — four
+  distinct facts (never a boolean, never a fabricated hour). Thresholds
+  (`minMeasuredPosts` default 5, `minBucketPosts` default 2) are `config.social.bestTime` with a
+  documented rationale, never a hidden constant, and ride the API response so the chip can quote them.
+- New migration `202608221603_social_best_time_suggestions.sql` — `social_best_time_suggestions`
+  (one UPSERTED row per account), third RLS wall, `sbt_status_shape` CHECK enforcing the three
+  persisted statuses structurally.
+- `best-time-job.ts` (new) — the nightly sweep (`smm-best-time`), env-gated
+  (`config.social.bestTime.enabled`), dark by default, `withGlobal`→per-tenant→per-account isolation,
+  mirroring `metrics-job.ts`/`inbox-triage-job.ts`.
+- `GET accounts/:accountId/best-time` + `POST accounts/:accountId/best-time/recompute` + MCP tool
+  `social.getBestTimeToPost` (read, reuses the existing `social_account`/`read` gate).
+- `VariantCard.tsx`'s new `BestTimeChip`, wired into the Composer per-variant-account; DEMO_MODE
+  fixtures seed all three non-default states across three accounts.
+
+**Module GUC (defect class #1) — closed and regression-pinned**
+- `computeAccountBestTime`/`applyBestTimeSuggestion` self-declare `declareSocialModuleScope`;
+  `best-time.test.ts`'s (G1) proves the RLS trap directly (an unscoped read sees zero rows on a table
+  a seeded row plainly exists in), (G2) proves the real functions write/read back a correct
+  `suggested` verdict with no `{modules}` option at any call site — the ticket's own named worst
+  failure mode (a stats job silently computing over an empty set and still emitting a confident
+  `insufficient_evidence`) is closed and pinned.
+
+**The clock**
+- UTC hour-of-day, always — no per-account timezone column exists in this schema to localize
+  against, and this module already shipped a real local-midnight/`toISOString()` timezone bug at this
+  exact seam (SMM-35). The chip renders "14:00 UTC" verbatim.
+
 ### social-media `0.5.17` — 2026-08-22 — SMM-35: assistant "social summary" read; no social write reachable from chat this pass
 
 **Added**

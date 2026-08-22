@@ -118,6 +118,9 @@ export const socialModule: ModuleContract = {
     // SMM-16 — sentiment/category/urgency + the unclassified/unavailable/classified/purged
     // three(+one)-fact triage-state model, and its structural tie into the retention purge.
     "202608211200_social_inbox_triage.sql",
+    // SMM-27 — `social_best_time_suggestions`, the cached classical-stats best-hour-to-post verdict
+    // per connected account; registered at write time.
+    "202608221603_social_best_time_suggestions.sql",
   ],
   // Dotted keys, matching class='grantable' catalog rows (0106). `validateModulePermissions()`
   // refuses boot if any of these is uncatalogued — which is why 0106 lands before this module is
@@ -1116,6 +1119,29 @@ export const socialModule: ModuleContract = {
         type: "object",
         properties: { tenantId: { type: "string", description: "Company id (route scope)." }, id: { type: "string", description: "The report." } },
         required: ["tenantId", "id"],
+      },
+    },
+    {
+      name: "social.getBestTimeToPost",
+      description:
+        "Read the nightly classical-stats best-hour-to-post verdict for one connected account, "
+        + "computed from its own published posts and measured engagement — NO gateway call, no "
+        + "model. The answer is one of three distinct facts, never a bare time or a boolean: "
+        + "'suggested' (a real answer, with its own sample size), 'insufficient_evidence' (too few "
+        + "measured posts yet — the honest default while no account is connected anywhere in this "
+        + "deployment, D-23), or 'unsupported' (this account's network can never report per-post "
+        + "engagement). `not_yet_computed` means the nightly sweep has never run for this account. "
+        + "`bestHourUtc` is always a UTC hour (0-23) — no per-account timezone exists to localize it.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/accounts/:accountId/best-time",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          accountId: { type: "string", description: "The connected account." },
+        },
+        required: ["tenantId", "accountId"],
       },
     },
   ],

@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.17` | IN PROGRESS | Social Media | 2026-08-22 |
+| social-media | `0.5.18` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,137 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.17` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.18` · IN PROGRESS
+
+**0.5.18 (2026-08-23, medior) — SMM-27: best-time-to-post, a CLASSICAL STATS job + a suggestion
+chip — the last unbuilt ticket in the department.** Worktree was ONE MERGE BEHIND at cut time
+(`git log --oneline -1` did not match `main`'s tip — SMM-35's own merge had landed); `git merge
+main` (fast-forward, clean) pulled `assistant-summary.ts`/`content-brief.ts` in before any of this
+ticket's own code was written.
+
+**Deliberately not an AI ticket — no gateway call, no model, no prompt.** New `best-time.ts`
+computes a deterministic per-account verdict over SMM-21's own `social_post_variants.published_at`
++ `social_post_metrics` (append-only; the LATEST snapshot per variant is read, mirroring the
+Analytics tab's own reasoning). A published variant whose latest snapshot has every interaction
+field NULL is EXCLUDED from the sample entirely — "not yet measured," never "zero engagement,"
+`metrics-job.ts`'s own "no invented numbers" rule applied to sample membership. Each measured post's
+engagement score is the sum of whichever of likes/comments/shares/saves/clicks it does carry;
+posts are bucketed by UTC hour of `published_at`, and the bucket with the highest average score
+(among buckets meeting their own sample floor) is the suggestion.
+
+**The clock: UTC, never a guessed local zone.** This module already shipped a real timezone bug at
+exactly this seam (SMM-35's `assistant-summary.ts` header: a `date` column parsed at local midnight,
+shifted a calendar day backward by a later `.toISOString()`). `published_at` here is `timestamptz`
+(unambiguous), but EXTRACTING an hour-of-day still requires picking a zone, and no per-account
+timezone column exists anywhere in this schema. Rather than fabricate one, every bucket is the UTC
+hour, deterministic regardless of session/process timezone — the chip renders "14:00 UTC" verbatim,
+never implying a client-local hour that was never computed.
+
+**Insufficient evidence is a first-class state, config-thresholded, never a fabricated hour.**
+`BestTimeStatus` is FOUR distinct facts (`capabilities.ts`'s own three-reasons discipline, extended
+by one): `not_yet_computed` (the nightly sweep never ran for this account — what EVERY real
+deployment reads today, D-23: no account is connected, no post has ever published anywhere in the
+estate), `insufficient_evidence` (fewer measured posts than `config.social.bestTime.
+minMeasuredPosts`, default **5** — a classical-stats rule-of-thumb floor on independent
+observations, not a claimed significance level and not vendor guidance, documented in `config.ts`
+itself — or the winning bucket alone did not reach `minBucketPosts`, default **2**, so one lucky
+post cannot "win" an hour outright), `unsupported` (this account's resolved driver never advertises
+`post_metrics` at all — a MORE PERMANENT fact than insufficient_evidence, checked via
+`driver.capabilities` before ever querying `social_post_metrics`, the same "unsupported vs empty"
+discipline `inbox-sync-job.ts` applies to `inbox_read`), and `suggested` (a real answer, carrying its
+own `bestHourSampleSize`/`totalMeasuredPosts`). Every threshold rides the API response itself
+(`minMeasuredPostsThreshold`/`minBucketPostsThreshold`), so the chip can quote "3 of 5 measured
+posts needed" honestly rather than a bare "not enough data."
+
+**The module GUC — closed, and regression-pinned two ways.** New `social_best_time_suggestions`
+(THIRD RLS wall, same as every `social_*` table but `social_post_client_reviews`) is written by
+`best-time.ts`'s `computeAccountBestTime`/`applyBestTimeSuggestion`, each self-declaring
+`declareSocialModuleScope` before touching a row — exactly the shape `metrics-job.ts`/
+`inbox-triage-job.ts` already use. `best-time.test.ts`'s (G1) proves the trap ITSELF: a plain
+`withTenants([tenantId])` read with no module option sees ZERO ROWS on a table a seeded row plainly
+exists in; (G2) proves `computeAccountBestTime`/`applyBestTimeSuggestion`/`getCachedBestTime` —
+called exactly as written, no `{modules:['social']}` at any call site — write and read back a REAL,
+correct `suggested` verdict from seeded data clearing every threshold, which fails outright (0
+measured posts, not a differently-labelled empty result) if either internal declaration is ever
+removed. This is the ticket's own named worst failure mode closed: without the declaration, a stats
+job would read zero rows silently and still emit a definite, indistinguishable-from-honest
+`insufficient_evidence` — a confident answer computed from nothing.
+
+**New migration `202608221603_social_best_time_suggestions.sql`.** `social_best_time_suggestions`
+(one row per account, UPSERTED — a current verdict, not a history, mirroring `social_metrics_daily`'s
+own per-day cache reasoning), `sbt_status_shape` CHECK making exactly one of the three persisted
+statuses (`suggested`/`insufficient_evidence`/`unsupported`) hold structurally (a `suggested` row
+without its three supporting numbers, or a non-`suggested` row that leaked one, cannot be written).
+THIRD RLS wall, FORCE RLS, self-asserted in the 0106/202608201519 idiom. `npm run
+lint:migration-rls` — **green** (132 migrations scanned, 53 baselined, 79 enforced, no unguarded
+FORCE-RLS backfill). `lint:migration-names`/`lint:withtenants` also green. Registered in
+`socialModule.migrations` at write time.
+
+**The scheduled sweep (`smm-best-time`), and the exact `main.ts` line.** New `best-time-job.ts`
+mirrors `metrics-job.ts`/`inbox-triage-job.ts` verbatim: env-gated via `config.social.bestTime.
+enabled` (dark by default), `withGlobal` for the tenant list then per-tenant recompute+upsert over
+every connected account, per-tenant AND per-account errors caught and logged so one bad
+account/tenant can never abort the sweep. `main.ts` was **not** edited (off-limits to this ticket) —
+the exact lines for the orchestrator to add:
+```ts
+import { startBestTimePullLoop } from "./modules/social/best-time-job";
+// ...
+if (config.social.bestTime.enabled) {
+  startBestTimePullLoop(config.social.bestTime.intervalMs);
+  console.log(`social best-time-to-post (smm-best-time) on: every ${config.social.bestTime.intervalMs}ms`);
+}
+```
+
+**New endpoints + MCP tool.** `GET accounts/:accountId/best-time` (read, reuses the existing
+`social_account`/`read` Cerbos gate `metrics/daily`/`metrics/posts` already use — no new
+permission) reads the cached verdict, answering `{status:'not_yet_computed'}` as DATA (never a 404)
+when the sweep has never run; `POST accounts/:accountId/best-time/recompute` (same `read` gate — a
+re-derivation of already-readable data, no blast radius of its own, so no D14/write classification)
+lets a freshly-connected account get an answer without waiting up to a day for the next sweep tick.
+New MCP tool `social.getBestTimeToPost` (read, `minAssurance:"low"`).
+
+**The chip.** `socialShared.ts`'s `describeBestTime`/`formatBestHourUtc` render each of the four
+states as itself (criterion-5 discipline, applied to a statistic instead of a refusal token) — never
+a blank chip, never a bare number. `VariantCard.tsx`'s new `BestTimeChip`, wired into the Composer
+(`composer/[postId]/page.tsx` fetches one `getBestTimeToPost` per DISTINCT account across a post's
+variants, keyed on `accountId` — the suggestion is a property of the account's own posting history,
+not the post). DEMO_MODE store (`demoSocial.ts`) pins the new `bestTime` array to the SAME
+`globalThis`-pinned `SocialStore` every other mutable demo state already uses, seeded across THREE
+accounts to drive three of the four states without any interaction (`soc-acc-ig-1` → `suggested`,
+`soc-acc-fb-1` → `insufficient_evidence`, `soc-acc-tiktok-1` → `unsupported`; any unlisted account
+reads the honest `not_yet_computed` default — `soc-acc-ig-2`/`soc-acc-ig-3` demonstrate it for free).
+
+**Driven in a real browser** (`DEMO_MODE=1 npm run dev`, Playwright, headless Chromium, tenant
+switched to `co-agency`, dept `dept-4`): `soc-post-2` (account `soc-acc-ig-1`) rendered *"Best time
+to post: around 14:00 UTC, based on 3 of 5 measured posts."* in the positive color; `soc-post-4`
+(account `soc-acc-fb-1`) rendered *"Not enough data yet: 2 of 5 measured posts needed before a best
+time can be suggested."* in the caution color — **the insufficient-evidence state, the one every
+real deployment carries today, confirmed rendering correctly and distinctly from the confident
+state**; `soc-post-1` (account `soc-acc-ig-2`) rendered *"Best-time-to-post hasn't been computed yet
+for this account."* in the muted color. The `unsupported` state (`soc-acc-tiktok-1`) was not reached
+in the browser pass — no demo variant currently targets that account — and is instead proven by
+`best-time.test.ts`'s (C1) against the mock driver; named rather than silently left unverified.
+`next build` not run (this ticket's own "don't run it repeatedly" instruction); `tsc`/vitest are the
+gate.
+
+**Test counts.** `src/modules/social` (full suite, including the three D14 registry files):
+**613 / 0 / 5** (37 files + 1 skipped file), measured directly on this worktree; +12 new, all in
+`best-time.test.ts`, re-run ALONE twice (12/12 both times) ruling out the shared-test-Postgres
+phantom-failure class this file names. `tsc --noEmit` clean on this ticket's own files (platform-nest
+whole-repo typecheck returned zero errors; `src/rbac/role-permission-bundles.db.test.ts` is another
+session's uncommitted mid-edit and is not present as broken in this worktree). `platform-ui`:
+**2615 / 0 / 0** (155 files), measured directly; `socialShared.test.ts` (45/45) re-run alone,
+unaffected by the new exports. `tsc --noEmit` clean for `platform-ui`.
+
+**Anything the spec did not answer, named rather than silently decided:** (1) the `unsupported`
+state has no demo-driven browser proof (see above) — a schema/fixture gap, not a code gap; (2)
+`avgEngagementScore` sums raw interaction counts (likes+comments+shares+saves+clicks) rather than a
+normalized engagement RATE (e.g. against impressions) — impressions are optional/absent on many
+networks (`metrics-job.ts`'s own "partial reporting" note), so a rate would silently exclude posts a
+raw sum can still rank; flagged as a reasonable classical-stats choice, not the only one; (3) no
+"which day of week" dimension — only hour-of-day, per the ticket's own "best TIME to post" framing;
+a day-of-week axis is a natural follow-up once real volume exists to support a second dimension
+without starving both of sample size.
 
 **0.5.17 (2026-08-22, medior) — SMM-35: the assistant's "social summary" read; no social write
 reachable from chat this pass.** Worktree was current at `main`'s tip at cut time (`git log
