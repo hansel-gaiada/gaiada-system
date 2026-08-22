@@ -863,6 +863,41 @@ const configBase = {
     contentBrief: {
       maxVariantsPerCall: Number(process.env.SOCIAL_CONTENT_BRIEF_MAX_VARIANTS_PER_CALL ?? 20),
     },
+    // SMM-27 — best-time-to-post: a nightly CLASSICAL STATS sweep (best-time-job.ts), never a
+    // gateway call — no model, no prompt, deliberate per the ticket's own binding instruction.
+    // ── NO DATA EXISTS, AND WON'T SOON (D-23) — every threshold below is a SELF-IMPOSED config
+    // default with its own documented rationale, never a constant that reads as measured, per the
+    // ticket's own instruction ("state a minimum-observations threshold as CONFIG... never a
+    // constant that reads as measured"). The chip and the cache row both distinguish
+    // insufficient_evidence (below threshold) from unsupported (the driver cannot ever report
+    // per-post engagement) from suggested (a real answer) — three distinct facts, never one
+    // boolean or a bare zero (`capabilities.ts`'s own discipline, applied to a statistic).
+    bestTime: {
+      enabled: process.env.SOCIAL_BEST_TIME_ENABLED === "1" || process.env.SOCIAL_BEST_TIME_ENABLED === "true",
+      // Once a day is enough — the input data (SMM-21's nightly metrics pull) itself only refreshes
+      // once a day, so recomputing more often would re-derive the identical answer.
+      intervalMs: Number(process.env.SOCIAL_BEST_TIME_INTERVAL_MS ?? 24 * 3600 * 1000),
+      // How far back to sample published posts. Longer than `metrics-job.ts`'s own 30-day
+      // REFRESH window on purpose: that window is about keeping an already-measured post's numbers
+      // current, this one is about accumulating enough SAMPLE SIZE to say anything at all while
+      // volume is sparse. 180 days is a deliberately generous starting point to reach the sample
+      // thresholds below sooner once a real account connects; revisit once real posting cadence is
+      // observed.
+      lookbackDays: Number(process.env.SOCIAL_BEST_TIME_LOOKBACK_DAYS ?? 180),
+      // THE THRESHOLD THE TICKET BRIEF ASKS FOR BY NAME. Below this many measured, published posts
+      // for an account, NO suggestion is computed — status stays 'insufficient_evidence' rather than
+      // ranking noise. Chosen as a classical-stats rule-of-thumb floor (you need at least a small
+      // handful of independent observations before a mean says more than the underlying variance
+      // does), NOT a claimed significance level and NOT vendor guidance — there is no vendor
+      // guidance for "how many of your own posts before a best-hour claim is trustworthy". Easy to
+      // raise once real volume exists to tune it against.
+      minMeasuredPosts: Number(process.env.SOCIAL_BEST_TIME_MIN_MEASURED_POSTS ?? 5),
+      // A SECOND, independent floor on the WINNING hour bucket itself: even once the account clears
+      // `minMeasuredPosts` overall, a single lucky post sitting alone in one hour must not "win" that
+      // hour outright just because every other hour has zero posts. The winning bucket must carry at
+      // least this many of its own measured posts before its average is trusted as the answer.
+      minBucketPosts: Number(process.env.SOCIAL_BEST_TIME_MIN_BUCKET_POSTS ?? 2),
+    },
     // SMM-22 — X metering (design D-9, addendum). The stop-loss chain's tenant + global tiers, X's
     // own per-post price, and the barred-twin unbar gate. Mirrors search's own moneyEnv/numericEnv
     // convention byte-for-byte (design's own words: "byte-for-byte the SEO pattern").
