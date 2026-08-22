@@ -30,9 +30,16 @@ alerting:
         - targets: ["alertmanager:9093"]
 
 scrape_configs:
+  # MSO-01 (2026-08-21): this job had NO `host` label at all -- every gda-aicenter series is
+  # host-less too (§4 of the design doc), so before this change the ONLY thing distinguishing
+  # SumoPod's own series from a second agent-bundle host would have been this job's absence of a
+  # collision, which is not a label, it's luck. Fixed the same way as the `node` job below.
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+        labels:
+          host: sumopod
+          env: ops
 
   # This VPS's own host metrics. Note the job name matches gda-aicenter's `node` job so the existing
   # DiskSpaceLow / DiskWillFillIn24h rules apply to BOTH boxes with no rule changes -- the instance
@@ -43,3 +50,4 @@ scrape_configs:
       - targets: ["node-exporter:9100"]
         labels:
           host: sumopod
+          env: ops
