@@ -72,6 +72,44 @@ Five constraints, proposed as **binding design rules**, not preferences:
 If any of these five is negotiated away, that changes what the feature is, and it should be a
 deliberate, recorded decision rather than a drift.
 
+### 2.1 This lands on compliance documents that already exist
+
+Checked 2026-08-23. `legal/` already carries `employee-monitoring-notice.md`, `dpia.md`, `lia.md`,
+`ropa.md`, `privacy-notice.md` and `retention-and-dsr-procedure.md`. The presence feature is **not
+covered by any of them**, and that is a shipping blocker, not paperwork to do afterwards.
+
+**The existing notice is scoped to one thing only** — the WhatsApp work-group summarisation bot.
+It makes an explicit promise to staff:
+
+> the Bot is **not** used to evaluate, manage, discipline, or make decisions about you as an
+> individual. It is a project tool, not a performance-monitoring tool.
+
+That promise is *already on record with employees*. The five rules in §2 are what keep the office
+consistent with it — rule 3 (no derived-activity metrics) and rule 4 (no manager view) are
+precisely the commitments that sentence implies. Shipping a presence map that violates either
+would not merely be a design regression; it would contradict a notice the company has already
+given its own staff, which is a materially worse failure.
+
+**Required before O1 ships to real users** (not before it is built):
+
+1. **Monitoring notice** — a new section covering presence: what is shown, to whom, that it is
+   opt-in, and that no history is retained. Both Part A (short in-group notice) and Part B.
+2. **ROPA entry** — presence is a new processing activity with its own purpose, legal basis and
+   retention. Retention is the easy part: *none*, by construction.
+3. **DPIA addendum** — location-of-person data raises the risk tier even when ephemeral. The five
+   rules are the mitigations; write them down as such, because a mitigation that lives only in a
+   design doc is not a mitigation.
+4. **Legal basis** — presence is opt-in, so consent, not legitimate interests. That means the
+   `lia.md` route does **not** apply here, and consent must be genuinely withdrawable (rule 1).
+   Note the trap: consent obtained from an employee is weak by default because of the power
+   imbalance, which is exactly why rule 1 requires that opting out be invisible to others.
+
+**Rule 2 is what makes all of this cheap.** Because presence is a Redis key with a TTL and never
+becomes a queryable record, the retention answer is "nothing is retained", the DSR answer is
+"there is nothing to export", and the DPIA risk drops accordingly. Had presence been a table, each
+of those turns into real, recurring work. This is the clearest example in the whole programme of a
+storage decision being a compliance decision.
+
 ---
 
 ## 3. Honesty carries over
