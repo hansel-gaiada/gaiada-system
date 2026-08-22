@@ -108,7 +108,7 @@ export class LinkedInOAuthCallbackController {
     // THE atomic single-use claim. A replayed (already-consumed) or cross-network state throws
     // SocialOAuthStateError here — mapped to a typed 400 by SocialOAuthErrorFilter, never a generic
     // 500 and never a silent second success.
-    const consumed = await consumeSocialOAuthState(state, { network: "linkedin" });
+    const consumed = await consumeSocialOAuthState(state, { network: "linkedin", principalUserId: req.principal.userId });
     return await completeLinkedInConnect(consumed.tenantId, consumed.accountId, { code, actorId: req.principal.userId });
   }
 }

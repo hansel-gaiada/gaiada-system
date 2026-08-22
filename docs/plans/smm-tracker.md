@@ -2575,10 +2575,16 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   the message names widening the port as the real fix. The port signature is deliberately unchanged —
   that stays the architect's call. Also corrected a fixture (`"yt-video-1"`, 3 uses) that no real
   YouTube id could look like; a fixture that cannot exist is part of why the fallback read as safe.
-- **NEW (opened 2026-08-23, senior-be):** `social_oauth_states.created_by` is stored for audit but is
-  NOT compared against the calling principal at consume time. `core/google-oauth/state.ts`'s own
-  login-CSRF defence does make that comparison (`principal_mismatch`), so this is a known asymmetry
-  rather than a design choice — the seat named it rather than absorbing it. Small and self-contained.
+- ~~`social_oauth_states.created_by` is stored for audit but is NOT compared against the calling
+  principal at consume time~~ — **CLOSED 2026-08-23** (module `0.5.26`). `principal_mismatch` now
+  refused. The attack Cerbos cannot see: two principals may both hold `connect` on the tenant, so the
+  wrong thing is the SWAP (B finishing A's ceremony, binding B's account into A's slot), and only the
+  row's provenance detects it. `principalUserId` is REQUIRED, not optional, so a call site cannot
+  silently skip the check — `tsc` enumerated every caller. Comparison is `?? null` both sides:
+  principal-less stays consumable by principal-less, principal-bound presented with `null` refuses.
+  Proven red-then-green (3 of 5 new tests go red without the check; the two null-matching ones stay
+  green, so they are not vacuous either way). Two fixture facts that would each have masked the test:
+  `created_by` is a `uuid` AND carries an FK to `users`, so real user rows are required.
 - No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)
   — **STILL OPEN, and deliberately not built on 2026-08-23.** It is the only one of these eight that is
   a FEATURE GAP rather than a defect, and it cannot be built without decisions that are not mine to

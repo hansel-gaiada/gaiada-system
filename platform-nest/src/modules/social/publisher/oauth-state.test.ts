@@ -43,7 +43,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import { withTenants, newId } from "../../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../../testing/setup";
-import { createCompany } from "../../../testing/fixtures";
+import { createCompany, createUser } from "../../../testing/fixtures";
 import { config } from "../../../config";
 import {
   mintSocialOAuthState, consumeSocialOAuthState, purgeSocialOAuthStates, wireSocialOAuthStateCustody,
@@ -71,6 +71,12 @@ async function makePendingAccount(tenant: string, network: "linkedin" | "youtube
     );
   }, MODULES);
   return accId;
+}
+
+/** A real `users` row — `social_oauth_states.created_by` carries an FK to it, so a synthetic id will
+ *  not do. Unique email per call because `users.email` is globally unique. */
+async function makeUser(): Promise<string> {
+  return createUser(`oauth-state-${newId()}@t.test`);
 }
 
 async function countRows(tenant: string): Promise<number> {
@@ -107,7 +113,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     const T = await freshCompany();
     const accountId = await makePendingAccount(T, "linkedin");
     const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: null });
-    const consumed = await consumeSocialOAuthState(token, { network: "linkedin" });
+    const consumed = await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
     expect(consumed).toEqual({ stateId: expect.any(String), tenantId: T, accountId, network: "linkedin", createdBy: null });
     expect(await countRows(T)).toBe(1); // the row survives, marked consumed — see test (7) for the purge
   });
@@ -118,7 +124,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     const accountId = await makePendingAccount(T, "linkedin");
     const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: null });
 
-    const first = await consumeSocialOAuthState(token, { network: "linkedin" });
+    const first = await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
     expect(first.accountId).toBe(accountId);
 
     // THE regression: presenting the EXACT SAME captured token again — exactly what an attacker who
@@ -126,9 +132,9 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     // second success (the pre-fix defect: see this file's own header) and never a generic 500 (the
     // typed SocialOAuthStateError is mapped to 400 by SocialOAuthErrorFilter, proven at the unit
     // level here since that filter is exercised elsewhere).
-    await expect(consumeSocialOAuthState(token, { network: "linkedin" })).rejects.toBeInstanceOf(SocialOAuthStateError);
+    await expect(consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null })).rejects.toBeInstanceOf(SocialOAuthStateError);
     try {
-      await consumeSocialOAuthState(token, { network: "linkedin" });
+      await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
       expect.unreachable("a replayed state must never resolve successfully");
     } catch (e) {
       expect((e as SocialOAuthStateError).reason).toBe("unknown_expired_or_consumed");
@@ -136,7 +142,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
 
     // A third, fourth, Nth replay attempt — not just "the second call" — all refused identically.
     for (let i = 0; i < 3; i += 1) {
-      await expect(consumeSocialOAuthState(token, { network: "linkedin" })).rejects.toBeInstanceOf(SocialOAuthStateError);
+      await expect(consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null })).rejects.toBeInstanceOf(SocialOAuthStateError);
     }
   });
 
@@ -147,8 +153,8 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: null });
 
     const results = await Promise.allSettled([
-      consumeSocialOAuthState(token, { network: "linkedin" }),
-      consumeSocialOAuthState(token, { network: "linkedin" }),
+      consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null }),
+      consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null }),
     ]);
     const fulfilled = results.filter((r) => r.status === "fulfilled");
     const rejected = results.filter((r) => r.status === "rejected");
@@ -168,16 +174,16 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     // a real stateId matched with a real-but-different tenantId still fails `timingSafeEqual`.
     const parts = legit.split(".");
     const forged = `${parts[0]}.${parts[1]}.${Buffer.from(other, "utf8").toString("base64url")}.${parts[3]}`;
-    await expect(consumeSocialOAuthState(forged, { network: "linkedin" })).rejects.toThrow(SocialOAuthStateError);
+    await expect(consumeSocialOAuthState(forged, { network: "linkedin", principalUserId: null })).rejects.toThrow(SocialOAuthStateError);
     try {
-      await consumeSocialOAuthState(forged, { network: "linkedin" });
+      await consumeSocialOAuthState(forged, { network: "linkedin", principalUserId: null });
     } catch (e) {
       expect((e as SocialOAuthStateError).reason).toBe("bad_signature");
     }
   });
 
   it("refuses a malformed token", async () => {
-    await expect(consumeSocialOAuthState("not-a-real-token", { network: "linkedin" })).rejects.toBeInstanceOf(SocialOAuthStateError);
+    await expect(consumeSocialOAuthState("not-a-real-token", { network: "linkedin", principalUserId: null })).rejects.toBeInstanceOf(SocialOAuthStateError);
   });
 
   // ══ (3) EXPIRY ═══════════════════════════════════════════════════════════════════════════════
@@ -192,9 +198,9 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     // comparison at consume time does NOT — mocking JS time alone would desync the two and either
     // falsely pass or falsely fail depending on which side of real "now" the mock lands on.
     await withTenants([T], (c) => c.query(`UPDATE social_oauth_states SET expires_at = now() - interval '1 minute'`), MODULES);
-    await expect(consumeSocialOAuthState(token, { network: "linkedin" })).rejects.toBeInstanceOf(SocialOAuthStateError);
+    await expect(consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null })).rejects.toBeInstanceOf(SocialOAuthStateError);
     try {
-      await consumeSocialOAuthState(token, { network: "linkedin" });
+      await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
     } catch (e) {
       expect((e as SocialOAuthStateError).reason).toBe("unknown_expired_or_consumed");
     }
@@ -208,7 +214,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: null });
 
     try {
-      await consumeSocialOAuthState(token, { network: "youtube" });
+      await consumeSocialOAuthState(token, { network: "youtube", principalUserId: null });
       expect.unreachable("a linkedin state must never verify at the youtube callback route");
     } catch (e) {
       expect((e as SocialOAuthStateError).reason).toBe("network_mismatch");
@@ -217,7 +223,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     // The safe direction (this file's own header): the claim already happened, so a SUBSEQUENT
     // attempt — even against the CORRECT network — is now a replay, not a fresh network_mismatch.
     try {
-      await consumeSocialOAuthState(token, { network: "linkedin" });
+      await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
       expect.unreachable("the state was already claimed by the mismatched attempt above");
     } catch (e) {
       expect((e as SocialOAuthStateError).reason).toBe("unknown_expired_or_consumed");
@@ -238,7 +244,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
 
     // The token still consumes correctly against its OWN tenant (A) — proves this is a real
     // isolation property, not an accidental total failure.
-    const consumed = await consumeSocialOAuthState(token, { network: "linkedin" });
+    const consumed = await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
     expect(consumed.tenantId).toBe(A);
   });
 
@@ -251,7 +257,7 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: null });
     // Consumed WHILE still valid — proves the purge deletes a CONSUMED-and-expired row too, not only
     // a never-consumed one.
-    await consumeSocialOAuthState(token, { network: "linkedin" });
+    await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
     // Force it into the past against Postgres's OWN clock (see the expiry test's own comment on why
     // `vi.useFakeTimers()` is the wrong tool here) — simulates "time has since elapsed".
     await withTenants([T], (c) => c.query(`UPDATE social_oauth_states SET expires_at = now() - interval '1 minute'`), MODULES);
@@ -272,4 +278,68 @@ describe.skipIf(!TEST_URL)("Security follow-up · social_oauth_states — DB-bac
     expect(counts).toEqual({ purged: 0 });
     expect(await countRows(T)).toBe(1);
   });
+
+  // ══ (8) PRINCIPAL BINDING — the deferred follow-up, now closed ═══════════════════════════════════
+  //
+  // Cerbos cannot refuse this on its own: two principals may BOTH legitimately hold `connect` on the
+  // same tenant, so what is wrong is not the permission but the SWAP — B finishing the ceremony A
+  // started, binding B's account into the slot A was connecting. Only the row's own provenance sees it.
+  it("refuses principal_mismatch when a DIFFERENT principal presents the state", async () => {
+    const T = await freshCompany();
+    const accountId = await makePendingAccount(T, "linkedin");
+    const userA = await makeUser(), userB = await makeUser();
+    const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: userA });
+    await expect(
+      consumeSocialOAuthState(token, { network: "linkedin", principalUserId: userB }),
+    ).rejects.toMatchObject({ reason: "principal_mismatch" });
+  });
+
+  it("the originating principal CAN consume its own state — not a blanket refusal", async () => {
+    const T = await freshCompany();
+    const accountId = await makePendingAccount(T, "linkedin");
+    const userA = await makeUser(), userB = await makeUser();
+    const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: userA });
+    const consumed = await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: userA });
+    expect(consumed.accountId).toBe(accountId);
+    expect(consumed.createdBy).toBe(userA);
+  });
+
+  it("FAILS CLOSED: a principal-bound state presented with principalUserId null is refused", async () => {
+    // The direction that matters. If this passed, a call site that forgot to thread the principal
+    // through would silently skip the whole check while still reading as enforced.
+    const T = await freshCompany();
+    const accountId = await makePendingAccount(T, "linkedin");
+    const userA = await makeUser(), userB = await makeUser();
+    const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: userA });
+    await expect(
+      consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null }),
+    ).rejects.toMatchObject({ reason: "principal_mismatch" });
+  });
+
+  it("a principal-LESS state stays consumable by a principal-less caller (null matches null)", async () => {
+    // Deliberate: not every mint path has a principal, and this must not become a de-facto
+    // requirement for one. Pins the `?? null` on both sides.
+    const T = await freshCompany();
+    const accountId = await makePendingAccount(T, "linkedin");
+    const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: null });
+    const consumed = await consumeSocialOAuthState(token, { network: "linkedin", principalUserId: null });
+    expect(consumed.createdBy).toBeNull();
+  });
+
+  it("a mismatched principal still SPENDS the state — the row is claimed before the check", async () => {
+    // Documents the ordering honestly: the atomic UPDATE runs first, so a refused attempt has still
+    // consumed the token. That is the safe direction — a state fed into a failed callback is exactly
+    // the one an attacker would retry — but the rightful principal must restart the ceremony.
+    const T = await freshCompany();
+    const accountId = await makePendingAccount(T, "linkedin");
+    const userA = await makeUser(), userB = await makeUser();
+    const token = await mintSocialOAuthState({ tenantId: T, accountId, network: "linkedin", createdBy: userA });
+    await expect(
+      consumeSocialOAuthState(token, { network: "linkedin", principalUserId: userB }),
+    ).rejects.toMatchObject({ reason: "principal_mismatch" });
+    await expect(
+      consumeSocialOAuthState(token, { network: "linkedin", principalUserId: userA }),
+    ).rejects.toMatchObject({ reason: "unknown_expired_or_consumed" });
+  });
+
 });

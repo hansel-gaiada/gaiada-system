@@ -37,12 +37,19 @@
 // every test that calls them directly — bypassing the state token entirely, which the pre-existing
 // test suites already do — keeps passing unmodified).
 //
-// ── WHAT IS DELIBERATELY *NOT* CLOSED HERE (named, not silently decided) ─────────────────────────────
-// `created_by` is stored on the row but NOT compared against the calling principal at consume time —
-// `core/google-oauth/state.ts`'s own A1 (login-CSRF) defense does exactly that comparison
-// (`principal_mismatch`), and this table carries the same column for the same future use, but wiring
-// the comparison in is a separate, small follow-up out of THIS one's scope (single-use replay closure
-// only) — see the migration header's own note.
+// ── `created_by` IS NOW COMPARED (this was the deferred follow-up; closed 2026-08-23) ─────────────
+// `consumeSocialOAuthState` now refuses `principal_mismatch` when the row's `created_by` is not the
+// calling principal — `core/google-oauth/state.ts`'s A1 (login-CSRF) defense, which this table always
+// carried the column for. The attack it closes: principal A starts a connect ceremony, principal B
+// (who also passes the callback's own Cerbos `connect` check for that tenant) presents A's state at
+// the callback and binds B's LinkedIn/YouTube account into the slot A was connecting. Cerbos alone
+// cannot refuse that — both are legitimately allowed to connect *something* in that tenant; what is
+// wrong is the SWAP, and only the state's own provenance can see it.
+//
+// `principalUserId` is a REQUIRED field on the `expect` argument, deliberately not optional. An
+// optional one would let a call site omit it and silently skip the comparison — an authorization
+// check that reads as enforced while enforcing nothing, a bug class this repo has hit repeatedly.
+// Required means `tsc` names every call site that has to decide.
 //
 // ── "absent ≠ zero" DISCIPLINE (this module's own central rule) ──────────────────────────────────────
 // `SocialOAuthStateFailureReason` distinguishes three DIFFERENT classes of refusal rather than
@@ -74,7 +81,8 @@ export const SOCIAL_OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes — a hum
 
 export type SocialOAuthNetwork = "linkedin" | "youtube";
 
-export type SocialOAuthStateFailureReason = "malformed" | "bad_signature" | "unknown_expired_or_consumed" | "network_mismatch";
+export type SocialOAuthStateFailureReason =
+  | "malformed" | "bad_signature" | "unknown_expired_or_consumed" | "network_mismatch" | "principal_mismatch";
 
 export class SocialOAuthStateError extends Error {
   readonly status = 400;
@@ -219,7 +227,7 @@ interface StateDbRow {
  *  retry against the OTHER network's route. */
 export async function consumeSocialOAuthState(
   token: string,
-  expect: { network: SocialOAuthNetwork },
+  expect: { network: SocialOAuthNetwork; principalUserId: string | null },
 ): Promise<ConsumedSocialOAuthState> {
   const { stateId, tenantId } = parseSocialOAuthStateToken(token);
 
@@ -244,6 +252,18 @@ export async function consumeSocialOAuthState(
     // header's "absent ≠ zero" note for why this is a deliberate anti-oracle collapse, not a silent
     // swallow of a genuine denial.
     throw new SocialOAuthStateError("unknown_expired_or_consumed");
+  }
+  // The row is ALREADY SPENT by the atomic UPDATE above, so the order of the two binding checks below
+  // carries no security weight — it only decides which honest reason the caller is told. Principal
+  // first, because "you are not the principal who started this ceremony" names a genuine
+  // cross-principal attempt, which is more actionable than a misrouted callback.
+  //
+  // `?? null` on BOTH sides on purpose: a state minted by a principal-less path (`createdBy: null`)
+  // stays consumable by a principal-less caller, and `undefined` can never accidentally equal a real
+  // user id. A row that HAS a `created_by` presented by a caller passing `null` therefore REFUSES —
+  // the fail-closed direction.
+  if ((row.created_by ?? null) !== (expect.principalUserId ?? null)) {
+    throw new SocialOAuthStateError("principal_mismatch");
   }
   if (row.network !== expect.network) throw new SocialOAuthStateError("network_mismatch");
 

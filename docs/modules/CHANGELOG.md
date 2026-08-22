@@ -11,6 +11,42 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.26` — 2026-08-23 — OAuth state is bound to the principal who started it
+
+**Fixed (security)** — closes the follow-up the previous pass named rather than absorbed:
+`social_oauth_states.created_by` was stored for audit but never compared at consume time.
+`consumeSocialOAuthState` now refuses `principal_mismatch`, the same A1 (login-CSRF) defence
+`core/google-oauth/state.ts` has always had and this table always carried the column for.
+
+**The attack it closes, and why Cerbos could not** — principal A starts a connect ceremony; principal
+B, who *also* legitimately holds `connect` on that tenant and so passes the callback's own Cerbos
+check, presents A's state and binds **B's** LinkedIn/YouTube account into the slot A was connecting.
+Both principals are authorized to connect *something* there, so no permission check can see it. What
+is wrong is the **swap**, and only the state row's own provenance can detect that.
+
+**`principalUserId` is REQUIRED on the `expect` argument, not optional.** An optional field would let
+a call site omit it and silently skip the comparison — an authorization check that reads as enforced
+while enforcing nothing, a bug class this repo has hit repeatedly. Required means `tsc` enumerates
+every call site that has to decide; it named all of them, and both real callbacks now thread
+`req.principal.userId` through.
+
+**Comparison is `?? null` on both sides**, so a state minted by a principal-less path stays consumable
+by a principal-less caller, while a principal-bound row presented with `null` **refuses** — the
+fail-closed direction, and the one that matters if a future call site forgets to thread the principal.
+
+**Ordering documented honestly** — the atomic `UPDATE` claims the row *before* either binding check,
+so a mismatched attempt has still **spent** the state and the rightful principal must restart the
+ceremony. That is the safe direction (a state fed into a failed callback is exactly the one an
+attacker would retry), and there is now a test asserting precisely that sequence rather than leaving
+it as a surprise.
+
+**Tests** — `oauth-state.test.ts` 15/15 (+5). Proven red-then-green: deleting the comparison turns
+exactly three of the five red, while the two null-matching cases stay green — showing they are not
+vacuous in the opposite direction either. Two fixture corrections were needed to get there and are
+worth noting, since both would have masked the test: `created_by` is a `uuid` **with an FK to
+`users`**, so string literals failed first on type and then on the constraint; the tests now create
+real `users` rows. `src/modules/social` 562/0/0 (36 files).
+
 ### social-media `0.5.25` — 2026-08-23 — the metered-spend panel is finally browser-driven
 
 **Added** — `e2e/social-console.spec.ts` +1 (14 total): SMM-22's usage panel was unit- and

@@ -97,7 +97,7 @@ export class YouTubeOAuthCallbackController {
     const parsed = parseSocialOAuthStateToken(state);
     await authorize(req.principal, { kind: "social_account", tenantId: parsed.tenantId, module: "social" }, "connect");
     // THE atomic single-use claim — see this file's own header.
-    const consumed = await consumeSocialOAuthState(state, { network: "youtube" });
+    const consumed = await consumeSocialOAuthState(state, { network: "youtube", principalUserId: req.principal.userId });
     return await completeYouTubeConnect(consumed.tenantId, consumed.accountId, { code, actorId: req.principal.userId });
   }
 }
