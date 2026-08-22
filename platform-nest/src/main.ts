@@ -110,6 +110,9 @@ import { startInboxPullLoop } from "./modules/social/inbox-sync-job";
 // SMM-16 — triage classification + the SLA guard. Fourth ticket to hand its registration up
 // rather than edit this file, which is why none of them have collided here.
 import { startInboxTriageLoop, startInboxSlaGuardLoop } from "./modules/social/inbox-triage-job";
+// SMM-27 — the best-time-to-post stats sweep. FIFTH social ticket to hand its registration up
+// rather than edit this file; not one of them has collided here.
+import { startBestTimePullLoop } from "./modules/social/best-time-job";
 // SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
@@ -462,6 +465,11 @@ async function bootstrap(): Promise<void> {
       registerPositionEventHandlers();
       // eslint-disable-next-line no-console
       console.log(`position reconciler on: streams [${POSITION_STREAMS.join(", ")}]`);
+    }
+    if (config.social.bestTime.enabled) {
+      startBestTimePullLoop(config.social.bestTime.intervalMs);
+      // eslint-disable-next-line no-console
+      console.log(`social best-time-to-post (smm-best-time) on: every ${config.social.bestTime.intervalMs}ms`);
     }
     if (config.social.triage.classifyEnabled) {
       startInboxTriageLoop(config.social.triage.classifyIntervalMs);

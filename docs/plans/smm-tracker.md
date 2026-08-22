@@ -99,7 +99,7 @@ a second hand-maintained list. `youtube:media_upload=direct` moves from "reporte
 "principle-safe, credential-gated only" — the SAME D-23 gap every other flip in this wave already
 carries. Module: `social-media 0.5.11 · IN PROGRESS`.
 | P3 content ops | 2 (+2 partial) | 8 |
-| P4 agents + assistant | 0 | 3 |
+| P4 agents + assistant | **3** | 3 ✅ |
 | Decision-gated | — | 3 (1 dead) |
 
 Module: `social-media 0.5.6 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
