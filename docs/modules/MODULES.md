@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.14` | IN PROGRESS | Social Media | 2026-08-21 |
+| social-media | `0.5.15` | IN PROGRESS | Social Media | 2026-08-22 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1246,7 +1246,72 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.14` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.15` · IN PROGRESS
+
+**0.5.15 (2026-08-22, senior-be) — SMM-22: X metering live — the money path, held back deliberately
+all session.** Worktree started 6 commits behind `main` (missing SMM-17's own landing entirely);
+`git merge main` (fast-forward, clean) pulled it in before any of this ticket's own code was written.
+
+**The barred twin made real, without unbarring anything by default.** `social.publishPostMetered`
+gets a genuine dispatch endpoint (`POST variants/:variantId/publish-metered`, backed by the SAME
+`dispatch.ts#dispatchApprovedPublish` the free tool uses, `toolName` threaded through — one
+implementation, not two) and a declared `McpToolDef`. `core/approval-executables.ts`'s bar on it is
+UNCHANGED by default (`config.social.usage.meteredPublishEnabled` defaults `false`). A new primitive,
+`liftBarredExecutable`, is the ONLY way the bar moves, called from exactly one config-gated site
+(`registerSocialMeteredExecutableApprovalIfEnabled`) that THROWS AT BOOT if the flag is on while X's
+per-post price is unconfigured — an auto-executing money tool with no price is the exact failure
+this ticket exists to prevent. `cerbos/policies/resource_mcp_tool.yaml` deliberately left untouched
+(named as a follow-up for whoever first turns the flag on for real).
+
+**The D-9 stop-loss chain's tenant + global tiers, proven at BOTH checkpoints — not one.** The
+precondition (`publish-precondition.ts`'s budget stage) now evaluates engagement → tenant → global
+via one new pure function (`usage-ledger.ts#evaluateUsageBudget`), reused by `dispatch.ts`'s own
+reservation — a per-ENGAGEMENT advisory-lock choke-point (`SOCIAL_USAGE_LEDGER_LOCK_NS`, a new
+namespace) that re-sums all three tiers ONE LAST TIME and inserts the `posted` ledger row atomically,
+before any network call. Proven airtight two ways: a deterministic sequential-reservation test
+(`usage-ledger.test.ts`) and a REAL concurrent `Promise.all` race between two dispatches on one
+engagement (`dispatch.test.ts`'s (M5), re-run 5× with no flake) — exactly one succeeds, never both.
+**A real defect found and fixed before shipping:** the first version applied the tenant/global tiers
+to EVERY publish including $0 ones, which would have let one tenant's X overspend freeze every OTHER
+tenant's free posting platform-wide. Fixed to gate the two new tiers on an actually-metered network
+only; a $0 post's only budget exposure remains the pre-existing, unchanged, engagement-scoped
+circuit breaker SMM-09 already shipped.
+
+**X's per-post price is a config fact, never a literal.**
+`config.social.usage.xPerPostCostUsd`/`xPerPostWithLinkCostUsd` (`moneyEnv`, no default — design
+§05's own figures are explicitly "re-verify at build time"). `media-rules.ts#estimateCostUsd`'s
+contract changed from a bare `number` to `{ok:true,costUsd}|{ok:false,reason:"x_price_not_configured"}`
+— an absent price now REFUSES everywhere it is consulted (precondition, reservation, every
+composer/approval-card read), never a silent $0. The global cap has design §05's own documented
+default ($100/mo, `numericEnv`); the tenant cap is optional, unset-skips-tier, mirroring `search`'s
+own convention.
+
+**The ledger's own lifecycle.** `dispatch.ts` inserts `posted` at the reservation; a synchronous
+dispatch failure releases it (`markUsageLedgerFailed`, cost → 0) before this file even returns.
+`post-status-sync-job.ts`'s EXISTING reconcile (`applyPostStatuses`) is extended to true a metered
+row up to `completed` (published) or `failed` (cost → 0, for `failed`/`cancelled`) in the SAME
+transaction as the variant's own authoritative status flip — X's price is flat, so true-up moves
+status only, never an amount.
+
+**The approval card + usage panel.** `GET .../publish-preconditions` now returns
+`estimatedCostUsd`/`costUnavailableReason` (computed fresh, `null` only for an unpriced X variant),
+rendered by `VariantCard.tsx`'s existing "Check now" preview. New `GET engagements/:id/usage`
+(`social.ledger.read`, already 0106-forward-seeded) backs a new `UsagePanel.tsx` on the Analytics tab
+— **NOT browser-driven this pass**, unit/type-checked + a DEMO_MODE fixture only, named as a real gap.
+
+No migration (0105's ledger + budget column already anticipated this). `main.ts` — nothing to hand
+over; no new scheduled loop, no new module registration, the first SMM ticket in this program with a
+genuine "no line to apply" answer.
+
+Test counts: **591 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `d14-smm-17-social-reply-registry.test.ts` + the new `d14-smm-22-social-metered-publish-registry.test.ts`
+(directly measured baseline for this exact set: 552, +39 new — exact arithmetic, cross-checked by two
+independent clean runs). `tsc --noEmit` clean both sides. All four migration/withTenants linters
+green (still 130 migrations; the new cross-tenant global sum needed no lint-withtenants allowlist
+entry — implemented as a per-tenant fan-out instead, the lint's own documented preferred
+alternative). `test:iam-chain-alignment` green (25/25, unaffected — `social.ledger.read` was already
+catalogued from SMM-30's forward-seeding). `platform-ui`: **2592 / 0 / 0**, full suite, twice. Full
+detail: `docs/plans/smm-tracker.md`'s SMM-22 evidence block.
 
 **0.5.14 (2026-08-21, senior-be) — SMM-17: the inbox reply flow, draft → WS4 → send, its own D14
 registry entry built by REUSING SMM-09's pattern rather than reinventing it.** Worktree started nine

@@ -41,6 +41,10 @@ import { evaluatePublishPreconditionWithClientReview } from "../modules/social/c
 // SMM-17 — the reply gate, built by reusing SMM-09's pattern rather than reinventing it. See this
 // file's own SMM-17 section, below the SMM-09 one, for the full reasoning.
 import { SOCIAL_REPLY_TOOL, replyLockKey, evaluateReplyPrecondition } from "../modules/social/reply-precondition";
+// SMM-22 — the config-gated bar lift for social.publishPostMetered. See this file's own SMM-22
+// section for the full reasoning; `resolveXPricing` is the money guard the boot check verifies.
+import { config } from "../config";
+import { resolveXPricing } from "../modules/social/usage-ledger";
 
 /** The result of a server-side precondition re-evaluation. `reason` is a TYPED token (snake_case,
  *  e.g. `run_blocked`, `stage_already_deployed`, `run_not_found`) — it is stored verbatim after the
@@ -255,6 +259,20 @@ export function getBarredExecutable(toolName: string): BarredExecutableEntry | u
   return barred.get(toolName);
 }
 
+/**
+ * SMM-22 — THE ONE DELIBERATE WAY A BAR MAY BE LIFTED. Every other rule in this file stands: a bar
+ * is a decision, `registerExecutableApproval` still throws for a barred name (this function is what
+ * makes a name STOP being barred, not a bypass of that check), and this must be called ONLY from a
+ * config-gated call site that has ALREADY verified the money guards a bar exists to protect — see
+ * `registerSocialMeteredExecutableApprovalIfEnabled` below for the one caller.
+ *
+ * No-op if the name was never barred (idempotent for the same reason `resetExecutableApprovals`'s
+ * clear operations are — a boot-time call site may run more than once in a test process).
+ */
+export function liftBarredExecutable(toolName: string): void {
+  barred.delete(toolName);
+}
+
 export function isBarredExecutable(toolName: string): boolean {
   return barred.has(toolName);
 }
@@ -288,8 +306,10 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
  * `registerPmExecutableApprovals()`; the webdev entry, `registerWebdevExecutableApprovals()`; the
  * social publish entry AND its bar, `registerSocialExecutableApprovals()`; the social reply entry,
- * `registerSocialReplyExecutableApprovals()` — either way, do not hand-roll a second copy of their
- * lock/precondition.
+ * `registerSocialReplyExecutableApprovals()`; and (SMM-22) whatever `config.social.usage.
+ * meteredPublishEnabled` implies for `social.publishPostMetered` (barred, or lifted-and-registered),
+ * `registerSocialMeteredExecutableApprovalIfEnabled()` — either way, do not hand-roll a second copy
+ * of their lock/precondition.
  *
  * ⚠ It clears the BARRED map too. That is the right direction for a test seam (a leftover bar would
  * make an unrelated suite's registration throw), and it is safe because the bar's real enforcement
@@ -937,6 +957,110 @@ export function registerSocialReplyExecutableApprovals(): void {
 }
 
 registerSocialReplyExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// SMM-22 — the config-gated, explicit lift of `social.publishPostMetered`'s bar.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/blueprints/smm-design-addendum-2026-08-12.md — D-9 (the stop-loss chain), D-14
+// (the money split), as AMENDED by SMM-22's own ticket row: "makes the metered path real without
+// unbarring anything by default."
+//
+// ── THE DEFAULT POSTURE IS BYTE-IDENTICAL TO BEFORE THIS TICKET ─────────────────────────────────
+// `config.social.usage.meteredPublishEnabled` defaults to `false` (config.ts). With it false, this
+// section does EXACTLY what SMM-09's `registerSocialExecutableApprovals()` already did: bars
+// `SOCIAL_PUBLISH_METERED_TOOL` and registers nothing for it. No deployment that has not explicitly
+// set `SOCIAL_METERED_PUBLISH_ENABLED=true` observes ANY behavioural change from this ticket on the
+// publish-registry surface.
+//
+// ── THE LIFT IS EXPLICIT, CONFIGURED, AND REFUSES LOUDLY WHEN THE MONEY GUARD IS ABSENT ─────────
+// Flipping the flag on is a deliberate deployment decision. The ONE guard that matters is X's own
+// per-post price (`resolveXPricing()`, usage-ledger.ts): an auto-executing money-spending tool with
+// no configured price is exactly the "under-count" failure direction this whole ticket exists to
+// prevent (a $0-priced post would sail through every stop-loss tier for free). So this section
+// THROWS AT MODULE LOAD — a boot failure, not a warning, matching this codebase's own established
+// doctrine for this exact class of misconfiguration (platform-nest/CLAUDE.md's "Boot-time
+// refusals" section: "a request-time failure happens AFTER a one-shot approval has been spent" — a
+// mis-registered auto-executing metered tool is precisely that risk, caught before any approval can
+// ever be filed against it) — when the flag is true and the price is unconfigured.
+//
+// The tenant/global CAPS are deliberately NOT part of this boot guard: `globalMonthlyCapUsd` always
+// has a value (config.ts's own `numericEnv` default, $100/mo per design §05) and `tenantMonthlyCapUsd`
+// is OPTIONAL BY DESIGN (D-9's own "unset -> tier skipped" convention, mirrored from search) — an
+// operator who has deliberately left the tenant tier unset is not misconfigured, they are relying on
+// the engagement + global tiers, exactly as the chain's own design permits.
+//
+// ── WHAT THIS DOES NOT DO ─────────────────────────────────────────────────────────────────────────
+// It does not touch `cerbos/policies/resource_mcp_tool.yaml`. D14-13's "both halves move together"
+// doctrine still applies the day a deployment ALSO wants an `origin='automation'`/`'agent'` re-drive
+// of this tool admitted — that is a SEPARATE, manual policy change (the executable-tool list), left
+// for the runbook that documents turning `SOCIAL_METERED_PUBLISH_ENABLED` on, deliberately NOT made
+// here: this file is code, Cerbos policy is data, and conflating the two would make an env var
+// silently rewrite a security policy file. Until that policy change is ALSO made, a human's own
+// direct WS4 decide-and-approve of a metered post still auto-executes (this registration is what
+// makes the human-approved path complete); only an agent/automation-ORIGINATED metered proposal's
+// re-drive stays denied by Cerbos in the interim — fails CLOSED, never open, exactly as D14-13's own
+// "drift fails closed" property promises.
+//
+// ── THE PRECONDITION, LOCK KEY AND RETRY POLICY ARE SMM-09's PATTERN, REUSED VERBATIM ────────────
+// Same `publishLockKey` (keyed on `variantId`, mirrors `socialPublishLockKey` above — the variant is
+// still the unit of publication regardless of which tool dispatches it), same
+// `evaluatePublishPreconditionWithClientReview` composition (SMM-31's client-review gate still runs
+// first), same `neverAutoRetry: true` (a metered publish is an outbound public write with the SAME
+// unobservable-landed-or-not property SMM-09's own doc names — the reasoning does not become less
+// true because money is also involved). The ONLY thing that differs from `socialPublishPrecondition`
+// is the tool name threaded through, which is what makes the precondition's own
+// `metered_network_requires_metered_tool` / `metered_tool_requires_metered_network` checks resolve
+// the OTHER way for this tool.
+
+function socialMeteredPublishLockKey(toolArgs: Record<string, unknown>): string {
+  return publishLockKey(toolArgs, SOCIAL_PUBLISH_METERED_TOOL);
+}
+
+async function socialMeteredPublishPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const verdict = await evaluatePublishPreconditionWithClientReview(client, toolArgs, SOCIAL_PUBLISH_METERED_TOOL);
+  if (verdict.ok) return { ok: true };
+  return { ok: false, reason: verdict.reason };
+}
+
+/**
+ * Called once at module load (below). If `config.social.usage.meteredPublishEnabled` is false
+ * (the default), this is a no-op — SMM-09's bar, registered a moment ago by
+ * `registerSocialExecutableApprovals()`, stands untouched. If true, verifies the money guard and
+ * either THROWS (guard absent) or explicitly lifts the bar and registers the metered tool with the
+ * SAME lock/precondition/retry discipline the free tool uses.
+ *
+ * Exported for the same reason every other bootstrap in this file is: a test file that calls
+ * `resetExecutableApprovals()` (which also clears the bar `registerSocialExecutableApprovals`
+ * re-establishes) and wants THIS ticket's state back afterward should call this rather than
+ * hand-roll a second copy of the lock/precondition/guard check.
+ */
+export function registerSocialMeteredExecutableApprovalIfEnabled(): void {
+  if (!config.social.usage.meteredPublishEnabled) return;
+
+  if (!resolveXPricing()) {
+    throw new Error(
+      "SOCIAL_METERED_PUBLISH_ENABLED is true, but X's per-post price is not configured "
+      + "(SOCIAL_X_PER_POST_COST_USD / SOCIAL_X_PER_POST_WITH_LINK_COST_USD are both required). "
+      + "Refusing to boot with an auto-executing metered publish tool and no price: an unpriced "
+      + "spend is exactly the failure this gate exists to prevent. Either set both price vars, or "
+      + "leave SOCIAL_METERED_PUBLISH_ENABLED unset/false to keep social.publishPostMetered barred.",
+    );
+  }
+
+  liftBarredExecutable(SOCIAL_PUBLISH_METERED_TOOL);
+  registerExecutableApproval({
+    toolName: SOCIAL_PUBLISH_METERED_TOOL,
+    lockKey: socialMeteredPublishLockKey,
+    precondition: socialMeteredPublishPrecondition,
+    neverAutoRetry: true,
+  });
+}
+
+registerSocialMeteredExecutableApprovalIfEnabled();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // P2-07 — `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee`: JML's registry entries.

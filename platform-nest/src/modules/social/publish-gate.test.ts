@@ -33,6 +33,8 @@ import { variantArgsSha256 } from "./canonical-args";
 import {
   PUBLISH_REFUSAL, PUBLISH_PRECONDITION_STAGES, SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL,
 } from "./publish-precondition";
+// SMM-22 — the metered twin's default (barred) posture check, below.
+import { isBarredExecutable } from "../../core/approval-executables";
 
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
@@ -257,8 +259,15 @@ describe.skipIf(!TEST_URL)("SMM-09 · the publish gate over HTTP + the refusal c
 
   // SMM-10: the dispatch endpoint now exists, so `social.publishPost` is declared — from the pinned
   // `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` constant, never retyped, because that spread IS the D14
-  // gate this test pins. `social.publishPostMetered` stays undeclared and barred forever.
-  it("declares the EXECUTABLE publish tool from the pinned classification, and the metered twin STILL never appears", async () => {
+  // gate this test pins.
+  //
+  // ⚠ CORRECTED 2026-08-22 (SMM-22). This test used to say "the metered twin STILL never appears" —
+  // true when SMM-09/10 wrote it, and no longer true: SMM-22 built `social.publishPostMetered`'s own
+  // dispatch endpoint, so the module contract's own "don't declare a tool with no endpoint" rule no
+  // longer bars declaring it. What has NOT changed, and is asserted below instead, is that the twin
+  // stays BARRED from D14 auto-execution by DEFAULT (`SOCIAL_METERED_PUBLISH_ENABLED` unset) —
+  // declaring a tool and auto-executing an approval of it are two different facts.
+  it("declares BOTH the free and metered publish tools from the pinned classification; the metered twin stays barred by default", async () => {
     const tool = socialModule.mcpTools.find((t) => t.name === SOCIAL_PUBLISH_TOOL);
     expect(tool).toBeDefined();
     expect(tool).toMatchObject({
@@ -267,17 +276,29 @@ describe.skipIf(!TEST_URL)("SMM-09 · the publish gate over HTTP + the refusal c
       write: true,
       impact: "high",
     });
-    const names = socialModule.mcpTools.map((t) => t.name);
-    expect(names).not.toContain(SOCIAL_PUBLISH_METERED_TOOL);
+    const meteredTool = socialModule.mcpTools.find((t) => t.name === SOCIAL_PUBLISH_METERED_TOOL);
+    expect(meteredTool).toBeDefined();
+    expect(meteredTool).toMatchObject({
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/publish-metered",
+      write: true,
+      impact: "high",
+    });
+    // The default posture: this deployment (test config, SOCIAL_METERED_PUBLISH_ENABLED unset) has
+    // NOT lifted the bar — declaring the tool did not do that.
+    expect(isBarredExecutable(SOCIAL_PUBLISH_METERED_TOOL)).toBe(true);
     // Every declared tool still points at a real endpoint or is explicitly informational.
     for (const t of socialModule.mcpTools) {
       if (t.pathTemplate) expect(t.pathTemplate.startsWith("/api/:tenantId/modules/social")).toBe(true);
     }
     // Tool parity is only real if the declared path is a route the app actually serves — a random
     // (never-approved) variant id still reaches the REAL dispatch endpoint and refuses with a typed
-    // token, never Fastify's own "route not found" 404.
+    // token, never Fastify's own "route not found" 404. Proven for BOTH endpoints.
     const res = await post(`/api/${A}/modules/social/variants/${newId()}/publish`, {}, manager);
     expect(res.statusCode).toBe(409);
     expect(res.json()).toMatchObject({ error: "variant_not_found" });
+    const meteredRes = await post(`/api/${A}/modules/social/variants/${newId()}/publish-metered`, {}, manager);
+    expect(meteredRes.statusCode).toBe(409);
+    expect(meteredRes.json()).toMatchObject({ error: "variant_not_found" });
   });
 });

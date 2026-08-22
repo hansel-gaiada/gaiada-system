@@ -255,14 +255,25 @@ describe("YouTube quota (SMM-37) — the videos.insert bucket gates uploads, NOT
 });
 
 describe("cost estimate — the price of the click, before the click", () => {
-  it("is zero for every unmetered network", () => {
+  const pricing = { perPostUsd: 0.015, perPostWithLinkUsd: 0.2 };
+
+  it("is zero, and never refuses, for every unmetered network — even with no xPricing configured", () => {
     for (const n of NETWORKS.filter((x) => x !== "x")) {
-      expect(estimateCostUsd(n, { body: "hello https://example.com" })).toBe(0);
+      expect(estimateCostUsd(n, { body: "hello https://example.com" }, null)).toEqual({ ok: true, costUsd: 0 });
     }
   });
 
-  it("prices an X post, and prices a link post higher", () => {
-    expect(estimateCostUsd("x", { body: "hello" })).toBe(0.015);
-    expect(estimateCostUsd("x", { body: "read this https://gaiada.com" })).toBe(0.2);
+  it("prices an X post, and prices a link post higher, when xPricing is configured", () => {
+    expect(estimateCostUsd("x", { body: "hello" }, pricing)).toEqual({ ok: true, costUsd: 0.015 });
+    expect(estimateCostUsd("x", { body: "read this https://gaiada.com" }, pricing)).toEqual({ ok: true, costUsd: 0.2 });
+  });
+
+  // SMM-22 defect class #4: an absent price must refuse, not default to zero — a zero price is an
+  // unmetered spend.
+  it("refuses x_price_not_configured for X when no pricing is configured, rather than defaulting to $0", () => {
+    expect(estimateCostUsd("x", { body: "hello" }, null)).toEqual({ ok: false, reason: "x_price_not_configured" });
+    expect(estimateCostUsd("x", { body: "read this https://gaiada.com" }, null)).toEqual({
+      ok: false, reason: "x_price_not_configured",
+    });
   });
 });

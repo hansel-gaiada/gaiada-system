@@ -232,7 +232,11 @@ export interface UpdateVariantResult {
 
 export interface VariantValidationResult {
   validation: ValidationResult;
-  estimatedCostUsd: number;
+  // SMM-22: `null` only for an X-network variant whose price is unconfigured — never for any other
+  // network, which can never refuse (see media-rules.ts's estimateCostUsd contract). Render `null`
+  // as "not priced yet," never as $0 — a $0 estimate would be an unmetered-spend lie.
+  estimatedCostUsd: number | null;
+  costUnavailableReason?: "x_price_not_configured";
   network: SocialNetwork;
 }
 
@@ -323,6 +327,10 @@ export interface PublishPreconditionResult {
   stages: readonly PublishPreconditionStage[];
   tool: string;
   meteredTool: string;
+  // SMM-22 — the approval card's own estimate: the price of the click, before the click. `null`
+  // only for an unpriced X variant (`costUnavailableReason` names why) — never a $0 stand-in.
+  estimatedCostUsd: number | null;
+  costUnavailableReason?: "x_price_not_configured";
 }
 
 // ── the client-review stage (SMM-31/SMM-32, D-16) ──────────────────────────────────────────────────
@@ -803,6 +811,33 @@ export interface PostMetricRow {
   clicks: number | null;
   fetchedAt: string;
 }
+
+// ── SMM-22 — the usage panel (X metering, D-9 stop-loss chain) ───────────────────────────────────
+//
+// `GET engagements/:id/usage` (`social.controller.ts#getEngagementUsage`) — month-to-date spend
+// against all THREE tiers. `tenant.capUsd` is `null` when the deployment has not configured a
+// tenant-wide cap (D-9's own "unset -> tier skipped" convention) — render that as "no tenant cap
+// configured," NEVER as a breached/zero cap. `global.capUsd` always has a value (config.ts's own
+// documented default, $100/mo per design §05, until an operator raises it).
+export interface UsageTier {
+  mtdUsd: number;
+  capUsd: number | null;
+}
+export interface UsageSnapshot {
+  engagement: UsageTier & { capUsd: number };
+  tenant: UsageTier;
+  global: UsageTier & { capUsd: number };
+  /** The fraction of a cap at which a tier is shown as "near its limit" (config.ts's
+   *  `budgetWarnRatio`, default 0.8) — rendered, never re-derived client-side. */
+  warnRatio: number;
+}
+
+export const EMPTY_USAGE_SNAPSHOT: UsageSnapshot = {
+  engagement: { mtdUsd: 0, capUsd: 0 },
+  tenant: { mtdUsd: 0, capUsd: null },
+  global: { mtdUsd: 0, capUsd: 0 },
+  warnRatio: 0.8,
+};
 
 /** True only on a genuine Cerbos 403. Never true for a 404 (module dark / entity absent) — see
  *  `lib/social.ts`'s header for the full "403 must never fold into an empty state" rule this

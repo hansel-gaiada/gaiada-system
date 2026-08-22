@@ -42,6 +42,7 @@
 //   GET           variants/:id/publish-preconditions          -> PublishPreconditionResult (SMM-09 dry run; verdict is DATA on a 200, never thrown)
 //   GET           metrics/daily                                -> {series: DailyMetricRow[]}  (SMM-21; engagementId REQUIRED, ?accountId=&from=&to=)
 //   GET           metrics/posts                                -> {posts: PostMetricRow[]}    (SMM-21; engagementId REQUIRED; latest snapshot per variant)
+//   GET           engagements/:id/usage                        -> UsageSnapshot            (SMM-22; X metering month-to-date vs the D-9 three-tier chain)
 //   GET           engagements/:id/asset-library                -> AssetLibrary            (SMM-20 — files/Drive/Studio creative_assets, attach-only)
 //   POST          variants/:id/media/attach                    -> AttachMediaResult        (SMM-20; edit invalidates approval, same as PATCH variants/:id)
 //   GET           publisher/status                              -> PublisherStatus         (SMM-05; THIS ticket's first reader for it — see `getPublisherStatus`)
@@ -80,12 +81,13 @@
 import { platformFetch, PlatformError } from "./platform";
 import {
   EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY, UNCONFIGURED_PUBLISHER_STATUS,
+  EMPTY_USAGE_SNAPSHOT,
 } from "./socialShared";
 import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
   SocialCampaign, SocialKpiTarget, SocialPost, SocialPostStatus, SocialPostDetail,
   VariantValidationResult, SocialAccount, PublishPreconditionResult, ClientReviewState,
-  DailyMetricRow, PostMetricRow,
+  DailyMetricRow, PostMetricRow, UsageSnapshot,
   AssetLibrary,
   PublisherStatus, InboxThread, InboxMessage, ReplySendPreconditionResult,
 } from "./socialShared";
@@ -269,6 +271,17 @@ export const listPostMetrics = async (
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/metrics/posts?${qs.toString()}`, u), { posts: [] });
   const obj = asObject<{ posts: unknown }>(r.data);
   return { ...r, data: asArray<PostMetricRow>(obj?.posts) };
+};
+
+// ── usage panel (SMM-22, X metering) ───────────────────────────────────────────────────────────
+//
+// `GET engagements/:id/usage` (`social.ledger.read`) — read-only, computes no budget decision
+// itself; the SAME D-9 arithmetic the publish gate's budget stage evaluates. A 404 (engagement
+// absent) degrades to the empty snapshot, same as `getEngagementScope`'s own EMPTY_SCOPE fallback.
+
+export const getEngagementUsage = async (u: string, t: string, engagementId: string): Promise<Guarded<UsageSnapshot>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/engagements/${engagementId}/usage`, u), EMPTY_USAGE_SNAPSHOT);
+  return { ...r, data: asObject<UsageSnapshot>(r.data) ?? EMPTY_USAGE_SNAPSHOT };
 };
 
 // ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ─────────────────

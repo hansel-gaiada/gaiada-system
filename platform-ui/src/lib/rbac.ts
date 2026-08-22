@@ -208,6 +208,14 @@ export const CAPABILITIES = [
   "social.client_review.read",     // view client sign-off state on a variant (Cerbos `read`)
   "social.client_review.request",  // ask the client to sign off, or re-ask after changes (Cerbos `request`)
   "social.client_review.withdraw", // retract a pending ask (Cerbos `withdraw`) — manager-tier only
+  // ── the usage panel (SMM-22, X metering) — Cerbos kind `social_ledger`, migration `0106`.
+  // Verified directly against 0106's role_permission seed rows: `social.ledger.read` is held by
+  // social_staff/social_manager/company_admin/manager/platform_admin/group_executive — "a
+  // department that cannot see its own spend cannot manage it" (resource_social_ledger.yaml's own
+  // header). `social.ledger.admin` (override a stop-loss) is deliberately ABSENT here: no override
+  // endpoint exists yet, same "don't declare a permission before its endpoint exists" rule this
+  // file already follows for `social.client_review.*`/`social.report.*`.
+  "social.ledger.read",
   // ── the engagement inbox (SMM-15/16/17/18) — Cerbos kind `social_inbox`, migration `0106`.
   // Verified directly against `resource_social_inbox.yaml` + `0106_iam_social_permissions.sql`'s
   // role_permission seed rows: `company_admin`/`manager`/`platform_admin`/`social_manager`/
@@ -283,6 +291,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
     // the engagement inbox (SMM-15/16/17/18) — 0106 seeds company_admin all four inbox actions.
     "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
+    // the usage panel (SMM-22) — 0106 seeds company_admin BOTH social.ledger.read AND .admin, but
+    // only `.read` is declared on the module contract yet (no override endpoint exists).
+    "social.ledger.read",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
     // company-grain / seal / recompute rows read "exec"; resource_report_period.yaml's header
     // establishes that §6.2's "lead" there means the COMPANY's lead, not a per-department manager).
@@ -347,6 +358,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
     // the engagement inbox (SMM-15/16/17/18) — 0106 seeds manager all four inbox actions.
     "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
+    // the usage panel (SMM-22) — 0106 seeds manager `read` only (NOT `.admin` — see resource_social_
+    // ledger.yaml's own header: the override sits one tier up, with company_admin).
+    "social.ledger.read",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
@@ -446,6 +460,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   social_staff: [
     "social.view", "social.manage", "people.directory", "social.client_review.read", "social.client_review.request",
     "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
+    // the usage panel (SMM-22) — 0106 seeds social_staff `read` ("a department that cannot see its
+    // own spend cannot manage it" — resource_social_ledger.yaml's own header, staff-tier by design).
+    "social.ledger.read",
   ],
   // social_manager = Cerbos module_manager: every social_staff permission PLUS
   // social.engagement.create/update/delete/set_scope and social.post.delete/publish/cancel/
@@ -457,6 +474,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.view", "social.manage", "social.scope.write", "social.post.delete",
     "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
     "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
+    // the usage panel (SMM-22) — 0106 seeds social_manager `read` (NOT `.admin`, same override-sits-
+    // one-tier-up reasoning as `manager` above).
+    "social.ledger.read",
   ],
   // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
   // — §8's person-grain cell for this column ("only persons acting under the assignment, via the

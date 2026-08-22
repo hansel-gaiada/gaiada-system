@@ -11,6 +11,63 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.15` — 2026-08-22 — SMM-22: X metering live — the money path
+
+**Added**
+- `POST variants/:variantId/publish-metered` — the metered twin's own dispatch endpoint, backed by
+  the SAME `dispatch.ts#dispatchApprovedPublish` as the free tool. `social.publishPostMetered` gets
+  its first real `McpToolDef`.
+- `GET engagements/:engagementId/usage` (`social.ledger.read`) — month-to-date spend vs all three
+  D-9 stop-loss tiers (engagement/tenant/global). New `UsagePanel.tsx` on the Analytics tab.
+- `usage-ledger.ts` (new file): the D-9 three-tier `evaluateUsageBudget` arithmetic, the ledger
+  read/write surface, and `reserveUsageSpend` — a per-engagement advisory-lock reservation that
+  closes the TOCTOU race between two concurrent metered dispatches.
+- `config.social.usage.*` — X's per-post price (`SOCIAL_X_PER_POST_COST_USD`/
+  `SOCIAL_X_PER_POST_WITH_LINK_COST_USD`, no default), the tenant cap (optional) and global cap
+  (documented $100/mo default, design §05), and `SOCIAL_METERED_PUBLISH_ENABLED` — the explicit,
+  boot-guarded gate that lifts `social.publishPostMetered`'s bar.
+- `liftBarredExecutable` (`approval-executables.ts`) — the one deliberate primitive that may lift a
+  D14 bar, called from exactly one config-gated site that refuses to boot if X's price is
+  unconfigured.
+- Two new refusal tokens: `metered_price_unconfigured` (budget stage) and
+  `metered_tool_requires_metered_network` (scope stage, the symmetric check to SMM-09's own
+  `metered_network_requires_metered_tool`).
+- `estimatedCostUsd`/`costUnavailableReason` on `GET .../publish-preconditions` and
+  `GET .../variants/:id/validation` — the approval card's own live price, `null` (never `$0`) when
+  X pricing is unconfigured.
+
+**Changed**
+- `media-rules.ts#estimateCostUsd`'s contract: `number` → `{ok:true,costUsd}|{ok:false,reason}`,
+  fed by config instead of a hardcoded literal. Every write path on `social.controller.ts` that
+  persists `estimated_cost_usd` now refuses the whole write rather than storing a fabricated `$0`.
+- `dispatch.ts#dispatchApprovedPublish` takes an optional `toolName` param — one implementation now
+  serves both `social.publishPost` and `social.publishPostMetered`.
+- `post-status-sync-job.ts#applyPostStatuses` trues up a metered variant's ledger reservation
+  (`posted → completed/failed`) in the SAME transaction as its authoritative status flip.
+
+**Found and fixed while building**
+- The first version of the precondition's tenant/global-tier check applied to EVERY publish,
+  including $0 ones — one tenant's X overspend would have frozen every other tenant's free posting
+  platform-wide. Fixed to gate the new tiers on an actually-metered network only; the pre-existing
+  engagement-tier circuit breaker (SMM-09) is unchanged.
+- `publish-gate.test.ts` pinned "the metered twin never appears on the module contract" — no longer
+  true once this ticket built its real endpoint. Updated to assert the twin IS declared but stays
+  barred from D14 auto-execution by default.
+
+**Not done this pass (named, not hidden)**
+- The usage panel is unit/type-checked only — not driven in a real browser.
+- `cerbos/policies/resource_mcp_tool.yaml` was not updated for an agent/automation-origin re-drive
+  of an unbarred metered publish (a human's own manual `publish-metered` call needs no Cerbos
+  change; only the automation/agent re-drive path does).
+- X's real billing trigger (charged on request-acceptance vs. confirmed-publish) is unverified
+  against a live account (D-23) — the ledger's reserve/true-up lifecycle is the best-supported
+  reading of design §05, not a verified vendor fact.
+
+Test counts: `src/modules/social` + the three `d14-smm-{09,17,22}-social-*-registry.test.ts` files —
+**591 / 0 / 5** (baseline for this exact set, measured directly: 552; +39 new). `platform-ui`:
+**2592 / 0 / 0**. Full detail: `docs/plans/smm-tracker.md`'s SMM-22 evidence block,
+`docs/modules/MODULES.md`'s social-media `0.5.15` entry.
+
 ### platform-nest `0.34.0` — 2026-08-21 — MSO-05: the observability console learns there is more than one server
 
 `GET /api/admin/observability` (Plane A, staff-only) grows from a single-box summary into an

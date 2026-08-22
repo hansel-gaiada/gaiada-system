@@ -25,7 +25,13 @@ import type { ModuleContract, RollupProvider } from "../contract";
 // documents as THE D14 gate; declaring the tool from it (never retyping the two literals) is what
 // this ticket's own AC requires. `social.publishPostMetered` stays undeclared and barred — see the
 // module contract's own header for why a declared tool needs a real endpoint before it exists here.
-import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION } from "./publish-precondition";
+import {
+  SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION,
+  // SMM-22 — the metered twin's own tool + spread classification (see that file's own doc for why
+  // this is declared even while the twin may still be barred from auto-execution: the ENDPOINT is
+  // real either way, only auto-exec-on-approval is config-gated).
+  SOCIAL_PUBLISH_METERED_TOOL, SOCIAL_PUBLISH_METERED_TOOL_CLASSIFICATION,
+} from "./publish-precondition";
 // SMM-17 — the reply gate's own tool, built by reusing SMM-09's pattern (see
 // reply-precondition.ts's header). `SOCIAL_REPLY_TOOL_CLASSIFICATION` is
 // `{...SOCIAL_PUBLISH_TOOL_CLASSIFICATION}` — spread, never retyped, same reasoning as above.
@@ -166,6 +172,13 @@ export const socialModule: ModuleContract = {
     { key: "social.report.update", description: "Edit a report's narrative, submit it for review, or send it back" },
     { key: "social.report.approve", description: "Approve a reviewed engagement report (delivery gate)" },
     { key: "social.report.deliver", description: "Deliver an approved engagement report to the client" },
+    // SMM-22 — the usage panel's own read gate. Already a catalog row + Cerbos action (0106 /
+    // resource_social_ledger.yaml, forward-seeded by SMM-30 exactly like social.report.*/
+    // social.client_review.* were) — this is the first ticket whose endpoint
+    // (`social.controller.ts`'s usage panel) honours it. `social.ledger.admin` stays undeclared:
+    // no override endpoint exists yet (raising a cap or clearing a blocked state is a follow-up,
+    // per this file's own rule against declaring a permission before its endpoint exists).
+    { key: "social.ledger.read", description: "View metered social spend (X per-post fees) against the engagement, tenant and platform caps" },
   ],
   customFieldTargets: ["social_engagement", "social_campaign", "social_post"],
   // Agentic-bar criterion 1 (tool parity): everything this ticket's UI can do is reachable as a
@@ -473,8 +486,14 @@ export const socialModule: ModuleContract = {
     // comment, and reported the tool as undeclared. A comment that contradicts the code 40 lines
     // away is worse than no comment.
     //
-    // `social.publishPostMetered` genuinely IS barred outright and must never appear here — that
-    // half was and remains correct.
+    // ⚠ CORRECTED 2026-08-22 (SMM-22). This comment used to say `social.publishPostMetered`
+    // "genuinely IS barred outright and must never appear here" — true when SMM-09 wrote it, and no
+    // longer true: it now DOES appear (a few blocks below, in its own SMM-22 section), because this
+    // ticket built the endpoint it lacked. What has NOT changed is `core/approval-executables.ts`'s
+    // bar on it — that stays the default (`SOCIAL_METERED_PUBLISH_ENABLED` defaults false) — only
+    // the module contract's own "don't declare a tool with no endpoint" rule, which the metered
+    // twin no longer violates. Declaring the tool and auto-executing an approval of it are two
+    // different facts; see the SMM-22 block's own header for the full reasoning.
     {
       name: "social.checkPublishPreconditions",
       description:
@@ -631,6 +650,72 @@ export const socialModule: ModuleContract = {
           scheduledAt: { type: "string" },
         },
         required: ["tenantId", "variantId"],
+      },
+    },
+    // ── SMM-22: THE METERED PUBLISH GATE'S OWN DISPATCH ENDPOINT ───────────────────────────────
+    // `social.publishPost`'s twin (D-14's money split). Declared here REGARDLESS of whether
+    // `core/approval-executables.ts`'s bar on it is currently lifted — the endpoint is real
+    // (`social.controller.ts#dispatchMeteredPublish`, wired to the SAME `dispatch.ts` entry point
+    // as the free tool) whether or not this deployment has opted into auto-execution. When barred
+    // (the default), a suspended approval for this tool sits `execution_status='not_applicable'`
+    // forever — exactly D-17's "seam present, no [auto-exec] backend" precedent, applied to money
+    // instead of generative images. When the bar is lifted (`SOCIAL_METERED_PUBLISH_ENABLED=true`,
+    // with X pricing configured), it behaves identically to `social.publishPost` in every respect
+    // except which network it may carry.
+    {
+      name: SOCIAL_PUBLISH_METERED_TOOL,
+      description:
+        "Publish an APPROVED post variant on a METERED network (X today) to its live social "
+        + "account. Real money moves when this succeeds — the estimate shown before approval is "
+        + "re-verified against the D-9 stop-loss chain (engagement -> tenant -> global caps) "
+        + "immediately before dispatching, and a fresh spend RESERVATION is taken atomically before "
+        + "any network call. Whether an approval of this tool auto-executes depends on this "
+        + "deployment's own configuration (`social.publishPost` always does; this twin is barred by "
+        + "default) — either way, sending a non-metered-network variant here, or a metered-network "
+        + "variant to `social.publishPost`, refuses with the SAME typed token vocabulary "
+        + "`social.checkPublishPreconditions` reports.",
+      minAssurance: "low",
+      // Spread, never retyped — see publish-precondition.ts's own comment on this constant.
+      ...SOCIAL_PUBLISH_METERED_TOOL_CLASSIFICATION,
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/publish-metered",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The approved post variant to publish. Must target a metered network (x)." },
+          accountId: { type: "string", description: "The target account (attribution only — the account actually dispatched to comes from the live row, never the caller)." },
+          body: { type: "string" },
+          firstComment: { type: "string" },
+          media: { type: "array", items: { type: "object" } },
+          settings: { type: "object" },
+          scheduledAt: { type: "string" },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
+    // ── SMM-22: THE USAGE PANEL'S OWN READ ─────────────────────────────────────────────────────
+    // Cerbos `read` on `social_ledger` (resource_social_ledger.yaml, 0106-forward-seeded) — the
+    // first ticket whose endpoint honours it. Read-only; makes no network call and consumes no
+    // budget itself (a caller checking the panel must never be charged for looking).
+    {
+      name: "social.getUsage",
+      description:
+        "Read this engagement's metered spend (X per-post fees) month-to-date against all THREE "
+        + "D-9 stop-loss tiers: the engagement's own cap, this tenant's optional cap (null if the "
+        + "deployment has not set one — that tier is then skipped, never read as zero), and the "
+        + "platform-wide global cap. This is the SAME arithmetic the publish gate's budget stage "
+        + "evaluates, so a caller can explain a `budget_exceeded` refusal before ever re-attempting.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/usage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement whose metered spend to read." },
+        },
+        required: ["tenantId", "engagementId"],
       },
     },
     // ── SMM-17: THE INBOX REPLY FLOW — draft -> WS4 -> send, reusing SMM-09's pattern ────────────

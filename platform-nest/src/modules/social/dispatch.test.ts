@@ -26,9 +26,11 @@ import { createMockPublisher, newMockPublisherState, type MockPublisherState } f
 import { SocialPublisherError } from "./publisher/types";
 import { storeOAuthGrant, revokeOAuthGrant } from "./publisher/oauth-tokens";
 import { variantPublishArgs, variantArgsSha256 } from "./canonical-args";
-import { SOCIAL_PUBLISH_TOOL, resetCreatorInfoVerifier } from "./publish-precondition";
+import { SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL, PUBLISH_REFUSAL, resetCreatorInfoVerifier } from "./publish-precondition";
 import { installCreatorInfoVerifier } from "./creator-info-verifier";
 import { dispatchApprovedPublish, DISPATCH_REFUSAL } from "./dispatch";
+// SMM-22 — X metering assertions.
+import { sumUsageMonthToDate, findPostedLedgerRowByRefId, resetGlobalUsageMonthToDateCache } from "./usage-ledger";
 
 const MODULES: { modules: string[] } = { modules: ["social"] };
 
@@ -147,13 +149,13 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
   }
 
   async function makeApprovedVariant(
-    opts: { engagementId?: string; media?: unknown; accountId?: string; settings?: Record<string, unknown> } = {},
+    opts: { engagementId?: string; media?: unknown; accountId?: string; settings?: Record<string, unknown>; body?: string } = {},
   ): Promise<{ variantId: string; engagementId: string }> {
     const engagementId = opts.engagementId ?? (await makeEngagement());
     const postId = newId();
     const variantId = newId();
     const accountId = opts.accountId ?? igAccount;
-    const body = "Hello from SMM-10's dispatch flow";
+    const body = opts.body ?? "Hello from SMM-10's dispatch flow";
     const media = opts.media ?? IG_MEDIA;
     const settings = opts.settings ?? { igType: "feed" };
     const hash = variantArgsSha256({
@@ -182,11 +184,12 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
   async function fileExecutingApproval(
     variantId: string,
     media: unknown = IG_MEDIA,
-    opts: { accountId?: string; settings?: Record<string, unknown> } = {},
+    opts: { accountId?: string; settings?: Record<string, unknown>; body?: string; toolName?: string } = {},
   ): Promise<string> {
     const id = newId();
+    const body = opts.body ?? "Hello from SMM-10's dispatch flow";
     const args = variantPublishArgs({
-      tenantId: co, id: variantId, accountId: opts.accountId ?? igAccount, body: "Hello from SMM-10's dispatch flow",
+      tenantId: co, id: variantId, accountId: opts.accountId ?? igAccount, body,
       firstComment: null, media, settings: opts.settings ?? { igType: "feed" }, scheduledAt: null,
     });
     await withTenants([co], (c) =>
@@ -195,7 +198,10 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
            (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at,
             origin, origin_site, execution_status)
          VALUES ($1,$2,'wf:delivery',$3,$4,'high','approved',$5,$5,now(),'automation','main','executing')`,
-        [id, co, SOCIAL_PUBLISH_TOOL, JSON.stringify(args), wfUser],
+        // SMM-22 — `toolName` defaults to the free tool (byte-identical to every pre-existing call
+        // site); the metered dispatch tests below pass `SOCIAL_PUBLISH_METERED_TOOL` so
+        // `resolveExecutingApprovalId` finds THIS row rather than none at all.
+        [id, co, opts.toolName ?? SOCIAL_PUBLISH_TOOL, JSON.stringify(args), wfUser],
       ),
     );
     return id;
@@ -903,6 +909,205 @@ describe.skipIf(!TEST_URL)("SMM-10 · dispatchApprovedPublish — the transactio
       expect(row.approvalId).toBe(approvalId); // still consumed — neverAutoRetry
       expect(row.lastError).toContain("capability_unsupported");
       expect(row.lastError).toContain("does not cover network 'youtube'");
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // SMM-22 — X metering: the reservation choke-point, wired into THIS SAME dispatch function.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // Proves the SECOND checkpoint (dispatch.ts's own `reserveUsageSpend` call) is doing real,
+  // additional work — not merely re-running the same precondition a second time. The precondition's
+  // OWN tenant/global-tier enforcement is proven independently in
+  // `usage-ledger.test.ts` (pure + DB-backed) and in `d14-smm-22-social-metered-publish-registry.
+  // test.ts` (`evaluatePublishPrecondition` called directly) — "a test for each, not one".
+  describe("SMM-22 · metered (X) dispatch — the reservation choke-point", () => {
+    let xAccount: string;
+    let xPriceBefore: number | null;
+    let xLinkPriceBefore: number | null;
+
+    beforeAll(async () => {
+      // `x` joins the enabled-networks set for this block only (the OUTER `afterAll` already
+      // restores the true original value, so layering here is safe — this nested block's `afterAll`
+      // restores to the OUTER block's own value, never past it).
+      config.social.publisher.enabledNetworks = [...new Set([...config.social.publisher.enabledNetworks, "x"])];
+      xPriceBefore = config.social.usage.xPerPostCostUsd;
+      xLinkPriceBefore = config.social.usage.xPerPostWithLinkCostUsd;
+      xAccount = newId();
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO social_accounts
+             (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+           VALUES ($1,$2,$3,$4,'x',$5,$6,'connected','{}','central')`,
+          [xAccount, co, clientId, publisherOrgId, uniq("@brand-x"), uniq("x")]), MODULES);
+    });
+
+    afterAll(() => {
+      config.social.usage.xPerPostCostUsd = xPriceBefore;
+      config.social.usage.xPerPostWithLinkCostUsd = xLinkPriceBefore;
+    });
+
+    async function makeXVariant(
+      opts: { engagementId?: string; budgetUsd?: number; body?: string } = {},
+    ): Promise<{ variantId: string; engagementId: string }> {
+      const engagementId = opts.engagementId ?? (await makeEngagement({ networks: { x: true } }));
+      if (opts.budgetUsd !== undefined) {
+        await withTenants([co], (c) =>
+          c.query(`UPDATE social_engagements SET usage_budget_usd = $1 WHERE id = $2`, [opts.budgetUsd, engagementId]), MODULES);
+      }
+      const postId = newId();
+      const variantId = newId();
+      const body = opts.body ?? "Hello from SMM-22's metered dispatch flow";
+      const hash = variantArgsSha256({
+        tenantId: co, id: variantId, accountId: xAccount, body, firstComment: null, media: [], settings: {}, scheduledAt: null,
+      });
+      await withTenants([co], async (c) => {
+        await c.query(
+          `INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
+           VALUES ($1,$2,$3,'SMM-22 post','approved','central')`, [postId, co, engagementId]);
+        await c.query(
+          `INSERT INTO social_post_variants
+             (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, status, origin_site)
+           VALUES ($1,$2,$3,$4,$5,'[]','{}',$6,'approved','central')`,
+          [variantId, co, postId, xAccount, body, hash],
+        );
+      }, MODULES);
+      return { variantId, engagementId };
+    }
+
+    async function ledgerRowOf(variantId: string) {
+      return withTenants([co], (c) => findPostedLedgerRowByRefId(c, variantId), MODULES);
+    }
+
+    // ══ (M1) SUCCESS — a real reservation, atomic with the dispatch ════════════════════════════
+
+    it("(M1) a successful metered dispatch reserves the ledger row 'posted' at the config-sourced price, atomically with the stamp", async () => {
+      config.social.usage.xPerPostCostUsd = 0.02;
+      config.social.usage.xPerPostWithLinkCostUsd = 0.3;
+      const { variantId, engagementId } = await makeXVariant({ body: "no link here" });
+      await fileExecutingApproval(variantId, [], {
+        accountId: xAccount, settings: {}, body: "no link here", toolName: SOCIAL_PUBLISH_METERED_TOOL,
+      });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL);
+      expect(verdict).toMatchObject({ ok: true, network: "x" });
+
+      const row = await variantRow(variantId);
+      expect(row.status).toBe("queued");
+
+      const ledgerRow = await ledgerRowOf(variantId);
+      expect(ledgerRow).not.toBeNull(); // still 'posted' — findPostedLedgerRowByRefId only finds 'posted' rows
+      const spent = await withTenants([co], (c) => sumUsageMonthToDate(c, engagementId), MODULES);
+      expect(spent).toBe(0.02);
+    });
+
+    it("(M1b) a link in the body prices at the WITH-LINK rate, never the base rate", async () => {
+      config.social.usage.xPerPostCostUsd = 0.02;
+      config.social.usage.xPerPostWithLinkCostUsd = 0.3;
+      const body = "check this out https://example.com";
+      const { variantId, engagementId } = await makeXVariant({ body });
+      await fileExecutingApproval(variantId, [], { accountId: xAccount, settings: {}, body, toolName: SOCIAL_PUBLISH_METERED_TOOL });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL);
+      expect(verdict).toMatchObject({ ok: true, network: "x" });
+
+      const spent = await withTenants([co], (c) => sumUsageMonthToDate(c, engagementId), MODULES);
+      expect(spent).toBe(0.3);
+    });
+
+    // ══ (M2) PRICE UNCONFIGURED — refuses, never defaults to $0 ═══════════════════════════════
+
+    it("(M2) X pricing unconfigured ⇒ metered_price_unconfigured, no ledger row, schedulePost never called", async () => {
+      config.social.usage.xPerPostCostUsd = null;
+      config.social.usage.xPerPostWithLinkCostUsd = null;
+      const { variantId } = await makeXVariant();
+      await fileExecutingApproval(variantId, [], { accountId: xAccount, settings: {}, toolName: SOCIAL_PUBLISH_METERED_TOOL });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL);
+      expect(verdict).toEqual({ ok: false, stage: "budget", reason: PUBLISH_REFUSAL.meteredPriceUnconfigured });
+      expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+      expect(await ledgerRowOf(variantId)).toBeNull();
+    });
+
+    // ══ (M3) DISPATCH FAILURE — the reservation is RELEASED, cost -> 0 ═════════════════════════
+
+    it("(M3) a failed schedulePost call releases the reservation: ledger row moves to 'failed', cost_usd -> 0", async () => {
+      config.social.usage.xPerPostCostUsd = 0.02;
+      config.social.usage.xPerPostWithLinkCostUsd = 0.3;
+      const { variantId, engagementId } = await makeXVariant();
+      await fileExecutingApproval(variantId, [], { accountId: xAccount, settings: {}, toolName: SOCIAL_PUBLISH_METERED_TOOL });
+      state.failWith = new SocialPublisherError("publisher_unreachable", "mock outage");
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL);
+      expect(verdict.ok).toBe(false);
+      if (verdict.ok) throw new Error("unreachable");
+      expect(verdict.reason).toBe(DISPATCH_REFUSAL.publishDispatchFailed);
+
+      // The reservation is no longer 'posted' (released) ...
+      expect(await ledgerRowOf(variantId)).toBeNull();
+      // ... and the released row's cost is 0, never left nonzero — read back directly, not inferred.
+      const { rows } = await adminPool().query<{ cost_usd: string; status: string }>(
+        `SELECT cost_usd, status FROM social_usage_ledger WHERE ref_id = $1`, [variantId],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("failed");
+      expect(Number(rows[0].cost_usd)).toBe(0);
+      // The engagement's spend is back to zero — a human retrying after fixing the outage is not
+      // charged twice, and is not blocked by a phantom charge for a post that never went out.
+      const spent = await withTenants([co], (c) => sumUsageMonthToDate(c, engagementId), MODULES);
+      expect(spent).toBe(0);
+    });
+
+    // ══ (M4) THE SYMMETRIC CHECK — a non-metered variant on the metered tool refuses ═══════════
+
+    it("(M4) a non-metered-network (instagram) variant reaching the METERED tool refuses metered_tool_requires_metered_network", async () => {
+      const { variantId } = await makeApprovedVariant(); // instagram, from the outer file's own fixtures
+      await fileExecutingApproval(variantId, IG_MEDIA, { toolName: SOCIAL_PUBLISH_METERED_TOOL });
+
+      const verdict = await dispatchApprovedPublish(co, variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL);
+      expect(verdict).toEqual({
+        ok: false, stage: "scope", reason: PUBLISH_REFUSAL.meteredToolRequiresMeteredNetwork,
+      });
+      expect(state.calls.filter((c) => c.op === "schedulePost")).toHaveLength(0);
+    });
+
+    // ══ (M5) THE RACE — end-to-end proof that two dispatches never jointly overspend ════════════
+    //
+    // Two DIFFERENT variants on the SAME engagement, dispatched CONCURRENTLY (Promise.all — a real
+    // race, not a simulated one), where the engagement's cap has room for exactly ONE of the two
+    // posts. This is the design's own named danger: "an approval sits between the estimate and the
+    // spend, and another post may consume budget in that window." The assertion is deliberately
+    // disjunctive over WHICH checkpoint catches the loser (the precondition's own fresh read, or
+    // dispatch.ts's reservation lock) — from outside `dispatchApprovedPublish` the two are
+    // indistinguishable by design (same refusal token either way), and the property that actually
+    // matters is observable regardless: never two, always at most one, never a corrupted sum.
+    it("(M5) ⭐ two concurrent metered dispatches on the SAME engagement: EXACTLY ONE succeeds, never both — proven under real concurrency", async () => {
+      config.social.usage.xPerPostCostUsd = 0.6;
+      config.social.usage.xPerPostWithLinkCostUsd = 0.6;
+      const engagementId = (await makeXVariant({ budgetUsd: 1 })).engagementId; // room for ~1 post, not 2
+      const a = await makeXVariant({ engagementId, body: "post A" });
+      const b = await makeXVariant({ engagementId, body: "post B" });
+      await fileExecutingApproval(a.variantId, [], { accountId: xAccount, settings: {}, body: "post A", toolName: SOCIAL_PUBLISH_METERED_TOOL });
+      await fileExecutingApproval(b.variantId, [], { accountId: xAccount, settings: {}, body: "post B", toolName: SOCIAL_PUBLISH_METERED_TOOL });
+
+      const [va, vb] = await Promise.all([
+        dispatchApprovedPublish(co, a.variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL),
+        dispatchApprovedPublish(co, b.variantId, wfUser, SOCIAL_PUBLISH_METERED_TOOL),
+      ]);
+
+      const outcomes = [va, vb];
+      const succeeded = outcomes.filter((v) => v.ok);
+      const refused = outcomes.filter((v) => !v.ok);
+      expect(succeeded).toHaveLength(1);
+      expect(refused).toHaveLength(1);
+      expect((refused[0] as { reason: string }).reason).toBe(PUBLISH_REFUSAL.budgetExceeded);
+
+      // Observable state: the engagement's confirmed spend never exceeds its own cap, and exactly
+      // ONE nonzero-cost row exists for this engagement — never two, regardless of which internal
+      // checkpoint caught the loser.
+      const spent = await withTenants([co], (c) => sumUsageMonthToDate(c, engagementId), MODULES);
+      expect(spent).toBeLessThanOrEqual(1);
+      expect(spent).toBe(0.6);
     });
   });
 });

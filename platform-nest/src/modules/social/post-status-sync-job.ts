@@ -35,6 +35,12 @@ import { emitEvent } from "../../events/outbox.service";
 // carries a human principal) had no `work_activity` row at all, unlike `dispatch.ts`'s own
 // synchronous 'dispatched'/'failed'/'refused' rows — see this file's own bottom comment for why.
 import { writeActivity } from "../../core/http";
+// SMM-22 — X metering true-up. This is the ONLY place a metered reservation moves `posted ->
+// completed`/`failed` from an AUTHORITATIVE network answer (dispatch.ts's own synchronous failure
+// path is the OTHER place a reservation is released, for a failure this job never sees because
+// nothing was ever queued). See this file's own new comment on `applyPostStatuses` for why the two
+// facts (variant status, ledger status) move together, atomically.
+import { findPostedLedgerRowByRefId, markUsageLedgerCompletedOnConnection, markUsageLedgerFailedOnConnection } from "./usage-ledger";
 
 /** One tenant's worth of in-flight rows, grouped by their publisher org so `getPostStatus` can be
  *  called ONCE per (org, window) rather than once per variant (addendum §A4l §4 — the batched-read
@@ -118,6 +124,16 @@ interface PendingActivity {
  * network's own vocabulary (`'published'`/`'failed'`), and `reason`/`network`/`providerPostId` in the
  * metadata are the SAME facts already carried on the sibling `emitEvent` call — one source of truth,
  * never a second, independently-worded copy of what happened.
+ *
+ * ── SMM-22 — WHO TRUES UP THE USAGE LEDGER, AND WHEN (added to this file's own doc rather than a
+ * second header) ────────────────────────────────────────────────────────────────────────────────
+ * This is where a metered (`x`) variant's ledger reservation moves `posted -> completed` (confirmed
+ * published) or `posted -> failed` (confirmed never delivered, cost released to 0) — see the
+ * `usage-ledger.ts` import comment above. `dispatch.ts`'s own synchronous failure path is the ONLY
+ * other place a reservation is released, and the two never overlap: dispatch.ts only sees a failure
+ * BEFORE the network ever accepted the post (nothing to reconcile later), while this function only
+ * ever sees a variant that reached `queued`/`publishing` — i.e., the network DID accept it and a
+ * `posted` row genuinely exists to true up.
  */
 export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]): Promise<{ applied: number }> {
   if (statuses.length === 0) return { applied: 0 };
@@ -148,6 +164,24 @@ export async function applyPostStatuses(tenantId: string, statuses: PostStatus[]
       const row = upd.rows[0];
       if (!row) continue; // already terminal (a repeat delivery), or no such provider id in this tenant
       applied += 1;
+
+      // SMM-22 — true up this variant's OWN `posted` reservation (if any) IN THE SAME TRANSACTION
+      // as the status flip above, so the two facts ("the post is confirmed published/failed" and
+      // "the spend is confirmed/released") become true together — never a window where one is
+      // updated and the other still reads stale. Only `x` ever carries a reservation (the only
+      // metered network today), so this is a no-op query for every other network's posts.
+      // `publishing` is an intermediate, non-terminal state — the reservation stays `posted`
+      // (still genuinely in flight) until a LATER sweep sees a terminal answer.
+      if (row.network === "x" && (nextStatus === "published" || nextStatus === "failed" || nextStatus === "cancelled")) {
+        const ledgerRow = await findPostedLedgerRowByRefId(c, row.id);
+        if (ledgerRow) {
+          if (nextStatus === "published") await markUsageLedgerCompletedOnConnection(c, ledgerRow.id);
+          // `failed` and `cancelled` both mean the post never delivered what was reserved for it —
+          // the SAME release `dispatch.ts`'s own synchronous failure path performs.
+          else await markUsageLedgerFailedOnConnection(c, ledgerRow.id);
+        }
+      }
+
       if (nextStatus === "failed") {
         await emitEvent(c, tenantId, "social_post_variant", row.id, "social.post.failed", {
           reason: "network_reported_failed", network: row.network, engagementId: row.engagement_id,

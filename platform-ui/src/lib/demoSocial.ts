@@ -937,6 +937,25 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     if (!eng) return err(404, "not found");
     return ok({ toolScope: eng.toolScope, usageBudgetUsd: eng.usageBudgetUsd });
   }
+  // SMM-22 — `GET engagements/:id/usage`, the usage panel's own demo route. X ships disabled at the
+  // deployment level, so a real deployment's month-to-date spend is genuinely $0 everywhere; a demo
+  // showing $0/$0/$0 would prove nothing about the panel's own rendering (the meter bars, the
+  // near-cap warning colour, the "no tenant cap configured" honest sentence). A small, clearly
+  // synthetic spend is seeded instead — labeled here as demo data, never presented as measured.
+  const engUsageM = tail.match(/^engagements\/([^/]+)\/usage$/);
+  if (engUsageM && m === "GET") {
+    const eng = ENGAGEMENTS.find((e) => e.id === engUsageM[1]);
+    if (!eng) return err(404, "not found");
+    const engagementSpend = Math.min(eng.usageBudgetUsd, eng.usageBudgetUsd * 0.62);
+    return ok({
+      engagement: { mtdUsd: Number(engagementSpend.toFixed(3)), capUsd: eng.usageBudgetUsd },
+      // The demo deliberately shows the UNSET tenant tier — the honest "not every deployment
+      // configures every tier" state, distinct from a spent-down cap.
+      tenant: { mtdUsd: Number(engagementSpend.toFixed(3)), capUsd: null },
+      global: { mtdUsd: Number((engagementSpend + 4.2).toFixed(3)), capUsd: 100 },
+      warnRatio: 0.8,
+    });
+  }
 
   // ── accounts (SMM-05 registry — the quota strips' data source) ─────────────────────────────────
   if (tail === "accounts" && m === "GET") {

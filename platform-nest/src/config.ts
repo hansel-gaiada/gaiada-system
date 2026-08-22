@@ -846,6 +846,43 @@ const configBase = {
         spikeMinRecentCount: Number(process.env.SOCIAL_INBOX_SPIKE_MIN_RECENT ?? 5),
       },
     },
+    // SMM-22 — X metering (design D-9, addendum). The stop-loss chain's tenant + global tiers, X's
+    // own per-post price, and the barred-twin unbar gate. Mirrors search's own moneyEnv/numericEnv
+    // convention byte-for-byte (design's own words: "byte-for-byte the SEO pattern").
+    usage: {
+      // X's per-post price is a CONFIG FACT with a documented external source, never a literal that
+      // reads as measured (defect class #4). BOTH must be set for X pricing to be considered
+      // configured — media-rules.ts's estimateCostUsd refuses `x_price_not_configured` rather than
+      // treating either-absent as $0, because a zero price is an unmetered spend. Unverified against
+      // a live X Developer Portal account (D-23) — design §05's own ~$0.015/~$0.20 figures are
+      // EXPLICITLY named "re-verify at build time", so no default ships here; an operator who has
+      // actually checked the live rate sets these two vars.
+      xPerPostCostUsd: moneyEnv("SOCIAL_X_PER_POST_COST_USD"),
+      xPerPostWithLinkCostUsd: moneyEnv("SOCIAL_X_PER_POST_WITH_LINK_COST_USD"),
+      // D-9's tenant tier. Optional; unset => tier SKIPPED (engagement + global tiers still
+      // enforced) — exactly `tenantMonthlyCapUsd`'s existing null-skips-tier convention in
+      // `config.search`, reused rather than reinvented.
+      tenantMonthlyCapUsd: moneyEnv("SOCIAL_TENANT_MONTHLY_CAP_USD"),
+      // D-9's global tier. Design §05 (smm-design.md, the ledger section): "global platform cap
+      // (env, default $100/mo until X usage is proven)" — a DOCUMENTED design default, never an
+      // invented number. On a default deployment this is the ONLY platform-wide ceiling, exactly
+      // the same "silently inert default" hazard SM-52 closed for search's own global cap — hence
+      // `numericEnv` (throws on an unparseable override) rather than a bare `Number(...)`.
+      globalMonthlyCapUsd: numericEnv("SOCIAL_GLOBAL_MONTHLY_CAP_USD", { default: 100 }),
+      // The fraction of a cap at which a threshold event fires (mirrors search's budgetWarnRatio).
+      budgetWarnRatio: numericEnv("SOCIAL_USAGE_BUDGET_WARN_RATIO", { default: 0.8, max: 1 }),
+      // ── THE BARRED-TWIN UNBAR GATE (D-14, this ticket) ──────────────────────────────────────────
+      // Default FALSE: `social.publishPostMetered` stays permanently barred from the D14 executor
+      // (core/approval-executables.ts's SMM-09 section) and the default posture is BYTE-IDENTICAL to
+      // before this ticket. Flipping this to true is a deliberate, explicit deployment decision —
+      // never a side effect of enabling the `x` network alone — and `approval-executables.ts`'s own
+      // SMM-22 section REFUSES AT BOOT if this is true while X's per-post price is unconfigured: an
+      // auto-executing money-spending tool with no price is precisely the "under-count" failure
+      // direction this ticket exists to prevent, and a boot failure is the loud, cheap-to-fix answer
+      // (matching this file's own `wireSearchProviderModeAndAdsWriteMode`-class boot refusals).
+      meteredPublishEnabled:
+        process.env.SOCIAL_METERED_PUBLISH_ENABLED === "1" || process.env.SOCIAL_METERED_PUBLISH_ENABLED === "true",
+    },
   },
   search: {
     defaultProvider: process.env.SEARCH_DEFAULT_PROVIDER ?? "dataforseo",
