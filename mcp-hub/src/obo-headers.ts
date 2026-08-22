@@ -17,7 +17,7 @@ import type { Principal } from "./principal";
 /** Takes only the envelope fields, not a whole `Principal`: several call sites hold a structural
  *  `{provider, externalId}` and widening THEM to include `agent` is what stops attribution being
  *  dropped by a type that never mentioned it. `assurance` is irrelevant to a header. */
-export type OboSubject = Pick<Principal, "provider" | "externalId" | "agent">;
+export type OboSubject = Pick<Principal, "provider" | "externalId" | "agent" | "actFor">;
 
 export function oboHeaders(principal: OboSubject, platformToken: string): Record<string, string> {
   return {
@@ -27,5 +27,9 @@ export function oboHeaders(principal: OboSubject, platformToken: string): Record
     // The co-author. The envelope above still names the HUMAN — authority is unchanged; this is
     // recorded alongside, never instead.
     ...(principal.agent ? { "x-obo-agent": principal.agent } : {}),
+    // DELEGATION: the human this call acts for. Omitted when absent, so a non-delegated call sends
+    // byte-identical headers to before this existed. The platform's `authorize()` intersects the
+    // caller's reach with this human's — it can only narrow, never widen.
+    ...(principal.actFor ? { "x-act-for": principal.actFor } : {}),
   };
 }

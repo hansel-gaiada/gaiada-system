@@ -31,6 +31,16 @@ export interface Principal {
    * Setting it can restrict a call; it can never widen one.
    */
   agent?: string;
+
+  /**
+   * DELEGATION (2026-08-22). The human this call is made ON BEHALF OF, when the caller is a persona
+   * acting for someone. Forwarded to the platform as `x-act-for`, where `authorize()` checks Cerbos
+   * twice and denies if either the caller or this human is refused.
+   *
+   * Unlike `agent`, this is authorization-BEARING. It is still safe to carry through the hub because
+   * the intersection only ever NARROWS: naming an actFor cannot grant the caller reach it lacked.
+   */
+  actFor?: string;
 }
 
 export interface OboEnvelope {
