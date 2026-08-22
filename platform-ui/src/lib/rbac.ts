@@ -208,6 +208,18 @@ export const CAPABILITIES = [
   "social.client_review.read",     // view client sign-off state on a variant (Cerbos `read`)
   "social.client_review.request",  // ask the client to sign off, or re-ask after changes (Cerbos `request`)
   "social.client_review.withdraw", // retract a pending ask (Cerbos `withdraw`) — manager-tier only
+  // ── the engagement inbox (SMM-15/16/17/18) — Cerbos kind `social_inbox`, migration `0106`.
+  // Verified directly against `resource_social_inbox.yaml` + `0106_iam_social_permissions.sql`'s
+  // role_permission seed rows: `company_admin`/`manager`/`platform_admin`/`social_manager`/
+  // `social_staff` ALL hold every one of the four actions identically — unlike client-review, this
+  // is NOT a staff/manager split (the policy's own header: "a community-manager replying to
+  // comments IS the job... requiring a manager for every 'thanks!' would make the inbox unusable").
+  // `group_executive` holds `read` only (0106 seeds it nowhere else) — same wholesale-excepted
+  // reach every other `social.*` capability gives that role via `ALL`.
+  "social.inbox.read",     // the triage queue and thread view, including AI-stamped triage state
+  "social.inbox.reply",    // decide a reply is SENT — outbound and public, same discipline as `social.post.publish`
+  "social.inbox.assign",   // take/give ownership of a thread, set its status, start its SLA clock — NO write endpoint exists yet (see lib/socialShared.ts's InboxThread header); rendered read-only
+  "social.inbox.escalate", // raise a thread to a lead — NO write endpoint exists yet either; same read-only rendering
   // ─────────── TR-25: the tracker/reporting program (§8's matrix). Mirrors, never decides. ───────────
   // ⚠ READ THIS BEFORE USING ANY `reports.*` CAPABILITY FOR ANYTHING BUT RENDERING.
   // These capabilities answer "should the UI OFFER this?", never "may this user SEE this person?". The
@@ -269,6 +281,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.view", "social.manage", "social.scope.write", "social.post.delete",
     // client-review (SMM-31/32) — 0106 seeds company_admin all three, same manager-tier bundle.
     "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
+    // the engagement inbox (SMM-15/16/17/18) — 0106 seeds company_admin all four inbox actions.
+    "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
     // The tenant's own administrator holds the exec-only reporting tier within its company (§8's
     // company-grain / seal / recompute rows read "exec"; resource_report_period.yaml's header
     // establishes that §6.2's "lead" there means the COMPANY's lead, not a per-department manager).
@@ -331,6 +345,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.view", "social.manage", "social.scope.write", "social.post.delete",
     // client-review (SMM-31/32) — 0106 seeds manager all three, same manager-tier bundle.
     "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
+    // the engagement inbox (SMM-15/16/17/18) — 0106 seeds manager all four inbox actions.
+    "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
@@ -423,15 +439,24 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // client-review (SMM-31/32): 0106 seeds social_staff `read`+`request` only, NOT `withdraw` —
   // verified directly against the migration's role_permission rows, same staff/manager split
   // `social.post.delete` already draws.
-  social_staff: ["social.view", "social.manage", "people.directory", "social.client_review.read", "social.client_review.request"],
+  // the engagement inbox (SMM-15/16/17/18): UNLIKE client-review, `0106` seeds social_staff ALL
+  // FOUR inbox actions (read/reply/assign/escalate) — `resource_social_inbox.yaml`'s own header
+  // states why this is not a staff/manager split ("a community-manager replying to comments IS the
+  // job... requiring a manager for every 'thanks!' would make the inbox unusable").
+  social_staff: [
+    "social.view", "social.manage", "people.directory", "social.client_review.read", "social.client_review.request",
+    "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
+  ],
   // social_manager = Cerbos module_manager: every social_staff permission PLUS
   // social.engagement.create/update/delete/set_scope and social.post.delete/publish/cancel/
   // delete_published (32-permission bundle). `social.scope.write` and `social.post.delete` are
   // this role's OWN tier — deliberately excluded from social_staff above. client-review `withdraw`
-  // is the identical split (0106 seeds social_manager all three, social_staff only two).
+  // is the identical split (0106 seeds social_manager all three, social_staff only two). The inbox
+  // actions are NOT split this way — social_manager holds the identical four social_staff already does.
   social_manager: [
     "social.view", "social.manage", "social.scope.write", "social.post.delete",
     "social.client_review.read", "social.client_review.request", "social.client_review.withdraw",
+    "social.inbox.read", "social.inbox.reply", "social.inbox.assign", "social.inbox.escalate",
   ],
   // §8's served-dept column: department + project grain ONLY. Deliberately NO `reports.person.view`
   // — §8's person-grain cell for this column ("only persons acting under the assignment, via the

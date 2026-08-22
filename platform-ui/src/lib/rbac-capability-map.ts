@@ -481,6 +481,30 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ── the engagement inbox (SMM-15/16/17/18) — verified directly against `0106_iam_social_
+  // permissions.sql`'s role_permission seed rows: company_admin/manager/platform_admin/
+  // social_manager/social_staff ALL hold every one of the four `social.inbox.*` keys identically
+  // (unlike client-review, this is NOT a staff/manager split — resource_social_inbox.yaml's own
+  // header explains why); group_executive holds `social.inbox.read` only (wholesale-excepted from
+  // this file's per-pair loop, same as every other social.* capability's `ALL`-derived reach for
+  // that role).
+  "social.inbox.read": {
+    permissions: ["social.inbox.read"],
+    semantics: "all",
+  },
+  "social.inbox.reply": {
+    permissions: ["social.inbox.reply"],
+    semantics: "all",
+  },
+  "social.inbox.assign": {
+    permissions: ["social.inbox.assign"],
+    semantics: "all",
+  },
+  "social.inbox.escalate": {
+    permissions: ["social.inbox.escalate"],
+    semantics: "all",
+  },
+
   // ─────────────── TR-25: reports / check-in / appraisal (§8's matrix, mirrors never decides) ────
   // Every entry in this block cites an exact Cerbos action name in rbac.ts's own comment — this is
   // the most precisely-documented block in the whole file despite nine of its twelve members being

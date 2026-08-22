@@ -44,6 +44,20 @@
 //   GET           metrics/posts                                -> {posts: PostMetricRow[]}    (SMM-21; engagementId REQUIRED; latest snapshot per variant)
 //   GET           engagements/:id/asset-library                -> AssetLibrary            (SMM-20 — files/Drive/Studio creative_assets, attach-only)
 //   POST          variants/:id/media/attach                    -> AttachMediaResult        (SMM-20; edit invalidates approval, same as PATCH variants/:id)
+//   GET           publisher/status                              -> PublisherStatus         (SMM-05; THIS ticket's first reader for it — see `getPublisherStatus`)
+//   GET           threads/:id/messages                           -> {threadId, messages[]}  (SMM-17; real)
+//   POST          threads/:id/messages                           -> ReplyDraftResult        (SMM-17; real — socialActions.ts)
+//   PATCH         threads/:id/messages/:messageId                -> ReplyDraftResult        (SMM-17; real — edit invalidates approval, socialActions.ts)
+//   POST          threads/:id/messages/:messageId/approve         -> ApproveReplyDraftResult (SMM-17; real, idempotent — socialActions.ts)
+//   GET           threads/:id/messages/:messageId/send-preconditions -> ReplySendPreconditionResult (SMM-17; real dry run)
+//
+// 3. SMM-18 (THIS ticket) — `GET threads` (the triage-queue list) does NOT exist on the real
+//    backend. `listInboxThreads` below calls a PROPOSED shape anyway (answered in full by
+//    `demoSocial.ts`) so the client-side rendering is provably correct and ready to wire — see
+//    `socialShared.ts`'s header on `InboxThread` for the complete gap statement, and the module's
+//    own smm-tracker.md SMM-18 row for the report. The inbox page gates the attempt behind
+//    `getPublisherStatus().inboxSurface`, which is `"none"` for every deployment today, so a live,
+//    non-demo deployment never actually depends on this proposed call succeeding right now.
 //
 // ── CONTRACT DISCREPANCIES FOUND WHILE BUILDING THIS (backend wins; §19 is reconciled here) ──────
 // 1. §19 documents `PATCH engagements/:id/scope` as returning `{toolScope, usageBudgetUsd,
@@ -64,13 +78,16 @@
 //    `composer/[postId]/page.tsx`'s `BackendPending` stands; only the READ side of the gap closes
 //    here.
 import { platformFetch, PlatformError } from "./platform";
-import { EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY } from "./socialShared";
+import {
+  EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY, UNCONFIGURED_PUBLISHER_STATUS,
+} from "./socialShared";
 import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
   SocialCampaign, SocialKpiTarget, SocialPost, SocialPostStatus, SocialPostDetail,
   VariantValidationResult, SocialAccount, PublishPreconditionResult, ClientReviewState,
   DailyMetricRow, PostMetricRow,
   AssetLibrary,
+  PublisherStatus, InboxThread, InboxMessage, ReplySendPreconditionResult,
 } from "./socialShared";
 
 export * from "./socialShared";
@@ -267,4 +284,58 @@ export const getAssetLibrary = async (u: string, t: string, engagementId: string
     ...r,
     data: obj ? { files: asArray(obj.files), studioAssets: asArray(obj.studioAssets) } : EMPTY_ASSET_LIBRARY,
   };
+};
+
+// ── publisher status (SMM-05) — this file's FIRST reader for `GET publisher/status`. The route has
+// shipped since SMM-05, but nothing under `lib/social.ts` ever called it (verified: no prior
+// export existed). `inboxSurface` is the one field the inbox page below actually gates on. ────────
+export const getPublisherStatus = async (u: string, t: string): Promise<Guarded<PublisherStatus>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/publisher/status`, u), UNCONFIGURED_PUBLISHER_STATUS);
+  return { ...r, data: asObject<PublisherStatus>(r.data) ?? UNCONFIGURED_PUBLISHER_STATUS };
+};
+
+// ── the engagement inbox (SMM-15/16/17 backend; SMM-18 this ticket) ────────────────────────────────
+//
+// `listInboxThreads` calls a PROPOSED endpoint (`GET .../threads`) that does not exist on the real
+// backend today — see `socialShared.ts`'s header on `InboxThread` for the full gap statement. The
+// caller (the inbox page) is expected to gate this behind `getPublisherStatus().inboxSurface ===
+// "available"` — which is `"none"` for every deployment today (the default `postiz` driver has zero
+// inbound engagement surface, D-23 also blocks every account connection regardless) — so a live,
+// non-demo deployment never actually depends on this call succeeding right now. When it IS
+// attempted (DEMO_MODE, or a hypothetical future `direct`-driver deployment) and the backend has no
+// such route, this throws a `PlatformError` the caller must render as an honest "this part of the
+// backend doesn't exist yet" state (`BackendPending`), never a silent empty queue — collapsing
+// "route absent" into "confirmed zero threads" would be exactly the frontend-first-drift bug class
+// this program's own root guide names.
+export const listInboxThreads = async (
+  u: string, t: string, params?: { engagementId?: string; status?: string },
+): Promise<InboxThread[]> => {
+  const qs = new URLSearchParams();
+  if (params?.engagementId) qs.set("engagementId", params.engagementId);
+  if (params?.status) qs.set("status", params.status);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await platformFetch<unknown>(`${base(t)}/threads${suffix}`, u);
+  return asArray<InboxThread>(data);
+};
+
+/** `GET threads/:threadId/messages` — REAL, built by SMM-17 as a verification convenience (its own
+ *  header: "SMM-18 owns the real triage-queue UI this endpoint is not trying to be"). Used here for
+ *  the thread-detail view once a thread id is known. */
+export const listThreadMessages = async (u: string, t: string, threadId: string): Promise<Guarded<InboxMessage[]>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/threads/${threadId}/messages`, u), { threadId, messages: [] });
+  const obj = asObject<{ threadId: string; messages: unknown }>(r.data);
+  return { ...r, data: asArray<InboxMessage>(obj?.messages) };
+};
+
+/** `GET threads/:threadId/messages/:messageId/send-preconditions` — REAL, a dry run of the exact
+ *  D14 reply-dispatch precondition (`evaluateReplyPrecondition`), mirroring `getPublishPreconditions`
+ *  above. A refusal is DATA on a 200, never thrown — render the stage/reason pair, never a generic
+ *  failure (criterion 5). */
+export const getReplySendPreconditions = async (
+  u: string, t: string, threadId: string, messageId: string,
+): Promise<Guarded<ReplySendPreconditionResult | null>> => {
+  const r = await readGuarded(
+    platformFetch<unknown>(`${base(t)}/threads/${threadId}/messages/${messageId}/send-preconditions`, u), null,
+  );
+  return { ...r, data: asObject<ReplySendPreconditionResult>(r.data) };
 };

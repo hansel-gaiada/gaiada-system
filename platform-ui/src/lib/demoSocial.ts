@@ -82,6 +82,43 @@ interface DemoVariant {
   estimatedCostUsd: number;
 }
 
+// ── the engagement inbox (SMM-15/16/17 backend; SMM-18 THIS ticket) ────────────────────────────────
+//
+// `socialShared.ts`'s own header states the real gap this fixture stands in for: the backend has
+// NO `GET threads` list/detail route at all yet (only message-level routes scoped to an
+// already-known threadId). Everything below is answered here so the triage queue / thread view /
+// SLA timers / reply-approval states are provably correct and browser-drivable TODAY, ready to
+// rewire the moment the real route exists — never presented as if it already had backend parity.
+interface DemoInboxThread {
+  id: string; accountId: string; network: DemoSocialNetwork; kind: "comment" | "dm" | "mention" | "review";
+  externalThreadId: string; postVariantId: string | null;
+  authorHandle: string | null; authorName: string | null; excerpt: string | null;
+  sentiment: "positive" | "neutral" | "negative" | "urgent" | null;
+  category: "question" | "complaint" | "praise" | "spam" | "other" | null;
+  urgency: "low" | "normal" | "high" | null;
+  aiTriageStatus: "unclassified" | "unavailable" | "classified" | "purged";
+  aiTriageAt: string | null;
+  status: "open" | "replied" | "escalated" | "dismissed" | "closed";
+  assignedTo: string | null;
+  slaDueAt: string | null; slaAlertedAt: string | null;
+  lastMessageAt: string | null;
+  createdAt: string; updatedAt: string;
+  /** Fixture-internal ONLY — the real `activity_content_purged_at` column is never returned by any
+   *  endpoint (verified: no SELECT in social.controller.ts exposes it), so this field is deliberately
+   *  absent from `InboxThread` (socialShared.ts) and never leaves `toPublicThread` below. It is what
+   *  the reply gate's own `retention` stage checks server-side. */
+  activityContentPurgedAt: string | null;
+}
+interface DemoInboxMessage {
+  id: string; threadId: string; direction: "in" | "out"; body: string;
+  status: "draft" | "in_review" | "approved" | "sent" | "failed";
+  source: "postiz_sync" | "reply";
+  externalId: string | null; postedAt: string | null; createdAt: string;
+  /** Internal only — mirrors `approval_id`/`args_sha256`, neither of which
+   *  `listThreadMessages`'s real SELECT returns either. */
+  approvalId: string | null; argsSha256: string | null;
+}
+
 interface DemoPost {
   id: string; engagementId: string; campaignId: string | null; title: string; brief: string | null;
   source: "human" | "ai" | "agent" | "native_import";
@@ -99,7 +136,9 @@ interface DemoEngagement {
   toolScope: {
     networks: Record<DemoSocialNetwork, boolean>;
     posting: { cadencePerWeek: number; requiresClientOk: boolean };
-    inbox: { enabled: boolean; slaMinutes: number; dm: boolean };
+    // `reply` (SMM-17's own additive dial, `tool_scope.inbox.reply`) — jsonb on the real backend,
+    // so no migration; added here the same way.
+    inbox: { enabled: boolean; slaMinutes: number; dm: boolean; reply: boolean };
     ai: { drafting: boolean; cloudPolish: boolean; imageGen: boolean };
     reporting: { cadence: string };
   };
@@ -127,7 +166,10 @@ const ENGAGEMENT: DemoEngagement = {
       youtube: false, threads: false, pinterest: false, bluesky: false, mastodon: false,
     },
     posting: { cadencePerWeek: 4, requiresClientOk: false },
-    inbox: { enabled: false, slaMinutes: 240, dm: false },
+    // SMM-18: flipped `enabled`/`reply` on for THIS ticket so the inbox demo has an in-scope
+    // engagement to check replies against — `enabled: false` was SMM-12's own placeholder from
+    // before SMM-15/16/17 existed, never revisited until now.
+    inbox: { enabled: true, slaMinutes: 240, dm: false, reply: true },
     ai: { drafting: true, cloudPolish: false, imageGen: false },
     reporting: { cadence: "monthly" },
   },
@@ -148,7 +190,7 @@ const CLIENT_REVIEWED_ENGAGEMENT: DemoEngagement = {
       youtube: false, threads: false, pinterest: false, bluesky: false, mastodon: false,
     },
     posting: { cadencePerWeek: 2, requiresClientOk: true },
-    inbox: { enabled: false, slaMinutes: 240, dm: false },
+    inbox: { enabled: false, slaMinutes: 240, dm: false, reply: false },
     ai: { drafting: true, cloudPolish: false, imageGen: false },
     reporting: { cadence: "monthly" },
   },
@@ -198,6 +240,7 @@ type SocialStore = {
   engagements: DemoEngagement[]; accounts: DemoAccount[]; posts: DemoPost[]; seq: number;
   clientReviews: DemoClientReview[];
   dailyMetrics: DemoDailyMetric[]; postMetrics: DemoPostMetric[];
+  inboxThreads: DemoInboxThread[]; inboxMessages: DemoInboxMessage[];
 };
 
 const ENGAGEMENTS_SEED: DemoEngagement[] = [ENGAGEMENT, CLIENT_REVIEWED_ENGAGEMENT];
@@ -482,6 +525,173 @@ function libraryContentTypeToKindFormat(contentType: string): { kind?: "image" |
   return {};
 }
 
+// ── the engagement inbox seed (SMM-18) — computed relative to module-load time (`hoursFromNow`)
+// rather than a fixed date, so "due soon"/"overdue" stay true whenever the dev server is actually
+// started, not just on the day this file was written. Nine threads, chosen to make every one of
+// the four `AiTriageStatus` values, all five `InboxThreadStatus` values, all four `InboxThreadKind`
+// values, and all four `SlaState`s (on_track/due_soon/overdue/none) reachable by simply opening the
+// page — no live action required to SEE each state, exactly the demo-fixture discipline SMM-12's
+// own composer/calendar seed already established. ───────────────────────────────────────────────
+function hoursFromNow(h: number): string {
+  return new Date(Date.now() + h * 60 * 60 * 1000).toISOString();
+}
+
+const INBOX_THREADS_SEED: DemoInboxThread[] = [
+  {
+    // unclassified + on_track SLA — "nobody has looked yet", the absence state that must look
+    // nothing like a real 'neutral' classification (see socialShared.ts's `describeTriage`).
+    id: "soc-thread-1", accountId: "soc-acc-ig-1", network: "instagram", kind: "comment",
+    externalThreadId: "ig-comment-8801", postVariantId: "soc-var-6",
+    authorHandle: "priya.k", authorName: "Priya K.",
+    excerpt: "Do you ship this to Australia?",
+    sentiment: null, category: null, urgency: null,
+    aiTriageStatus: "unclassified", aiTriageAt: null,
+    status: "open", assignedTo: null,
+    slaDueAt: hoursFromNow(2), slaAlertedAt: null, lastMessageAt: hoursFromNow(-0.5),
+    createdAt: hoursFromNow(-0.5), updatedAt: hoursFromNow(-0.5), activityContentPurgedAt: null,
+  },
+  {
+    // classified (question/normal/neutral) + due_soon SLA + assigned. Carries a DRAFT reply below
+    // — the full draft -> edit -> approve -> "ok:true" send-preconditions loop starts here.
+    id: "soc-thread-2", accountId: "soc-acc-ig-1", network: "instagram", kind: "comment",
+    externalThreadId: "ig-comment-8802", postVariantId: "soc-var-6",
+    authorHandle: "sam.lee", authorName: "Sam Lee",
+    excerpt: "What sizes are available for the autumn jacket?",
+    sentiment: "neutral", category: "question", urgency: "normal",
+    aiTriageStatus: "classified", aiTriageAt: hoursFromNow(-0.4),
+    status: "open", assignedTo: DEMO_MANAGER_ID,
+    slaDueAt: hoursFromNow(0.3), slaAlertedAt: null, lastMessageAt: hoursFromNow(-0.4),
+    createdAt: hoursFromNow(-0.4), updatedAt: hoursFromNow(-0.4), activityContentPurgedAt: null,
+  },
+  {
+    // classified (complaint/high/negative) + OVERDUE SLA + unassigned — the "this needs a human
+    // now" case. Carries a DRAFT reply (editable) so the edit-invalidates-approval loop is
+    // separately drivable from soc-thread-2's own.
+    id: "soc-thread-3", accountId: "soc-acc-fb-1", network: "facebook", kind: "comment",
+    externalThreadId: "fb-comment-4401", postVariantId: null,
+    authorHandle: "grumpy.customer", authorName: null,
+    excerpt: "My order arrived damaged and nobody has replied to my email!!",
+    sentiment: "negative", category: "complaint", urgency: "high",
+    aiTriageStatus: "classified", aiTriageAt: hoursFromNow(-6),
+    status: "open", assignedTo: null,
+    slaDueAt: hoursFromNow(-0.5), slaAlertedAt: hoursFromNow(-0.4), lastMessageAt: hoursFromNow(-6),
+    createdAt: hoursFromNow(-6), updatedAt: hoursFromNow(-6), activityContentPurgedAt: null,
+  },
+  {
+    // classified (praise/low/positive), already `replied` (a SENT reply below), and a genuinely
+    // NO-SLA thread — the engagement's own `slaMinutes` was never configured for this dial's
+    // purposes in this specific case, matching `inbox-triage-job.ts`'s own "never invent a fallback
+    // duration" rule: `none` is a real, distinct, legitimate state, not an error.
+    id: "soc-thread-4", accountId: "soc-acc-ig-1", network: "instagram", kind: "comment",
+    externalThreadId: "ig-comment-8803", postVariantId: "soc-var-6",
+    authorHandle: "happy.customer", authorName: "Happy Customer",
+    excerpt: "Loved the new arrivals, ordering more!",
+    sentiment: "positive", category: "praise", urgency: "low",
+    aiTriageStatus: "classified", aiTriageAt: hoursFromNow(-20),
+    status: "replied", assignedTo: DEMO_MANAGER_ID,
+    slaDueAt: null, slaAlertedAt: null, lastMessageAt: hoursFromNow(-19),
+    createdAt: hoursFromNow(-20), updatedAt: hoursFromNow(-19), activityContentPurgedAt: null,
+  },
+  {
+    // `unavailable` — a real comment exists, AI classification was ATTEMPTED and got nothing usable
+    // (gateway down/unconfigured/unparsable). Must look nothing like `unclassified` (nobody's
+    // looked) even though both have null sentiment/category/urgency.
+    id: "soc-thread-5", accountId: "soc-acc-ig-1", network: "instagram", kind: "comment",
+    externalThreadId: "ig-comment-8804", postVariantId: "soc-var-6",
+    authorHandle: "m.tan", authorName: "M. Tan",
+    excerpt: "Is this available in size M?",
+    sentiment: null, category: null, urgency: null,
+    aiTriageStatus: "unavailable", aiTriageAt: hoursFromNow(-1),
+    status: "open", assignedTo: null,
+    slaDueAt: hoursFromNow(3), slaAlertedAt: null, lastMessageAt: hoursFromNow(-1),
+    createdAt: hoursFromNow(-1), updatedAt: hoursFromNow(-1), activityContentPurgedAt: null,
+  },
+  {
+    // `purged` — WAS classified, then LinkedIn's 48h activity-content cap scrubbed the excerpt AND
+    // (0113's profile-purge window) the author identity. A COMPLIANCE fact, never rendered as
+    // missing data. Carries an APPROVED reply so `source_content_purged` is drivable live via
+    // send-preconditions (fail-closed-on-unknown, D-22's own doctrine restated for a reply).
+    id: "soc-thread-6", accountId: "soc-acc-ig-1", network: "instagram", kind: "comment",
+    externalThreadId: "ig-comment-7701", postVariantId: "soc-var-6",
+    authorHandle: null, authorName: null,
+    excerpt: null,
+    sentiment: null, category: null, urgency: null,
+    aiTriageStatus: "purged", aiTriageAt: hoursFromNow(-60),
+    status: "open", assignedTo: null,
+    slaDueAt: hoursFromNow(-40), slaAlertedAt: hoursFromNow(-39), lastMessageAt: hoursFromNow(-58),
+    createdAt: hoursFromNow(-60), updatedAt: hoursFromNow(-48), activityContentPurgedAt: hoursFromNow(-48),
+  },
+  {
+    // `escalated` + dm kind + overdue SLA — kind/status variety.
+    id: "soc-thread-7", accountId: "soc-acc-fb-1", network: "facebook", kind: "dm",
+    externalThreadId: "fb-dm-2201", postVariantId: null,
+    authorHandle: "concerned.parent", authorName: "Concerned Parent",
+    excerpt: "Can someone from your team call me back about a safety recall?",
+    sentiment: "negative", category: "complaint", urgency: "high",
+    aiTriageStatus: "classified", aiTriageAt: hoursFromNow(-3),
+    status: "escalated", assignedTo: DEMO_MANAGER_ID,
+    slaDueAt: hoursFromNow(-1), slaAlertedAt: hoursFromNow(-0.9), lastMessageAt: hoursFromNow(-3),
+    createdAt: hoursFromNow(-3), updatedAt: hoursFromNow(-1), activityContentPurgedAt: null,
+  },
+  {
+    // `dismissed` + mention kind — an operator already closed this out with no reply needed.
+    id: "soc-thread-8", accountId: "soc-acc-ig-1", network: "instagram", kind: "mention",
+    externalThreadId: "ig-mention-3301", postVariantId: null,
+    authorHandle: "randomshopper", authorName: null,
+    excerpt: "just tagging @northwindtraders bc this looked cute lol",
+    sentiment: "neutral", category: "other", urgency: "low",
+    aiTriageStatus: "classified", aiTriageAt: hoursFromNow(-30),
+    status: "dismissed", assignedTo: DEMO_MANAGER_ID,
+    slaDueAt: null, slaAlertedAt: null, lastMessageAt: hoursFromNow(-30),
+    createdAt: hoursFromNow(-30), updatedAt: hoursFromNow(-28), activityContentPurgedAt: null,
+  },
+  {
+    // `closed` + review kind + due_soon-shaped SLA (harmless once closed — the queue's own default
+    // filter hides closed/dismissed by status, see `socialDemo`'s `threads` route below) — kind
+    // variety (review threads exist per 0105's own CHECK even though no network in this deployment
+    // exposes a review surface today).
+    id: "soc-thread-9", accountId: "soc-acc-fb-1", network: "facebook", kind: "review",
+    externalThreadId: "fb-review-990", postVariantId: null,
+    authorHandle: "verified.buyer", authorName: "Verified Buyer",
+    excerpt: "Five stars, fast shipping and great packaging.",
+    sentiment: "positive", category: "praise", urgency: "low",
+    aiTriageStatus: "classified", aiTriageAt: hoursFromNow(-72),
+    status: "closed", assignedTo: DEMO_MANAGER_ID,
+    slaDueAt: hoursFromNow(-70), slaAlertedAt: hoursFromNow(-69), lastMessageAt: hoursFromNow(-72),
+    createdAt: hoursFromNow(-72), updatedAt: hoursFromNow(-70), activityContentPurgedAt: null,
+  },
+];
+
+const INBOX_MESSAGES_SEED: DemoInboxMessage[] = [
+  // soc-thread-1 — inbound only, nothing drafted yet.
+  { id: "soc-msg-1", threadId: "soc-thread-1", direction: "in", body: "Do you ship this to Australia?", status: "sent", source: "postiz_sync", externalId: "ig-comment-8801", postedAt: hoursFromNow(-0.5), createdAt: hoursFromNow(-0.5), approvalId: null, argsSha256: null },
+  // soc-thread-2 — inbound + a DRAFT reply (editable; the live draft->edit->approve loop starts here).
+  { id: "soc-msg-2", threadId: "soc-thread-2", direction: "in", body: "What sizes are available for the autumn jacket?", status: "sent", source: "postiz_sync", externalId: "ig-comment-8802", postedAt: hoursFromNow(-0.4), createdAt: hoursFromNow(-0.4), approvalId: null, argsSha256: null },
+  { id: "soc-msg-3", threadId: "soc-thread-2", direction: "out", body: "Hi Sam! The autumn jacket runs XS-XL — happy to check a specific size for you.", status: "draft", source: "reply", externalId: null, postedAt: null, createdAt: hoursFromNow(-0.3), approvalId: null, argsSha256: "sha256-demo-reply-0003" },
+  // soc-thread-3 — inbound + a DRAFT reply (a second, independently-editable draft).
+  { id: "soc-msg-4", threadId: "soc-thread-3", direction: "in", body: "My order arrived damaged and nobody has replied to my email!!", status: "sent", source: "postiz_sync", externalId: "fb-comment-4401", postedAt: hoursFromNow(-6), createdAt: hoursFromNow(-6), approvalId: null, argsSha256: null },
+  { id: "soc-msg-5", threadId: "soc-thread-3", direction: "out", body: "So sorry to hear that — I've escalated this to our support team and someone will reach out directly.", status: "draft", source: "reply", externalId: null, postedAt: null, createdAt: hoursFromNow(-0.2), approvalId: null, argsSha256: "sha256-demo-reply-0005" },
+  // soc-thread-4 — inbound + a SENT reply (historical record; `status:'replied'` on the thread).
+  { id: "soc-msg-6", threadId: "soc-thread-4", direction: "in", body: "Loved the new arrivals, ordering more!", status: "sent", source: "postiz_sync", externalId: "ig-comment-8803", postedAt: hoursFromNow(-20), createdAt: hoursFromNow(-20), approvalId: null, argsSha256: null },
+  { id: "soc-msg-7", threadId: "soc-thread-4", direction: "out", body: "Thank you so much — can't wait for you to see what's coming next!", status: "sent", source: "reply", externalId: "ig-reply-9001", postedAt: hoursFromNow(-19), createdAt: hoursFromNow(-19.2), approvalId: "appr-demo-reply-1", argsSha256: "sha256-demo-reply-0007" },
+  // soc-thread-5 — inbound only (unavailable triage; no reply drafted).
+  { id: "soc-msg-8", threadId: "soc-thread-5", direction: "in", body: "Is this available in size M?", status: "sent", source: "postiz_sync", externalId: "ig-comment-8804", postedAt: hoursFromNow(-1), createdAt: hoursFromNow(-1), approvalId: null, argsSha256: null },
+  // soc-thread-6 — the ORIGINAL comment row still exists (purge scrubs the THREAD's excerpt/author,
+  // never individual message rows retroactively — inbox-sync-job.ts's own evidence: "Individual
+  // MESSAGE rows carry no such guard"), plus an APPROVED reply that will refuse
+  // `source_content_purged` at send-preconditions — drivable live, no click needed to reach it.
+  { id: "soc-msg-9", threadId: "soc-thread-6", direction: "in", body: "Anyone know if this comes in navy?", status: "sent", source: "postiz_sync", externalId: "ig-comment-7701", postedAt: hoursFromNow(-58), createdAt: hoursFromNow(-58), approvalId: null, argsSha256: null },
+  { id: "soc-msg-10", threadId: "soc-thread-6", direction: "out", body: "Navy is back in stock as of this week!", status: "approved", source: "reply", externalId: null, postedAt: null, createdAt: hoursFromNow(-47), approvalId: null, argsSha256: "sha256-demo-reply-0010" },
+  // soc-thread-7 — inbound + a FAILED reply (the network call failed or its outcome was ambiguous;
+  // never auto-retried — `reply_send_failed`'s own doctrine). No `lastError` rendered: the real
+  // `listThreadMessages` SELECT does not return one either (verified against source).
+  { id: "soc-msg-11", threadId: "soc-thread-7", direction: "in", body: "Can someone from your team call me back about a safety recall?", status: "sent", source: "postiz_sync", externalId: "fb-dm-2201", postedAt: hoursFromNow(-3), createdAt: hoursFromNow(-3), approvalId: null, argsSha256: null },
+  { id: "soc-msg-12", threadId: "soc-thread-7", direction: "out", body: "We take this seriously — a member of our safety team will call you within the hour.", status: "failed", source: "reply", externalId: null, postedAt: null, createdAt: hoursFromNow(-0.8), approvalId: "appr-demo-reply-2", argsSha256: "sha256-demo-reply-0012" },
+  // soc-thread-8/9 — inbound only, both resolved without ever needing a reply.
+  { id: "soc-msg-13", threadId: "soc-thread-8", direction: "in", body: "just tagging @northwindtraders bc this looked cute lol", status: "sent", source: "postiz_sync", externalId: "ig-mention-3301", postedAt: hoursFromNow(-30), createdAt: hoursFromNow(-30), approvalId: null, argsSha256: null },
+  { id: "soc-msg-14", threadId: "soc-thread-9", direction: "in", body: "Five stars, fast shipping and great packaging.", status: "sent", source: "postiz_sync", externalId: "fb-review-990", postedAt: hoursFromNow(-72), createdAt: hoursFromNow(-72), approvalId: null, argsSha256: null },
+];
+
 const CLIENT_REVIEWS_SEED: DemoClientReview[] = [
   {
     id: "cr-1", variantId: "soc-var-7", clientId: "cl-1", status: "pending",
@@ -544,6 +754,8 @@ const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   clientReviews: CLIENT_REVIEWS_SEED,
   dailyMetrics: DAILY_METRICS_SEED,
   postMetrics: POST_METRICS_SEED,
+  inboxThreads: INBOX_THREADS_SEED,
+  inboxMessages: INBOX_MESSAGES_SEED,
 }) as SocialStore;
 
 // Live views. Every read and every mutation below goes through these, so the action graph and the RSC
@@ -554,8 +766,58 @@ const POSTS = store.posts;
 const CLIENT_REVIEWS = store.clientReviews;
 const DAILY_METRICS = store.dailyMetrics;
 const POST_METRICS = store.postMetrics;
+const INBOX_THREADS = store.inboxThreads;
+const INBOX_MESSAGES = store.inboxMessages;
 const nid = (p: string) => `${p}-${++store.seq}`;
 const now = () => new Date().toISOString();
+
+// ── the inbox reply gate, computed FRESH (never a stored verdict) — mirrors `computePrecondition`
+// above's own reasoning, and mirrors the real `evaluateReplyPrecondition`'s four-stage order
+// (scope -> hash -> unconsumed -> retention). Deliberately simplified for demo fidelity: the real
+// chain's hash check requires re-hashing the live body against the args the caller supplied, which
+// this fixture has no caller-supplied args to check against (`send-preconditions` here is a pure
+// GET with no body) — omitted rather than faked, same "don't invent a check you can't really run"
+// discipline this file's own asset-attach section states for `mediaUploadFailed`.
+const REPLY_PRECONDITION_STAGES_DEMO = ["scope", "hash", "unconsumed", "retention"] as const;
+const REPLY_TOOL_DEMO = "social.sendReply";
+
+function inboxThreadById(id: string): DemoInboxThread | undefined {
+  return INBOX_THREADS.find((t) => t.id === id);
+}
+function inboxMessageById(threadId: string, messageId: string): DemoInboxMessage | undefined {
+  return INBOX_MESSAGES.find((m) => m.id === messageId && m.threadId === threadId && m.direction === "out");
+}
+function computeReplyPrecondition(thread: DemoInboxThread, msg: DemoInboxMessage) {
+  const base = { stages: REPLY_PRECONDITION_STAGES_DEMO, tool: REPLY_TOOL_DEMO };
+  const account = accountById(thread.accountId);
+  if (!account || account.status !== "connected") {
+    return { ...base, ok: false as const, stage: "scope" as const, reason: "account_not_connected" };
+  }
+  if (msg.externalId !== null || msg.status === "sent") {
+    return { ...base, ok: false as const, stage: "unconsumed" as const, reason: "already_sent" };
+  }
+  if (msg.approvalId !== null) {
+    return { ...base, ok: false as const, stage: "unconsumed" as const, reason: "approval_already_consumed" };
+  }
+  if (msg.status !== "approved") {
+    return { ...base, ok: false as const, stage: "unconsumed" as const, reason: "message_not_approved" };
+  }
+  if (thread.activityContentPurgedAt !== null) {
+    return { ...base, ok: false as const, stage: "retention" as const, reason: "source_content_purged" };
+  }
+  return { ...base, ok: true as const };
+}
+
+/** Never leaks `activityContentPurgedAt` — the real backend exposes it through no endpoint either
+ *  (see this section's own header on `DemoInboxThread`). */
+function toPublicThread(t: DemoInboxThread) {
+  const { activityContentPurgedAt: _internal, ...pub } = t;
+  return pub;
+}
+function toPublicMessage(m: DemoInboxMessage) {
+  const { threadId: _t, approvalId: _a, argsSha256: _s, ...pub } = m;
+  return pub;
+}
 
 function reviewByVariantId(variantId: string): DemoClientReview | undefined {
   return CLIENT_REVIEWS.find((r) => r.variantId === variantId);
@@ -967,6 +1229,112 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     review.decidedAt = now();
     review.updatedAt = now();
     return ok({ id: review.id, status: "withdrawn" });
+  }
+
+  // ── publisher status (SMM-05) — THIS ticket's first demo route for it. `inboxSurface:
+  // "available"` on purpose: DEMO_MODE's whole point is proving the client-side rendering is
+  // correct and ready, so it does NOT reproduce today's real "none" steady state (see this file's
+  // header, and socialShared.ts's `PublisherStatus` doc, for why a live deployment reads "none").
+  // `driver: "direct"` matches the ONE real driver whose capabilities ever include `inbox_read`
+  // (platform-nest's `publisher/direct.ts`) — Postiz, the real default, never does.
+  if (tail === "publisher/status" && m === "GET") {
+    return ok({
+      configured: true, driver: "direct",
+      enabledNetworks: ["instagram", "facebook", "tiktok"],
+      capabilities: ["schedule", "media_upload", "inbox_read", "quota_probe"],
+      inboxSurface: "available", quotaProbe: "unavailable",
+      orgs: [{ publisherOrgId: "pub-org-northwind", clientId: "cl-1", driver: "direct", status: "active", accountCount: ACCOUNTS.length, lastSyncedAt: hoursFromNow(-1) }],
+    });
+  }
+
+  // ── the engagement inbox (SMM-15/16/17 backend; SMM-18 THIS ticket) ─────────────────────────────
+  //
+  // `GET threads` — the PROPOSED list route (see this file's + socialShared.ts's headers for the
+  // real-backend gap this stands in for). `status` defaults to hiding `dismissed`/`closed` — the
+  // same "the queue is a queue, not an archive" convention `?status=` lets a caller override,
+  // mirroring `listPosts`/`listEngagements`'s own optional-filter shape.
+  if (tail === "threads" && m === "GET") {
+    const statusFilter = params.get("status");
+    let rows = INBOX_THREADS;
+    // `?status=all` bypasses the default filter (used to resolve a thread clicked into from a link
+    // even if it is dismissed/closed) — rather than inventing a second endpoint for that one case.
+    if (statusFilter && statusFilter !== "all") rows = rows.filter((t) => t.status === statusFilter);
+    else if (!statusFilter) rows = rows.filter((t) => t.status !== "dismissed" && t.status !== "closed");
+    return ok(rows.map(toPublicThread));
+  }
+
+  const threadMessagesM = tail.match(/^threads\/([^/]+)\/messages$/);
+  if (threadMessagesM && m === "GET") {
+    const threadId = threadMessagesM[1];
+    if (!inboxThreadById(threadId)) return err(404, "inbox thread not found");
+    const rows = INBOX_MESSAGES.filter((msg) => msg.threadId === threadId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map(toPublicMessage);
+    return ok({ threadId, messages: rows });
+  }
+  if (threadMessagesM && m === "POST") {
+    const threadId = threadMessagesM[1];
+    const thread = inboxThreadById(threadId);
+    if (!thread) return err(404, "inbox thread not found");
+    const body_ = b() as { body?: string };
+    const text = (body_.body ?? "").trim();
+    if (!text) return err(400, "empty_body");
+    const id = nid("soc-msg");
+    const argsSha256 = nid("sha256-demo-reply");
+    INBOX_MESSAGES.push({
+      id, threadId, direction: "out", body: text, status: "draft", source: "reply",
+      externalId: null, postedAt: null, createdAt: now(), approvalId: null, argsSha256,
+    });
+    return { status: 201, json: { id, threadId, body: text, status: "draft", argsSha256 } };
+  }
+
+  const editableMessageStatuses = new Set(["draft", "in_review", "approved", "failed"]);
+  const threadMessageDetailM = tail.match(/^threads\/([^/]+)\/messages\/([^/]+)$/);
+  if (threadMessageDetailM && m === "PATCH") {
+    const [, threadId, messageId] = threadMessageDetailM;
+    if (!inboxThreadById(threadId)) return err(404, "reply draft not found");
+    const msg = inboxMessageById(threadId, messageId);
+    if (!msg) return err(404, "reply draft not found");
+    const body_ = b() as { body?: string };
+    if (body_.body === undefined) return err(400, "no_fields");
+    const text = body_.body.trim();
+    if (!text) return err(400, "empty_body");
+    if (!editableMessageStatuses.has(msg.status)) return err(409, "message_not_editable");
+    const wasApproved = msg.approvalId !== null || msg.status === "approved";
+    msg.body = text;
+    msg.argsSha256 = nid("sha256-demo-reply");
+    msg.approvalId = null;
+    if (["in_review", "approved", "failed"].includes(msg.status)) msg.status = "draft";
+    return ok({ id: messageId, threadId, body: text, argsSha256: msg.argsSha256, approvalInvalidated: wasApproved });
+  }
+
+  const approveMessageM = tail.match(/^threads\/([^/]+)\/messages\/([^/]+)\/approve$/);
+  if (approveMessageM && m === "POST") {
+    const [, threadId, messageId] = approveMessageM;
+    if (!inboxThreadById(threadId)) return err(404, "reply draft not found");
+    const msg = inboxMessageById(threadId, messageId);
+    if (!msg) return err(404, "reply draft not found");
+    if (msg.status !== "approved") {
+      if (msg.status !== "draft" && msg.status !== "in_review") return err(409, "message_not_editable");
+      if (!msg.body.trim()) return err(400, "empty_body");
+      msg.status = "approved";
+    }
+    return ok({ id: messageId, threadId, status: "approved" }); // idempotent
+  }
+
+  const sendPreconditionsM = tail.match(/^threads\/([^/]+)\/messages\/([^/]+)\/send-preconditions$/);
+  if (sendPreconditionsM && m === "GET") {
+    const [, threadId, messageId] = sendPreconditionsM;
+    const thread = inboxThreadById(threadId);
+    if (!thread) return err(404, "reply draft not found");
+    const msg = inboxMessageById(threadId, messageId);
+    if (!msg) return err(404, "reply draft not found");
+    const verdict = computeReplyPrecondition(thread, msg);
+    return ok({
+      ok: verdict.ok,
+      ...(verdict.ok ? {} : { stage: verdict.stage, reason: verdict.reason }),
+      stages: verdict.stages, tool: verdict.tool,
+    });
   }
 
   return null;
