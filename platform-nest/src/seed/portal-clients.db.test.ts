@@ -18,7 +18,10 @@ import { seedPortalClients } from "./portal-clients";
 // The seed resolves companies BY NAME and deliberately skips any it cannot find, so the fixture only
 // has to create the two names it looks for.
 const AGENCY = "Gaia Digital Agency";
-const RESORT = "Sanur Resort";
+// Renamed with the seed (2026-08-22): the resort is Viceroy Bali, in Ubud. This constant must
+// track `agency.ts`'s RESORT_NAME or the fixture looks the company up by a name that no longer
+// exists and seeds nothing, silently.
+const RESORT = "Viceroy Bali";
 
 describe.skipIf(!TEST_URL)("seed/portal-clients", () => {
   let agency: string;

@@ -99,7 +99,7 @@ const SPECS: Spec[] = [
     run: { title: "Ubud Yoga — booking platform", status: "delivery_active", pendingGate: null },
   },
   {
-    company: "Sanur Resort",
+    company: "Viceroy Bali",
     client: "Bali Wedding Planners",
     clientEmail: "hello@baliweddings.test",
     project: "Wedding microsite + booking flow",
@@ -107,7 +107,7 @@ const SPECS: Spec[] = [
     run: { title: "Wedding microsite — scope", status: "scope_pending", pendingGate: "scope_signoff" },
   },
   {
-    company: "Sanur Resort",
+    company: "Viceroy Bali",
     client: "Sanur Dive Center",
     clientEmail: "hello@sanurdive.test",
     project: "Dive Center — booking integration",

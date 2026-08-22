@@ -91,7 +91,7 @@ const REAL_ROLES = [
  *  They cannot be DERIVED from policy — the parse finds no rule naming them — so they are added
  *  after derivation and must be excluded from any check that compares a bundle against role-arm
  *  reach (see iam-04-reg1-mirror-reach-invariant.test.ts's exemption and why it stays narrow). */
-export const PERMISSION_NATIVE_ROLES = ["owner"];
+const PERMISSION_NATIVE_ROLES = ["owner"];
 
 const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",
@@ -495,7 +495,9 @@ export function serialize(doc) {
   return JSON.stringify(doc, null, 2) + "\n";
 }
 
-export { REAL_ROLES };
+// One export list, matching this file's existing convention — an inline `export const`
+// alongside it type-resolved inconsistently from the .ts consumers.
+export { REAL_ROLES, PERMISSION_NATIVE_ROLES };
 
 function main() {
   const args = new Set(process.argv.slice(2));

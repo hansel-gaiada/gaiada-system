@@ -13,6 +13,12 @@
 //     `monitoring_staff`/`monitoring_manager` (22 -> 24) — keep this tuple in lockstep
 //     with the .mjs's own REAL_ROLES array; a mismatch here is a TS error at every importer, not a
 //     silent drift, which is the point of hand-writing it rather than inferring `string[]`.
+//   - `PERMISSION_NATIVE_ROLES` (IAM-14): roles with NO Cerbos rules, whose reach IS their bundle
+//     (IAM-04c §3). They cannot be derived from policy — the parse finds no rule naming them — so the
+//     generator appends them after derivation. Kept as a separate tuple rather than folded into
+//     REAL_ROLES because the two are used differently: anything comparing a bundle against ROLE-ARM
+//     reach must skip these (they have none), while anything comparing the artifact to the DATABASE
+//     must include them.
 //   - `generate()`: builds the full role-permission-bundles.json document in memory.
 //   - `serialize(doc)`: the exact `JSON.stringify(doc, null, 2) + "\n"` byte-for-byte
 //     serialization the checked-in file must match.
@@ -28,6 +34,8 @@ export const REAL_ROLES: readonly [
   "social_staff", "social_manager",
   "monitoring_staff", "monitoring_manager",
 ];
+
+export const PERMISSION_NATIVE_ROLES: readonly ["owner"];
 
 export interface RoleBundleDoc {
   _meta: {

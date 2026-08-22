@@ -12,9 +12,31 @@ import { createRole, grantRole, addMembership } from "../testing/fixtures";
 import { seedDepartmentsAndHr, type SeededDepartments } from "./departments";
 import { EMPLOYEES, AGENCY_DEPTS } from "./roster";
 
+// ── THE REAL ESTATE (corrected 2026-08-22, owner-supplied + verified against public sources) ─────
+// `Sanur Resort` was a placeholder and wrong on two counts: the resort is VICEROY BALI and it is in
+// UBUD, not Sanur. Established 2005 by the Syrowatka family and still owner-managed — 25 pool villas,
+// ~150 staff — with several named businesses of its own, which is why it gets child companies here
+// rather than being a leaf.
+//
+// Anthony Syrowatka owns the holding and, per the owner, every company beneath it. He is seeded with
+// the Phase-3 `owner` role (D-8) on each, which is what makes the two-person appointment rule (D-9:
+// 1 superadmin + 1 owner) satisfiable at all — before this there was exactly ONE elevated principal
+// in the estate.
+//
+// ⚠ NOT SEEDED, deliberately: the Bali Restaurant & Cafe Association (BRCA) is an industry body he
+// co-founded, not a company he owns; and public sources say "owner of other businesses" without
+// naming them. Inventing companies for a holding backbone would be worse than a short one.
 const HOLDING_NAME = "D & A Syrowatka";
 const AGENCY_NAME = "Gaia Digital Agency";
-const RESORT_NAME = "Sanur Resort";
+const RESORT_NAME = "Viceroy Bali";
+/** Viceroy Bali's own businesses — real, named venues, not illustrative filler. */
+const VICEROY_VENUES: { name: string; type: string }[] = [
+  { name: "Apéritif", type: "restaurant" },
+  { name: "CasCades Restaurant & Bar", type: "restaurant" },
+  { name: "Pinstripe Bar", type: "bar" },
+  { name: "Akoya Spa", type: "spa" },
+];
+const CATERING_NAME = "Bali Catering and Events";
 const site = () => config.originSite;
 
 // The people roster + department/division shape both seeds share now live in ./roster.
@@ -81,6 +103,13 @@ export async function seedAgency(): Promise<SeededAgency> {
   const holdingId = await ensureCompany(HOLDING_NAME, [], "holding", null);
   const tenantId = await ensureCompany(AGENCY_NAME, ["agency", "hr", "reports", "assistant"], "agency", holdingId);
   const resortId = await ensureCompany(RESORT_NAME, [], "resort", holdingId);
+  // Viceroy's own venues hang off the RESORT, not the holding — the tree mirrors the business, and
+  // MON-00a's root anchor means every one of them shares the holding's root either way.
+  const venueIds: string[] = [];
+  for (const v of VICEROY_VENUES) {
+    venueIds.push(await ensureCompany(v.name, [], v.type, resortId));
+  }
+  const cateringId = await ensureCompany(CATERING_NAME, [], "catering", holdingId);
 
   // ---- People ----
   const users = {
@@ -91,7 +120,9 @@ export async function seedAgency(): Promise<SeededAgency> {
     approver: await ensureUser("approver@gaiada-creative.test", "Eka (Client Lead)", "Client Lead"),
     exec: await ensureUser("exec@gaiada.test", "Gaiada Exec", "Group Executive"),
     superadmin: await ensureUser("hansel@gaiada.com", "Clement Hansel", "AI Manager"),
-    resortGm: await ensureUser("gm@sanur-resort.test", "Wayan (GM)", "General Manager"),
+    resortGm: await ensureUser("gm@viceroybali.test", "Wayan (GM)", "General Manager"),
+    // The holding owner (D-8). A real person, so the address is the real domain rather than .test.
+    owner: await ensureUser("anthony@gaiada.com", "Anthony Syrowatka", "Owner"),
   };
   // Roles + memberships (all idempotent).
   const roleCompanyAdmin = await createRole("company_admin");
@@ -101,6 +132,7 @@ export async function seedAgency(): Promise<SeededAgency> {
   const roleExec = await createRole("group_executive");
   const rolePlatform = await createRole("platform_admin");
   const roleItAdmin = await createRole("it_admin");
+  const roleOwner = await createRole("owner");
 
   for (const u of [users.admin, users.pm, users.designer, users.copy, users.approver]) await addMembership(tenantId, u);
   await grantRole(users.admin, roleCompanyAdmin, "company", tenantId);
@@ -121,6 +153,24 @@ export async function seedAgency(): Promise<SeededAgency> {
   // Owner also administers the resort → multi-company switcher for the owner.
   await addMembership(resortId, users.admin);
   await grantRole(users.admin, roleCompanyAdmin, "company", resortId);
+  // ── THE OWNER (IAM-14 / D-8) ────────────────────────────────────────────────────────────────────
+  // `owner` is granted per company, one grant each, across the holding and everything under it. It is
+  // NOT a global grant: D-8 scopes owner to the companies actually owned, and a global one would make
+  // it a second platform tier — the very thing D-7 is deleting `group_executive` for.
+  //
+  // Membership as well as a grant on each: `assemblePrincipal` derives `companies` from memberships,
+  // so a grant without one leaves the company switcher empty and `inTenant` false.
+  const ownedCompanies = [holdingId, tenantId, resortId, ...venueIds, cateringId];
+  for (const c of ownedCompanies) {
+    await addMembership(c, users.owner);
+    await grantRole(users.owner, roleOwner, "company", c);
+  }
+  // The holding is his home company, which is what MON-00a/00c's root anchor reads — without it
+  // `rootCompanies` is empty and every root-gated rule denies him on his own estate.
+  await withGlobal((c) =>
+    c.query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [holdingId, users.owner]),
+  );
+
   // Resort GM.
   await addMembership(resortId, users.resortGm);
   await grantRole(users.resortGm, roleManager, "company", resortId);
@@ -295,7 +345,7 @@ async function seedIt(tenantId: string, resortId: string) {
   }
   if (await count(resortId, "it_devices") === 0) {
     await withTenants([resortId], (c) => c.query(`INSERT INTO it_devices (id,tenant_id,name,kind,status,site,network,ip,vendor,origin_site,labels)
-      VALUES ($1,$2,'Lobby CCTV','cctv','online','Sanur Resort','CCTV','10.1.20.5','Hikvision',$3,ARRAY['demo-fixture']),($4,$2,'Front Desk PC','workstation','online','Sanur Resort','LAN','10.1.10.5','HP',$3,ARRAY['demo-fixture'])`,
+      VALUES ($1,$2,'Lobby CCTV','cctv','online','Viceroy Bali','CCTV','10.1.20.5','Hikvision',$3,ARRAY['demo-fixture']),($4,$2,'Front Desk PC','workstation','online','Viceroy Bali','LAN','10.1.10.5','HP',$3,ARRAY['demo-fixture'])`,
       [newId(), resortId, site(), newId()]));
   }
 }
@@ -428,7 +478,7 @@ async function seedCheckinsAndFacts(tenantId: string, u: Record<string, string>)
   }
 }
 
-// ---- Sanur Resort: light data so switching shows a distinct company ----
+// ---- Viceroy Bali: light data so switching shows a distinct company ----
 async function seedResort(resortId: string, u: Record<string, string>) {
   const clientId = await ensureClient(resortId, "Walk-in Guests", "front@sanur-resort.test");
   const projectId = await ensureProject(resortId, "Peak-season staffing", u.resortGm, clientId);
