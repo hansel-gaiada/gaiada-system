@@ -421,8 +421,13 @@ async function loadAccountWindowCounts(
  *  `(payload->>'_deleted') = 'true'`, i.e. tombstones only. A spike payload has no `_deleted` key, so
  *  the comparison is `NULL = 'true'` → NULL → never matched, and these rows are not eligible today.
  *  If that GC is ever widened to prune by age or by relayed status, THIS DEDUP SILENTLY WEAKENS: a
- *  pruned announcement reads as "never announced" and the spike re-fires. Widen that GC and you must
- *  give this a store of its own.
+ *  pruned announcement reads as "never announced" and the spike re-fires, with no error anywhere.
+ *
+ *  That is NOT hypothetical — it is scheduled. `docs/superpowers/specs/2026-07-05-ws1-event-backbone.md`
+ *  §7 carries an OPEN item for exactly this ("no `XTRIM`/outbox-row-purge policy defined yet ... must be
+ *  addressed before this becomes a growth liability"). The dependency is recorded under that item too,
+ *  because whoever implements trimming will be reading the backbone spec and not this file. When it
+ *  lands: exclude `social.inbox.spike_detected` from the purge, or give this a store of its own.
  *
  *  A suppressed spike is counted as `suppressed`, never silently skipped — the caller can tell
  *  "quiet because nothing is spiking" from "quiet because we already said so", which are different

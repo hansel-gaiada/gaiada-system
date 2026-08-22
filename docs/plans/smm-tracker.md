@@ -2560,7 +2560,10 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   deletes from it. The dedup survives for a NARROWER reason than I claimed: that GC matches only
   `(payload->>'_deleted') = 'true'`, and a spike payload has no `_deleted` key, so the comparison is
   `NULL = 'true'` and never matches. If that GC is ever widened to prune by age or relayed status, this
-  dedup silently weakens and needs its own store. Recorded in the code at the point of use. Worth
+  dedup silently weakens and needs its own store — and that is SCHEDULED, not hypothetical: WS1's
+  event-backbone spec §7 has an open item for an outbox-row-purge policy. The dependency is now recorded
+  under THAT item too, since whoever implements trimming reads the backbone spec, not the social job.
+  Recorded in the code at the point of use. Worth
   generalising: "table X is never cleaned up" is a claim about a DIFFERENT service in this program, and
   `sync-engine-go` owns deletions on tables `platform-nest` treats as append-only.
 - ~~`listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide~~

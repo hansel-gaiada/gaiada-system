@@ -106,5 +106,15 @@ A single core `EventConsumerService` reads each stream's consumer group and disp
 ## 7. Open items (flagged, not silently dropped)
 
 - **Retention/trimming**: no `XTRIM`/outbox-row-purge policy defined yet — not needed at v1 event volume, but must be addressed before this becomes a growth liability.
+  - ⚠ **A consumer now depends on outbox rows persisting** (added 2026-08-23). `social-media 0.5.21`'s
+    inbox spike-detection dedup uses `outbox_events` itself as its "did we already announce this?"
+    state — it queries for a prior `social.inbox.spike_detected` row for the account inside a cooldown
+    (`platform-nest/src/modules/social/inbox-triage-job.ts#spikeAlreadyAnnounced`). This is safe against
+    today's only deletion path, `sync-engine-go/internal/gc/tombstone.go#purgeTombstones`, because that
+    matches `(payload->>'_deleted') = 'true'` and a spike payload has no `_deleted` key. **An age-based
+    or relayed-based purge would silently break it**: a purged announcement reads as "never announced",
+    so a sustained spike would resume re-firing every sweep tick with no error anywhere. Whoever defines
+    this policy must either exclude that event type or give the dedup its own store. Any other consumer
+    that treats this table as append-only should be listed here too.
 - ~~**Relationship to the future sync engine**...~~ **Resolved** in `2026-07-06-ws1-sync-engine-revision.md` §1 (D7 fix): `outbox_events` *is* `sync_outbox` — one table, two independent cursor-based readers (this spec's relay, and the sync engine's push/pull). No dual-write, no sibling table.
 - **WS8 event taxonomy**: which specific event types trigger re-embed vs. hard-delete in the RAG indexer is WS8's responsibility to define when it becomes a consumer of this backbone, not this spec's.
