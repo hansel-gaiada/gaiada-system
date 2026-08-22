@@ -59,9 +59,11 @@ const SCOPE_TYPES = new Set(["global", "company", "project", "org_unit"]);
 // **This map is machine-checked against that file** by `permission-arm-hazard-scan.test.ts`, which
 // re-derives it from the policy source — it is the eighth hand-maintained list in this program, and
 // the first that cannot silently drift, because the guard reads the policy rather than a copy.
+// IAM-15: `group_executive: ["global"]` removed. This map is machine-checked against
+// derived_roles.yaml, and that file no longer defines the role — so leaving the entry here would fail
+// the very guard described above (an entry with no policy source to re-derive it from).
 const ROLE_SCOPE_CONSTRAINTS: Record<string, readonly string[]> = {
   platform_admin: ["global"],
-  group_executive: ["global"],
   client: ["company"],
   org_unit_lead: ["org_unit"],
 };

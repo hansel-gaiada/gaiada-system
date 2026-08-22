@@ -117,7 +117,7 @@ describe.skipIf(!TEST_URL)("TR-13 ReportDocument builder + endpoints (live PG + 
     await grantRole(alice, await createRole("member"), "company", co);
     await grantRole(bob, await createRole("member"), "company", co);
     await grantRole(admin, await createRole("company_admin"), "company", co);
-    await grantRole(exec, await createRole("group_executive"), "global", null);
+    await grantRole(exec, await createRole("platform_admin"), "global", null);
     // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
     // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
     // home_company_id, not a membership, so the exec does not join the companies under assertion.

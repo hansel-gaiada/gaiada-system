@@ -62,13 +62,15 @@ const POLICIES_DIR = join(ROOT, "cerbos/policies");
 const CATALOG_PATH = join(ROOT, "src/rbac/permission-catalog.json");
 const OUTPUT_PATH = join(ROOT, "src/rbac/role-permission-bundles.json");
 
-// ── The 20 real, nameable roles — matches 0102's own list and the parity suite's REAL_ROLES.
+// ── The 19 real, nameable roles — matches 0102's own list and the parity suite's REAL_ROLES.
 // (IAM-02g/0098 added `webdev_staff`/`webdev_manager` — 18 -> 20; HIER-2/0102 added `org_unit_lead`
 // — 20 -> 21, `team_lead`'s org-chart-subtree-scoped replacement, DR-9; HIER-3 (2026-08-11) retired
 // `team_lead` itself — 21 -> 20, the role, its derived role, and every writer that could mint the
-// grant are all gone.) ──
+// grant are all gone. IAM-15 (2026-08-23) retired `group_executive` the same way — 20 -> 19, D-7's
+// "last unrestricted cross-company business role"; its 54 policy rules are deleted and a migration
+// drops the row, so leaving it here would emit an empty bundle for a role that does not exist.) ──
 const REAL_ROLES = [
-  "platform_admin", "company_admin", "group_executive", "manager", "member", "viewer",
+  "platform_admin", "company_admin", "manager", "member", "viewer",
   "org_unit_lead", "client", "it_admin", "it_manager", "it",
   "agency_approver",
   "hr_staff", "hr_manager",
@@ -97,6 +99,9 @@ const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",
   "resource_search_keyword", "resource_search_ledger", "resource_search_audit",
   "resource_search_report",
+  // SM-76: the finding-state entity (search_finding_states) — same module_staff/module_manager
+  // -> search_staff/search_manager resolution as every other resource_search_* kind.
+  "resource_search_finding",
 ]);
 // Historical note (IAM-02a/0094 finding (b), CLOSED by 0097+0098): `webdev_change_request`/
 // `webdev_provisioned_site` module_staff/module_manager pairs used to resolve to an EMPTY target

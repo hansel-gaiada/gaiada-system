@@ -29,7 +29,7 @@ const site = () => config.originSite;
 export type PersonaKey =
   | "superadmin" | "company_admin" | "manager" | "org_unit_lead" | "member" | "viewer"
   | "hr_staff" | "hr_manager" | "it_admin" | "search_staff" | "search_manager"
-  | "agency_approver" | "group_executive" | "client_contact";
+  | "agency_approver" | "client_contact";
 
 interface PersonaDef {
   role: string;
@@ -59,7 +59,6 @@ const PERSONA_DEFS: Record<Exclude<PersonaKey, "client_contact">, PersonaDef> = 
   search_staff: { role: "search_staff", scope: "company" },
   search_manager: { role: "search_manager", scope: "company" },
   agency_approver: { role: "agency_approver", scope: "company", extraRole: "member" },
-  group_executive: { role: "group_executive", scope: "global" },
 };
 
 export const ALL_PERSONA_KEYS: PersonaKey[] = [...(Object.keys(PERSONA_DEFS) as PersonaKey[]), "client_contact"];

@@ -20,42 +20,10 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4: `group_executive` is a GLOBAL-scope-only role (derived_roles.yaml: `g.scopeType ==
-    # "global"`), so a holder never has a `company_memberships` row and `variables.inTenant` is
-    # FALSE for every resource. Folding it into the rule above (as `company_admin`/`manager`'s
-    # `inTenant && notLow` companion) denied it outright, defeating the role's entire cross-company-
-    # oversight purpose. Own rule, `variables.notLow` only — matching `resource_appraisal.yaml`'s
-    # `group_executive` rule exactly (the cross-company owner tier is by definition never "in
-    # tenant"). See docs/superpowers/plans/2026-08-11-hier-5-report.md §5 / 2026-08-12-iam-trap4-report.md.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # Deciding (approve/reject) is a human governance action — company admins and owners only.
-    #
-    # D14-06 adds `retry`: re-running the EXECUTION of an already-approved row (D14-07's endpoint)
-    # after `execution_status='failed'`. It carries the same real-world consequence as the original
-    # decision — a medium+/unclassified write actually happening — so it gets the same decider set
-    # rather than a weaker one. A plain `manager` is deliberately excluded from both (they hold
-    # `read` above, so the inbox is visible but not actionable).
-    #
-    # OQ-1 note (superadmin approves, and as the fallback): NO addition was needed for it. The
-    # `actions: ["*"]` / `platform_admin` rule at the top of this file already covers `decide` and
-    # now `retry` for the platform superadmin, on every origin. A second explicit rule would be
-    # redundant and would invite someone to later "tidy" one of the two and change behaviour.
     - actions: ["decide", "retry"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4: same fold-in defect as `read` above — own rule, `variables.notLow` only.
-    - actions: ["decide", "retry"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # WSD-2: hr-origin approvals (leave). Rows carry resource.attr.module == "hr". Both sides of
-    # the shared-service relationship can unblock people: the served company's admin (via the
-    # company_admin rules above) AND the PROVIDING unit's hr_manager (module_manager here). Scoped
-    # tightly to module == "hr" so a stray "<other>_manager" grant never reaches non-hr approvals.
     - actions: ["read", "decide"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager"]
@@ -88,12 +56,6 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4 shape (same reason as `read`/`decide` above): group_executive is global-scope-only,
-    # so `variables.inTenant` is always false for it — own rule, `variables.notLow` only.
-    - actions: ["decide_leave"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     - actions: ["decide_leave"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager"]
@@ -168,25 +130,6 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["hr_people_ops"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4 shape: group_executive is global-scope-only, so `variables.inTenant` is always false
-    # for it — its own rule, `variables.notLow` only. Same treatment `read`/`decide`/`decide_leave`
-    # already get in this file.
-    - actions: ["decide_override"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    #
-    # ══════════ REQUESTER ≠ DECIDER — structural, deny-overrides ══════════════════════════════════
-    # Copies resource_invoice.yaml's IAM-GAP-02 maker/checker pattern verbatim, for the same reason:
-    # `roles: ["user"]` matches EVERY principal, and Cerbos combines a kind's rules with
-    # deny-overrides, so this beats every ALLOW above INCLUDING platform_admin's wildcard. Nobody
-    # approves their own override request, superadmin included — that is D-9's no-self-escalation
-    # expressed in the authority layer rather than in a controller that a second writer could forget.
-    #
-    # `creatorId` is the requester (`automation_approvals.requested_by`), fed by the decide handler.
-    # FAIL CLOSED on an absent/empty value: `has() && != ""` means a row whose requester cannot be
-    # resolved is refused rather than waved through — an override with an unknown author is exactly
-    # the one nobody should be able to rubber-stamp.
     - actions: ["decide_override"]
       effect: EFFECT_DENY
       roles: ["user"]
@@ -215,15 +158,6 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["hr_people_ops"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4 shape: group_executive is global-scope-only, so inTenant is always false for it.
-    - actions: ["decide_assignment"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    #
-    # The SAME structural requester-not-decider DENY as decide_override, restated for this action
-    # rather than shared: a DENY that silently covered two actions would be one edit away from
-    # covering neither. deny-overrides beats every ALLOW above, platform_admin's wildcard included.
     - actions: ["decide_assignment"]
       effect: EFFECT_DENY
       roles: ["user"]

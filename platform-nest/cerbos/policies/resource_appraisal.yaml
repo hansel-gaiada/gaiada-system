@@ -103,13 +103,6 @@ resourcePolicy:
       derivedRoles: ["company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # Exec group (global, cross-company by design, same shape as every other exec rule in this
-    # program): read-only. Never write/submit/ack/cycle_admin/finalize.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-
     # Dept lead tier — COARSE company-scoped gate only (see file header on the known
     # approximation); appraisals.controller.ts narrows read (to the caller's own assigned
     # subjects) and write/submit (to an EXACT manager_user_id match on the specific row) the rest

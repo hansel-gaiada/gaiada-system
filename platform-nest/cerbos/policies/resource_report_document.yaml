@@ -68,15 +68,6 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
 
-    # Group executive (global, cross-company): every grain, including company (§8: exec is the ONLY
-    # column with a checkmark on the company-grain row). Gated on `notLow` only — NOT `inTenant`,
-    # which requires the resource's tenant to be in principal.companies and therefore never holds for
-    # a global exec grant (derived roles do not cascade). Same shape as every other exec rule here.
-    - actions: ["read_person", "read_project", "read_department", "read_company"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-
     # The tenant's own admin: every grain incl. company. §8 restricts the company-grain row against
     # dept-lead/HR/served-dept, not against the company's own administrator.
     - actions: ["read_person", "read_project", "read_department", "read_company"]

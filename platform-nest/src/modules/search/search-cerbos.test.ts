@@ -48,7 +48,7 @@ const ledger: Resource = { kind: "resource_search_ledger", tenantId: T1, module:
 // in this file belongs to, so anchoring the root there restores the single-root fixture world the
 // matrix was written against. Cross-root refusal is pinned in cerbos.test.ts and
 // cross-root-boundary.db.test.ts, not here.
-const owner = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], "high", [T1]);
+const owner = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], [], "high", [T1]);
 const manager = principal([{ role: "search_manager", scopeType: "company", scopeId: T1 }]);
 const member = principal([{ role: "search_staff", scopeType: "company", scopeId: T1 }]);
 const servedDeptUser = principal([{ role: "search_staff", scopeType: "company", scopeId: T1 }], [T1, T2]);

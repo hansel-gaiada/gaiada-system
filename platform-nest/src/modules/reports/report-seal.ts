@@ -167,7 +167,10 @@ async function notifyExecsAndLeads(tenantId: string, actorId: string | null, typ
   const { rows } = await withGlobal((c) =>
     c.query<{ user_id: string }>(
       `SELECT DISTINCT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-        WHERE r.name IN ('company_admin', 'group_executive')
+        -- IAM-15 (D-7): group_executive dropped. This picks WHO GETS NOTIFIED on a seal, so the
+        -- narrowing is a real behaviour change: a holding-level exec no longer receives seal
+        -- notifications, because there is no holding-level exec.
+        WHERE r.name IN ('company_admin')
           AND (ur.scope_type = 'global' OR (ur.scope_type = 'company' AND ur.scope_id = $1))`,
       [tenantId],
     ),

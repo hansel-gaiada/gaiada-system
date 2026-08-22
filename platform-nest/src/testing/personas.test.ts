@@ -7,7 +7,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { config } from "../config";
 import { buildApp } from "../main";
 import { initTestDb, teardownTestDb, TEST_URL } from "./setup";
-import { seedPersonaTenant, isDeniedStatus } from "./personas";
+import { seedPersonaTenant, isDeniedStatus, ALL_PERSONA_KEYS } from "./personas";
 
 describe.skipIf(!TEST_URL)("IAM-06b · persona fixtures — one line, both directions", () => {
   let app: NestFastifyApplication;
@@ -89,9 +89,20 @@ describe.skipIf(!TEST_URL)("IAM-06b · persona fixtures — one line, both direc
     expect(() => p.as("org_unit_lead")).toThrow(/was not seeded/);
   });
 
-  it("group_executive is seeded (D-7: obsolete, not yet removed) and still passes the platform_admin/group_executive wildcard", async () => {
-    const p = await seedPersonaTenant(["group_executive"]);
-    const res = await app.inject({ method: "GET", url: `/api/${p.tenantId}/it/devices`, headers: p.as("group_executive") });
+  it("🔴 IAM-15 — `group_executive` is no longer a seedable persona at all", () => {
+    // Was: "group_executive is seeded (D-7: obsolete, not yet removed) and still passes the wildcard".
+    // D-7 has now removed it, so the persona is gone from PERSONA_DEFS and the KEY itself no longer
+    // typechecks — which is why this asserts against the registry rather than trying to seed it.
+    expect(ALL_PERSONA_KEYS as readonly string[]).not.toContain("group_executive");
+  });
+
+  it("control: the wildcard tier still works — platform_admin reaches the same route", async () => {
+    // The positive half of the case above. Without it, the removal could have taken the whole
+    // wildcard path with it and this file would not notice.
+    // `superadmin` is this registry's key for the platform_admin grant — not "platform_admin",
+    // which is the ROLE name. The two vocabularies differ here and the type catches it.
+    const p = await seedPersonaTenant(["superadmin"]);
+    const res = await app.inject({ method: "GET", url: `/api/${p.tenantId}/it/devices`, headers: p.as("superadmin") });
     expect(res.statusCode).toBe(200);
   });
 });

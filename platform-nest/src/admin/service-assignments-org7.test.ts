@@ -106,11 +106,11 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("ORG-7 — reconciler wired into t
     await addMembership(B, targetAdmin);
 
     const companyAdminRole = await createRole("company_admin");
-    const execRole = await createRole("group_executive");
+    const execRole = await createRole("platform_admin");
     await grantRole(providerAdmin, companyAdminRole, "company", A);
     await grantRole(targetAdmin, companyAdminRole, "company", B);
     await grantRole(globalExec, execRole, "global", null);
-    // MON-00c: group_executive's rules are gated on `variables.inRoot`, and a root is resolved from
+    // MON-00c: platform_admin's rules are gated on `variables.inRoot`, and a root is resolved from
     // `users.home_company_id` or an active membership. This exec has a GLOBAL grant and therefore no
     // membership, so it resolved `rootCompanies: []` and every call below 403'd. Anchored to A, the
     // ROOT of this fixture's tree (B was created as A's child), which is the root the exec oversees.

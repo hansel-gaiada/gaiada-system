@@ -70,13 +70,6 @@ resourcePolicy:
             has(request.resource.attr.subjectUserId) &&
             request.resource.attr.subjectUserId == request.principal.id
 
-    # Exec group (global, cross-company by design — same shape as every other exec rule in this
-    # program, e.g. resource_report_admin.yaml): full read + excuse.
-    - actions: ["read", "excuse"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-
     # ═══════════ §8's "HR-appraisal role" column — SPLIT BY TR-25 (finding ②) ═══════════
     # TR-09 expressed this tier as `module_staff`/`module_manager` + `module == "hr"`, which resolves
     # to the SAME two grant names (`hr_staff`/`hr_manager`) as `hr_people_*` — two spellings of one

@@ -57,8 +57,16 @@ export async function resolveViaPlatform(provider: string, externalId: string): 
   if (!res.ok) throw new Error(`platform resolve ${res.status}`);
   const principal = (await res.json()) as { assurance: string; companies?: string[]; roles?: { role: string }[] };
   if (principal.assurance === "low") return { tenantSet: [], crossCompany: false }; // D4 ceiling: unverified → no knowledge
-  // Cross-company elevation is group_executive / platform_admin only (the "one brain" is owner-gated).
-  const crossCompany = (principal.roles ?? []).some((r) => r.role === "group_executive" || r.role === "platform_admin");
+  // Cross-company elevation is `platform_admin` only. IAM-15 (D-7, 2026-08-23) removed
+  // `group_executive`, which used to be the other arm here — and this is a REAL narrowing, not a
+  // rename: the cross-business "one brain" is now visible to the platform tier alone.
+  //
+  // `owner` is deliberately NOT substituted in. It would look like the natural heir (D-8 calls it the
+  // business-authority role), but owner is granted PER OWNED COMPANY — so "is this caller
+  // cross-company elevated?" cannot be answered by the presence of an owner grant, only by comparing
+  // the grant set against the companies in play. Quietly treating any owner as globally elevated here
+  // would reintroduce exactly the unrestricted cross-company reach D-7 deleted.
+  const crossCompany = (principal.roles ?? []).some((r) => r.role === "platform_admin");
   return { tenantSet: principal.companies ?? [], crossCompany };
 }
 

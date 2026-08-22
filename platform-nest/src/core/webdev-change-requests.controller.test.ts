@@ -57,7 +57,10 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
   let co2: string;
   let admin: string;      // company_admin of co, with a membership
   let admin2: string;     // company_admin of co2 (for the cross-tenant probe)
-  let exec: string;       // group_executive, GLOBAL grant, NO membership row anywhere — trap #4
+  let exec: string;       // platform_admin, GLOBAL grant, NO membership row anywhere — trap #4
+                          // (IAM-15: was group_executive; that role is deleted, but the SHAPE this
+                          //  fixture exists for — a global principal with no membership — is what
+                          //  matters, and platform_admin still has it.)
   let plainMember: string;
   let webdevManager: string;
   let webdevStaff: string;
@@ -80,7 +83,7 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     const roleAdmin = await createRole("company_admin");
     const roleMember = await createRole("member");
     const roleClient = await createRole("client");
-    const roleExec = await createRole("group_executive");
+    const roleExec = await createRole("platform_admin");
     const roleWebdevManager = await createRole("webdev_manager");
     const roleWebdevStaff = await createRole("webdev_staff");
 
@@ -231,7 +234,7 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     expect(new Set(roles)).toEqual(
       new Set([
         "platform_admin",
-        "group_executive",
+        // IAM-15: `group_executive` removed from the staff policy's role set with the role itself.
         "company_admin",
         "manager",
         "module_manager",
@@ -268,7 +271,7 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
     expect(await crRow(cr.id)).toMatchObject({ status: "new", route: null });
   });
 
-  it("TRAP #4: a group_executive with NO membership row is ALLOWED read AND triage (the exec rule needs notLow + inRoot, never inTenant)", async () => {
+  it("TRAP #4: a GLOBAL principal with NO membership row is ALLOWED read AND triage (the rule must not depend on inTenant)", async () => {
     // Proof the fixture really is membership-less: `inTenant` is `resource.tenantId in
     // principal.companies`, and `companies` is built only from company_memberships/client_contacts.
     const memberships = await adminPool().query(

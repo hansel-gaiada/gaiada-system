@@ -13,11 +13,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["*"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.inRoot" } }
-    # Finance surface — company admins manage invoices for their company (UI gates company.manage).
     - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]

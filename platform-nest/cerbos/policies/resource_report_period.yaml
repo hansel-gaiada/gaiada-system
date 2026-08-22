@@ -38,13 +38,6 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
 
-    # Exec group (global, cross-company by design — same shape as every other exec rule in this
-    # program, e.g. resource_report_admin.yaml / resource_checkin.yaml): view + seal + amend + pin.
-    - actions: ["view", "seal", "amend", "pin"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-
     # The tenant's own admin ("lead" in §6.2's shorthand — see header note): view + seal + amend +
     # pin, bounded to its own company.
     - actions: ["view", "seal", "amend", "pin"]

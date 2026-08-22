@@ -16,7 +16,10 @@ import type { Me } from "./platform";
 
 export type Role =
   | "platform_admin"   // superadmin — everything, everywhere (unrestricted)
-  | "group_executive"  // owner — everything across the group's companies (unrestricted)
+  // IAM-15 (D-7, 2026-08-23): `group_executive` removed. It meant "everything across the group's
+  // companies, unrestricted", which is exactly the reach D-7 deleted. Holding-wide business
+  // authority is `owner` now, granted PER OWNED COMPANY — so it needs no entry in this union: a
+  // per-company grant is already expressible as a company-scoped role.
   | "company_admin"    // admin within a company
   | "manager"          // runs work within a company
   | "member"           // baseline access
@@ -272,7 +275,6 @@ const EXEC_ONLY_REPORTS: Capability[] = ["reports.company.view", "reports.period
 const HR_OPS: Capability[] = ["checkin.excuse", "appraisal.cycle.admin"];
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
-  group_executive: ALL,
   company_admin: [
     "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
     // IAM-02a-FIX-2 — company_admin appears in every one of the five backing policies for these three
@@ -540,9 +542,14 @@ export function can(me: Me, cap: Capability, companyId?: string | null): boolean
   });
 }
 
-// "Elevated" = a global superadmin/owner grant. Kept as a named concept because
-// several surfaces (People directory, org editing default) key off it.
-const ELEVATED = new Set<Role>(["platform_admin", "group_executive"]);
+// "Elevated" = a global superadmin grant. Kept as a named concept because several surfaces
+// (People directory, org editing default) key off it.
+//
+// ⚠ IAM-15 narrowed this to ONE role, and it must mirror the backend: `src/admin/elevated.ts` is
+// `platform_admin` at global scope and nothing else. `owner` is deliberately NOT here — D-8 gives it
+// no platform/system controls, and this program's rule is that the UI is a MIRROR of the server's
+// authorization, never a second opinion.
+const ELEVATED = new Set<Role>(["platform_admin"]);
 export function isElevated(me: Me): boolean {
   return me.roles.some((r) => ELEVATED.has(r.role as Role) && r.scopeType === "global");
 }
@@ -625,7 +632,8 @@ export function canSwitchCompany(me: Me): boolean {
 // see `isUnrestricted`'s comment above; ORG-7/ORG-12 `serviceScopes` replaced
 // it, and a served-company grant doesn't by itself imply manager-tier framing).
 const MANAGER_TIER = new Set<Role>([
-  "platform_admin", "group_executive", "company_admin", "manager", "it_admin", "it_manager",
+  // IAM-15: `group_executive` dropped with the role.
+  "platform_admin", "company_admin", "manager", "it_admin", "it_manager",
 ]);
 
 // "Any grant qualifies," not "every grant qualifies" — a user holding a

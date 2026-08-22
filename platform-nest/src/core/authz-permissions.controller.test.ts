@@ -55,8 +55,8 @@ const T2 = "aaaaaaaa-0000-0000-0000-000000000002";
  *  wildcard-bypass case correctly does for `can()`, which DOES consult the role arm) would report
  *  an empty `scopeLevelPermissions` here, which is correct for a principal that literally holds
  *  no permission rows — but does not exercise what this endpoint needs to prove for a REAL
- *  platform_admin/group_executive principal. */
-function bundlePrincipal(role: "platform_admin" | "group_executive"): Principal {
+ *  platform_admin principal. */
+function bundlePrincipal(role: "platform_admin"): Principal {
   const keys = roleBundles.roles[role] as string[];
   return principal(
     [{ role, scopeType: "global", scopeId: null }],
@@ -207,10 +207,13 @@ describe("computeEffectivePermissions() — wildcard bypass role disclosure", ()
     expect(body.wildcardBypassRoles).toEqual(["platform_admin"]);
   });
 
-  it("flags group_executive in wildcardBypassRoles", () => {
+  it("🔴 IAM-15 — group_executive is NOT flagged: it is no longer a wildcard bypass role", () => {
+    // Inverted from "flags group_executive in wildcardBypassRoles". Its per-kind `*` rules were among
+    // the 54 deleted, so the endpoint must stop advertising a bypass that does not exist — a caller
+    // reading this field decides how much to trust the rest of the answer.
     const p = principal([{ role: "group_executive", scopeType: "global", scopeId: null }]);
     const body = computeEffectivePermissions(p, { scopeType: "global", scopeId: null });
-    expect(body.wildcardBypassRoles).toEqual(["group_executive"]);
+    expect(body.wildcardBypassRoles).toEqual([]);
   });
 
   it("an ordinary role (manager) is NOT flagged", () => {
@@ -219,14 +222,18 @@ describe("computeEffectivePermissions() — wildcard bypass role disclosure", ()
     expect(body.wildcardBypassRoles).toEqual([]);
   });
 
-  it("holding both bypass roles reports both, deduplicated and sorted", () => {
+  it("duplicate grant rows for the bypass role are deduplicated", () => {
+    // Was "holding BOTH bypass roles reports both, deduplicated and sorted". IAM-15 left exactly one
+    // bypass role, so the "both" half is gone — but the DEDUPLICATION half is the part that was
+    // actually load-bearing (Finding F: duplicate `user_roles` rows for the same role/scope), and it
+    // is preserved here with two identical grants plus a non-bypass one for contrast.
     const p = principal([
       { role: "platform_admin", scopeType: "global", scopeId: null },
-      { role: "group_executive", scopeType: "global", scopeId: null },
+      { role: "manager", scopeType: "global", scopeId: null },
       { role: "platform_admin", scopeType: "global", scopeId: null }, // duplicate grant row (Finding F shape)
     ]);
     const body = computeEffectivePermissions(p, { scopeType: "global", scopeId: null });
-    expect(body.wildcardBypassRoles).toEqual(["group_executive", "platform_admin"]);
+    expect(body.wildcardBypassRoles).toEqual(["platform_admin"]);
   });
 });
 
@@ -337,13 +344,15 @@ describe("AuthzPermissionsController — revocation (D11 session_version): a bum
 });
 
 describe("AuthzPermissionsController.globalScoped — no tenancy gate, answers the principal's global-scope grants", () => {
-  it("a principal with zero company memberships still gets a body (group_executive shape)", () => {
-    const p = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], []);
+  it("a principal with zero company memberships still gets a body (global-grant shape)", () => {
+    // IAM-15: the fixture was a `group_executive` grant — the canonical "global grant, no membership"
+    // principal. platform_admin has the same shape and is what remains.
+    const p = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], [], []);
     const { reply } = mockReply();
     const body = new AuthzPermissionsController().globalScoped(req(p), reply);
     expect(body?.scopeType).toBe("global");
     expect(body?.scopeId).toBeNull();
-    expect(body?.wildcardBypassRoles).toEqual(["group_executive"]);
+    expect(body?.wildcardBypassRoles).toEqual(["platform_admin"]);
   });
 });
 
@@ -395,25 +404,14 @@ describe.skipIf(!live)("scopeLevelPermissions vs can() — live parity sweep (su
     expect(denied).toEqual([]);
   }, 30_000);
 
-  it("group_executive: scopeLevelPermissions is a SUBSET of what can() would grant (no over-report) — spot-checked across its bundle", async () => {
-    const p = bundlePrincipal("group_executive");
-    const body = computeEffectivePermissions(p, { scopeType: "company", scopeId: T1 });
-    expect(body.wildcardBypassRoles).toEqual(["group_executive"]);
-    // Spot check (not exhaustive — 118 keys, sampled) rather than the full sweep the platform_admin
-    // test does, to keep runtime bounded; the exhaustive guarantee for this role already lives in
-    // IAM-02b's parity suite (22/22, teeth-proven) which this endpoint's computation reuses via
-    // can.scopeOnly() -> principal.perms, the same data that suite pins.
-    const sample = body.scopeLevelPermissions.filter((_, i) => i % 12 === 0);
-    for (const key of sample) {
-      // Same `creatorId` reasoning as the platform_admin sweep above — and it matters here even though
-      // the sample is strided, because which keys the stride lands on moves with the catalog.
-      expect(
-        await can(p, key, {
-          id: "probe-1", tenantId: T1, ownerId: "u1", subjectUserId: "u1", module: "hr", creatorId: "someone-else",
-        }),
-      ).toBe(true);
-    }
-  }, 30_000);
+  // IAM-15 (D-7) removed the `group_executive` case that sat here. It asserted
+  // `wildcardBypassRoles == ["group_executive"]` and spot-checked its 118-key bundle — both
+  // meaningless once the role has no bundle and no rules. It is DELETED rather than retargeted
+  // because the claim it made ("scopeLevelPermissions never over-reports vs can()") is already
+  // covered exhaustively by the platform_admin sweep directly above, which is the only
+  // wildcard-bypass tier left. Retargeting it at company_admin would have been a different test
+  // wearing this one's name: company_admin is not a wildcard-bypass role, so
+  // `wildcardBypassRoles` would be empty and the assertion would prove nothing.
 });
 
 // ───────────────────────────────────────────────────────────────────────────────────────────

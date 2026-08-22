@@ -9,12 +9,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # Group executive (owner) — global, cross-company.
-    - actions: ["read", "update"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # Compliance gates are an admin surface: company admins only.
     - actions: ["read", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]

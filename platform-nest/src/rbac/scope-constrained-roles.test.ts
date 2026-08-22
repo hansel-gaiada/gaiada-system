@@ -35,7 +35,11 @@ describe("IAM-SEC-06 · scope-constrained-roles.json artifact", () => {
 
   it("pins every other scope-narrow role this program has found (IAM-SEC-03/04/05)", () => {
     const doc = generate();
-    expect(doc.roles.group_executive).toEqual(["global"]);
+    // IAM-15: `group_executive` was pinned here as global-only. Its derived role is deleted, so the
+    // generator (which scans derived_roles.yaml for `g.role == "<name>"`) no longer emits an entry —
+    // asserted as ABSENT rather than dropped, because a silently missing role in THIS file means a
+    // scope constraint stopped being enforced, which is the failure IAM-SEC-03/04/05 exist to catch.
+    expect(doc.roles.group_executive).toBeUndefined();
     expect(doc.roles.client).toEqual(["company"]);
   });
 

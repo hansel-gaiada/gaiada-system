@@ -48,7 +48,8 @@ describe.skipIf(!TEST_URL)("mail — MAIL-06 decider notifications on approval c
   let app: NestFastifyApplication;
   let co: string;
   let admin: string; // company_admin, scoped to co — a decider on ALL three origins below
-  let exec: string; // group_executive, GLOBAL scope — a decider on automation/hr, per derived_roles.yaml
+  let exec: string; // IAM-15: was group_executive. company_admin @ GLOBAL is the decider tier that
+                    // remains on automation/hr per derived_roles.yaml.
   let hrMgr: string; // hr_manager, scoped to co — the WSD-2 "providing unit's hr_manager"
   let financeMgr: string; // finance_manager, scoped to co — NEGATIVE PROBE: a different module's manager
   let agencyApprover: string; // agency_approver, scoped to co — the agency_approval mirror's module_approver
@@ -81,7 +82,7 @@ describe.skipIf(!TEST_URL)("mail — MAIL-06 decider notifications on approval c
     }
 
     await grantRole(admin, await createRole("company_admin"), "company", co);
-    await grantRole(exec, await createRole("group_executive"), "global", null);
+    await grantRole(exec, await createRole("company_admin"), "global", null);
     await grantRole(hrMgr, await createRole("hr_manager"), "company", co);
     await grantRole(financeMgr, await createRole("finance_manager"), "company", co);
     await grantRole(agencyApprover, await createRole("agency_approver"), "company", co);
@@ -115,7 +116,7 @@ describe.skipIf(!TEST_URL)("mail — MAIL-06 decider notifications on approval c
   });
 
   describe("1. automation-approvals create (origin=automation, the hub-gate suspension path)", () => {
-    it("notifies company_admin + group_executive (one bell + one mail_log row each); a non-decider member gets nothing", async () => {
+    it("notifies both company_admin deciders (one bell + one mail_log row each); a non-decider member gets nothing", async () => {
       const before = {
         admin: await notifCount(admin), exec: await notifCount(exec), member: await notifCount(member),
       };
@@ -140,7 +141,7 @@ describe.skipIf(!TEST_URL)("mail — MAIL-06 decider notifications on approval c
   });
 
   describe("2. hr-origin leave request (hr.controller.ts fileLeave — the ONLY origin='hr' insert site)", () => {
-    it("notifies company_admin + group_executive + the providing unit's hr_manager; a DIFFERENT module's manager gets nothing", async () => {
+    it("notifies the company_admin deciders + the providing unit's hr_manager; a DIFFERENT module's manager gets nothing", async () => {
       const before = {
         admin: await notifCount(admin), exec: await notifCount(exec),
         hrMgr: await notifCount(hrMgr), financeMgr: await notifCount(financeMgr), leaveFiler: await notifCount(leaveFiler),

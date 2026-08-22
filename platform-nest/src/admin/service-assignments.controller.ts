@@ -55,10 +55,13 @@ function findNode(root: BlobNode, nodeId: string): BlobNode | null {
   return null;
 }
 
+/** IAM-15 (D-7): the `group_executive` arm is gone with the role. `isGlobalActor` therefore means
+ *  `platform_admin` alone, and the effect is REAL rather than cosmetic — a global actor here skips
+ *  the re-consent flip on relink, so the set of principals who can relink without re-consent just
+ *  narrowed to the platform tier. That is the correct reading of D-7: re-consent exists to protect
+ *  the SERVED company, and a cross-company business role should not be able to waive it. */
 function isGlobalActor(principal: Principal): boolean {
-  return principal.roles.some(
-    (g) => g.scopeType === "global" && (g.role === "platform_admin" || g.role === "group_executive"),
-  );
+  return principal.roles.some((g) => g.scopeType === "global" && g.role === "platform_admin");
 }
 
 function assertValidModuleKey(key: unknown): asserts key is string {

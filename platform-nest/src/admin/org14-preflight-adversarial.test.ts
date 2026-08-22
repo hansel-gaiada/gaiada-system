@@ -97,7 +97,7 @@ describe.skipIf(!RUN)("ORG-14 pre-flag adversarial gate", () => {
   let app: NestFastifyApplication;
   let redis: Redis;
   let H: string;
-  let exec: string; // group_executive (global) — proposes auto-active / reconciles
+  let exec: string; // platform_admin (global) — proposes auto-active / reconciles
 
   beforeAll(async () => {
     await initTestDb();
@@ -113,9 +113,9 @@ describe.skipIf(!RUN)("ORG-14 pre-flag adversarial gate", () => {
 
     H = await createCompany("ORG14 Holding");
     exec = await createUser("org14-exec@holding.test");
-    const ge = await createRole("group_executive");
+    const ge = await createRole("platform_admin");
     await grantRole(exec, ge, "global", null);
-    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
+    // MON-00c: a GLOBAL platform_admin grant carries no membership, so no root resolves and
     // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
     // home_company_id, not a membership, so the exec does not join the companies under assertion.
     await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [H, exec]);

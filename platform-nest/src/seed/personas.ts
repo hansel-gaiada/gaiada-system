@@ -42,7 +42,7 @@ const ORG_UNIT_ID = "d-persona";
 export type PersonaKey =
   | "superadmin" | "company_admin" | "manager" | "org_unit_lead" | "member" | "viewer"
   | "hr_staff" | "hr_manager" | "it_admin" | "search_staff" | "search_manager"
-  | "agency_approver" | "group_executive" | "client_contact";
+  | "agency_approver" | "client_contact";
 
 interface PersonaSpec {
   key: PersonaKey;
@@ -69,9 +69,9 @@ export const PERSONAS: PersonaSpec[] = [
   { key: "search_staff", role: "search_staff", scope: "company", label: "Persona Search Staff" },
   { key: "search_manager", role: "search_manager", scope: "company", label: "Persona Search Manager" },
   { key: "agency_approver", role: "agency_approver", scope: "company", label: "Persona Agency Approver", extraRole: "member" },
-  {
-    key: "group_executive", role: "group_executive", scope: "global", label: "Persona Group Executive (⚠ obsolete — D-7, removal is Phase 3)",
-  },
+  // IAM-15: the "Persona Group Executive" entry is removed. It already carried its own expiry note
+  // — "⚠ obsolete — D-7, removal is Phase 3" — and this is Phase 3. Seeding a persona for a role
+  // that no longer exists would create a principal whose grant joins to nothing.
 ];
 
 export interface SeededPersonas {

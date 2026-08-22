@@ -13,11 +13,6 @@ resourcePolicy:
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.inRoot" } }
-
     # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
     # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
     # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the

@@ -53,15 +53,13 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — work_activity (member/manager/co
     expect(await allow(p, waOtherTenant, "create")).toBe(false);
   });
 
-  it("exec (group_executive, global scope): read allowed, ingest (create) denied", async () => {
-    // WD-20-R1 FIXED 2026-07-30. This test previously asserted read === false, characterizing the
-    // gap the QA gate found: resource_work_activity.yaml listed no group_executive rule, and derived
-    // roles do NOT cascade (each is gated on an explicit grant of its own name), so a pure exec
-    // matched no rule. The policy now carries the same explicit exec carve-out as the sibling
-    // resource_integration_connection.yaml, so the correct expectation is read=true. Ingest stays
-    // company_admin-only — exec is an oversight role, not a service principal.
+  it("🔴 IAM-15 — exec (group_executive) now reads nothing here either", async () => {
+    // This assertion has flipped twice, which is worth recording. It first asserted read === false
+    // (WD-20-R1: resource_work_activity.yaml carried no exec rule and derived roles do not cascade),
+    // then true when the carve-out was added 2026-07-30 — and now false again, for a different reason
+    // than the first time: not a missing rule, but a REMOVED role (D-7). `create` was always denied.
     const p: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
-    expect(await allow(p, wa, "read")).toBe(true);
+    expect(await allow(p, wa, "read")).toBe(false);
     expect(await allow(p, wa, "create")).toBe(false);
   });
 
@@ -113,17 +111,20 @@ describe.skipIf(!live)("WD-20 Cerbos matrix — integration_connection (own/othe
     }
   });
 
-  it("exec (group_executive, global): explicit carve-out — full CRUD on ANY tenant's rows, gated only by assurance", async () => {
-    // MON-00c: T1 and T2 sit in the same root here — cross-company within one root is still the
-    // point of this test (a global exec's carve-out), so rootCompanies is anchored to include BOTH,
-    // not just T1. Anchoring to [T1] alone would now deny the T2 checks below via `inRoot`.
+  it("🔴 IAM-15 — the exec carve-out on integration_connection is GONE, all four actions", async () => {
+    // This was the widest exec reach in the estate: full CRUD on any tenant's rows in its root,
+    // including the credential vault (`integration_connection` holds connection secrets by reference).
+    // D-7's "last unrestricted cross-company business role" was not an abstraction — this rule was it.
     const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1, T2], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
     for (const action of ["read", "create", "update", "delete"]) {
-      expect(await allow(execP, companyRow, action)).toBe(true);
-      expect(await allow(execP, otherUserRow, action)).toBe(true);
-      // cross-tenant too — group_executive is a global, cross-company role for this resource
-      expect(await allow(execP, { kind: "integration_connection", tenantId: T2, ownerId: "" }, action)).toBe(true);
+      expect(await allow(execP, companyRow, action)).toBe(false);
+      expect(await allow(execP, otherUserRow, action)).toBe(false);
+      expect(await allow(execP, { kind: "integration_connection", tenantId: T2, ownerId: "" }, action)).toBe(false);
     }
+    // Positive control: the kind is still reachable by the tier that should reach it. Without this the
+    // twelve DENYs above would pass against a policy file that failed to load at all.
+    const admin: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    expect(await allow(admin, companyRow, "read")).toBe(true);
   });
 
   it("exec at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {
@@ -196,17 +197,17 @@ describe.skipIf(!live)("W0-4 Cerbos matrix — client_contact (governance tier v
     }
   });
 
-  it("group_executive (global, gated on notLow AND inRoot): read AND create/update/revoke succeed even " +
-     "CROSS-COMPANY within the exec's own root — for a tenant the exec is not a MEMBER of at all", async () => {
-    // MON-00c: T1 and T2 are anchored as the SAME root here, so this still exercises "not a member,
-    // but still allowed" (companies: [] — inTenant plays no part) without also claiming unbounded
-    // cross-root reach, which resource_client_contact.yaml's group_executive rule no longer grants.
+  it("🔴 IAM-15 — group_executive reaches no client_contact, in its root or across it", async () => {
+    // `client_contact` is the staff/client trust boundary (design §7), so an exec with CRUD here could
+    // reach every client's stakeholder records across the holding. That reach is now gone.
     const execP: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1, T2], roles: [{ role: "group_executive", scopeType: "global", scopeId: null }], sessionVersion: 1 };
-    // Not a member of T1 or T2 (companies: []) — proves the rule truly does not depend on inTenant.
     for (const action of ["read", "create", "update", "revoke"]) {
-      expect(await allow(execP, cc, action)).toBe(true);
-      expect(await allow(execP, ccT2, action)).toBe(true);
+      expect(await allow(execP, cc, action)).toBe(false);
+      expect(await allow(execP, ccT2, action)).toBe(false);
     }
+    // Positive control, as above: prove the kind is still reachable by someone.
+    const admin: Principal = { userId: ME, assurance: "high", companies: [], rootCompanies: [T1], roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }], sessionVersion: 1 };
+    expect(await allow(admin, cc, "read")).toBe(true);
   });
 
   it("group_executive at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {
@@ -282,7 +283,7 @@ describe.skipIf(!live)("PRV-03 Cerbos matrix — webdev_provisioned_site (manage
     for (const action of ACTIONS) expect(await allow(p, site, action)).toBe(false);
   });
 
-  it("TRAP #4 — group_executive (owner) with NO membership row ANYWHERE is ALLOWED read/provision/reconcile (the exec rule is notLow+inRoot, never inTenant)", async () => {
+  it("🔴 IAM-15 — group_executive with no membership is now DENIED read/provision/reconcile (TRAP #4 inverted)", async () => {
     const execNoMembership: Principal = {
       userId: ME,
       assurance: "high",
@@ -296,10 +297,16 @@ describe.skipIf(!live)("PRV-03 Cerbos matrix — webdev_provisioned_site (manage
       sessionVersion: 1,
     };
     for (const action of ACTIONS) {
-      expect(await allow(execNoMembership, site, action)).toBe(true);
-      // and cross-company too — the whole point of the global grant
-      expect(await allow(execNoMembership, siteT2, action)).toBe(true);
+      expect(await allow(execNoMembership, site, action)).toBe(false);
+      expect(await allow(execNoMembership, siteT2, action)).toBe(false);
     }
+    // Positive control: the kind is still reachable, so the DENYs above are the removal and not a
+    // policy file that failed to load.
+    const admin: Principal = {
+      userId: ME, assurance: "high", companies: [], rootCompanies: [T1],
+      roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }], sessionVersion: 1,
+    };
+    expect(await allow(admin, site, "read")).toBe(true);
   });
 
   it("group_executive at LOW assurance is denied (D4 ceiling applies even to the exec carve-out)", async () => {

@@ -80,11 +80,22 @@ describe.skipIf(!TEST_URL)("IAM-SEC-02/04 — a role is grantable only at scopes
     });
   });
 
-  it("refuses group_executive at company scope", () =>
-    assign(groupExecRole, "company", tenant).then((res) => {
+  it("🔴 IAM-15 — group_executive is refused at company scope by the FENCE now, not the scope guard", () => {
+    // The refusal survives, but its REASON changed and that distinction is the point of this case.
+    // Before: `ROLE_SCOPE_CONSTRAINTS` mapped the role to `["global"]`, so a company-scoped grant
+    // failed the scope guard with "global scope". That entry is gone — the map is machine-checked
+    // against derived_roles.yaml, which no longer defines the role, so keeping it would fail that
+    // guard instead.
+    //
+    // What refuses it now is the elevated fence (IAM-16), which lists `group_executive` in
+    // ELEVATED_TIER defensively precisely so that a re-created role cannot be granted from this
+    // surface at ANY scope. Asserting the new message rather than deleting the case keeps a test on
+    // the path a resurrected role would take.
+    return assign(groupExecRole, "company", tenant).then((res) => {
       expect(res.statusCode).toBe(400);
-      expect(res.body).toContain("global scope");
-    }));
+      expect(res.body).toContain("elevated_role_forbidden");
+    });
+  });
 
   it("refuses platform_admin at project scope", () =>
     assign(platformAdminRole, "project", "11111111-1111-1111-1111-111111111111").then((res) => {

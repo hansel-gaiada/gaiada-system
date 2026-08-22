@@ -56,13 +56,17 @@ describe.skipIf(!TEST_URL)("A1 detective control — managed_by is reconciler-on
     await addMembership(A, superadmin);
 
     const paRole = await createRole("platform_admin");
-    const execRole = await createRole("group_executive");
     memberRoleId = await createRole("member");
     await grantRole(superadmin, paRole, "global", null);
-    await grantRole(globalExec, execRole, "global", null);
-    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
-    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
-    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    // IAM-15: `globalExec` held `group_executive`. That role is deleted, so it now holds
+    // `platform_admin` — the only remaining global actor. Both principals are therefore
+    // platform_admin here, which is FINE for this file: its subject is `managed_by` provenance
+    // (reconciler-only), not a distinction between two elevated tiers. Kept as a separate USER so
+    // the "a different principal did this write" assertions still mean something.
+    await grantRole(globalExec, paRole, "global", null);
+    // MON-00c: a GLOBAL grant carries no membership, so no root resolves and `variables.inRoot` is
+    // false. Anchored via home_company_id, not a membership, so this principal does not join the
+    // companies under assertion.
     await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [A, globalExec]);
 
     app = await buildApp();

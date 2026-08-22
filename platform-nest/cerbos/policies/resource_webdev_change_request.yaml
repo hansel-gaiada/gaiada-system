@@ -41,22 +41,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # ── TRAP #4: the group_executive (owner) rule is gated on `notLow` ONLY, never `inTenant` ──────
-    # `group_executive` is a GLOBAL cross-company grant (`scopeType == "global"`,
-    # derived_roles.yaml:19–24). `variables.inTenant` is `resource.tenantId in principal.companies`,
-    # and `principal.companies` is built exclusively from the caller's `company_memberships` rows — so
-    # an owner who holds the global grant but has no membership row in THIS company has an empty (or
-    # simply non-matching) `companies` set and `inTenant` is FALSE. Folding the exec into the
-    # company_admin/manager rule below would therefore produce a global grant that never fires, a
-    # DENY that reads exactly like a broken derived role. That mistake has already cost one wrong fix
-    # in this estate; the shipped correct shape is resource_integration_connection.yaml:29–33, which
-    # this rule copies. `notLow` still applies: a low-assurance chat session gets no company data,
-    # owner or not. QA probes this positively (exec with NO membership row => ALLOW).
-    - actions: ["create", "read", "triage"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # The in-tenant elevated tier: company_admin and manager get the full surface.
     - actions: ["create", "read", "triage"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]

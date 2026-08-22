@@ -15,12 +15,16 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createRole } from "../testing/fixtures";
 
+// IAM-15 (2026-08-23) removed `group_executive` from this list. It was migration-seeded as a baseline
+// role, and D-7 deletes it — so a later migration drops the row and asserting its presence here would
+// pin the exact state the removal exists to prevent. The absence is pinned explicitly below rather
+// than just dropped from the list, because a silently shorter list is how a baseline role goes missing
+// by accident (which is the failure IAM-02e wrote this file to catch in the first place).
 const BASELINE_ROLES = [
   "member",
   "manager",
   "company_admin",
   "platform_admin",
-  "group_executive",
   "it_admin",
 ] as const;
 
@@ -48,7 +52,21 @@ describe.skipIf(!TEST_URL)("IAM-02e · baseline roles are migration-seeded, not 
     ).toEqual([]);
   });
 
-  it("each baseline role is exactly one global row (0073's partial unique index still holds for these six)", async () => {
+  it("🔴 IAM-15 — `group_executive` is NOT present after migrate(), despite being seeded by an earlier migration", async () => {
+    // It IS still created by its original baseline migration; a later one deletes it. So this asserts
+    // migration ORDERING as much as the removal — if the drop ever landed before the seed, or was
+    // reverted, the role would quietly exist again on every fresh database and DR restore.
+    const { rows } = await adminPool().query<{ name: string }>(
+      `SELECT name FROM roles WHERE name = 'group_executive'`,
+    );
+    expect(
+      rows,
+      "group_executive exists on a migrations-only database — IAM-15's drop either did not run or an " +
+        "earlier migration re-created it after the drop",
+    ).toEqual([]);
+  });
+
+  it("each baseline role is exactly one global row (0073's partial unique index still holds)", async () => {
     const { rows } = await adminPool().query<{ name: string; n: string }>(
       `SELECT name, count(*)::text AS n FROM roles
        WHERE company_id IS NULL AND name = ANY($1)

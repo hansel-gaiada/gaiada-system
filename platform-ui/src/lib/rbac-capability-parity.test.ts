@@ -90,15 +90,22 @@ function mismatchFor(
 // ─────────────────────────── the guarded exception register ───────────────────────────
 
 // An entire role excluded from the per-pair loop below because the owner already ruled on its
-// divergence IN BULK, not pair by pair. Today: exactly `group_executive` (design doc §3.3 /
-// Ruling 4 / D-7 — the drift register's finding #4: `ALL` overrides THREE separately-documented,
-// deliberate Cerbos narrowings (hr_record, checkin ops-polls, appraisal write/cycle) plus
-// agency_approval:approve and the entire `member` kind. The owner's ruling is to correct this in
-// PHASE 3 when D-7 deletes the role, not here — its sole live holder, `exec@gaiada.test`, is a
-// seed/test account, per IAM-02a-0's live query). Guarded below: if `group_executive` ever stops
-// diverging (e.g. its `ROLE_CAPS` entry is narrowed, or the role really is deleted), the guard
-// test fails, forcing this exclusion to be revisited rather than quietly outliving its reason.
-const WHOLESALE_EXCEPTED_ROLES = new Set<string>(["group_executive"]);
+// divergence IN BULK, not pair by pair.
+//
+// ⚠ THE SET IS NOW EMPTY, AND THAT IS THE GUARD WORKING AS DESIGNED. Its sole member was
+// `group_executive` (design doc §3.3 / Ruling 4 / D-7 — the drift register's finding #4: `ALL`
+// overrode three separately-documented Cerbos narrowings plus agency_approval:approve and the whole
+// `member` kind). That ruling said explicitly to correct it "in PHASE 3 when D-7 deletes the role,
+// not here", and it also armed a guard test that would fail the moment the role stopped diverging.
+//
+// IAM-15 deleted the role on 2026-08-23. The guard fired exactly as intended — "group_executive no
+// longer diverges from Cerbos under any capability ... the wholesale exclusion is now stale and
+// should be dropped" — so the exclusion is dropped rather than carried forward, and the guard test
+// that policed it is retired with it (a guard over an empty set proves nothing).
+//
+// Kept as an empty Set, not deleted: the per-pair loop reads it, and the NEXT bulk ruling should
+// land here with the same discipline rather than reintroducing the mechanism from scratch.
+const WHOLESALE_EXCEPTED_ROLES = new Set<string>([]);
 
 interface RegisterEntry {
   role: string;
@@ -249,12 +256,17 @@ describe("well-formedness (belt to the type system's braces)", () => {
 // ────────────────────────── section 2: the register stays honest ──────────────────────────
 
 describe("the guarded exception register (guard-the-guard)", () => {
-  it("the group_executive wholesale exclusion is still warranted — it must still diverge from Cerbos somewhere", () => {
-    const stillMismatched = CAPABILITIES.filter((cap) => mismatchFor("group_executive", cap) !== null);
+  it("the wholesale-exclusion register is EMPTY — every role is now checked pair by pair", () => {
+    // Replaces "the group_executive wholesale exclusion is still warranted". That test existed to
+    // notice the day the exclusion outlived its reason; IAM-15 was that day and it fired. What
+    // remains worth pinning is the stronger property it was protecting: no role escapes the per-pair
+    // parity loop. Re-adding one must be a deliberate, reviewed act.
     expect(
-      stillMismatched.length,
-      "group_executive no longer diverges from Cerbos under any capability — the wholesale exclusion (Ruling 4 / D-7) is now stale and should be dropped, per that ruling's own instruction ('drop the exclusion when Phase 3 deletes the role').",
-    ).toBeGreaterThan(0);
+      [...WHOLESALE_EXCEPTED_ROLES],
+      "a role was added back to the wholesale-exclusion set — that exempts it from EVERY capability " +
+        "parity check, so it needs an owner ruling and a guard test of its own, exactly as " +
+        "group_executive had (Ruling 4 / D-7).",
+    ).toEqual([]);
   });
 
   it("every KNOWN_NON_DRIFT entry is still a real, correctly-directed mismatch under today's map/bundles", () => {

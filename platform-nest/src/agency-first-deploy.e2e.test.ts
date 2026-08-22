@@ -49,10 +49,14 @@ describe.skipIf(!TEST_URL)("agency first-deploy daily flow (e2e)", () => {
     await grantRole(u.designer, await createRole("member"), "company", co);
     await grantRole(u.approver, await createRole("member"), "company", co);
     await grantRole(u.approver, await createRole("agency_approver"), "company", co);
-    await grantRole(u.exec, await createRole("group_executive"), "global", null);
-    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
-    // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
-    // home_company_id, not a membership, so the exec does not join the companies under assertion.
+    // IAM-15 (D-7): `u.exec` held `group_executive`. Dropping the grant entirely was wrong — this
+    // flow READS `/api/rollups` as that user, and with no grant it 403s and the response is an error
+    // body, not an array. `platform_admin` is the substitute because `core.rollup.read` is one of the
+    // keys IAM-14 deliberately withholds from company_admin and owner (a cross-company OPERATOR
+    // surface), so it is the only role left that can read this endpoint.
+    await grantRole(u.exec, await createRole("platform_admin"), "global", null);
+    // MON-00c: home_company_id still anchors the root for this principal. Anchored via
+    // home_company_id, not a membership, so the user does not join the companies under assertion.
     await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [co, u.exec]);
     app = await buildApp();
   });

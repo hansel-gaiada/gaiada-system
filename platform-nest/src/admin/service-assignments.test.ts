@@ -58,11 +58,11 @@ describe.skipIf(!TEST_URL)("service-assignments API (ORG-3)", () => {
     await addMembership(B, targetAdmin);
 
     const companyAdminRole = await createRole("company_admin");
-    const execRole = await createRole("group_executive");
+    const execRole = await createRole("platform_admin");
     await grantRole(providerAdmin, companyAdminRole, "company", A);
     await grantRole(targetAdmin, companyAdminRole, "company", B);
     await grantRole(globalExec, execRole, "global", null);
-    // MON-00c: group_executive's rules are gated on `variables.inRoot`, and a root resolves from
+    // MON-00c: platform_admin's rules are gated on `variables.inRoot`, and a root resolves from
     // `users.home_company_id` or an active membership. This exec holds a GLOBAL grant and therefore
     // has no membership, so it resolved `rootCompanies: []` and every call below 403'd. Anchored to
     // A, this fixture's ROOT company, via home_company_id rather than a membership — a
@@ -99,7 +99,7 @@ describe.skipIf(!TEST_URL)("service-assignments API (ORG-3)", () => {
     expect(body.assignments[0].status).toBe("proposed");
   });
 
-  it("a global actor (group_executive) creates an 'active' assignment directly", async () => {
+  it("a global actor (platform_admin) creates an 'active' assignment directly", async () => {
     const r = await app.inject({
       method: "POST",
       url: `/api/${A}/org-structure/units/d-hr/assignments`,

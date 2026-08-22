@@ -44,17 +44,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # group_executive is a GLOBAL cross-company role, so it is gated on `notLow` only — NOT
-    # `inTenant`, which requires the resource's tenant to be in principal.companies and therefore
-    # never holds for a global exec grant. Same shape and same reasoning as
-    # resource_work_activity.yaml's exec rule (derived roles do not cascade).
-    - actions: ["recompute"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # The company's own admin may re-derive its own company's facts (ops path: an n8n nightly flow
-    # runs under a company_admin service principal). Bounded to that tenant, and never low-assurance
-    # — a chat-session principal must not be able to trigger a window recompute.
     - actions: ["recompute"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]

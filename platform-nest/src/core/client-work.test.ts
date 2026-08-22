@@ -52,8 +52,12 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
     await grantRole(member, await createRole("member"), "company", co);
     await grantRole(member2, await createRole("member"), "company", co);
     await grantRole(viewer, await createRole("viewer"), "company", co);
-    await grantRole(exec, await createRole("group_executive"), "global", null);
-    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves from
+    // ⚠ IAM-15: this was a global `group_executive`. It must become `platform_admin`, NOT
+    // company_admin: this fixture reads `/api/rollups`, and `core.rollup.read` is one of the keys
+    // IAM-14 deliberately withholds from company_admin (and from `owner`) as a cross-company OPERATOR
+    // surface. Substituting company_admin 403s on the rollup read.
+    await grantRole(exec, await createRole("platform_admin"), "global", null);
+    // MON-00c: a GLOBAL grant carries no membership, so no root resolves from
     // `users.home_company_id` or memberships, `rootCompanies` came back empty, `variables.inRoot` was
     // false, and the exec's own rules denied. Anchored via home_company_id rather than a membership so
     // the exec does not join the companies whose numbers these assertions check.

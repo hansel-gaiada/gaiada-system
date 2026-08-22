@@ -62,12 +62,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # group_executive — see TRAP #4. Gated on `notLow` ONLY, never `inTenant`. Read-only: an exec
-    # oversees engagements across companies; they do not set another department's spend dial.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     - actions: ["read", "create", "update", "delete", "set_scope"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]

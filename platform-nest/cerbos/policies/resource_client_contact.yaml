@@ -32,15 +32,6 @@ resourcePolicy:
       derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
-    # A group executive is a GLOBAL cross-company role, so it gets its own rule gated on `notLow`
-    # ONLY — never `inTenant`. This is the WD-20-R1 lesson, learned the hard way: `inTenant` is
-    # `resource.tenantId in principal.companies`, which NEVER holds for a global grant, so folding the
-    # exec into a rule above would have silently granted them nothing while looking correct.
-    - actions: ["read", "create", "update", "revoke"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-
     # ══════════ IAM-04-ROLLOUT-B4 — permission-matching arm. PURELY ADDITIVE: every rule above ═══
     # is byte-for-byte unchanged. group_executive's own notLow-only rule above is DELIBERATELY not
     # mirrored (IAM-04c/TRAP-4: the exec tier never enters the permission catalog via this file's

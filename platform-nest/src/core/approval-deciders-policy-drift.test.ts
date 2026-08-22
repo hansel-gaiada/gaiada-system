@@ -132,7 +132,10 @@ const agencyYaml = readFileSync(resolve(POLICIES_DIR, "resource_agency_approval.
 // The role sets approval-deciders.ts's header documents as mirrored today (2026-08-05, after
 // D14-06 added `retry` alongside `decide` with the SAME role set — see resolveAutomationApprovalDeciders
 // and resolveAgencyApprovalDeciders in that file).
-const AUTOMATION_EXPECTED = new Set(["company_admin", "group_executive", "hr_manager"]);
+// IAM-15 (D-7): `group_executive` dropped. This set MIRRORS resource_automation_approval.yaml's
+// `decide` role set, and that policy's exec rule was one of the 54 deleted — so the mirror had to
+// shrink with it or this drift guard would report drift against a rule that no longer exists.
+const AUTOMATION_EXPECTED = new Set(["company_admin", "hr_manager"]);
 const AGENCY_EXPECTED = new Set(["company_admin", "agency_approver"]);
 
 describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
@@ -206,15 +209,15 @@ describe("approval-deciders.ts — Cerbos policy drift guard (MAIL-23)", () => {
 
   it("D14-06 (`retry` added alongside `decide`, same roles) does NOT trip the guard — the exact live case", () => {
     const withRetryAnchor = 'actions: ["decide", "retry"]';
-    // TWO occurrences since IAM-TRAP4 split group_executive out of company_admin's rule (see the
-    // note above): one rule per tier, each granting the same two actions. Pinned exactly rather
-    // than loosened to `toBeGreaterThan(0)` — if a third appears, or one disappears, the shape this
-    // test simulates has changed and the simulation below would quietly stop meaning anything.
-    expect(automationYaml.split(withRetryAnchor).length - 1).toBe(2);
-    // Simulate "before D14-06": the same rules with only `decide`, no `retry`. BOTH occurrences
-    // must be rewritten — `String.replace` with a string pattern only replaces the first, which
-    // would leave the group_executive rule still granting `retry` and make this a different test
-    // than the one it claims to be.
+    // ONE occurrence since IAM-15. It was TWO — IAM-TRAP4 had split group_executive out of
+    // company_admin's rule, giving one rule per tier — and D-7 deleted the exec's half, leaving
+    // company_admin's alone. Pinned exactly rather than loosened to `toBeGreaterThan(0)`: if this
+    // count moves again the shape the simulation below assumes has changed.
+    expect(automationYaml.split(withRetryAnchor).length - 1).toBe(1);
+    // Simulate "before D14-06": the same rule with only `decide`, no `retry`. `replaceAll` is kept
+    // even though there is one occurrence now — it was load-bearing when there were two (a plain
+    // `replace` would have left the exec rule still granting `retry`), and it stays correct if a
+    // second tier is ever added back.
     const preD14 = automationYaml.replaceAll(withRetryAnchor, 'actions: ["decide"]');
     const beforeRoles = resolveDeciderRoles(parsePolicyRules(preD14), "decide", { module_manager: "hr_manager" });
     const afterRoles = resolveDeciderRoles(parsePolicyRules(automationYaml), "decide", { module_manager: "hr_manager" });

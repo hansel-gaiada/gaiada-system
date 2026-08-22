@@ -28,8 +28,8 @@ describe("canViewEmployee", () => {
     expect(canViewEmployee(me("admin", ["platform_admin"]), "u-2")).toBe(true);
   });
 
-  it("lets an owner (group_executive) view anyone", () => {
-    expect(canViewEmployee(me("owner", ["group_executive"]), "u-2")).toBe(true);
+  it("lets an elevated principal view anyone (IAM-15: was group_executive, now the platform tier)", () => {
+    expect(canViewEmployee(me("owner", ["platform_admin"]), "u-2")).toBe(true);
   });
 });
 

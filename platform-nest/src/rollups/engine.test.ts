@@ -43,7 +43,8 @@ describe.skipIf(!TEST_URL)("rollups (D12)", () => {
     exec = await createUser("exec@gaiada.test");
     member = await createUser("member2@a.test");
     await addMembership(tenantA, member);
-    const execRole = await createRole("group_executive");
+    // IAM-15: was group_executive. platform_admin is the tier that still holds core.rollup.read.
+    const execRole = await createRole("platform_admin");
     const memberRole = await createRole("member");
     await grantRole(exec, execRole, "global", null);
     // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves from
@@ -94,7 +95,7 @@ describe.skipIf(!TEST_URL)("rollups (D12)", () => {
     ).rejects.toThrow(/foreign key/);
   });
 
-  it("group_executive reads the cross-company view; a member cannot", async () => {
+  it("an operator tier reads the cross-company view; a member cannot", async () => {
     const period = "2026-07-05";
     await recomputeRollups(tenantB, period);
 

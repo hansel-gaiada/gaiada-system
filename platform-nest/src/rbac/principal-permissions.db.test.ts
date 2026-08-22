@@ -167,10 +167,13 @@ describe.skipIf(!TEST_URL)("IAM-03a · assemblePrincipal() perms resolution", ()
     expect(p!.perms!.map((g) => g.key)).toContain("core.task.update");
   });
 
-  it("group_executive @ global resolves exactly its bundle of perms (materially narrower than platform_admin)", async () => {
+  it("🔴 IAM-15 — a group_executive grant resolves to ZERO perms (the role has no bundle at all)", async () => {
+    // Was: "resolves exactly its bundle (materially narrower than platform_admin)" — 134 keys. The
+    // role is deleted, so the grant row still exists in this fixture but joins to nothing. Kept as a
+    // zero-assertion rather than removed, because it proves the resolution query does not fall back
+    // to some wildcard when a role has no role_permissions rows.
     const p = await assemblePrincipal(groupExecId, "high");
-    expect(p!.perms!.length).toBe(bundleSize("group_executive"));
-    expect(p!.perms!.every((g) => g.scopeType === "global" && g.scopeId === null)).toBe(true);
+    expect(p!.perms!.length).toBe(0);
   });
 
   it("company_admin @ companyA resolves exactly its bundle of perms, every one scoped to companyA (never global, never companyB)", async () => {

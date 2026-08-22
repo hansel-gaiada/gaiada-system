@@ -46,12 +46,17 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
     // DB query by the explicit `tenantId` parameter regardless of the caller's own memberships
     // (same pattern as src/admin/org14-preflight-adversarial.test.ts's `exec` fixture).
     await grantRole(platformAdmin, await createRole("platform_admin"), "global", null);
-    await grantRole(groupExec, await createRole("group_executive"), "global", null);
-    // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves from
-    // `users.home_company_id` or memberships, `rootCompanies` came back empty, `variables.inRoot` was
-    // false, and the exec's own rules denied. Anchored via home_company_id rather than a membership so
-    // the exec does not join the companies whose numbers these assertions check.
-    await adminPool().query(`UPDATE users SET home_company_id = $1 WHERE id = $2`, [tenant, groupExec]);
+    // ⚠ IAM-15: this fixture WAS a global `group_executive`, which reached invoices with no
+    // membership because the exec rule carried no `inTenant`. Substituting company_admin at global
+    // scope does NOT reproduce that — company_admin IS inTenant-gated, so invoice creation 403'd and
+    // the test failed in its setup rather than its assertion.
+    //
+    // So this is now a company-scoped company_admin WITH a membership. The maker/checker property
+    // under test is unchanged and is the point: whoever creates an invoice cannot approve it, no
+    // matter how senior. Only the seniority of the principal demonstrating it has come down a tier,
+    // because the tier above it no longer exists.
+    await grantRole(groupExec, await createRole("company_admin"), "company", tenant);
+    await addMembership(tenant, groupExec);
     app = await buildApp();
 
     // A client + project + billable time in the period to invoice against.
@@ -244,7 +249,7 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
       expect(otherApprove.statusCode).toBe(200);
     });
 
-    it("group_executive CANNOT approve an invoice IT created — 403 (the hole being closed)", async () => {
+    it("a second company_admin CANNOT approve an invoice IT created — 403 (the hole being closed)", async () => {
       const created = await app.inject({
         method: "POST", url: `/api/${tenant}/invoices`, headers: asUser(groupExec),
         payload: { clientId, periodStart: "2026-07-01", periodEnd: "2026-07-31", rate: 10 },

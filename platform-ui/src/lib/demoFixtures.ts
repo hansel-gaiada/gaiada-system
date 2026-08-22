@@ -73,7 +73,8 @@ const ME = {
   companies: COMPANIES.map((c) => ({ id: c.id as string, name: c.name as string, type: c.type as string | null })),
   roles: [
     { role: "platform_admin", scopeType: "global", scopeId: null },
-    { role: "group_executive", scopeType: "global", scopeId: null },
+    // IAM-15: the demo identity's `group_executive` grant is gone with the role. It keeps
+    // `platform_admin`, which already confers ALL, so every demo surface behaves as before.
   ],
 };
 

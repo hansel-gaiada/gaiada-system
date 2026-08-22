@@ -141,7 +141,13 @@ describe.skipIf(!TEST_URL)("TR-24 appraisal engine (live PG + RLS + Cerbos)", ()
     // file keeps its exact original intent (incl. the "HR cannot patch scores" 403 at line ~327).
     // The withdrawn `hr_staff` capability is pinned as a DENIAL in reports-cerbos.test.ts.
     await grantRole(hrAdmin, await createRole("hr_manager"), "company", co);
-    await grantRole(exec, await createRole("group_executive"), "global", null);
+    // ⚠ IAM-15: this fixture was a global `group_executive` — the §8 oversight tier that could READ
+    // an appraisal but never write one. It is now `company_admin` @ company, NOT platform_admin:
+    // probing live Cerbos after the removal, company_admin has exactly that read-only-on-appraisal
+    // shape, while platform_admin's wildcard allows everything and would silently invert the
+    // "exec is read-only" assertion below into a no-op.
+    await grantRole(exec, await createRole("company_admin"), "company", co);
+    await addMembership(co, exec);
     await grantRole(managerA, await createRole("manager"), "company", co);
     await grantRole(managerB, await createRole("manager"), "company", co);
     for (const u of [s1, s2, s3, s4, s5, t1, t2, t3, plainMember]) await grantRole(u, await createRole("member"), "company", co);
@@ -335,7 +341,7 @@ describe.skipIf(!TEST_URL)("TR-24 appraisal engine (live PG + RLS + Cerbos)", ()
     expect(r.statusCode).toBe(403);
   });
 
-  it("exec is read-only — cannot write, submit, ack, or finalize", async () => {
+  it("the oversight tier is read-only — cannot write, submit, ack, or finalize", async () => {
     expect((await patchRoute(s1AppraisalId, { commentary: "x".repeat(60) }, exec)).statusCode).toBe(403);
     expect((await submitRoute(s1AppraisalId, {}, exec)).statusCode).toBe(403);
     expect((await finalizeRoute(s1AppraisalId, exec)).statusCode).toBe(403);

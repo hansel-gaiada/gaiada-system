@@ -87,12 +87,15 @@ const EXCLUDED_RELATIONSHIP_CLASS: readonly string[] = CATALOG.filter((p) => p.c
   .map((p) => p.key)
   .sort();
 
-/** The two role names IAM-04c's bypass ruling documents as carrying Cerbos's per-kind `*`
- *  wildcard rule (56 of 61 kinds). Not derived from anything queryable — Cerbos policies carry no
- *  "this role is a bypass role" flag, so this is the same institutional fact `can.ts`'s header
- *  and the IAM-04c ruling doc both name. See the file header for why holding one of these matters
- *  for how this endpoint's answer should be read. */
-const WILDCARD_BYPASS_ROLES: readonly string[] = ["platform_admin", "group_executive"];
+/** The role name(s) IAM-04c's bypass ruling documents as carrying Cerbos's per-kind `*` wildcard
+ *  rule. Not derived from anything queryable — Cerbos policies carry no "this role is a bypass role"
+ *  flag, so this is the same institutional fact `can.ts`'s header and the IAM-04c ruling doc both
+ *  name. See the file header for why holding one of these matters for how this endpoint's answer
+ *  should be read.
+ *
+ *  IAM-15 (D-7): was `["platform_admin", "group_executive"]`. One name, not two, since the exec's
+ *  wildcard rules were deleted along with the role. */
+const WILDCARD_BYPASS_ROLES: readonly string[] = ["platform_admin"];
 
 export const EFFECTIVE_PERMISSIONS_CAVEAT =
   "scopeLevelPermissions answers 'does this principal hold this permission SOMEWHERE in " +

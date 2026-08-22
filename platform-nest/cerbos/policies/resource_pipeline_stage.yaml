@@ -22,26 +22,10 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4: `group_executive` is a GLOBAL-scope-only role (derived_roles.yaml: `g.scopeType ==
-    # "global"`), so a holder never has a `company_memberships` row and `variables.inTenant` is
-    # FALSE for every resource. Folding it into the rule above denied it outright, defeating the
-    # role's entire cross-company-oversight purpose. Own rule, `variables.notLow` only — matching
-    # `resource_appraisal.yaml`'s `group_executive` rule exactly. See
-    # docs/superpowers/plans/2026-08-11-hier-5-report.md §5 / 2026-08-12-iam-trap4-report.md.
-    - actions: ["update"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     - actions: ["read"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # IAM-TRAP4: same fold-in defect as `update` above — own rule, `variables.notLow` only.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-
     # ══════════ IAM-04-B4 — permission-matching arm. PURELY ADDITIVE: every rule above is byte-
     # for-byte unchanged. Mirrors ONLY the company_admin/manager/member `inTenant && notLow` reach
     # above. `group_executive`'s own `variables.notLow`-only rules (IAM-TRAP4) are DELIBERATELY not

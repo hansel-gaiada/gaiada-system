@@ -130,7 +130,6 @@ export async function seedAgency(): Promise<SeededAgency> {
   const roleManager = await createRole("manager");
   const roleMember = await createRole("member");
   const roleApprover = await createRole("agency_approver");
-  const roleExec = await createRole("group_executive");
   const rolePlatform = await createRole("platform_admin");
   const roleItAdmin = await createRole("it_admin");
   const roleOwner = await createRole("owner");
@@ -143,9 +142,18 @@ export async function seedAgency(): Promise<SeededAgency> {
   await grantRole(users.approver, roleMember, "company", tenantId);
   await grantRole(users.approver, roleApprover, "company", tenantId);
   await grantRole(users.pm, roleItAdmin, "company", tenantId);
-  // Exec: real member of both companies (so the app + switcher work) + global exec (rollups).
+  // Exec: real member of both companies (so the app + switcher work).
+  //
+  // ⚠ IAM-15 (D-7) removed the `group_executive` GRANT that used to sit here. The account stays a
+  // member of both companies deliberately — it is a long-standing fixture that several suites resolve
+  // by email, and deleting the user would break them for a reason unrelated to the role. What it no
+  // longer has is cross-company exec reach, because that role no longer exists: its 54 policy rules
+  // were deleted and the migration drops the row.
+  //
+  // Holding-wide business oversight is `owner` now (IAM-14), granted per owned company to the actual
+  // owner — which is the distinction D-7 was drawing: an unrestricted cross-company role is not the
+  // same thing as the person who owns the companies.
   await addMembership(tenantId, users.exec); await addMembership(resortId, users.exec);
-  await grantRole(users.exec, roleExec, "global", null);
   // Super-user (Clement): platform_admin global + company_admin of both → sees everything + switcher.
   await addMembership(tenantId, users.superadmin); await addMembership(resortId, users.superadmin);
   await grantRole(users.superadmin, rolePlatform, "global", null);

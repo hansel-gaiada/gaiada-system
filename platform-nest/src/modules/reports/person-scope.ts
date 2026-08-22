@@ -98,7 +98,9 @@ export type PersonAxisTier = "unrestricted" | "company_wide" | "unit_scoped" | "
  *  matrix test can be read against ONE list rather than a chain of `||`s. */
 const UNRESTRICTED_ROLES = new Set(["platform_admin"]);
 const COMPANY_WIDE_ROLES = new Set([
-  "group_executive",
+  // IAM-15 (D-7): `group_executive` removed. It sat here as a company-wide person-axis tier; with the
+  // role gone the tier is company_admin + the HR tiers. `owner` is NOT added — it is granted per
+  // company, so it already reaches its companies through the ordinary company-scoped path.
   "company_admin",
   // §8's "HR-appraisal role" column. BOTH HR tiers read person-grain reports company-wide (that is
   // `hr.view`-shaped); they diverge only on APPRAISAL and on check-in `excuse`, which is a Cerbos

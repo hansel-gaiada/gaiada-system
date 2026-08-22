@@ -11,7 +11,7 @@
     "companionDoc": "docs/superpowers/plans/2026-08-13-iam-sec-06-report.md",
     "keyOrder": "roles sorted alphabetically by name; each role's scope-type list sorted lexically",
     "counts": {
-      "roles": 13
+      "roles": 12
     }
   },
   "roles": {
@@ -20,9 +20,6 @@
     ],
     "company_admin": [
       "company",
-      "global"
-    ],
-    "group_executive": [
       "global"
     ],
     "hr_manager": [

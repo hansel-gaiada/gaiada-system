@@ -32,27 +32,27 @@ describe.skipIf(!live)("Cerbos policy parity (role × scope matrix)", () => {
     expect(await allow(p, { kind: "company", tenantId: T2 }, "update")).toBe(true);
   });
 
-  // MON-00c: this test's SUBJECT is the rollup-vs-project distinction — an exec reads aggregates
-  // across the companies it oversees, never their underlying records. That is orthogonal to the root
-  // boundary, so the principal is given a root that CONTAINS T2. Before this, it passed `companies:
-  // []`, which (since `rootCompanies` defaults to `companies`) left the root EMPTY, so `inRoot` was
-  // false and the rollup read was denied for a reason this test is not about — the assertion failed
-  // while the behaviour it names was in fact intact.
-  it("group_executive reads cross-company ONLY through rollups (within its own root)", async () => {
+  // IAM-15 (D-7) — these two cases asserted the exec's rollup reach: cross-company aggregates inside
+  // its own root, refused outside it (MON-00c). Both are inverted rather than deleted, because the
+  // pair together is what pins that the role reaches NOTHING now — the second one used to be the
+  // interesting half (the boundary), and the first was the capability the role existed for.
+  //
+  // The rollup path mattered most of all: it was the ONE surface where a global exec legitimately
+  // read across companies, so if any reach survived the sweep, this is where it would be.
+  it("🔴 IAM-15 — group_executive no longer reads rollups, inside its own root or anywhere", async () => {
     const p = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], "high", [T2]);
-    expect(await allow(p, { kind: "rollup", tenantId: T2 }, "read")).toBe(true);
+    expect(await allow(p, { kind: "rollup", tenantId: T2 }, "read")).toBe(false);
     expect(await allow(p, { kind: "project", tenantId: T2 }, "read")).toBe(false);
   });
 
-  // The other half of the same rule, which the version above can no longer express now that it
-  // supplies a root: the aggregate path is bounded too. An exec is not a SaaS operator, so a rollup
-  // belonging to a company OUTSIDE its root is a cross-customer read and must be refused.
-  it("group_executive is refused even on a rollup OUTSIDE its root (MON-00c)", async () => {
+  it("🔴 IAM-15 — and nothing outside its root either (the MON-00c boundary is now moot)", async () => {
     const p = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], "high", [T1]);
     expect(await allow(p, { kind: "rollup", tenantId: T2 }, "read")).toBe(false);
-    // Positive control — without this the assertion above passes vacuously for any principal that
-    // simply cannot read rollups at all.
-    expect(await allow(p, { kind: "rollup", tenantId: T1 }, "read")).toBe(true);
+    // The old positive control asserted the exec COULD read its own root's rollup. It cannot now, so
+    // the control moves to a role that still can — otherwise both assertions pass vacuously against a
+    // stale or empty policy set, which is exactly how a broken sweep would look like a clean one.
+    const admin = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], [], "high", [T1]);
+    expect(await allow(admin, { kind: "rollup", tenantId: T1 }, "read")).toBe(true);
   });
 
   it("company-scope grants cascade down to the company's projects and tasks", async () => {

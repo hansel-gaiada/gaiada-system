@@ -39,8 +39,10 @@ describe("TR-25 personAxisTier — ONE tier detector replacing three divergent o
     expect(personAxisTier(p([g("platform_admin", "global", null)], []), T1)).toBe("unrestricted");
   });
 
-  it("exec / company_admin / both HR tiers are company_wide", () => {
-    expect(personAxisTier(p([g("group_executive", "global", null)], []), T1)).toBe("company_wide");
+  it("company_admin / both HR tiers are company_wide (IAM-15 dropped the exec from this tier)", () => {
+    // `group_executive` used to head this list. D-7 deleted it, and it is NOT replaced here:
+    // platform_admin is `unrestricted` (asserted above), and `owner` is granted per company so it
+    // reaches its companies through the ordinary company-scoped path rather than a special tier.
     expect(personAxisTier(p([g("company_admin", "company", T1)]), T1)).toBe("company_wide");
     expect(personAxisTier(p([g("hr_staff", "company", T1)]), T1)).toBe("company_wide");
     expect(personAxisTier(p([g("hr_manager", "company", T1)]), T1)).toBe("company_wide");
@@ -78,8 +80,11 @@ describe("TR-25 personAxisTier — ONE tier detector replacing three divergent o
     expect(personAxisTier(p([g("company_admin", "company", null)], [T1]), T1)).toBe("self_only");
   });
 
-  it("the broader tier always WINS over a co-held manager grant — narrowing must not apply to an exec who also leads a team", () => {
-    expect(personAxisTier(p([g("manager", "company", T1), g("group_executive", "global", null)], [T1]), T1)).toBe("company_wide");
+  it("the broader tier always WINS over a co-held manager grant — narrowing must not apply to an admin who also leads a team", () => {
+    // Was an exec + manager pair. company_admin + manager makes the same point: the person-axis tier
+    // is the WIDEST grant held, not the narrowest, so co-holding `manager` must not pull an admin
+    // down into unit-scoped narrowing.
+    expect(personAxisTier(p([g("manager", "company", T1), g("company_admin", "company", T1)], [T1]), T1)).toBe("company_wide");
     expect(requiresUnitNarrowing(p([g("manager", "company", T1), g("hr_manager", "company", T1)]), T1)).toBe(false);
     expect(requiresUnitNarrowing(p([g("manager", "company", T1)]), T1)).toBe(true);
   });

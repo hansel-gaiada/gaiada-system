@@ -51,8 +51,12 @@ export async function resolveAutomationApprovalDeciders(tenantId: string, module
     c.query<{ user_id: string }>(
       `SELECT DISTINCT ur.user_id
          FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+        -- IAM-15 (D-7) dropped the group_executive clause with the role. This query MIRRORS
+        -- resource_automation_approval.yaml's decide rule, and that rule's exec arm was one of the
+        -- 54 deleted, so keeping the clause would have made the mirror WIDER than the policy -- the
+        -- exact drift this file's header warns about. (No backticks in here: this SQL sits inside a
+        -- JS template literal, where a backtick ENDS the string.)
         WHERE (r.name = 'company_admin' AND (ur.scope_type = 'global' OR (ur.scope_type = 'company' AND ur.scope_id = $1)))
-           OR (r.name = 'group_executive' AND ur.scope_type = 'global')
            OR ($2::boolean AND r.name = 'hr_manager' AND (ur.scope_type = 'global' OR (ur.scope_type = 'company' AND ur.scope_id = $1)))`,
       [tenantId, includeHr],
     ),

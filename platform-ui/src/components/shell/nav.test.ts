@@ -123,9 +123,8 @@ describe("cappedGroupItems (Sidebar §3.1 Departments overflow)", () => {
 
 describe("canManageIT", () => {
   const withRoles = (roles: string[]): Me => ({ ...base, roles: roles.map((role) => ({ role, scopeType: "global", scopeId: null })) });
-  it("is true for elevated (platform_admin / group_executive)", () => {
+  it("is true for elevated (platform_admin — IAM-15 removed the second elevated role)", () => {
     expect(canManageIT(withRoles(["platform_admin"]))).toBe(true);
-    expect(canManageIT(withRoles(["group_executive"]))).toBe(true);
   });
   it("is true for a dedicated IT role", () => {
     expect(canManageIT(withRoles(["it_admin"]))).toBe(true);

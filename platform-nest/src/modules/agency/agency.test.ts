@@ -36,8 +36,17 @@ describe.skipIf(!TEST_URL)("agency module (phase e2e)", () => {
     registerCoreRollupProvider(coreTaskRollups);
     await syncMetricDefinitions();
 
-    agencyCo = await createCompany("Creative House", ["agency"]);
-    otherCo = await createCompany("Print Shop");
+    // ⚠ BOTH COMPANIES MUST SHARE A ROOT (MON-00). They were two independent roots, which was
+    // invisible while the exec fixture was a `group_executive` anchored to one of them. IAM-15 made
+    // it a `platform_admin`, whose rollup reach is operator-wide — so `/api/rollups` assembled a
+    // tenant set spanning two roots and `withTenants` refused it with CrossRootTenantSetError.
+    //
+    // A shared holding is the correct fixture, not a workaround: this suite's subject is the
+    // "cross-COMPANY management view", and under MON-00 cross-company means within one root. Two
+    // unrelated roots would be a cross-CUSTOMER view, which is the thing the boundary forbids.
+    const holdingCo = await createCompany("Creative Holding");
+    agencyCo = await createCompany("Creative House", ["agency"], holdingCo);
+    otherCo = await createCompany("Print Shop", [], holdingCo);
     manager = await createUser("mgr@creative.test");
     member = await createUser("mem@creative.test");
     approver = await createUser("approver@creative.test");
@@ -47,7 +56,7 @@ describe.skipIf(!TEST_URL)("agency module (phase e2e)", () => {
     const managerRole = await createRole("manager");
     const memberRole = await createRole("member");
     const approverRole = await createRole("agency_approver");
-    const execRole = await createRole("group_executive");
+    const execRole = await createRole("platform_admin");
     await grantRole(manager, managerRole, "company", agencyCo);
     await grantRole(member, memberRole, "company", agencyCo);
     await grantRole(approver, memberRole, "company", agencyCo);

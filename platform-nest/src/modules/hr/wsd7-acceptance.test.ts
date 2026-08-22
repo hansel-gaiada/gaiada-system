@@ -127,7 +127,7 @@ describe.skipIf(!RUN)("WSD-7 — owner's literal acceptance scenario (HR serving
     D = await createCompany("Unserved Co D", ["hr"], H); // hr enabled directly, but A never serves it
 
     exec = await createUser("exec@holding.test");
-    const ge = await createRole("group_executive");
+    const ge = await createRole("platform_admin");
     await grantRole(exec, ge, "global", null);
     // MON-00c: group_executive's rules are gated on `variables.inRoot`, and a root resolves from
     // `users.home_company_id` or an active membership. This exec holds a GLOBAL grant and therefore

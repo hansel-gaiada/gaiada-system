@@ -9,9 +9,12 @@
 # it would be either meaningless or accidentally false. Handlers pass
 # resource.attr = {kind:"social_platform_app", module:"social"} with NO tenantId, and the reach is
 # GLOBAL-ROLE-ONLY by construction:
-#   * `platform_admin` — the wildcard, as everywhere.
-#   * `group_executive` — read, `notLow`-gated (it is a global grant already; TRAP #4's inTenant
-#     concern is moot here because nothing in this policy uses inTenant at all).
+#   * `platform_admin` — the wildcard, as everywhere, and since IAM-15 the ONLY reach on this kind.
+# IAM-15 (D-7) removed the `group_executive` read rule that used to sit here. Nothing replaced it:
+# there is deliberately no company-scoped tier on this kind (see below), so the fleet is now
+# platform-only. That is a narrowing, and an intended one — the role was the last unrestricted
+# cross-company business role, and this kind is exactly where "cross-company" had the widest blast
+# radius.
 # No company_admin rule, no manager rule, and no module tier: a company admin in one tenant must not
 # be able to edit the app fleet that carries every OTHER tenant's connections. That is a
 # cross-tenant blast radius wearing a per-tenant role name.
@@ -44,7 +47,3 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }

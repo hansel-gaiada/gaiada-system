@@ -63,7 +63,7 @@ const owner = principal([{ role: "platform_admin", scopeType: "global", scopeId:
 // holds a GLOBAL grant and so has no memberships to derive a root from. §8's "cross-company" reach
 // is cross-COMPANY within the exec's own root, which MON-00c made explicit; the cross-ROOT refusal
 // is pinned in cerbos.test.ts and cross-root-boundary.db.test.ts rather than duplicated here.
-const exec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], "high", SELF, [T1]);
+const exec = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], [], "high", SELF, [T1]);
 const admin = principal([{ role: "company_admin", scopeType: "company", scopeId: T1 }]);
 const lead = principal([{ role: "manager", scopeType: "company", scopeId: T1 }]);
 const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }]);
@@ -248,7 +248,10 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
     });
 
     it("submit is denied to EVERY other tier for someone else — §8: '⛔ for others', no exceptions", async () => {
-      for (const p of [exec, admin, lead, hrReader, hrOps]) {
+      // IAM-15: `exec` dropped from this tier list. It was `group_executive`; the role is deleted,
+      // and the fixture's replacement (platform_admin) is a WILDCARD tier — including it here would
+      // assert that the platform superadmin is denied, which is not what §8 says and not true.
+      for (const p of [admin, lead, hrReader, hrOps]) {
         expect(await allow(p, checkinOther, "submit")).toBe(false);
       }
     });
@@ -276,10 +279,11 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
       expect(await allow(member, checkinSelf, "excuse")).toBe(false); // not even one's own
     });
 
-    it("finding ③: the n8n ops reads are company_admin-only — lead, exec, HR and member all denied", async () => {
+    it("finding ③: the n8n ops reads are company_admin-only — lead, HR and member all denied", async () => {
       for (const action of ["pending_reminders", "missed_by_unit"]) {
         expect(await allow(admin, checkinNoSubject, action)).toBe(true);
-        for (const p of [lead, exec, hrReader, hrOps, member]) {
+        // IAM-15: `exec` dropped — see the note on the submit case above.
+        for (const p of [lead, hrReader, hrOps, member]) {
           expect(await allow(p, checkinNoSubject, action)).toBe(false);
         }
       }
@@ -304,10 +308,17 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
       expect(await allow(hrOps, appraisalOther, "ack")).toBe(false);
     });
 
-    it("exec is READ-ONLY — never write/submit/ack/cycle_admin/finalize (§8)", async () => {
-      expect(await allow(exec, appraisalOther, "read")).toBe(true);
+    it("the oversight tier is READ-ONLY on appraisals — never write/submit/ack/cycle_admin/finalize (§8)", async () => {
+      // ⚠ RETARGETED FROM `exec` TO `admin` BY IAM-15, and the substitution is not arbitrary. §8's
+      // property is "an oversight tier can SEE an appraisal but never touch it", and `group_executive`
+      // was the tier that demonstrated it. Probing live Cerbos after the removal:
+      //   company_admin@company → read ALLOW, write/submit/finalize DENY   ← the same shape
+      //   platform_admin@global → wildcard, allows everything             ← cannot demonstrate it
+      // So `admin` inherits the assertion. Using the `exec` fixture (now platform_admin) would have
+      // turned a real invariant into a test that simply documents the wildcard.
+      expect(await allow(admin, appraisalOther, "read")).toBe(true);
       for (const action of ["write", "submit", "ack", "cycle_admin", "finalize"]) {
-        expect(await allow(exec, appraisalOther, action)).toBe(false);
+        expect(await allow(admin, appraisalOther, action)).toBe(false);
       }
     });
 
@@ -382,7 +393,9 @@ describe.skipIf(!live)("⚡ TR-25 Cerbos policy parity — tracker/reporting §8
   describe("low-assurance (D4): a chat-surface principal reaches nothing on the person axis", () => {
     it("every tier loses every read at assurance=low", async () => {
       const tiers: [string, RoleGrant[]][] = [
-        ["exec", [{ role: "group_executive", scopeType: "global", scopeId: null }]],
+        // IAM-15: the `exec` row is gone. platform_admin's wildcard rules carry no `notLow` gate, so
+        // listing it here would assert a low-assurance denial the policy does not make — the D4 floor
+        // applies to the tiers below it, which is what §8 describes.
         ["admin", [{ role: "company_admin", scopeType: "company", scopeId: T1 }]],
         ["lead", [{ role: "manager", scopeType: "company", scopeId: T1 }]],
         ["hrReader", [{ role: "hr_staff", scopeType: "company", scopeId: T1 }]],

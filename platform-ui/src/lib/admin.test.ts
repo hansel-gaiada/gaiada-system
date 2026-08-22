@@ -133,7 +133,7 @@ describe("triggerAgentGoal", () => {
       return new Response(JSON.stringify({ id: "g1" }), { status: 202 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const result = await triggerAgentGoal("u1", "t1", meWith("group_executive"), { goal: "check the pipeline" });
+    const result = await triggerAgentGoal("u1", "t1", meWith("platform_admin"), { goal: "check the pipeline" });
     expect(result).toEqual({ ok: true, id: "g1" });
   });
 

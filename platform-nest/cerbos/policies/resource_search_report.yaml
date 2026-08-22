@@ -15,11 +15,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["read", "create", "update", "delete", "approve", "deliver"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # Search staff / manager (served-company grant) + the served company's own admin: draft-only.
     - actions: ["read", "create", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff", "module_manager", "company_admin"]

@@ -34,7 +34,7 @@ import { monitoringModule } from "../modules/monitoring";
 import { resetDrivers, registerDriver } from "../modules/monitoring/drivers/registry";
 import { httpDriver } from "../modules/monitoring/drivers/http";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
-import { createCompany, createUser, createRole, grantRole, createClient } from "../testing/fixtures";
+import { createCompany, createUser, createRole, grantRole, createClient, addMembership } from "../testing/fixtures";
 
 // A string that must never appear in a response read by the other root. Asserted against the WHOLE
 // raw body rather than a parsed field, so a leak through a field nobody thought to check — an error
@@ -66,13 +66,35 @@ describe.skipIf(!TEST_URL)("MON-00 · the cross-root boundary", () => {
     rootB = await createCompany("Root B Holding", ["monitoring"]);
     childB1 = await createCompany(`Child B1 ${CANARY}`, ["monitoring"], rootB);
 
-    // The exec holds a GLOBAL group_executive grant and DELIBERATELY has no membership anywhere.
-    // That is the real shape (IAM-TRAP4 exists because `inTenant` is built from memberships and so
-    // is always false for this principal) and it is why a root boundary cannot be derived from
-    // memberships — there are none to derive it from.
+    // ⚠ IAM-15 CHANGED THE PRINCIPAL HERE, NOT THE CLAIM. This fixture used a GLOBAL
+    // `group_executive` grant, which D-7 deleted. The boundary it guards is emphatically NOT dead —
+    // 195 live rules still carry `variables.inRoot`, because every `perm_*` mirror is root-gated — so
+    // the suite is retargeted rather than removed.
+    //
+    // The membership-less shape had to go WITH the role, though, and that is worth being precise
+    // about: after the sweep there is exactly ONE live rule gated on `inRoot` alone
+    // (resource_rollup.yaml's `perm_rollup_read`). Every other root-gated rule is
+    // `inTenant && notLow && inRoot`. So a principal with no memberships anywhere can no longer reach
+    // the monitoring route this suite drives — the old positive control would fail for a reason that
+    // is not a bug.
+    //
+    // ⚠ I FIRST TRIED MEMBERSHIPS IN BOTH CHILDREN, to isolate `inRoot` as the sole cause of the
+    // refusal (inTenant true for root B, inRoot false). That fixture is INVALID and the suite said so:
+    // MON-00b's `CrossRootTenantSetError` exists precisely to make a principal spanning two roots
+    // impossible, so it models nobody and the requests fail for a reason that is not the boundary.
+    // Recorded rather than quietly reverted — it is an easy mistake to repeat, and the failure looked
+    // like a leak rather than a bad fixture.
+    //
+    // So: membership in root A only, plus the global grant. For a root-B resource BOTH `inTenant` and
+    // `inRoot` are false, which means this suite no longer isolates `inRoot` — the boundary is now
+    // enforced by two independent walls and the test proves the OUTCOME (no cross-root read, no
+    // canary in the body) rather than which wall stopped it. That is a real reduction in precision
+    // and is called out here rather than papered over: `inRoot`'s remaining sole-gate rule is
+    // resource_rollup.yaml's `perm_rollup_read`, which the /rollups cases below still exercise.
     execA = await createUser("exec-a@roota.test");
-    const execRole = await createRole("group_executive");
+    const execRole = await createRole("company_admin");
     await grantRole(execA, execRole, "global", null);
+    await addMembership(childA1, execA);
     // A real exec belongs to a company even though they hold a GLOBAL grant and no membership. That
     // employment is the anchor MON-00a reads; without it the principal is denied everywhere, which is
     // the correct fail-closed behaviour but models nobody. Two roots exist here, so the migration

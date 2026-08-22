@@ -20,12 +20,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["read", "create", "update", "delete", "propose_change", "apply_manual", "launch", "apply_negatives", "set_budget"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
-    # Search staff / manager (served-company grant) + the served company's own admin: draft-only
-    # baseline — read/write the plan objects and propose changes, never execute them.
     - actions: ["read", "create", "update", "propose_change"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff", "module_manager", "company_admin"]

@@ -109,7 +109,7 @@ describe.skipIf(!TEST_URL)("⚡ TR-25 person-axis boundary (live PG + RLS + Cerb
     await grantRole(seoLead, await createRole("manager"), "company", co);
     for (const u of [fran, ben, cora]) await grantRole(u, await createRole("member"), "company", co);
     await grantRole(admin, await createRole("company_admin"), "company", co);
-    await grantRole(exec, await createRole("group_executive"), "global", null);
+    await grantRole(exec, await createRole("platform_admin"), "global", null);
     // MON-00c: a GLOBAL group_executive grant carries no membership, so no root resolves and
     // `variables.inRoot` was false — denying the exec on its own rules. Anchored via
     // home_company_id, not a membership, so the exec does not join the companies under assertion.
@@ -348,7 +348,9 @@ describe.skipIf(!TEST_URL)("⚡ TR-25 person-axis boundary (live PG + RLS + Cerb
 
     it("finding ③: the n8n ops reads stay company_admin-only through the wire", async () => {
       expect((await get(asUser(admin), `/checkins/missed-yesterday`)).statusCode).toBe(200);
-      for (const u of [webLead, exec, hrReader, hrOps, fran]) {
+      // IAM-15: `exec` dropped from this denial list. It held `group_executive`; that role is gone and
+      // its fixture is now platform_admin, a wildcard tier that legitimately reaches these ops reads.
+      for (const u of [webLead, hrReader, hrOps, fran]) {
         expect((await get(asUser(u), `/checkins/missed-yesterday`)).statusCode).toBe(403);
         expect((await get(asUser(u), `/checkins/pending-reminders`)).statusCode).toBe(403);
       }

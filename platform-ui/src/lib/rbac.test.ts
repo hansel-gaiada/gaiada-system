@@ -13,7 +13,7 @@ function me(roles: Me["roles"], comps = companies): Me {
 
 describe("can() — capability + scope", () => {
   const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
-  const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+  const exec = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
   const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
   const coAdminA = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
   const member = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
@@ -57,15 +57,15 @@ describe("can() — capability + scope", () => {
   // from, so this loop can never go stale by construction — but pin it anyway so a future
   // refactor that reintroduces a second hand-maintained list (e.g. someone "simplifying" ALL back
   // into a literal array) fails here immediately instead of silently regressing.
-  it("platform_admin and group_executive hold every known Capability", () => {
+  it("platform_admin holds every known Capability (IAM-15: group_executive, the other ALL-holder, is gone)", () => {
     const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
-    const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+    const exec = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
     for (const cap of CAPABILITIES) {
       expect(can(admin, cap, "co-a"), `platform_admin missing ${cap}`).toBe(true);
-      expect(can(exec, cap, "co-a"), `group_executive missing ${cap}`).toBe(true);
+      expect(can(exec, cap, "co-a"), `platform_admin (exec fixture) missing ${cap}`).toBe(true);
       // Global grants must also answer true with NO companyId (cross-company questions).
       expect(can(admin, cap), `platform_admin missing ${cap} (no companyId)`).toBe(true);
-      expect(can(exec, cap), `group_executive missing ${cap} (no companyId)`).toBe(true);
+      expect(can(exec, cap), `platform_admin (exec fixture) missing ${cap} (no companyId)`).toBe(true);
     }
   });
 
@@ -178,7 +178,7 @@ describe("agency_approver (DR-2b) — mirrors exactly what Cerbos grants, nothin
 // touching this test will fail loudly.
 describe("pipeline.write / pipeline.manage / webdev.provision (IAM-02a-FIX-2) — exact role sets", () => {
   const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
-  const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+  const exec = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
   const coAdminA = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
   const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
   const memberA = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
@@ -345,7 +345,7 @@ describe("scopeCovers — A4 fixes (no over-grant)", () => {
 
   it("global/elevated grants are unaffected — still cover every company", () => {
     const admin = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
-    const exec = me([{ role: "group_executive", scopeType: "global", scopeId: null }]);
+    const exec = me([{ role: "platform_admin", scopeType: "global", scopeId: null }]);
     expect(can(admin, "hr.manage", "co-a")).toBe(true);
     expect(can(admin, "hr.manage", "co-b")).toBe(true);
     expect(can(exec, "hr.manage", "co-a")).toBe(true);
@@ -364,8 +364,8 @@ describe("canManageIT", () => {
 });
 
 describe("isManagerTier — UX-2 §1.3 Home role boundary", () => {
-  it("platform_admin/group_executive/company_admin/manager/it_admin/it_manager are manager-tier", () => {
-    for (const role of ["platform_admin", "group_executive", "company_admin", "manager", "it_admin", "it_manager"] as const) {
+  it("platform_admin/company_admin/manager/it_admin/it_manager are manager-tier (IAM-15 dropped group_executive)", () => {
+    for (const role of ["platform_admin", "company_admin", "manager", "it_admin", "it_manager"] as const) {
       expect(isManagerTier(me([{ role, scopeType: "company", scopeId: "co-a" }]))).toBe(true);
     }
   });
@@ -418,8 +418,8 @@ describe("isClient — external client routing", () => {
   });
 
   it("staff are not clients, so the staff home is never taken away from them", () => {
-    for (const role of ["member", "manager", "company_admin", "group_executive", "platform_admin"] as const) {
-      const u = me([{ role, scopeType: role === "group_executive" || role === "platform_admin" ? "global" : "company", scopeId: role === "group_executive" || role === "platform_admin" ? null : "co-a" }]);
+    for (const role of ["member", "manager", "company_admin", "platform_admin"] as const) {
+      const u = me([{ role, scopeType: role === "platform_admin" ? "global" : "company", scopeId: role === "platform_admin" ? null : "co-a" }]);
       expect(isClient(u)).toBe(false);
     }
   });

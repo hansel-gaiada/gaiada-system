@@ -171,11 +171,12 @@ describe.skipIf(!live)("IAM-04b dual-match pilot: hr_case (module-role compositi
     const hrManagerLinked = principal([{ role: "hr_manager", scopeType: "company", scopeId: T1 }], [], [T1], "linked");
     expect(await allow(hrManagerLinked, hrCase(), "export")).toBe(false); // assurance not high
 
-    // MON-00c: resource_hr_case.yaml's group_executive rule is now `notLow && inRoot` — anchor
-    // rootCompanies to include T2 alongside T1 so this stays a same-root cross-company check (still
-    // legitimate) rather than the now-blocked cross-ROOT case.
+    // IAM-15: resource_hr_case.yaml's group_executive rule is DELETED, so the exec's cross-company
+    // read is now refused. Kept as a DENY rather than removed — this file's claim is "the role arm's
+    // decisions are unchanged by the permission arm", and the exec is the case where role-arm and
+    // perm-arm reach differed most, so it is still the most informative principal to check.
     const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1, T2]);
-    expect(await allow(groupExec, { ...hrCase(), tenantId: T2 }, "read")).toBe(true); // deliberately cross-company
+    expect(await allow(groupExec, { ...hrCase(), tenantId: T2 }, "read")).toBe(false);
 
     const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }], []);
     expect(await allow(member, hrCase("u1"), "read")).toBe(true); // self
@@ -480,10 +481,10 @@ describe.skipIf(!live)("HIER-2 rollout batch 3: checkin's permission arm (Patter
     expect(await allow(companyAdmin, checkin(), "pending_reminders")).toBe(true);
     expect(await allow(companyAdmin, checkin(), "missed_by_unit")).toBe(true);
 
-    // MON-00c: resource_checkin.yaml's group_executive rule is now `notLow && inRoot` — anchor
-    // rootCompanies to include T2 alongside T1 so this stays a same-root cross-company check.
+    // IAM-15: resource_checkin.yaml's group_executive rule is DELETED. The hr_manager/hr_staff/member
+    // assertions below are the ones carrying this test's actual claim now, and they are untouched.
     const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1, T2]);
-    expect(await allow(groupExec, { ...checkin(), tenantId: T2 }, "read")).toBe(true); // deliberately cross-company
+    expect(await allow(groupExec, { ...checkin(), tenantId: T2 }, "read")).toBe(false);
 
     const hrManager = principal([{ role: "hr_manager", scopeType: "company", scopeId: T1 }], []);
     expect(await allow(hrManager, checkin(), "excuse")).toBe(true);
@@ -591,11 +592,13 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
 
   it("device: ROLE ARM UNCHANGED — the wildcard platform_admin+group_executive tier is still decided by the role arm alone, not mirrored into the permission catalog (IAM-04c)", async () => {
     const resource: Resource = { kind: "device", id: "x1", tenantId: T1 };
-    // MON-00c: resource_device.yaml's group_executive wildcard rule is now gated on `inRoot` too —
-    // anchor rootCompanies to include T1 (the resource's tenant) so this stays "the untouched
-    // wildcard rule still allows", not a case the new root gate would deny.
+    // IAM-15: resource_device.yaml's group_executive wildcard rule is DELETED. This test's subject is
+    // "the wildcard TIER is decided by the role arm, never mirrored into the catalog" — that claim is
+    // now carried by platform_admin alone, which is the only wildcard tier left on this kind.
     const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
-    expect(await allow(groupExec, resource, "delete")).toBe(true); // via the untouched wildcard rule
+    expect(await allow(groupExec, resource, "delete")).toBe(false);
+    const platformAdmin = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
+    expect(await allow(platformAdmin, resource, "delete")).toBe(true); // the wildcard tier that remains
     // The permission arm's OWN rule still requires inTenant&&notLow (it is not the wildcard rule),
     // so the principal must be a member of the resource's tenant for the global-scope grant to
     // apply here — same "inTenant is a SEPARATE, unchanged gate" shape pm_task's own pilot test
@@ -677,8 +680,12 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
     expect(await allow(p, { ...resource, tenantId: T2 }, "update")).toBe(false);
     // MON-00c: resource_org_structure.yaml's group_executive rule is now `notLow && inRoot` — anchor
     // rootCompanies to include T1 (the resource's tenant) so the untouched role-arm rule still fires.
+    // IAM-15: the group_executive-only rule this line guarded is deleted, so the exec is now DENIED.
+    // The assertion is kept (inverted) because this test's subject is that the PERMISSION arm's allow
+    // above does not depend on the role arm — and a role-arm principal that now reaches nothing is
+    // still the cleanest way to show the two arms are independent.
     const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
-    expect(await allow(groupExec, resource, "update")).toBe(true); // via the untouched role-arm rule, not the perm arm
+    expect(await allow(groupExec, resource, "update")).toBe(false);
   });
 
   it("pm_project.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .manage", async () => {
@@ -714,8 +721,9 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
     }
     // MON-00c: resource_report_period.yaml's group_executive rule is now `notLow && inRoot` — anchor
     // rootCompanies to include T1 (the resource's tenant) so the untouched role-arm rule still fires.
+    // IAM-15: same inversion as org_structure.update above — the exec's own rule is gone.
     const groupExec = principal([{ role: "group_executive", scopeType: "global", scopeId: null }], [], [], "high", [T1]);
-    expect(await allow(groupExec, resource, "seal")).toBe(true); // via the untouched role-arm rule
+    expect(await allow(groupExec, resource, "seal")).toBe(false);
   });
 
   it("task.update: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .read/.create/.delete", async () => {

@@ -73,7 +73,8 @@ describe.skipIf(!TEST_URL)("D14-06 — automation_approval decide/retry decider 
     // grant of the same role name derives nothing. The owner is a group-level principal by definition,
     // so this is correct rather than a test convenience; company membership still supplies `companies`
     // for the `inTenant` condition.
-    owner = await principalFor("d1406-owner@a.test", "group_executive", "global");
+    // IAM-15: was a `group_executive` global grant. company_admin is the decider tier that remains.
+    owner = await principalFor("d1406-owner@a.test", "company_admin", "global");
     hrManager = await principalFor("d1406-hrmgr@a.test", "hr_manager", "company");
     plainManager = await principalFor("d1406-mgr@a.test", "manager", "company");
   });
@@ -90,8 +91,8 @@ describe.skipIf(!TEST_URL)("D14-06 — automation_approval decide/retry decider 
     }
   });
 
-  it("company_admin and group_executive still decide, and now retry (constraint 7: added to, not replaced)", async () => {
-    for (const [name, p] of [["company_admin", companyAdmin], ["group_executive", owner]] as const) {
+  it("company_admin still decides, and now retries (constraint 7: added to, not replaced)", async () => {
+    for (const [name, p] of [["company_admin", companyAdmin], ["company_admin@global", owner]] as const) {
       for (const action of ["decide", "retry"]) {
         const d = await check(p, row(), action);
         expect(d.allow, `${name} ${action}: ${why(d)}`).toBe(true);

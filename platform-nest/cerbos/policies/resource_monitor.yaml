@@ -47,12 +47,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # Read-only across companies: an exec oversees client uptime; they do not retune another
-    # department's checks or expose a client's status publicly.
-    - actions: ["read"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     - actions: ["read", "create", "update", "delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]

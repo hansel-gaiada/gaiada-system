@@ -109,7 +109,7 @@ describe.skipIf(!dbUp)("knowledge service", () => {
     expect(keys).not.toContain("brand:group"); // cross-company, member not elevated
   });
 
-  it("a group_executive (crossCompany attested) sees the cross-company one-brain node", async () => {
+  it("a platform_admin (crossCompany attested) sees the cross-company one-brain node", async () => {
     const r = await app.inject({
       method: "POST", url: "/graph/neighbors", headers: { ...svc, "x-obo-provider": "telegram", "x-obo-external-id": "tg:exec" },
       payload: { startKey: "client:acme", scope: "public" },

@@ -15,14 +15,6 @@ derivedRoles:
             request.principal.attr.grants.exists(g,
               g.role == "platform_admin" && g.scopeType == "global")
 
-    - name: group_executive
-      parentRoles: ["user"]
-      condition:
-        match:
-          expr: >-
-            request.principal.attr.grants.exists(g,
-              g.role == "group_executive" && g.scopeType == "global")
-
     - name: company_admin
       parentRoles: ["user"]
       condition:

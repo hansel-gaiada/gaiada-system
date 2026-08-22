@@ -13,11 +13,6 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["*"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.inRoot" } }
-    # Reviewing quarantined sources (approve/reject) — company admins (knowledge.review).
     - actions: ["read", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin"]

@@ -10,6 +10,21 @@ build against.
 `docs/superpowers/plans/2026-08-13-iam-phase2-design.md`, and
 `docs/superpowers/plans/2026-08-13-p2-02-03-report.md`.
 
+> **⚠ `group_executive` NO LONGER EXISTS (IAM-15 / D-7, 2026-08-23).** Every mention of it below is
+> HISTORICAL and describes the contract as it stood before that removal. The role's 54 Cerbos rules,
+> its derived role, its 134-key bundle, its `role_permissions` rows and the role row itself are all
+> gone, and a migration revokes every grant. The counts and role tables further down are therefore
+> stale for this one role and are deliberately NOT rewritten — this document is a dated freeze that
+> other departments build against, and silently editing history would make the freeze unreadable.
+>
+> What replaced it, and what did not:
+> * **Holding-wide business oversight → `owner`** (IAM-14 / D-8), granted PER OWNED COMPANY rather
+>   than globally. That is the substance of D-7: "the last unrestricted cross-company business role"
+>   is gone, and the person who owns the companies holds authority over them explicitly.
+> * **Nothing replaced it for a non-owner.** An employee who needs cross-company reach now needs a
+>   grant in each company. That is a real narrowing and it is the intended one.
+> * **`platform_admin` is untouched** and remains the highest role in the system.
+
 > **⚠ NEW AXIS (2026-08-13, P2-03): `ui_grantable`.** Every catalog entry now carries a REQUIRED
 > `uiGrantable: boolean` (and a DB-side `permissions.ui_grantable`, migration 0110). It answers a
 > DIFFERENT question than `sensitive` or `class`: **may this permission ever appear in a role bundle

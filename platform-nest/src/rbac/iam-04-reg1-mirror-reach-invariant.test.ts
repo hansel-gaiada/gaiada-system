@@ -504,7 +504,8 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "agency_approval.approve": ["agency_approver"],
   "hr_case.update": ["hr_manager", "hr_staff"],
   "hr_case.delete": ["hr_manager"],
-  "hr_case.export": ["group_executive", "hr_manager"],
+  // IAM-15: `group_executive` dropped from this entry with the role itself (D-7).
+  "hr_case.export": ["hr_manager"],
   "hr_case.read": ["hr_manager", "hr_staff"],
   "hr_case.create": ["hr_manager", "hr_staff"],
   "hr_record.read": ["hr_manager", "hr_staff"],
@@ -517,6 +518,26 @@ const IAM_04_REG1_PRE_EXISTING_OUT_OF_SCOPE_BASELINE: Record<string, string[]> =
   "resource_search_audit.update": ["search_manager", "search_staff"],
   "resource_search_audit.delete": ["search_manager"],
   "resource_search_audit.run": ["search_manager", "search_staff"],
+  // ── ADDED 2026-08-23 BY IAM-15, BUT OWNED BY SM-76 — READ THIS BEFORE TOUCHING IT ──────────────
+  // These three are NOT IAM-15's doing and were NOT introduced by removing `group_executive`. They
+  // are SM-76's new kinds (`search_finding_states` / `search_audit_checks` / `search_property_facts`,
+  // committed in 813d943 along with their policies, catalog rows and migrations).
+  //
+  // Why they surface only now: this register is computed from the BUNDLE ARTIFACT crossed with the
+  // policies, and SM-76 committed its policies + catalog WITHOUT regenerating
+  // `role-permission-bundles.json`. So the artifact did not yet know these keys existed, the mirrors
+  // were invisible to the detector, and the pin stayed green while three real instances sat in the
+  // tree. IAM-15 had to regenerate the artifact (to drop `group_executive`'s 134 keys), and doing so
+  // made them visible.
+  //
+  // ⚠ SO THIS IS THE "IT GREW" CASE THE MESSAGE BELOW WARNS ABOUT, and it is being recorded rather
+  // than fixed ON PURPOSE: the responsible kind's policy belongs to SM-76, and repairing another
+  // ticket's mirror conditions inside a role-removal commit would bury a real authorization change
+  // where nobody would look for it. They are logged here — with their holders, so the shape is
+  // reviewable — and left for SM-76 to disposition the way MON-00c's five entries were.
+  "resource_search_finding.triage": ["search_manager", "search_staff"],
+  "resource_search_finding.accept_risk": ["search_manager"],
+  "resource_search_property.attest": ["search_manager"],
   "resource_search_campaign.read": ["search_manager", "search_staff"],
   "resource_search_campaign.create": ["search_manager", "search_staff"],
   "resource_search_campaign.update": ["search_manager", "search_staff"],
@@ -715,16 +736,35 @@ describe("IAM-04-REG1 · permission-arm MIRROR-REACH invariant (static, re-deriv
       // clause set contains neither `inRoot` nor `inTenant`, so the axiom has nothing to fire on
       // and the exec must flag. If this ever passes covered, the comparator has been weakened
       // into exactly the blindness that let a cross-root permission-arm read survive Wall 2.
-      const key = keyFor(catalog, "rollup", "read")!;
-      const holders = holdersOf(bundles, key);
-      expect(holders, "group_executive must still hold core.rollup.read in the bundle (else this proof is vacuous)").toContain(
-        "group_executive",
-      );
-      const narrow = findNarrowHolders("rollup", "read", "", kinds, derivedExprs, holders);
+      // ⚠ IAM-15 MADE THIS TEST SYNTHETIC, AND IT HAD TO. It used the real rollup.read bundle
+      // holders, asserting `group_executive` was among them — the estate's only root-gated role arm,
+      // and the reason the live 2026-08-21 leak was expressible at all. D-7 deleted that role, and no
+      // remaining role arm is gated on `inRoot` without also being gated on `inTenant`, so the live
+      // shape can no longer be reproduced from real policy.
+      //
+      // The DETECTOR must still catch it, though — that is the point of the test, not the role — so
+      // the root-gated holder is injected instead of found. If a future role arm is ever root-gated
+      // again, this becomes reproducible from real policy and should go back to using it.
+      const ROOT_GATED = "synthetic_root_gated_role";
+      const patchedExprs = new Map(derivedExprs);
+      patchedExprs.set(ROOT_GATED, 'request.principal.attr.grants.exists(g, g.role == "' + ROOT_GATED + '" && g.scopeType == "global")');
+      const probe: ParsedKind = {
+        kind: "unconditioned_mirror_probe",
+        rules: [
+          { actions: ["read"], effect: "EFFECT_ALLOW", derivedRoles: [ROOT_GATED], condition: "variables.inRoot && variables.notLow" },
+        ],
+      };
+      const patchedKinds = new Map(kinds);
+      patchedKinds.set("unconditioned_mirror_probe", probe);
+
+      // A mirror with NO condition at all: its clause set contains neither inRoot nor inTenant, so
+      // the `inTenant ⇒ inRoot` axiom has nothing to fire on and the root-gated arm MUST flag.
+      const narrow = findNarrowHolders("unconditioned_mirror_probe", "read", "", patchedKinds, patchedExprs, [ROOT_GATED]);
       expect(
         narrow.map((n) => n.role),
-        "a condition-less rollup.read mirror must flag the root-gated exec — re-dropping resource_rollup.yaml's mirror condition reopens the §1.2 leak",
-      ).toContain("group_executive");
+        "a condition-less mirror must flag a root-gated holder — if this passes covered, the axiom has " +
+          "been widened into the blindness that let a cross-root permission-arm read survive Wall 2",
+      ).toContain(ROOT_GATED);
     });
 
     it("the axiom is ONE-directional: a mirror gated on inRoot does NOT satisfy a role arm gated on inTenant (root-wide mirror > membership-gated arm — must flag)", () => {

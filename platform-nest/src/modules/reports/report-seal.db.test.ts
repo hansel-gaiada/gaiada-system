@@ -106,7 +106,7 @@ describe.skipIf(!TEST_URL)("TR-15 seal/amend/pin (live PG + RLS + Cerbos)", () =
     await addMembership(co, admin);
     await grantRole(alice, await createRole("member"), "company", co);
     await grantRole(admin, await createRole("company_admin"), "company", co);
-    await grantRole(exec, await createRole("group_executive"), "global", null);
+    await grantRole(exec, await createRole("platform_admin"), "global", null);
 
     await withTenants([co], (c) => c.query(`INSERT INTO company_org_structure (tenant_id, structure, origin_site) VALUES ($1,$2,'central')`, [co, JSON.stringify(ORG_BLOB)]));
     projectId = await createProject(co, "Website");
