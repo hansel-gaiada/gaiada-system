@@ -6,7 +6,7 @@ import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
 import { currentVia } from "./request-context";
-import { auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
+import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
 
@@ -20,6 +20,56 @@ export async function authorize(principal: Principal, resource: Resource, action
     );
     throw new ForbiddenException(`not authorized: ${decision.reason}`);
   }
+
+  // ── DELEGATION: THE SECOND CHECK (2026-08-22) ───────────────────────────────────────────────────
+  // Owner-accepted model: effective permission = persona scope ∩ acting user's permissions. The
+  // caller has just been authorized above; if this call is made ON BEHALF OF a human, that human must
+  // independently be authorized for the SAME resource and action, and either denial refuses.
+  //
+  // ⚠ ORDER MATTERS FOR WHAT THE ERROR SAYS, NOT FOR THE OUTCOME. The caller is checked first so a
+  // persona lacking the capability outright is refused for its OWN missing reach rather than
+  // reporting a denial about the human — which would read as "Alice may not do this" when the truth
+  // is "this persona may not, for anyone".
+  //
+  // ⚠ THE INTERSECTION IS THE SAFETY PROPERTY. This can only ever NARROW: both must allow, so
+  // presenting an `actFor` never grants the caller anything it lacked. That is why the header behind
+  // it is safe to accept from a first-party service, and it is pinned by test rather than asserted
+  // here.
+  if (principal.actFor && principal.actFor.userId !== principal.userId) {
+    const onBehalfOf = await assemblePrincipal(principal.actFor.userId, principal.assurance);
+    if (!onBehalfOf) {
+      // An unresolvable acting user fails CLOSED. The alternative — proceeding with the caller's own
+      // authority — would silently convert a delegated call into a full-authority one, which is the
+      // exact escalation this field exists to prevent.
+      await auditDecision(
+        resource.tenantId ?? null, principal, action, resource.kind, resource.id ?? null, false,
+        `act-for user not resolvable: ${principal.actFor.userId}`,
+      );
+      throw new ForbiddenException("not authorized: the user this call acts for is unknown or inactive");
+    }
+    // The acting user is checked WITHOUT `actFor`, or the recursion would never terminate. It also
+    // carries the caller's `via`, so a denial audits with the same channel the caller arrived on.
+    const delegated = await check({ ...onBehalfOf, via: principal.via }, resource, action);
+    if (!delegated.allow) {
+      await auditDecision(
+        resource.tenantId ?? null, principal, action, resource.kind, resource.id ?? null, false,
+        `act-for denied for ${principal.actFor.userId}: ${delegated.reason}`,
+      );
+      throw new ForbiddenException(`not authorized on behalf of that user: ${delegated.reason}`);
+    }
+    // ⚠ NO D11 SESSION CHECK FOR THE ACTING USER, AND ITS ABSENCE IS THE STRONGER GUARANTEE.
+    // D11 exists because a principal assembled EARLIER (a live session, a long-lived token) can go
+    // stale after a disable or role change, so its `session_version` is compared against the row. The
+    // acting user's principal is assembled HERE, at decision time, from the database — so there is no
+    // stale window to close and the comparison could never fail. Freshness is structural rather than
+    // checked: a human who is disabled resolves to null and refuses above, and a human whose roles
+    // shrank is denied by the check immediately above on the very next call.
+    //
+    // A `sessionVersionCurrent(onBehalfOf)` call here would look reassuring and assert nothing, which
+    // is worse than no check at all — it would invite someone later to believe delegation had a
+    // revocation path it does not need.
+  }
+
   if (action !== "read" && !(await sessionVersionCurrent(principal))) {
     throw new UnauthorizedException("session revoked — re-authenticate");
   }

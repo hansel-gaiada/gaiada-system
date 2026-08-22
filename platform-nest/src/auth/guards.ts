@@ -91,6 +91,20 @@ export class AuthGuard implements CanActivate {
       // makes a write more attributable. A client that lies about it gains nothing and incriminates
       // an agent that did not act.
       const agentHeader = req.headers["x-obo-agent"];
+      // ── DELEGATION (2026-08-22): `x-act-for` names the HUMAN this call acts for ─────────────────
+      // Unlike `x-obo-agent` this is authorization-BEARING — `authorize()` checks Cerbos twice and
+      // denies if either the caller or this human is refused. It is nonetheless safe to read from a
+      // header, and for a STRONGER reason than the agent marker: an intersection only ever narrows,
+      // so a caller that lies here loses reach rather than gaining it, and implicates a human who
+      // never asked. Read only inside this block, which already required the service token.
+      //
+      // Not validated as a user here on purpose: `authorize()` resolves it and FAILS CLOSED if it
+      // cannot. Validating in two places invites the two checks to disagree.
+      const actForHeader = req.headers["x-act-for"];
+      const actFor =
+        typeof actForHeader === "string" && actForHeader.trim()
+          ? { userId: actForHeader.trim() }
+          : undefined;
       const via = {
         provider,
         externalId,
@@ -109,12 +123,17 @@ export class AuthGuard implements CanActivate {
       if (row?.verified_at) {
         const principal = await assemblePrincipal(row.user_id, "linked");
         if (principal) {
-          req.principal = { ...principal, via };
+          req.principal = { ...principal, via, ...(actFor ? { actFor } : {}) };
           return true;
         }
       }
       // The anonymous principal keeps `via` too: an unauthenticated agent-driven call is still
       // agent-driven, and that is exactly the request whose provenance is worth recording.
+      //
+      // It deliberately does NOT keep `actFor`. An anonymous caller has no authority to delegate, so
+      // the intersection would be empty anyway — but the reason to drop it is legibility, not
+      // arithmetic: carrying it would produce "act-for denied for <uuid>" when the actual problem is
+      // that the caller is unauthenticated, sending whoever debugs it after the wrong identity.
       req.principal = { ...ANONYMOUS, via };
       return true;
     }

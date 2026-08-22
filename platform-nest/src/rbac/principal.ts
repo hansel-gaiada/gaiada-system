@@ -115,6 +115,41 @@ export interface Principal {
     /** Present only when an AGENT drove the call. Its absence is the meaningful case: a human did it. */
     agent?: string;
   };
+
+  /**
+   * ── DELEGATION (2026-08-22) — step 2 of [agent-attribution-gate], owner-accepted ───────────────
+   *
+   * The HUMAN this call is made on behalf of, when the caller is a persona acting for someone.
+   *
+   * ⚠ THIS IS THE ONE FIELD ON `Principal` THAT IS AUTHORIZATION-BEARING RATHER THAN NEUTRAL.
+   * `via` records who drove a call and changes no decision. This CHANGES DECISIONS — and it can only
+   * ever change them one way.
+   *
+   * THE PROBLEM IT SOLVES. `Principal` holds ONE `userId`, and OBO resolves to either the human or
+   * the bot. There was no delegation, so "a persona helps an employee within that employee's scope,
+   * and escalates beyond it" could not be expressed: whichever identity the envelope named got that
+   * identity's full authority. A persona with `hr_manager` helping a junior would act with
+   * hr_manager's reach; a junior's own request routed through a powerful persona would too.
+   *
+   * THE MODEL (owner's ruling, plan §Deferred): effective permission = persona scope ∩ acting user's
+   * permissions. `authorize()` checks Cerbos TWICE — once as the caller, once as the acting user —
+   * and denies if EITHER denies. Both identities are audited.
+   *
+   * ⚠ WHY A HEADER CAN BE TRUSTED FOR THIS, which is not obvious given it decides authorization.
+   * Because an intersection is MONOTONICALLY NARROWING: adding `actFor` can only ever subtract from
+   * what the caller could already do alone. A caller that lies about it does not gain reach — it
+   * loses reach, and incriminates a human who did not ask. That is a strictly stronger safety
+   * argument than `via`'s ("a lie gains nothing"), and it is the property `authorize()`'s tests pin.
+   * It is still read only inside the OBO block, which already requires the service token.
+   *
+   * THE ALTERNATIVE REJECTED: persona authority plus a redaction layer. That trades an architectural
+   * guarantee for a filter which must be correct on every field, every endpoint, forever — and its
+   * failure mode is silent over-disclosure rather than a denial.
+   */
+  actFor?: {
+    /** The acting human's `users.id`. Resolved by the guard, never taken on faith from the body. */
+    userId: string;
+  };
 }
 
 export const ANONYMOUS: Principal = {
