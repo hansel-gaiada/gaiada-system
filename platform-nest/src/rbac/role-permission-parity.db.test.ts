@@ -81,6 +81,10 @@ const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",
   "resource_search_keyword", "resource_search_ledger", "resource_search_audit",
   "resource_search_report",
+  // SM-76: the finding-state entity (search_finding_states) — same module_staff/module_manager
+  // -> search_staff/search_manager resolution as every other resource_search_* kind (matches
+  // scripts/generate-role-bundles.mjs's own SEARCH_KINDS addition).
+  "resource_search_finding",
 ]);
 
 // SMM-30 — the seven module-tiered social kinds (0105/0106). BARE names (`social_post`), matching

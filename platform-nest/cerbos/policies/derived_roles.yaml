@@ -1195,6 +1195,34 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "search.property.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # SM-76: perm_resource_search_property_attest — recording an attested property fact
+    # (search_property_facts), sensitive/elevated (resource_search_property.yaml's "attest" rule).
+    - name: perm_resource_search_property_attest
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.property.attest" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    # SM-76: perm_resource_search_finding_* — the new resource_search_finding kind
+    # (search_finding_states). triage = baseline; accept_risk = sensitive/elevated.
+    - name: perm_resource_search_finding_triage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.finding.triage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+    - name: perm_resource_search_finding_accept_risk
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "search.finding.accept_risk" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_resource_search_report_* — IAM-04-ROLLOUT-B12
     - name: perm_resource_search_report_read
       parentRoles: ["user"]

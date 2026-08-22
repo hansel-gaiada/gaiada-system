@@ -101,8 +101,12 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
     // as a literal here only because rewriting these three suites' fixed-input style is its own
     // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
-    expect(catalog.length).toBe(298);
-    expect(catalogKindSet.size).toBe(77);
+    // MON-10b (2026-08-19): +14 pairs / +5 kinds (monitoring). SM-76 (2026-08-23, seo-audit-capability
+    // §6): +3 pairs (search.finding.triage, search.finding.accept_risk, search.property.attest) / +1
+    // kind (`resource_search_finding` — `search.property.attest` is a new action on the EXISTING
+    // `resource_search_property` kind), 298/77 -> 301/78.
+    expect(catalog.length).toBe(301);
+    expect(catalogKindSet.size).toBe(78);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

@@ -87,7 +87,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
     // as a literal here only because rewriting these three suites' fixed-input style is its own
     // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
-    expect(grantable.length).toBe(283);
+    // MON-10b (2026-08-19): +14 grantable (monitoring). SM-76 (2026-08-23, seo-audit-capability §6):
+    // +3 grantable, 283 -> 286.
+    expect(grantable.length).toBe(286);
     expect(relationshipKeys.size).toBe(15);
   });
 

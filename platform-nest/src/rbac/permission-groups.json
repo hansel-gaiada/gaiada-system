@@ -3,15 +3,15 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (283 grantable permissions, MON-10b 2026-08-19)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (286 grantable permissions, SM-76 2026-08-23)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 92,
-      "grantablePermissionsInCatalog": 283,
-      "permissionsCoveredByGroups": 261,
+      "groups": 94,
+      "grantablePermissionsInCatalog": 286,
+      "permissionsCoveredByGroups": 264,
       "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 52
+      "sensitiveGroups": 54
     }
   },
   "groups": [
@@ -682,6 +682,7 @@
         "search.audit.update",
         "search.audit.delete",
         "search.audit.run",
+        "search.finding.triage",
         "search.campaign.create",
         "search.campaign.update",
         "search.campaign.delete",
@@ -743,6 +744,26 @@
       "description": "Override a provider budget stop-loss cap. Rare, high-impact, audited.",
       "permissions": [
         "search.ledger.admin"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_accept_finding_risk",
+      "name": "Accept Audit-Finding Risk",
+      "domain": "search",
+      "description": "Accept risk on an open site-audit finding (with expiry or explicit indefinite) or mark it a false positive. Conceals a live, measured problem from the open-findings view — kept separate from drafting.",
+      "permissions": [
+        "search.finding.accept_risk"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "search_attest_property_facts",
+      "name": "Attest Property Facts",
+      "domain": "search",
+      "description": "Record an attested property fact (CMS, hosting, security posture) that a dependent audit check can resolve from on a later run. An accountability record, not a routine property edit.",
+      "permissions": [
+        "search.property.attest"
       ],
       "sensitive": true
     },

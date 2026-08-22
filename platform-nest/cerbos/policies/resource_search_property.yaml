@@ -7,6 +7,13 @@
 # CRUD under `search:engagement:read|write`, matching the controller's shared authorize() call) —
 # Cerbos itself only ever sees the resource kind + action + derived role, so that bundling is purely
 # a module-registry/UI concern and does not change this policy's shape.
+#
+# SM-76 (docs/plans/2026-08-23-seo-audit-capability.md §6/§3.5) adds `attest`: recording a
+# provenance-stamped property fact (search_property_facts) that a dependent security check can
+# resolve from on a LATER run — e.g. an attested `wp.salts_unique_confirmed` fact can flip
+# `security.wp_salts` from "not verified" to passing. SENSITIVE and elevated-only (grouped with
+# `delete` below), same tier as monitoring's `maintenance.create`/`channel.manage`: an attested fact
+# is an accountability record, not a routine property edit, and requires `recorded_by` (app-enforced).
 apiVersion: api.cerbos.dev/v1
 resourcePolicy:
   version: default
@@ -18,18 +25,14 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    # Owner (group_executive) is a global role — full oversight everywhere (design §11 "owner").
-    - actions: ["read", "create", "update", "delete"]
-      effect: EFFECT_ALLOW
-      derivedRoles: ["group_executive"]
-      condition: { match: { expr: "variables.notLow && variables.inRoot" } }
     # Search staff / manager (served-company grant) + the served company's own admin: baseline set.
+    # NOT attest (elevated below, SM-76).
     - actions: ["read", "create", "update"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff", "module_manager", "company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # Destructive: manager + company admin only (NOT plain staff/member).
-    - actions: ["delete"]
+    # Destructive + attest: manager + company admin only (NOT plain staff/member).
+    - actions: ["delete", "attest"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager", "company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -56,4 +59,8 @@ resourcePolicy:
     - actions: ["delete"]
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_resource_search_property_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["attest"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_resource_search_property_attest"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

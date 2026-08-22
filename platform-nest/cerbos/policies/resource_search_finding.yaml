@@ -1,0 +1,54 @@
+# SM-76 (docs/plans/2026-08-23-seo-audit-capability.md §6) — the trackable finding-state entity
+# (search_finding_states, SM-76 schema). Every search handler passes
+# resource.attr = {module: "search", tenantId: <SERVED company>, kind: "resource_search_finding", ...}
+# (SearchController), same shape every other resource_search_* kind uses, so a materialized
+# (search_staff|search_manager, company, <served>) grant lights up ONLY that served company's
+# finding-state surface.
+#
+# ── TWO ACTIONS, DELIBERATELY SPLIT BY WHICH DIRECTION THEY MOVE (design §5.2/§6) ─────────────────
+#   triage      — assign, move to in_remediation, or claim a fix (fixed_claimed). Baseline: it makes
+#                 a finding MORE visible/worked, never less. Same tier as search.audit.update.
+#   accept_risk — accept risk (with expiry or explicit indefinite) or mark false_positive (the same
+#                 grant covers both triage outcomes, design §5.2). THE CONCEALING DIRECTION: it makes
+#                 a live, measured problem stop surfacing as open. Elevated only, mirroring
+#                 monitoring's `maintenance.create` reasoning (resource_monitor_maintenance.yaml) —
+#                 module_staff never gets it.
+#
+# Cerbos does NOT hot-reload. Restart it after editing and PROVE the new decision with a probe.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: resource_search_finding
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    # Search staff / manager (served-company grant) + the served company's own admin: baseline —
+    # triage only. NOT accept_risk (concealing direction, elevated below).
+    - actions: ["triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Elevated: accept_risk / false_positive — manager + company admin only (NOT plain staff).
+    - actions: ["accept_risk"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
+    # above is byte-for-byte unchanged. Generic global-or-company mirror per action, same shape as
+    # every other resource_search_* kind. Any group_executive-only or platform_admin wildcard rule
+    # on this kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the
+    # permission catalog).
+
+    - actions: ["triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_resource_search_finding_triage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["accept_risk"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_resource_search_finding_accept_risk"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

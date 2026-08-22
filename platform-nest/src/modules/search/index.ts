@@ -149,6 +149,14 @@ export const searchModule: ModuleContract = {
     // vendor's) to be paired against. Registered here AT WRITE TIME, same standing lesson as every
     // comment immediately above (0047's omission from this array is this module's own repeated bug).
     "0066_search_ads_execution_manifest.sql",
+    // SM-76 (docs/plans/2026-08-23-seo-audit-capability.md): the site-audit v2 schema wave —
+    // search_finding_states / search_audit_checks / search_property_facts, search_audits.group_id +
+    // kind='security'/source='psi' constraint surgery, search_audit_findings.state_id — plus the
+    // matching IAM seed (search.finding.triage/accept_risk, search.property.attest). Registered here
+    // AT WRITE TIME, same standing lesson as every comment above (0047's omission is this module's
+    // own repeated bug).
+    "202608221727_search_audit_v2_finding_states_checks_facts.sql",
+    "202608221728_iam_search_finding_property_attest_permissions.sql",
   ],
   // IAM-01d migration (§7 of docs/superpowers/plans/2026-08-10-permission-catalog.md — the largest
   // module reconciliation, 14 declared keys):
@@ -178,6 +186,13 @@ export const searchModule: ModuleContract = {
     { key: "search.keyword.create", description: "Import keyword sets" },
     { key: "search.keyword.update", description: "Edit keyword sets and keywords" },
     { key: "search.audit.run", description: "Trigger a technical/CWV/content audit" },
+    // SM-76: the finding-state working set (search_finding_states). triage = baseline (assign,
+    // in_remediation, fixed_claimed); accept_risk = sensitive/elevated (accept_risk or
+    // false_positive — the concealing direction).
+    { key: "search.finding.triage", description: "Assign a finding, move it to in_remediation, or claim a fix (fixed_claimed)" },
+    { key: "search.finding.accept_risk", description: "Accept risk (with expiry) or mark a finding a false positive (elevated, audited)" },
+    // SM-76: recording an attested property fact (search_property_facts) — sensitive, elevated.
+    { key: "search.property.attest", description: "Record an attested property fact (CMS/hosting/security posture) — requires recorded_by (elevated, audited)" },
     { key: "search.campaign.create", description: "Create SEM campaigns, ad groups and ads" },
     { key: "search.campaign.update", description: "Edit SEM campaigns, ad groups, ads and negatives" },
     { key: "search.campaign.propose_change", description: "Draft a SEM change proposal" },

@@ -63,8 +63,11 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
     // as a literal here only because rewriting these three suites' fixed-input style is its own
     // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
-    expect(permissions.length).toBe(298);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(283);
+    // MON-10b (2026-08-19): +14 grantable (monitoring). SM-76 (2026-08-23, seo-audit-capability §6):
+    // +3 grantable (search.finding.triage, search.finding.accept_risk, search.property.attest),
+    // 298/283 -> 301/286.
+    expect(permissions.length).toBe(301);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(286);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
