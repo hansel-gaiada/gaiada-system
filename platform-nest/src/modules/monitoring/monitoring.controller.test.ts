@@ -25,11 +25,14 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
   let app: NestFastifyApplication;
   let coA: string;
   let coB: string;
+  let coC: string;
   let clientA: string;
   let clientB: string;
+  let clientC: string;
   let staff: string;
   let manager: string;
   let outsider: string;
+  let managerC: string;
   let monitorA: string;
   let monitorB: string;
   let hbToken: string;
@@ -96,6 +99,22 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
     await pool.query(
       `INSERT INTO monitor_incidents (tenant_id, client_id, monitor_id, cause, severity)
        VALUES ($1,$2,$3,'no heartbeat','page')`, [coA, clientA, hbMonitor.rows[0].id]);
+
+    // MON-19 — the SSRF allowlist floor. `viceroybali.com` is VERIFIED for coA/clientA, so an http
+    // monitor targeting it must be accepted; anything else must be refused (constraint 2).
+    await pool.query(
+      `INSERT INTO search_properties (tenant_id, client_id, domain, site_url, verified_at)
+       VALUES ($1,$2,'viceroybali.com','https://viceroybali.com', now())`, [coA, clientA]);
+
+    // MON-19 cross-tenant write fixture — a SECOND company with the module enabled (unlike coB,
+    // which deliberately lacks it and only proves the module gate). This is what lets the
+    // cross-tenant write test prove the RLS wall specifically, rather than merely re-proving the
+    // 404-when-module-off case already covered above.
+    coC = await createCompany("Other Monitored Agency", ["monitoring"]);
+    clientC = await createClient(coC, "Someone Else Entirely");
+    managerC = await createUser("mon-mgr@c.test");
+    await addMembership(coC, managerC);
+    await grantRole(managerC, mgrRole, "company", coC);
 
     app = await buildApp();
   }, 60_000);
@@ -205,6 +224,259 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
       const bad = await app.inject({ method: "POST", url: `/api/monitoring/heartbeat/definitely-not-a-token` });
       // A 404 on a bad token would let an attacker enumerate valid ones.
       expect(bad.statusCode).toBe(good.statusCode);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // MON-19 — monitor create / update / delete.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("MON-19 — monitor write surface", () => {
+    it("rejects an unknown kind with 400, not a silent accept", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "bogus kind", kind: "not-a-kind", clientId: clientA, target: "https://viceroybali.com" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("rejects a known kind with no registered driver — 'available:false' must not be silently accepted", async () => {
+      // 'tcp' is a real KNOWN_KINDS member (registry.ts) but this suite never registers a driver for
+      // it — exactly the "not built yet" state the UI's kind picker renders disabled.
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "tcp attempt", kind: "tcp", clientId: clientA, target: "viceroybali.com:443" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/no monitor driver/i);
+    });
+
+    it("refuses a target whose host is not a VERIFIED property — the SSRF floor at write time", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "ssrf attempt", kind: "http", clientId: clientA, target: "https://evil.example/" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/not a verified property/i);
+    });
+
+    it("refuses even a private/metadata-looking host the same way — never a special-cased 500", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "metadata attempt", kind: "http", clientId: clientA, target: "http://169.254.169.254/" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    let createdMonitorId: string;
+
+    it("creates an http monitor for a verified target, and the write is readable back through the same scope", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: {
+          name: "viceroybali.com — homepage", kind: "http", clientId: clientA,
+          target: "https://viceroybali.com/", intervalSec: 45, severity: "ticket",
+        },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      createdMonitorId = res.json().id;
+      expect(createdMonitorId).toBeTruthy();
+
+      const got = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(staff),
+      });
+      expect(got.statusCode).toBe(200);
+      const body = got.json() as { kind: string; intervalSec: number; config: unknown };
+      expect(body.kind).toBe("http");
+      expect(body.intervalSec).toBe(45);
+      // The detail read path redacts config regardless of who created it.
+      expect(body.config).toBeNull();
+    });
+
+    it("creates a keyword monitor carrying the body_contains assertion inside its driver config", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: {
+          name: "viceroybali.com — content check", kind: "keyword", clientId: clientA,
+          target: "https://viceroybali.com/", assertions: [{ type: "body_contains", expr: "Book a table" }],
+        },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      const row = await adminPool().query<{ config: { expect?: string } }>(
+        `SELECT config FROM monitors WHERE id = $1`, [res.json().id]);
+      expect(row.rows[0].config.expect).toBe("Book a table");
+    });
+
+    it("a keyword monitor with no assertion is refused by the driver's OWN validate(), not silently accepted", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "content check, no assertion", kind: "keyword", clientId: clientA, target: "https://viceroybali.com/" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("creates a heartbeat monitor, issuing a one-time plaintext token that is never stored in clear", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "nightly export job", kind: "heartbeat", clientId: clientA },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      const body = res.json() as { id: string; heartbeatToken: string };
+      expect(body.heartbeatToken).toBeTruthy();
+
+      const row = await adminPool().query<{ token_hash: string }>(
+        `SELECT token_hash FROM monitor_heartbeats WHERE monitor_id = $1`, [body.id]);
+      expect(row.rows[0].token_hash).not.toBe(body.heartbeatToken);
+      expect(row.rows[0].token_hash).toBe(createHash("sha256").update(body.heartbeatToken).digest("hex"));
+
+      // The minted token actually works against the real (unauthenticated) ingest endpoint.
+      const ping = await app.inject({ method: "POST", url: `/api/monitoring/heartbeat/${body.heartbeatToken}` });
+      expect(ping.statusCode).toBeLessThan(300);
+    });
+
+    it("clientId must belong to this tenant", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/monitors`, headers: asUser(staff),
+        payload: { name: "wrong client", kind: "http", clientId: clientB, target: "https://viceroybali.com/" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("updates name, interval and severity, re-validating the target on every write", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(staff),
+        payload: { name: "viceroybali.com — homepage (renamed)", intervalSec: 90, severity: "page" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { name: string; intervalSec: number; severity: string };
+      expect(body.name).toBe("viceroybali.com — homepage (renamed)");
+      expect(body.intervalSec).toBe(90);
+      expect(body.severity).toBe("page");
+    });
+
+    it("refuses to re-target a monitor onto an unverified host, even on update", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(staff),
+        payload: { target: "https://evil.example/" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("refuses to change kind after creation", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(staff),
+        payload: { kind: "keyword" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("company C (a DIFFERENT tenant with the module enabled) cannot update company A's monitor — RLS, not just Cerbos", async () => {
+      // managerC is authorized to update MONITORS IN THEIR OWN TENANT (coC) — Cerbos's decision does
+      // not depend on the target row. RLS is what must refuse this, exactly like the read suite's
+      // cross-tenant assertion above, restated for a write.
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coC}/monitoring/monitors/${createdMonitorId}`, headers: asUser(managerC),
+        payload: { name: "hijacked" },
+      });
+      expect(res.statusCode).toBe(404);
+      const row = await adminPool().query(`SELECT name FROM monitors WHERE id = $1`, [createdMonitorId]);
+      expect(row.rows[0].name).not.toBe("hijacked");
+    });
+
+    it("company C cannot delete company A's monitor either", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coC}/monitoring/monitors/${createdMonitorId}`, headers: asUser(managerC),
+      });
+      expect(res.statusCode).toBe(404);
+      const row = await adminPool().query(`SELECT deleted_at FROM monitors WHERE id = $1`, [createdMonitorId]);
+      expect(row.rows[0].deleted_at).toBeNull();
+    });
+
+    it("monitoring_staff cannot delete — delete is manager-tier (destroys history)", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(staff),
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("a manager CAN delete — soft delete: deleted_at is set, the row and its result history survive", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(manager),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { id: string; deletedAt: string };
+      expect(body.deletedAt).toBeTruthy();
+
+      // Gone from the active board...
+      const got = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/monitors/${createdMonitorId}`, headers: asUser(staff),
+      });
+      expect(got.statusCode).toBe(404);
+
+      // ...but the row itself, and its history, still physically exist — this is SOFT delete.
+      const row = await adminPool().query(
+        `SELECT deleted_at, enabled FROM monitors WHERE id = $1`, [createdMonitorId]);
+      expect(row.rows[0].deleted_at).not.toBeNull();
+      expect(row.rows[0].enabled).toBe(false);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // MON-20 — incident acknowledge: an accountability record, not an edit, not a close.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("MON-20 — incident acknowledge", () => {
+    it("staff can acknowledge an open incident, recording who and when", async () => {
+      const openIncident = await adminPool().query<{ id: string }>(
+        `SELECT id FROM monitor_incidents WHERE monitor_id = $1 AND closed_at IS NULL LIMIT 1`, [monitorA]);
+      const incidentId = openIncident.rows[0].id;
+
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/incidents/${incidentId}/ack`, headers: asUser(staff),
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      const body = res.json() as { acknowledgedAt: string; acknowledgedBy: string };
+      expect(body.acknowledgedAt).toBeTruthy();
+      expect(body.acknowledgedBy).toBe(staff);
+
+      // Not an edit and not a close: severity/cause/closed_at are all untouched by acknowledging.
+      const row = await adminPool().query(
+        `SELECT closed_at, severity, cause FROM monitor_incidents WHERE id = $1`, [incidentId]);
+      expect(row.rows[0].closed_at).toBeNull();
+      expect(row.rows[0].severity).toBe("page");
+      expect(row.rows[0].cause).toBe("connect: refused");
+    });
+
+    it("re-acknowledging by someone else does NOT reassign the claim — first person wins", async () => {
+      const openIncident = await adminPool().query<{ id: string }>(
+        `SELECT id FROM monitor_incidents WHERE monitor_id = $1 AND closed_at IS NULL LIMIT 1`, [monitorA]);
+      const incidentId = openIncident.rows[0].id;
+
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/incidents/${incidentId}/ack`, headers: asUser(manager),
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      const body = res.json() as { acknowledgedBy: string };
+      // Still the ORIGINAL claimant (staff), not manager — an accountability record is not
+      // overwritable by whoever happens to click it next.
+      expect(body.acknowledgedBy).toBe(staff);
+    });
+
+    it("company C cannot acknowledge company A's incident — 404, RLS-invisible", async () => {
+      const openIncident = await adminPool().query<{ id: string }>(
+        `SELECT id FROM monitor_incidents WHERE monitor_id = $1 AND closed_at IS NULL LIMIT 1`, [monitorA]);
+      const incidentId = openIncident.rows[0].id;
+
+      const res = await app.inject({
+        method: "POST", url: `/api/${coC}/monitoring/incidents/${incidentId}/ack`, headers: asUser(managerC),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("an unknown incident id is 404", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/incidents/00000000-0000-0000-0000-000000000000/ack`,
+        headers: asUser(staff),
+      });
+      expect(res.statusCode).toBe(404);
     });
   });
 });

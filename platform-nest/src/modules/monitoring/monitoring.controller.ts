@@ -15,24 +15,47 @@
 // exists so ours cannot.
 import {
   BadRequestException,
+  Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { config } from "../../config";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { authorize } from "../../core/http";
 import { withTenants, withGlobal } from "../../db";
-import { listKindSpecs, parseKind } from "./drivers/registry";
+import { getDriver, hasDriver, listKindSpecs, parseKind } from "./drivers/registry";
+import {
+  assertHostAllowlisted,
+  buildRawDriverConfig,
+  extractTargetHost,
+  parseIntervalSec,
+  parseSeverity,
+  parseTags,
+  MonitorValidationError,
+} from "./write-validation";
 
 const MOD = { modules: ["monitoring"] as string[] };
+// MON-19 — the SSRF allowlist (constraint 2) is resolved from `search_properties`, a table owned by
+// the `search` module. Declaring BOTH scopes here is deliberate, not a widening: this transaction
+// genuinely reads a search-owned table AND writes a monitoring-owned one, and `opts.modules` exists
+// precisely so a handler states which module-sliced tables it is allowed to touch — omitting `search`
+// would make the allowlist query return ZERO rows with no error (the same fail-closed trap the third
+// wall imposes on `monitoring` itself), which would then read as "no verified properties" and refuse
+// every legitimate create. This does NOT require the tenant's `search` module to be enabled in
+// `enabled_modules` — that is a separate, product-level gate (isModuleEnabled), not this
+// request-scope declaration wall (0028's §2.4 distinction, restated for a cross-module read).
+const MOD_WITH_SEARCH = { modules: ["monitoring", "search"] as string[] };
 
 interface MonitorRow {
   id: string;
@@ -307,6 +330,332 @@ export class MonitoringController {
       reason: r.reason,
       createdBy: r.created_by,
     }));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // MON-19 — monitor create / update / delete.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * A monitor definition written here IS the standing authorization for the platform to probe that
+   * target on a schedule (design §4.3) — see the class-level comment. Two refusals are load-bearing
+   * and NOT the same failure:
+   *   · unknown kind, or a known kind with no registered driver -> 400. registry.ts's own rule
+   *     ("absent, not silently inert") restated at the write boundary: accepting either would create
+   *     a monitor that sits on the board forever reporting `unknown`.
+   *   · a target whose host is not on the tenant+client's VERIFIED `search_properties` allowlist ->
+   *     400. Without this, "create a monitor" is a scheduled SSRF primitive (constraint 2).
+   */
+  @Post(":tenantId/monitoring/monitors")
+  async createMonitor(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor", tenantId, module: "monitoring" }, "create");
+
+    const name = String(body?.name ?? "").trim();
+    if (!name) throw new BadRequestException("name is required");
+
+    const kind = parseKind(body?.kind);
+    if (kind === null) throw new BadRequestException(`unknown monitor kind '${String(body?.kind)}'`);
+    if (!hasDriver(kind)) {
+      throw new BadRequestException(
+        `no monitor driver is registered for kind '${kind}' on this deployment — it cannot run`,
+      );
+    }
+
+    const clientId = String(body?.clientId ?? "").trim();
+    if (!clientId) throw new BadRequestException("clientId is required");
+
+    let severity: string, intervalSec: number, tags: string[];
+    const target = typeof body?.target === "string" ? body.target.trim() : "";
+    let host: string | null;
+    let rawConfig: unknown;
+    try {
+      severity = parseSeverity(body?.severity);
+      intervalSec = parseIntervalSec(body?.intervalSec);
+      tags = parseTags(body?.tags);
+      host = extractTargetHost(kind, target);
+      rawConfig = buildRawDriverConfig(kind, { target, assertions: body?.assertions, graceSec: body?.graceSec });
+    } catch (e) {
+      if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+      throw e;
+    }
+
+    let validatedConfig: unknown;
+    try {
+      validatedConfig = getDriver(kind).validate(rawConfig);
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error ? e.message : "invalid monitor configuration");
+    }
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const clientRow = await c.query(`SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL`, [clientId]);
+        if (!clientRow.rows[0]) throw new BadRequestException("clientId not found in this tenant");
+
+        // ── THE SSRF FLOOR (constraint 2) ─────────────────────────────────────────────────────
+        // Mirrors runner.ts's DUE_SELECT allowlist subquery exactly: VERIFIED properties for this
+        // tenant+client ONLY. An unverified property contributes nothing, so typing a target is
+        // never itself sufficient authorization to probe it — someone had to pass verification.
+        if (host !== null) {
+          const allow = await c.query<{ allowlist: string[] }>(
+            `SELECT COALESCE(array_agg(DISTINCT p.domain), ARRAY[]::text[]) AS allowlist
+               FROM search_properties p
+              WHERE p.tenant_id = $1 AND p.client_id = $2
+                AND p.verified_at IS NOT NULL AND p.deleted_at IS NULL`,
+            [tenantId, clientId],
+          );
+          try {
+            assertHostAllowlisted(host, allow.rows[0]?.allowlist ?? []);
+          } catch (e) {
+            throw new BadRequestException(e instanceof Error ? e.message : "target not allowlisted");
+          }
+        }
+
+        const ins = await c.query<{ id: string }>(
+          `INSERT INTO monitors
+             (tenant_id, client_id, name, kind, config, target, interval_sec, severity, tags, created_by, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           RETURNING id`,
+          [
+            tenantId, clientId, name, kind, JSON.stringify(validatedConfig), target || null,
+            intervalSec, severity, tags, req.principal.userId ?? null, config.originSite,
+          ],
+        );
+        const id = ins.rows[0].id;
+
+        // MON-13's ingest token, minted only for heartbeat monitors. Returned ONCE, in plaintext,
+        // exactly like the design of the ingest endpoint itself demands — it is never stored except
+        // as a SHA-256 hash, and there is no read path that can recover it afterwards.
+        let heartbeatToken: string | undefined;
+        if (kind === "heartbeat") {
+          heartbeatToken = randomBytes(24).toString("hex");
+          const hash = createHash("sha256").update(heartbeatToken).digest("hex");
+          const cfg = validatedConfig as { graceSec: number };
+          await c.query(
+            `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, grace_sec)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [tenantId, clientId, id, hash, cfg.graceSec],
+          );
+        }
+
+        // ── "AFTER ANY WRITE, ASSERT WHAT YOU WROTE" (constraint 1) ───────────────────────────
+        // Reads the row back through the EXACT SAME tenant+module scope the INSERT just used. If
+        // `opts.modules` were ever accidentally dropped from this call, the INSERT itself would
+        // still throw (FORCE RLS's WITH CHECK), but a future refactor that swaps this to a looser
+        // wrapper would not be caught by that — this line is the one that would catch it, because a
+        // write that "succeeded" but is invisible under the scope that made it is exactly the silent
+        // failure mode this module's tests are written to make loud.
+        const check = await c.query(`SELECT id FROM monitors WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!check.rows[0]) {
+          throw new Error(`monitor ${id} was inserted but is not readable under its own write scope`);
+        }
+
+        return heartbeatToken ? { id, heartbeatToken } : { id };
+      },
+      MOD_WITH_SEARCH,
+    );
+  }
+
+  /**
+   * `kind` is intentionally NOT editable here. Changing what a monitor probes mid-life is close
+   * enough to "a different monitor" that reusing the id would silently discard the driver contract
+   * (and the config shape) the row was created under — delete and recreate is the correct path, and
+   * an explicit refusal here is cheaper than a config-validation edge case nobody asked for.
+   */
+  @Patch(":tenantId/monitoring/monitors/:id")
+  async updateMonitor(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor", id, tenantId, module: "monitoring" }, "update");
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const existing = await c.query<{
+          kind: string; config: Record<string, unknown>; client_id: string; target: string | null;
+        }>(`SELECT kind, config, client_id, target FROM monitors WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!existing.rows[0]) throw new NotFoundException("monitor not found");
+        if (body?.kind !== undefined && parseKind(body.kind) !== parseKind(existing.rows[0].kind)) {
+          throw new BadRequestException("kind cannot be changed after creation — delete and recreate instead");
+        }
+        const kind = parseKind(existing.rows[0].kind);
+        // Cannot be null: only a known, driver-registered kind is ever stored (createMonitor's own
+        // gate), so a row reaching here always parses. Still checked, never assumed.
+        if (kind === null || !hasDriver(kind)) {
+          throw new BadRequestException(
+            `monitor's stored kind '${existing.rows[0].kind}' has no registered driver — it cannot be updated safely`,
+          );
+        }
+
+        const name = body?.name !== undefined ? String(body.name).trim() : undefined;
+        if (name !== undefined && !name) throw new BadRequestException("name cannot be blank");
+
+        let severity: string | undefined, intervalSec: number | undefined, tags: string[] | undefined;
+        let enabled: boolean | undefined;
+        let target = existing.rows[0].target ?? "";
+        let host: string | null = null;
+        let validatedConfig: unknown = existing.rows[0].config;
+        const clientId = existing.rows[0].client_id;
+
+        try {
+          if (body?.severity !== undefined) severity = parseSeverity(body.severity);
+          if (body?.intervalSec !== undefined) intervalSec = parseIntervalSec(body.intervalSec);
+          if (body?.tags !== undefined) tags = parseTags(body.tags);
+          if (body?.enabled !== undefined) enabled = Boolean(body.enabled);
+
+          const targetProvided = typeof body?.target === "string";
+          if (targetProvided) target = (body.target as string).trim();
+          // Re-validated on EVERY update that can affect what gets dialled, not only when `target`
+          // is present in the body: an assertion/graceSec-only edit still re-runs the SSRF check
+          // (cheap, and closes the window where a property is un-verified after creation but the
+          // monitor keeps its original, now-stale, authorization).
+          if (targetProvided || body?.assertions !== undefined || body?.graceSec !== undefined) {
+            const raw = buildRawDriverConfig(kind, { target, assertions: body?.assertions, graceSec: body?.graceSec });
+            validatedConfig = getDriver(kind).validate(raw) as Record<string, unknown>;
+          }
+          host = extractTargetHost(kind, target);
+        } catch (e) {
+          if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+          throw e;
+        }
+
+        if (host !== null) {
+          const allow = await c.query<{ allowlist: string[] }>(
+            `SELECT COALESCE(array_agg(DISTINCT p.domain), ARRAY[]::text[]) AS allowlist
+               FROM search_properties p
+              WHERE p.tenant_id = $1 AND p.client_id = $2
+                AND p.verified_at IS NOT NULL AND p.deleted_at IS NULL`,
+            [tenantId, clientId],
+          );
+          try {
+            assertHostAllowlisted(host, allow.rows[0]?.allowlist ?? []);
+          } catch (e) {
+            throw new BadRequestException(e instanceof Error ? e.message : "target not allowlisted");
+          }
+        }
+
+        const sets: string[] = ["updated_at = now()", "config = $2"];
+        const params: unknown[] = [id, JSON.stringify(validatedConfig)];
+        if (name !== undefined) { params.push(name); sets.push(`name = $${params.length}`); }
+        if (target !== undefined) { params.push(target || null); sets.push(`target = $${params.length}`); }
+        if (severity !== undefined) { params.push(severity); sets.push(`severity = $${params.length}`); }
+        if (intervalSec !== undefined) { params.push(intervalSec); sets.push(`interval_sec = $${params.length}`); }
+        if (tags !== undefined) { params.push(tags); sets.push(`tags = $${params.length}`); }
+        if (enabled !== undefined) { params.push(enabled); sets.push(`enabled = $${params.length}`); }
+
+        const upd = await c.query<{ id: string }>(
+          `UPDATE monitors SET ${sets.join(", ")} WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+          params,
+        );
+        // Cross-tenant is proven here: company B's request runs inside `withTenants([tenantB])`, so
+        // RLS makes company A's row invisible and this UPDATE matches zero rows — a 404, never a 200
+        // that quietly touched nothing and never a leak of company A's data to construct the 403/404
+        // decision. Same shape as the read suite's cross-tenant assertion, restated for a write.
+        if (!upd.rows[0]) throw new NotFoundException("monitor not found");
+
+        const check = await c.query<MonitorRow>(`${MONITOR_SELECT} AND m.id = $1`, [id]);
+        if (!check.rows[0]) {
+          throw new Error(`monitor ${id} was updated but is not readable under its own write scope`);
+        }
+        return mapMonitor(check.rows[0]);
+      },
+      MOD_WITH_SEARCH,
+    );
+  }
+
+  /**
+   * SOFT DELETE, matching every neighbouring module's convention for a user-facing entity
+   * (`search_properties`, `clients`, `hr_cases`, `pm_tasks`, … all set `deleted_at = now()` rather
+   * than issuing a `DELETE`) and matching this table's own DDL, which already carries `deleted_at`
+   * for exactly this purpose. Two reasons this is the right call here specifically, not just
+   * "because that's the house style":
+   *   1. `monitor_results` is PARTITIONED and carries NO foreign key to `monitors` (0116's own
+   *      header: retention is a partition DROP, not a row-level DELETE). A hard delete of the parent
+   *      would either leave orphaned result rows with no monitor to belong to, or require an
+   *      unindexed cross-partition scan to clean them up — fighting the entire reason the table is
+   *      partitioned in the first place.
+   *   2. An incident/uptime history is exactly the evidence an SLA figure or a postmortem depends
+   *      on; the permission catalog's own description ("Delete monitors and their history") means
+   *      "stop counting it and take it off the active board", not "make the outage undiscoverable"
+   *      — a distinction the soft-delete + `enabled=false` combination makes true without a second
+   *      code path.
+   * `enabled = false` is set alongside `deleted_at` as defence in depth: every read path already
+   * filters `deleted_at IS NULL`, but the runner's DUE_SELECT filters on `enabled = true` too, so a
+   * reader that ever forgets the `deleted_at` half still cannot schedule a probe against this row.
+   */
+  @Delete(":tenantId/monitoring/monitors/:id")
+  async deleteMonitor(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "monitor", id, tenantId, module: "monitoring" }, "delete");
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const r = await c.query<{ id: string; deleted_at: Date }>(
+          `UPDATE monitors SET deleted_at = now(), enabled = false, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+           RETURNING id, deleted_at`,
+          [id],
+        );
+        if (!r.rows[0]) throw new NotFoundException("monitor not found");
+        return { id: r.rows[0].id, deletedAt: iso(r.rows[0].deleted_at) };
+      },
+      MOD,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // MON-20 — incident acknowledge: an ACCOUNTABILITY RECORD, not an edit and not a close.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Records that a named person has seen this incident. Deliberately NOT idempotent-overwriting:
+   * once `acknowledged_at` is set, a second call (from anyone) leaves it untouched and returns the
+   * ORIGINAL claim — the first person who saw it is the fact being recorded, and a later click must
+   * not silently reassign credit/accountability to someone else. There is no `close` action and this
+   * endpoint never touches `closed_at`: an incident closes when the monitor recovers, and letting an
+   * acknowledge (or an update) double as a close would let a human mark a still-failing check
+   * resolved, which is exactly the false-green failure mode this whole module exists to prevent.
+   */
+  @Post(":tenantId/monitoring/incidents/:id/ack")
+  async acknowledgeIncident(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "monitor_incident", id, tenantId, module: "monitoring" }, "acknowledge");
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const claimed = await c.query<{ id: string; acknowledged_at: Date; acknowledged_by: string }>(
+          `UPDATE monitor_incidents SET acknowledged_at = now(), acknowledged_by = $2
+             WHERE id = $1 AND acknowledged_at IS NULL
+           RETURNING id, acknowledged_at, acknowledged_by`,
+          [id, req.principal.userId ?? null],
+        );
+        if (claimed.rows[0]) {
+          return {
+            id: claimed.rows[0].id,
+            acknowledgedAt: iso(claimed.rows[0].acknowledged_at),
+            acknowledgedBy: claimed.rows[0].acknowledged_by,
+          };
+        }
+        // Not updated: either it does not exist under this tenant (cross-tenant / bad id -> 404), or
+        // it is already acknowledged (return the EXISTING claim, unchanged — see the doc comment).
+        const existing = await c.query<{ id: string; acknowledged_at: Date | null; acknowledged_by: string | null }>(
+          `SELECT id, acknowledged_at, acknowledged_by FROM monitor_incidents WHERE id = $1`,
+          [id],
+        );
+        if (!existing.rows[0]) throw new NotFoundException("incident not found");
+        return {
+          id: existing.rows[0].id,
+          acknowledgedAt: iso(existing.rows[0].acknowledged_at),
+          acknowledgedBy: existing.rows[0].acknowledged_by,
+        };
+      },
+      MOD,
+    );
   }
 }
 
