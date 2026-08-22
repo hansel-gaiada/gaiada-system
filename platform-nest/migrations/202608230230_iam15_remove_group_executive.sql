@@ -53,8 +53,29 @@ UPDATE users SET session_version = session_version + 1, updated_at = now()
 DELETE FROM role_permissions
  WHERE role_id IN (SELECT id FROM roles WHERE name = 'group_executive');
 
-DELETE FROM position_roles
- WHERE role_id IN (SELECT id FROM roles WHERE name = 'group_executive');
+-- ⚠ position_roles is FORCE RLS, and migrations run as `platform_owner` (NOBYPASSRLS). A bare
+-- DELETE here matches ZERO ROWS and reports success — the estate's signature failure mode, and
+-- `lint:migration-rls` caught exactly that in this file before it shipped. The GUC must be set to
+-- every company first, because these rows are not scoped to one tenant.
+--
+-- In practice there should be nothing to delete: `trg_position_roles_guard` refuses
+-- `group_executive` by name at INSERT time, so no position can ever have carried it. The statement
+-- stays anyway — "the trigger means there are no rows" is a belief about another file, and a
+-- silently-empty DELETE is indistinguishable from a working one.
+DO $$
+DECLARE
+  all_tenants text;
+BEGIN
+  SELECT string_agg(id::text, ',') INTO all_tenants FROM companies;
+  IF all_tenants IS NULL THEN
+    RAISE NOTICE 'IAM-15: no companies exist; position_roles cleanup is vacuously complete';
+  ELSE
+    PERFORM set_config('app.current_tenant_ids', all_tenants, true);
+    DELETE FROM position_roles
+     WHERE role_id IN (SELECT id FROM roles WHERE name = 'group_executive');
+    RAISE NOTICE 'IAM-15: position_roles cleaned under an explicit tenant set';
+  END IF;
+END $$;
 
 DELETE FROM roles WHERE name = 'group_executive';
 
