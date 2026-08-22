@@ -2535,7 +2535,14 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   is recorded on the activity row so a rejection is distinguishable from a gateway hiccup (both are
   `draftedVia:'fallback'`) and so the false-positive rate is observable rather than assumed. Wire
   contract untouched.
-- The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series
+- ~~The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series~~
+  — **CLOSED 2026-08-23** (`reports 0.3.2`, not a social version — the defect and the fix both live in
+  the shared reporting kit, `platform-ui/src/components/reports/GrainCharts.tsx`). Fixed for the CLASS
+  rather than for social: instead of adding social's four keys to the allowlist (which breaks again
+  for the next producer), anything the grain-specific composition did not consume is now rendered
+  generically, in all four grains. Ratio series and empty series are deliberately excluded — a ratio
+  charted alone sums per-bucket percentages (average-of-averages), and an empty frame implies zero.
+  Proven red-then-green.
 - ~~OAuth state is HMAC-signed and time-boxed but not DB-backed single-use~~ **CLOSED 2026-08-23,
   senior-be — see "Security follow-ups closed" evidence block above** (`social_oauth_states` +
   `oauth-state.ts`, RED-then-GREEN proven)

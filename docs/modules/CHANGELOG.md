@@ -11,6 +11,36 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### reports `0.3.2` — 2026-08-23 — a foreign producer's series and tables are no longer dropped
+
+**Fixed**
+- `GrainCharts.tsx` keyed every section to a name `document-builder.ts` (TR-13) emits, which was
+  correct while the four PM grains were the only producers of a `ReportDocument`. They are not any
+  more: the social-media module builds its own (`social/reports.ts`) with keys no allowlist mentions
+  — `impressions_daily`, `followers_daily`, `top_posts`, `kpi_vs_target`. A social report rendered
+  through this kit, **including into a PDF via `/print/reports/[jobToken]`**, carried its KPI wall
+  and its narrative but silently lost every series and table it had computed, and the reader had no
+  way to tell an omitted chart from a metric that was never gathered.
+- This is the failure the file's own governing rule already forbids, reached from the other
+  direction: the rule is *"render what the document ACTUALLY CONTAINS and degrade honestly for what
+  it doesn't"*, and a fixed allowlist stops doing that the moment a new producer appears. So rather
+  than adding social's four keys — which breaks again for the next module — anything the
+  grain-specific composition did not consume is now rendered generically, for all four grains.
+
+**Two deliberate exclusions**, both to avoid rendering something WRONG rather than something missing:
+- **Ratio series** (carrying `numeratorKey`/`denominatorKey`) are never charted by the generic pass.
+  Per the file's own correctness note, a ratio charted alone silently sums per-bucket percentages —
+  the average-of-averages bug. Which chart honestly represents a ratio is a per-grain judgement (for
+  `on_time_rate` the answer was grouped bars over the two raw counters), so it stays with the grain
+  composition. Skipping is honest degradation; a wrong frame is not.
+- **Series with no points** are skipped, for the header's original reason: an empty chart frame
+  implies the missing data is zero.
+
+**Tests** — `GrainCharts.test.tsx` 12/0/0 (+4): a social-shaped document renders all four of its
+sections; an already-consumed key is not double-rendered under its own label; an empty series is
+skipped; a ratio series is refused. Proven red-then-green — removing the four wirings turns the
+foreign-producer test red. `tsc --noEmit` clean.
+
 ### social-media `0.5.22` — 2026-08-23 — the metrics pull is gated where every other job is
 
 **Changed**
