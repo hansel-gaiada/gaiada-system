@@ -46,17 +46,37 @@
 .pm-urg--undated   { color: var(--pm-urgency-neutral-fg); }
 
 /* The chip's tinted bed + hairline edge. Tint is derived from the GRAPHIC tier so
-   the wash stays a wash; the label keeps the validated -fg value above. */
+   the wash stays a wash; the label keeps the validated -fg value above.
+
+   Phase 3 a11y fix (2026-08-22): the background used to be mixed against
+   `transparent`, which composites onto whatever ambient surface the chip
+   happens to sit on — fine on `--pm-surface-card`, but this component is
+   documented (see file header) to render on several ambients, and axe
+   caught it failing on `--pm-surface-page`: the overdue chip measured
+   3.96:1 and due-soon 3.90:1 against page in light theme (both below the
+   4.5:1 the -fg text tier needs), because a translucent wash's EFFECTIVE
+   colour drifts with whatever is behind it, and page is darker than the
+   --n-11/--n-12 canvas/card pairing -fg was actually validated against
+   (colors.css's own comment). Fixed by mixing against the FIXED, opaque
+   `--pm-surface-card` token instead of `transparent` — same technique
+   amendment-01's `--cat-N-area` uses to re-derive per theme without
+   depending on an unknown ambient — at a lower 10% (was 14-16%) so the
+   result clears 4.5:1 with real margin in both themes: computed worst
+   case (light, due-soon, the tightest of the three) lands at 4.73:1,
+   dark (all three tiers converge fg==graphic) at 4.9-5.5:1+. This trades
+   a very slightly more "boxed" look (an opaque chip instead of a blend
+   with its exact ambient) for a treatment that is provably safe wherever
+   the chip renders, rather than re-tuned to one specific page. */
 .pm-urg--chip.pm-urg--overdue {
-  background: color-mix(in srgb, var(--pm-urgency-overdue-graphic) 14%, transparent);
+  background: color-mix(in srgb, var(--pm-urgency-overdue-graphic) 10%, var(--pm-surface-card));
   border-color: color-mix(in srgb, var(--pm-urgency-overdue-graphic) 45%, transparent);
 }
 .pm-urg--chip.pm-urg--due-soon {
-  background: color-mix(in srgb, var(--pm-urgency-due-soon-graphic) 16%, transparent);
+  background: color-mix(in srgb, var(--pm-urgency-due-soon-graphic) 10%, var(--pm-surface-card));
   border-color: color-mix(in srgb, var(--pm-urgency-due-soon-graphic) 45%, transparent);
 }
 .pm-urg--chip.pm-urg--on-track {
-  background: color-mix(in srgb, var(--pm-urgency-on-track-graphic) 14%, transparent);
+  background: color-mix(in srgb, var(--pm-urgency-on-track-graphic) 10%, var(--pm-surface-card));
   border-color: color-mix(in srgb, var(--pm-urgency-on-track-graphic) 42%, transparent);
 }
 .pm-urg--chip.pm-urg--done,

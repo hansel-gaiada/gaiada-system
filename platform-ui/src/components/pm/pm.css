@@ -1,23 +1,34 @@
 /* Project-management surfaces — board, task detail, tracker.
 
-   P4-L4 (2026-08-07): repointed from house tokens to the PM-scoped Repsona
-   palette (`styles/tokens/pm.css`) so the surface actually renders Repsona's
-   look — flat mid-grey panels, Material blue accent, subtle radius — in BOTH
-   themes, instead of inheriting the house Syrowatka dark palette (which is
-   what happened before: every var() here resolved to --surface-card/
-   --erp-hairline/--erp-accent, which already had dark values, just the WRONG
-   ones — bronze-on-warm-black instead of Repsona's grey-on-blue). PM is a
-   deliberate visual island (plan decision 18); every colour below is
-   `var(--pm-*)` or an explicitly house-only mechanical token (--elev-overlay,
-   --scrim, --erp-ease, fonts) that the plan itself says to keep (§L: "Radius
-   and shadow are the same story: --pm-radius, and --elev-overlay for floating
-   layers").
+   Phase 3 (2026-08-22, docs/design/2026-08-22-ui-redesign-design-language.md
+   §12): PM's visual-island PALETTE is retired — every `--pm-*` colour token
+   (tokens/pm.css) is now a `var()` alias onto the house token layer, so this
+   file inherits the warm house surfaces/interactive teal/rust-amber-sage
+   urgency automatically. Repsona's INFORMATION ARCHITECTURE is kept verbatim
+   on purpose (board/gantt layout, the Backlog/ToDo/Doing/Blocked/Done ladder,
+   urgency tiers, tag chips all render exactly as before) — only the surface
+   TREATMENT moved. History: P4-L4 (2026-08-07) originally pointed this file
+   at a bespoke PM-scoped Repsona palette so it would render Repsona's actual
+   look instead of the house palette's wrong (bronze-on-warm-black) values;
+   Phase 1/3 converge that bespoke palette back onto the house layer now that
+   the house layer itself has a warm neutral ramp, an interactive colour
+   distinct from the brand colour, and a categorical ramp — the thing PM's
+   island existed to work around no longer needs working around.
 
    Radius is scoped to PM only, via --pm-radius* exclusively (never a literal):
    pills/chips/badges are fully round (--pm-radius-pill), cards/columns/panels
    get --pm-radius, floating layers (popovers/menus/tooltips) get
-   --pm-radius-lg. Kept conservative — full component-anatomy fidelity
-   (avatars, breadcrumbs, filter-bar layout) is P4-L3, not this ticket.
+   --pm-radius-lg — these are now the house --radius-sm/-md/-lg under the
+   hood (tokens/pm.css), numerically near-identical to the old PM-local scale.
+
+   Density (Phase 3, §9.2): card/panel paddings and gaps below are expressed
+   as `calc(var(--card-gap) * N)` rather than a bare px literal — the
+   multiplier N is picked so the result is BYTE-IDENTICAL to the pre-existing
+   pixel value at the "comfortable" (default) density, so this is a zero
+   visual change today and a real one the moment a viewer switches density
+   mode. `--pm-accent-fill`/`--pm-text-on-accent` (amendment-01 §6.5) are the
+   large-fill/on-fill twins used for gantt bars and the progress fill —
+   see tokens/pm.css for why those two exist and what bug they fixed.
 
    The tag-colour system (.pm-tag, TagChip.tsx, tagColors.ts) is untouched by
    design: it ships its own onLight/onDark hex pairs, already WCAG-validated,
@@ -30,7 +41,12 @@
 /* ---- progress bar ---- */
 .pm-progress { display: flex; align-items: center; gap: 10px; }
 .pm-progress__track { flex: 1 1 auto; height: 6px; background: var(--pm-surface-sunken); position: relative; min-width: 80px; }
-.pm-progress__fill { position: absolute; inset: 0 auto 0 0; background: var(--pm-accent); }
+/* A large-area fill (the whole track can be 100% wide) — the muted
+   --pm-accent-fill tier (§6.5's amendment), not full-chroma --pm-accent,
+   per the "large fills use the area tier" rule. No text sits directly on
+   this fill (the % readout is a sibling span outside the track), so no
+   on-fill ink token is needed here. */
+.pm-progress__fill { position: absolute; inset: 0 auto 0 0; background: var(--pm-accent-fill); }
 .pm-progress__val { flex: 0 0 auto; font: 700 11px var(--font-body); color: var(--pm-text-dim); min-width: 34px; text-align: right; }
 
 /* ---- view switcher ---- */
@@ -67,7 +83,12 @@
 .pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--pm-line-soft); position: sticky; top: 0; background: var(--pm-surface-card); z-index: 1; }
 .pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim); }
 .pm-col__count { font: 700 10px var(--font-body); color: var(--pm-text-faint); }
-.pm-col__body { padding: 10px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; transition: background 0.2s var(--erp-ease); }
+/* Density tokens (Phase 3, §9.2): `calc(var(--card-gap) * N)` keeps the ratio
+   scaling with compact/spacious while landing EXACTLY on the pre-existing
+   pixel value at the "comfortable" default (--card-gap: 16px) — zero visual
+   change today, real response to a density switch. Same technique below for
+   every other card/panel padding in this file. */
+.pm-col__body { padding: calc(var(--card-gap) * 0.625); display: flex; flex-direction: column; gap: calc(var(--card-gap) * 0.625); flex: 1 1 auto; transition: background 0.2s var(--erp-ease); }
 .pm-col__body--drop { background: color-mix(in srgb, var(--pm-accent) 10%, transparent); }
 
 /* ---- board control strip ------------------------------------------------- */
@@ -93,7 +114,10 @@
   border-bottom: 0.5px solid var(--line-control);
   background: transparent;
   outline: none;
-  padding: 6px 2px;
+  /* Density (Phase 3, §9.2): vertical padding as a --control-height ratio
+     (40px comfortable * 0.15 = 6px, today's exact value) so the control
+     tightens/loosens with density like a house form control does. */
+  padding: calc(var(--control-height) * 0.15) 2px;
   /* Narrower than `lux-filters`' 150px: in a single strip the two selects plus Filters plus two
      buttons have to share one row, and "Whole dept"/"Status" are short strings. */
   min-width: 118px;
@@ -145,7 +169,7 @@
 .pm-board--dragging .pm-col--empty .pm-col__head { flex-direction: row; justify-content: space-between; padding: 11px 13px; height: auto; border-bottom: 0.5px solid var(--pm-line-soft); }
 .pm-board--dragging .pm-col--empty .pm-col__title { writing-mode: horizontal-tb; transform: none; }
 .pm-board--dragging .pm-col--empty .pm-col__body { display: flex; }
-.pm-card { border: 0.5px solid var(--pm-line); border-left-width: 2px; border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; cursor: grab; text-decoration: none; transition: background 0.2s var(--erp-ease), opacity 0.15s var(--erp-ease); }
+.pm-card { border: 0.5px solid var(--pm-line); border-left-width: 2px; border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: calc(var(--card-gap) * 0.625) calc(var(--card-gap) * 0.75); display: flex; flex-direction: column; gap: calc(var(--card-gap) * 0.5); cursor: grab; text-decoration: none; transition: background 0.2s var(--erp-ease), opacity 0.15s var(--erp-ease); }
 .pm-card:hover { background: color-mix(in srgb, var(--pm-accent) 6%, transparent); }
 .pm-card--dragging { opacity: 0.4; }
 /* Move trigger sits beside the card link (not nested inside the <a>); hidden until
@@ -183,14 +207,14 @@
 
 /* ---- subtasks / checklist ---- */
 .pm-subs { display: flex; flex-direction: column; gap: 2px; }
-.pm-sub { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 0.5px solid var(--pm-line-soft); }
+.pm-sub { display: flex; align-items: center; gap: 10px; padding: calc(var(--row-height) * 0.175) 4px; border-bottom: 0.5px solid var(--pm-line-soft); }
 .pm-sub:last-child { border-bottom: 0; }
 .pm-sub__title { font: 400 13px var(--font-body); color: var(--pm-text); flex: 1 1 auto; }
 .pm-sub__title--done { text-decoration: line-through; color: var(--pm-text-faint); }
 
 /* ---- comments / activity ---- */
 .pm-thread { display: flex; flex-direction: column; gap: 14px; }
-.pm-comment { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 0.5px solid var(--pm-line-soft); }
+.pm-comment { display: flex; flex-direction: column; gap: 4px; padding-bottom: calc(var(--row-height) * 0.3); border-bottom: 0.5px solid var(--pm-line-soft); }
 .pm-comment:last-child { border-bottom: 0; }
 .pm-comment__head { display: flex; align-items: center; gap: 8px; }
 .pm-comment__author { font: 700 12px var(--font-body); color: var(--pm-text); }
@@ -199,7 +223,7 @@
 .pm-ai-badge { font: 700 8px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-accent); border: 0.5px solid var(--pm-accent); border-radius: var(--pm-radius-pill); padding: 1px 5px; }
 
 /* ---- AI tracker panel ---- */
-.pm-sugg { border: 0.5px solid var(--pm-line); border-left: 2px solid var(--pm-accent); border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pm-sugg { border: 0.5px solid var(--pm-line); border-left: 2px solid var(--pm-accent); border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: calc(var(--card-gap) * 0.75) calc(var(--card-gap) * 0.875); display: flex; flex-direction: column; gap: calc(var(--card-gap) * 0.5); }
 .pm-sugg__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .pm-sugg__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-dim); }
 .pm-docs { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -219,10 +243,14 @@
 .pm-gantt__zoom:first-child { border-radius: var(--pm-radius) 0 0 var(--pm-radius); }
 .pm-gantt__zoom:last-child { border-radius: 0 var(--pm-radius) var(--pm-radius) 0; }
 .pm-gantt__zoom:hover { color: var(--pm-text); }
-.pm-gantt__zoom[aria-pressed="true"] { color: var(--pm-accent-fg); background: var(--pm-accent); border-color: var(--pm-accent); }
+/* Fixed-01 (Phase 3 a11y audit): was `color: var(--pm-accent-fg)`, which in
+   light theme equals --pm-accent itself — same colour as the background this
+   rule paints, i.e. invisible text. --pm-text-on-accent is the token built
+   for text ON an accent fill (see tokens/pm.css). */
+.pm-gantt__zoom[aria-pressed="true"] { color: var(--pm-text-on-accent); background: var(--pm-accent); border-color: var(--pm-accent); }
 .pm-gantt__zoom:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 .pm-gantt__window { display: inline-flex; align-items: center; gap: 6px; }
-.pm-gantt__window input[type="date"] { font: 400 12px var(--font-body); padding: 4px 6px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
+.pm-gantt__window input[type="date"] { font: 400 12px var(--font-body); padding: calc(var(--control-height) * 0.1) 6px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
 .pm-gantt__window input[type="date"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 .pm-gantt__window-sep { color: var(--pm-text-faint); font-size: 11px; }
 .pm-gantt__window-clear {
@@ -258,7 +286,16 @@
 .pm-gantt__meta-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 .pm-gantt__meta-tags { display: inline-flex; gap: 4px; flex: 0 0 auto; }
 .pm-gantt__track { position: relative; height: 22px; background: var(--pm-surface-sunken); border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); }
-.pm-gantt__bar { position: absolute; top: 3px; bottom: 3px; background: var(--pm-accent); color: var(--pm-accent-fg); border-radius: var(--pm-radius); opacity: 0.9; display: flex; align-items: center; padding: 0 6px; font: 700 9px var(--font-body); white-space: nowrap; overflow: hidden; text-decoration: none; min-width: 4px; }
+/* Default (no status modifier below overrides it) — the bar's OWN colour is
+   the interactive accent, a large fill, so it uses --pm-accent-fill (§6.5's
+   amendment), not full-chroma --pm-accent — the modifiers below are the
+   PROTECTED status ladder (§12: "pixel-identical, deliberately") and stay on
+   the full-chroma --pm-status-* values unchanged; only this generic/default
+   bar (not one of the five status hues) is the "gantt bar" the area-tier
+   rule means. Text was `color: var(--pm-accent-fg)`, which in light theme
+   equals --pm-accent itself — invisible text on its own background; fixed
+   to --pm-text-on-accent (Phase 3 a11y audit). */
+.pm-gantt__bar { position: absolute; top: 3px; bottom: 3px; background: var(--pm-accent-fill); color: var(--pm-text-on-accent); border-radius: var(--pm-radius); opacity: 0.9; display: flex; align-items: center; padding: 0 6px; font: 700 9px var(--font-body); white-space: nowrap; overflow: hidden; text-decoration: none; min-width: 4px; }
 .pm-gantt__bar--done { background: var(--pm-status-done); color: var(--pm-status-ink); }
 .pm-gantt__bar--blocked { background: var(--pm-status-blocked); color: var(--pm-status-ink); }
 .pm-gantt__bar--todo { background: var(--pm-status-todo); color: var(--pm-status-ink); }
@@ -347,7 +384,9 @@
 /* Authored (solid fill) sits above derived (dashed outline only) within the same track — fill vs
    outline is a SHAPE distinction, not just a colour one, so the pairing still reads on a
    greyscale render (same rule `UrgencyChip`'s glyphs follow). */
-.pm-gantt__projectbar--authored { top: 3px; background: var(--pm-accent); border: 0.5px solid var(--pm-accent); opacity: 0.85; }
+/* Fill is the large-area amendment-01 tier; the 0.5px outline stays
+   full-chroma --pm-accent (a hairline, not an area). */
+.pm-gantt__projectbar--authored { top: 3px; background: var(--pm-accent-fill); border: 0.5px solid var(--pm-accent); opacity: 0.85; }
 .pm-gantt__projectbar--derived { top: 15px; background: transparent; border: 1.5px dashed var(--pm-text-faint); }
 /* Urgency treatment (P4-H2/P4-G2's `projectUrgency`) recolours the AUTHORED bar only — the
    derived envelope stays neutral on purpose, it's a fact ("here's where the work sits"), not a
@@ -373,7 +412,7 @@
 .pm-gantt__filterbar-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 10px; border-top: 0.5px solid var(--pm-line-soft); }
 .pm-gantt__filterbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pm-gantt__filterbar-field input {
-  font: 400 12px var(--font-body); padding: 4px 6px; border: 0.5px solid var(--pm-line);
+  font: 400 12px var(--font-body); padding: calc(var(--control-height) * 0.1) 6px; border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text);
 }
 .pm-gantt__filterbar-field input:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
@@ -383,7 +422,7 @@
 /* ---- P4-C6: inline "Add a task" per group ---- */
 .pm-gantt__addtask { display: flex; align-items: center; gap: 6px; padding: 6px 4px 6px 26px; }
 .pm-gantt__addtask input[type="text"] {
-  flex: 1 1 auto; min-width: 0; font: 400 12px var(--font-body); padding: 4px 6px;
+  flex: 1 1 auto; min-width: 0; font: 400 12px var(--font-body); padding: calc(var(--control-height) * 0.1) 6px;
   border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text);
 }
 .pm-gantt__addtask input[type="text"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
@@ -405,7 +444,7 @@
 
 /* ---- dependencies ---- */
 .pm-deps { display: flex; flex-direction: column; gap: 8px; }
-.pm-dep { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); }
+.pm-dep { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(var(--row-height) * 0.2) 10px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); }
 .pm-dep__title { font: 400 13px var(--font-body); color: var(--pm-text); }
 .pm-blocked-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-urgency-overdue-fg); border: 0.5px solid var(--pm-urgency-overdue-graphic); border-radius: var(--pm-radius-pill); padding: 2px 6px; }
 
@@ -463,7 +502,7 @@ button.pm-tag--btn { border: 0; background: transparent; padding: 0; margin: 0; 
 button.pm-tag--btn:disabled { cursor: default; opacity: 0.55; }
 button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); outline-offset: 2px; }
 .pm-tags-new { display: inline-flex; align-items: center; gap: 6px; }
-.pm-tagmgr { display: flex; flex-direction: column; gap: 12px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: 14px; margin-top: 8px; }
+.pm-tagmgr { display: flex; flex-direction: column; gap: calc(var(--card-gap) * 0.75); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: calc(var(--card-gap) * 0.875); margin-top: 8px; }
 .pm-tagmgr__list { display: flex; flex-direction: column; gap: 8px; }
 .pm-tagmgr__row { display: flex; align-items: center; gap: 8px; }
 .pm-tagmgr__row .lux-field__control { flex: 1 1 auto; }
@@ -515,7 +554,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
   /* A department with 30 tags must scroll the panel, not the page. */
   max-height: min(60vh, 420px);
   overflow-y: auto;
-  padding: 12px;
+  padding: calc(var(--card-gap) * 0.75);
   background: var(--pm-surface-raised);
   border: 0.5px solid var(--pm-line);
   border-top: 0.5px solid var(--pm-line);
@@ -544,7 +583,9 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
   padding: 3px 8px; border-radius: var(--pm-radius-pill); border: 0.5px solid var(--pm-accent);
   color: var(--pm-accent); text-decoration: none; background: transparent; transition: background 0.15s var(--erp-ease), color 0.15s var(--erp-ease);
 }
-.pm-facets__chip:hover, .pm-facets__chip:focus-visible { background: var(--pm-accent); color: var(--pm-accent-fg); }
+/* Fixed-01 (Phase 3 a11y audit): was `color: var(--pm-accent-fg)` — see
+   tokens/pm.css's --pm-text-on-accent comment for why that was invisible text. */
+.pm-facets__chip:hover, .pm-facets__chip:focus-visible { background: var(--pm-accent); color: var(--pm-text-on-accent); }
 .pm-facets__chip-x { font-weight: 700; }
 .pm-facets__clearall { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--pm-text-dim); text-decoration: underline; }
 .pm-facets__clearall:hover, .pm-facets__clearall:focus-visible { color: var(--pm-accent); }
@@ -553,7 +594,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-swatch-wrap { position: relative; display: inline-block; }
 .pm-swatch-trigger { width: 22px; height: 22px; padding: 0; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .pm-swatch-trigger__dot { width: 13px; height: 13px; background: var(--pm-swatch-hex); }
-.pm-swatch-pop { position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
+.pm-swatch-pop { position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: calc(var(--card-gap) * 0.5); background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
 .pm-swatch { width: 27px; height: 27px; padding: 0; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .pm-swatch__dot { width: 16px; height: 16px; background: var(--pm-swatch-hex); }
 .pm-swatch--active { border-color: var(--pm-text); border-width: 1.5px; }
@@ -562,13 +603,13 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 
 /* ---- board drop/move popovers (P1-03) — anchored variant of .erp-usermenu__pop ---- */
 .pm-dropmenu { position: fixed; min-width: 190px; max-width: 240px; background: var(--pm-surface-raised); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-lg); display: flex; flex-direction: column; z-index: 80; box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); max-height: 70vh; overflow-y: auto; }
-.pm-dropmenu__item { text-align: left; padding: 9px 12px; font: 400 13px var(--font-body); color: var(--pm-text); background: transparent; border: 0; border-bottom: 0.5px solid var(--pm-line-soft); cursor: pointer; }
+.pm-dropmenu__item { text-align: left; padding: calc(var(--card-gap) * 0.5625) calc(var(--card-gap) * 0.75); font: 400 13px var(--font-body); color: var(--pm-text); background: transparent; border: 0; border-bottom: 0.5px solid var(--pm-line-soft); cursor: pointer; }
 .pm-dropmenu__item:last-child { border-bottom: 0; }
 .pm-dropmenu__item:hover, .pm-dropmenu__item:focus-visible { background: color-mix(in srgb, var(--pm-accent) 10%, transparent); }
 /* P2-09 — keyboard "⇅ Move" menu's two axis sections (BoardGrid: Status + Division/Assignee). */
 .pm-dropmenu__group-label { padding: 8px 12px 4px; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); background: var(--pm-surface-card); }
 .pm-dropmenu__select-label { display: flex; flex-direction: column; gap: 6px; padding: 12px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim); }
-.pm-dropmenu__select { font: 400 13px var(--font-body); padding: 6px 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
+.pm-dropmenu__select { font: 400 13px var(--font-body); padding: calc(var(--control-height) * 0.15) 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
 
 /* ---- custom statuses (P2-05, design spec §7) ---- */
 /* Column-head status-colour dot — only rendered on CUSTOMIZED projects (Board's
@@ -580,9 +621,9 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-col__head--over .pm-col__count { color: var(--pm-urgency-overdue-fg); }
 
 /* status editor (⚙ Edit statuses) — AssigneeEditor-style inline reveal */
-.pm-statusmgr { display: flex; flex-direction: column; gap: 12px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: 14px; margin-top: 4px; flex: 1 1 320px; max-width: 640px; }
+.pm-statusmgr { display: flex; flex-direction: column; gap: calc(var(--card-gap) * 0.75); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: calc(var(--card-gap) * 0.875); margin-top: 4px; flex: 1 1 320px; max-width: 640px; }
 .pm-statusmgr__list { display: flex; flex-direction: column; gap: 6px; }
-.pm-statusmgr__row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 0.5px solid var(--pm-line-soft); }
+.pm-statusmgr__row { display: flex; align-items: center; gap: 8px; padding: calc(var(--row-height) * 0.1) 0; border-bottom: 0.5px solid var(--pm-line-soft); }
 .pm-statusmgr__row:last-child { border-bottom: 0; }
 .pm-statusmgr__handle { color: var(--pm-text-faint); cursor: grab; font: 700 12px var(--font-body); letter-spacing: -2px; user-select: none; }
 .pm-statusmgr__reorder { display: inline-flex; flex-direction: column; gap: 1px; }
@@ -592,7 +633,9 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-statusmgr__label { flex: 1 1 auto; min-width: 90px; }
 .pm-statusmgr__flags { display: inline-flex; gap: 4px; }
 .pm-statusmgr__flag { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 7px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); background: transparent; color: var(--pm-text-faint); cursor: pointer; }
-.pm-statusmgr__flag--on { color: var(--pm-accent-fg); background: var(--pm-accent); border-color: var(--pm-accent); }
+/* Fixed-01 (Phase 3 a11y audit): was `color: var(--pm-accent-fg)` — see
+   tokens/pm.css's --pm-text-on-accent comment for why that was invisible text. */
+.pm-statusmgr__flag--on { color: var(--pm-text-on-accent); background: var(--pm-accent); border-color: var(--pm-accent); }
 .pm-statusmgr__flag:disabled { opacity: 0.55; cursor: default; }
 .pm-statusmgr__flag:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 .pm-statusmgr__wip { width: 58px; flex: 0 0 58px; }
@@ -654,7 +697,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 
 /* tag breakdown — ranked horizontal bars, hairline rows, PM-radius ends */
 .pm-tagbars { display: flex; flex-direction: column; }
-.pm-tagbar { display: grid; grid-template-columns: 140px 1fr 80px; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 0.5px solid var(--pm-line-soft); }
+.pm-tagbar { display: grid; grid-template-columns: 140px 1fr 80px; align-items: center; gap: 12px; padding: calc(var(--row-height) * 0.175) 0; border-bottom: 0.5px solid var(--pm-line-soft); }
 .pm-tagbar:last-child { border-bottom: 0; }
 .pm-tagbar__label { font: 400 13px var(--font-body); color: var(--pm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm-tagbar__track { height: 16px; background: var(--pm-surface-sunken); border-radius: var(--pm-radius); }
@@ -674,7 +717,7 @@ html[data-theme="dark"] .pm-tagbar__fill { background: var(--pm-tagbar-ondark, v
 
 /* task-detail status select (P2-05) */
 .pm-statussel { display: inline-flex; align-items: center; gap: 8px; }
-.pm-statussel__select { font: 400 13px var(--font-body); padding: 4px 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
+.pm-statussel__select { font: 400 13px var(--font-body); padding: calc(var(--control-height) * 0.1) 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
 .pm-statussel__select:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 
 /* ---- comment reactions (P3-09) ---- */
@@ -696,7 +739,7 @@ html[data-theme="dark"] .pm-tagbar__fill { background: var(--pm-tagbar-ondark, v
 .pm-rx-add:hover, .pm-rx-add:focus-visible { border-color: var(--pm-accent); color: var(--pm-accent); }
 .pm-rx-pop {
   position: absolute; top: 26px; left: 0; z-index: 60; display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: 4px; padding: 8px; background: var(--pm-surface-card); border: 0.5px solid var(--pm-line);
+  gap: 4px; padding: calc(var(--card-gap) * 0.5); background: var(--pm-surface-card); border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius-lg);
   box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); max-width: min(200px, calc(100vw - 32px));
 }

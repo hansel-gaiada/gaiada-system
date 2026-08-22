@@ -11,11 +11,14 @@
 .pm-home__col {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* Density (Phase 3, §9.2): calc() multipliers of --card-gap land exactly on
+     the pre-existing px values at the "comfortable" default — zero visual
+     change today, real response once a viewer switches density mode. */
+  gap: calc(var(--card-gap) * 0.5);
   background: var(--pm-surface-card);
   border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius-lg);
-  padding: 10px;
+  padding: calc(var(--card-gap) * 0.625);
   min-width: 0;
 }
 
@@ -70,11 +73,11 @@
 .pm-home__card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(var(--card-gap) * 0.25);
   background: var(--pm-surface-raised);
   border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius);
-  padding: 7px 9px;
+  padding: calc(var(--card-gap) * 0.4375) calc(var(--card-gap) * 0.5625);
 }
 
 .pm-home__card-top { display: flex; align-items: center; gap: 7px; min-width: 0; }

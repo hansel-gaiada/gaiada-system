@@ -7,7 +7,9 @@
   background: var(--pm-surface-card);
   border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius);
-  padding: 7px 10px;
+  /* Density (Phase 3, §9.2): vertical padding as a --control-height ratio
+     (40px comfortable * 0.175 = 7px, today's exact value). */
+  padding: calc(var(--control-height) * 0.175) 10px;
   min-width: 160px;
   cursor: pointer;
 }

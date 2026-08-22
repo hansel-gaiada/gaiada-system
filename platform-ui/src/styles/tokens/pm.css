@@ -1,184 +1,150 @@
 /* ============================================================================
-   PM token layer — Repsona-faithful palette (P4-L1 / P4-G4)
-   plan: docs/superpowers/plans/2026-08-04-pm-repsona-parity-phase4-plan.md §L
+   PM token layer — CONVERGED onto the house token layer (Phase 1, 2026-08-22)
+   plan: docs/design/2026-08-22-ui-redesign-design-language.md §12
 
-   WHY THIS FILE EXISTS
-   Owner directive 2026-08-06: the PM surface mirrors Repsona, because the team is
-   already fluent in it. Repsona is dark-first, rounded and saturated; the
-   Syrowatka house style is hairline, zero-radius and muted bronze. Both cannot be
-   true on one surface, so PM is a deliberate visual island (plan decision 18) —
-   every OTHER surface keeps the house style.
+   WHY THIS FILE NO LONGER OWNS A PALETTE
+   Through 2026-08-06 this file was a deliberate visual island: PM mirrored
+   Repsona's own Material-Design palette because the team was fluent in it,
+   while every other surface kept the house "luxury minimalist" style. Owner
+   directive 2026-08-22: the island's PALETTE retires; its INFORMATION
+   ARCHITECTURE does not (board/gantt layout, the Backlog/ToDo/Doing/Blocked/
+   Done ladder, urgency tiers, tag chips all stay exactly as designed). The
+   mechanism: every `--pm-*` name below is now a straight `var()` alias onto a
+   house token that already handles its own theming — so this file no longer
+   needs its own dark blocks at all. That is not an oversight; it is the
+   proof the convergence happened. A property that is a formula/alias over
+   tokens which flip elsewhere (--surface-card, --accent, --status-*, --cat-*)
+   flips for free, with nothing to keep in sync here.
 
-   The mechanism matters. `styles/tokens.test.ts` fails the build on any colour
-   literal under `src/components/**`, and the correct answer is NOT to exempt
-   `components/pm/**` — an exemption like that never comes back, and it would stop
-   the guard test protecting PM from accidental one-off colours forever. Instead the
-   Repsona palette lives HERE, in the token layer, where literals are legal, and PM
-   components consume only `var(--pm-*)`. Same shape of solution as the existing
-   `creative/creative.css` carve-out, but without spending an exemption.
+   THE MAPPING, ONE ROW AT A TIME (see the design-language spec §12 for the
+   full rationale and the visual-change note per row):
+     surface-page/-sunken/-card/-raised -> --surface-page/-sunken/-card/-raised
+     line / line-soft                   -> --line / --line-soft
+     ink / text / text-dim / text-faint -> --cat-on / --ink-strong / --ink-muted / --ink-subtle
+     accent / accent-weak / accent-fg   -> --accent / --tint-hover / --accent-fg
+     radius / radius-lg / radius-pill   -> --radius-sm / --radius-md / --radius-pill
+                                            (this is the one exception that DISAPPEARS: PM no
+                                             longer needs its own radius scale now that radius
+                                             is house-wide — kept as aliases only so existing
+                                             component CSS referencing --pm-radius-* needs no edit)
+     urgency overdue/due-soon/on-track  -> --status-critical/-warning/-ok (+ -fg twins)
+     status ladder (backlog..done)      -> --cat-8/-5/-4/-6/-3 (UNCHANGED mapping — this pairing
+                                            already existed before convergence, see the tone-ramp
+                                            comment below; now expressed via the promoted --cat-*
+                                            names instead of this file's own --pm-tone-*)
+     tone-1..8 / tone-on / tone-N-line  -> --cat-1..8 / --cat-on / --cat-N-line (byte-identical
+                                            values — --cat-* WAS this file's ramp, promoted verbatim)
 
-   PROVENANCE — read before "correcting" a value.
-   These hues are RECONSTRUCTED from screenshots of the live instance
-   (gda.repsona.com), not sampled from Repsona's stylesheet. They land on the
-   Material Design ramp, which is evidently what Repsona uses: the cumulative-flow
-   legend and tag-distribution donut read as pink / blue / amber / lime / light-green
-   / deep-orange, and the status hues below are mapped to match that legend
-   (ToDo green, Doing yellow-green, Blocked orange, Done amber). Treat them as a
-   faithful approximation; if someone ever samples the real CSS, that wins.
-
-   CONTRAST — every ratio below was computed with the WCAG 2.1 formula
-   (2026-08-06). Two rules, and they are different rules:
-     · TEXT needs >= 4.5:1 against whatever it sits on.
-     · A FILL (chip background, bar, dot) is a graphic, not text — it needs to be
-       distinguishable, not 4.5:1.
-
-   The tone ramp deliberately uses ONE text colour (ink) on every chip in BOTH
-   themes: ink-on-fill does not depend on the page surface, so a single validated
-   ramp works everywhere and there is no per-tone/per-theme text matrix to keep
-   honest. Measured ink-on-fill: 4.94 (purple, the floor) to 11.63 (lime).
-   The known weakness: on the LIGHT page these fills are only 1.45-3.41 against
-   paper, so a chip's edge would read faintly — mitigated by the hairline border
-   token below (`--pm-tone-N-line`), which is the house mechanism anyway.
+   PROVENANCE of the underlying hues (kept for history): reconstructed from
+   screenshots of the live Repsona instance (gda.repsona.com), landing on the
+   Material Design ramp — pink / blue / amber / lime / light-green /
+   deep-orange / purple / slate, status hues mapped to match Repsona's own
+   cumulative-flow legend (ToDo green, Doing yellow-green, Blocked orange,
+   Done amber). Every ink-on-fill ratio was computed with the WCAG 2.1
+   formula on 2026-08-06 (floor 4.94:1, purple) — those ratios are UNCHANGED
+   by this migration; only where the underlying colour now lives moved.
    ============================================================================ */
 
 :root {
-  /* ---- Repsona chrome ------------------------------------------------------
-     Kept as explicit PM surfaces rather than reusing --surface-card, because the
-     Repsona look is a flat mid-grey panel stack, not the house paper/linen. */
-  --pm-surface-page:   #F5F5F5;
-  --pm-surface-card:   #FFFFFF;
-  --pm-surface-raised: #FAFAFA;  /* menus, modal, popovers */
-  --pm-surface-sunken: #EEEEEE;  /* board column troughs   */
-  --pm-line:           #E0E0E0;
-  --pm-ink:            #1A1916;  /* the one text colour used on every tone fill */
-  --pm-text:           #212121;
-  --pm-text-dim:       #616161;
-  /* Fainter meta tier (counts, uppercase micro-labels) — the PM-scoped twin of
-     the house --ink-subtle step. 4.62:1 on --pm-surface-card. */
-  --pm-text-faint:     #757575;
-  /* Nested/inner hairline (P4-L4) — a decorative FILL, so no 4.5:1 duty, same
-     class as --pm-tone-N-line below. Formula, not a literal pair: blends
-     --pm-line toward --pm-surface-card, so it tracks whichever theme's
-     surfaces are active without a second dark-block declaration — the sync
-     guard only compares properties actually redeclared there, and this one
-     deliberately isn't one of them. */
-  --pm-line-soft: color-mix(in srgb, var(--pm-line) 55%, var(--pm-surface-card));
+  /* ---- Chrome -------------------------------------------------------------- */
+  --pm-surface-page:   var(--surface-page);
+  --pm-surface-card:   var(--surface-card);
+  --pm-surface-raised: var(--surface-raised);
+  --pm-surface-sunken: var(--surface-sunken);
+  --pm-line:           var(--line);
+  --pm-line-soft:      var(--line-soft);
+  --pm-ink:            var(--cat-on);   /* the one text colour used on every tone fill */
+  --pm-text:           var(--ink-strong);
+  --pm-text-dim:       var(--ink-muted);
+  /* Fainter meta tier (counts, uppercase micro-labels) — the house --ink-subtle
+     now clears real AA (4.54:1 light / 4.57:1 dark, both worst-case) where the
+     old PM-local value only cleared 4.62:1 in light and had no validated dark
+     value of its own. */
+  --pm-text-faint:     var(--ink-subtle);
 
-  /* Repsona's interactive blue — links, buttons, active tabs. 4.6:1 on white. */
-  --pm-accent:      #1976D2;
-  --pm-accent-weak: #E3F2FD;
-  /* Text/icon sitting ON the accent fill (Gantt bar labels, filled toggle
-     buttons). White clears the light accent at exactly 4.6:1 (the ratio noted
-     above) but collapses to 2.21:1 on the LIFTED dark accent below — so this
-     pair, unlike --pm-accent itself, needs a real per-theme value. Dark uses
-     --pm-ink rather than a second literal: 7.95:1 on #64B5F6. */
-  --pm-accent-fg:   #FFFFFF;
+  /* Repsona's interactive blue retires in favour of the house interactive
+     colour — PM's links/buttons now match every other surface instead of
+     being the one blue thing in a bronze-and-teal system. */
+  --pm-accent:      var(--accent);
+  --pm-accent-weak: var(--tint-hover);
+  --pm-accent-fg:   var(--accent-fg);
+  /* Phase 3 (2026-08-22, §12 + amendment-01 §6.5): two large-fill twins
+     accent's small-control tiers above never had.
+     --pm-accent-fill is for a LARGE accent-coloured area (a gantt bar
+     BODY, a progress-bar fill, an authored-range bar) per the amendment's
+     own usage rule — full-chroma --pm-accent stays reserved for small
+     controls (links, focus rings, small buttons).
+     --pm-text-on-accent is the text-safe colour for something written ON
+     TOP of an accent fill (white-on-fill 6.00:1 light / --n-1-on-fill
+     11.14:1 dark, per the design-language spec's accent table) — distinct
+     from --pm-accent-fg, which is accent-USED-AS-text on a neutral
+     surface (a link), not text sitting on an accent fill. Auditing this
+     migration found FOUR pm.css rules that had used --pm-accent-fg for
+     the on-fill job instead (`.pm-gantt__zoom[aria-pressed]`,
+     `.pm-gantt__bar`, `.pm-facets__chip:hover`, `.pm-statusmgr__flag--on`)
+     — in light theme --accent-fg equals --accent itself (see colors.css's
+     own "one value for both graphic and text" note), so every one of
+     those rules painted its label THE SAME COLOUR AS ITS OWN BACKGROUND
+     (1:1 contrast, functionally invisible text). Fixed at each call site
+     in pm.css; these two tokens exist so the fix is a token swap, not a
+     bespoke value per site. */
+  --pm-accent-fill:    var(--accent-fill);
+  --pm-text-on-accent: var(--text-on-accent);
 
-  /* Repsona is rounded; the house style is not. Scoped to PM only.
-     Pills (tag chips, status badges, avatars) are fully round. */
-  --pm-radius:      4px;
-  --pm-radius-lg:   8px;
-  --pm-radius-pill: 999px;
+  /* Repsona is rounded; the house style now is too (Phase 1 retires the
+     zero-radius law app-wide) — PM's OWN radius scale is redundant and
+     collapses onto the house one. Values are near-identical (4px/8px stay
+     4px/8px) so the board's corners barely move. */
+  --pm-radius:      var(--radius-sm);
+  --pm-radius-lg:   var(--radius-md);
+  --pm-radius-pill: var(--radius-pill);
 
-  /* ---- Urgency: overdue · almost late · in time (P4-G4) --------------------
-     Two tiers per state, same convention as the house --status-* families:
-       *-graphic = dot/bar/fill (a graphic, no 4.5:1 requirement)
-       *-fg      = text/glyph  (validated >= 4.5:1 on the surface below)
-     Kept SEPARATE from --status-critical/-ok on purpose: status and urgency are
-     different axes, and a task can legitimately be Doing AND overdue. Reusing the
-     status family would make one override the other on the same card. */
-  --pm-urgency-overdue-graphic:   #E53935;
-  --pm-urgency-due-soon-graphic:  #FFB300;
-  --pm-urgency-on-track-graphic:  #43A047;
-  --pm-urgency-overdue-fg:        #C62828;  /* 5.38:1 on --pm-surface-card */
-  --pm-urgency-due-soon-fg:       #8D5A00;  /* 5.59:1 */
-  --pm-urgency-on-track-fg:       #2E7D32;  /* 4.91:1 */
-  --pm-urgency-neutral-fg:        #616161;  /* undated / done — never alarming   */
+  /* ---- Urgency: overdue · almost late · in time ----------------------------
+     Converged onto the house --status-* family instead of bespoke Material
+     reds/ambers/greens — overdue reads as the same rust the rest of the app
+     uses for "critical," due-soon the same amber as "warning," on-track the
+     same sage as "ok." Kept as a SEPARATE token namespace from --status-*
+     (not literally --status-critical everywhere) because urgency and status
+     remain different axes — a task can be Doing AND overdue at once, and
+     reusing the status family directly would let one override the other on
+     the same card. */
+  --pm-urgency-overdue-graphic:   var(--status-critical);
+  --pm-urgency-due-soon-graphic:  var(--status-warning);
+  --pm-urgency-on-track-graphic:  var(--status-ok);
+  --pm-urgency-overdue-fg:        var(--status-critical-fg);
+  --pm-urgency-due-soon-fg:       var(--status-warning-fg);
+  --pm-urgency-on-track-fg:       var(--status-ok-fg);
+  --pm-urgency-neutral-fg:        var(--ink-muted);  /* undated / done — never alarming */
 
   /* ---- Status ladder (Backlog · ToDo · Doing · Blocked · Done) -------------
-     Hues mapped to the live instance's own cumulative-flow legend. Ids are the
-     PERSISTED values (see lib/pmVocabulary.ts) — `in_progress`, not `doing`. */
-  --pm-status-backlog:     #90A4AE;
-  --pm-status-todo:        #8BC34A;
-  --pm-status-in-progress: #CDDC39;
-  --pm-status-blocked:     #FF7043;
-  --pm-status-done:        #FFC107;
-  /* Text/label sitting on a status-hue fill (Gantt bars, filled column dots) —
-     same ink-on-fill technique as --pm-tone-on below, and no coincidence: every
-     status hue above is literally one of the tone-ramp values (backlog=tone-8,
-     todo=tone-5, in-progress=tone-4, blocked=tone-6, done=tone-3), so the
-     already-measured ratios apply unchanged: 6.79 / 8.37 / 11.63 / 6.40 /
-     10.78:1. Theme-invariant like --pm-tone-on — no dark-block entry needed. */
-  --pm-status-ink:         var(--pm-ink);
+     Ids are the PERSISTED values (see lib/pmVocabulary.ts) — `in_progress`,
+     not `doing`. This mapping is UNCHANGED by the convergence: every status
+     hue was already one of the tone-ramp values before Phase 1
+     (backlog=tone-8, todo=tone-5, in-progress=tone-4, blocked=tone-6,
+     done=tone-3) — it is simply expressed via the promoted --cat-* names now. */
+  --pm-status-backlog:     var(--cat-8);
+  --pm-status-todo:        var(--cat-5);
+  --pm-status-in-progress: var(--cat-4);
+  --pm-status-blocked:     var(--cat-6);
+  --pm-status-done:        var(--cat-3);
+  --pm-status-ink:         var(--cat-on);
 
   /* ---- Categorical tone ramp (tags, chart series, board accents) -----------
-     8 tones, Material 300-400 level. `-on` is the text colour that sits ON the
-     fill; `-line` is the hairline that gives a chip its edge on a light page. */
-  --pm-tone-1:      #F06292;  /* pink   — ink 5.75:1  */
-  --pm-tone-2:      #42A5F5;  /* blue   — ink 6.64:1  */
-  --pm-tone-3:      #FFC107;  /* amber  — ink 10.78:1 */
-  --pm-tone-4:      #CDDC39;  /* lime   — ink 11.63:1 */
-  --pm-tone-5:      #8BC34A;  /* green  — ink 8.37:1  */
-  --pm-tone-6:      #FF7043;  /* orange — ink 6.40:1  */
-  --pm-tone-7:      #BA68C8;  /* purple — ink 4.94:1  (the floor) */
-  --pm-tone-8:      #90A4AE;  /* slate  — ink 6.79:1  */
-  --pm-tone-on:     var(--pm-ink);
-  --pm-tone-1-line: color-mix(in srgb, var(--pm-tone-1) 55%, transparent);
-  --pm-tone-2-line: color-mix(in srgb, var(--pm-tone-2) 55%, transparent);
-  --pm-tone-3-line: color-mix(in srgb, var(--pm-tone-3) 55%, transparent);
-  --pm-tone-4-line: color-mix(in srgb, var(--pm-tone-4) 55%, transparent);
-  --pm-tone-5-line: color-mix(in srgb, var(--pm-tone-5) 55%, transparent);
-  --pm-tone-6-line: color-mix(in srgb, var(--pm-tone-6) 55%, transparent);
-  --pm-tone-7-line: color-mix(in srgb, var(--pm-tone-7) 55%, transparent);
-  --pm-tone-8-line: color-mix(in srgb, var(--pm-tone-8) 55%, transparent);
+     THIS is the ramp that got promoted app-wide as --cat-1..8 (see
+     tokens/colors.css) — these aliases exist only so nothing that already
+     reads --pm-tone-N needs to change. Values are byte-identical to before. */
+  --pm-tone-1: var(--cat-1);  --pm-tone-2: var(--cat-2);
+  --pm-tone-3: var(--cat-3);  --pm-tone-4: var(--cat-4);
+  --pm-tone-5: var(--cat-5);  --pm-tone-6: var(--cat-6);
+  --pm-tone-7: var(--cat-7);  --pm-tone-8: var(--cat-8);
+  --pm-tone-on: var(--cat-on);
+  --pm-tone-1-line: var(--cat-1-line);  --pm-tone-2-line: var(--cat-2-line);
+  --pm-tone-3-line: var(--cat-3-line);  --pm-tone-4-line: var(--cat-4-line);
+  --pm-tone-5-line: var(--cat-5-line);  --pm-tone-6-line: var(--cat-6-line);
+  --pm-tone-7-line: var(--cat-7-line);  --pm-tone-8-line: var(--cat-8-line);
 }
 
-/* ---------------------------------------------------------------------------
-   DARK — Repsona's native mode, and the one every screenshot shows.
-
-   The two blocks below MUST declare identical values: CSS cannot union a media
-   query with an attribute selector, so drift would give an OS-dark user and a
-   pinned-dark user different colours. `tokens.test.ts` asserts they match — the
-   same guard colors.css already carries.
-
-   The tone ramp itself does NOT change between themes (ink-on-fill is
-   surface-independent, so one validated ramp serves both); only the chrome and
-   the text-tier urgency values do.
-   --------------------------------------------------------------------------- */
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) {
-    --pm-surface-page:   #212121;
-    --pm-surface-card:   #2B2B2B;
-    --pm-surface-raised: #333333;
-    --pm-surface-sunken: #262626;
-    --pm-line:           #3D3D3D;
-    --pm-text:           #ECEFF1;  /* 12.26:1 on --pm-surface-card */
-    --pm-text-dim:       #B0BEC5;
-    --pm-text-faint:     #90A4AE;  /* 5.47:1 on --pm-surface-card */
-    --pm-accent:         #64B5F6;  /* the 1976D2 blue is unreadable on dark */
-    --pm-accent-weak:    #1E3A5F;
-    --pm-accent-fg:      var(--pm-ink);  /* white fails at 2.21:1 on this lighter blue; ink clears 7.95:1 */
-    --pm-urgency-overdue-fg:  #FF7961;  /* 5.50:1 on #2B2B2B */
-    --pm-urgency-due-soon-fg: #FFB300;  /* 7.89:1 */
-    --pm-urgency-on-track-fg: #81C784;  /* 7.04:1 */
-    --pm-urgency-neutral-fg:  #B0BEC5;
-  }
-}
-
-html[data-theme="dark"] {
-  --pm-surface-page:   #212121;
-  --pm-surface-card:   #2B2B2B;
-  --pm-surface-raised: #333333;
-  --pm-surface-sunken: #262626;
-  --pm-line:           #3D3D3D;
-  --pm-text:           #ECEFF1;
-  --pm-text-dim:       #B0BEC5;
-  --pm-text-faint:     #90A4AE;
-  --pm-accent:         #64B5F6;
-  --pm-accent-weak:    #1E3A5F;
-  --pm-accent-fg:      var(--pm-ink);
-  --pm-urgency-overdue-fg:  #FF7961;
-  --pm-urgency-due-soon-fg: #FFB300;
-  --pm-urgency-on-track-fg: #81C784;
-  --pm-urgency-neutral-fg:  #B0BEC5;
-}
+/* No dark blocks: every value above is an alias onto a house token that
+   already flips for dark/light/pinned itself. Redeclaring any of these here
+   would only risk drift — the whole point of aliasing is that this file has
+   nothing left to keep in sync. */

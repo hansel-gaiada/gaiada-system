@@ -4,11 +4,13 @@
    read as primary. Now the work is on the left and its properties on the right, sections divided by
    the system's hairlines instead of ten boxes. Tokens only — no colour literals.
 
-   P4-L4 (2026-08-07): repointed from house tokens to the PM-scoped Repsona palette
-   (`styles/tokens/pm.css`) — see pm.css's header comment for why. `--elev-overlay`
-   and `--scrim` stay house tokens on purpose (the plan explicitly keeps shadows on
-   that one house mechanism for PM's floating layers too); radius is --pm-radius*
-   only, scoped to the drawer/menus. */
+   Phase 3 (2026-08-22): `--pm-*` is now a straight alias onto the house token layer
+   — see pm.css's header comment for the full history. `--elev-overlay` and `--scrim`
+   stay house tokens on purpose (PM's floating layers use the same mechanism as
+   every other overlay in the app); radius is --pm-radius* only, scoped to the
+   drawer/menus. Density: paddings below use `calc(var(--card-padding) * N)` so the
+   drawer responds to a density-mode switch while landing on today's exact px
+   values at "comfortable" — same technique pm.css documents at its own header. */
 
 .pm-detail {
   display: grid;
@@ -16,15 +18,18 @@
   gap: 0;
   border-top: 0.5px solid var(--pm-line);
 }
-.pm-detail__main { min-width: 0; padding: 20px 26px 26px 0; }
+/* Density (Phase 3, §9.2): calc() multipliers of --card-padding (20px at
+   "comfortable") reproduce the exact pre-existing px values today and scale
+   with density from here on — same technique pm.css uses for --card-gap. */
+.pm-detail__main { min-width: 0; padding: var(--card-padding) calc(var(--card-padding) * 1.3) calc(var(--card-padding) * 1.3) 0; }
 .pm-detail__side {
   min-width: 0;
-  padding: 20px 0 26px 22px;
+  padding: var(--card-padding) 0 calc(var(--card-padding) * 1.3) calc(var(--card-padding) * 1.1);
   border-left: 0.5px solid var(--pm-line);
 }
 
 /* A titled block. The label is the system eyebrow; the rule under it replaces the card border. */
-.pm-sec + .pm-sec { margin-top: 22px; padding-top: 20px; border-top: 0.5px solid var(--pm-line-soft); }
+.pm-sec + .pm-sec { margin-top: calc(var(--card-padding) * 1.1); padding-top: var(--card-padding); border-top: 0.5px solid var(--pm-line-soft); }
 .pm-sec__head {
   display: flex;
   align-items: baseline;
@@ -185,7 +190,7 @@
   transition: color 0.2s var(--erp-ease);
 }
 .pm-drawer__btn:hover { color: var(--pm-text); }
-.pm-drawer__body { flex: 1 1 auto; overflow-y: auto; padding: 18px 22px 28px; min-height: 0; }
+.pm-drawer__body { flex: 1 1 auto; overflow-y: auto; padding: calc(var(--card-padding) * 0.9) calc(var(--card-padding) * 1.1) calc(var(--card-padding) * 1.4); min-height: 0; }
 /* The drawer is narrower than a page, so the properties column stacks sooner. */
 .pm-drawer .pm-detail { grid-template-columns: minmax(0, 1fr) 280px; }
 
