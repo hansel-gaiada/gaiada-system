@@ -6635,6 +6635,30 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - 26 tickets P0–P3 + 2 committed P4 (design §12).
 
 ## social-media
+### [0.5.19] — 2026-08-23 · IN PROGRESS
+- **Two SECURITY-SHAPED follow-ups closed, both named honestly by earlier seats rather than silently
+  absorbed.** Full evidence in `docs/modules/MODULES.md`'s own 0.5.19 entry and
+  `docs/plans/smm-tracker.md`'s evidence blocks.
+- **A — OAuth state single-use.** New `social_oauth_states` table
+  (`migrations/202608221751_social_oauth_states.sql`, third RLS wall) + new shared
+  `publisher/oauth-state.ts` (mint/parse/consume, atomic `UPDATE...WHERE consumed_at IS NULL`)
+  replace LinkedIn's/YouTube's per-network signed-but-replayable state. RED (pre-fix): the same
+  signed state verified successfully on repeat presentation. GREEN: a replayed/consumed/
+  network-mismatched state is refused with a typed `SocialOAuthStateError`, never a generic 500.
+  Found+fixed in the same pass: `YouTubeOAuthStateError` was never registered in `main.ts`'s filter
+  list (a body-less 500 on any bad YouTube callback state) — closed by construction by consolidating
+  both networks onto one error class.
+- **B — SMM-22's Cerbos gap for an agent/automation-origin metered-tool re-drive.** Live-probed as
+  ALREADY denied before any policy edit (absence from `resource_mcp_tool.yaml`'s executable-tool
+  bracket already refuses `social.publishPostMetered` for an unattended caller, grant or no grant) —
+  closed as documentation + regression-test hardening of a correct-but-untested-and-undocumented
+  invariant, not a live hole (stated plainly, per instruction not to invent work). Dated SMM-22 block
+  added to the policy file; five new LIVE-Cerbos tests in `mcp-hub/src/cerbos.test.ts` pin the DENY
+  for both n8n/automation and agent-origin callers, with and without a verified grant.
+- Tests: platform-nest social suite **531/531** (5 pre-existing, unrelated skips), mcp-hub **273/273**,
+  `tsc --noEmit` clean in both. Cerbos policy compiled clean before and after
+  (`ghcr.io/cerbos/cerbos:0.54.0 compile`).
+
 ### [0.5.14] — 2026-08-21 · IN PROGRESS
 - **SMM-17 — the inbox reply flow: draft → WS4 → send, its own D14 registry entry, built by reusing
   SMM-09's pattern rather than reinventing it.** No migration — 0105's own `social_inbox_messages`

@@ -12,131 +12,28 @@
 // `storeOAuthGrant` and stamping the SAME `social_accounts` row Postiz's own connect flow would have
 // stamped `connected`.
 //
-// ── STATE: SIGNED, NOT DB-BACKED — THE SAME NAMED, DELIBERATE SIMPLIFICATION AS 38c ─────────────────
-// Mirrors `linkedin-oauth.ts`'s own state scheme byte-for-byte: an HMAC-signed, time-boxed token
-// carrying (tenantId, accountId, nonce, exp), keyed from `config.integrationTokenKey` under the SAME
-// domain-separation label 38c already uses (`"gaiada:social-oauth-state:v1"` — this label is
-// deliberately NOT per-network; the (tenantId, accountId, nonce, exp) payload shape is identical
-// across every `direct`-driver network, and cross-network confusion is prevented by the
-// network-specific `STATE_PREFIX` — `"yts1"` here vs. LinkedIn's `"lis1"` — which is itself inside the
-// signed input, so a LinkedIn state token can never verify against this file's parser or vice versa
-// even though both derive the SAME HMAC key). No live YouTube credential exists to attack today
-// (D-23), and the sole value a stolen, unused state+code pair unlocks is "start someone else's OAuth
-// exchange on their behalf", which still needs the CSRF-bound Cerbos check in
-// `youtube-oauth.controller.ts` to complete against the SAME principal that started it — identical
-// reasoning to 38c's own. A future pass wanting full parity with the Google *search* flow's DB-backed
-// single-use guarantee (`core/google-oauth/state.ts`) would add a small state table — flagged as a
-// follow-up, not silently decided as unnecessary, same as 38c left it.
+// ── STATE: DB-BACKED, ATOMICALLY SINGLE-USE (security follow-up, closes this file's own former gap) ──
+// This file used to mint/parse its own HMAC-signed-but-replayable state, byte-for-byte identical to
+// `linkedin-oauth.ts`'s own former scheme (see git history / the migration header for the removed
+// code). It now mints and consumes state through `./oauth-state.ts` — the ONE shared, DB-backed
+// single-use state machine both this file and `linkedin-oauth.ts` use, mirroring
+// `core/google-oauth/state.ts`'s own mint/parse/consume split. See that file's header for the full
+// mechanism. Google's own authorization `code` being separately single-use at ITS token endpoint is
+// UNCHANGED and still true — this closes the independent, pure state-replay window that fact never
+// covered.
 import type { PoolClient } from "pg";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "../../../config";
 import { newId, withTenants } from "../../../db";
 import { emitEvent } from "../../../events/outbox.service";
 import { hasRegisteredPlatformApp, loadOrgByClient } from "./provisioning";
-import { storeOAuthGrant, registerTokenRefresher, OAuthTokenError } from "./oauth-tokens";
+import { storeOAuthGrant, registerTokenRefresher } from "./oauth-tokens";
+import { mintSocialOAuthState } from "./oauth-state";
 import { SocialPublisherError } from "./types";
 import {
   exchangeAuthorizationCode, hasYouTubeAppCredentials, refreshWithRefreshToken,
 } from "./youtube-client";
 
 const MODULES: { modules: string[] } = { modules: ["social"] };
-const STATE_PREFIX = "yts1";
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes — a human OAuth consent round trip, not a long-lived link.
-
-// ── Signed state ────────────────────────────────────────────────────────────────────────────────────
-
-export type YouTubeOAuthStateFailureReason = "malformed" | "bad_signature" | "expired";
-
-export class YouTubeOAuthStateError extends Error {
-  readonly status = 400;
-  readonly code = "youtube_oauth_state_invalid";
-  constructor(readonly reason: YouTubeOAuthStateFailureReason) {
-    super("this YouTube connect attempt is not usable — start a new one");
-    this.name = "YouTubeOAuthStateError";
-  }
-}
-
-function b64url(buf: Buffer): string {
-  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-function fromB64url(s: string): Buffer {
-  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-}
-
-/** Domain-separated from every OTHER HMAC this estate derives off the same root key — see the file
- *  header for why this label is shared with `linkedin-oauth.ts` (the payload shape is identical; the
- *  network-specific `STATE_PREFIX` inside the signed input is what keeps the two apart). */
-function signingKey(): Buffer {
-  const b64 = config.integrationTokenKey;
-  if (!b64) {
-    // Reuses oauth-tokens.ts's own vocabulary, same as linkedin-oauth.ts does: the underlying fact is
-    // identical — `INTEGRATION_TOKEN_KEY` unset — whether it is this state-signing step or
-    // `storeOAuthGrant`'s own sealing step that discovers it.
-    throw new OAuthTokenError(
-      "oauth_vault_not_configured",
-      "INTEGRATION_TOKEN_KEY is unset — it signs the YouTube OAuth state token (client-invites.ts's "
-      + "own pattern, reused via linkedin-oauth.ts) and seals the resulting grant (secret-box.ts)",
-    );
-  }
-  return createHmac("sha256", Buffer.from(b64, "base64")).update("gaiada:social-oauth-state:v1").digest();
-}
-
-interface StatePayload {
-  tenantId: string;
-  accountId: string;
-  nonce: string;
-  exp: number; // epoch ms
-}
-
-function signingInput(p: StatePayload): string {
-  return [STATE_PREFIX, ...[p.tenantId, p.accountId, p.nonce, String(p.exp)].map((s) => b64url(Buffer.from(s, "utf8")))].join(".");
-}
-
-export function mintYouTubeOAuthState(tenantId: string, accountId: string): string {
-  const payload: StatePayload = { tenantId, accountId, nonce: b64url(randomBytes(12)), exp: Date.now() + STATE_TTL_MS };
-  const input = signingInput(payload);
-  const mac = createHmac("sha256", signingKey()).update(input).digest();
-  return `${input}.${b64url(mac)}`;
-}
-
-export interface ParsedYouTubeOAuthState {
-  tenantId: string;
-  accountId: string;
-}
-
-/** Verify signature + expiry, `timingSafeEqual` throughout (mirrors `linkedin-oauth.ts`'s own
- *  parser). Does NOT consume anything — see the header. */
-export function parseYouTubeOAuthState(token: string): ParsedYouTubeOAuthState {
-  const parts = token.split(".");
-  if (parts.length !== 6) throw new YouTubeOAuthStateError("malformed");
-  const [prefix, tenantIdB64, accountIdB64, nonceB64, expB64, macB64] = parts as [string, string, string, string, string, string];
-  void nonceB64;
-  if (prefix !== STATE_PREFIX) throw new YouTubeOAuthStateError("malformed");
-  let tenantId: string;
-  let accountId: string;
-  let exp: number;
-  try {
-    tenantId = fromB64url(tenantIdB64).toString("utf8");
-    accountId = fromB64url(accountIdB64).toString("utf8");
-    exp = Number(fromB64url(expB64).toString("utf8"));
-    if (!tenantId || !accountId || !Number.isFinite(exp)) throw new Error("empty");
-  } catch {
-    throw new YouTubeOAuthStateError("malformed");
-  }
-  const canonicalInput = parts.slice(0, 5).join(".");
-  const expected = createHmac("sha256", signingKey()).update(canonicalInput).digest();
-  let given: Buffer;
-  try {
-    given = fromB64url(macB64);
-  } catch {
-    throw new YouTubeOAuthStateError("malformed");
-  }
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    throw new YouTubeOAuthStateError("bad_signature");
-  }
-  if (Date.now() > exp) throw new YouTubeOAuthStateError("expired");
-  return { tenantId, accountId };
-}
 
 // ── Readiness (reuses SMM-07's exact vocabulary, per the ticket's own instruction) ───────────────────
 
@@ -240,7 +137,7 @@ export async function startYouTubeConnect(
     MODULES,
   );
 
-  const state = mintYouTubeOAuthState(tenantId, accountId);
+  const state = await mintSocialOAuthState({ tenantId, accountId, network: "youtube", createdBy: input.actorId });
   const authorizeUrl = buildYouTubeAuthorizeUrl(state);
   return { accountId, authorizeUrl, resumed };
 }

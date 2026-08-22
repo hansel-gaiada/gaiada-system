@@ -20,16 +20,22 @@
 //    own URL and calls THIS endpoint as an ordinary authenticated BFF request — `AuthGuard` is
 //    therefore correct and sufficient here even though the route itself needs no `:tenantId`.
 //
-// WHAT STOPS A FORGED OR REPLAYED CALLBACK — identical three-point defence to 38c's own header
-// (`parseYouTubeOAuthState`'s HMAC check before any DB read; the ordinary Cerbos check scoped to the
-// state's own tenant; Google's own authorization `code` being single-use at its token endpoint).
+// WHAT STOPS A FORGED OR REPLAYED CALLBACK — identical three-point defence to
+// `linkedin-oauth.controller.ts`'s own header (see it for the full reasoning, including the named,
+// not-yet-closed `created_by` principal-binding gap): `parseSocialOAuthStateToken`'s HMAC check before
+// any DB read; the ordinary Cerbos check scoped to the state's own tenant, which runs BEFORE the state
+// is consumed; and, as of the security follow-up that added `./publisher/oauth-state.ts`,
+// `consumeSocialOAuthState`'s atomic single-use claim — a replayed or cross-network state is refused
+// with a typed, distinguishable `SocialOAuthStateError`, never a generic 500. Google's own
+// authorization `code` being single-use at its token endpoint remains a real, independent defence.
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import {
-  checkYouTubeConnectReadiness, completeYouTubeConnect, parseYouTubeOAuthState, startYouTubeConnect,
+  checkYouTubeConnectReadiness, completeYouTubeConnect, startYouTubeConnect,
 } from "./publisher/youtube-oauth";
+import { consumeSocialOAuthState, parseSocialOAuthStateToken } from "./publisher/oauth-state";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -86,9 +92,12 @@ export class YouTubeOAuthCallbackController {
     }
     // Verify the signature FIRST (cheap, no DB) so the tenantId used for the Cerbos check below is
     // trustworthy — mirrors SearchGoogleOauthCallbackController's / LinkedInOAuthCallbackController's
-    // own ordering exactly.
-    const parsed = parseYouTubeOAuthState(state);
+    // own ordering exactly. Does NOT consume the state; a principal who fails the Cerbos check below
+    // must not have spent it.
+    const parsed = parseSocialOAuthStateToken(state);
     await authorize(req.principal, { kind: "social_account", tenantId: parsed.tenantId, module: "social" }, "connect");
-    return await completeYouTubeConnect(parsed.tenantId, parsed.accountId, { code, actorId: req.principal.userId });
+    // THE atomic single-use claim — see this file's own header.
+    const consumed = await consumeSocialOAuthState(state, { network: "youtube" });
+    return await completeYouTubeConnect(consumed.tenantId, consumed.accountId, { code, actorId: req.principal.userId });
   }
 }

@@ -82,6 +82,45 @@
 # publishing; nothing in the addendum proposes a metered reply path), so there is no barred name to
 # keep out of this list, unlike `social.publishPostMetered`.
 #
+# SMM-22 security follow-up (2026-08-23) — `social.publishPostMetered`'s own EXPLICIT entry, closing
+# an UNTESTED (not previously live-exploitable, but unpinned and undocumented-for-this-tool) gap named
+# honestly by SMM-22's own follow-up review. Read this before ever adding the name below.
+#
+# WHAT CHANGED SINCE THIS FILE'S OWN SMM-09-ERA REASONING ABOVE (§"THE TWIN'S ABSENCE IS THE POINT"):
+# that text was written when `social.publishPostMetered` had NO real endpoint and could not even be
+# declared to the hub (`modules/social/index.ts`'s own SMM-09-era comment said so in as many words).
+# SMM-22 (2026-08-22) built the real endpoint AND the real classification
+# (`SOCIAL_PUBLISH_METERED_TOOL_CLASSIFICATION`, spread from `social.publishPost`'s own
+# `write:true`/`impact:"high"` — `publish-precondition.ts`), so the tool IS now genuinely visible to
+# this policy with real attributes, exactly like `social.publishPost`. The SMM-09-era reasoning is
+# still the right OUTCOME (stay off the list) but was written about a tool that could not yet be
+# tested against; this entry is the update that reasoning needed and never got.
+#
+# THE TOOL SPENDS REAL MONEY PER CALL (X is the only metered network live in v1; owner decision OQ-2
+# separately disabled X on the $0 `social.publishPost` path). `core/approval-executables.ts`'s own
+# SMM-22 section is explicit that this policy file is NOT auto-updated when an operator sets
+# `SOCIAL_METERED_PUBLISH_ENABLED=true` — that env var only ever lifts the CODE-side executables-
+# registry bar (a config decision); admitting the tool to THIS list is a SEPARATE, manual, reviewed
+# policy change, deliberately never made automatic ("this file is code, Cerbos policy is data, and
+# conflating the two would make an env var silently rewrite a security policy file" — that file's own
+# words). Until that separate change is made, deliberately: an agent/automation-ORIGINATED metered
+# publish can NEVER auto-execute via the D14 grant-lift path, REGARDLESS of the config flag, and
+# REGARDLESS of whether a request carries a plausible `approvalId` — the impact-gate's grant-lift
+# disjunct requires the tool's name to appear in the bracket list below, and it does not. (A
+# consequence named honestly, not hidden: today this ALSO blocks a legitimately human-approved metered
+# publish from auto-executing — `approval-executables.ts`'s own comment calls this "the interim", to
+# be closed later by the SAME deliberate, reviewed, manual addition this note warns against making
+# lightly. That is a functional gap, not a security one, and is out of THIS follow-up's scope.)
+#
+# ⚠ DO NOT "FIX" THIS BY ADDING `social.publishPostMetered` TO THE BRACKET BELOW as a quick way to
+# make `SOCIAL_METERED_PUBLISH_ENABLED=true` "work end to end". Doing so, without the runbook review
+# `approval-executables.ts`'s own header names, is exactly how an agent/automation-origin re-drive of
+# a money-spending tool would become authorizable outside the human-approval path this note exists to
+# keep closed. Regression-tested LIVE against this exact tool name (not a synthetic stand-in):
+# `mcp-hub/src/cerbos.test.ts`, "SMM-22 — social.publishPostMetered" block — both an n8n/automation-
+# origin caller AND an agent-origin caller (`principal.attr.isUnattended` via the agent marker, not
+# `isAutomation`), each WITH a verified grant for the exact call, still DENY.
+#
 # D14-17 (2026-08-06) — Assistant write-tool entries evaluated, ZERO NET-NEW ENTRIES, so this list is
 # UNCHANGED by that ticket. Full evidence in platform-nest/src/core/approval-executables.ts's own
 # D14-17 section; summary: the assistant broker's ENTIRE tool universe (`ASSISTANT_AGENT_TOOLS` in

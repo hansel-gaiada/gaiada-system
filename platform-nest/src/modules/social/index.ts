@@ -23,8 +23,19 @@ import type { ModuleContract, RollupProvider } from "../contract";
 // SMM-10 — the publish gate's dispatch endpoint. `SOCIAL_PUBLISH_TOOL_CLASSIFICATION` is the pinned
 // `{write:true, impact:'high'}` constant `core/approval-executables.ts`'s SMM-09 section already
 // documents as THE D14 gate; declaring the tool from it (never retyping the two literals) is what
-// this ticket's own AC requires. `social.publishPostMetered` stays undeclared and barred — see the
-// module contract's own header for why a declared tool needs a real endpoint before it exists here.
+// this ticket's own AC requires.
+//
+// ⚠ STALE-COMMENT FIX (found while closing SMM-22's Cerbos follow-up, 2026-08-23): this line used to
+// say "`social.publishPostMetered` stays undeclared and barred — see the module contract's own
+// header for why a declared tool needs a real endpoint before it exists here", which stopped being
+// true the moment SMM-22 (2026-08-22) built the metered tool's own real endpoint and declared it
+// below — the SAME correction the "⚠ CORRECTED 2026-08-22 (SMM-22)" note ~500 lines down already
+// made for a near-identical sentence, missed here. What is STILL true: `social.publishPostMetered`
+// remains BARRED FROM AUTO-EXECUTION in `core/approval-executables.ts` by default
+// (`SOCIAL_METERED_PUBLISH_ENABLED` defaults false) and remains DELIBERATELY ABSENT from
+// `cerbos/policies/resource_mcp_tool.yaml`'s executable-tool bracket — see that file's own dated
+// SMM-22 block for why an agent/automation-origin re-drive of this money-spending tool must never be
+// authorizable through that list, config flag or no.
 import {
   SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION,
   // SMM-22 — the metered twin's own tool + spread classification (see that file's own doc for why

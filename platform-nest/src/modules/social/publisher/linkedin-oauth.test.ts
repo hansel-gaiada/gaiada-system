@@ -1,15 +1,22 @@
-// SMM-38 phase 38c — LinkedIn's OAuth grant flow: signed state (mint/verify/tamper/expiry), the
-// readiness precondition (reusing SMM-07's exact refusal vocabulary), and the full start→callback
-// round trip against live Postgres (skips without DATABASE_URL_TEST). No live LinkedIn app
-// credential exists (D-23) — every network-touching case drives a STUB `fetchImpl`, never a real
-// socket.
+// SMM-38 phase 38c — LinkedIn's OAuth grant flow: the readiness precondition (reusing SMM-07's exact
+// refusal vocabulary) and the full start→callback round trip against live Postgres (skips without
+// DATABASE_URL_TEST). No live LinkedIn app credential exists (D-23) — every network-touching case
+// drives a STUB `fetchImpl`, never a real socket.
+//
+// ── STATE COVERAGE MOVED ─────────────────────────────────────────────────────────────────────────
+// The signed-state mint/verify/tamper/expiry cases that used to live in THIS file (against this
+// file's own now-removed `mintLinkedInOAuthState`/`parseLinkedInOAuthState`) moved to
+// `oauth-state.test.ts` when the security follow-up that closed the state-replay gap consolidated
+// LinkedIn's and YouTube's per-network signing code into the ONE shared `oauth-state.ts` module — see
+// that file's own header, and its own regression proof that a replayed state is now refused rather
+// than silently re-accepted. This file still proves `startLinkedInConnect`/`completeLinkedInConnect`
+// work end to end (they call into the shared module transparently; their own signature is unchanged).
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { withTenants, withGlobal, newId } from "../../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../../testing/setup";
 import { createCompany, createUser } from "../../../testing/fixtures";
 import { config } from "../../../config";
 import {
-  mintLinkedInOAuthState, parseLinkedInOAuthState, LinkedInOAuthStateError,
   checkLinkedInConnectReadiness, startLinkedInConnect, completeLinkedInConnect,
   registerLinkedInTokenRefresher, buildLinkedInAuthorizeUrl,
 } from "./linkedin-oauth";
@@ -19,50 +26,8 @@ import { SocialPublisherError } from "./types";
 
 const MODULES = { modules: ["social"] };
 
-describe("SMM-38c · LinkedIn OAuth state — signed, time-boxed, no DB (see the file's own header)", () => {
-  const originalKey = config.integrationTokenKey;
-  beforeAll(() => { config.integrationTokenKey = Buffer.alloc(32, 7).toString("base64"); });
-  afterAll(() => { config.integrationTokenKey = originalKey; });
-
-  it("round-trips tenantId/accountId through mint → parse", () => {
-    const state = mintLinkedInOAuthState("tenant-1", "account-1");
-    const parsed = parseLinkedInOAuthState(state);
-    expect(parsed).toEqual({ tenantId: "tenant-1", accountId: "account-1" });
-  });
-
-  it("refuses a tampered state — a spliced-in tenant id fails the signature, before any DB read", () => {
-    // 6 segments: prefix, tenantId, accountId, nonce, exp, mac. Take a genuinely-forged token's own
-    // first 5 (its full payload, naming the EVIL tenant) and staple on a DIFFERENT, legitimate
-    // token's mac — the signature must not verify against a payload it was never computed over.
-    const legit = mintLinkedInOAuthState("tenant-1", "account-1");
-    const forgedPayload = mintLinkedInOAuthState("tenant-EVIL", "account-1").split(".").slice(0, 5).join(".");
-    const forged = `${forgedPayload}.${legit.split(".")[5]}`;
-    expect(() => parseLinkedInOAuthState(forged)).toThrow(LinkedInOAuthStateError);
-    try { parseLinkedInOAuthState(forged); } catch (e) {
-      expect((e as LinkedInOAuthStateError).reason).toBe("bad_signature");
-    }
-  });
-
-  it("refuses a malformed token", () => {
-    expect(() => parseLinkedInOAuthState("not-a-real-token")).toThrow(LinkedInOAuthStateError);
-  });
-
-  it("refuses an expired state — even with a valid signature", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      const state = mintLinkedInOAuthState("tenant-1", "account-1");
-      vi.setSystemTime(new Date("2026-01-01T00:11:00Z")); // past the 10-minute TTL
-      expect(() => parseLinkedInOAuthState(state)).toThrow(LinkedInOAuthStateError);
-      try { parseLinkedInOAuthState(state); } catch (e) {
-        expect((e as LinkedInOAuthStateError).reason).toBe("expired");
-      }
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("buildLinkedInAuthorizeUrl carries the exact scopes the org-page publish + comment-read need", () => {
+describe("SMM-38c · buildLinkedInAuthorizeUrl (pure, no key/DB needed)", () => {
+  it("carries the exact scopes the org-page publish + comment-read need", () => {
     const url = buildLinkedInAuthorizeUrl("some-state");
     expect(url).toContain("response_type=code");
     // URLSearchParams encodes a space as `+` (application/x-www-form-urlencoded), not `%20` —

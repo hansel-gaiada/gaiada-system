@@ -1,16 +1,22 @@
-// SMM-38 phase 38d — YouTube's OAuth grant flow: signed state (mint/verify/tamper/expiry), the
-// readiness precondition (reusing SMM-07's exact refusal vocabulary), and the full start→callback
-// round trip against live Postgres (skips without DATABASE_URL_TEST). No live YouTube app credential
-// exists (D-23) — every network-touching case drives a STUB `fetchImpl`, never a real socket.
-// Mirrors `linkedin-oauth.test.ts` (38c) closely — "Follow that shape" was this ticket's own
-// instruction.
+// SMM-38 phase 38d — YouTube's OAuth grant flow: the readiness precondition (reusing SMM-07's exact
+// refusal vocabulary) and the full start→callback round trip against live Postgres (skips without
+// DATABASE_URL_TEST). No live YouTube app credential exists (D-23) — every network-touching case
+// drives a STUB `fetchImpl`, never a real socket. Mirrors `linkedin-oauth.test.ts` (38c) closely —
+// "Follow that shape" was this ticket's own instruction.
+//
+// ── STATE COVERAGE MOVED ─────────────────────────────────────────────────────────────────────────
+// The signed-state mint/verify/tamper/expiry cases that used to live in THIS file (against this
+// file's own now-removed `mintYouTubeOAuthState`/`parseYouTubeOAuthState`) moved to
+// `oauth-state.test.ts` when the security follow-up that closed the state-replay gap consolidated
+// LinkedIn's and YouTube's per-network signing code into the ONE shared `oauth-state.ts` module — see
+// that file's own header. This file still proves `startYouTubeConnect`/`completeYouTubeConnect`
+// work end to end (they call into the shared module transparently; their own signature is unchanged).
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { withTenants, withGlobal, newId } from "../../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../../testing/setup";
 import { createCompany, createUser } from "../../../testing/fixtures";
 import { config } from "../../../config";
 import {
-  mintYouTubeOAuthState, parseYouTubeOAuthState, YouTubeOAuthStateError,
   checkYouTubeConnectReadiness, startYouTubeConnect, completeYouTubeConnect,
   registerYouTubeTokenRefresher, buildYouTubeAuthorizeUrl,
 } from "./youtube-oauth";
@@ -20,60 +26,9 @@ import { SocialPublisherError } from "./types";
 
 const MODULES = { modules: ["social"] };
 
-describe("SMM-38d · YouTube OAuth state — signed, time-boxed, no DB (mirrors linkedin-oauth.ts's own scheme)", () => {
-  const originalKey = config.integrationTokenKey;
-  beforeAll(() => { config.integrationTokenKey = Buffer.alloc(32, 7).toString("base64"); });
-  afterAll(() => { config.integrationTokenKey = originalKey; });
-
-  it("round-trips tenantId/accountId through mint → parse", () => {
-    const state = mintYouTubeOAuthState("tenant-1", "account-1");
-    const parsed = parseYouTubeOAuthState(state);
-    expect(parsed).toEqual({ tenantId: "tenant-1", accountId: "account-1" });
-  });
-
-  it("a LinkedIn state token never verifies against the YouTube parser, even though both derive " +
-     "from the SAME HMAC key/domain label — the network-specific STATE_PREFIX inside the signed " +
-     "input keeps them apart (see this file's own header)", () => {
-    // Reproduces linkedin-oauth.ts's own mint format by hand (prefix "lis1") rather than importing
-    // it, keeping this test file's dependency surface to `youtube-oauth.ts` alone.
-    const linkedInLikeToken = "lis1.dGVuYW50LTE.YWNjb3VudC0x.bm9uY2U.MTc2MTIzNDU2Nzg5MA.deadbeef";
-    expect(() => parseYouTubeOAuthState(linkedInLikeToken)).toThrow(YouTubeOAuthStateError);
-    try { parseYouTubeOAuthState(linkedInLikeToken); } catch (e) {
-      expect((e as YouTubeOAuthStateError).reason).toBe("malformed");
-    }
-  });
-
-  it("refuses a tampered state — a spliced-in tenant id fails the signature, before any DB read", () => {
-    const legit = mintYouTubeOAuthState("tenant-1", "account-1");
-    const forgedPayload = mintYouTubeOAuthState("tenant-EVIL", "account-1").split(".").slice(0, 5).join(".");
-    const forged = `${forgedPayload}.${legit.split(".")[5]}`;
-    expect(() => parseYouTubeOAuthState(forged)).toThrow(YouTubeOAuthStateError);
-    try { parseYouTubeOAuthState(forged); } catch (e) {
-      expect((e as YouTubeOAuthStateError).reason).toBe("bad_signature");
-    }
-  });
-
-  it("refuses a malformed token", () => {
-    expect(() => parseYouTubeOAuthState("not-a-real-token")).toThrow(YouTubeOAuthStateError);
-  });
-
-  it("refuses an expired state — even with a valid signature", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      const state = mintYouTubeOAuthState("tenant-1", "account-1");
-      vi.setSystemTime(new Date("2026-01-01T00:11:00Z")); // past the 10-minute TTL
-      expect(() => parseYouTubeOAuthState(state)).toThrow(YouTubeOAuthStateError);
-      try { parseYouTubeOAuthState(state); } catch (e) {
-        expect((e as YouTubeOAuthStateError).reason).toBe("expired");
-      }
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("buildYouTubeAuthorizeUrl carries EXACTLY the upload + comment-read scopes (dossier §6.2 (a)/(b)) " +
-     "— never the broad manage scope, never analytics, never anything DM-shaped (none exists)", () => {
+describe("SMM-38d · buildYouTubeAuthorizeUrl (pure, no key/DB needed)", () => {
+  it("carries EXACTLY the upload + comment-read scopes (dossier §6.2 (a)/(b)) — never the broad " +
+     "manage scope, never analytics, never anything DM-shaped (none exists)", () => {
     const url = buildYouTubeAuthorizeUrl("some-state");
     const parsed = new URL(url);
     expect(parsed.searchParams.get("response_type")).toBe("code");

@@ -69,6 +69,10 @@ import { wireSocialPublisher } from "./modules/social/publisher/boot";
 // do, and why `direct` itself is deliberately NOT registered here (unlike this purger hook, that
 // would change resolvePublisher's empty-registry heuristic — see boot.ts's own header).
 import { wireOAuthTokenCustody } from "./modules/social/publisher/oauth-tokens";
+// Security follow-up to SMM-38c/38d — registers `purgeSocialOAuthStates` into the SAME SMM-36 seam,
+// key `'oauth_states'`, alongside `wireOAuthTokenCustody()` immediately below. Pure in-process
+// registration, no network call, no new schedule.
+import { wireSocialOAuthStateCustody } from "./modules/social/publisher/oauth-state";
 // SM-49 AC 9 (tracker §6u; design addendum §A10.4) — the repointed-base-URL boot guard. Lives outside
 // config.ts (SM-48 owns it this wave) and outside modules/search (it isn't itself an egress file — see
 // its own header). registerProvider above already makes the simulate/live branches structurally
@@ -179,8 +183,10 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new ClientAccessErrorFilter(),
     new SocialPublisherErrorFilter(),
     // SMM-38 phase 38c — `linkedin-oauth.controller.ts` is the first caller to surface
-    // `OAuthTokenError`/`LinkedInOAuthStateError` over HTTP (38b shipped the former with no filter
-    // at all, since no controller existed yet to need one).
+    // `OAuthTokenError`/`SocialOAuthStateError` over HTTP (38b shipped the former with no filter
+    // at all, since no controller existed yet to need one). `SocialOAuthStateError` is the security
+    // follow-up's consolidation of what used to be two per-network classes — see
+    // `publisher-error.filter.ts`'s own header for the YouTube-500 gap that consolidation closed.
     new SocialOAuthErrorFilter(),
   );
   // WD-04: the one multipart consumer in the app (in-ERP meeting audio/video upload). The size cap
@@ -424,6 +430,9 @@ async function bootstrap(): Promise<void> {
   // registers its publisher driver"). Pure in-process registration, no network call, no schedule of
   // its own: it rides SMM-36's existing inbox-retention sweep and cadence.
   wireOAuthTokenCustody();
+  // Security follow-up to SMM-38c/38d — the state-replay closure's own purge registration, same
+  // placement reasoning as the line above.
+  wireSocialOAuthStateCustody();
   // SMM-10/D-22 — install the dispatch-side creator-info verifier. Unconditional: it is a pure,
   // in-process registration (`setCreatorInfoVerifier`), never a network call, so there is no boot
   // condition to gate it on. Its own doc states the steady state THIS makes correct: with no

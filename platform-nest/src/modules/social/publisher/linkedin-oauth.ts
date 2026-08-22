@@ -13,139 +13,29 @@
 // its own controller (`linkedin-oauth.controller.ts`), and ends by calling `storeOAuthGrant` and
 // stamping the SAME `social_accounts` row Postiz's own connect flow would have stamped `connected`.
 //
-// ── STATE: SIGNED, NOT DB-BACKED — A DELIBERATE, NAMED SIMPLIFICATION ───────────────────────────
-// `core/google-oauth/state.ts` (the estate's other real OAuth-callback precedent) persists its state
-// in a DB table with atomic single-use consumption. This file instead mirrors `core/client-invites.ts`'s
-// LIGHTER pattern: an HMAC-signed, time-boxed token carrying (tenantId, accountId, nonce, exp), keyed
-// from `config.integrationTokenKey` under its OWN domain-separation label — "derived from the
-// credential-vault key rather than adding a second secret to configure" (client-invites.ts's own
-// reasoning, reused verbatim). There is deliberately NO database row and NO atomic single-use
-// enforcement of the state token itself. This is safe in the one way that matters most — LinkedIn's
-// own authorization `code` is single-use at ITS token endpoint (a replayed `code` fails there with
-// `invalid_grant`, surfaced by this file as a typed `SocialPublisherError`) — but it does NOT close a
-// pure state-replay window before the code is ever exchanged, the way a DB-backed
-// `UPDATE ... WHERE consumed_at IS NULL` would. Named here as a considered, deliberate scope choice
-// (no live LinkedIn credential exists to attack today — D-23 — and the sole value a stolen, unused
-// state+code pair unlocks is "start someone else's OAuth exchange on their behalf", which still needs
-// the CSRF-bound Cerbos check in `linkedin-oauth.controller.ts` to complete against the SAME
-// principal that started it). A future pass that wants full parity with the Google flow's DB-backed
-// single-use guarantee would add a small state table — flagged as a follow-up, not silently decided
-// as unnecessary.
+// ── STATE: DB-BACKED, ATOMICALLY SINGLE-USE (security follow-up, closes this file's own former gap) ──
+// This file used to mint/parse its own HMAC-signed-but-replayable state (see git history / the
+// migration header for the removed code and the reasoning it carried). It now mints and consumes
+// state through `./oauth-state.ts` — the ONE shared, DB-backed single-use state machine both this
+// file and `youtube-oauth.ts` use, mirroring `core/google-oauth/state.ts`'s own mint/parse/consume
+// split. See that file's header for the full mechanism (the atomic `UPDATE ... WHERE consumed_at IS
+// NULL ... RETURNING`, the network_mismatch check, the "absent ≠ zero" reasoning behind collapsing
+// never-minted/expired/already-consumed into one refusal). LinkedIn's own authorization `code` being
+// separately single-use at ITS token endpoint is UNCHANGED and still true — this closes the
+// independent, pure state-replay window that fact never covered.
 import type { PoolClient } from "pg";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { config } from "../../../config";
 import { newId, withTenants } from "../../../db";
 import { emitEvent } from "../../../events/outbox.service";
 import { hasRegisteredPlatformApp, loadOrgByClient } from "./provisioning";
-import { storeOAuthGrant, registerTokenRefresher, OAuthTokenError } from "./oauth-tokens";
+import { storeOAuthGrant, registerTokenRefresher } from "./oauth-tokens";
+import { mintSocialOAuthState } from "./oauth-state";
 import { SocialPublisherError } from "./types";
 import {
   exchangeAuthorizationCode, hasLinkedInAppCredentials, refreshWithRefreshToken,
 } from "./linkedin-client";
 
 const MODULES: { modules: string[] } = { modules: ["social"] };
-const STATE_PREFIX = "lis1";
-const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes — a human OAuth consent round trip, not a long-lived link.
-
-// ── Signed state ────────────────────────────────────────────────────────────────────────────────
-
-export type LinkedInOAuthStateFailureReason = "malformed" | "bad_signature" | "expired";
-
-export class LinkedInOAuthStateError extends Error {
-  readonly status = 400;
-  readonly code = "linkedin_oauth_state_invalid";
-  constructor(readonly reason: LinkedInOAuthStateFailureReason) {
-    super("this LinkedIn connect attempt is not usable — start a new one");
-    this.name = "LinkedInOAuthStateError";
-  }
-}
-
-function b64url(buf: Buffer): string {
-  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-function fromB64url(s: string): Buffer {
-  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-}
-
-/** Domain-separated from every OTHER HMAC this estate derives off the same root key
- *  (`client-invites.ts`'s own label, the Google OAuth state key's label) so this key can never
- *  coincide with theirs even though all three derive from the SAME `INTEGRATION_TOKEN_KEY`. */
-function signingKey(): Buffer {
-  const b64 = config.integrationTokenKey;
-  if (!b64) {
-    // Reuses oauth-tokens.ts's own vocabulary (this file's sibling in `Yours`) rather than inventing
-    // a fourth: the underlying fact is identical — `INTEGRATION_TOKEN_KEY` unset — whether it is
-    // this state-signing step or `storeOAuthGrant`'s own sealing step that discovers it.
-    throw new OAuthTokenError(
-      "oauth_vault_not_configured",
-      "INTEGRATION_TOKEN_KEY is unset — it signs the LinkedIn OAuth state token (client-invites.ts's "
-      + "own pattern, reused) and seals the resulting grant (secret-box.ts)",
-    );
-  }
-  return createHmac("sha256", Buffer.from(b64, "base64")).update("gaiada:social-oauth-state:v1").digest();
-}
-
-interface StatePayload {
-  tenantId: string;
-  accountId: string;
-  nonce: string;
-  exp: number; // epoch ms
-}
-
-/** `STATE_PREFIX` is prepended LITERALLY, never through `b64url` — mirrors `client-invites.ts`'s own
- *  `signingInput` exactly (`${TOKEN_PREFIX}.${b64url(...)}...`). Every other field IS b64url-encoded
- *  so an arbitrary tenant/account id (which may itself contain characters outside the base64url
- *  alphabet) can never introduce a stray `.` that would desynchronize the split. */
-function signingInput(p: StatePayload): string {
-  return [STATE_PREFIX, ...[p.tenantId, p.accountId, p.nonce, String(p.exp)].map((s) => b64url(Buffer.from(s, "utf8")))].join(".");
-}
-
-export function mintLinkedInOAuthState(tenantId: string, accountId: string): string {
-  const payload: StatePayload = { tenantId, accountId, nonce: b64url(randomBytes(12)), exp: Date.now() + STATE_TTL_MS };
-  const input = signingInput(payload);
-  const mac = createHmac("sha256", signingKey()).update(input).digest();
-  return `${input}.${b64url(mac)}`;
-}
-
-export interface ParsedLinkedInOAuthState {
-  tenantId: string;
-  accountId: string;
-}
-
-/** Verify signature + expiry, `timingSafeEqual` throughout (mirrors client-invites.ts /
- *  oauth-state.ts's own attack-A1 defence). Does NOT consume anything — see the header. */
-export function parseLinkedInOAuthState(token: string): ParsedLinkedInOAuthState {
-  const parts = token.split(".");
-  // 6 segments: prefix, tenantId, accountId, nonce, exp, mac (signingInput's own 5 + the mac mint appends).
-  if (parts.length !== 6) throw new LinkedInOAuthStateError("malformed");
-  const [prefix, tenantIdB64, accountIdB64, nonceB64, expB64, macB64] = parts as [string, string, string, string, string, string];
-  void nonceB64;
-  if (prefix !== STATE_PREFIX) throw new LinkedInOAuthStateError("malformed");
-  let tenantId: string;
-  let accountId: string;
-  let exp: number;
-  try {
-    tenantId = fromB64url(tenantIdB64).toString("utf8");
-    accountId = fromB64url(accountIdB64).toString("utf8");
-    exp = Number(fromB64url(expB64).toString("utf8"));
-    if (!tenantId || !accountId || !Number.isFinite(exp)) throw new Error("empty");
-  } catch {
-    throw new LinkedInOAuthStateError("malformed");
-  }
-  const canonicalInput = parts.slice(0, 5).join(".");
-  const expected = createHmac("sha256", signingKey()).update(canonicalInput).digest();
-  let given: Buffer;
-  try {
-    given = fromB64url(macB64);
-  } catch {
-    throw new LinkedInOAuthStateError("malformed");
-  }
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
-    throw new LinkedInOAuthStateError("bad_signature");
-  }
-  if (Date.now() > exp) throw new LinkedInOAuthStateError("expired");
-  return { tenantId, accountId };
-}
 
 // ── Readiness (reuses SMM-07's exact vocabulary, per the ticket's own instruction) ───────────────
 
@@ -254,7 +144,7 @@ export async function startLinkedInConnect(
     MODULES,
   );
 
-  const state = mintLinkedInOAuthState(tenantId, accountId);
+  const state = await mintSocialOAuthState({ tenantId, accountId, network: "linkedin", createdBy: input.actorId });
   const authorizeUrl = buildLinkedInAuthorizeUrl(state);
   return { accountId, authorizeUrl, resumed };
 }

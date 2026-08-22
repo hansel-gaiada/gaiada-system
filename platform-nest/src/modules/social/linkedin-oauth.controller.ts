@@ -21,23 +21,31 @@
 //    as an ordinary authenticated BFF request — `AuthGuard` is therefore correct and sufficient here
 //    even though the route itself needs no `:tenantId`.
 //
-// WHAT STOPS A FORGED OR REPLAYED CALLBACK, mirroring the Google callback's own three-point defence
-// (that file's header) with the ONE difference `linkedin-oauth.ts`'s header names explicitly (no
-// DB-backed single-use state row — a deliberate, named simplification):
-//   1. FORGERY: `parseLinkedInOAuthState` recomputes the HMAC over the canonical re-encoding and
+// WHAT STOPS A FORGED OR REPLAYED CALLBACK — mirrors the Google callback's own three-point defence
+// (that file's header), and as of the security follow-up that added `./publisher/oauth-state.ts`, all
+// three points now hold rather than two of three plus an outsourced third party:
+//   1. FORGERY: `parseSocialOAuthStateToken` recomputes the HMAC over the canonical re-encoding and
 //      rejects anything that does not match, via `timingSafeEqual`, BEFORE any database read.
-//   2. CSRF / login-CSRF: the ordinary Cerbos check below (`social_account`/`connect`, scoped to the
-//      state's OWN tenant) runs before `completeLinkedInConnect` — a principal whose access to that
-//      tenant's social module was revoked after starting the flow is refused here.
-//   3. LinkedIn's own `code` is single-use at ITS token endpoint — a replayed callback still fails
-//      the exchange with `invalid_grant`, surfaced as a typed `SocialPublisherError`.
+//   2. CSRF / login-CSRF (tenant-role defense in depth): the ordinary Cerbos check below
+//      (`social_account`/`connect`, scoped to the state's OWN tenant) runs BEFORE the state is
+//      consumed — a principal whose access to that tenant's social module was revoked after starting
+//      the flow is refused here, and refusal does not spend the state (only `consumeSocialOAuthState`
+//      does that). NOTE: unlike `core/google-oauth/state.ts`'s own A1 defense, this does not yet check
+//      that the calling principal IS the one who started the flow (`created_by` is stored but not
+//      compared) — a named, not silently decided, follow-up (see the migration header).
+//   3. REPLAY: `consumeSocialOAuthState`'s atomic `UPDATE ... WHERE consumed_at IS NULL ... RETURNING`
+//      (this security follow-up's own addition) means a second presentation of the SAME state matches
+//      zero rows and is refused with a typed, distinguishable `SocialOAuthStateError` — never a
+//      generic 500, never a silent second success. LinkedIn's own `code` remaining single-use at ITS
+//      token endpoint is unchanged and still a real, independent defence in depth.
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { authorize } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import {
-  checkLinkedInConnectReadiness, completeLinkedInConnect, parseLinkedInOAuthState, startLinkedInConnect,
+  checkLinkedInConnectReadiness, completeLinkedInConnect, startLinkedInConnect,
 } from "./publisher/linkedin-oauth";
+import { consumeSocialOAuthState, parseSocialOAuthStateToken } from "./publisher/oauth-state";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,9 +101,14 @@ export class LinkedInOAuthCallbackController {
       throw new BadRequestException("state is required");
     }
     // Verify the signature FIRST (cheap, no DB) so the tenantId used for the Cerbos check below is
-    // trustworthy — mirrors SearchGoogleOauthCallbackController's own ordering exactly.
-    const parsed = parseLinkedInOAuthState(state);
+    // trustworthy — mirrors SearchGoogleOauthCallbackController's own ordering exactly. Does NOT
+    // consume the state; a principal who fails the Cerbos check below must not have spent it.
+    const parsed = parseSocialOAuthStateToken(state);
     await authorize(req.principal, { kind: "social_account", tenantId: parsed.tenantId, module: "social" }, "connect");
-    return await completeLinkedInConnect(parsed.tenantId, parsed.accountId, { code, actorId: req.principal.userId });
+    // THE atomic single-use claim. A replayed (already-consumed) or cross-network state throws
+    // SocialOAuthStateError here — mapped to a typed 400 by SocialOAuthErrorFilter, never a generic
+    // 500 and never a silent second success.
+    const consumed = await consumeSocialOAuthState(state, { network: "linkedin" });
+    return await completeLinkedInConnect(consumed.tenantId, consumed.accountId, { code, actorId: req.principal.userId });
   }
 }
