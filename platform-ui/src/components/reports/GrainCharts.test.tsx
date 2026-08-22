@@ -108,3 +108,62 @@ describe("GrainCharts — render what's there, never an empty frame for what isn
     expect(sectionHeading("Department portfolio")).toBeInTheDocument();
   });
 });
+
+// ── a foreign producer's keys must not be silently dropped ──────────────────────────────────────
+// The four PM grains were once the only producers of a ReportDocument. The social-media module now
+// builds its own (`social/reports.ts`) with keys no allowlist in GrainCharts mentions, so a social
+// report rendered through this kit — including into a PDF via /print/reports/[jobToken] — carried
+// its KPI wall and narrative but silently lost every series and table it had computed.
+
+function socialDoc(overrides: Partial<ReportDocument> = {}): ReportDocument {
+  return {
+    header: baseHeader({ grain: "company", scopeName: "Acme Coffee" }),
+    kpis: [],
+    // Note: NONE of these keys appear in any allowlist in GrainCharts.
+    series: [series("impressions_daily", "Impressions"), series("followers_daily", "Followers")],
+    distributions: [],
+    tables: [
+      { key: "top_posts", label: "Top posts", columns: [{ key: "network", label: "Network" }], rows: [{ network: "instagram" }] },
+      { key: "kpi_vs_target", label: "KPI vs target", columns: [{ key: "metric", label: "Metric" }], rows: [{ metric: "Impressions" }] },
+    ],
+    highlights: [],
+    narrative: { source: "deterministic", text: "" },
+    ...overrides,
+  };
+}
+
+describe("a foreign producer's series/tables are rendered, not dropped", () => {
+  it("renders social's own series and tables through the company grain", () => {
+    render(<CompanyCharts document={socialDoc()} />);
+    expect(sectionHeading("Impressions")).not.toBeNull();
+    expect(sectionHeading("Followers")).not.toBeNull();
+    expect(sectionHeading("Top posts")).not.toBeNull();
+    expect(sectionHeading("KPI vs target")).not.toBeNull();
+  });
+
+  it("does not double-render a key the grain composition already consumed", () => {
+    // throughput_weighted is rendered by CompanyCharts itself as "Throughput (weighted)"; the
+    // generic pass must not add a second section under the series' own label.
+    const d = socialDoc({ series: [series("throughput_weighted", "Throughput")] });
+    render(<CompanyCharts document={d} />);
+    expect(sectionHeading("Throughput (weighted)")).not.toBeNull();
+    expect(screen.queryAllByRole("heading", { name: "Throughput" })).toHaveLength(0);
+  });
+
+  it("skips an empty series rather than drawing a frame that implies zero", () => {
+    const empty: ReportSeries = { key: "impressions_daily", label: "Impressions", unit: "count", kind: "line", points: [] };
+    render(<CompanyCharts document={socialDoc({ series: [empty] })} />);
+    expect(sectionHeading("Impressions")).toBeNull();
+  });
+
+  it("never charts a RATIO series alone — the average-of-averages trap", () => {
+    // A ratio charted by itself silently sums per-bucket percentages. Which chart honestly shows a
+    // ratio is a per-grain judgement, so the generic pass declines rather than guessing.
+    const ratio: ReportSeries = {
+      key: "engagement_rate", label: "Engagement rate", unit: "percent", kind: "line",
+      points: [{ t: "2026-07-01", v: 3.5 }], numeratorKey: "engagements_period", denominatorKey: "impressions_period",
+    };
+    render(<CompanyCharts document={socialDoc({ series: [ratio] })} />);
+    expect(sectionHeading("Engagement rate")).toBeNull();
+  });
+});
