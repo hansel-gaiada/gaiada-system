@@ -104,7 +104,10 @@ export default async function PortalDeliverablesPage() {
                                   {f.filename}
                                 </a>
                               )}
-                              <span style={{ font: "400 11px var(--font-body)", color: "var(--ink-faint)" }}>
+                              {/* `--ink-subtle`, not `--ink-faint` — the accessibility contract exempts
+                                  `--ink-faint` only for decorative use, and a file's byte size is real,
+                                  readable meta a client may act on. */}
+                              <span style={{ font: "400 11px var(--font-body)", color: "var(--ink-subtle)" }}>
                                 {formatBytes(f.byteSize)}
                                 {f.url ? " · link" : ""}
                               </span>

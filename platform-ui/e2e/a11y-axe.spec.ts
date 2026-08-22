@@ -271,5 +271,46 @@ for (const theme of ["light", "dark"] as const) {
       const violations = reportViolations("PM task drawer", results);
       expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
     });
+
+    // ── Phase 5 additions (2026-08-22 department/portal/list sweep) ─────────────────────────────
+    // The suite above only ever covered the drawers/streaming/proposal-card surfaces its own
+    // ticket built. Phase 5's job is partly a broad RE-verification, so these three add the
+    // archetypes Phase 5 actually touches: a bespoke department console (List/Dashboard mix, Web
+    // Dev — the reference console), the client portal shell (its own separate interface, §2.6),
+    // and a plain DataTable-backed List page. Same `chromium`-project shared staff session as
+    // everything above — `/portal` does not redirect staff away (see `(portal)/portal/layout.tsx`'s
+    // own header), so this exercises the portal's "not a contact" teach-state render, which is a
+    // real surface a manager visiting their client's view will see.
+    test(`department console — Web Dev home (${theme})`, async ({ page }) => {
+      await page.goto("/departments/dept-1");
+      await pinTheme(page, theme);
+      await page.reload();
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      const results = await runAxe(page);
+      const violations = reportViolations("department console — Web Dev home", results);
+      expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+    });
+
+    test(`client portal — overview (${theme})`, async ({ page }) => {
+      await page.goto("/portal");
+      await pinTheme(page, theme);
+      await page.reload();
+      // The chrome (brand mark + tab strip) renders regardless of whether this identity is a
+      // portal contact — asserting the tab strip, not a heading, keeps this robust either way.
+      await expect(page.getByRole("navigation", { name: "Portal sections" })).toBeVisible();
+      const results = await runAxe(page);
+      const violations = reportViolations("client portal overview", results);
+      expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+    });
+
+    test(`list page — projects DataTable (${theme})`, async ({ page }) => {
+      await page.goto("/projects");
+      await pinTheme(page, theme);
+      await page.reload();
+      await expect(page.getByRole("heading", { level: 1 })).toContainText("Projects");
+      const results = await runAxe(page);
+      const violations = reportViolations("list page — projects", results);
+      expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+    });
   });
 }

@@ -51,10 +51,16 @@ export function InboxWorkspace({
   return (
     <div style={{ display: "grid", gridTemplateColumns: selected ? "1.1fr 1.4fr" : "1fr", gap: 16, alignItems: "start" }}>
       <div>
-        <div role="tablist" aria-label="Queue filter" style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {/* A filter, not a tab strip — it narrows which rows of the SAME queue are visible, it does
+            not switch between separate content panels, so `role="tablist"/"tab"` (Phase 5 a11y sweep
+            fix, 2026-08-22) was the wrong ARIA pattern: no `tabpanel` exists to point at, and a
+            screen-reader user would be told "tab 1 of 4" for a control arrow keys don't move through.
+            `role="group"` + `aria-pressed` is the toggle-button-group pattern this actually is —
+            matches `data/FilterBar.tsx`'s own `role="group"` convention for the URL-driven case. */}
+        <div role="group" aria-label="Queue filter" style={{ display: "flex", gap: 6, marginBottom: 10 }}>
           {STATUS_FILTERS.map((s) => (
             <button
-              key={s} type="button" role="tab" aria-selected={statusFilter === s}
+              key={s} type="button" aria-pressed={statusFilter === s}
               onClick={() => setStatusFilter(s)}
               className={`lux-btn lux-btn--sm ${statusFilter === s ? "lux-btn--solid" : "lux-btn--ghost"}`}
             >

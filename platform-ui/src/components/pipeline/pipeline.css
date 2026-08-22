@@ -2,7 +2,7 @@
    no framework, matches the rest of the design system (var(--erp-*) tokens, 0 radius, hairlines). */
 
 .pl-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-.pl-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font: 500 12px/1 var(--font-body); border-radius: 999px; background: var(--wash); color: var(--text-primary); }
+.pl-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font: 500 12px/1 var(--font-body); border-radius: var(--radius-pill); background: var(--wash); color: var(--text-primary); }
 .pl-chip--done { background: color-mix(in srgb, var(--status-ok) 14%, transparent); color: var(--status-ok-fg); }
 .pl-chip--failed { background: color-mix(in srgb, var(--status-critical) 14%, transparent); color: var(--status-critical-fg); }
 .pl-chip__confidence { opacity: 0.65; }
@@ -13,7 +13,7 @@
 .pl-stage__name { font: 700 13px var(--font-body); color: var(--text-primary); }
 .pl-stage__meta { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 
-.pl-blockage { padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--status-warning) 8%, transparent); border: 1px solid color-mix(in srgb, var(--status-warning) 30%, transparent); margin-bottom: 20px; font: 500 14px/1.45 var(--font-body); }
+.pl-blockage { padding: 12px 14px; border-radius: var(--radius-12); background: color-mix(in srgb, var(--status-warning) 8%, transparent); border: 1px solid color-mix(in srgb, var(--status-warning) 30%, transparent); margin-bottom: 20px; font: 500 14px/1.45 var(--font-body); }
 
 .pl-link-row { display: flex; flex-direction: column; gap: 8px; }
 .pl-link-row__item { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
@@ -48,21 +48,21 @@
 
 /* B3–B5 — the collapsed recovery-tools box: intentionally NOT a Card, and warning-toned, so it
    reads as a deliberate override path rather than a routine action sitting beside Approve/Edit. */
-.pl-recovery { margin-top: 28px; border: 0.5px solid color-mix(in srgb, var(--status-warning) 40%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--status-warning) 5%, transparent); }
+.pl-recovery { margin-top: 28px; border: 0.5px solid color-mix(in srgb, var(--status-warning) 40%, transparent); border-radius: var(--radius-12); background: color-mix(in srgb, var(--status-warning) 5%, transparent); }
 .pl-recovery__summary { cursor: pointer; list-style: none; padding: 14px 18px; font: 700 12px var(--font-body); letter-spacing: 0.04em; color: var(--status-warning-fg); }
 .pl-recovery__summary::-webkit-details-marker { display: none; }
 .pl-recovery__body { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); padding: 4px 18px 20px; border-top: 0.5px solid color-mix(in srgb, var(--status-warning) 30%, transparent); }
 .pl-recovery__group { padding-top: 14px; }
 .pl-recovery__hint { margin: 0 0 10px; font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-50); }
 .pl-recovery__form { display: flex; flex-direction: column; gap: 8px; }
-.pl-recovery__form select, .pl-recovery__form input { border: 0.5px solid var(--erp-hairline); border-radius: 6px; padding: 8px 10px; font: 400 13px var(--font-body); background: transparent; color: var(--text-primary); }
+.pl-recovery__form select, .pl-recovery__form input { border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-4); padding: 8px 10px; font: 400 13px var(--font-body); background: transparent; color: var(--text-primary); }
 
 /* WD-03 (D-3) — the artifact edit affordance + its locked-after-signature state. */
 .pl-edit { margin-top: 10px; }
 .pl-edit__summary { cursor: pointer; font: 500 12px var(--font-body); color: var(--erp-accent); list-style: none; }
 .pl-edit__summary::-webkit-details-marker { display: none; }
 .pl-edit__form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.pl-edit__textarea { font: 400 13px/1.5 var(--font-mono, monospace); padding: 10px; border: 0.5px solid var(--erp-hairline); border-radius: 6px; background: var(--erp-surface, transparent); color: var(--text-primary); resize: vertical; }
+.pl-edit__textarea { font: 400 13px/1.5 var(--font-mono, monospace); padding: 10px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-4); background: var(--erp-surface, transparent); color: var(--text-primary); resize: vertical; }
 .pl-edit__locked-note { margin: 8px 0 0; font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-50); }
 
 /* PRV-04 — the "Site & repo" card (SiteRepoCard.tsx). */
@@ -72,16 +72,16 @@
 .pl-site-row:first-child { border-top: none; padding-top: 0; }
 .pl-site-row__head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .pl-site-row__slug { font: 700 14px var(--font-body); color: var(--text-primary); }
-.pl-site-row__framework { font: 400 12px var(--font-body); color: var(--erp-ink-50); padding: 2px 8px; border: 0.5px solid var(--erp-hairline); border-radius: 999px; }
+.pl-site-row__framework { font: 400 12px var(--font-body); color: var(--erp-ink-50); padding: 2px 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-pill); }
 .pl-site-row__links { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
 .pl-site-row__links a { color: var(--erp-accent); word-break: break-all; }
 .pl-site-row__links em { font-style: normal; color: var(--erp-ink-50); }
 .pl-site-row__meta { margin: 0 0 8px; font: 400 12px var(--font-body); color: var(--erp-ink-50); }
-.pl-site-row__failure { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--status-critical) 8%, transparent); border: 1px solid color-mix(in srgb, var(--status-critical) 25%, transparent); font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.pl-site-row__failure { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius-8); background: color-mix(in srgb, var(--status-critical) 8%, transparent); border: 1px solid color-mix(in srgb, var(--status-critical) 25%, transparent); font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
 .pl-site-row__error, .pl-site-form__error { margin: 8px 0 0; font: 500 12px/1.4 var(--font-body); color: var(--status-critical-fg); }
 .pl-site-row__ok, .pl-site-form__ok { margin: 8px 0 0; font: 500 12px/1.4 var(--font-body); color: var(--status-ok-fg); }
 
 .pl-site-form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 0.5px solid var(--erp-hairline-soft); }
 .pl-site-form__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); max-width: 340px; }
-.pl-site-form__field select, .pl-site-form__field input { border: 0.5px solid var(--erp-hairline); border-radius: 6px; padding: 8px 10px; font: 400 13px var(--font-body); letter-spacing: normal; text-transform: none; background: transparent; color: var(--text-primary); }
+.pl-site-form__field select, .pl-site-form__field input { border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-4); padding: 8px 10px; font: 400 13px var(--font-body); letter-spacing: normal; text-transform: none; background: transparent; color: var(--text-primary); }
 .pl-site-form__field input:focus-visible, .pl-site-form__field select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }

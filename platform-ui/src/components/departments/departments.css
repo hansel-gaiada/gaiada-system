@@ -345,7 +345,16 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
 .dept-rail { display: flex; flex-direction: column; gap: 0; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); }
 .dept-rail__section { padding: 20px 22px; }
 .dept-rail__section + .dept-rail__section { border-top: 0.5px solid var(--erp-hairline); }
-.dept-rail__heading { display: flex; align-items: baseline; gap: 8px; opacity: 0.6; font-size: 10px; margin-bottom: 14px; }
+/* `color`, not `opacity` (Phase 5 a11y fix, 2026-08-22): opacity composites against
+   whatever the ambient text colour already is, double-dipping alpha on top of an
+   inherited colour and landing under the 4.5:1 AA floor (axe caught it at 3-node scale
+   on the department console, light theme). Same root cause the existing
+   PRE_EXISTING_CONTRAST_EXCLUSIONS in e2e/a11y-axe.spec.ts names for
+   `.erp-side__tagline`/`.erp-side__grouplabel`, but this one is scoped to departments.css
+   alone (not app-wide), so it is fixed here rather than deferred: `--erp-ink-50` is the
+   house alias for `--ink-subtle`, the token colors.css documents as AA-cleared for exactly
+   this case ("small caps labels"). */
+.dept-rail__heading { display: flex; align-items: baseline; gap: 8px; color: var(--erp-ink-50); font-size: 10px; margin-bottom: 14px; }
 /* Count beside the heading — the number a person wants before reading a single row. Not in the
    eyebrow's tracking: 0.30em on a digit is spacing with nothing to separate. */
 .dept-rail__count { font: 700 10px var(--font-body); letter-spacing: 0; color: var(--erp-ink-60); }

@@ -85,19 +85,18 @@ describe("design tokens", () => {
     // token layer (tokens/colors.css, tokens/spacing.css) is where --elev-*/
     // --radius-* are legitimately built out of literals in the first place.
     //
-    // EXCEPT list, honestly earned: the pre-existing "zero radius/no shadow"
-    // law was only ever ENFORCED against globals.css itself (see the test
-    // above) — nothing previously scanned component CSS for a radius or
-    // shadow literal, so creative.css/pipeline.css/portal.css already ship
-    // literal border-radius (8-12px, 999px) that predates this Phase 1 pass
-    // by an unknown margin. Rewriting those three files' radius rules onto
-    // the new scale is a real, mechanical, LOW-RISK change, but it touches
-    // components outside this pass's owned-file list (ui.css, shell.css,
-    // tokens/pm.css) and "component CSS files should not need rule changes"
-    // was the explicit brief here — so it is named, excepted, and left for
-    // the follow-up that owns those files, not silently fixed by a broad
-    // rewrite in a token-layer pass.
-    const RADIUS_EXCEPT = ["creative/creative.css", "pipeline/pipeline.css", "portal/portal.css"];
+    // EXCEPT list: the pre-existing "zero radius/no shadow" law was only ever
+    // ENFORCED against globals.css itself (see the test above) — nothing
+    // previously scanned component CSS for a radius or shadow literal, so
+    // creative.css/pipeline.css/portal.css shipped literal border-radius
+    // (8-12px, 999px) that predated this Phase 1 pass by an unknown margin.
+    // Phase 5 (2026-08-22 sweep) rewrote all three files' radius rules onto
+    // the `--radius-*` scale — the RADIUS except list is now empty, not
+    // removed outright, so a future regression still names itself here
+    // rather than silently reappearing. `creative.css` keeps its OWN shadow
+    // exception: its `box-shadow`/drop-shadow literals sit on user-uploaded
+    // imagery (before/after grading previews), a case tokens can't cover.
+    const RADIUS_EXCEPT: string[] = [];
     const SHADOW_EXCEPT = ["creative/creative.css"]; // literal rgba() drop-shadows on user-uploaded imagery
     const radiusFiles = componentCssFiles(RADIUS_EXCEPT);
     const shadowFiles = componentCssFiles(SHADOW_EXCEPT);

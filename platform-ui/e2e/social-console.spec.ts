@@ -149,7 +149,18 @@ test.describe("Inbox — AI-triage chip: four states that must not collapse into
   test("unclassified, unavailable, classified (neutral IS an answer), and purged are visibly and textually distinct", async ({ page, context }) => {
     await loginStaff(page, context, "superadmin");
     await page.goto(`${DEPT4}/inbox`);
-    await page.getByRole("tab", { name: "All" }).click();
+
+    // The queue filter is a toggle-button group, not a tab strip (Phase 5 a11y fix, 2026-08-22 —
+    // it narrows one list, it doesn't switch panels, so `role="tab"` was the wrong ARIA pattern;
+    // see InboxWorkspace.tsx's own comment). Same accessible name, corrected role — and this proves
+    // the control still actually FILTERS, not merely that a button exists: soc-thread-4 carries
+    // `status: "replied"` (demoSocial.ts), so the page's default "open" filter must hide its row,
+    // and clicking "All" must reveal it. A markup-only check (an attribute flipping) would not have
+    // caught a regression that left the click handler disconnected from the rendered list.
+    const repliedThreadRow = page.getByText("Loved the new arrivals, ordering more!");
+    await expect(repliedThreadRow).toHaveCount(0);
+    await page.getByRole("button", { name: "All" }).click();
+    await expect(repliedThreadRow).toBeVisible();
 
     // soc-thread-1 — unclassified ("nobody has looked yet"): italic, dashed, muted.
     const unclassified = page.getByText("Not yet triaged");

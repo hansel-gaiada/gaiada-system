@@ -6,7 +6,7 @@
 /* Filmstrip of uploaded images */
 .cs-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
 .cs-thumb {
-  flex: 0 0 auto; width: 72px; height: 72px; padding: 0; border-radius: 8px;
+  flex: 0 0 auto; width: 72px; height: 72px; padding: 0; border-radius: var(--radius-8);
   overflow: hidden; cursor: pointer; background: var(--surface-card);
   border: 1px solid color-mix(in srgb, var(--hairline) 100%, transparent);
   outline: 2px solid transparent; transition: outline-color .12s ease;
@@ -20,7 +20,7 @@
 /* Preview + before/after slider */
 .cs-preview { min-width: 0; }
 .cs-ba {
-  position: relative; width: 100%; border-radius: 12px; overflow: hidden;
+  position: relative; width: 100%; border-radius: var(--radius-12); overflow: hidden;
   background: var(--surface-card); border: 1px solid var(--hairline); user-select: none; touch-action: none;
   line-height: 0;
 }
@@ -35,7 +35,7 @@
 }
 .cs-ba__tag {
   position: absolute; top: 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: #fff; line-height: 1.4;
+  padding: 2px 8px; border-radius: var(--radius-pill); background: rgba(0,0,0,.55); color: #fff; line-height: 1.4;
 }
 .cs-ba__tag--l { left: 8px; } .cs-ba__tag--r { right: 8px; }
 .cs-ba__range { position: absolute; inset: auto 0 8px; width: 60%; margin: 0 auto; opacity: 0; height: 24px; }
@@ -47,7 +47,7 @@
 
 .cs-presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .cs-chip {
-  padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  padding: 6px 12px; border-radius: var(--radius-pill); font-size: 12px; cursor: pointer;
   background: var(--surface-card); color: var(--text-primary);
   border: 1px solid var(--hairline); transition: all .12s ease;
 }
@@ -73,7 +73,7 @@
 .cs-lib { display: flex; flex-direction: column; gap: 10px; }
 .cs-lib__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .cs-lib__card {
-  display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px;
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius-12);
   background: var(--surface-card); border: 1px solid var(--hairline);
 }
 .cs-lib__card.is-training { border-color: var(--accent); }
@@ -87,7 +87,7 @@
 /* Dropzone */
 .cs-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  flex: 0 0 auto; width: 72px; height: 72px; border-radius: 8px; cursor: pointer;
+  flex: 0 0 auto; width: 72px; height: 72px; border-radius: var(--radius-8); cursor: pointer;
   border: 1px dashed color-mix(in srgb, var(--text-primary) 30%, transparent);
   color: color-mix(in srgb, var(--text-primary) 55%, transparent); background: transparent; transition: all .12s ease;
 }

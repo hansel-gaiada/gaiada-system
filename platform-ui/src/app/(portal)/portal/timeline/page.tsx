@@ -124,7 +124,9 @@ function Stream({ events, now }: { events: PortalTimelineEvent[]; now: Date }) {
         <div className="cp-tl__row" key={`${e.kind}-${e.id}`}>
           <div className="cp-tl__when">
             {portalDate(e.at)}
-            <div style={{ font: "400 11px/1.5 var(--font-body)", color: "var(--ink-faint)" }}>
+            {/* `--ink-subtle`, not `--ink-faint` — the relative-days line is real, readable meta
+                a client relies on, not decoration (accessibility contract, design-language §14). */}
+            <div style={{ font: "400 11px/1.5 var(--font-body)", color: "var(--ink-subtle)" }}>
               {relativeDays(e.at, now)}
             </div>
           </div>
