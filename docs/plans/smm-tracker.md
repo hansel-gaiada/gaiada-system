@@ -2687,6 +2687,19 @@ load-bearing for a test it never mentions.
 
 ## Cross-session hazards
 
+- **`platform-nest/.env`'s `DATABASE_URL_TEST` does not point at the running test Postgres, and the
+  failure mode is SILENT.** On 2026-08-23 it named port `55433`, which is `mimi-postgres` — a different
+  project's container — and password auth simply failed. Suites **skip** rather than error when the test
+  DB is unreachable, so the run reported `11 skipped` and looked like a pass. The gaiada test database is
+  the `gaiada-test-pg-2` container (host port `55435`). `.env` is gitignored and `.env.example` documents
+  no value, so there is no "correct" entry to restore and it is not safe to edit in a shared checkout —
+  someone else may legitimately have their own Postgres on 55433. Build the URL yourself instead:
+  `PW=$(docker exec gaiada-test-pg-2 sh -c 'printf %s "$POSTGRES_PASSWORD"')` then
+  `DATABASE_URL_TEST="postgresql://postgres:${PW}@localhost:55435/postgres"`. **Always report the skip
+  count** — this is the second time in this module's history that "all green" meant "nothing ran".
+- **The full backend suite exceeds a 10-minute foreground call** (~28–42 min depending on contention).
+  Run it backgrounded and write to a log; a foreground attempt is killed at the cap with no summary.
+
 - **⚠ A git worktree does NOT isolate you from the shared Cerbos container, and that invalidates every
   authz test result taken in one.** `gaiada-cerbos-1` bind-mounts
   `<main checkout>/platform-nest/cerbos/policies` — the MAIN working tree, dirty or not — so a detached
