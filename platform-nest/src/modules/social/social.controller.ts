@@ -1613,8 +1613,28 @@ export class SocialController {
           [variantId, req.principal.userId],
         );
         if (upd.rowCount) {
+          // The SAME third-walled join `requestClientReview` above uses, for the same stated reason:
+          // `handleClientReviewWithdrawn` must reach the exact CLIENT audience `.requested` reached,
+          // and re-deriving this inside `event-handlers.ts` would be the second copy that drifts.
+          //
+          // If the variant was soft-deleted while its review sat pending, this returns NO row and the
+          // client fields stay absent. That is deliberate, and it is NOT a fallback to the review
+          // row's own `client_id`: `resolveClientRecipients` scopes recipients on `projectId`, so a
+          // clientId recovered without a trustworthy projectId would notify a WIDER audience than the
+          // original ask ever reached. Absent beats over-notifying — the handler bails on no clientId.
+          const { rows: ctx } = await c.query<{ client_id: string; project_id: string | null; title: string }>(
+            `SELECT e.client_id, e.project_id, p.title
+               FROM social_post_variants v
+               JOIN social_posts p       ON p.id = v.post_id       AND p.tenant_id = v.tenant_id
+               JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = v.tenant_id
+              WHERE v.id = $1 AND v.deleted_at IS NULL`,
+            [variantId],
+          );
           await emitEvent(c, tenantId, "social_post_variant", variantId, "social.client_review.withdrawn", {
             reviewId: upd.rows[0].id,
+            clientId: ctx[0]?.client_id ?? null,
+            projectId: ctx[0]?.project_id ?? null,
+            postTitle: ctx[0]?.title,
           });
           return { kind: "ok" as const, reviewId: upd.rows[0].id };
         }

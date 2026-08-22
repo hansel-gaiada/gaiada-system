@@ -2406,7 +2406,19 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 | **SMM-29 / 34** | Decision-gated (ClipsAI; generative images, waiting on `render-gateway-go` to leave `0.0.0`) |
 
 **Small follow-ups the seats named rather than silently absorbed:**
-- `social.client_review.withdrawn` has no registered event handler, unlike `.requested`/`.decided`
+- ~~`social.client_review.withdrawn` has no registered event handler, unlike `.requested`/`.decided`~~
+  — **CLOSED 2026-08-23** (module `0.5.19`). `handleClientReviewWithdrawn` added and registered; the
+  write path now carries `clientId`/`projectId`/`postTitle` on the event via the same third-walled
+  join `requestClientReview` uses. The real-world defect was not the missing function but the
+  missing *registration*: `.requested` left a live bell entry aimed at a row the client could no
+  longer see once the ask was withdrawn, so the client saw a vanished item rather than a retraction.
+  Proven red-then-green — deleting the registration line turns the new pin in `client-review.test.ts`
+  red with its own diagnostic. Note the pre-existing `arrayContaining` assertion in that same file
+  stayed GREEN throughout the entire period the handler was missing: a non-exhaustive registration
+  check is not a registration check. Worth remembering for the other handler maps in this module.
+  Deliberate non-change: `social.withdrawClientReview` stays impact `'low'` (its comment cited
+  "never notifies the client", which is now false — corrected in place, with the surviving ground
+  being that a withdrawal notice creates no NEW outward exposure).
 - `metrics-job.ts` reads `process.env` directly instead of `config.ts` (it was held out of that file to avoid a three-way collision)
 - The report narrative has no runtime numeric guard — only the prompt constrains a hallucinated figure
 - The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series

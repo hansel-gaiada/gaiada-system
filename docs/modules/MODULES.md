@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.18` | IN PROGRESS | Social Media | 2026-08-23 |
+| social-media | `0.5.19` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1112,7 +1112,29 @@ caught in-session this time). Brevo inbound also hands out attachment `DownloadT
 than bytes, so the token→bytes fetch is staging work behind the existing `NormalizedAttachment`
 seam — carried as a named step in design §15 R3 (v4).
 
-## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.0` Â· DEV-VERIFIED
+## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.2` Â· DEV-VERIFIED (schema/RLS/Cerbos layer; the site-audit capability itself is PLANNED)
+
+**State at 0.5.2 (2026-08-23, SM-76 schema + IAM wave, docs/plans/2026-08-23-seo-audit-capability.md).**
+Schema-and-IAM-only wave for the first-class SEO/site-audit capability (Phase 1 of the design doc).
+3 new tables (`search_finding_states`, `search_audit_checks`, `search_property_facts`,
+migrations `202608221727`/`202608221728`), `search_audits` +`group_id`/+`kind='security'`/
++`source='psi'` (CONKEY constraint surgery), `search_audit_findings` +`state_id`. All 3 new tables
+carry `tenant_id`+`client_id NOT NULL` + FORCE RLS with the module's own third-wall predicate. IAM:
+3 new catalog permissions (`search.finding.triage`, `search.finding.accept_risk` **sensitive**,
+`search.property.attest` **sensitive**), a new Cerbos kind `resource_search_finding`, a new `attest`
+action on `resource_search_property`, and matching role bundles (staff gets triage only; manager/
+company_admin/platform_admin/owner get all three). Verified against a real NOSUPERUSER test role
+(RLS: right-tenant+scope visible, no-scope and cross-tenant zero rows, partial-unique current-fact
+index holds) and a restarted, directly-probed live Cerbos instance (staff/manager/admin/cross-
+tenant/low-assurance/cross-root decisions all match design). **Known gap:** a concurrent same-day
+migration in this shared checkout retires the `group_executive` role estate-wide (D-7/IAM-15); its
+Cerbos-policy-file removal had not yet reached the search module as of this change, so the 2 policy
+files this wave touches still carry a (soon-obsolete) `group_executive` rule, matching every sibling
+`resource_search_*` file and the design doc's own text at write time — flagged for IAM-15's
+follow-through, not fixed here. `role-permission-bundles.json` was deliberately left unregenerated
+for the same reason (the live tree has ~45 unrelated in-flight policy edits from that concurrent
+effort). No application code, no endpoints, no UI in this wave — those land SM-77 onward, and the
+site-audit **capability** stays `PLANNED` until they do.
 
 **State at 0.5.0 (2026-08-01, SM-24 final QA gate, re-verdict Â§6bu/Â§6by).** Promoted from
 `IN PROGRESS` to `DEV-VERIFIED` â€” the vocabulary's own bar ("prototyped and exercised end-to-end
@@ -1246,7 +1268,7 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.18` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.19` · IN PROGRESS
 
 **0.5.18 (2026-08-23, qa) — SMM-25: the Playwright console suite, the department's whole-merge-gate
 ticket — no product code touched, so the version number does not move.** New

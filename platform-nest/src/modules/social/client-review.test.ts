@@ -440,9 +440,33 @@ describe.skipIf(!TEST_URL)("SMM-31 · client-review stage", () => {
   // "social_post_variant" stream these two new handlers also ride).
   // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-  it("socialModule.eventHandlers registers both new routes", () => {
+  it("socialModule.eventHandlers registers all three client-review routes", () => {
     expect(Object.keys(socialModule.eventHandlers ?? {})).toEqual(
-      expect.arrayContaining(["social.client_review.requested", "social.client_review.decided"]),
+      expect.arrayContaining([
+        "social.client_review.requested",
+        "social.client_review.decided",
+        "social.client_review.withdrawn",
+      ]),
     );
+  });
+
+  it("`withdrawn` is REGISTERED, not merely implemented — the client is told the ask was retracted", () => {
+    // The defect this pins: `social.client_review.withdrawn` was emitted by
+    // `social.controller.ts#withdrawClientReview` and rode the (already-drained)
+    // "social_post_variant" stream, but NOTHING was registered against it. `.requested` had put
+    // "a post is ready for your review" in the client's bell pointing at /portal/social-reviews;
+    // withdrawing left that entry live, aimed at a row the client could no longer see. A vanished
+    // row is indistinguishable from a broken portal — the exact conflation this module refuses
+    // everywhere else ("absent is not zero").
+    //
+    // This assertion is deliberately separate from the arrayContaining check above: that one is
+    // non-exhaustive and stayed green through the entire period the handler was missing, which is
+    // precisely why it did not catch this. Deleting the registration line must turn THIS red.
+    expect(
+      typeof (socialModule.eventHandlers ?? {})["social.client_review.withdrawn"],
+      "no handler registered for social.client_review.withdrawn: the event is written, relayed to " +
+        "events:social_post_variant, and read by nobody, so a retracted client ask is never " +
+        "communicated to the client who was asked",
+    ).toBe("function");
   });
 });

@@ -11,6 +11,95 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.19` — 2026-08-23 — a retracted client ask is now told to the client
+
+**Fixed**
+- `social.client_review.withdrawn` had **no registered event handler**, unlike `.requested` and
+  `.decided`. The event was emitted, relayed to the (already-drained) `events:social_post_variant`
+  stream, and read by nobody. `.requested` had put *"a post is ready for your review"* in the
+  client's bell aimed at `/portal/social-reviews`; withdrawing left that entry live, pointing at a
+  row the client could no longer see — a vanished item reads as a broken portal, not as a withdrawn
+  request. That is the same "absent is not zero" conflation this module refuses everywhere else.
+  `handleClientReviewWithdrawn` (`event-handlers.ts`) now notifies the CLIENT that the ask was
+  retracted, reaching the same audience and the same `kind: 'general'` as `.requested`.
+
+**Changed**
+- `social.controller.ts#withdrawClientReview` now enriches the `withdrawn` payload with
+  `clientId`/`projectId`/`postTitle` using the SAME third-walled join `requestClientReview` already
+  uses — rather than the handler re-deriving it, which is how a second copy of that join drifts.
+  When the variant was soft-deleted while its review sat pending the join returns no row and the
+  client fields stay **absent**; this deliberately does NOT fall back to the review row's own
+  `client_id`, because `resolveClientRecipients` scopes on `projectId` and a clientId recovered
+  without a trustworthy projectId would notify a **wider** audience than the original ask reached.
+- The `social.withdrawClientReview` MCP tool stays impact `'low'`. Its prior justification cited
+  "never notifies the client", which is no longer true; the surviving ground is that the `'medium'`
+  bar is *the first moment a variant becomes visible outside the tenant*, and a withdrawal notice
+  carries no variant content and creates no new exposure. Comment corrected in place rather than
+  left to read as current.
+
+**Tests** — `event-handlers.test.ts` +2 (the notify path asserts the retraction WORDING, not merely
+that a row landed; plus a no-recipient case pinning that absent client fields mean silent, never
+broadcast). `client-review.test.ts` +1 registration pin, deliberately separate from the existing
+non-exhaustive `arrayContaining` check — that check stayed green throughout the period the handler
+was missing, which is exactly why it did not catch this. Proven red-then-green: deleting the
+registration line turns the pin red with its own diagnostic. `src/modules/social` 538/0/0 measured
+directly (35 files).
+
+### search-marketing `0.5.2` — 2026-08-23 — SM-76: site-audit v2 schema + IAM wave
+
+**Added (schema, migrations `202608221727`/`202608221728`)**
+- `search_finding_states` — one row per (property, check_key, scope): the trackable finding entity
+  making "which properties still have finding X" a single indexed SELECT and making triage STICKY
+  across runs (design `docs/plans/2026-08-23-seo-audit-capability.md` §2.3).
+- `search_audit_checks` — per-run check coverage (`passed`/`failed`/`error`/`not_run`/`unsupported`)
+  so an empty findings list is distinguishable from "never checked" (the honesty spine, §7).
+- `search_property_facts` — provenance-stamped property facts (CMS/hosting/attestation), append-only
+  chain with a partial-unique "current fact" index.
+- `search_audits` +`group_id`, +`kind='security'`, +`source='psi'` (CONKEY constraint-surgery
+  idiom); `search_audit_findings` +`state_id` (nullable FK into `search_finding_states`).
+- All 3 new tables carry `tenant_id`+`client_id NOT NULL` + FORCE RLS with the module's byte-identical
+  third-wall predicate (`tenant_id = ANY(app_current_tenants()) AND app_module_allowed('search')`).
+
+**Added (IAM)**
+- 3 new catalog permissions: `search.finding.triage` (baseline), `search.finding.accept_risk`
+  (**sensitive** — the concealing direction: accept-risk/false-positive), `search.property.attest`
+  (**sensitive** — an accountability record that can flip a security check to passing on a later
+  run). New Cerbos kind `resource_search_finding`; new `attest` action on the existing
+  `resource_search_property` kind.
+- Role bundles: `search_manager`/`company_admin`/`platform_admin`/`owner` hold all 3; `search_staff`
+  holds `triage` only (not the two sensitive actions) — mirrors the kind's existing staff/manager
+  split on every other `resource_search_*` kind.
+- `permission-catalog.json` 298→301 (286 grantable, 78 kinds); `permission-groups.json` gained
+  `search_accept_finding_risk` and `search_attest_property_facts` (sensitive groups) + `search.finding.
+  triage` folded into `search_manage_drafts`.
+
+**Verified**
+- Live Cerbos, restarted + probed directly (`/api/check/resources`): staff gets `triage`, not
+  `accept_risk`; manager/company_admin/platform_admin get both plus `attest`; cross-tenant, low-
+  assurance, and unanchored/cross-root `group_executive` probes all DENY as designed; the IAM-04
+  permission-arm mirror (flat `perms`, no role) grants exactly `triage`, denies `accept_risk`.
+- RLS (`src/db/module-search-audit-v2-rls.test.ts`, real NOSUPERUSER role): right-tenant+scope
+  visible, no-scope zero rows, cross-tenant zero rows, empty-set zero rows, WITH CHECK blocks a
+  smuggled cross-tenant insert, the partial-unique current-fact index blocks two simultaneously-
+  current rows for one key (and allows a proper supersede chain).
+- `permission-catalog.db.test.ts` (12/12), `role-catalog-drift.db.test.ts` (5/5),
+  `iam-215-boundary-pin.test.ts` (83/83), `test:iam-chain-alignment` (25/25) all green.
+
+**Known gap, flagged not silent**
+- A concurrent same-day migration in this shared checkout (`202608230230_iam15_remove_group_
+  executive.sql`, D-7) retires the `group_executive` role estate-wide; its Cerbos-policy-file half
+  (stripping the role from ~46 `resource_*.yaml` files) had not yet reached the search module's
+  policies as of this change. This entry's 2 touched/added policy files still carry a
+  `group_executive` rule (matching the design doc's own text and every sibling `resource_search_*`
+  file as they stood at write time) and will need the same strip in IAM-15's follow-through.
+- `role-permission-bundles.json` (the generated JSON mirror) was deliberately **not** regenerated:
+  the live working tree has ~45 unrelated, uncommitted `cerbos/policies/*.yaml` edits in flight from
+  that same concurrent IAM-15 effort, and regenerating now would check in a corrupted intermediate
+  snapshot. Verified correct output locally (uncommitted) for this change's own keys.
+- Status stays module-level `DEV-VERIFIED` for schema/RLS/Cerbos (this wave); the site-audit
+  *capability* itself (checks, finding-state machine, orchestration, UI) remains `PLANNED` — SM-77
+  onward.
+
 ### social-media `0.5.18` — 2026-08-23 — SMM-25: Playwright console suite (no product code, version unchanged)
 
 **Added**

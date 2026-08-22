@@ -41,7 +41,7 @@ import { SOCIAL_REPLY_TOOL, SOCIAL_REPLY_TOOL_CLASSIFICATION } from "./reply-pre
 // SMM-16 — the inbox SLA guard's breach event + the spike detector's event, same routing table
 import {
   handlePostDispatched, handlePostPublished, handlePostFailed,
-  handleClientReviewRequested, handleClientReviewDecided,
+  handleClientReviewRequested, handleClientReviewDecided, handleClientReviewWithdrawn,
   handleInboxSlaBreached, handleInboxSpikeDetected,
 } from "./event-handlers";
 
@@ -576,11 +576,14 @@ export const socialModule: ModuleContract = {
     //    already use for 'medium' — an automation/agent principal is suspended into WS4 rather than
     //    allowed to put draft content in front of a client unsupervised.
     //  - `withdraw` is impact 'low': a write (never a read — the endpoint mutates
-    //    `social_post_client_reviews`), but a purely CORRECTIVE one. It never notifies the client
-    //    (`social.client_review.withdrawn` rides the drained stream but has no registered handler,
-    //    unlike `.requested`/`.decided`) and it only retracts exposure that already happened —
-    //    matching `syncConnectorRegistry`'s own 'low' reasoning ("its blast radius is a stale row,
-    //    not a post"). Here the blast radius is a retracted ask, not new exposure.
+    //    `social_post_client_reviews`), but a purely CORRECTIVE one. It STAYS 'low' even though
+    //    `social.client_review.withdrawn` now HAS a registered handler that does notify the client
+    //    (`handleClientReviewWithdrawn`, added because a silently-retracted ask left the client
+    //    holding a bell entry pointing at a vanished row). The 'medium' ground above is specifically
+    //    "the FIRST moment a variant becomes visible to an external party" — a withdrawal notice
+    //    carries no variant content and creates NO new exposure, it only names the retraction of
+    //    exposure that already happened. Same reasoning as `syncConnectorRegistry`'s own 'low'
+    //    ("its blast radius is a stale row, not a post"): here it is a retracted ask.
     //  - `read` carries no write/impact pair at all, matching every other plain read tool on this
     //    contract (`listPosts`, `validateVariant`, `listAccounts`) — `{status:'not_requested'}` is
     //    data, not an error, exactly as the endpoint's own comment states.
@@ -1155,10 +1158,11 @@ export const socialModule: ModuleContract = {
     "social.post.dispatched": handlePostDispatched,
     "social.post.published": handlePostPublished,
     "social.post.failed": handlePostFailed,
-    // SMM-31 — both ride the already-drained "social_post_variant" stream (see event-handlers.ts's
+    // SMM-31 — all three ride the already-drained "social_post_variant" stream (see event-handlers.ts's
     // own header for why that is deliberate, not an oversight).
     "social.client_review.requested": handleClientReviewRequested,
     "social.client_review.decided": handleClientReviewDecided,
+    "social.client_review.withdrawn": handleClientReviewWithdrawn,
     // SMM-16 — same reasoning: the inbox SLA guard and spike detector ride the same already-drained
     // stream rather than needing a main.ts change to be read at all.
     "social.inbox.sla_breached": handleInboxSlaBreached,

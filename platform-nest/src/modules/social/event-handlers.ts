@@ -8,6 +8,9 @@
 // - `social.post.failed` → notifications + mail (risk warning)
 // - `social.client_review.requested` → notifies the CLIENT (portal contacts) that a post awaits them
 // - `social.client_review.decided` → notifies STAFF (the engagement owner) of the client's decision
+// - `social.client_review.withdrawn` → notifies the CLIENT that the ask was RETRACTED (same audience
+//   as `.requested`; silence here left a live bell entry pointing at a row the client could no
+//   longer see, which reads as a broken portal rather than a withdrawn request)
 // - `social.inbox.sla_breached` → notifications + mail (risk warning — a customer-visible thread has
 //   gone unanswered past the engagement's OWN configured response window)
 // - `social.inbox.spike_detected` → notifications only (attention-needed, not yet a confirmed
@@ -238,6 +241,48 @@ export async function handleClientReviewDecided(event: OutboxEvent): Promise<voi
     entityType: "social_post_client_review",
     entityId: payload.reviewId ?? event.entityId,
     href: `/departments/social-media/posts`,
+  });
+}
+
+interface ClientReviewWithdrawnPayload {
+  reviewId?: string;
+  clientId?: string | null;
+  projectId?: string | null;
+  postTitle?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Handle `social.client_review.withdrawn`. Notifies the CLIENT that an ask has been RETRACTED.
+ *
+ * Why this exists at all: `.requested` puts "a post is ready for your review" in the client's bell,
+ * pointed at `/portal/social-reviews`. Withdrawing was silent, so the client kept a live ask for a
+ * review that no longer existed — and following it showed the item simply GONE. A vanished row is
+ * indistinguishable from a broken portal, which is the exact conflation this module refuses
+ * everywhere else ("absent is not zero"). Naming the retraction is the honest close of that loop.
+ *
+ * Same audience and the same `kind: 'general'` as `handleClientReviewRequested`: a retraction must
+ * reach everyone the original ask reached and never a WIDER set — see the write path's comment in
+ * `social.controller.ts#withdrawClientReview` for why the client fields arrive absent rather than
+ * recovered from the review row when the variant is gone. Bell only, no mail: retracting is a
+ * routine workflow step, not a customer-visible incident, matching `.decided` rather than a
+ * publish `failed`.
+ */
+export async function handleClientReviewWithdrawn(event: OutboxEvent): Promise<void> {
+  const payload = event.payload as ClientReviewWithdrawnPayload;
+  if (!payload.reviewId || !payload.clientId) return;
+
+  const recipients = await withTenants([event.tenantId], (c) =>
+    resolveClientRecipients(c, { clientId: payload.clientId!, projectId: payload.projectId ?? null, kind: "general" }),
+  );
+  if (!recipients.length) return;
+
+  await notifyBestEffort(event.tenantId, null, recipients, "social.client_review.withdrawn", {
+    title: `A post is no longer awaiting your review${payload.postTitle ? `: ${payload.postTitle}` : ""}`,
+    href: "/portal/social-reviews",
+    entityType: "social_post_client_review",
+    entityId: payload.reviewId,
+    severity: "info",
   });
 }
 

@@ -7,7 +7,7 @@ import { createCompany, createUser, addMembership } from "../../testing/fixtures
 import type { OutboxEvent } from "../../events/types";
 import {
   handlePostDispatched, handlePostPublished, handlePostFailed,
-  handleClientReviewRequested, handleClientReviewDecided,
+  handleClientReviewRequested, handleClientReviewDecided, handleClientReviewWithdrawn,
 } from "./event-handlers";
 
 let seq = 0;
@@ -350,6 +350,70 @@ describe.skipIf(!TEST_URL)("SMM-13 · social post event handlers", () => {
       createdAt: new Date().toISOString(),
     };
     await handleClientReviewRequested(event); // must not throw
+  });
+
+  it("handleClientReviewWithdrawn tells the CLIENT the ask was retracted, and never staff", async () => {
+    const reviewId = newId();
+    const event: OutboxEvent = {
+      id: newId(),
+      tenantId,
+      entityType: "social_post_variant",
+      entityId: variantId,
+      eventType: "social.client_review.withdrawn",
+      payload: { reviewId, clientId, projectId: null, postTitle: "Autumn launch teaser" },
+      originSite: "central",
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+
+    await handleClientReviewWithdrawn(event);
+
+    const { rows } = await withTenants([tenantId], (c) =>
+      c.query(
+        `SELECT type, payload FROM notifications WHERE user_id = $1 AND type = 'social.client_review.withdrawn' ORDER BY created_at DESC LIMIT 1`,
+        [clientContactUserId],
+      ));
+    expect(rows).toHaveLength(1);
+    const payload = rows[0].payload as Record<string, unknown>;
+    // Must NAME the retraction. A bell entry that still reads like a live ask is the whole defect
+    // this handler exists to close, so assert the wording, not merely that a row landed.
+    expect(String(payload.title)).toContain("no longer awaiting your review");
+    expect(String(payload.title)).toContain("Autumn launch teaser");
+    expect(payload.entityType).toBe("social_post_client_review");
+    expect(payload.entityId).toBe(reviewId);
+    // Retracting is routine, not an incident — same severity ground as `.decided`(approved).
+    expect(payload.severity).toBe("info");
+
+    // Same audience discipline as `.requested`: the client's side only.
+    const staffNotif = await withTenants([tenantId], (c) =>
+      c.query(`SELECT count(*) AS n FROM notifications WHERE user_id = $1 AND type = 'social.client_review.withdrawn'`, [ownerUserId]));
+    expect(Number(staffNotif.rows[0].n)).toBe(0);
+  });
+
+  it("handleClientReviewWithdrawn notifies NOBODY when the payload carries no clientId", async () => {
+    // The write path deliberately omits the client fields when the variant was soft-deleted while
+    // its review sat pending (see social.controller.ts#withdrawClientReview). It must NOT fall back
+    // to a wider audience: `resolveClientRecipients` scopes on projectId, so guessing here would
+    // notify people the original ask never reached. Absent must mean silent, not broadcast.
+    const before = await withTenants([tenantId], (c) =>
+      c.query(`SELECT count(*) AS n FROM notifications WHERE type = 'social.client_review.withdrawn'`));
+
+    const event: OutboxEvent = {
+      id: newId(),
+      tenantId,
+      entityType: "social_post_variant",
+      entityId: variantId,
+      eventType: "social.client_review.withdrawn",
+      payload: { reviewId: newId(), clientId: null, projectId: null },
+      originSite: "central",
+      schemaVersion: 1,
+      createdAt: new Date().toISOString(),
+    };
+    await handleClientReviewWithdrawn(event); // must not throw
+
+    const after = await withTenants([tenantId], (c) =>
+      c.query(`SELECT count(*) AS n FROM notifications WHERE type = 'social.client_review.withdrawn'`));
+    expect(Number(after.rows[0].n)).toBe(Number(before.rows[0].n));
   });
 
   it("handleClientReviewDecided(approved) notifies the engagement owner at info severity", async () => {
