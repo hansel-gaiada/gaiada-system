@@ -100,6 +100,49 @@ that safe rather than merely cheap.
 asserting the refusal message actually names the missing `network` parameter). `inbox-sync-job.test.ts`
 8/0/0 unchanged.
 
+### social-media `0.5.23` — 2026-08-23 — OAuth state is single-use; SMM-22's metered gap hardened
+
+*(This entry was missing: the seat that did the work updated `MODULES.md` but not this file, and its
+report listed CHANGELOG.md as updated. Reconstructed from its `MODULES.md` entry and its report.)*
+
+**Fixed (security) — LinkedIn/YouTube `direct`-driver OAuth `state` is now DB-backed and atomically
+single-use.** Both files' headers had named the signed-but-replayable state as a deliberate,
+follow-up-flagged simplification. New table `social_oauth_states`
+(`migrations/202608221751_social_oauth_states.sql`, third RLS wall, same predicate as
+`social_oauth_tokens`) plus a shared `publisher/oauth-state.ts` (mint/parse/consume, mirroring
+`core/google-oauth/state.ts`'s proven pattern) replace the two per-network signed-only
+implementations. **RED**, captured before the fix via a stashed round-trip: the same signed state
+verified successfully on a 2nd and 3rd presentation. **GREEN** (`oauth-state.test.ts` 10/10): a
+second consume is refused with a typed `SocialOAuthStateError("unknown_expired_or_consumed")` — never
+a silent second success, never a generic 500 — and two concurrent consumes of one token resolve to
+exactly one winner via an atomic `UPDATE ... WHERE consumed_at IS NULL`, a database-enforced property
+rather than check-then-act. Network-mismatch and cross-tenant cases covered too.
+
+**Fixed (found in the same pass, independent of the above)** — `YouTubeOAuthStateError` was never
+registered in `main.ts`'s filter list, so a malformed, forged or expired YouTube callback state
+escaped as a **body-less 500**. That is the bug class `platform-nest/CLAUDE.md` records as having
+recurred four times. Consolidating both networks' state errors into one `SocialOAuthStateError`
+closes it by construction rather than by adding a fifth one-off filter.
+
+**Hardened, NOT a live hole — stated plainly** — SMM-22's Cerbos gap for an agent/automation-origin
+metered re-drive. Live probes against a standalone Cerbos serving the **unmodified** policy showed
+`social.publishPostMetered` was **already denied** for both an n8n-origin and an agent-origin caller
+(`isUnattended`), each presenting a plausible `approvalId`: the tool is simply absent from
+`resource_mcp_tool.yaml`'s executable-tool bracket, and D14-13's grant-lift disjunct cannot fire
+without a bracket entry. What was missing was documentation and a regression test, so that is what
+landed — five live-Cerbos tests in `mcp-hub/src/cerbos.test.ts` using the real tool name, pinning the
+denial for both caller shapes with and without a grant, and that a verified human is unaffected. The
+policy edit is comment-only; `cerbos compile` verified clean before and after, with no `//` inside a
+folded scalar (the mistake in this same file that broke every policy on `main` this week).
+
+**Named, not silently decided** — `created_by` is stored on the new table for audit but is **not**
+compared against the calling principal at consume time, unlike `core/google-oauth/state.ts`'s
+login-CSRF defence. Tracked as its own follow-up.
+
+**Measured** — platform-nest social suite 531 passed / 0 failed / 5 skipped (36 files) at the time;
+`mcp-hub` 273/273, independently re-verified. `test:iam-chain-alignment` 25/25.
+
+
 ### reports `0.3.2` — 2026-08-23 — a foreign producer's series and tables are no longer dropped
 
 **Fixed**
