@@ -754,6 +754,32 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "engagementId"],
       },
     },
+    // ── SMM-35: THE ASSISTANT'S "SOCIAL SUMMARY" READ ──────────────────────────────────────────
+    // Cerbos `read` on `social_engagement` — the SAME action `listEngagements`/`getEngagementScope`
+    // already use; no new permission, no Cerbos edit. Read-only, so it needs no ASST-23 write-intent
+    // proposal — every number it returns is either a real count of our own rows or an explicit
+    // `null`/`false` for something never observed (see `assistant-summary.ts`'s own header on why an
+    // absent metric is never rendered as 0). This tool is what makes a "social summary" chat answer
+    // possible without the model inventing a follower count or a publish rate.
+    {
+      name: "social.getEngagementSummary",
+      description:
+        "Read a cross-source summary of one social engagement: post counts by status, open/escalated "
+        + "inbox thread counts, each connected account's latest KNOWN follower reading (null, never 0, "
+        + "if that account's metrics have never been pulled), and this engagement's metered-spend "
+        + "usage against all three D-9 stop-loss tiers. Makes no network call and writes nothing.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/engagements/:engagementId/assistant-summary",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          engagementId: { type: "string", description: "The engagement to summarize." },
+        },
+        required: ["tenantId", "engagementId"],
+      },
+    },
     // ── SMM-17: THE INBOX REPLY FLOW — draft -> WS4 -> send, reusing SMM-09's pattern ────────────
     // `social.createReplyDraft`/`social.updateReplyDraft`/`social.approveReplyDraft` are plain,
     // low-impact writes on OUR OWN row (never network-visible) — mirrors `social.addPostVariant`'s

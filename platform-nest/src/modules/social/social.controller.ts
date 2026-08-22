@@ -72,6 +72,10 @@ import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./k
 // the request shape and calls authorize(), content-brief.ts owns everything past that (see its
 // own header for why authorize() never lives there).
 import { runContentBrief } from "./content-brief";
+// SMM-35 — the assistant's "social summary" read: one engagement's posts/inbox/metrics/usage, honest
+// about what was never observed (see assistant-summary.ts's own header). Domain file owns the reads;
+// this controller validates the route and calls authorize(), same split as content-brief.ts.
+import { runAssistantSummary } from "./assistant-summary";
 import {
   buildCaptionPrompt, parseCaptionDraft, buildIdeaPrompt, parseIdeaDraft,
   MAX_KNOWLEDGE_HITS, MAX_BRAND_INGEST_CHUNKS, MAX_IDEA_COUNT,
@@ -1716,6 +1720,22 @@ export class SocialController {
     );
     if (!result.found) throw new NotFoundException("engagement not found");
     return result.snapshot;
+  }
+
+  // ==================================================== ASSISTANT SUMMARY (SMM-35) =============
+  // Read-only. Same Cerbos action `getEngagementScope`/`listEngagements` already use on this
+  // resource kind (`read` on `social_engagement`) — no new permission, no Cerbos edit. This is the
+  // one endpoint `social.getEngagementSummary` (index.ts) fronts; `assistant-summary.ts` owns every
+  // query. Never redacted (a read, not a write proposal) and never itself charged against the usage
+  // budget it reports (same "checking the panel is free" rule `getEngagementUsage` above carries).
+  @Get("engagements/:engagementId/assistant-summary")
+  async getAssistantSummary(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("engagementId") engagementId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_engagement", id: engagementId, tenantId, module: "social" }, "read");
+    const result = await runAssistantSummary(tenantId, engagementId);
+    if (result.kind === "not_found") throw new NotFoundException("social engagement not found");
+    return result.summary;
   }
 
   // ==================================================== INBOX REPLY FLOW (SMM-17) =============
