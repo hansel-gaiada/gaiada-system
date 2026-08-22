@@ -29,6 +29,8 @@ import { createMockPublisher, newMockPublisherState, type MockPublisherState } f
 import {
   applyPostStatuses, reconcileTenantPostStatus, reconcileOneProviderPost,
 } from "./post-status-sync-job";
+// SMM-22 — the reconcile's own ledger true-up assertions.
+import { reserveUsageSpend, findPostedLedgerRowByRefId } from "./usage-ledger";
 
 const MODULES: { modules: string[] } = { modules: ["social"] };
 
@@ -40,13 +42,14 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
   let clientId: string;
   let publisherOrgId: string;
   let igAccount: string;
+  let xAccount: string;
   let state: MockPublisherState;
   let enabledNetworksBefore: string[];
 
   beforeAll(async () => {
     await initTestDb();
     enabledNetworksBefore = config.social.publisher.enabledNetworks;
-    config.social.publisher.enabledNetworks = [...new Set([...enabledNetworksBefore, "instagram"])];
+    config.social.publisher.enabledNetworks = [...new Set([...enabledNetworksBefore, "instagram", "x"])];
     config.social.publisher.defaultOrgApiKey = "test-org-key";
 
     co = await createCompany("SMM-10 Sync Co", ["social"]);
@@ -66,6 +69,13 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
            (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
          VALUES ($1,$2,$3,$4,'instagram',$5,$6,'connected','{}','central')`,
         [igAccount, co, clientId, publisherOrgId, uniq("@brand"), uniq("ig")]), MODULES);
+    xAccount = newId();
+    await withTenants([co], (c) =>
+      c.query(
+        `INSERT INTO social_accounts
+           (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+         VALUES ($1,$2,$3,$4,'x',$5,$6,'connected','{}','central')`,
+        [xAccount, co, clientId, publisherOrgId, uniq("@brand-x"), uniq("x")]), MODULES);
   });
 
   afterAll(async () => {
@@ -80,8 +90,12 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
   });
 
   /** A variant already past dispatch: `queued`, carrying `approval_id` + `provider_post_id` — the
-   *  exact shape `dispatch.ts`'s own successful stamp leaves behind. */
-  async function makeInFlightVariant(providerPostId: string): Promise<{ variantId: string; engagementId: string }> {
+   *  exact shape `dispatch.ts`'s own successful stamp leaves behind. `accountId`/`toolName` default
+   *  to the free path's own instagram shape (every pre-existing call site is unaffected); SMM-22's
+   *  own tests below pass the X account + the metered tool name. */
+  async function makeInFlightVariant(
+    providerPostId: string, opts: { accountId?: string; toolName?: string } = {},
+  ): Promise<{ variantId: string; engagementId: string }> {
     const engagementId = newId();
     await withTenants([co], (c) =>
       c.query(
@@ -94,8 +108,8 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
     await withTenants([co], async (c) => {
       await c.query(`INSERT INTO automation_approvals
            (id, tenant_id, workflow_id, tool_name, tool_args, impact, status, requested_by, decided_by, decided_at, origin, origin_site, execution_status)
-         VALUES ($1,$2,'wf:delivery','social.publishPost','{}','high','approved',NULL,NULL,now(),'automation','main','executed')`,
-        [approvalId, co]);
+         VALUES ($1,$2,'wf:delivery',$3,'{}','high','approved',NULL,NULL,now(),'automation','main','executed')`,
+        [approvalId, co, opts.toolName ?? "social.publishPost"]);
       await c.query(
         `INSERT INTO social_posts (id, tenant_id, engagement_id, title, status, origin_site)
          VALUES ($1,$2,$3,'sync post','publishing','central')`, [postId, co, engagementId]);
@@ -103,7 +117,7 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
         `INSERT INTO social_post_variants
            (id, tenant_id, post_id, account_id, body, media, settings, args_sha256, approval_id, provider_post_id, status, origin_site)
          VALUES ($1,$2,$3,$4,'body','[]','{}','deadbeef',$5,$6,'queued','central')`,
-        [variantId, co, postId, igAccount, approvalId, providerPostId],
+        [variantId, co, postId, opts.accountId ?? igAccount, approvalId, providerPostId],
       );
     }, MODULES);
     return { variantId, engagementId };
@@ -266,5 +280,85 @@ describe.skipIf(!TEST_URL)("SMM-10 · post-status-sync-job — the reconcile saf
   it("(T6) an unknown/foreign providerPostId resolves to `false` — never leaks whether it belongs to another tenant", async () => {
     const result = await reconcileOneProviderPost(co, uniq("nonexistent"));
     expect(result).toBe(false);
+  });
+
+  // ══ (T7) SMM-22 — the usage-ledger true-up, atomic with the status flip ══════════════════════
+
+  describe("SMM-22 · the metered (X) ledger true-up", () => {
+    async function makeInFlightXVariant(providerPostId: string, engagementCapUsd = 10) {
+      const { variantId, engagementId } = await makeInFlightVariant(providerPostId, {
+        accountId: xAccount, toolName: "social.publishPostMetered",
+      });
+      const reservation = await reserveUsageSpend(co, engagementId, 0.02, engagementCapUsd, {
+        accountId: xAccount, kind: "x_post", refId: variantId, requestedBy: null, correlationId: null,
+      });
+      if (!reservation.ok) throw new Error("unreachable — fixture cap always covers 0.02");
+      return { variantId, engagementId, ledgerId: reservation.ledgerId };
+    }
+
+    it("(T7a) a 'published' authoritative status advances the variant's OWN reservation to 'completed'", async () => {
+      const providerPostId = uniq("post");
+      const { variantId, ledgerId } = await makeInFlightXVariant(providerPostId);
+
+      const result = await applyPostStatuses(co, [{ providerPostId, state: "published", publishedUrl: "https://x.example/p/1" }]);
+      expect(result.applied).toBe(1);
+
+      const { rows } = await adminPool().query<{ status: string; cost_usd: string }>(
+        `SELECT status, cost_usd FROM social_usage_ledger WHERE id = $1`, [ledgerId],
+      );
+      expect(rows[0].status).toBe("completed");
+      expect(Number(rows[0].cost_usd)).toBe(0.02); // flat X price — true-up moves status only
+      // No longer findable as 'posted' — the reconcile job's own idempotency guard against
+      // advancing an already-completed row a second time on a redelivered webhook/poll.
+      const found = await withTenants([co], (c) => findPostedLedgerRowByRefId(c, variantId), MODULES);
+      expect(found).toBeNull();
+    });
+
+    it("(T7b) a 'failed' authoritative status RELEASES the reservation: status -> 'failed', cost_usd -> 0", async () => {
+      const providerPostId = uniq("post");
+      const { ledgerId } = await makeInFlightXVariant(providerPostId);
+
+      await applyPostStatuses(co, [{ providerPostId, state: "failed", error: "network rejected the post" }]);
+
+      const { rows } = await adminPool().query<{ status: string; cost_usd: string }>(
+        `SELECT status, cost_usd FROM social_usage_ledger WHERE id = $1`, [ledgerId],
+      );
+      expect(rows[0].status).toBe("failed");
+      expect(Number(rows[0].cost_usd)).toBe(0);
+    });
+
+    it("(T7c) a 'cancelled' authoritative status ALSO releases the reservation, the same as 'failed'", async () => {
+      const providerPostId = uniq("post");
+      const { ledgerId } = await makeInFlightXVariant(providerPostId);
+
+      await applyPostStatuses(co, [{ providerPostId, state: "cancelled" }]);
+
+      const { rows } = await adminPool().query<{ status: string; cost_usd: string }>(
+        `SELECT status, cost_usd FROM social_usage_ledger WHERE id = $1`, [ledgerId],
+      );
+      expect(rows[0].status).toBe("failed");
+      expect(Number(rows[0].cost_usd)).toBe(0);
+    });
+
+    it("(T7d) a redelivered 'published' status for an ALREADY-terminal variant applies zero rows and does NOT touch the (already-completed) ledger row a second time", async () => {
+      const providerPostId = uniq("post");
+      const { ledgerId } = await makeInFlightXVariant(providerPostId);
+      const first = await applyPostStatuses(co, [{ providerPostId, state: "published", publishedUrl: "https://x.example/p/1" }]);
+      expect(first.applied).toBe(1);
+
+      const second = await applyPostStatuses(co, [{ providerPostId, state: "published", publishedUrl: "https://x.example/p/1" }]);
+      expect(second.applied).toBe(0); // `WHERE status IN ('queued','publishing')` already excludes this row
+
+      const { rows } = await adminPool().query<{ status: string }>(`SELECT status FROM social_usage_ledger WHERE id = $1`, [ledgerId]);
+      expect(rows[0].status).toBe("completed"); // unchanged by the redelivery
+    });
+
+    it("(T7e) a non-metered (instagram) variant's reconcile never touches the ledger at all — no row to find, no query wasted", async () => {
+      const providerPostId = uniq("post");
+      const { variantId } = await makeInFlightVariant(providerPostId); // instagram, the free tool — no reservation exists
+      await applyPostStatuses(co, [{ providerPostId, state: "published", publishedUrl: "https://instagram.example/p/1" }]);
+      const found = await withTenants([co], (c) => findPostedLedgerRowByRefId(c, variantId), MODULES);
+      expect(found).toBeNull(); // there was never a row to true up — confirms this is a genuine no-op, not a silent failure
+    });
   });
 });

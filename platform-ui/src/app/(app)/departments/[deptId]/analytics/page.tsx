@@ -6,8 +6,9 @@ import { getDepartment } from "@/lib/departments";
 import { Card } from "@/components/ui";
 import { AccessDenied } from "@/components/social/AccessDenied";
 import { AnalyticsPanel } from "@/components/social/AnalyticsPanel";
+import { UsagePanel } from "@/components/social/UsagePanel";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { listEngagements, listDailyMetrics, listPostMetrics } from "@/lib/social";
+import { listEngagements, listDailyMetrics, listPostMetrics, getEngagementUsage } from "@/lib/social";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
@@ -70,9 +71,10 @@ export default async function DepartmentSocialAnalyticsPage({ params, searchPara
     );
   }
 
-  const [daily, posts] = await Promise.all([
+  const [daily, posts, usage] = await Promise.all([
     listDailyMetrics(userId, tenant, selectedEngagementId),
     listPostMetrics(userId, tenant, selectedEngagementId),
+    getEngagementUsage(userId, tenant, selectedEngagementId),
   ]);
 
   if (daily.forbidden || posts.forbidden) {
@@ -84,20 +86,29 @@ export default async function DepartmentSocialAnalyticsPage({ params, searchPara
   }
 
   return (
-    <Card
-      title="Analytics"
-      headerRight={
-        engagements.data.length > 1 ? (
-          <form method="get" aria-label="Engagement filter" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select name="engagementId" defaultValue={selectedEngagementId}>
-              {engagements.data.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
-            <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Filter</button>
-          </form>
-        ) : undefined
-      }
-    >
-      <AnalyticsPanel dailySeries={daily.data} postMetrics={posts.data} />
-    </Card>
+    <>
+      <Card
+        title="Analytics"
+        headerRight={
+          engagements.data.length > 1 ? (
+            <form method="get" aria-label="Engagement filter" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <select name="engagementId" defaultValue={selectedEngagementId}>
+                {engagements.data.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Filter</button>
+            </form>
+          ) : undefined
+        }
+      >
+        <AnalyticsPanel dailySeries={daily.data} postMetrics={posts.data} />
+      </Card>
+      {/* SMM-22 — the usage/ledger panel design §08 names for this tab. `social.ledger.read` is a
+          SEPARATE permission from the analytics reads above, so this renders independently even
+          when a viewer lacks (or holds) only one of the two — never folded into the same
+          `forbidden` check, which would conflate two different Cerbos decisions into one. */}
+      <Card title="Metered spend (X)">
+        {usage.forbidden ? <AccessDenied what="view metered spend" /> : <UsagePanel usage={usage.data} />}
+      </Card>
+    </>
   );
 }

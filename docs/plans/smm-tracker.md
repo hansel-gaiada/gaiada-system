@@ -32,9 +32,13 @@ not afterwards.
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **6** | 6 ✅ |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
-| P3 content ops | **7** (+1 partial: SMM-25 e2e) | 8 |
+| P3 content ops | **8** (+1 partial: SMM-25 e2e) | 8 |
 | P4 agents + assistant | 0 | 3 |
 | Decision-gated | — | 3 (1 dead) |
+
+**Note (2026-08-22, senior-be, SMM-22):** X metering landed — see this file's SMM-22 evidence block
+(P3 table below). The scoreboard's P3 row above is now updated to 8/8 landed (SMM-25's own e2e
+Playwright suite is the one still-partial item, unrelated to this ticket).
 
 **Note (2026-08-21, medior, SMM-16):** the module-version line below still reads `0.5.11`, pre-dating
 both SMM-15 (0.5.12) and this ticket (0.5.13, `docs/modules/MODULES.md`'s own entry) — flagged per
@@ -1245,7 +1249,7 @@ any single capability is real, that phase decides how `direct` gets registered a
 | SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ✅ **merged** | backend + frontend DEV-VERIFIED, evidence below; `main.ts` registration **CONFIRMED landed** 2026-08-20 by the SMM-33/24 docs pass (this row previously said "still pending merge" — stale, corrected: `main.ts` now imports and calls `startMetricsPullLoop`) |
 | SMM-20 | Asset attach only; `ai.imageGen` ships inert and names why | ✅ | files/Drive/Studio `creative_assets` attach, browser-driven; see evidence below |
 | SMM-21 | Metrics → `social_metrics_daily`, nightly flow, Analytics tab | ⬜ | |
-| SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ⬜ | widens SMM-09's budget stage |
+| SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ✅ **merged** | backend DEV-VERIFIED against live Postgres (591/0/5); usage panel UI **unit/type-checked only, NOT browser-driven** — see evidence below |
 | SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ✅ | backend DEV-VERIFIED against live Postgres + Redis + a real sidecar round trip, evidence below |
 | SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | ✅ **docs closed** 2026-08-20 | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20; `docs/FRONTEND-BFF-CONTRACT.md` §19 gained the missing dispatch-endpoint row, the webhook-intake row, and the two SMM-21 metrics rows, each verified against the controller code read directly. **The AGPL source-offer itself was NOT built as of this pass** — confirmed then (no footer surface anywhere in the staff console) and a placement recommended, not built. **Closed 2026-08-21 by senior-uiux** — see the (now-closed) gap entry below for the placement decision, the exact copy, and the browser evidence |
 | SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
@@ -1599,6 +1603,166 @@ would have refused the exact staff this ticket is for; (3) detach reuses the pre
 `updateVariant` PATCH rather than a new endpoint — sending the filtered `media` array is itself a
 legal edit under the SAME editability law, so no new backend surface was needed for removal.
 
+**SMM-22 evidence (2026-08-22, senior-be).** Worktree started 6 commits behind `main`'s tip
+(`git log --oneline -1` did not match; `git merge-base --is-ancestor HEAD main` confirmed) — missing
+SMM-17's own inbox-reply landing (`reply-precondition.ts`, `InboxWorkspace.tsx`) entirely. `git merge
+main` (fast-forward, clean) pulled everything in before any of this ticket's own code was written,
+stated per this file's own repeated cross-session-hazard note.
+
+**No migration.** `social_usage_ledger` and `social_engagements.usage_budget_usd` (both 0105) already
+carried everything this ticket needed.
+
+**The barred twin, made real without unbarring anything by default.** `social.publishPostMetered`
+now has a genuine dispatch endpoint (`POST variants/:variantId/publish-metered`, `social.controller.ts`,
+wired to the SAME `dispatch.ts#dispatchApprovedPublish` the free tool uses — one implementation,
+`toolName` threaded through) and a declared `McpToolDef` (`modules/social/index.ts`) — the module
+contract's own "don't declare a tool with no endpoint" rule no longer blocks it, since the endpoint is
+now real. What did NOT change: `core/approval-executables.ts`'s bar on it, which stays the default
+(`config.social.usage.meteredPublishEnabled` defaults `false`, unset by every existing deployment) —
+`registerSocialExecutableApprovals()` still bars it exactly as SMM-09 left it. Lifting the bar is a
+NEW, deliberate primitive (`liftBarredExecutable`, approval-executables.ts) called from exactly ONE
+config-gated site (`registerSocialMeteredExecutableApprovalIfEnabled`) that THROWS AT BOOT if
+`SOCIAL_METERED_PUBLISH_ENABLED=true` while X's per-post price
+(`SOCIAL_X_PER_POST_COST_USD`/`SOCIAL_X_PER_POST_WITH_LINK_COST_USD`) is unconfigured — an
+auto-executing money tool with no price is exactly the "under-count" failure this ticket exists to
+prevent. `d14-smm-22-social-metered-publish-registry.test.ts` (B1)/(B2)/(B3)/(B4) prove: boot-refuses
+when enabled+unpriced (both halves — either price alone is not enough), lifts cleanly when priced
+(real lockKey, `neverAutoRetry:true`, free tool untouched), and re-running the bootstrap with the flag
+off is a no-op (stays barred). `metered_network_requires_metered_tool` (SMM-09's own check) still
+refuses a metered-network variant on the free tool — unchanged, re-proven by (C4a). A NEW symmetric
+check, `metered_tool_requires_metered_network` (C4b), refuses the other direction (a non-metered
+variant on the metered tool) — belt and braces, since there was previously no reason to guard it.
+Cerbos's `resource_mcp_tool.yaml` executable-tool list was DELIBERATELY NOT touched — the code-side
+flag is the real gate either way, and hand-editing a security policy file as a side effect of an env
+var felt like exactly the kind of silent half-unbar this ticket was told not to do; a deployment that
+lifts the bar AND wants agent/automation-origin re-drives (as opposed to a human's own manual
+`publish-metered` call, which needs no Cerbos change) must add that entry itself — named as a
+follow-up, not done.
+
+**The stop-loss chain's three tiers, and proof that BOTH checkpoints enforce them — not one.**
+Engagement (SMM-09's own, unchanged) → tenant (new) → global (new), `usage-ledger.ts#evaluateUsageBudget`,
+one implementation reused by both checkpoints:
+- **The precondition** (`publish-precondition.ts`'s budget stage, run by the D14 executor AND by
+  `dispatch.ts`'s own re-run) now evaluates all three tiers for a metered network.
+  `d14-smm-22-social-metered-publish-registry.test.ts` (C1) proves the TENANT tier alone refuses a
+  fresh engagement with plenty of its OWN headroom, because a DIFFERENT engagement in the same tenant
+  already spent past the tenant cap; (C2) proves the GLOBAL tier the same way across two DIFFERENT
+  tenants. Both run `evaluatePublishPrecondition` directly, with `dispatch.ts` nowhere in the call
+  stack — this is the precondition's OWN enforcement, independently proven.
+- **The reservation** (`dispatch.ts`, new) is the ledger's own "ONE choke-point before dispatch"
+  (0105's header): a per-ENGAGEMENT advisory lock (`SOCIAL_USAGE_LEDGER_LOCK_NS`, a NEW namespace,
+  distinct from the variant lock), re-sums all three tiers ONE LAST TIME under it, and inserts the
+  `posted` ledger row atomically — all BEFORE any network call. `usage-ledger.test.ts` (T5) proves it
+  airtight against two SEQUENTIAL reservations that each individually fit but jointly exceed the cap
+  (deterministic, no timing dependency). `dispatch.test.ts` (M5) proves the END-TO-END property under
+  REAL concurrency: two variants on the same engagement, `Promise.all`'d, room for exactly one —
+  exactly one dispatch succeeds, the other refuses `budget_exceeded`, and exactly one nonzero-cost
+  ledger row exists afterward. Re-run 5× with no flake.
+- **⚠ A real design defect found and fixed before it shipped:** the first version of the precondition
+  change applied the tenant/global tiers to EVERY publish, including $0 ones — meaning a single
+  tenant's X overspend would have frozen every OTHER tenant's free Instagram/Facebook posting
+  platform-wide the moment the global cap was breached. Fixed: the tenant/global tiers now gate ONLY
+  an actually-metered dispatch (`METERED_NETWORKS.has(network)`); a $0 post's only budget exposure is
+  still the pre-existing, unchanged, engagement-scoped circuit breaker SMM-09 already shipped.
+
+**X's per-post price** is `config.social.usage.xPerPostCostUsd`/`xPerPostWithLinkCostUsd`
+(`SOCIAL_X_PER_POST_COST_USD`/`SOCIAL_X_PER_POST_WITH_LINK_COST_USD`, `moneyEnv` — throws on an
+unparseable value, `null` when unset) — no default ships, and design §05's own ~$0.015/~$0.20 figures
+are its own "re-verify at build time" caveat, never copied in as a measured fact.
+`media-rules.ts#estimateCostUsd`'s contract changed from returning a bare `number` to
+`{ok:true,costUsd}|{ok:false,reason:"x_price_not_configured"}` — an absent price now REFUSES
+(`metered_price_unconfigured`, new token) everywhere it is consulted (the precondition's budget
+stage, `dispatch.ts`'s own reservation, every composer/approval-card read on `social.controller.ts`)
+rather than silently pricing at $0. The GLOBAL cap has a documented default
+(`SOCIAL_GLOBAL_MONTHLY_CAP_USD`, `numericEnv`, default $100/mo — design §05's own words, "until X
+usage is proven"); the TENANT cap is optional, unset-skips-tier, mirroring `search`'s own
+`tenantMonthlyCapUsd` convention exactly.
+
+**A ledger row, posted → completed/failed, and who trues it up.** `dispatch.ts`'s reservation inserts
+`posted` at the estimate. On a SYNCHRONOUS dispatch failure (schedulePost threw, or media/OAuth
+resolution failed before any network call), `dispatch.ts` itself releases it
+(`markUsageLedgerFailed`, cost → 0, same statement) — nothing was spent. On SUCCESS, the row
+deliberately STAYS `posted` (the variant's own status is `queued`, not `published`, at that same
+instant) — `post-status-sync-job.ts`'s EXISTING reconcile sweep (`applyPostStatuses`, both the safety
+poll and the webhook intake) is extended to true it up IN THE SAME TRANSACTION as the variant's own
+authoritative status flip: `published` → `completed` (cost unchanged — X's price is flat, there is no
+"actual" to correct, unlike search's own vendor-reported true-up), `failed`/`cancelled` → `failed`
+(cost → 0, released). `post-status-sync-job.test.ts` (T7a-e) proves all four outcomes plus the
+idempotent-redelivery case (a second webhook/poll for an already-`completed` row touches nothing) and
+that a non-metered variant's reconcile never even looks for a ledger row.
+
+**The estimate on the approval card.** `GET variants/:variantId/publish-preconditions`
+(`social.controller.ts`) now returns `estimatedCostUsd`/`costUnavailableReason` alongside the verdict
+— computed fresh (never the stored column), `null` only for an unpriced X variant, rendered by
+`VariantCard.tsx`'s existing "Check now" preview as either a "this will cost $X" line or an honest
+"no price configured, this will refuse" warning. Every composer write path
+(`createVariant`/`updateVariant`/`attachMedia`) now refuses the WHOLE write
+(`resolveEstimatedCostOrRefuse`) rather than persisting a fabricated `$0` when X pricing is
+unconfigured; the two GET-only reads (`getVariantValidation`, the approval card above) answer
+`estimatedCostUsd: null` as DATA, never a thrown refusal — asking is not spending.
+
+**Usage panel + rollups.** New `GET engagements/:engagementId/usage` (`social.ledger.read`, already a
+0106-forward-seeded permission — this is the first ticket to declare it) returns the same three-tier
+snapshot the precondition evaluates. Rendered by a new `UsagePanel.tsx` on the Analytics tab (design
+§08's own "usage/ledger panel" line), alongside the pre-existing `AnalyticsPanel`. The
+`social.usage_cost.month` exec rollup (`modules/social/index.ts`) already existed from SMM-30's
+forward scaffolding and needed no change — it was already reading `social_usage_ledger` correctly.
+**⚠ NOT browser-driven** — unlike SMM-12/32's own Playwright-verified panels, this pass verified the
+panel only by `tsc --noEmit` + the full platform-ui unit suite; DEMO_MODE fixture data was added
+(`demoSocial.ts`, a synthetic, clearly-labeled MTD spend) but nobody drove it in a real browser this
+pass. Named as a real gap, not silently claimed as DEV-VERIFIED.
+
+**`main.ts` — genuinely nothing to hand over this time.** No new scheduled loop, no new module
+registration call, nothing outside what Nest's own controller/module-contract auto-wiring already
+covers — the first SMM ticket in this file's own history with an honest "no main.ts line" answer.
+
+**Refusal tokens — every one, and which are new.** `metered_price_unconfigured` (new, budget stage)
+and `metered_tool_requires_metered_network` (new, scope stage) are added to `PUBLISH_REFUSAL`; every
+other token (`metered_network_requires_metered_tool`, `budget_exceeded`, the whole six-stage
+vocabulary) is REUSED, unchanged.
+
+Test counts: **591 / 0 / 5** across `src/modules/social` + `d14-smm-09-social-publish-registry.test.ts`
++ `d14-smm-17-social-reply-registry.test.ts` + the new `d14-smm-22-social-metered-publish-registry.test.ts`
+(this ticket's own fourth file in the set). Baseline **measured directly**: immediately after this
+ticket's SOURCE changes landed but before any of its own new test files were written, the same
+`src/modules/social` set alone came back **476 passed, 1 failed, 5 skipped** — the one failure was
+`publish-gate.test.ts`'s own pre-existing assertion that the metered tool "STILL never appears" on the
+module contract, which stopped being true the moment this ticket declared its real endpoint (fixed,
+not silently loosened — the test now asserts the twin IS declared but STAYS barred by default).
+476 + 1 (fixed) + 39 new (16 `usage-ledger.test.ts` + 6 `dispatch.test.ts` M-series + 5
+`post-status-sync-job.test.ts` T7-series + 12 `d14-smm-22-...-registry.test.ts`) + 53
+(`d14-smm-09-...`, pre-existing, unaffected) + 22 (`d14-smm-17-...`, pre-existing, unaffected) = 591 —
+matches the measured final figure exactly. The full combined run was executed TWICE (once mid-fix,
+once final, after finding and fixing the $0-post budget-gating defect named above) landing on
+591/0/5 both times; `dispatch.test.ts`'s (M5) concurrency test was additionally re-run alone 5× with
+no flake. `tsc --noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/
+`lint:postiz-deps` all green (no migration — still 130 files; the new cross-tenant global-sum read
+needed NO lint-withtenants allowlist entry — implemented as a per-tenant fan-out, the lint's own
+documented PREFERRED alternative to an architect-ratified exception). `test:iam-chain-alignment`
+green (25/25, unaffected — `social.ledger.read` was already a catalogued, bundle-assigned permission
+from SMM-30's forward-seeding; no Cerbos policy file touched).
+
+`platform-ui`: **2592 / 0 / 0**, full suite, run twice (once before, once after the `rbac.ts`/
+`rbac-capability-map.ts`/`demoSocial.ts` UI-wiring passes) and stable both times. `tsc --noEmit`
+clean. `rbac-capability-parity.test.ts` includes the new `social.ledger.read` pairs (verified against
+0106's own role_permission rows, not inferred) and stays green.
+
+**Anything the spec did not answer, named rather than silently decided:** (1) whether X actually
+charges on request-acceptance vs. confirmed-publish, and whether a later removal refunds, is a real
+X-billing fact this ticket has no way to verify (no live X Developer Portal account, D-23) — the
+ledger's own lifecycle (reserve at dispatch-acceptance, true-up on confirmed publish/failure) is the
+best-supported reading of design §05's "estimated at dispatch, trued-up on completion" language, not
+an invented assumption, but it is flagged as a assumption rather than a verified fact; (2) no
+`social.ledger.admin` override endpoint was built (raise a cap, clear a blocked state) — the
+permission stays catalogued-but-undeclared on the module contract, matching this file's own "don't
+declare a permission before its endpoint exists" rule; (3) the usage panel is unit-tested, not
+browser-driven (see above) — a genuine, named gap for a future pass or the merge orchestrator to
+close; (4) `cerbos/policies/resource_mcp_tool.yaml` was deliberately left untouched even though
+lifting the bar is now possible — an agent/automation-origin re-drive of an unbarred metered publish
+needs that Cerbos entry too (D14-13's own doctrine), and adding it as a side effect of a code change
+felt like exactly the silent half-unbar this ticket was told not to do; named as a follow-up for
+whoever first sets `SOCIAL_METERED_PUBLISH_ENABLED=true` for real.
+
 ## P4 — agents + assistant ⬜
 
 | # | Ticket | State |
@@ -1647,14 +1811,17 @@ legal edit under the SAME editability law, so no new backend surface was needed 
 
 ---
 
-## What is actually left (2026-08-22)
+## What is actually left (2026-08-22, updated same day by SMM-22's own pass)
 
-**36 tickets merged.** P0, P1, P2 and the whole `direct`-driver wave are closed. Module `0.5.14`;
-`src/modules/social` 503/503, `platform-ui` 2574/2574.
+**37 tickets merged.** P0, P1, P2, P3 and the whole `direct`-driver wave are all closed now that
+SMM-22 (X metering) has landed — see its own evidence block above. Module `0.5.15`;
+`src/modules/social` + the three `d14-smm-{09,17,22}-social-*-registry.test.ts` files 591/0/5,
+`platform-ui` 2592/0/0 (both this pass's own directly-measured figures, not carried over from an
+earlier session's stale count — see SMM-22's evidence block for the full arithmetic).
 
 | Remaining | Note |
 |---|---|
-| **SMM-22** X metering | The money path. Held back deliberately all session — it widens SMM-09's budget stage and touches `dispatch.ts`, and it is the one ticket where a mistake costs real money |
+| **SMM-22 follow-ups** | Usage panel not browser-driven (unit/type-checked only); `resource_mcp_tool.yaml` not updated for the (currently unused) agent/automation-origin metered-tool re-drive case; X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
 | **SMM-25** full-stack e2e | 🟡 partial — the DEMO_MODE social fixture landed in SMM-14; the Playwright console suite has not |
 | **SMM-26 / 27 / 35** | P4: MCP agent surface, best-time-to-post, assistant integration |
 | **SMM-29 / 34** | Decision-gated (ClipsAI; generative images, waiting on `render-gateway-go` to leave `0.0.0`) |

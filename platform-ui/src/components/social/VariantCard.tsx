@@ -267,6 +267,20 @@ export function VariantCard({
               {describeRefusal(preview.reason ?? "")}
             </p>
           )}
+          {/* SMM-22 — the approval card's own live estimate: the price of the click, BEFORE the
+              click, re-verified against config at the SAME instant the gate itself was checked —
+              never the stale `variant.estimatedCostUsd` a prior save happened to store. */}
+          {!previewError && preview && preview.estimatedCostUsd !== null && preview.estimatedCostUsd > 0 && (
+            <p style={{ margin: "4px 0 0", font: "600 12px var(--font-body)", color: "var(--erp-ink-70)" }}>
+              This publish will cost ${preview.estimatedCostUsd.toFixed(3)} (metered).
+            </p>
+          )}
+          {!previewError && preview && preview.estimatedCostUsd === null && (
+            <p style={{ margin: "4px 0 0", font: "600 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>
+              This is a metered post and no price is configured yet — publishing will refuse rather
+              than spend at an unknown rate.
+            </p>
+          )}
         </div>
       </div>
 

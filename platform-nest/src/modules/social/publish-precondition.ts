@@ -54,6 +54,15 @@ import { variantArgsSha256, argsSha256 } from "./canonical-args";
 import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
 import { assertDispatchChain } from "./publisher/provisioning";
 import { SocialPublisherError } from "./publisher/types";
+// SMM-22: moved to its own leaf module — see this file's "module-scope GUC" section below for why,
+// and for the re-export that keeps every OTHER file's existing import path unchanged.
+import { declareSocialModuleScope } from "./module-scope";
+// SMM-22 — the D-9 stop-loss chain's tenant + global tiers, and X's config-sourced price. The
+// engagement tier stays computed inline below (it was already here, pre-this-ticket); the tenant
+// and global sums and the pure evaluateUsageBudget arithmetic are `usage-ledger.ts`'s own — one
+// implementation, reused here AND by `dispatch.ts`'s reservation, never a second copy.
+import { evaluateUsageBudget, resolveXPricing, sumUsageMonthToDate, sumGlobalUsageMonthToDate } from "./usage-ledger";
+import { config } from "../../config";
 
 /** The two tool names D-14 splits the publish path across. `social.publishPost` is the $0 path and
  *  is registry-eligible; `social.publishPostMetered` carries any variant on a metered network (X
@@ -68,6 +77,15 @@ export const SOCIAL_PUBLISH_METERED_TOOL = "social.publishPostMetered";
  *  cannot even REPRESENT a low-impact write. A publish that is not `high` is a publish that does not
  *  suspend. */
 export const SOCIAL_PUBLISH_TOOL_CLASSIFICATION = { write: true, impact: "high" } as const;
+
+/** SMM-22 — the metered twin's classification. SPREAD, never retyped, exactly like
+ *  `SOCIAL_REPLY_TOOL_CLASSIFICATION`: a metered publish is the SAME outbound-public,
+ *  irreversible act as the free one, so it shares one classification literal, not two that could
+ *  drift. Used by `core/approval-executables.ts`'s SMM-22 section (only reachable when the bar is
+ *  lifted) and by `modules/social/index.ts`'s McpToolDef declaration (declared regardless of
+ *  whether the bar is lifted — the tool exists and suspends into WS4 either way; only auto-execution
+ *  on approval is config-gated). */
+export const SOCIAL_PUBLISH_METERED_TOOL_CLASSIFICATION = { ...SOCIAL_PUBLISH_TOOL_CLASSIFICATION };
 
 // ── The typed refusal vocabulary ────────────────────────────────────────────────────────────────
 
@@ -99,6 +117,12 @@ export const PUBLISH_REFUSAL = {
    *  bar is visible at the tool surface rather than as a runtime branch; a metered variant on
    *  `social.publishPost` is a routing bug, and it fails closed here rather than spending. */
   meteredNetworkRequiresMeteredTool: "metered_network_requires_metered_tool",
+  /** SMM-22, the symmetric belt-and-braces check: a NON-metered-network variant reached the
+   *  metered tool. Not itself a money risk (no cap exists to breach), but a routing bug the OTHER
+   *  direction from `meteredNetworkRequiresMeteredTool` — the metered path should never write an
+   *  `x_post`-kind ledger row for, say, an Instagram post. Refused at the same stage for the same
+   *  reason: the tool-name split IS the D-14 gate, and it must hold both ways. */
+  meteredToolRequiresMeteredNetwork: "metered_tool_requires_metered_network",
 
   // ── (2) quota ──────────────────────────────────────────────────────────────────────────────
   /** The account's live posting quota is spent. `quota_unknown` is deliberately NOT escalated —
@@ -133,9 +157,21 @@ export const PUBLISH_REFUSAL = {
   variantNotApproved: "variant_not_approved",
 
   // ── (5) budget ─────────────────────────────────────────────────────────────────────────────
-  /** This engagement's monthly metered cap is spent (or would be by this publish). Fail-closed at
-   *  the engagement tier; the tenant and global tiers of the stop-loss chain are SMM-22's. */
+  /** D-9's stop-loss chain tripped at SOME tier — engagement, tenant, or global. The engagement
+   *  tier was SMM-09's own check; SMM-22 adds the tenant and global tiers to the SAME token rather
+   *  than inventing a per-tier spelling, because every tier answers the identical operator
+   *  question ("this publish would spend past a configured cap") and a caller branches on `stage`
+   *  ("budget"), not on WHICH tier, to render it. Which tier tripped is visible on the usage panel,
+   *  never inferred from the refusal token alone. */
   budgetExceeded: "budget_exceeded",
+  /** SMM-22, defect class #4: X's per-post price is unconfigured. FAIL CLOSED — an absent price
+   *  must refuse, never default to $0 (a zero price is an unmetered spend). This is the steady
+   *  state for every deployment that has not set `SOCIAL_X_PER_POST_COST_USD`/
+   *  `SOCIAL_X_PER_POST_WITH_LINK_COST_USD`, which today is every deployment (X also ships
+   *  disabled at `SOCIAL_NETWORKS_ENABLED`, so the `scope` stage's `network_disabled` refusal
+   *  fires first in practice — this branch exists so turning X on does not silently turn the price
+   *  requirement off with it). */
+  meteredPriceUnconfigured: "metered_price_unconfigured",
 
   // ── (6) creator-info (D-22) ────────────────────────────────────────────────────────────────
   /** TikTok variant, and no creator-info re-verification is available at this instant. FAIL CLOSED,
@@ -167,6 +203,7 @@ export const PUBLISH_REFUSAL_STAGE: Record<PublishRefusalReason, PublishPrecondi
   [PUBLISH_REFUSAL.networkNotInScope]: "scope",
   [PUBLISH_REFUSAL.engagementInactive]: "scope",
   [PUBLISH_REFUSAL.meteredNetworkRequiresMeteredTool]: "scope",
+  [PUBLISH_REFUSAL.meteredToolRequiresMeteredNetwork]: "scope",
   [PUBLISH_REFUSAL.quotaExhausted]: "quota",
   [PUBLISH_REFUSAL.mediaRulesFailed]: "quota",
   [PUBLISH_REFUSAL.argsHashMismatch]: "hash",
@@ -174,6 +211,7 @@ export const PUBLISH_REFUSAL_STAGE: Record<PublishRefusalReason, PublishPrecondi
   [PUBLISH_REFUSAL.approvalAlreadyConsumed]: "unconsumed",
   [PUBLISH_REFUSAL.variantNotApproved]: "unconsumed",
   [PUBLISH_REFUSAL.budgetExceeded]: "budget",
+  [PUBLISH_REFUSAL.meteredPriceUnconfigured]: "budget",
   [PUBLISH_REFUSAL.creatorInfoUnverified]: "creator_info",
   [PUBLISH_REFUSAL.creatorSelectionNoLongerPermitted]: "creator_info",
 };
@@ -283,40 +321,14 @@ export function publishLockKey(toolArgs: Record<string, unknown>, toolName: stri
 }
 
 // ── the module-scope GUC ────────────────────────────────────────────────────────────────────────
-
-/**
- * ⚠ THE SINGLE MOST IMPORTANT LINE IN THIS FILE. Every `social_*` table carries 0105's THREE-wall
- * policy: `tenant_id = ANY(app_current_tenants()) AND app_module_allowed('social')`. The executor
- * opens its claim transaction with `withTenants([tenantId], ...)` and NO `{modules}` option — it is
- * a generic executor and has no business knowing which module a registered tool belongs to. With
- * `app.scopes` unset, `app_module_allowed('social')` is FALSE and every query below reads ZERO ROWS,
- * silently, fail-closed. That would make this entire gate answer `variant_not_found` for a perfectly
- * healthy publish — the "mysteriously returns nothing" failure the module's own controller header
- * names as the commonest bug in this codebase.
- *
- * So the precondition declares its own module scope, ADDITIVELY and idempotently, on the caller's
- * transaction. `set_config(..., true)` is transaction-local (it unwinds at COMMIT/ROLLBACK), it adds
- * a scope rather than replacing one, and it is not a data write — `precondition`'s "must not write"
- * contract is about domain rows, and this narrows nothing and mutates nothing durable. The only
- * other tables the executor touches on this connection are `automation_approvals` and `companies`,
- * neither of which consults `app.scopes` at all (0014's policy is the tenant wall only).
- *
- * Exported so `inbox-retention-job.ts` (SMM-36) can reuse the EXACT same additive scope declaration
- * rather than growing a second copy — the purge job's per-tenant transaction is opened the same
- * module-less way the D14 executor's is, for the same reason (a generic scheduled sweep has no
- * business knowing which module it is about to touch), and a second hand-written version of this
- * function is exactly how the two copies would drift.
- */
-export async function declareSocialModuleScope(c: PoolClient): Promise<void> {
-  await c.query(
-    `SELECT set_config('app.scopes',
-       CASE
-         WHEN coalesce(current_setting('app.scopes', true), '') = '' THEN 'social'
-         WHEN 'social' = ANY(string_to_array(current_setting('app.scopes', true), ',')) THEN current_setting('app.scopes', true)
-         ELSE current_setting('app.scopes', true) || ',social'
-       END, true)`,
-  );
-}
+//
+// SMM-22: the implementation moved to `module-scope.ts` (a shared leaf both this file and
+// `usage-ledger.ts` can import without a cycle — see that file's own header; imported at the top of
+// this file and re-exported here under its ORIGINAL name so every existing
+// `import { declareSocialModuleScope } from "./publish-precondition"` (dispatch.ts,
+// reply-precondition.ts, inbox-retention-job.ts, inbox-sync-job.ts, inbox-triage-job.ts,
+// client-review.ts) keeps compiling unchanged).
+export { declareSocialModuleScope };
 
 // ── the chain ───────────────────────────────────────────────────────────────────────────────────
 
@@ -447,6 +459,12 @@ export async function evaluatePublishPrecondition(
   if (toolName === SOCIAL_PUBLISH_TOOL && METERED_NETWORKS.has(network)) {
     return refuse(PUBLISH_REFUSAL.meteredNetworkRequiresMeteredTool);
   }
+  // SMM-22 — the symmetric check. A non-metered-network variant has no business on the metered
+  // tool: there is no money at stake, but writing an `x_post`-kind ledger row for (say) an
+  // Instagram post would be a data-integrity bug the usage panel could not explain.
+  if (toolName === SOCIAL_PUBLISH_METERED_TOOL && !METERED_NETWORKS.has(network)) {
+    return refuse(PUBLISH_REFUSAL.meteredToolRequiresMeteredNetwork);
+  }
 
   // ══ (2) QUOTA (and the network's media/body/schedule rules) ═══════════════════════════════════
   //
@@ -516,26 +534,47 @@ export async function evaluatePublishPrecondition(
 
   // ══ (5) BUDGET — the metered stop-loss, re-checked at execution ═══════════════════════════════
   //
-  // Engagement tier only; the tenant and global tiers of design D-9's chain are SMM-22's, and
-  // inventing them here would be a second, driftable copy of a control that ticket owns. The ledger
-  // is APPEND-ONLY, so a plain sum over the current calendar month is the whole read. `failed` rows
-  // are excluded: a spend that did not happen must not consume a client's cap.
+  // The estimate itself can now REFUSE (`x_price_not_configured`): an absent price is a fail-closed
+  // condition, never a $0 stand-in, since a $0 estimate would let an unpriced X post sail through
+  // every tier for free. For the $0 path (every network except X) `estimateCostUsd` never refuses —
+  // there is nothing to misconfigure about a network that costs nothing.
+  const estimate = estimateCostUsd(network, shape, resolveXPricing());
+  if (!estimate.ok) return refuse(PUBLISH_REFUSAL.meteredPriceUnconfigured);
+
+  const engagementCap = Number(row.usage_budget_usd);
+  // SMM-22 ⚠ THE TENANT/GLOBAL TIERS ARE GATED ON `METERED_NETWORKS.has(network)`, DELIBERATELY —
+  // read this before "simplifying" it into an unconditional 3-tier check.
   //
-  // For the $0 path this is almost always a pass (`estimateCostUsd` is 0 for every network except
-  // X, and X routes to the barred twin) — which is the point. The branch exists so that an
-  // engagement already OVER its cap cannot publish at all, and so SMM-22 has a live seam to widen
-  // rather than a new one to invent.
-  const estimate = estimateCostUsd(network, shape);
-  const budget = Number(row.usage_budget_usd);
-  const spend = await c.query<{ spent: string }>(
-    `SELECT coalesce(sum(cost_usd), 0)::text AS spent
-       FROM social_usage_ledger
-      WHERE engagement_id = $1 AND status <> 'failed' AND created_at >= date_trunc('month', now())`,
-    [row.engagement_id],
-  );
-  const spent = Number(spend.rows[0]?.spent ?? 0);
-  // A non-finite budget (a corrupted column) fails CLOSED rather than reading as "unlimited".
-  if (!Number.isFinite(budget) || spent + estimate > budget) return refuse(PUBLISH_REFUSAL.budgetExceeded);
+  // SMM-09's own engagement-tier check (unchanged, below) was designed as a per-CLIENT circuit
+  // breaker: "an engagement already over its cap cannot publish AT ALL" — even a $0 Instagram post,
+  // once THAT ENGAGEMENT's own metered spend has exceeded ITS OWN cap. That blast radius is
+  // deliberately scoped to one client. Naively extending the SAME "$0 posts are blocked too" shape
+  // to the TENANT and GLOBAL tiers would turn one runaway X bill into a PLATFORM-WIDE freeze on
+  // every company's free Instagram/Facebook/LinkedIn posting the moment the global cap is breached
+  // — a blast radius no design document asked for and this ticket must not invent. So the tenant
+  // and global tiers apply ONLY to an actually-metered dispatch (`estimate.costUsd` can only be
+  // nonzero for a network in `METERED_NETWORKS`, and the scope stage above already guarantees a
+  // metered network only ever reaches here via the metered tool) — a $0 publish's ONLY budget
+  // exposure remains the pre-existing engagement-tier check, exactly as before this ticket.
+  const engagementMtd = await sumUsageMonthToDate(c, row.engagement_id);
+  if (METERED_NETWORKS.has(network)) {
+    const tenantMtd = await sumUsageMonthToDate(c);
+    // Cross-tenant, TTL-cached — see that function's own header for why this is safe to call from
+    // inside an already-open, lock-holding transaction (a separate pool connection, no lock taken).
+    const globalMtd = await sumGlobalUsageMonthToDate();
+    const decision = evaluateUsageBudget({
+      estimate: estimate.costUsd,
+      engagementCap, engagementMtd,
+      tenantCap: config.social.usage.tenantMonthlyCapUsd, tenantMtd,
+      globalCap: config.social.usage.globalMonthlyCapUsd, globalMtd,
+    });
+    if (!decision.ok) return refuse(PUBLISH_REFUSAL.budgetExceeded);
+  } else {
+    // The UNCHANGED, engagement-tier-only check every network except X has always run.
+    if (!Number.isFinite(engagementCap) || engagementMtd + estimate.costUsd > engagementCap) {
+      return refuse(PUBLISH_REFUSAL.budgetExceeded);
+    }
+  }
 
   // ══ (6) CREATOR-INFO re-verify (D-22) ═════════════════════════════════════════════════════════
   if (CONSENT_AT_UPLOAD_NETWORKS.has(network)) {

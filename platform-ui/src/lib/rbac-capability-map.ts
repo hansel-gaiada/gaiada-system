@@ -481,6 +481,18 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ── the usage panel (SMM-22, X metering) — verified directly against 0106's role_permission seed
+  // rows: social_staff/social_manager/company_admin/manager/platform_admin ALL hold
+  // `social.ledger.read`; group_executive holds it too but under a `notLow && inRoot` CONDITION
+  // (resource_social_ledger.yaml), wholesale-excepted from this file's per-pair loop, same as every
+  // other social.* capability's `ALL`-derived reach for that role. `social.ledger.admin` is
+  // deliberately NOT mapped here — no endpoint exists yet, and this file only covers DECLARED
+  // module-contract permissions.
+  "social.ledger.read": {
+    permissions: ["social.ledger.read"],
+    semantics: "all",
+  },
+
   // ── the engagement inbox (SMM-15/16/17/18) — verified directly against `0106_iam_social_
   // permissions.sql`'s role_permission seed rows: company_admin/manager/platform_admin/
   // social_manager/social_staff ALL hold every one of the four `social.inbox.*` keys identically

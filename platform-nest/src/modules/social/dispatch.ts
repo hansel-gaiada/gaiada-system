@@ -58,11 +58,19 @@ import { APPROVAL_EXEC_LOCK_NS } from "../../core/approval-execute";
 import {
   SOCIAL_PUBLISH_TOOL,
   CONSENT_AT_UPLOAD_NETWORKS,
+  METERED_NETWORKS,
   PUBLISH_REFUSAL,
   declareSocialModuleScope,
   type PublishPreconditionStage,
   type PublishRefusalReason,
 } from "./publish-precondition";
+// SMM-22 — X metering. `reserveUsageSpend` is the ledger's own "ONE choke-point before dispatch"
+// (0105's header on `social_usage_ledger`): re-sums the D-9 three-tier chain under a MONEY lock
+// (distinct from this file's own variant lock) and inserts the `posted` reservation row atomically,
+// so a concurrent second dispatch for the SAME engagement cannot both pass a stale sum. See that
+// function's own header for why this is a SEPARATE lock from `APPROVAL_EXEC_LOCK_NS`.
+import { estimateCostUsd, type Network } from "./media-rules";
+import { reserveUsageSpend, markUsageLedgerFailed, resolveXPricing } from "./usage-ledger";
 // SMM-31 — the client-review gate, composed IN FRONT of the six-stage chain (never inside it — see
 // client-review.ts's header). Re-run here for the SAME reason this file re-runs the six-stage chain
 // itself (see this file's own "WHY THIS FILE RE-RUNS THE PRECONDITION A SECOND TIME" note): a
@@ -335,14 +343,18 @@ interface VariantForDispatch {
   scheduled_at: Date | null;
   args_sha256: string | null;
   engagement_id: string;
+  // SMM-22 — the engagement tier's own cap, needed by the reservation below. Joined here rather
+  // than a second query: this row is read once, under the same lock, for every dispatch.
+  usage_budget_usd: string | number;
 }
 
 async function loadVariantForDispatch(c: PoolClient, variantId: string): Promise<VariantForDispatch | null> {
   const { rows } = await c.query<VariantForDispatch>(
     `SELECT v.tenant_id, v.account_id, v.body, v.first_comment, v.media, v.settings, v.scheduled_at,
-            v.args_sha256, p.engagement_id
+            v.args_sha256, p.engagement_id, e.usage_budget_usd
        FROM social_post_variants v
-       JOIN social_posts p ON p.id = v.post_id AND p.tenant_id = v.tenant_id
+       JOIN social_posts p       ON p.id = v.post_id       AND p.tenant_id = v.tenant_id
+       JOIN social_engagements e ON e.id = p.engagement_id AND e.tenant_id = v.tenant_id
       WHERE v.id = $1 AND v.deleted_at IS NULL`,
     [variantId],
   );
@@ -351,13 +363,18 @@ async function loadVariantForDispatch(c: PoolClient, variantId: string): Promise
 
 /** Resolve the ONE `automation_approvals` row this call is executing for. Plain core tenant wall —
  *  no module scope needed for this table — but run on the SAME connection as the social reads so it
- *  is atomic with them under the one advisory lock. */
-async function resolveExecutingApprovalId(c: PoolClient, tenantId: string, variantId: string): Promise<string | null> {
+ *  is atomic with them under the one advisory lock. `toolName` is threaded through (SMM-22): the
+ *  metered dispatch resolves `social.publishPostMetered`'s own executing row, never the free
+ *  tool's — the SAME variant could in principle have BOTH tools' rows in flight (a routing bug
+ *  upstream), and matching on the wrong tool name would consume the wrong grant. */
+async function resolveExecutingApprovalId(
+  c: PoolClient, tenantId: string, variantId: string, toolName: string,
+): Promise<string | null> {
   const { rows } = await c.query<{ id: string }>(
     `SELECT id FROM automation_approvals
       WHERE tenant_id = $1 AND tool_name = $2 AND execution_status = 'executing'
         AND tool_args @> $3::jsonb`,
-    [tenantId, SOCIAL_PUBLISH_TOOL, JSON.stringify({ variantId })],
+    [tenantId, toolName, JSON.stringify({ variantId })],
   );
   return rows.length === 1 ? rows[0].id : null;
 }
@@ -377,8 +394,16 @@ type PreconditionOutcome =
 
 /** Phase 1: lock + re-run the precondition + resolve the consuming approval. Never writes; never
  *  performs network I/O. Mirrors the executor's own claim shape (lock FIRST, then read) so this
- *  transaction is atomic with respect to any other holder of the same variant's lock key. */
-async function checkPreconditionAndResolveApproval(tenantId: string, variantId: string): Promise<PreconditionOutcome> {
+ *  transaction is atomic with respect to any other holder of the same variant's lock key.
+ *
+ *  SMM-22: `toolName` is threaded through — `SOCIAL_PUBLISH_TOOL` (default, unchanged behavior) for
+ *  the free path, `SOCIAL_PUBLISH_METERED_TOOL` for the metered one. Passing it into the SAME
+ *  `evaluatePublishPreconditionWithClientReview` call is what makes `publish-precondition.ts`'s
+ *  `metered_network_requires_metered_tool` / `metered_tool_requires_metered_network` symmetric
+ *  checks actually fire on this path — one implementation, two callers, never two copies. */
+async function checkPreconditionAndResolveApproval(
+  tenantId: string, variantId: string, toolName: string,
+): Promise<PreconditionOutcome> {
   return withTenants([tenantId], async (c) => {
     await c.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [APPROVAL_EXEC_LOCK_NS, variantId]);
     // Declared explicitly rather than via `withTenants`'s `{modules}` option — this transaction ALSO
@@ -400,10 +425,10 @@ async function checkPreconditionAndResolveApproval(tenantId: string, variantId: 
     // connection — see this file's own header for why the whole precondition re-runs a second time,
     // and client-review.ts's header for why this call is composed rather than folded into the
     // six-stage chain.
-    const verdict = await evaluatePublishPreconditionWithClientReview(c, args as unknown as Record<string, unknown>, SOCIAL_PUBLISH_TOOL);
+    const verdict = await evaluatePublishPreconditionWithClientReview(c, args as unknown as Record<string, unknown>, toolName);
     if (!verdict.ok) return { kind: "refused" as const, stage: verdict.stage, reason: verdict.reason };
 
-    const approvalId = await resolveExecutingApprovalId(c, tenantId, variantId);
+    const approvalId = await resolveExecutingApprovalId(c, tenantId, variantId, toolName);
     if (!approvalId) return { kind: "unresolved" as const };
 
     // Re-walk the chain UNDER THE LOCK for the fields `schedulePost` needs (integration id, org,
@@ -444,8 +469,10 @@ async function stampDispatchOutcome(
 }
 
 /**
- * THE ENTRY POINT. Called by `social.controller.ts`'s dispatch endpoint (the handler
- * `social.publishPost`'s `pathTemplate` fronts). `actorId` is the OBO-resolved principal's own
+ * THE ENTRY POINT. Called by `social.controller.ts`'s dispatch endpoints — `social.publishPost`'s
+ * (the free path, default `toolName`) and, SMM-22, `social.publishPostMetered`'s (the metered path,
+ * `toolName = SOCIAL_PUBLISH_METERED_TOOL`) — ONE implementation serving both, never a second copy
+ * of the dispatch mechanics for the metered twin. `actorId` is the OBO-resolved principal's own
  * user id, for `writeActivity`/`emitEvent` attribution — never the approver (invariant 1,
  * `core/approval-execute.ts`).
  */
@@ -453,6 +480,7 @@ export async function dispatchApprovedPublish(
   tenantId: string,
   variantId: string,
   actorId: string | null,
+  toolName: string = SOCIAL_PUBLISH_TOOL,
 ): Promise<DispatchVerdict> {
   // ── D-22: the live fetch, OUTSIDE any transaction, BEFORE the precondition re-run so the
   // verifier (running INSIDE that transaction, read-only) sees a fresh snapshot for a TikTok variant.
@@ -470,7 +498,7 @@ export async function dispatchApprovedPublish(
     await refreshCreatorInfoSnapshot(tenantId, variantId, preview.chain.org, preview.chain.integrationId);
   }
 
-  const outcome = await checkPreconditionAndResolveApproval(tenantId, variantId);
+  const outcome = await checkPreconditionAndResolveApproval(tenantId, variantId, toolName);
   if (outcome.kind === "not_found") {
     return { ok: false, stage: "scope", reason: PUBLISH_REFUSAL.variantNotFound };
   }
@@ -483,6 +511,40 @@ export async function dispatchApprovedPublish(
 
   const { approvalId, chain, args, variant } = outcome.claim;
   const expectedHash = variant.args_sha256 as string; // non-null: the hash stage already passed
+
+  // ── SMM-22: THE RESERVATION — the ledger's own "ONE choke-point before dispatch" ────────────────
+  // For a metered network (X today), the precondition above already proved this dispatch WOULD be
+  // within budget as of the moment it ran — but that moment and this one are separated by whatever
+  // else this process was doing, and a DIFFERENT variant on the SAME engagement may have reserved
+  // spend in between (design's own header: "an approval sits between the estimate and the spend,
+  // and another post may consume budget in that window. A test that proves only one of them is not
+  // proof"). `reserveUsageSpend` re-sums all three tiers under its OWN engagement-keyed lock and
+  // inserts the `posted` row atomically — this is the SECOND, airtight check, and it runs BEFORE
+  // any network call (media upload or schedulePost) is ever attempted for a metered post, exactly
+  // like every other refusal on this path.
+  //
+  // Never holds a lock across the network call: `reserveUsageSpend`'s own transaction commits
+  // (releasing its lock) before this function returns from it — the SAME "no lock across network
+  // I/O" discipline this file's header already states for the variant lock and for D-22's fetch.
+  let usageLedgerId: string | null = null;
+  if (METERED_NETWORKS.has(chain.network)) {
+    const estimate = estimateCostUsd(chain.network as Network, { body: args.body }, resolveXPricing());
+    if (!estimate.ok) {
+      // Structurally unreachable in the ordinary flow: the precondition just re-ran the SAME
+      // estimate a moment ago and would have refused `metered_price_unconfigured` first. Refused
+      // honestly rather than assumed away — this file's own discipline ("never assume, always
+      // check") applies to money exactly as it does to `isUploadTerminalFor`'s own guard.
+      return { ok: false, stage: "budget", reason: PUBLISH_REFUSAL.meteredPriceUnconfigured };
+    }
+    const reservation = await reserveUsageSpend(
+      tenantId, variant.engagement_id, estimate.costUsd, Number(variant.usage_budget_usd),
+      { accountId: variant.account_id, kind: "x_post", refId: variantId, requestedBy: actorId, correlationId: approvalId },
+    );
+    if (!reservation.ok) {
+      return { ok: false, stage: "budget", reason: PUBLISH_REFUSAL.budgetExceeded };
+    }
+    usageLedgerId = reservation.ledgerId;
+  }
 
   // ── Phase 2: the network call(s). OUTSIDE any transaction and outside the advisory lock (this
   // file's header, and the same discipline `core/approval-execute.ts`'s TRANSACTION BOUNDARY note
@@ -619,6 +681,12 @@ export async function dispatchApprovedPublish(
     // precondition-check transaction committed, by design, so the network call is never made under
     // it). Reported as CRITICAL so the caller notifies loudly rather than treating this as an
     // ordinary refusal; a human must look at whether the post above actually went out.
+    //
+    // SMM-22: the ledger reservation (if one was made) is DELIBERATELY left `posted` here, never
+    // auto-flipped to `completed` OR `failed`. We do not know whether the post landed — flipping to
+    // `failed,cost=0` would risk under-charging a post that DID go out; flipping to `completed`
+    // would overstate a certainty we do not have. `posted` is the honest "uncertain, needs a human"
+    // state, and it is exactly what the CRITICAL notification below asks a human to resolve.
     await withTenants([tenantId], (c) =>
       emitEvent(c, tenantId, "social_post_variant", variantId, "social.post.failed", {
         reason: DISPATCH_REFUSAL.stampRaceLost, network: chain.network, engagementId: variant.engagement_id,
@@ -634,6 +702,12 @@ export async function dispatchApprovedPublish(
   }
 
   if (!dispatched) {
+    // SMM-22: RELEASE the reservation — nothing was actually spent (the network call failed before
+    // ever landing, or resolving media/an OAuth handle failed before one was even attempted), so the
+    // `posted` row must not keep consuming this engagement's/tenant's/the platform's cap. Moves
+    // `cost_usd` to 0 in the SAME statement as the status flip (`markUsageLedgerFailed`'s own
+    // invariant) — never left nonzero on a failed row.
+    if (usageLedgerId) await markUsageLedgerFailed(tenantId, usageLedgerId);
     await withTenants([tenantId], (c) =>
       emitEvent(c, tenantId, "social_post_variant", variantId, "social.post.failed", {
         reason: dispatchReason, network: chain.network, engagementId: variant.engagement_id, detail: dispatchError,
@@ -645,6 +719,13 @@ export async function dispatchApprovedPublish(
     return { ok: false, stage: "dispatch", reason: dispatchReason };
   }
 
+  // SMM-22: the ledger reservation (if one was made) DELIBERATELY stays `posted` here, not
+  // `completed` — the variant's own status moves to `queued`, not `published`, at this same
+  // instant (stampDispatchOutcome above), because a successful `schedulePost` means the network
+  // ACCEPTED the post, not that it is confirmed live. `post-status-sync-job.ts`'s existing
+  // authoritative reconcile sweep is what advances BOTH facts together: `queued -> published` and
+  // (SMM-22) `posted -> completed` when it confirms the post landed, or `-> failed` (this file's own
+  // `markUsageLedgerFailed`, cost -> 0) if it discovers the post never actually went out.
   await withTenants([tenantId], (c) =>
     emitEvent(c, tenantId, "social_post_variant", variantId, "social.post.dispatched", {
       network: chain.network, engagementId: variant.engagement_id, providerPostId: dispatched!.providerPostId,

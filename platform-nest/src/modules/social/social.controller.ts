@@ -61,7 +61,11 @@ import {
 } from "./reply-precondition";
 import { dispatchApprovedReply } from "./reply-dispatch";
 import { reconcileOneProviderPost } from "./post-status-sync-job";
-import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot } from "./media-rules";
+import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSnapshot, type VariantShape } from "./media-rules";
+// SMM-22 — X metering. `resolveXPricing` feeds every `estimateCostUsd` call on this controller;
+// `readUsageSnapshot` backs the usage-panel endpoint. One implementation, reused from
+// `publish-precondition.ts`/`dispatch.ts` too — never a second copy of the arithmetic.
+import { resolveXPricing, readUsageSnapshot } from "./usage-ledger";
 import { completeViaGateway } from "./gateway-client";
 import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./knowledge-client";
 import {
@@ -111,6 +115,19 @@ const EDITABLE_MESSAGE_STATUSES = new Set(["draft", "in_review", "approved", "fa
  *  identifiers or secrets in it. */
 function refuse(reason: string): never {
   throw new BadRequestException({ message: reason });
+}
+
+/** SMM-22, defect class #4: every write site on this controller that persists
+ *  `estimated_cost_usd` (a NOT NULL column) goes through this rather than reading
+ *  `estimateCostUsd(...).costUsd` unconditionally — which would have nothing honest to write for an
+ *  unpriced X variant. Refuses the WHOLE write (never silently substitutes $0, which the ticket
+ *  names by name as an unmetered spend) with the SAME typed-token/`refuse()` shape every other
+ *  write-time rule violation on this controller uses. For every non-X network this can never
+ *  refuse — there is nothing to misconfigure about a network that costs nothing. */
+function resolveEstimatedCostOrRefuse(network: Network, shape: VariantShape): number {
+  const estimate = estimateCostUsd(network, shape, resolveXPricing());
+  if (!estimate.ok) refuse(estimate.reason);
+  return estimate.costUsd;
 }
 
 type ToolScope = Record<string, Record<string, unknown>>;
@@ -867,6 +884,9 @@ export class SocialController {
       tenantId, id, accountId: body.accountId, body: draft.body, firstComment: draft.firstComment,
       media: draft.media, settings: draft.settings, scheduledAt: body.scheduledAt ?? null,
     });
+    // SMM-22: computed BEFORE the write — an unpriced X variant refuses the whole create, never a
+    // silent $0 in the persisted estimate.
+    const estimatedCostUsd = resolveEstimatedCostOrRefuse(account.network, draft);
     const created = await withTenants(
       [tenantId],
       async (c) => {
@@ -877,7 +897,7 @@ export class SocialController {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (id) DO NOTHING`,
           [id, tenantId, postId, body.accountId, draft.body, draft.firstComment,
            JSON.stringify(draft.media), JSON.stringify(draft.settings), JSON.stringify(validation),
-           argsSha256, body.scheduledAt ?? null, estimateCostUsd(account.network, draft), config.originSite],
+           argsSha256, body.scheduledAt ?? null, estimatedCostUsd, config.originSite],
         );
         return (ins.rowCount ?? 0) > 0;
       },
@@ -887,7 +907,7 @@ export class SocialController {
     // The validation travels back with the 201 so the composer can render it immediately — the
     // caller should never have to make a second call to find out whether what it just created is
     // publishable.
-    return { id, created, validation, argsSha256, estimatedCostUsd: estimateCostUsd(account.network, draft) };
+    return { id, created, validation, argsSha256, estimatedCostUsd };
   }
 
   @Patch("variants/:variantId")
@@ -967,13 +987,14 @@ export class SocialController {
       settings: result.next.settings,
       scheduledAt: result.next.scheduledAt,
     }, account.quota);
+    const estimatedCostUsd = resolveEstimatedCostOrRefuse(account.network, {
+      body: result.next.body, media: (result.next.media ?? []) as never[], settings: result.next.settings,
+    });
     await withTenants(
       [tenantId],
       (c) => c.query(
         `UPDATE social_post_variants SET validation = $1, estimated_cost_usd = $2 WHERE id = $3`,
-        [JSON.stringify(validation), estimateCostUsd(account.network, {
-          body: result.next.body, media: (result.next.media ?? []) as never[], settings: result.next.settings,
-        }), variantId],
+        [JSON.stringify(validation), estimatedCostUsd, variantId],
       ),
       { modules: ["social"] },
     );
@@ -1033,9 +1054,15 @@ export class SocialController {
     // Computed FRESH rather than read from the stored column: the quota moves under us between
     // edits, so the stored verdict answers "was it valid when last written", and the caller asking
     // this endpoint wants "is it valid now".
+    //
+    // SMM-22: this is a READ, so an unpriced X variant does not refuse the call — it answers
+    // honestly with `estimatedCostUsd: null` and the reason, DATA rather than an error, the same
+    // "a verdict is a successful answer" doctrine `getVariantPublishPreconditions` already states.
+    const costEstimate = estimateCostUsd(account.network, shape, resolveXPricing());
     return {
       validation: validateVariant(account.network, shape, account.quota),
-      estimatedCostUsd: estimateCostUsd(account.network, shape),
+      estimatedCostUsd: costEstimate.ok ? costEstimate.costUsd : null,
+      ...(costEstimate.ok ? {} : { costUnavailableReason: costEstimate.reason }),
       network: account.network,
     };
   }
@@ -1335,13 +1362,14 @@ export class SocialController {
       body: result.body, firstComment: result.firstComment,
       media: result.media as never[], settings: result.settings, scheduledAt: result.scheduledAt,
     }, account.quota);
+    const attachEstimatedCostUsd = resolveEstimatedCostOrRefuse(account.network, {
+      body: result.body, media: result.media as never[], settings: result.settings,
+    });
     await withTenants(
       [tenantId],
       (c) => c.query(
         `UPDATE social_post_variants SET validation = $1, estimated_cost_usd = $2 WHERE id = $3`,
-        [JSON.stringify(validation), estimateCostUsd(account.network, {
-          body: result.body, media: result.media as never[], settings: result.settings,
-        }), variantId],
+        [JSON.stringify(validation), attachEstimatedCostUsd, variantId],
       ),
       { modules: ["social"] },
     );
@@ -1414,6 +1442,8 @@ export class SocialController {
         });
         return {
           found: true as const,
+          accountId: rows[0].account_id,
+          body: rows[0].body,
           // SMM-31: the client-review gate runs FIRST here too — this dry run is the one surface
           // staff actually consult before filing a WS4 request, so it is the practical "would this
           // even be submittable" answer in an architecture with no separate submit endpoint (see
@@ -1430,14 +1460,26 @@ export class SocialController {
     // variant" indistinguishable from "this variant exists and is currently blocked".
     if (!result.found) throw new NotFoundException("post variant not found");
     const verdict = result.verdict;
+    // SMM-22 — THE APPROVAL CARD'S OWN ESTIMATE. Computed fresh (never read from the stored
+    // `estimated_cost_usd` column, for the SAME "is this true NOW" reasoning
+    // `getVariantValidation` already states), and rendered as DATA, never a refusal — a human
+    // reading this card must see the price of their click, or an honest "not priced yet" reason,
+    // BEFORE they approve, exactly the design's own "money safety: X spend is visible on the
+    // approval card before the human clicks" requirement.
+    const account = await this.loadAccount(tenantId, result.accountId);
+    const costEstimate = estimateCostUsd(account.network, { body: result.body }, resolveXPricing());
     return {
       ok: verdict.ok,
       ...(verdict.ok ? {} : { stage: verdict.stage, reason: verdict.reason }),
       stages: PUBLISH_PRECONDITION_STAGES,
       // Names the split so a caller never has to infer it: the free tool is the one that
-      // auto-executes on approval; the metered twin exists and cannot (addendum D-14).
+      // auto-executes on approval; the metered twin exists and cannot (addendum D-14) unless this
+      // deployment has explicitly configured otherwise (core/approval-executables.ts's SMM-22
+      // section).
       tool: SOCIAL_PUBLISH_TOOL,
       meteredTool: SOCIAL_PUBLISH_METERED_TOOL,
+      estimatedCostUsd: costEstimate.ok ? costEstimate.costUsd : null,
+      ...(costEstimate.ok ? {} : { costUnavailableReason: costEstimate.reason }),
     };
   }
 
@@ -1614,6 +1656,62 @@ export class SocialController {
       throw new ConflictException({ message: verdict.reason });
     }
     return { ok: true, providerPostId: verdict.providerPostId, network: verdict.network };
+  }
+
+  // ==================================================== METERED PUBLISH GATE (SMM-22) =========
+  //
+  // `social.publishPostMetered`'s own dispatch endpoint — the SAME `dispatchApprovedPublish` this
+  // controller's `dispatchPublish` calls, just with the metered tool name threaded through (see
+  // dispatch.ts's own header for why one implementation serves both). Reachable through the D14
+  // executor's re-drive ONLY when this deployment has explicitly lifted the bar
+  // (`core/approval-executables.ts`'s SMM-22 section); otherwise a suspended approval for this tool
+  // stays `execution_status='not_applicable'` forever and this endpoint is never called by the
+  // executor — a human with `publish` authority may still call it directly (the SAME Cerbos action
+  // `dispatchPublish` uses; no new permission), which is what lets a manually-reviewed metered
+  // publish complete even while the auto-executor stays out of the loop.
+  @Post("variants/:variantId/publish-metered")
+  @HttpCode(200)
+  async dispatchMeteredPublish(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "publish");
+    const verdict = await dispatchApprovedPublish(tenantId, variantId, req.principal.userId, SOCIAL_PUBLISH_METERED_TOOL);
+    if (!verdict.ok) {
+      // Same message-vs-error trap avoidance as `dispatchPublish` above.
+      throw new ConflictException({ message: verdict.reason });
+    }
+    return { ok: true, providerPostId: verdict.providerPostId, network: verdict.network };
+  }
+
+  // ==================================================== USAGE PANEL (SMM-22) ===================
+  //
+  // Read-only. `social.ledger.read` (resource_social_ledger.yaml, 0106) — a department that cannot
+  // see its own spend cannot manage it, so this is staff-tier, same reasoning that Cerbos file's own
+  // header gives. Makes no network call and consumes no budget itself: a caller checking the panel
+  // must never be charged for looking.
+  @Get("engagements/:engagementId/usage")
+  async getEngagementUsage(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("engagementId") engagementId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_ledger", id: engagementId, tenantId, module: "social" }, "read");
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        // `{modules:["social"]}` below already declares the module scope for this connection
+        // (db/index.ts's own contract) — no explicit `declareSocialModuleScope` needed here, same
+        // as every other endpoint on this controller.
+        const { rows } = await c.query<{ usage_budget_usd: string }>(
+          `SELECT usage_budget_usd FROM social_engagements WHERE id = $1 AND deleted_at IS NULL`,
+          [engagementId],
+        );
+        if (!rows[0]) return { found: false as const };
+        const snapshot = await readUsageSnapshot(c, engagementId, Number(rows[0].usage_budget_usd));
+        return { found: true as const, snapshot };
+      },
+      { modules: ["social"] },
+    );
+    if (!result.found) throw new NotFoundException("engagement not found");
+    return result.snapshot;
   }
 
   // ==================================================== INBOX REPLY FLOW (SMM-17) =============
@@ -2444,7 +2542,7 @@ export class SocialController {
     const account = await this.loadAccount(tenantId, locked.accountId);
     const shape = { body: next.body, firstComment: next.firstComment, media: (next.media ?? []) as never[], settings: next.settings };
     const validation = validateVariant(account.network, shape, account.quota);
-    const estimatedCostUsd = estimateCostUsd(account.network, shape);
+    const estimatedCostUsd = resolveEstimatedCostOrRefuse(account.network, shape);
     await withTenants(
       [tenantId],
       (c) => c.query(`UPDATE social_post_variants SET validation = $1, estimated_cost_usd = $2 WHERE id = $3`, [JSON.stringify(validation), estimatedCostUsd, variantId]),

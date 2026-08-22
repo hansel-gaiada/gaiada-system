@@ -422,14 +422,37 @@ export function checkQuota(network: Network, quota?: QuotaSnapshot): ValidationR
   return { ok: errors.length === 0, errors, warnings };
 }
 
+/** SMM-22 — X's per-post price, resolved from config (never a literal here — see
+ *  `config.social.usage`'s own header for the documented source and why both fields must be set
+ *  together). Passed in by the caller, exactly like `quota` is, so this file stays a PURE function
+ *  of its own parameters with no config coupling of its own. */
+export interface XPricing {
+  perPostUsd: number;
+  perPostWithLinkUsd: number;
+}
+
+/** `estimateCostUsd`'s result. `{ok:false}` is the ONLY honest answer when X pricing is
+ *  unconfigured — SMM-22's own defect class #4: "an absent price must refuse, not default to
+ *  zero; a zero price is an unmetered spend." Every caller must branch on `ok` rather than reading
+ *  `costUsd` unconditionally. */
+export type CostEstimate =
+  | { ok: true; costUsd: number }
+  | { ok: false; reason: "x_price_not_configured" };
+
 /** The metered-cost preview shown on the composer and, decisively, on the approval card — so the
- *  human approving a publish sees the price of their click BEFORE they make it (design §05).
+ *  human approving a publish sees the price of their click BEFORE they make it (design §05), and
+ *  the SAME function the budget stop-loss stage (publish-precondition.ts) consults before it will
+ *  ever let money move.
  *
- *  X is the only metered network in v1 and ships DISABLED (addendum D-14); this returns 0 for
- *  everything else, which is the honest answer rather than a placeholder. Re-verify the rate at
- *  SMM-22 before any client is charged against it. */
-export function estimateCostUsd(network: Network, variant: VariantShape): number {
-  if (network !== "x") return 0;
+ *  X is the only metered network in v1 and ships DISABLED (addendum D-14); every other network is
+ *  `{ok:true, costUsd:0}` — the honest answer rather than a placeholder, and one that can never
+ *  refuse (there is nothing to misconfigure about a network that costs nothing). For X, `xPricing`
+ *  null means "no config fact exists yet" and refuses rather than assuming $0 or reusing a stale
+ *  literal — SMM-22's own re-verification instruction, now enforced structurally rather than left
+ *  as a comment. */
+export function estimateCostUsd(network: Network, variant: VariantShape, xPricing: XPricing | null): CostEstimate {
+  if (network !== "x") return { ok: true, costUsd: 0 };
+  if (!xPricing) return { ok: false, reason: "x_price_not_configured" };
   const hasLink = /https?:\/\//i.test(variant.body ?? "");
-  return hasLink ? 0.2 : 0.015;
+  return { ok: true, costUsd: hasLink ? xPricing.perPostWithLinkUsd : xPricing.perPostUsd };
 }
