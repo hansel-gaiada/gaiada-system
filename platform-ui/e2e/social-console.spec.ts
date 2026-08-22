@@ -24,6 +24,17 @@ import { loginAsPersona } from "./personas";
 
 const DEPT4 = "/departments/dept-4"; // Social Media, co-agency (lib/org.ts's AGENCY_DEPARTMENTS[3])
 
+// FILE-SCOPE SERIAL, overriding the config's `fullyParallel: true`. Every test here drives the same
+// DEMO_MODE store, which is pinned to `globalThis` (`lib/demoSocial.ts`) and therefore shared by ONE
+// dev-server process across all workers — so parallel tests mutate each other's rows. The race was
+// latent rather than absent: this suite passed 8-worker parallel at 13 tests, and adding a 14th
+// shifted the timing enough to fail three Composer tests that had never failed. A suite whose green
+// depends on worker count is not evidence, so this trades ~35s of wall clock for a result that means
+// something. (The inner `describe.configure` below predates this and is now redundant; left in place
+// because it documents the specific pair that first collided.)
+test.describe.configure({ mode: "serial" });
+
+
 async function loginStaff(page: Page, context: BrowserContext, persona: "superadmin" | "member") {
   await loginAsPersona(page, persona);
   // Fresh (no-cookie) DEMO_MODE sessions default-fallback to `companies[0]` regardless of role
@@ -360,3 +371,50 @@ test.describe("Portal — client review surface, the four labels a client actual
     await expect(page.getByText("Please swap the second photo for the new packaging shot before we go out with this.")).toBeVisible();
   });
 });
+
+// ── SMM-22's usage panel, the one surface that had never been browser-driven ─────────────────────
+// It was unit- and type-checked only, so its ONE stated rule had never been observed in a rendered
+// page: an UNSET tenant cap (`capUsd: null`) is a different fact from a cap spent to zero headroom,
+// and collapsing them would make an operator who never set a tenant-wide cap believe one exists and
+// is nearly exhausted. `soc-eng-1` seeds all three tiers at genuinely different states — engagement
+// 62% (below the 0.8 warn ratio), tenant UNSET, platform-wide 97.2% (above it) — so one page proves
+// the panel discriminates rather than merely renders.
+test.describe("Analytics — the metered-spend panel's three tiers must not collapse", () => {
+  test("an unset cap is its own sentence, never a 0%-remaining bar, and the warn ratio really discriminates", async ({ page, context }) => {
+    await loginStaff(page, context, "superadmin");
+    await page.goto(`${DEPT4}/analytics?engagementId=soc-eng-1`);
+
+    // THE RULE: the unset tenant tier renders as prose, not as a meter.
+    await expect(page.getByText(/No this tenant cap configured — this tier is not enforced/)).toBeVisible();
+    // ...and it still reports the spend it DID track, so "not capped" never reads as "not measured".
+    await expect(page.getByText(/tracked but not capped/)).toBeVisible();
+
+    // The structural half of the same claim: exactly TWO meters exist (engagement, platform-wide).
+    // A third would mean the unset tier had been given a bar — the precise failure the panel exists
+    // to prevent, and one that prose assertions alone would not catch.
+    const meters = page.getByRole("progressbar");
+    await expect(meters).toHaveCount(2);
+
+    // The bars carry the REAL ratios, so they are data and not decoration.
+    await expect(page.getByRole("progressbar", { name: "This engagement metered spend" }))
+      .toHaveAttribute("aria-valuenow", "62");
+    await expect(page.getByRole("progressbar", { name: "Platform-wide metered spend" }))
+      .toHaveAttribute("aria-valuenow", "97");
+
+    // And the warn ratio actually changes the rendering: 62% and 97% must not be the same colour.
+    // Computed styles, because the whole point is what an operator SEES.
+    const fill = (name: string) => page.getByRole("progressbar", { name }).locator("div").first();
+    const under = await fill("This engagement metered spend").evaluate((el) => getComputedStyle(el).backgroundColor);
+    const over = await fill("Platform-wide metered spend").evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(under).not.toBe(over);
+
+    // 97.2% is NEAR the cap, not over it — the exhausted-tier refusal warning must NOT appear yet.
+    // This is the assertion that would catch a `>=` slipping in where `>` was meant.
+    await expect(page.getByText(/This tier is exhausted/)).toHaveCount(0);
+
+    // Nothing is at zero here, so the genuine-steady-state sentence must stay absent — otherwise a
+    // real $0 month and a seeded-spend month would look identical.
+    await expect(page.getByText(/No metered spend has posted anywhere yet this month/)).toHaveCount(0);
+  });
+});
+

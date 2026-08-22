@@ -2497,7 +2497,7 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 
 | Remaining | Note |
 |---|---|
-| **SMM-22 follow-ups** | Usage panel not browser-driven (unit/type-checked only); ~~`resource_mcp_tool.yaml` not updated for the agent/automation-origin metered-tool re-drive case~~ **CLOSED 2026-08-23, senior-be — see "Security follow-ups closed" evidence block above** (was already correctly denied; closed as documentation + regression test); X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
+| **SMM-22 follow-ups** | ~~Usage panel not browser-driven (unit/type-checked only)~~ **CLOSED 2026-08-23** — driven in a browser, 14/14 (see the e2e note below); ~~`resource_mcp_tool.yaml` not updated for the agent/automation-origin metered-tool re-drive case~~ **CLOSED 2026-08-23, senior-be — see "Security follow-ups closed" evidence block above** (was already correctly denied; closed as documentation + regression test); X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
 | **SMM-25** full-stack e2e | 🟡 partial, and permanently so until D-23 clears — the DEMO_MODE Playwright console suite landed this pass (13/13); the LIVE half cannot be built by anyone today (no credential exists anywhere in the estate) |
 | **SMM-26 follow-up** | the v1.0 design's "weekly per opted-in engagement" scheduled sweep for the content-brief flow was deliberately NOT built — needs an architect decision on an automation service identity before a principal-less job can legitimately call WS8's per-principal-scoped RAG search |
 | **SMM-27** | ✅ merged 2026-08-23 — see this file's own SMM-27 evidence block (P4 table above); the last unbuilt ticket in the department |
@@ -2686,6 +2686,23 @@ already relies on** — reusing the shared one silently makes the new case's pos
 load-bearing for a test it never mentions.
 
 ## Cross-session hazards
+
+- **⚠ Playwright `reuseExistingServer: true` makes e2e results in this shared checkout MEANINGLESS
+  unless you set `E2E_PORT`.** `playwright.config.ts` reuses whatever already listens on port 3005
+  outside CI, and in this repo that is routinely ANOTHER SESSION'S dev server running THEIR branch.
+  On 2026-08-23 this cost real time and produced a false conclusion: the social analytics page
+  returned **HTTP 500**, the failure reproduced in a *clean detached worktree at a known-good commit*,
+  and I stated it was a genuine regression on `main`. It was not. Both my worktree run and my main-tree
+  run were hitting one foreign server on 3005; on a private port the same tests pass. The config's own
+  comment names `E2E_PORT` for exactly this and it is easy to miss.
+  **Always run e2e as `E2E_PORT=<verified-free> npx playwright test ...`**, and verify the port is free
+  first (`Get-NetTCPConnection -State Listen`) — a busy port fails loudly with `EADDRINUSE`, which is
+  the good case; the silent case is a port that answers with someone else's code.
+- **The DEMO_MODE store is shared across Playwright workers, so `fullyParallel` is unsafe for it.**
+  `lib/demoSocial.ts` pins its store to `globalThis`, and one dev-server process serves every worker,
+  so parallel tests mutate each other's rows. `social-console.spec.ts` passed 8-worker parallel at 13
+  tests and failed three Composer tests at 14 — the race was latent, not absent. The file is now
+  serial at file scope. A suite whose green depends on worker count is not evidence.
 
 - **A `git status` snapshot goes STALE WITHIN MINUTES here — re-take it immediately before staging.**
   On 2026-08-23 I listed the dirty tree (108 other-session files), confirmed `docs/modules/CHANGELOG.md`

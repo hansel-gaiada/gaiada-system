@@ -11,6 +11,66 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.25` — 2026-08-23 — the metered-spend panel is finally browser-driven
+
+**Added** — `e2e/social-console.spec.ts` +1 (14 total): SMM-22's usage panel was unit- and
+type-checked only, so its ONE stated rule had never been observed in a rendered page — an UNSET
+tenant cap (`capUsd: null`) is a different fact from a cap spent to zero headroom, and collapsing the
+two would make an operator who never configured a tenant-wide cap believe one exists and is nearly
+exhausted. `soc-eng-1` seeds all three tiers at genuinely different states (engagement 62%, below the
+0.8 warn ratio; tenant UNSET; platform-wide 97.2%, above it), so one page proves the panel
+*discriminates* rather than merely renders. Asserts the unset tier as prose, and — structurally —
+that exactly TWO `progressbar`s exist, since a third would mean the unset tier had been given a bar,
+which prose assertions alone would not catch. Also pins the real `aria-valuenow` values (62 / 97), a
+computed-colour difference across the warn threshold, and that 97.2% does NOT trip the
+"tier is exhausted" refusal — the assertion that catches a `>=` slipping in where `>` was meant.
+
+**Fixed (test infrastructure)** — the spec is now **serial at file scope**, overriding the config's
+`fullyParallel: true`. Every test drives the same DEMO_MODE store, which `lib/demoSocial.ts` pins to
+`globalThis` and one dev-server process serves to all workers, so parallel tests mutate each other's
+rows. The race was **latent, not absent**: this suite passed 8-worker parallel at 13 tests and failed
+three Composer tests at 14 — adding a test shifted the timing, it did not introduce the bug. A suite
+whose green depends on worker count is not evidence, so this trades ~35s of wall clock for a result
+that means something.
+
+**Measured** — 14/14, both 8-worker default config and `--workers=1`, in a clean detached worktree at
+the merged commit, on a private `E2E_PORT`. That last detail is load-bearing: see the tracker's new
+cross-session hazard on `reuseExistingServer`, which caused a false "regression on main" conclusion
+earlier in this same pass before being traced to a foreign dev server on port 3005.
+
+### core `IAM-15` — 2026-08-23 — `group_executive` is removed (D-7)
+
+**Removed**
+- The role's entire reach: **54 `group_executive`-only rules across 46 Cerbos policies**, its derived
+  role in `derived_roles.yaml`, its 134-key bundle in `role-permission-bundles.json`, and its entry
+  in `scope-constrained-roles.json`. Migration `202608230230` revokes every grant, drops the
+  `role_permissions` / `position_roles` rows and deletes the `roles` row, then refuses to finish if
+  the role still exists or any `user_roles` row is left orphaned.
+- The seed no longer grants it. `exec@gaiada.test` stays a member of both companies — it is a
+  long-standing fixture several suites resolve by email — but holds no exec role.
+
+**Why it was safe now and not before**
+- The estate's ONLY holder was that fixture. Checked before writing the migration, not assumed:
+  narrowing authorization without knowing who holds the role is how an outage ships as a cleanup.
+- Sequenced last on purpose. MON-00c had root-bounded the role behind `variables.inRoot` as interim
+  protection, so removing it earlier would have discarded that work; and `owner` (IAM-14) had to
+  exist first, because several of these rules were literally commented as the *owner* tier.
+
+**Consequences worth knowing**
+- Holding-wide oversight is now `owner`, granted per owned company. Nothing replaced the role for a
+  non-owner — cross-company reach now needs a grant in each company. That narrowing is the ticket.
+- The widest single loss was `integration_connection`: full CRUD on any tenant's rows in the root,
+  including the credential vault. D-7's "last unrestricted cross-company business role" was not an
+  abstraction — that rule was it.
+- **`inRoot` is now nearly vestigial as a SOLE gate.** Exactly one live rule still uses it alone
+  (`resource_rollup.yaml`'s `perm_rollup_read`); all 195 other uses are `inTenant && notLow &&
+  inRoot`. `cross-root-boundary.db.test.ts` records the precision this costs it.
+
+**Verified**
+- Live PDP probe before/after: `group_executive` on `appraisal.read` went ALLOW → DENY while
+  `platform_admin` stayed ALLOW (the control that proves the policy set loaded rather than failed).
+- `cerbos compile` clean on the swept tree.
+
 ### social-media `0.5.24` — 2026-08-23 — `listComments` refuses a post id it cannot route
 
 **Fixed**
