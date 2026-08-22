@@ -23,7 +23,7 @@
 // intended role-set is recorded, but the grants people actually authorize against are still the ones
 // `agency.ts` writes directly. This file makes the org chart true; it does not silently become the
 // authorization path.
-import { withTenants } from "../db";
+import { withGlobal, withTenants } from "../db";
 import { STAFF, VACANCIES, type StaffMember } from "./roster";
 
 /** Levels that lead the unit they sit in. `fixture` is excluded on purpose — the
@@ -32,7 +32,12 @@ const LEAD_LEVELS = new Set(["gm", "head", "manager"]);
 
 async function roleIdByName(name: string): Promise<string | null> {
   // Global (library) roles only: company_id IS NULL, per 0073's partial unique index.
-  const { rows } = await withTenants([], (c) =>
+  // withGlobal, NOT withTenants([]). An empty tenant array sets the GUC to nothing, so anything
+  // RLS-predicated matches ZERO ROWS and reports success — here that would silently resolve every
+  // role id to null and seed seats with no roles at all. `roles` carries no RLS and these are global
+  // library rows (company_id IS NULL), so the global reader is both correct and the idiom three
+  // other call sites already use for this exact query. Caught by lint:withtenants.
+  const { rows } = await withGlobal((c) =>
     c.query<{ id: string }>(`SELECT id FROM roles WHERE company_id IS NULL AND name = $1`, [name]),
   );
   return rows[0]?.id ?? null;
