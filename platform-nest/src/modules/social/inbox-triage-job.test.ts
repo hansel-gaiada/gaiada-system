@@ -411,6 +411,58 @@ describe.skipIf(!TEST_URL)("SMM-16 · inbox-triage-job", () => {
     expect(result.spikes).toBe(0);
   });
 
+  it("(T8c) a SUSTAINED spike announces ONCE, then reports itself suppressed rather than re-firing", async () => {
+    // The defect: the detector re-fired every sweep tick for as long as the spike lasted, so one
+    // burst became a stream of identical bells. Dedup state is the `outbox_events` log itself.
+    const T = await makeTenant("SMM-16 Spike T8c");
+    const clientId = await makeClient(T);
+    const accountId = await makeAccount(T, clientId, "linkedin");
+    await makeEngagement(T, clientId, 240);
+    const threadId = await makeThread(T, accountId, "linkedin");
+
+    const minRecent = config.social.triage.slaGuard.spikeMinRecentCount;
+    for (let i = 0; i < minRecent + 3; i += 1) {
+      await addMessage(T, threadId, `sustained burst ${i}`, new Date(Date.now() - 60_000));
+    }
+
+    const first = await runTenantSpikeDetection(T, new Date());
+    expect(first.spikes).toBeGreaterThanOrEqual(1);
+    expect(first.notified).toBeGreaterThanOrEqual(1);
+    expect(first.suppressed).toBe(0);
+
+    // Second tick, nothing changed: still elevated, but already announced.
+    const second = await runTenantSpikeDetection(T, new Date());
+    expect(second.spikes).toBeGreaterThanOrEqual(1); // STILL a spike — the traffic did not stop
+    expect(second.notified).toBe(0);                 // but we do not repeat ourselves
+    expect(second.suppressed).toBeGreaterThanOrEqual(1);
+
+    // Exactly one announcement exists in the durable log for this account.
+    const { rows } = await withTenants([T], (c) => c.query<{ n: string }>(
+      `SELECT count(*) AS n FROM outbox_events
+        WHERE entity_id = $1 AND event_type = 'social.inbox.spike_detected'`, [accountId]));
+    expect(Number(rows[0].n)).toBe(1);
+  });
+
+  it("(T8d) `spikes` and `suppressed` stay SEPARATE — a suppressed spike must not read as no spike", async () => {
+    // Collapsing the two would make a sustained spike look like it had stopped, which is the same
+    // absent-vs-zero conflation this module refuses everywhere else. A caller has to be able to
+    // distinguish "quiet because nothing is elevated" from "quiet because we already said so".
+    const T = await makeTenant("SMM-16 Spike T8d");
+    const clientId = await makeClient(T);
+    const accountId = await makeAccount(T, clientId, "linkedin");
+    await makeEngagement(T, clientId, 240);
+    const threadId = await makeThread(T, accountId, "linkedin");
+    const minRecent = config.social.triage.slaGuard.spikeMinRecentCount;
+    for (let i = 0; i < minRecent + 3; i += 1) {
+      await addMessage(T, threadId, `still burst ${i}`, new Date(Date.now() - 60_000));
+    }
+    await runTenantSpikeDetection(T, new Date());
+    const again = await runTenantSpikeDetection(T, new Date());
+    expect(again.suppressed).toBeGreaterThan(0);
+    expect(again.spikes).toBeGreaterThan(0);
+    expect(again.spikes).toBeGreaterThanOrEqual(again.suppressed);
+  });
+
   // ══ (T9) ⭐ MODULE-GUC REGRESSION — spike detection ════════════════════════════════════════════
 
   it("(T9) ⭐ spike detection reads through a transaction with no module scope passed at the call site — fails (0 spikes on a real burst) if declareSocialModuleScope is ever removed", async () => {

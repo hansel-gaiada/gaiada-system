@@ -407,14 +407,40 @@ async function loadAccountWindowCounts(
 
 /** One tenant's per-account spike check. See the file header + `config.ts`'s own comment on why the
  *  thresholds are a documented operational default, never a measured or claimed business number.
- *  KNOWN LIMITATION, stated rather than silently solved: no persistent dedup exists, so a sustained
- *  spike re-fires on every sweep tick for as long as it lasts — acceptable for a first cut given
- *  there is no live traffic to spike on at all yet (D-23), and left as a named follow-up rather than
- *  building dedup state this ticket has no real data to validate against. Notifies via the SAME
- *  drained stream as the SLA guard; an account with no resolvable client engagement is counted
- *  `unnotifiable` rather than silently dropped. */
+ *
+ *  DEDUP (was a named follow-up, now closed): a sustained spike used to re-fire on EVERY sweep tick
+ *  for as long as it lasted, so one burst became a stream of identical bells. The dedup state is the
+ *  `outbox_events` log itself — every emit is already durably recorded there, it is never pruned, and
+ *  `idx_outbox_events_entity (tenant_id, entity_type, entity_id)` already indexes exactly the lookup
+ *  needed. That is deliberately NOT a new table: a second store of "did we already say this" would
+ *  have to be kept in agreement with the log that actually decides what was emitted.
+ *
+ *  A suppressed spike is counted as `suppressed`, never silently skipped — the caller can tell
+ *  "quiet because nothing is spiking" from "quiet because we already said so", which are different
+ *  facts. Same reason an account with no resolvable client engagement is counted `unnotifiable`
+ *  rather than dropped. Notifies via the SAME drained stream as the SLA guard. */
+/** Has a spike for this account already been announced inside the cooldown? Reads the durable
+ *  `outbox_events` log rather than a purpose-built dedup table — see `runTenantSpikeDetection`'s
+ *  docstring for why. `outbox_events` is a CORE table (no module predicate), so the surrounding
+ *  `declareSocialModuleScope` is inert for it and the tenant wall alone applies. */
+async function spikeAlreadyAnnounced(
+  c: PoolClient, accountId: string, now: Date, cooldownMinutes: number,
+): Promise<boolean> {
+  if (cooldownMinutes <= 0) return false;
+  const { rows } = await c.query<{ one: number }>(
+    `SELECT 1 AS one FROM outbox_events
+      WHERE entity_type = 'social_post_variant'
+        AND entity_id = $1
+        AND event_type = 'social.inbox.spike_detected'
+        AND created_at >= $2::timestamptz - make_interval(mins => $3::int)
+      LIMIT 1`,
+    [accountId, now, cooldownMinutes],
+  );
+  return rows.length > 0;
+}
+
 export async function runTenantSpikeDetection(tenantId: string, now: Date = new Date()): Promise<{
-  accountsChecked: number; spikes: number; notified: number; unnotifiable: number;
+  accountsChecked: number; spikes: number; notified: number; unnotifiable: number; suppressed: number;
 }> {
   const { windowMinutes: winM, baselineWindows: baseW, multiplier, minRecent } = {
     windowMinutes: config.social.triage.slaGuard.spikeWindowMinutes,
@@ -422,16 +448,25 @@ export async function runTenantSpikeDetection(tenantId: string, now: Date = new 
     multiplier: config.social.triage.slaGuard.spikeMultiplier,
     minRecent: config.social.triage.slaGuard.spikeMinRecentCount,
   };
+  // `0` means derive — see config.ts's own comment. Derived from THIS run's effective window/baseline
+  // rather than the raw defaults, so an operator who widens the window also widens the cooldown and
+  // cannot accidentally end up re-notifying inside a single baseline period.
+  const configuredRenotify = config.social.triage.slaGuard.spikeRenotifyMinutes;
+  const renotifyM = configuredRenotify > 0 ? configuredRenotify : winM * (baseW + 1);
   return withTenants([tenantId], async (c) => {
     await declareSocialModuleScope(c);
     const accounts = await loadConnectedAccounts(c);
-    let spikes = 0, notified = 0, unnotifiable = 0;
+    let spikes = 0, notified = 0, unnotifiable = 0, suppressed = 0;
     for (const acc of accounts) {
       const counts = await loadAccountWindowCounts(c, acc.accountId, now, winM, baseW);
       const baselineAvg = baseW > 0 ? counts.baseline / baseW : 0;
       const isSpike = counts.recent >= minRecent && counts.recent >= baselineAvg * multiplier;
       if (!isSpike) continue;
       spikes += 1;
+      // Counted as a spike FIRST, then suppressed: `spikes` stays an honest count of what is
+      // actually elevated right now, and `suppressed` says how much of it we chose not to repeat.
+      // Collapsing the two would make a sustained spike look like it had stopped.
+      if (await spikeAlreadyAnnounced(c, acc.accountId, now, renotifyM)) { suppressed += 1; continue; }
       const { rows: engRows } = await c.query<{ engagementId: string }>(
         `SELECT id AS "engagementId" FROM social_engagements
           WHERE client_id = $1 AND deleted_at IS NULL AND status = 'active'
@@ -446,32 +481,37 @@ export async function runTenantSpikeDetection(tenantId: string, now: Date = new 
       });
       notified += 1;
     }
-    return { accountsChecked: accounts.length, spikes, notified, unnotifiable };
+    return { accountsChecked: accounts.length, spikes, notified, unnotifiable, suppressed };
   });
 }
 
 export async function runInboxSlaGuard(now: Date = new Date()): Promise<{
   tenants: number; refreshed: number; breaches: number; notified: number; unnotifiable: number;
-  spikes: number; spikeNotified: number; spikeUnnotifiable: number; errors: number;
+  spikes: number; spikeNotified: number; spikeUnnotifiable: number; spikeSuppressed: number;
+  errors: number;
 }> {
   const { rows: tenants } = await withGlobal((c) =>
     c.query<{ id: string }>(`SELECT id FROM companies WHERE deleted_at IS NULL`),
   );
   let refreshed = 0, breaches = 0, notified = 0, unnotifiable = 0;
-  let spikes = 0, spikeNotified = 0, spikeUnnotifiable = 0, errors = 0;
+  let spikes = 0, spikeNotified = 0, spikeUnnotifiable = 0, spikeSuppressed = 0, errors = 0;
   for (const { id: tenantId } of tenants) {
     try {
       const sla = await runTenantSlaGuard(tenantId, now);
       refreshed += sla.refreshed; breaches += sla.breaches; notified += sla.notified; unnotifiable += sla.unnotifiable;
       const spike = await runTenantSpikeDetection(tenantId, now);
       spikes += spike.spikes; spikeNotified += spike.notified; spikeUnnotifiable += spike.unnotifiable;
+      spikeSuppressed += spike.suppressed;
     } catch (err) {
       errors += 1;
       // eslint-disable-next-line no-console
       console.error(`[SOCIAL-INBOX-SLA-GUARD] tenant ${tenantId} failed:`, (err as Error).message);
     }
   }
-  return { tenants: tenants.length, refreshed, breaches, notified, unnotifiable, spikes, spikeNotified, spikeUnnotifiable, errors };
+  return {
+    tenants: tenants.length, refreshed, breaches, notified, unnotifiable,
+    spikes, spikeNotified, spikeUnnotifiable, spikeSuppressed, errors,
+  };
 }
 
 /** Only started by main.ts when `config.social.triage.slaGuard.guardEnabled` is true — dark by

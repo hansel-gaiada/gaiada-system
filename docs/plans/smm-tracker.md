@@ -2432,7 +2432,15 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   contract untouched.
 - The print page's `CompanyCharts` does not know this document's series/table keys, so a rendered PDF carries KPIs and narrative but not series
 - OAuth state is HMAC-signed and time-boxed but not DB-backed single-use
-- Spike detection has no persistent dedup, so a sustained spike re-fires each tick
+- ~~Spike detection has no persistent dedup, so a sustained spike re-fires each tick~~
+  — **CLOSED 2026-08-23** (module `0.5.21`). The dedup state is the `outbox_events` log itself: every
+  emit is already durably recorded, it is never pruned, and `idx_outbox_events_entity` already indexes
+  the exact lookup — so no new table, and no second store of "did we already say this" to keep in
+  agreement with the log that decides what was emitted. Cooldown is DERIVED
+  (`spikeWindowMinutes * (spikeBaselineWindows + 1)`, the point the burst ages out of its own
+  baseline) rather than a fresh constant, per this module's convention that these thresholds must
+  never read as measured. `spikes` and `suppressed` are counted SEPARATELY — collapsing them would
+  make a sustained spike look like it had stopped. Proven red-then-green.
 - `listComments`'s `urn:li:` prefix heuristic would need a real `network` parameter if a third network's ids ever collide
 - No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)
 

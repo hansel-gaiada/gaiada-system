@@ -11,6 +11,38 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.21` — 2026-08-23 — a sustained inbox spike is announced once, not every tick
+
+**Fixed**
+- Spike detection had **no persistent dedup**, so a spike that lasted re-fired on every sweep tick
+  and one burst became a stream of identical bells. `runTenantSpikeDetection` now suppresses a
+  re-announcement inside a cooldown.
+- **The dedup state is the `outbox_events` log itself**, not a new table. Every emit is already
+  durably recorded there, it is never pruned, and `idx_outbox_events_entity
+  (tenant_id, entity_type, entity_id)` already indexes exactly the lookup needed. A purpose-built
+  dedup table would be a second store of "did we already say this" that has to be kept in agreement
+  with the log that actually decides what was emitted. `outbox_events` is a CORE table, so the
+  surrounding `declareSocialModuleScope` is inert for it and the tenant wall alone applies.
+
+**Honest counting** — a suppressed spike is counted as `suppressed`, and `spikes` still counts what
+is genuinely elevated right now. Collapsing them would make a sustained spike look like it had
+*stopped*; a caller must be able to tell "quiet because nothing is elevated" from "quiet because we
+already said so". Propagated through `runInboxSlaGuard` as `spikeSuppressed` so it is observable at
+the job level rather than lost in the per-tenant return.
+
+**Cooldown is DERIVED, not a new constant** — `SOCIAL_INBOX_SPIKE_RENOTIFY_MINUTES` defaults to `0`,
+meaning `spikeWindowMinutes * (spikeBaselineWindows + 1)`: the point at which the spiking traffic has
+fully aged out of its own baseline comparison, so a still-firing detector is reporting genuinely new
+elevation rather than the same burst. Derived precisely so it cannot read as a measured or claimed
+business number, matching this module's existing convention for these thresholds. It is computed from
+the RUN's effective window/baseline, so an operator who widens the window widens the cooldown and
+cannot accidentally re-notify inside a single baseline period. Not added to `.env.example` or the
+compose `environment:` block — none of its four sibling `SOCIAL_INBOX_SPIKE_*` vars are there either,
+and introducing the inconsistency for a derive-by-default knob would be worse than the omission.
+
+**Tests** — `inbox-triage-job.test.ts` 15/0/0 (+2). Proven red-then-green: disabling the dedup check
+turns both new tests red (`expected 1 to be +0`, `expected 0 to be greater than 0`).
+
 ### social-media `0.5.20` — 2026-08-23 — the report narrative can no longer state an invented number
 
 **Fixed**

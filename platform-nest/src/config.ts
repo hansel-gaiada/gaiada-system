@@ -844,6 +844,13 @@ const configBase = {
         // "spike". This absolute floor exists ONLY to prevent that div-by-noise failure mode — it is
         // not a claim that 5 comments/hour is meaningful for any real account.
         spikeMinRecentCount: Number(process.env.SOCIAL_INBOX_SPIKE_MIN_RECENT ?? 5),
+        // Re-notify cooldown for a SUSTAINED spike. `0` means DERIVE it as
+        // `spikeWindowMinutes * (spikeBaselineWindows + 1)` — the point at which the spiking traffic
+        // has fully aged out of its own baseline comparison, so a still-firing detector is reporting
+        // genuinely new elevation rather than the same burst it already reported. Derived rather
+        // than a fresh constant precisely so it cannot read as a measured or claimed number; an
+        // explicit override is available when an operator wants a different cadence.
+        spikeRenotifyMinutes: Number(process.env.SOCIAL_INBOX_SPIKE_RENOTIFY_MINUTES ?? 0),
       },
     },
     // SMM-26 — the `smm-agent-content-brief` flow (content-brief.ts). Deliberately ONE knob, not a
