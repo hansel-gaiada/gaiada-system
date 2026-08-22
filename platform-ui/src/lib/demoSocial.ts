@@ -236,11 +236,23 @@ interface DemoPostMetric {
   videoViews?: number; clicks?: number;
   fetchedAt: string;
 }
+// SMM-27 — one account's cached best-time-to-post verdict, mirroring
+// `social_best_time_suggestions` (and `BestTimeSuggestion`, socialShared.ts) field-for-field. An
+// account with NO entry here reads `not_yet_computed` from the dispatcher below — the demo's own
+// honest default, matching every real deployment today (D-23: no account is connected anywhere).
+interface DemoBestTime {
+  accountId: string;
+  status: "insufficient_evidence" | "unsupported" | "suggested";
+  bestHourUtc: number | null; bestHourSampleSize: number | null; totalMeasuredPosts: number;
+  avgEngagementScore: number | null; minMeasuredPostsThreshold: number; minBucketPostsThreshold: number;
+  lookbackDays: number;
+}
 type SocialStore = {
   engagements: DemoEngagement[]; accounts: DemoAccount[]; posts: DemoPost[]; seq: number;
   clientReviews: DemoClientReview[];
   dailyMetrics: DemoDailyMetric[]; postMetrics: DemoPostMetric[];
   inboxThreads: DemoInboxThread[]; inboxMessages: DemoInboxMessage[];
+  bestTime: DemoBestTime[];
 };
 
 const ENGAGEMENTS_SEED: DemoEngagement[] = [ENGAGEMENT, CLIENT_REVIEWED_ENGAGEMENT];
@@ -745,6 +757,33 @@ const POST_METRICS_SEED: DemoPostMetric[] = [
   },
 ];
 
+// SMM-27 — the three DISTINCT non-default facts, driven deliberately across three different
+// accounts so all four chip states are reachable in one demo session without any interaction
+// (`not_yet_computed` is simply what an unlisted account — soc-acc-ig-2/soc-acc-ig-3 — reads):
+//   - soc-acc-ig-1 (northwindtraders, the account with the most published+measured history in this
+//     fixture): 'suggested' — 5 measured posts, 3 of them at 14:00 UTC, a real winning bucket.
+//   - soc-acc-fb-1: 'insufficient_evidence' — only 2 measured posts against a threshold of 5, the
+//     honest state a freshly-connected account would show.
+//   - soc-acc-tiktok-1: 'unsupported' — TikTok is audit-locked in this deployment (config.ts's own
+//     `enabledNetworks` default excludes it) and its driver never advertises `post_metrics` here.
+const BEST_TIME_SEED: DemoBestTime[] = [
+  {
+    accountId: "soc-acc-ig-1", status: "suggested", bestHourUtc: 14, bestHourSampleSize: 3,
+    totalMeasuredPosts: 5, avgEngagementScore: 62.5, minMeasuredPostsThreshold: 5,
+    minBucketPostsThreshold: 2, lookbackDays: 180,
+  },
+  {
+    accountId: "soc-acc-fb-1", status: "insufficient_evidence", bestHourUtc: null,
+    bestHourSampleSize: null, totalMeasuredPosts: 2, avgEngagementScore: null,
+    minMeasuredPostsThreshold: 5, minBucketPostsThreshold: 2, lookbackDays: 180,
+  },
+  {
+    accountId: "soc-acc-tiktok-1", status: "unsupported", bestHourUtc: null,
+    bestHourSampleSize: null, totalMeasuredPosts: 0, avgEngagementScore: null,
+    minMeasuredPostsThreshold: 5, minBucketPostsThreshold: 2, lookbackDays: 180,
+  },
+];
+
 // One store, shared by every module copy. Seeded once, on first touch.
 const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   engagements: ENGAGEMENTS_SEED,
@@ -756,6 +795,7 @@ const store: SocialStore = ((globalThis as Record<symbol, unknown>)[STORE] ??= {
   postMetrics: POST_METRICS_SEED,
   inboxThreads: INBOX_THREADS_SEED,
   inboxMessages: INBOX_MESSAGES_SEED,
+  bestTime: BEST_TIME_SEED,
 }) as SocialStore;
 
 // Live views. Every read and every mutation below goes through these, so the action graph and the RSC
@@ -768,6 +808,7 @@ const DAILY_METRICS = store.dailyMetrics;
 const POST_METRICS = store.postMetrics;
 const INBOX_THREADS = store.inboxThreads;
 const INBOX_MESSAGES = store.inboxMessages;
+const BEST_TIME = store.bestTime;
 const nid = (p: string) => `${p}-${++store.seq}`;
 const now = () => new Date().toISOString();
 
@@ -1248,6 +1289,26 @@ export function socialDemo(method: string, p: string, params: URLSearchParams, b
     review.decidedAt = now();
     review.updatedAt = now();
     return ok({ id: review.id, status: "withdrawn" });
+  }
+
+  // ── best-time-to-post (SMM-27) — classical stats, cached per account. GET reads the seeded
+  // verdict, or the honest `not_yet_computed` default for any account not named in `BEST_TIME_SEED`
+  // (see that seed's own header for which three accounts drive the other three states). POST
+  // recompute is a demo no-op that echoes the SAME cached row back — there is no real posting
+  // history in this fixture for a "recompute" to derive anything different from.
+  const bestTimeM = tail.match(/^accounts\/([^/]+)\/best-time$/);
+  if (bestTimeM && m === "GET") {
+    const row = BEST_TIME.find((b) => b.accountId === bestTimeM[1]);
+    if (!row) return ok({ status: "not_yet_computed" });
+    const { accountId: _accountId, ...rest } = row;
+    return ok(rest);
+  }
+  const bestTimeRecomputeM = tail.match(/^accounts\/([^/]+)\/best-time\/recompute$/);
+  if (bestTimeRecomputeM && m === "POST") {
+    const row = BEST_TIME.find((b) => b.accountId === bestTimeRecomputeM[1]);
+    if (!row) return ok({ status: "insufficient_evidence", bestHourUtc: null, bestHourSampleSize: null, totalMeasuredPosts: 0, avgEngagementScore: null, minMeasuredPostsThreshold: 5, minBucketPostsThreshold: 2, lookbackDays: 180 });
+    const { accountId: _accountId, ...rest } = row;
+    return ok(rest);
   }
 
   // ── publisher status (SMM-05) — THIS ticket's first demo route for it. `inboxSurface:

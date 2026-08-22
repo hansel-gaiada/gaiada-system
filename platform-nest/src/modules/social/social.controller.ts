@@ -88,6 +88,10 @@ import {
   checkConnectReadiness, initiateAccountConnect, provisionPublisherOrg, syncConnectorRegistry,
 } from "./publisher/provisioning";
 import { getPublisher } from "./publisher/registry";
+// SMM-27 — best-time-to-post. `getCachedBestTime` reads the nightly sweep's cached verdict;
+// `computeAccountBestTime` backs the manual "recompute now" affordance so a freshly-connected
+// account is not stuck showing a stale/absent cache for up to a full day.
+import { getCachedBestTime, computeAccountBestTime, applyBestTimeSuggestion } from "./best-time";
 
 const ENGAGEMENT_STATUSES = new Set(["draft", "active", "paused", "closed"]);
 const NETWORKS = new Set([
@@ -2336,6 +2340,40 @@ export class SocialController {
       { modules: ["social"] },
     );
     return { posts: rows };
+  }
+
+  /** SMM-27 — best-time-to-post, the READ side. Returns the nightly sweep's cached verdict, or
+   *  `{status:"not_yet_computed"}` — a FOURTH, distinct token, never silently coerced into
+   *  `insufficient_evidence` — if the sweep has never run for this account (e.g. freshly
+   *  connected, or `config.social.bestTime.enabled` is false, which is this ticket's own
+   *  shipped default: every real deployment is in this state today, D-23). Classical stats only —
+   *  no gateway call happens on this path. */
+  @Get("accounts/:accountId/best-time")
+  async getBestTime(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("accountId") accountId: string,
+  ) {
+    if (!UUID_RE.test(accountId)) refuse("invalid_id");
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    const cached = await getCachedBestTime(tenantId, accountId);
+    if (!cached) return { status: "not_yet_computed" as const };
+    return cached;
+  }
+
+  /** SMM-27 — best-time-to-post, the on-demand RECOMPUTE. Same `read` gate as the GET above: this
+   *  is a re-derivation of our own already-readable data, never a write with any blast radius of
+   *  its own (unlike `social.post.publish`), so it does not need a `write`/`impact` classification
+   *  or a D14 gate. Exists so a freshly-connected account is not stuck showing a stale/absent cache
+   *  for up to a full day while the nightly sweep is dark or not yet due. */
+  @Post("accounts/:accountId/best-time/recompute")
+  @HttpCode(200)
+  async recomputeBestTime(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("accountId") accountId: string,
+  ) {
+    if (!UUID_RE.test(accountId)) refuse("invalid_id");
+    await authorize(req.principal, { kind: "social_account", tenantId, module: "social" }, "read");
+    const result = await computeAccountBestTime(tenantId, accountId);
+    await applyBestTimeSuggestion(tenantId, accountId, result);
+    return result;
   }
 
   /** Provision the (tenant, client) → publisher-org mapping. Idempotent. See provisioning.ts for

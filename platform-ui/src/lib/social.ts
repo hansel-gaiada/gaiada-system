@@ -81,7 +81,7 @@
 import { platformFetch, PlatformError } from "./platform";
 import {
   EMPTY_TOOL_SCOPE, NOT_REQUESTED_REVIEW, EMPTY_ASSET_LIBRARY, UNCONFIGURED_PUBLISHER_STATUS,
-  EMPTY_USAGE_SNAPSHOT,
+  EMPTY_USAGE_SNAPSHOT, NOT_YET_COMPUTED_BEST_TIME,
 } from "./socialShared";
 import type {
   Guarded, SocialEngagement, SocialEngagementDetail, EngagementScope, SocialBrandProfile,
@@ -90,6 +90,7 @@ import type {
   DailyMetricRow, PostMetricRow, UsageSnapshot,
   AssetLibrary,
   PublisherStatus, InboxThread, InboxMessage, ReplySendPreconditionResult,
+  BestTimeSuggestion,
 } from "./socialShared";
 
 export * from "./socialShared";
@@ -242,6 +243,17 @@ export const getPublishPreconditions = async (
 export const getClientReview = async (u: string, t: string, variantId: string): Promise<Guarded<ClientReviewState>> => {
   const r = await readGuarded(platformFetch<unknown>(`${base(t)}/variants/${variantId}/client-review`, u), NOT_REQUESTED_REVIEW);
   return { ...r, data: asObject<ClientReviewState>(r.data) ?? NOT_REQUESTED_REVIEW };
+};
+
+// ── best-time-to-post (SMM-27) — classical stats, `social.account.read` ────────────────────────────
+//
+// `GET accounts/:accountId/best-time` never 404s for a valid account (the controller answers
+// `{status:'not_yet_computed'}` as DATA, same "a legitimate steady state, not an error" doctrine
+// `PublishPreconditionResult`/`ClientReviewState` already follow) — `readGuarded`'s own fallback
+// exists here for a genuine 403/404/network failure, not for the ordinary "sweep hasn't run" case.
+export const getBestTimeToPost = async (u: string, t: string, accountId: string): Promise<Guarded<BestTimeSuggestion>> => {
+  const r = await readGuarded(platformFetch<unknown>(`${base(t)}/accounts/${accountId}/best-time`, u), NOT_YET_COMPUTED_BEST_TIME);
+  return { ...r, data: asObject<BestTimeSuggestion>(r.data) ?? NOT_YET_COMPUTED_BEST_TIME };
 };
 
 // ── analytics (SMM-21) ──────────────────────────────────────────────────────────────────────────

@@ -366,6 +366,68 @@ export const NOT_REQUESTED_REVIEW: ClientReviewState = { status: "not_requested"
 
 export type ClientReviewVerdict = { ok: true } | { ok: false; reason: ClientReviewRefusalReason };
 
+// ── best-time-to-post (SMM-27) — a CLASSICAL STATS suggestion, never AI ─────────────────────────────
+//
+// Mirrors `platform-nest/src/modules/social/best-time.ts` verbatim. FOUR distinct facts, never one
+// boolean and never a bare number that could be misread as "post now" —
+//   'not_yet_computed'      — the nightly sweep has never run for this account (dark by default:
+//                              EVERY real deployment reads this today, since no account is connected
+//                              anywhere in the estate, D-23).
+//   'insufficient_evidence' — the sweep DID run, but fewer measured posts exist than this account's
+//                              own `minMeasuredPostsThreshold` (or the best hour bucket alone did not
+//                              reach `minBucketPostsThreshold`) — a threshold, not a hidden constant;
+//                              both numbers ride the response so the chip can quote them honestly.
+//   'unsupported'           — this account's network can never report per-post engagement. No amount
+//                              of waiting produces a suggestion — a DIFFERENT, more permanent fact
+//                              than insufficient_evidence, never collapsed into it.
+//   'suggested'             — a real answer, backed by real counts (`bestHourSampleSize` of
+//                              `totalMeasuredPosts`).
+// `bestHourUtc` is ALWAYS a UTC hour (0-23) — no per-account timezone exists anywhere in this schema
+// to localize it, so the chip must say "UTC" explicitly rather than imply a client-local time that
+// was never computed (see `best-time.ts`'s own header for why guessing one would be exactly this
+// ticket's own "fabricated precision" failure mode, pointed at a clock instead of a sample size).
+export type BestTimeStatus = "not_yet_computed" | "insufficient_evidence" | "unsupported" | "suggested";
+export interface BestTimeSuggestion {
+  status: BestTimeStatus;
+  bestHourUtc: number | null;
+  bestHourSampleSize: number | null;
+  totalMeasuredPosts: number;
+  avgEngagementScore: number | null;
+  minMeasuredPostsThreshold: number;
+  minBucketPostsThreshold: number;
+  lookbackDays: number;
+}
+export const NOT_YET_COMPUTED_BEST_TIME: BestTimeSuggestion = {
+  status: "not_yet_computed", bestHourUtc: null, bestHourSampleSize: null, totalMeasuredPosts: 0,
+  avgEngagementScore: null, minMeasuredPostsThreshold: 0, minBucketPostsThreshold: 0, lookbackDays: 0,
+};
+
+/** `hourUtc` -> "14:00 UTC" — a plain, unambiguous label. Never converted to a browser-local hour:
+ *  there is no per-account timezone fact to convert AGAINST (see the type's own header). */
+export function formatBestHourUtc(hourUtc: number): string {
+  return `${String(hourUtc).padStart(2, "0")}:00 UTC`;
+}
+
+/** The chip's own copy for each of the four states — criterion-5 discipline applied to a statistic
+ *  instead of a refusal token: every state renders as ITSELF, never a blank chip and never a number
+ *  dressed up as more confident than the underlying sample. */
+export function describeBestTime(s: BestTimeSuggestion): string {
+  switch (s.status) {
+    case "not_yet_computed":
+      return "Best-time-to-post hasn't been computed yet for this account.";
+    case "unsupported":
+      return "This network can't report per-post engagement, so a best-time suggestion isn't possible here.";
+    case "insufficient_evidence":
+      return `Not enough data yet: ${s.totalMeasuredPosts} of ${s.minMeasuredPostsThreshold} measured posts needed before a best time can be suggested.`;
+    case "suggested":
+      return `Best time to post: around ${formatBestHourUtc(s.bestHourUtc as number)}, based on ${s.bestHourSampleSize} of ${s.totalMeasuredPosts} measured posts.`;
+    default: {
+      const exhaustive: never = s.status;
+      return exhaustive;
+    }
+  }
+}
+
 // ── the asset library (SMM-20, AMENDED by D-17 — attach only, generation removed) ─────────────────
 //
 // `GET engagements/:id/asset-library` — files already on record for the engagement's CLIENT

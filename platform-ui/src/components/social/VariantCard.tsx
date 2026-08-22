@@ -18,15 +18,15 @@ import {
   attachVariantMedia,
 } from "@/lib/socialActions";
 import {
-  describeRefusal, describeQuota, evaluateClientReviewState, type SocialPostVariant,
+  describeRefusal, describeQuota, evaluateClientReviewState, describeBestTime, type SocialPostVariant,
   type SocialAccount, type PublishPreconditionResult, type ClientReviewState,
-  type AssetLibrary, type MediaDescriptor,
+  type AssetLibrary, type MediaDescriptor, type BestTimeSuggestion,
 } from "@/lib/socialShared";
 import { ValidationList } from "./ValidationList";
 
 export function VariantCard({
   tenantId, variant, canDelete, account, accountsForbidden, clientReview, requiresClientOk,
-  canRequestReview, canWithdrawReview, assetLibrary, assetLibraryForbidden,
+  canRequestReview, canWithdrawReview, assetLibrary, assetLibraryForbidden, bestTime,
 }: {
   tenantId: string;
   variant: SocialPostVariant;
@@ -63,6 +63,13 @@ export function VariantCard({
   /** True only on a genuine 403 reading the library — rendered distinctly from "the library is
    *  empty", same honesty rule every other guarded read on this card already follows. */
   assetLibraryForbidden?: boolean;
+  /** SMM-27 — the classical-stats best-time-to-post suggestion for THIS variant's account (one
+   *  value per account, read once by the composer page — same "one value shared by every variant
+   *  of the post" pattern `requiresClientOk`/`assetLibrary` already follow, except this is keyed
+   *  per-account rather than per-post since the statistic is a property of the account's own
+   *  posting history). `undefined` only when the account lookup itself missed (see the page's own
+   *  fallback) — never fabricated as a suggestion. */
+  bestTime?: BestTimeSuggestion;
 }) {
   const router = useRouter();
   const [body, setBody] = useState(variant.body);
@@ -290,6 +297,8 @@ export function VariantCard({
         error={reviewError} onRequest={requestReview} onWithdraw={withdrawReview}
       />
 
+      <BestTimeChip suggestion={bestTime} />
+
       {variant.estimatedCostUsd > 0 && (
         <p style={{ margin: 0, font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>
           Estimated metered cost: ${variant.estimatedCostUsd.toFixed(3)}
@@ -433,6 +442,37 @@ function ClientReviewPanel({
         )}
         {error && <span style={{ font: "400 12px var(--font-body)", color: "var(--status-critical-fg, #b3261e)" }}>{error}</span>}
       </div>
+    </div>
+  );
+}
+
+/** SMM-27 — the best-time-to-post chip. CLASSICAL STATS ONLY — no gateway call sits behind this
+ *  render. Renders as one of FOUR visibly distinct states, never a bare time and never blank:
+ *   - `undefined` (the account lookup itself missed) or `'not_yet_computed'` — muted, informational,
+ *     explicitly says nothing has been computed. This is the state EVERY real deployment is in
+ *     today (no account is connected anywhere in the estate, D-23), so it is deliberately not
+ *     alarming — it reads as "not yet", never as an error.
+ *   - `'unsupported'` — muted, but a DIFFERENT sentence: this network can never answer, which is a
+ *     more permanent fact than "no data yet" and must not be confused with it.
+ *   - `'insufficient_evidence'` — muted/caution, and ALWAYS quotes the actual threshold and the
+ *     actual count (`describeBestTime`) rather than a bare "not enough data" — the ticket's own
+ *     "state the threshold" instruction, carried all the way to the pixel.
+ *   - `'suggested'` — the only state styled as a positive, confident answer, and the ONLY state
+ *     that ever renders an hour. Labelled "UTC" explicitly (`formatBestHourUtc`) — see
+ *     `best-time.ts`'s header for why no client-local hour is ever implied. */
+function BestTimeChip({ suggestion }: { suggestion?: BestTimeSuggestion }) {
+  const s = suggestion ?? { status: "not_yet_computed" as const, bestHourUtc: null, bestHourSampleSize: null, totalMeasuredPosts: 0, avgEngagementScore: null, minMeasuredPostsThreshold: 0, minBucketPostsThreshold: 0, lookbackDays: 0 };
+  const color = s.status === "suggested"
+    ? "var(--status-positive-fg, #1a7f37)"
+    : s.status === "insufficient_evidence" ? "var(--status-caution-fg, #9a6700)" : "var(--erp-ink-50)";
+  return (
+    <div style={{ borderTop: "0.5px solid var(--erp-hairline-soft)", paddingTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <span style={{ font: "600 11px var(--font-body)", letterSpacing: "0.04em", color: "var(--erp-ink-60)" }}>
+        Best time to post
+      </span>
+      <span style={{ font: "400 12px/1.5 var(--font-body)", color }}>
+        {describeBestTime(s)}
+      </span>
     </div>
   );
 }
