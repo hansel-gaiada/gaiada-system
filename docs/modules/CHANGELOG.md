@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.18` — 2026-08-23 — SMM-25: Playwright console suite (no product code, version unchanged)
+
+**Added**
+- `platform-ui/e2e/social-console.spec.ts` (13 tests) + a new `social` project in
+  `playwright.config.ts` — the department's whole-merge-gate suite, over DEMO_MODE
+  (`src/lib/demoSocial.ts`). Covers all four department routes (`calendar`/`composer`/`inbox`/
+  `analytics`, `dept-4`) plus the client-review portal list+detail pages.
+- One additive DEMO_MODE fixture: `soc-post-10`/`soc-var-11` (`demoSocial.ts`) — closes a real gap
+  where NO seeded variant targeted `soc-acc-tiktok-1`, so the best-time chip's `'unsupported'` state
+  (SMM-27's own seed) could never actually render in a browser.
+
+**Scope, stated plainly**
+- The addendum's original SMM-25 row asked for full-stack e2e + a Playwright suite + DEMO_MODE
+  fixtures. Fixtures already existed; full-stack live e2e is undrivable by anyone today (every
+  platform app credential in the estate is empty, app reviews deferred to staging, D-23). This entry
+  is the DEMO_MODE Playwright suite only, never presented as live verification.
+
+**No product defect found**
+- Every first-pass test failure was a locator scoped too broadly across a page that legitimately
+  renders one fact twice, or one cross-test race inside the new suite itself (fixed with
+  `test.describe.configure({ mode: "serial" })`, not a blanket `.first()`). Re-run twice after
+  fixing (8-worker parallel, 32.6s; 1-worker serial, 49.4s) — 13/13 both times.
+
+Full detail: `docs/modules/MODULES.md`'s social-media `0.5.18` (SMM-25) entry,
+`docs/plans/smm-tracker.md`'s SMM-25 evidence block.
+
 ### social-media `0.5.18` — 2026-08-23 — SMM-27: best-time-to-post — classical stats job + suggestion chip
 
 **Added**

@@ -84,6 +84,14 @@ test.describe("Composer — best-time-to-post chip: four states, never a bare ti
 });
 
 test.describe("Composer — client sign-off: five distinct steady states + the live request/withdraw loop", () => {
+  // Serial, deliberately: both tests below read/mutate the SAME shared-globalThis demo row
+  // (soc-var-10's client review) — under the default fully-parallel config they raced (one test
+  // asserting "not_requested" while the other was mid-flight turning it "pending"), a real
+  // test-isolation bug in THIS suite, not a product defect. Sequencing is the honest fix; giving
+  // the live-loop test its own separate "not_requested" fixture would need a second seed row this
+  // suite has no other use for.
+  test.describe.configure({ mode: "serial" });
+
   test("pending, stale, changes_requested (with the client's own comment), and not_requested read as five different facts", async ({ page, context }) => {
     await loginStaff(page, context, "superadmin");
 
@@ -162,8 +170,12 @@ test.describe("Inbox — AI-triage chip: four states that must not collapse into
     await expect(page.getByText("(content purged)")).toBeVisible();
 
     // soc-thread-4 — a thread with genuinely no SLA target ("none") reads as its own honest
-    // sentence, never a 0-based countdown or an error.
-    await expect(page.getByText("No SLA target — this engagement has not configured an inbox response time.")).toBeVisible();
+    // sentence, never a 0-based countdown or an error. Scoped to soc-thread-4's OWN row (its
+    // excerpt is unique) — soc-thread-9 ALSO has no SLA target, so the bare text is not unique on
+    // this page; that is two threads legitimately sharing one honest state, not a locator bug to
+    // paper over with `.first()`.
+    const thread4Row = page.locator(".lux-table__row", { hasText: "Loved the new arrivals, ordering more!" });
+    await expect(thread4Row.getByText("No SLA target — this engagement has not configured an inbox response time.")).toBeVisible();
   });
 });
 
@@ -183,8 +195,20 @@ test.describe("Inbox — reply gate: edit-invalidates-draft loop and the source_
     // purged under LinkedIn's 48h cap. send-preconditions must refuse `source_content_purged`
     // honestly (fail-closed-on-unknown, D-22's doctrine) — never presented as a system error.
     await page.goto(`${DEPT4}/inbox?thread=soc-thread-6`);
-    await page.getByRole("button", { name: "Check send readiness" }).click();
-    await expect(page.getByText("retention")).toBeVisible();
+    // TWO "Check send readiness" buttons render for this one message (soc-msg-10, the sole
+    // approved-but-unsent reply on this thread) — one in the per-message row of the "Messages"
+    // list, one in the "Draft reply" panel's own controls. Both point at the identical message id,
+    // so this is one fact rendered twice in two places, not two variants disagreeing — scoped to
+    // the message-list row specifically (unambiguous about WHICH affordance is being driven) rather
+    // than a blind `.first()`.
+    await page.locator("li", { hasText: "Navy is back in stock as of this week!" })
+      .getByRole("button", { name: "Check send readiness" }).click();
+    // Exact match: a bare substring "retention" also matches the (unrelated, already-visible)
+    // purged-triage-chip disclaimer text ("Retention compliance — not a failure.") rendered twice
+    // on this page (once in the queue row, once in the detail panel, for this same thread) —
+    // exact:true targets only the `<code>{stage}</code>` badge, which is the actual fact this
+    // assertion is about.
+    await expect(page.getByText("retention", { exact: true })).toBeVisible();
     await expect(page.getByText(/scrubbed under LinkedIn's 48-hour retention cap/)).toBeVisible();
     await expect(page.getByText(/This is correct, expected behaviour — not a bug/)).toBeVisible();
   });
@@ -194,8 +218,11 @@ test.describe("Inbox — RBAC: a plain member is denied, not shown an empty queu
   test("member-tier (negative control): the inbox page reads Access denied, never a bare empty list", async ({ page, context }) => {
     await loginStaff(page, context, "member");
     await page.goto(`${DEPT4}/inbox`);
-    await expect(page.getByRole("alert")).toContainText("Access denied");
-    await expect(page.getByRole("alert")).toContainText("view the engagement inbox");
+    // `getByRole("alert")` alone can pick up a second, unrelated dev-only overlay role in this
+    // environment (Next's own dev toolbar) — scoped to OUR AccessDenied component's own text so
+    // this asserts the product's denial, not just "some alert exists somewhere on the page".
+    const denied = page.getByRole("alert").filter({ hasText: "view the engagement inbox" });
+    await expect(denied).toContainText("Access denied");
     // Never the empty-queue sentence — a denial must never read as "nothing to show".
     await expect(page.getByText("Nothing in this queue right now.")).toHaveCount(0);
   });
@@ -243,8 +270,13 @@ test.describe("Calendar — drag-to-reschedule: the discarded-approval warning m
     // soc-var-8's chip must read "Client: approved" — the raw status. The Composer is the only
     // surface with the live hash needed to know it's actually stale (VariantCard, tested above);
     // the calendar roll-up carries no argsSha256 to compare against, and must not fabricate one.
-    await expect(page.getByText("Client: approved")).toBeVisible();
-    await expect(page.getByText(/Client:.*stale/i)).toHaveCount(0);
+    // soc-post-7's own TITLE literally contains the word "stale" ("Approved, then edited — now
+    // stale") — a bare page-wide `/Client:.*stale/i` regex matches across that unrelated text
+    // node and the chip's, which is not what "no chip reads stale" means. Scoped to the review
+    // chip elements themselves (the ones the raw-status assertion above also targets).
+    const reviewChips = page.locator("a", { hasText: "Approved, then edited" }).getByText(/^Client:/);
+    await expect(reviewChips).toHaveText("Client: approved");
+    await expect(reviewChips).not.toHaveText(/stale/i);
   });
 });
 
@@ -299,13 +331,32 @@ test.describe("Portal — client review surface, the four labels a client actual
     await loginAsPersona(page, "client_contact");
     await page.goto("/portal/social-reviews");
 
-    // cr-1 (soc-var-7) — pending.
-    await expect(page.getByText("Awaiting your decision")).toBeVisible();
-    // cr-2 (soc-var-8) — approved (against the OLD hash; the portal has no reason to know it's
-    // since gone stale — that fact belongs to the staff Composer only, per this suite's own
-    // calendar/composer assertions above).
-    await expect(page.getByText("Approved").first()).toBeVisible();
-    // cr-3 (soc-var-9) — changes requested, WITH the client's own prior comment visible.
-    await expect(page.getByText("Changes requested").first()).toBeVisible();
+    // Pending reviews each get their OWN Card (section.lux-card), headed by the post's own title —
+    // scoped to that specific card so a SECOND, unrelated pending review left behind by an earlier
+    // test's live request/withdraw loop (soc-var-10 — a different post, different title) can never
+    // be mistaken for cr-1. cr-1 (soc-var-7, soc-post-6) — pending.
+    const pendingCard = page.locator("section.lux-card", {
+      has: page.getByRole("heading", { name: "Client sign-off needed: Autumn drop" }),
+    });
+    await expect(pendingCard.getByText("Awaiting your decision")).toBeVisible();
+
+    // Decided reviews (cr-2, cr-3) are NOT their own cards — they're rows inside the single
+    // "Past reviews" card, one Link (post title) + one status span per row, per this page's own
+    // source (app/(portal)/portal/social-reviews/page.tsx). Scoped to the row via its own title
+    // Link so cr-2's "Approved" can never be confused with cr-3's "Changes requested" two rows down.
+    const pastReviews = page.locator("section.lux-card", { has: page.getByRole("heading", { name: "Past reviews" }) });
+    const cr2Row = pastReviews.locator("div", { has: page.getByRole("link", { name: "Approved, then edited — now stale" }) }).last();
+    const cr3Row = pastReviews.locator("div", { has: page.getByRole("link", { name: "Client asked for changes — carousel copy" }) }).last();
+    // cr-2 (soc-var-8, soc-post-7) — approved (against the OLD hash; the portal has no reason to
+    // know it's since gone stale — that fact belongs to the staff Composer only, per this suite's
+    // own calendar/composer assertions above).
+    await expect(cr2Row).toHaveText(/Approved/);
+    // cr-3 (soc-var-9, soc-post-8) — changes requested.
+    await expect(cr3Row).toHaveText(/Changes requested/);
+
+    // The client's OWN comment is a detail-page fact, not shown on this list (§16h's contract) —
+    // followed to cr-3's own review page to prove it's actually there, not just claimed by title.
+    await cr3Row.getByRole("link", { name: "Client asked for changes — carousel copy" }).click();
+    await expect(page.getByText("Please swap the second photo for the new packaging shot before we go out with this.")).toBeVisible();
   });
 });

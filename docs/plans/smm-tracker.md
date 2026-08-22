@@ -32,9 +32,20 @@ not afterwards.
 | P1 publish loop | **12** | 12 ✅ |
 | P2 inbox + client approval | **6** | 6 ✅ |
 | PD `direct` driver (SMM-38) | **5 (38a, 38b, 38c, 38d, 38e)** | 5 phases |
-| P3 content ops | **8** (+1 partial: SMM-25 e2e) | 8 |
+| P3 content ops | **8** (+1 partial, DEV-VERIFIED for its buildable half: SMM-25 e2e) | 8 |
 | P4 agents + assistant | **3** (+1 partial: SMM-35 summary-read only) | 3 |
 | Decision-gated | — | 3 (1 dead) |
+
+**Note (2026-08-23, qa, SMM-25):** the Playwright console suite landed — `e2e/social-console.spec.ts`
+(13 tests, new `social` project), driven twice (8-worker parallel and single-worker serial), both
+13/13. This is the whole-department merge gate the addendum named as the last outstanding piece.
+The live full-stack e2e third of the original ask stays permanently deferred, not done, until D-23
+clears — no live dev stack exists for anyone to point a browser at today. Zero product defects
+found; every first-pass failure was a locator-precision bug in the new test file itself, fixed
+without weakening any assertion (see this file's own SMM-25 evidence block, P3 table below).
+platform-ui: 2615/2615 vitest, `tsc --noEmit` clean (both measured directly, not cited). Module
+`social-media 0.5.18` (unchanged — no backend/UI product code touched, only `e2e/**`,
+`playwright.config.ts`, and one additive `demoSocial.ts` fixture).
 
 **Note (2026-08-23, medior, SMM-27):** best-time-to-post landed — a classical-stats sweep +
 suggestion chip, deliberately NOT an AI ticket. This is the LAST unbuilt ticket in the department:
@@ -1264,8 +1275,115 @@ any single capability is real, that phase decides how `direct` gets registered a
 | SMM-22 | X metering live: stop-loss in dispatch **and** precondition, usage panel | ✅ **merged** | backend DEV-VERIFIED against live Postgres (591/0/5); usage panel UI **unit/type-checked only, NOT browser-driven** — see evidence below |
 | SMM-23 | Reports: snapshot + AI narrative → approve → render → Drive | ✅ | backend DEV-VERIFIED against live Postgres + Redis + a real sidecar round trip, evidence below |
 | SMM-24 | Docs/registration, BFF rows, toolkit entry, MAP regen, AGPL source-offer footer | ✅ **docs closed** 2026-08-20 | toolkit entry **already complete** (`deptToolkits.ts`, all four routes); MODULES/CHANGELOG current; two stale doc claims corrected 2026-08-20; `docs/FRONTEND-BFF-CONTRACT.md` §19 gained the missing dispatch-endpoint row, the webhook-intake row, and the two SMM-21 metrics rows, each verified against the controller code read directly. **The AGPL source-offer itself was NOT built as of this pass** — confirmed then (no footer surface anywhere in the staff console) and a placement recommended, not built. **Closed 2026-08-21 by senior-uiux** — see the (now-closed) gap entry below for the placement decision, the exact copy, and the browser evidence |
-| SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial | DEMO_MODE social fixture landed in SMM-14 |
+| SMM-25 | Full-stack e2e + Playwright suite + DEMO_MODE fixtures | 🟡 partial (DEV-VERIFIED for its buildable half) | DEMO_MODE fixture landed in SMM-14 (extended by SMM-12/18/22/27); the committed Playwright console suite (`e2e/social-console.spec.ts`, new `social` project) landed this pass — 13/13, driven twice (parallel + serial); live full-stack e2e remains genuinely undrivable — every platform app credential is empty and app reviews are deferred to staging (D-23), so no live dev stack exists for anyone to drive today. See evidence below |
 | SMM-33 | Capability inventory + eval register | ✅ **both named gaps CLOSED** 2026-08-21 | golden-case table (SMM-14, proof of P1) stands; the companion registry (`docs/modules/social-capability-inventory.md`) named two structural gaps 2026-08-20; **both closed in code 2026-08-21 (senior-be)** — see evidence below. **21 MCP tools** now (was 18; the three new client-review tools), the group's own read/request/withdraw declared, the portal decide confirmed to stay undeclared; the post-status webhook (and its shared safety-poll sibling) now writes an honestly-attributed (`actor_id NULL`) `work_activity` row |
+
+**SMM-25 evidence (2026-08-23, qa).** Worktree was current at cut time (`git log --oneline -1`
+matched `main`'s tip through SMM-27's merge; `best-time.ts`/`InboxWorkspace.tsx` both present) —
+stated rather than assumed, per this file's own repeated cross-session-hazard note.
+
+**The honest scope reduction, stated plainly rather than silently narrowed.** The addendum's row
+asks for three things: full-stack e2e on the live dev stack, a Playwright console suite, and
+DEMO_MODE fixtures. The fixtures already landed (SMM-14, extended by SMM-12/18/22/27) and the live
+half is not buildable by anyone today — every platform app credential in the estate is empty and
+app reviews are deferred to staging (D-23), so there is no live dev stack to point a browser at.
+**This pass delivers the DEMO_MODE Playwright suite only**, and says so rather than describing
+DEMO_MODE coverage as live verification.
+
+**New `platform-ui/e2e/social-console.spec.ts`** (13 tests) + a new `social` project in
+`playwright.config.ts` (self-contained logins — platform_admin/manager-tier, plain `member`, and
+the demo client-portal contact — no dependency on the `chromium` project's stored session, same
+reasoning as the `portal`/`personas`/`pm-unified` projects' own headers). Covers all four department
+routes (`calendar`/`composer`/`inbox`/`analytics` under `dept-4`) plus the client-review portal
+list+detail pages.
+
+**Every honest-absence state from the ticket's own table, covered or named as a gap:**
+- `insufficient_evidence` best-time chip — covered, and distinguished from `suggested` (quotes an
+  hour + UTC), `not_yet_computed`, and `unsupported` (all four now reachable — see the fixture note
+  below).
+- `unsupported` vs empty inbox — the fixture gap this ticket found: NO seeded post variant targeted
+  `soc-acc-tiktok-1` (the one account `BEST_TIME_SEED` already marks `unsupported`), so the
+  Composer could never actually render that fourth state. Closed with one new fixture post/variant
+  (`soc-post-10`/`soc-var-11`, `demoSocial.ts`), additive only — no existing seed touched.
+- triage `purged` — covered as a compliance fact: chip text, its "not a failure" caption, the row's
+  own "(content purged)"/"Unknown" wording, and a computed-style check proving it is NOT rendered
+  in the critical/red family.
+- triage `unclassified` vs `unavailable` — covered as an actual CSS distinction
+  (`font-style: italic` vs `normal`), not just two different strings, per the ticket's own "assert
+  the distinction" instruction.
+- quota unknown vs not-modeled vs real — covered, three exact strings, including the at-cap
+  (25/25) case staying "known" rather than flipping to some fourth state.
+- `source_content_purged` — covered through the real send-preconditions read (fail-closed-on-unknown).
+- KPI omitted vs zeroed — covered: an em-dash cell alongside a real number in the SAME row (proves
+  it isn't a blanket dash), plus a whole account (`soc-acc-ig-2`, never pulled) asserted ABSENT from
+  the per-account tables rather than rendered as a zeroed section.
+- `platform_app_not_registered` — **named as unreachable in DEMO_MODE today, not forced.**
+  `InboxUnavailableNotice` (the only UI surface that renders this token's copy) is gated on
+  `status.data.inboxSurface !== "available"`, and `demoSocial.ts`'s own `publisher/status` route
+  hardcodes `inboxSurface: "available"` **on purpose** (that file's own comment: DEMO_MODE exists to
+  prove the triage UI renders, not to reproduce D-23's "none" steady state). Flipping that default
+  would silently hide every triage-chip/SLA/reply-gate scenario this suite (and SMM-18's own
+  browser pass) depends on being visible — the fix would need a query-param toggle threaded through
+  `lib/social.ts`'s `getPublisherStatus` and the inbox page itself, both off-limits to this ticket's
+  file surface. Unit coverage already exists (`socialShared.test.ts`, cited by name in that file).
+  Reported rather than papered over — a real, if narrow, gap for whoever next touches that surface.
+- The Calendar/Composer pages' own `AccessDenied` (403) path is **likewise unreachable in
+  DEMO_MODE** — `demoFixtures.ts`'s dispatcher never returns a 403 for `/modules/social/*`
+  regardless of caller role (no RBAC enforcement in the fixture layer at all for those two pages;
+  unlike the Inbox page, which gates locally via a direct `can(me, "social.inbox.read", tenant)`
+  check BEFORE any network call — that one IS real and IS the suite's RBAC negative control). The
+  suite instead proves the write-affordance is correctly hidden for a `member` (no `NewPostForm` on
+  Composer) — the honest ceiling of what DEMO_MODE can prove for those two pages.
+
+**Distinctions, not presence — how each was actually asserted:** every table-row assertion above
+compares the SPECIFIC wording/style two adjacent states would collapse into if a future change
+broke the distinction (e.g. `toHaveCSS("font-style", …)` for triage, an explicit
+`.not.toBe("0")`/`.not.toBe("—")` pairing for every omitted-metric check, a computed-color check
+that the purged chip is NOT the critical-red RGB), never a bare "something rendered" check.
+
+**Drag-to-reschedule** (`soc-post-3`, two approved variants): the native HTML5 DnD is driven with
+`locator.dragTo()`, and the blocking `confirm()` is captured via `page.once("dialog", …)` — the
+message is asserted to name the exact count ("2 approved variants" / "discard 2 existing
+approvals" / "drops back to draft"), then **dismissed**, and the post is proven to have NOT moved
+(reload + re-check). The confirm-and-commit path is not separately re-driven (the cancel path
+already proves the warning fires before any write; SMM-12's own evidence already covers the commit
+path with the resulting banner).
+
+**Negative control (SMM-24):** `SourceOfferNotice` (role="note", "Open-source notice") is present
+on Social Media (`dept-4/calendar`) and absent on Web Dev (`dept-1/projects`) — both assertions in
+one test, so a regression that made the footer console-wide (or vanish entirely) fails on the same
+run either way.
+
+**Fixture added, `globalThis`-pinned:** `soc-post-10`/`soc-var-11` in `demoSocial.ts`'s
+`POSTS_SEED` (the tiktok best-time gap above) — read-only relative to the existing pinned `STORE`
+object, appended to the same array that store already wraps, so it inherits the existing pinning
+with no new mutable state of its own.
+
+**No real product defect found.** Every one of the 13 tests' first-pass failures (6 distinct
+locator bugs, caught and fixed before this count) was a test-authoring precision issue — three
+strict-mode collisions from scoping a `getByText`/`getByRole` too broadly across a page that
+legitimately renders the same label twice for two different reasons (once as a compliance-disclaimer
+caption AND once as a live triage chip; once as a status pill AND once as a plain-text caption on
+the portal's decided-reviews row; once as a stage-code badge AND once inside an unrelated sentence
+containing the same substring), one page-title collision (a post literally titled "…now stale"
+defeating a page-wide regex), and one genuine test-isolation bug in THIS suite (two tests racing on
+the same shared-`globalThis` demo row under `fullyParallel`, fixed with `test.describe.configure({
+mode: "serial" })` rather than a blanket `.first()` that would have hidden a real collision if one
+ever existed). None of the six fixes weakened an assertion's meaning — each was re-scoped to name
+which of two legitimately-duplicated elements it meant. Re-run twice after fixing (parallel, 8
+workers, 32.6s; then alone, 1 worker, 49.4s) — 13/13 both times, ruling out both the
+shared-globalThis-store phantom-failure class and ordinary flakiness.
+
+**Environment note for the next seat:** this worktree had no `node_modules` and no `SESSION_SECRET`
+set — `npm ci` plus `SESSION_SECRET=<anything, 32+ chars>` in the shell that spawns `npx playwright
+test` (not just `DEMO_MODE`, which `playwright.config.ts`'s `webServer.env` already sets) are both
+required before `next dev` will serve `/login` at all; its absence surfaces as every `loginAsPersona`
+call timing out on `waitForURL`, not as a build error, which reads confusingly like a broken login
+flow rather than a missing env var.
+
+**What remains unverifiable until credentials exist:** a real publish to any live network, a real
+Postiz round trip, a real LinkedIn/YouTube `direct`-driver dispatch, and the true steady-state
+`platform_app_not_registered` inbox panel in a browser — all D-23, all named rather than guessed at.
 
 **SMM-33 + SMM-24 evidence (2026-08-20, medior, docs-only pass).** Started from a worktree cut before
 `main` had SMM-21's merge (`9a5a8f5`); confirmed a clean fast-forward (`git merge-base --is-ancestor
@@ -2281,7 +2399,7 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 | Remaining | Note |
 |---|---|
 | **SMM-22 follow-ups** | Usage panel not browser-driven (unit/type-checked only); `resource_mcp_tool.yaml` not updated for the (currently unused) agent/automation-origin metered-tool re-drive case; X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
-| **SMM-25** full-stack e2e | 🟡 partial — the DEMO_MODE social fixture landed in SMM-14; the Playwright console suite has not |
+| **SMM-25** full-stack e2e | 🟡 partial, and permanently so until D-23 clears — the DEMO_MODE Playwright console suite landed this pass (13/13); the LIVE half cannot be built by anyone today (no credential exists anywhere in the estate) |
 | **SMM-26 follow-up** | the v1.0 design's "weekly per opted-in engagement" scheduled sweep for the content-brief flow was deliberately NOT built — needs an architect decision on an automation service identity before a principal-less job can legitimately call WS8's per-principal-scoped RAG search |
 | **SMM-27** | ✅ merged 2026-08-23 — see this file's own SMM-27 evidence block (P4 table above); the last unbuilt ticket in the department |
 | **SMM-35** | 🟡 partial — assistant "social summary" read landed; no social write reachable from `/assistant` this pass (own named cross-repo gap) |
