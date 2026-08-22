@@ -29,3 +29,37 @@
 .scope-envelope__why summary { display: inline; cursor: pointer; color: var(--erp-accent); font-weight: 700; list-style: none; }
 .scope-envelope__why summary::-webkit-details-marker { display: none; }
 .scope-envelope__list { margin: 6px 0 0; padding-left: 18px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+
+/* ---- Scope bar (UI redesign Phase 2, 2026-08-22) ----
+   A row of ScopePill-style disclosures, one per opted-in axis (Entity/Department/Period/
+   Currency). Inactive axes stay quiet (same visual weight as the static scope-pill above);
+   an active (non-default) axis is called out with --accent so a scoped view is visibly scoped,
+   never a silent filter. */
+.scope-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.scope-bar__pill { position: relative; display: inline-block; }
+.scope-bar__pill--static { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card); }
+.scope-bar__summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none;
+  border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card);
+  user-select: none; transition: border-color 0.15s var(--erp-ease), color 0.15s var(--erp-ease);
+}
+.scope-bar__summary::-webkit-details-marker { display: none; }
+.scope-bar__pill--active .scope-bar__summary { border-color: var(--accent); }
+.scope-bar__pill--active .scope-bar__value { color: var(--accent); font-weight: 700; }
+.scope-bar__label {
+  font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50);
+}
+.scope-bar__value { font: 400 13px var(--font-body); color: var(--text-primary); }
+.scope-bar__menu { box-shadow: var(--elev-overlay);
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 10; min-width: 200px;
+  border: 0.5px solid var(--erp-hairline); background: var(--surface-raised); max-height: 320px; overflow: auto;
+}
+.scope-bar__item {
+  display: block; padding: 8px 12px; font: 400 13px var(--font-body); color: var(--text-primary);
+  text-decoration: none; border-bottom: 0.5px solid var(--erp-hairline-soft);
+}
+.scope-bar__item:hover { background: var(--tint-hover); }
+.scope-bar__item--active { color: var(--accent); font-weight: 700; }
+.scope-bar__count { display: inline-flex; align-items: center; gap: 8px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
+.scope-bar__reset { color: var(--accent); font-weight: 700; text-decoration: none; }
+.scope-bar__reset:hover { text-decoration: underline; }

@@ -1,12 +1,13 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 import { NavLink } from "./NavLink";
 import { RailCategory } from "./RailCategory";
 import { useSidebarState } from "./sidebarState";
 import { Eyebrow } from "@/components/ui";
-import type { NavGroup } from "./nav";
+import { cappedGroupItems, DEPARTMENTS_OVERFLOW_HREF, type NavGroup } from "./nav";
 
 // One collapsible unit per group, so ~35 destinations don't all compete at once.
 // Multi-open on purpose (ERP work spans two groups), the group holding the
@@ -49,9 +50,22 @@ export function NavGroupSection({ group }: { group: NavGroup }) {
         </span>
       </button>
       <div className="erp-navgroup__items" id={id}>
-        {group.items.map((item) => (
-          <NavLink key={item.href} item={item} />
-        ))}
+        {(() => {
+          const { items, overflowCount } = cappedGroupItems(group);
+          return (
+            <>
+              {items.map((item) => (
+                <NavLink key={item.href} item={item} />
+              ))}
+              {overflowCount > 0 && (
+                <Link href={DEPARTMENTS_OVERFLOW_HREF} className="erp-navbtn erp-navbtn--more">
+                  <Icon name="chevron" size={14} />
+                  <span>All departments ({overflowCount} more)</span>
+                </Link>
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );

@@ -164,3 +164,25 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   }
   return groups;
 }
+
+// UI redesign §3.1 — "cap Departments at a visible max ... with an inline 'All departments →' link".
+// Deliberately a RENDER-time concern, not navFor()'s: the full RBAC-computed list above is still
+// what navFor() returns (a company with 12 departments still gets all 12 in the data), so nothing
+// here can silently hide a destination from a capability check — it only decides how many rows the
+// sidebar actually paints before an overflow link takes over. Keeping this in nav.ts (not inlined in
+// Sidebar.tsx/NavGroupSection.tsx/RailCategory.tsx) means the one cap number and the one target
+// route are defined once for every render path (expanded list, collapsed-rail flyout) instead of
+// three times.
+export const DEPARTMENTS_CAP = 6;
+export const DEPARTMENTS_OVERFLOW_HREF = "/organization";
+
+export interface CappedGroup {
+  items: NavItem[];
+  /** How many additional items were truncated, or 0 when nothing was cut. */
+  overflowCount: number;
+}
+
+export function cappedGroupItems(group: NavGroup, cap: number = DEPARTMENTS_CAP): CappedGroup {
+  if (group.label !== "Departments" || group.items.length <= cap) return { items: group.items, overflowCount: 0 };
+  return { items: group.items.slice(0, cap), overflowCount: group.items.length - cap };
+}

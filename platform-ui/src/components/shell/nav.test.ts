@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { navFor, canManageIT } from "./nav";
+import { navFor, canManageIT, cappedGroupItems, DEPARTMENTS_CAP, DEPARTMENTS_OVERFLOW_HREF } from "./nav";
 import type { Me } from "@/lib/platform";
 
 const base: Me = {
@@ -89,6 +89,35 @@ describe("navFor (RBAC-gated visibility)", () => {
     // Distinct glyphs: the same shape twice in a 12-icon column is unreadable.
     const glyphs = needsGlyph.map((g) => g.icon!);
     expect(new Set(glyphs).size).toBe(glyphs.length);
+  });
+});
+
+// UI redesign §3.1 — the Departments visual cap is a RENDER-time concern (see nav.ts's own
+// comment): navFor() itself must keep returning every department uncapped (a capability check
+// must never be truncated), and this is a separate pure helper the render layer calls.
+describe("cappedGroupItems (Sidebar §3.1 Departments overflow)", () => {
+  const wideDepts = Array.from({ length: 9 }, (_, i) => ({ label: `Dept ${i}`, href: `/departments/d${i}`, icon: "hr" as const }));
+  const wideGroup = { label: "Departments", icon: "hr" as const, items: wideDepts };
+
+  it("leaves a group at or under the cap untouched", () => {
+    const short = { label: "Departments", icon: "hr" as const, items: wideDepts.slice(0, 3) };
+    expect(cappedGroupItems(short)).toEqual({ items: short.items, overflowCount: 0 });
+  });
+
+  it("truncates a wide Departments group and reports the overflow count", () => {
+    const result = cappedGroupItems(wideGroup);
+    expect(result.items).toHaveLength(DEPARTMENTS_CAP);
+    expect(result.items).toEqual(wideDepts.slice(0, DEPARTMENTS_CAP));
+    expect(result.overflowCount).toBe(wideDepts.length - DEPARTMENTS_CAP);
+  });
+
+  it("never caps a group that isn't Departments, however wide", () => {
+    const business = { label: "Business", icon: "briefcase" as const, items: wideDepts };
+    expect(cappedGroupItems(business).overflowCount).toBe(0);
+  });
+
+  it("points the overflow link at Organization, not a dead end", () => {
+    expect(DEPARTMENTS_OVERFLOW_HREF).toBe("/organization");
   });
 });
 

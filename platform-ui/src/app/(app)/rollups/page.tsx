@@ -6,11 +6,14 @@ import { groupRollups } from "@/lib/rollups";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { RecomputeButton } from "@/components/RecomputeButton";
+import { ScopeBar } from "@/components/scope/ScopeBar";
+import { currentAxisValue, wholeGroupOption, type ScopeAxisConfig } from "@/lib/scope";
 
-export default async function RollupsPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
+export default async function RollupsPage({ searchParams }: { searchParams: Promise<{ period?: string; entity?: string }> }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
-  const { period: periodParam } = await searchParams;
+  const sp = await searchParams;
+  const periodParam = sp.period;
 
   let rows: RollupRow[];
   try {
@@ -31,8 +34,22 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
     throw e;
   }
 
-  const groups = groupRollups(rows);
+  const allGroups = groupRollups(rows);
   const period = periodParam ?? rows[0]?.period;
+
+  // The scope bar's reference wiring (UI redesign §3): Rollups is the one page that was ALREADY
+  // consolidated-by-default with no control surfacing that fact — exactly the gap the Entity axis
+  // exists to close. "Whole group" is the explicit default; picking a company narrows the SAME
+  // already-fetched cross-company result set, so this needs no new backend read.
+  const entityAxis: ScopeAxisConfig = {
+    key: "entity",
+    param: "entity",
+    label: "Entity",
+    defaultValue: "all",
+    options: [wholeGroupOption(), ...allGroups.map((g) => ({ value: g.tenantId, label: g.company }))],
+  };
+  const entityValue = currentAxisValue(sp, entityAxis);
+  const groups = entityValue === "all" ? allGroups : allGroups.filter((g) => g.tenantId === entityValue);
 
   return (
     <>
@@ -48,6 +65,7 @@ export default async function RollupsPage({ searchParams }: { searchParams: Prom
           </form>
         }
       />
+      <ScopeBar basePath="/rollups" searchParams={sp} axes={allGroups.length > 0 ? [entityAxis] : []} />
       {groups.length === 0 ? (
         <Card>
           <p style={{ margin: 0, font: "400 14px/1.5 var(--font-body)", color: "var(--ink-muted)" }}>

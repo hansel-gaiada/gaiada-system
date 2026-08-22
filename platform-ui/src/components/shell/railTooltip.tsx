@@ -7,17 +7,22 @@ const RAIL = "(min-width: 761px)";
 // Labels for the collapsed rail. Fixed-positioned from the trigger rect rather
 // than a CSS ::after, because the nav column scrolls and would clip anything
 // outside the 64px rail. Native title is unstyled and ~1s slow.
-export function useRailTooltip(label: string) {
+/** `always: true` skips the collapsed-rail gate — for controls that need a hover/focus label
+ *  regardless of sidebar state (the company spine's segments, §7's "hover/focus reveals a floating
+ *  label"). Default behaviour (rail-only) is unchanged for every existing caller. */
+export function useRailTooltip(label: string, opts?: { always?: boolean }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   const show = useCallback((e: SyntheticEvent<HTMLElement>) => {
-    if (document.documentElement.dataset.sidebar !== "collapsed") return;
-    if (!window.matchMedia(RAIL).matches) return;
+    if (!opts?.always) {
+      if (document.documentElement.dataset.sidebar !== "collapsed") return;
+      if (!window.matchMedia(RAIL).matches) return;
+    }
     // Rows inside a flyout already show their label.
     if (e.currentTarget.closest(".erp-railmenu")) return;
     const r = e.currentTarget.getBoundingClientRect();
     setPos({ top: r.top + r.height / 2, left: r.right + 8 });
-  }, []);
+  }, [opts?.always]);
 
   const hide = useCallback(() => setPos(null), []);
 

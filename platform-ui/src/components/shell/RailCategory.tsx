@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 import { NavLink } from "./NavLink";
-import type { NavGroup } from "./nav";
+import { cappedGroupItems, DEPARTMENTS_OVERFLOW_HREF, type NavGroup } from "./nav";
 
 const OPEN_DELAY = 120;
 const CLOSE_DELAY = 200;
@@ -115,9 +116,21 @@ export function RailCategory({ group }: { group: NavGroup }) {
           style={{ top, maxHeight: `calc(100vh - ${top}px - 16px)` }}
         >
           <div className="erp-railmenu__title">{group.label}</div>
-          {group.items.map((item) => (
-            <NavLink key={item.href} item={item} />
-          ))}
+          {(() => {
+            const { items, overflowCount } = cappedGroupItems(group);
+            return (
+              <>
+                {items.map((item) => (
+                  <NavLink key={item.href} item={item} />
+                ))}
+                {overflowCount > 0 && (
+                  <Link href={DEPARTMENTS_OVERFLOW_HREF} className="erp-navbtn erp-navbtn--more">
+                    <span>All departments ({overflowCount} more)</span>
+                  </Link>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
     </div>
