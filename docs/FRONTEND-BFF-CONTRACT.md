@@ -3013,12 +3013,30 @@ prefix. Evaluated strictly in this order, and the first refusal wins:
 
 | Stage | Tokens |
 |---|---|
-| `scope` | `variant_not_found` · `cross_client_account` · `account_not_connected` · `network_disabled` · `network_not_in_scope` · `engagement_inactive` · `metered_network_requires_metered_tool` |
+| `scope` | `variant_not_found` · `cross_client_account` · `account_not_connected` · `network_disabled` · `network_not_in_scope` · `engagement_inactive` · `metered_network_requires_metered_tool` · `metered_tool_requires_metered_network` |
 | `quota` | `quota_exhausted` · `media_rules_failed` |
 | `hash` | `args_hash_mismatch` |
 | `unconsumed` | `already_dispatched` · `approval_already_consumed` · `variant_not_approved` |
-| `budget` | `budget_exceeded` |
+| `budget` | `budget_exceeded` · `metered_price_unconfigured` |
 | `creator_info` | `creator_info_unverified` · `creator_selection_no_longer_permitted` |
+
+**SMM-22 — the metered path (X), and what the two new tokens mean.** `metered_tool_requires_metered_network`
+is the SYMMETRIC twin of the existing `metered_network_requires_metered_tool`: the first stops a metered
+variant reaching the free tool, the second stops a free variant reaching the metered one — which would
+write an `x_post`-kind ledger row for an Instagram post and leave the usage panel unable to explain
+itself. `metered_price_unconfigured` is a **fail-closed** refusal, not an error: `estimateCostUsd` now
+returns a reason rather than `$0`, because a `$0` estimate would let an unpriced X post pass every tier
+of the stop-loss for free.
+
+`GET variants/:variantId/publish-preconditions` gains **`estimatedCostUsd`** and, when the price is
+absent, **`costUnavailableReason`** — so the approval card can show what a publish will cost before a
+human approves it, and can say why it cannot when the price is unconfigured.
+
+| Method + path | Cerbos | Note |
+|---|---|---|
+| `POST /api/:tenantId/modules/social/variants/:variantId/publish-metered` | `social_post` / `publish` | **BUILT.** The metered twin's dispatch endpoint. Shares `dispatch.ts#dispatchApprovedPublish` with the free path via a `toolName` parameter — one implementation, not two. `social.publishPostMetered` is **declared as an MCP tool regardless**, so an automation call still suspends into WS4; what is config-gated (`SOCIAL_METERED_PUBLISH_ENABLED`, default off) is only whether the D14 registry AUTO-EXECUTES it on approval. Boot REFUSES if that flag is true while X's per-post price is unset. |
+| `GET /api/:tenantId/modules/social/engagements/:engagementId/usage` | `social_ledger` / `read` | **BUILT.** Month-to-date metered spend for the usage panel, plus the engagement/tenant/global stop-loss tiers' state. The two new tiers apply ONLY to metered dispatches — see `publish-precondition.ts`'s own comment on why extending them to `$0` posts would turn one runaway X bill into a platform-wide freeze on every company's free posting. |
+
 
 Five properties a console (and every downstream ticket) must not smooth over:
 
