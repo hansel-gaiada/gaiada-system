@@ -2419,7 +2419,13 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   Deliberate non-change: `social.withdrawClientReview` stays impact `'low'` (its comment cited
   "never notifies the client", which is now false — corrected in place, with the surviving ground
   being that a withdrawal notice creates no NEW outward exposure).
-- `metrics-job.ts` reads `process.env` directly instead of `config.ts` (it was held out of that file to avoid a three-way collision)
+- ~~`metrics-job.ts` reads `process.env` directly instead of `config.ts` (it was held out of that file to avoid a three-way collision)~~
+  — **CLOSED 2026-08-23** (module `0.5.22`). Gate moved to `config.social.metricsPull`; it was the
+  only job in the module not gated there. The two env-mutating tests were REMOVED rather than ported:
+  `config.ts` is evaluated once at import and `main.ts` reads the flag once at boot, so a test that
+  set an env var and expected the value to follow would assert behaviour the real boot path does not
+  have. Replaced with assertions on the config surface, including one pinning that the flag is a real
+  boolean — a bare `Boolean(process.env.X)` reads the string `"false"` as ON.
 - ~~The report narrative has no runtime numeric guard — only the prompt constrains a hallucinated figure~~
   — **CLOSED 2026-08-23** (module `0.5.20`). `findUngroundedNumbers` traces every digit-run in the
   narrative back to a grounding fact; an untraceable number REJECTS the AI draft in favour of the

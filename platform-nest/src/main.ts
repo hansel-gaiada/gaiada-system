@@ -102,7 +102,7 @@ import { startInboxRetentionPurgeLoop } from "./modules/social/inbox-retention-j
 // SMM-21 — the nightly metrics sweep. Registered here rather than by the authoring seat because
 // three tickets were in flight over this file at once; the seat handed up the line instead of
 // editing it, which is what kept the collision from happening.
-import { startMetricsPullLoop, socialMetricsPullEnabled, socialMetricsPullIntervalMs } from "./modules/social/metrics-job";
+import { startMetricsPullLoop } from "./modules/social/metrics-job";
 // SMM-15 — the smm-inbox-pull sweep. Registered here rather than by the authoring seat: three
 // tickets have now handed this line up instead of editing main.ts, which is exactly why none of
 // them collided over it.
@@ -486,10 +486,10 @@ async function bootstrap(): Promise<void> {
       // eslint-disable-next-line no-console
       console.log(`social inbox pull (smm-inbox-pull) on: every ${config.social.inboxPull.pullIntervalMs}ms`);
     }
-    if (socialMetricsPullEnabled()) {
-      startMetricsPullLoop(socialMetricsPullIntervalMs());
+    if (config.social.metricsPull.enabled) {
+      startMetricsPullLoop(config.social.metricsPull.intervalMs);
       // eslint-disable-next-line no-console
-      console.log(`social metrics pull on: every ${socialMetricsPullIntervalMs()}ms`);
+      console.log(`social metrics pull on: every ${config.social.metricsPull.intervalMs}ms`);
     }
     startConsumerLoop([
       "deliverable",

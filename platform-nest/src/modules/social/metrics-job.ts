@@ -292,21 +292,10 @@ export async function runMetricsPull(now: Date = new Date()): Promise<{
 
 // ── env gate + loop ─────────────────────────────────────────────────────────────────────────────
 //
-// Read directly from `process.env` here, deliberately NOT via `config.ts`: that file (and
-// `main.ts`) is held by SMM-38a's parallel worktree for the length of this ticket. Naming matches
-// this module's existing `SOCIAL_*_ENABLED` / `SOCIAL_*_INTERVAL_MS` convention
-// (`inbox-retention-job.ts`'s `SOCIAL_INBOX_RETENTION_PURGE_ENABLED`,
-// `post-status-sync-job.ts`'s `SOCIAL_RECONCILE_ENABLED`) so a later pass folding this into
-// `config.social` is a mechanical rename, not a redesign. Dark by default, like every other job in
-// this module.
-
-export function socialMetricsPullEnabled(): boolean {
-  return process.env.SOCIAL_METRICS_PULL_ENABLED === "1" || process.env.SOCIAL_METRICS_PULL_ENABLED === "true";
-}
-
-export function socialMetricsPullIntervalMs(): number {
-  return Number(process.env.SOCIAL_METRICS_PULL_INTERVAL_MS ?? 24 * 3600 * 1000);
-}
+// The gate lives in `config.social.metricsPull` (enabled / intervalMs), read by `main.ts` — the same
+// place every other job in this module is gated from. It was read straight from `process.env` here
+// for the length of SMM-24 only because `config.ts` was held by a parallel worktree; that was always
+// flagged as a mechanical fold-in, now done. Dark by default, like every other job in this module.
 
 /** Daily loop. Only started by main.ts when `socialMetricsPullEnabled()` is true — see this
  *  file's header for why the gate lives here instead of in `config.ts`. */

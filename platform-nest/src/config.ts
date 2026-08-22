@@ -804,6 +804,17 @@ const configBase = {
       // does not fit this run is picked up on the next one.
       maxPostsPerAccountPerRun: Number(process.env.SOCIAL_INBOX_PULL_MAX_POSTS_PER_ACCOUNT ?? 20),
     },
+    // SMM-24 — the daily metrics pull (`smm-metrics-pull`). Dark by default, same convention as
+    // `inboxPull`/`inboxRetention`/`triage` below. These two were read straight from `process.env` in
+    // `metrics-job.ts` for the length of SMM-24 because this file was held by SMM-38a's parallel
+    // worktree at the time; that file's own comment called the later fold-in "a mechanical rename,
+    // not a redesign", which is what this is. It also restores the module's single convention: every
+    // other social job is gated by `config.social.*` and `main.ts` reads the flag from here.
+    metricsPull: {
+      enabled:
+        process.env.SOCIAL_METRICS_PULL_ENABLED === "1" || process.env.SOCIAL_METRICS_PULL_ENABLED === "true",
+      intervalMs: Number(process.env.SOCIAL_METRICS_PULL_INTERVAL_MS ?? 24 * 3600 * 1000),
+    },
     // SMM-16 — AI triage (`smm-inbox-triage`) + the SLA/spike guard (`smm-inbox-sla-guard`, named in
     // 0105's own `ix_social_inbox_threads_sla` comment). Both dark by default, same convention as
     // `inboxPull`/`inboxRetention` above.

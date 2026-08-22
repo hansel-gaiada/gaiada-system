@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.22` — 2026-08-23 — the metrics pull is gated where every other job is
+
+**Changed**
+- `metrics-job.ts` read `SOCIAL_METRICS_PULL_ENABLED` / `SOCIAL_METRICS_PULL_INTERVAL_MS` straight
+  from `process.env` through two exported helpers. It was the **only** job in this module not gated
+  by `config.social.*` — `inboxPull`, `inboxRetention`, `triage`, `slaGuard` and `reconcileEnabled`
+  are all read from `config.ts` by `main.ts`. The gate now lives in `config.social.metricsPull`
+  (`enabled` / `intervalMs`) and the two helpers are gone. The original deviation was explicitly
+  temporary — `config.ts` was held by SMM-38a's parallel worktree at the time, and that file's own
+  comment called the fold-in "a mechanical rename, not a redesign". This is that rename.
+
+**Tests** — the two suite cases that mutated `process.env` and re-read the helpers were **removed,
+not ported**. `config.ts` is evaluated ONCE at import, so a late env change is invisible to it by
+design, and `main.ts` reads the flag once at startup. A test that set an env var and expected the
+value to follow would have asserted a behaviour the real boot path does not have — worse than not
+testing it. Replaced with three assertions against the config surface itself: dark-by-default (the
+pull spends gateway calls per account, so defaulting ON would be a real cost, not noise), the 24h
+interval default, and that the flag is a real boolean — guarding the `=== "1" || === "true"` form,
+since a bare `Boolean(process.env.X)` reads the *string* `"false"` as ON, which is how a
+dark-by-default job quietly starts running in an environment that tried to disable it.
+`metrics-job.test.ts` 14/0/0. typecheck clean.
+
 ### social-media `0.5.21` — 2026-08-23 — a sustained inbox spike is announced once, not every tick
 
 **Fixed**

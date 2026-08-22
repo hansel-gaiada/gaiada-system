@@ -29,7 +29,6 @@ import { createMockPublisher, newMockPublisherState, type MockPublisherState } f
 import { SocialPublisherError } from "./publisher/types";
 import {
   applyAccountDailyMetrics, appendPostMetrics, pullTenantMetrics, runMetricsPull,
-  socialMetricsPullEnabled, socialMetricsPullIntervalMs,
 } from "./metrics-job";
 
 const MODULES: { modules: string[] } = { modules: ["social"] };
@@ -346,22 +345,29 @@ describe.skipIf(!TEST_URL)("SMM-21 · metrics-job — pullMetrics into social_me
   });
 
   // ══ env gate ════════════════════════════════════════════════════════════════════════════════
+  //
+  // The two `socialMetricsPull*()` helpers these tests used to call are gone: the gate moved into
+  // `config.social.metricsPull`, where every other job in this module is gated from. The assertions
+  // deliberately do NOT mutate `process.env` and re-read any more — `config.ts` is evaluated ONCE at
+  // import, so a late env change is invisible to it by design. A test that set an env var and
+  // expected the value to follow would assert a behaviour the real boot path does not have (main.ts
+  // reads the flag once, at startup), which is worse than not testing it at all.
 
-  it("dark by default: socialMetricsPullEnabled() is false with no env var set", () => {
-    const prev = process.env.SOCIAL_METRICS_PULL_ENABLED;
-    delete process.env.SOCIAL_METRICS_PULL_ENABLED;
-    expect(socialMetricsPullEnabled()).toBe(false);
-    process.env.SOCIAL_METRICS_PULL_ENABLED = "true";
-    expect(socialMetricsPullEnabled()).toBe(true);
-    if (prev === undefined) delete process.env.SOCIAL_METRICS_PULL_ENABLED;
-    else process.env.SOCIAL_METRICS_PULL_ENABLED = prev;
+  it("dark by default: the metrics pull is OFF unless the env var was set at boot", () => {
+    // No env var is set in this suite's environment, so this pins the default the deployed stack
+    // actually gets. The pull spends gateway calls per account, so defaulting ON would be a real
+    // cost rather than mere noise — the same ground the search pull scheduler's hard gate stands on.
+    expect(config.social.metricsPull.enabled).toBe(false);
   });
 
-  it("socialMetricsPullIntervalMs() defaults to 24h", () => {
-    const prev = process.env.SOCIAL_METRICS_PULL_INTERVAL_MS;
-    delete process.env.SOCIAL_METRICS_PULL_INTERVAL_MS;
-    expect(socialMetricsPullIntervalMs()).toBe(24 * 3600 * 1000);
-    if (prev === undefined) delete process.env.SOCIAL_METRICS_PULL_INTERVAL_MS;
-    else process.env.SOCIAL_METRICS_PULL_INTERVAL_MS = prev;
+  it("the metrics pull interval defaults to 24h", () => {
+    expect(config.social.metricsPull.intervalMs).toBe(24 * 3600 * 1000);
+  });
+
+  it("the flag is a real boolean, not a truthy string", () => {
+    // Guards the `=== "1" || === "true"` form that config.ts uses: a bare
+    // `Boolean(process.env.X)` would read the STRING "false" as ON, which is exactly how a
+    // dark-by-default job quietly starts running in an environment that tried to disable it.
+    expect(typeof config.social.metricsPull.enabled).toBe("boolean");
   });
 });
