@@ -4,6 +4,8 @@ import {
   describeRefusal, describeQuota, PUBLISH_PRECONDITION_STAGES,
   CLIENT_REVIEW_REFUSAL, evaluateClientReviewState,
   EMPTY_ASSET_LIBRARY,
+  REPLY_REFUSAL, REPLY_DISPATCH_REFUSAL, REPLY_PRECONDITION_STAGES,
+  describeTriage, describeSla, UNCONFIGURED_PUBLISHER_STATUS,
 } from "./socialShared";
 
 // Pure-helper tests only — no network. `readGuarded`/`platformFetch` (the networked half of
@@ -208,5 +210,135 @@ describe("SMM-20 asset library refusal tokens", () => {
 
   it("ships EMPTY_ASSET_LIBRARY as two empty arrays — the honest fallback for a 403/404 read", () => {
     expect(EMPTY_ASSET_LIBRARY).toEqual({ files: [], studioAssets: [] });
+  });
+});
+
+// ── SMM-18 — the engagement inbox ──────────────────────────────────────────────────────────────────
+describe("REPLY_PRECONDITION_STAGES", () => {
+  it("mirrors reply-precondition.ts's stage order exactly (scope → hash → unconsumed → retention)", () => {
+    expect(REPLY_PRECONDITION_STAGES).toEqual(["scope", "hash", "unconsumed", "retention"]);
+  });
+});
+
+describe("REPLY_REFUSAL — eleven tokens, recounted from source (not the ten this ticket's brief named)", () => {
+  it("has exactly eleven distinct tokens", () => {
+    const tokens = Object.values(REPLY_REFUSAL);
+    expect(new Set(tokens).size).toBe(11);
+    expect(tokens.length).toBe(11);
+  });
+
+  it("names every one of them as itself — none falls back to the raw token (criterion 5)", () => {
+    for (const token of Object.values(REPLY_REFUSAL)) {
+      expect(describeRefusal(token)).not.toBe(token);
+      expect(describeRefusal(token).length).toBeGreaterThan(10);
+    }
+  });
+
+  it("source_content_purged reads as correct, expected behaviour — never as a system failure", () => {
+    const sentence = describeRefusal(REPLY_REFUSAL.sourceContentPurged);
+    expect(sentence).toMatch(/correct, expected behaviour/i);
+    expect(sentence).not.toMatch(/\berror\b/i);
+  });
+});
+
+describe("REPLY_DISPATCH_REFUSAL — four tokens", () => {
+  it("has exactly the four documented tokens", () => {
+    expect(REPLY_DISPATCH_REFUSAL).toEqual({
+      approvalNotResolvable: "approval_not_resolvable",
+      stampRaceLost: "reply_stamp_race_lost",
+      capabilityUnsupported: "capability_unsupported",
+      sendFailed: "reply_send_failed",
+    });
+  });
+
+  it("names every one of them as itself — none falls back to the raw token", () => {
+    for (const token of Object.values(REPLY_DISPATCH_REFUSAL)) {
+      expect(describeRefusal(token)).not.toBe(token);
+      expect(describeRefusal(token).length).toBeGreaterThan(10);
+    }
+  });
+});
+
+describe("platform_app_not_registered — the honest-empty-inbox token", () => {
+  it("names the D-23 deferral, not a broken button", () => {
+    expect(describeRefusal("platform_app_not_registered")).toMatch(/D-23/);
+  });
+});
+
+describe("describeTriage — the four states must look nothing alike", () => {
+  it("unclassified reads as an absence ('not yet') — visual 'absent'", () => {
+    const d = describeTriage({ aiTriageStatus: "unclassified", sentiment: null, category: null, urgency: null });
+    expect(d.visual).toBe("absent");
+    expect(d.label).toMatch(/not yet/i);
+  });
+
+  it("unavailable reads as a distinct fact from unclassified — different visual, different label", () => {
+    const d = describeTriage({ aiTriageStatus: "unavailable", sentiment: null, category: null, urgency: null });
+    expect(d.visual).toBe("unavailable");
+    expect(d.visual).not.toBe("absent");
+    expect(d.label).not.toMatch(/not yet/i);
+    expect(d.detail).toMatch(/not a guessed value/i);
+  });
+
+  it("purged reads as a compliance fact, explicitly disclaiming missing-data/failure framing", () => {
+    const d = describeTriage({ aiTriageStatus: "purged", sentiment: null, category: null, urgency: null });
+    expect(d.visual).toBe("purged");
+    expect(d.detail).toMatch(/compliance/i);
+    expect(d.detail).toMatch(/not missing data or a system failure/i);
+  });
+
+  // The exact fact this ticket's brief names by name: sentiment='neutral'+classified must be
+  // distinguishable from sentiment=null+unclassified, even though a naive render might collapse
+  // both into "nothing interesting to say".
+  it("classified+neutral is a REAL answer, visually distinct from unclassified's absence", () => {
+    const classifiedNeutral = describeTriage({ aiTriageStatus: "classified", sentiment: "neutral", category: "other", urgency: "normal" });
+    const unclassified = describeTriage({ aiTriageStatus: "unclassified", sentiment: null, category: null, urgency: null });
+    expect(classifiedNeutral.visual).toBe("classified");
+    expect(classifiedNeutral.visual).not.toBe(unclassified.visual);
+    expect(classifiedNeutral.label).not.toEqual(unclassified.label);
+  });
+
+  it("classified renders the category/urgency/sentiment triple, not just a status word", () => {
+    const d = describeTriage({ aiTriageStatus: "classified", sentiment: "negative", category: "complaint", urgency: "high" });
+    expect(d.label).toMatch(/complaint/i);
+    expect(d.label).toMatch(/high/i);
+    expect(d.detail).toMatch(/negative/i);
+  });
+});
+
+describe("describeSla — never invents a fallback duration", () => {
+  const NOW = "2026-08-21T12:00:00.000Z";
+
+  it("null slaDueAt is its own real state ('none'), never rendered as overdue or on-track", () => {
+    const sla = describeSla(null, NOW);
+    expect(sla.state).toBe("none");
+    expect(sla.label).toMatch(/no sla target/i);
+  });
+
+  it("a future due date within the hour is 'due_soon'", () => {
+    const sla = describeSla("2026-08-21T12:30:00.000Z", NOW);
+    expect(sla.state).toBe("due_soon");
+    expect(sla.label).toMatch(/due in/i);
+  });
+
+  it("a future due date beyond the hour is 'on_track'", () => {
+    const sla = describeSla("2026-08-21T15:00:00.000Z", NOW);
+    expect(sla.state).toBe("on_track");
+  });
+
+  it("a past due date is 'overdue'", () => {
+    const sla = describeSla("2026-08-21T11:00:00.000Z", NOW);
+    expect(sla.state).toBe("overdue");
+    expect(sla.label).toMatch(/overdue by/i);
+  });
+
+  it("exactly at the due instant counts as overdue, not on_track (never a false green at 0)", () => {
+    expect(describeSla(NOW, NOW).state).toBe("overdue");
+  });
+});
+
+describe("UNCONFIGURED_PUBLISHER_STATUS — the honest fallback for a 403/404 publisher/status read", () => {
+  it("reads inboxSurface as 'none', never 'available'", () => {
+    expect(UNCONFIGURED_PUBLISHER_STATUS.inboxSurface).toBe("none");
   });
 });

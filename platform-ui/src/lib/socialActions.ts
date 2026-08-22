@@ -17,7 +17,8 @@ import { getActiveTenant } from "./tenant";
 import { can } from "./rbac";
 import type {
   ToolScope, CreatedResult, CreateVariantResult, UpdateVariantResult, PublishPreconditionResult,
-  ClientReviewStatus, AttachMediaResult,
+  ClientReviewStatus, AttachMediaResult, ReplyDraftResult, ApproveReplyDraftResult,
+  ReplySendPreconditionResult,
 } from "./socialShared";
 
 async function ctx(tenantOverride?: string): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
@@ -372,5 +373,87 @@ export async function withdrawClientReview(tenantId: string, variantId: string):
     });
     revalidatePath(`/departments`, "layout");
     return res;
+  });
+}
+
+// ── the engagement inbox reply flow (SMM-17 backend, SMM-18 this ticket) — draft / edit / approve
+// ONLY. Deliberately no `sendReply` action here: `POST .../messages/:messageId/send` is the D14
+// dispatch endpoint, reachable in the ordinary flow ONLY through the executor's re-drive (mirrors
+// `dispatchPublish`'s own documented convention — no UI in this codebase calls `POST
+// variants/:id/publish` directly either, verified by grep). Its own precondition requires a
+// pre-existing, currently-EXECUTING `social.sendReply` automation approval
+// (`approval_not_resolvable` otherwise) — a direct human POST from this console would refuse every
+// single time, the exact dead-button anti-pattern `rbac.ts`'s own discipline names. Reported as an
+// open question in this ticket's final report: how a human-initiated reply actually reaches the
+// automation-approval queue at all is not answered anywhere in `social.controller.ts`.
+// Gated on `social.inbox.reply` here as a UI hint only — Cerbos's `assign` action on `social_inbox`
+// is the real boundary for all three writes below (drafting/editing/approving a reply rides `assign`,
+// per `resource_social_inbox.yaml`'s own header: "a draft is a row in our DB").
+
+export async function createReplyDraft(
+  tenantId: string, threadId: string, body: string,
+): Promise<ActionResult<ReplyDraftResult>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.inbox.reply", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.inbox.reply permission." };
+  }
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<ReplyDraftResult>(`${base(c.tenant)}/threads/${threadId}/messages`, c.userId, {
+      method: "POST", body: JSON.stringify({ body }),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+/** Edit invalidates approval (D-15, restated for a reply) — the response's `approvalInvalidated`
+ *  must be rendered immediately, same discipline `updateVariant` follows. */
+export async function updateReplyDraft(
+  tenantId: string, threadId: string, messageId: string, body: string,
+): Promise<ActionResult<ReplyDraftResult>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.inbox.reply", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.inbox.reply permission." };
+  }
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<ReplyDraftResult>(`${base(c.tenant)}/threads/${threadId}/messages/${messageId}`, c.userId, {
+      method: "PATCH", body: JSON.stringify({ body }),
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+/** Idempotent on the backend (an already-`approved` message re-approves as a no-op). */
+export async function approveReplyDraft(
+  tenantId: string, threadId: string, messageId: string,
+): Promise<ActionResult<ApproveReplyDraftResult>> {
+  const c0 = await ctx(tenantId);
+  if (isCtxError(c0)) return { ok: false, error: c0.error };
+  if (!can(c0.me, "social.inbox.reply", c0.tenant)) {
+    return { ok: false, error: "You don't have the social.inbox.reply permission." };
+  }
+  return run(tenantId, async (c) => {
+    const res = await platformFetch<ApproveReplyDraftResult>(`${base(c.tenant)}/threads/${threadId}/messages/${messageId}/approve`, c.userId, {
+      method: "POST",
+    });
+    revalidatePath(`/departments`, "layout");
+    return res;
+  });
+}
+
+// ── send-preconditions dry run (SMM-17) — a GET, routed through a server action for the same
+// reason `checkPublishPreconditions` above is: a client component fires it on demand and cannot
+// import `lib/social.ts` (server-only) directly.
+export async function checkReplySendPreconditions(
+  tenantId: string, threadId: string, messageId: string,
+): Promise<ActionResult<{ verdict: ReplySendPreconditionResult }>> {
+  return run(tenantId, async (c) => {
+    const verdict = await platformFetch<ReplySendPreconditionResult>(
+      `${base(c.tenant)}/threads/${threadId}/messages/${messageId}/send-preconditions`, c.userId,
+    );
+    return { verdict };
   });
 }
