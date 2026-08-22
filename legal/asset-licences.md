@@ -53,11 +53,54 @@ dependency.
 
 ---
 
+## Candidate: automation robot
+
+| Field | Value |
+|---|---|
+| **Asset** | Pixel Robot |
+| **Source** | https://opengameart.org/content/pixel-robot |
+| **Author** | David Harrington |
+| **Licence** | **CC0** — public domain, **no attribution required** |
+| **Contents** | `robot-spritesheet.png`, 180×64. Idle (7 frames) + run (7 frames), ~20×26 per frame |
+| **Date assessed** | 2026-08-23, by downloading and rendering the sheet, not from the description |
+| **Status** | **Provisionally adopted**, subject to the design note below |
+
+**Limitation, measured not assumed: it is front-facing only.** One direction, no turn. At first
+pass that fails the four-direction requirement in the style contract.
+
+**Why it is adoptable anyway — and why this is the better design.** An automation is a workflow. It
+has no journey: it fires and completes. It does not walk from PM to Design to hand work over, the
+way an agent does. So the automation avatar should be **stationary in the utility room, animating
+only when it actually runs** — idle when idle, the run cycle when a workflow is executing. A
+single-direction sprite is not a compromise here; a walking robot would be inventing a journey that
+does not exist, which the honesty rule forbids anyway.
+
+Consequences to carry into the build:
+- The four-direction requirement in the style contract applies to **people and agents only**.
+  Automations are exempt by nature, and the exemption should be stated rather than discovered.
+- Scale: ~20×26 against LPC's 64×64 frame. Upscale 2× (integer only) to ~40×52, which sits
+  correctly beside an LPC character. Verify against a real LPC figure before committing.
+- CC0 means no attribution obligation and no share-alike — it does not inherit LPC's CC-BY-SA.
+  Keep the two asset sets separately recorded; do not let one set's terms be assumed for the other.
+
+**A second limitation, measured: the preview sheet has no alpha channel.** Verified by reading the
+pixels — `robot-spritesheet.png` is 180×64 with **zero transparent pixels**, a solid purple matte
+at `rgb(118,66,138)`, and the words "IDLE" and "RUN" baked into the image as labels.
+
+That file is a *preview*, not the deliverable — `pixel-robot.zip` (33 KB) is the actual download and
+most likely contains properly keyed sprites. **Fetch and verify the zip before adopting.** If the
+zip is also matted, the preprocessing is still trivial for pixel art (no anti-aliasing means a
+chroma key is exact), but it must be a one-time build step with the result committed, never a
+runtime cost, and the label text must be cropped out.
+
+Recorded because it is precisely the kind of thing that looks fine in a browser preview and then
+ships a purple box behind every automation.
+
 ## Outstanding
 
-- **A robot sprite for automations.** LPC ships none. Needs a CC0 source or a small commission —
-  the only unsolved asset in the cast. Until then the automation avatar is an original placeholder
-  drawn in-house, which carries no third-party obligation.
+- **Fetch and verify `pixel-robot.zip`** — confirm real alpha, frame dimensions and cell layout.
+- Confirm the robot reads correctly at 2× beside a 64×64 LPC character, in both themes.
+- Nothing else. The cast is otherwise covered.
 
 ## Adding a row
 
