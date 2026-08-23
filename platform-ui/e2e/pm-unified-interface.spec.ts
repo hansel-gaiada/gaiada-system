@@ -14,6 +14,15 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 // `co-agency`, the one company `gede-ic`/`seo-staff` actually have a role in (`src/lib/demoFixtures.ts`).
 test.use({ storageState: { cookies: [], origins: [] } });
 
+// FILE-SCOPE SERIAL, overriding the config's `fullyParallel: true` — same reasoning and same
+// mechanism `social-console.spec.ts` adopted in c714340. DEMO_MODE's fixture store is stateful and
+// lives IN the dev-server process, so parallel workers all mutate one shared store: tests here
+// signed in as three different identities trample each other's session and tenant state, and the
+// suite reports up to 8 of 10 failing. Every one of those passes when run serially, which is how
+// you can tell them apart from a real regression — but only if you already know to look, and the
+// failure output gives no hint. Serial costs about a minute and removes the whole class.
+test.describe.configure({ mode: "serial" });
+
 async function loginAs(page: Page, context: BrowserContext, email: string): Promise<void> {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
