@@ -53,6 +53,52 @@ dependency.
 
 ---
 
+## LPC licence position — RESOLVED 2026-08-23 (owner read the licences; supersedes the CC-BY-SA framing above)
+
+**Share-alike is avoidable entirely, and we are avoiding it.**
+
+Calling LPC "CC-BY-SA" was wrong. Licences are recorded **per asset** in `CREDITS.csv`
+(13,915 rows, 72 authors across the whole library) and most assets are **multi-licensed** —
+typically `OGA-BY 3.0, CC-BY-SA 3.0, GPL 3.0`. Multi-licensed means the user **elects one**. We
+elect **OGA-BY 3.0** wherever it is offered, and CC0 where that is offered. Neither carries
+share-alike, so **our derivative sprites stay ours** and the application is unaffected either way.
+
+Owner decision: use the free assets, keep the set small — this is an internal office tool, not a
+character-creator product. No thousand-variant wardrobe.
+
+### The curated set, measured rather than assumed
+
+Across the ten asset groups the office needs (male/female bodies, male/female heads, eyes, two
+hairstyles, a shirt, trousers, shoes): **813 candidate rows, 765 of them electable with no
+share-alike (94%), 18 distinct authors to credit.**
+
+The 48 exceptions are concentrated in exactly two groups, so they are avoided by picking a
+different variant within the same group, not by giving anything up:
+
+| Group | Rows that are CC-BY-SA-only | Action |
+|---|---|---|
+| `torso/clothes/longsleeve` | 33 | Choose an OGA-BY variant from the same group |
+| `head/heads/human/male` | 15 | Choose an OGA-BY variant from the same group |
+
+**Target: a 100% OGA-BY / CC0 set. Zero share-alike.** Verify each chosen file against
+`CREDITS.csv` before committing it — the group is mixed, so the *variant* is what determines the
+licence, not the folder.
+
+### What OGA-BY 3.0 actually obliges
+
+Attribution: name the author, link the source, state the licence. That is all — no share-alike, no
+copyleft reaching our code or our recolours. The credits surface must be **generated from
+`CREDITS.csv`**, never hand-maintained, or it silently rots.
+
+### One unresolved gap, and the rule that catches it
+
+The `eyes` sample originally pulled (`eyes/human/adult/neutral/walk.png`) matched **no row** in
+`CREDITS.csv`. 116 `eyes/` rows exist and the ones sampled are CC0, so a licensed variant is
+certainly available — but **an asset with no credit row has unknown provenance and does not ship**,
+per this file's own rule. Resolve the exact eyes file to a real CREDITS row before committing it.
+
+---
+
 ## Candidate: automation robot
 
 | Field | Value |
