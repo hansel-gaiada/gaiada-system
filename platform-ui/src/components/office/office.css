@@ -51,6 +51,28 @@
 .office__replay-btn:disabled { color: var(--erp-ink-50); cursor: not-allowed; opacity: 0.6; }
 .office__replay-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+.office__floor-selector {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.office__floor-btn {
+  font: 600 12px var(--font-body);
+  color: var(--erp-ink-60);
+  background: var(--surface-card);
+  border: 1px solid var(--erp-hairline);
+  padding: var(--space-4) var(--space-12);
+  cursor: pointer;
+}
+.office__floor-btn:hover { background: var(--tint-hover); color: var(--ink-strong); }
+.office__floor-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.office__floor-btn--active {
+  color: var(--ink-strong);
+  background: var(--tint-active);
+  border-color: var(--accent);
+}
+
 .office__body {
   display: flex;
   gap: var(--space-20);
@@ -59,7 +81,13 @@
 }
 
 .office__canvas-wrap {
-  overflow: auto;
+  /* The floor plate sizes itself to its own content (width/height are set inline from the
+     selected floor's real tile size) and the PAGE scrolls it — this element must never own a
+     vertical scrollbar of its own. A very wide floor may still scroll horizontally in its own
+     contained strip (owner's exception: "horizontal overflow on a very wide plate may stay a
+     contained scroll, but vertical must be the page"). */
+  overflow-x: auto;
+  overflow-y: visible;
   border: 0.5px solid var(--erp-hairline);
   max-width: 100%;
   flex: 0 0 auto;
@@ -131,6 +159,14 @@
   color: var(--erp-ink-60);
 }
 .office__roster-name { font: 500 13px var(--font-body); color: var(--ink-strong); }
+
+.office__roster-working {
+  align-self: flex-start;
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-fg);
+}
 
 .office__detail {
   border: 0.5px solid var(--erp-hairline);

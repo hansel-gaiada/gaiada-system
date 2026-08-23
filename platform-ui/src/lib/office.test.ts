@@ -1,57 +1,168 @@
 import { describe, it, expect } from "vitest";
 import {
-  layoutRooms, roomTileRect, floorSizeTiles, deskSlotTile, roomCenterTile,
+  buildFloors, allRooms, roomTileRect, deskSlotTile, roomCenterTile,
+  roomSizeTiles, deskColsForOccupancy,
+  buildWalkableGrid, findPath, nearestWalkable, roomToRoomPath, pathLength, pointAlongPath,
   restingRoomKey, buildReplaySteps, totalReplayMs, hashId, catToken, lerp, clamp01,
-  type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput,
+  isGenuinelyWorking, WORKING_RECENCY_MS,
+  CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES,
+  type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor,
 } from "./office";
 
-const rooms: OfficeRoomInput[] = [
-  { key: "lobby", label: "Lobby", kind: "lobby", boundTo: "Airlock intent queue" },
-  { key: "dept-1", label: "Web Dev", kind: "department", deptId: "dept-1", boundTo: "Department dept-1" },
-  { key: "dept-2", label: "SEO", kind: "department", deptId: "dept-2", boundTo: "Department dept-2" },
-  { key: "unassigned", label: "Unassigned", kind: "unassigned", boundTo: "No department binding" },
-  { key: "utility", label: "Utility", kind: "utility", boundTo: "Automations" },
-];
+function room(key: string, kind: OfficeRoomInput["kind"], occupantCount: number, extra: Partial<OfficeRoomInput> = {}): OfficeRoomInput {
+  return { key, label: key, kind, boundTo: `test:${key}`, occupantCount, ...extra };
+}
 
-describe("layoutRooms / roomTileRect / floorSizeTiles", () => {
-  it("packs rooms into a wrapping grid in input order", () => {
-    const laid = layoutRooms(rooms);
-    expect(laid.map((r) => [r.col, r.row])).toEqual([[0, 0], [1, 0], [2, 0], [0, 1], [1, 1]]);
+describe("roomSizeTiles / deskColsForOccupancy — footprint from real headcount (req #3)", () => {
+  it("never shrinks below the minimum, even for zero occupants", () => {
+    const size = roomSizeTiles(0);
+    expect(size.wTiles).toBeGreaterThanOrEqual(ROOM_MIN_W_TILES);
+    expect(size.hTiles).toBeGreaterThanOrEqual(ROOM_MIN_H_TILES);
   });
 
-  it("gives every room a non-overlapping tile rect", () => {
-    const laid = layoutRooms(rooms);
-    const rects = laid.map(roomTileRect);
-    // Two rooms in the same row must not overlap on x.
-    const row0 = rects.slice(0, 3);
-    for (let i = 1; i < row0.length; i++) {
-      expect(row0[i].x).toBeGreaterThanOrEqual(row0[i - 1].x + row0[i - 1].w);
+  it("grows monotonically (never smaller) as occupancy increases", () => {
+    const sizes = [0, 1, 2, 3, 4, 6, 9, 12, 20].map(roomSizeTiles);
+    for (let i = 1; i < sizes.length; i++) {
+      expect(sizes[i].wTiles).toBeGreaterThanOrEqual(sizes[i - 1].wTiles);
+      expect(sizes[i].hTiles).toBeGreaterThanOrEqual(sizes[i - 1].hTiles);
     }
   });
 
-  it("computes a floor size that bounds every room", () => {
-    const laid = layoutRooms(rooms);
-    const size = floorSizeTiles(laid);
-    for (const r of laid) {
-      const rect = roomTileRect(r);
-      expect(rect.x + rect.w).toBeLessThanOrEqual(size.w);
-      expect(rect.y + rect.h).toBeLessThanOrEqual(size.h);
-    }
+  it("a 9-person room is strictly bigger (both dimensions or at least one, never smaller) than a 2-person room", () => {
+    const small = roomSizeTiles(2);
+    const big = roomSizeTiles(9);
+    expect(big.wTiles + big.hTiles).toBeGreaterThan(small.wTiles + small.hTiles);
   });
 
-  it("floorSizeTiles degrades to one room's size for an empty list", () => {
-    const size = floorSizeTiles([]);
-    expect(size.w).toBeGreaterThan(0);
-    expect(size.h).toBeGreaterThan(0);
+  it("widens the desk grid rather than only growing tall, once occupancy passes small-room thresholds", () => {
+    expect(deskColsForOccupancy(2)).toBe(3);
+    expect(deskColsForOccupancy(3)).toBe(3);
+    expect(deskColsForOccupancy(4)).toBeGreaterThan(3);
+    expect(deskColsForOccupancy(9)).toBeGreaterThan(deskColsForOccupancy(4));
+  });
+
+  it("is deterministic — same occupancy always yields the same footprint", () => {
+    expect(roomSizeTiles(7)).toEqual(roomSizeTiles(7));
   });
 });
 
-describe("deskSlotTile / roomCenterTile", () => {
+describe("buildFloors — one connected building, not detached boxes (req #1/#2)", () => {
+  const smallOffice: OfficeRoomInput[] = [
+    room("lobby", "lobby", 0),
+    room("agents", "agents", 2),
+    room("dept-1", "department", 4, { deptId: "d1" }),
+    room("dept-2", "department", 2, { deptId: "d2" }),
+    room("utility", "utility", 0),
+  ];
+
+  it("places every room of a small office on one floor", () => {
+    const floors = buildFloors(smallOffice);
+    expect(floors).toHaveLength(1);
+    expect(allRooms(floors)).toHaveLength(smallOffice.length);
+  });
+
+  it("keeps the Lobby on the ground floor (floor 0) — it is first in room order by construction", () => {
+    const floors = buildFloors(smallOffice);
+    const lobby = allRooms(floors).find((r) => r.key === "lobby")!;
+    expect(lobby.floor).toBe(0);
+  });
+
+  it("gives every room a real door on the wall that touches its floor's corridor", () => {
+    const floors = buildFloors(smallOffice);
+    for (const floor of floors) {
+      for (const r of floor.rooms) {
+        const rect = roomTileRect(r);
+        expect(r.doorX).toBeGreaterThan(rect.x);
+        expect(r.doorX).toBeLessThan(rect.x + rect.w);
+        if (r.side === "north") {
+          // Bottom-aligned to the corridor's top edge.
+          expect(rect.y + rect.h).toBeCloseTo(floor.corridorY, 5);
+        } else {
+          expect(rect.y).toBeCloseTo(floor.corridorY + CORRIDOR_W_TILES, 5);
+        }
+      }
+    }
+  });
+
+  it("gives every room in the same floor a non-overlapping footprint", () => {
+    const floors = buildFloors(smallOffice);
+    for (const floor of floors) {
+      const rects = floor.rooms.map(roomTileRect);
+      for (let i = 0; i < rects.length; i++) {
+        for (let j = i + 1; j < rects.length; j++) {
+          const a = rects[i], b = rects[j];
+          const overlaps = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+          // Same-side neighbours never overlap in x; opposite-side rooms are separated by the
+          // corridor band in y — either way this must be false.
+          expect(overlaps).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("computes a floor size that bounds every one of its rooms", () => {
+    const floors = buildFloors(smallOffice);
+    for (const floor of floors) {
+      for (const r of floor.rooms) {
+        const rect = roomTileRect(r);
+        expect(rect.x + rect.w).toBeLessThanOrEqual(floor.widthTiles + 0.01);
+        expect(rect.y + rect.h).toBeLessThanOrEqual(floor.heightTiles + 0.01);
+      }
+    }
+  });
+
+  it("is DETERMINISTIC — a department never moves floors between renders of the same data", () => {
+    const a = buildFloors(smallOffice);
+    const b = buildFloors(smallOffice);
+    const keyToFloor = (fs: OfficeFloor[]) => new Map(allRooms(fs).map((r) => [r.key, r.floor]));
+    expect(keyToFloor(a)).toEqual(keyToFloor(b));
+  });
+
+  it("splits onto a second floor when the roster doesn't fit one legible plate", () => {
+    const bigOffice: OfficeRoomInput[] = [
+      room("lobby", "lobby", 0),
+      ...Array.from({ length: 14 }, (_, i) => room(`dept-${i}`, "department", 10, { deptId: `d${i}` })),
+    ];
+    const floors = buildFloors(bigOffice);
+    expect(floors.length).toBeGreaterThan(1);
+    // Every room still lands SOMEWHERE, and each floor still individually respects the width cap
+    // (with a little slack — a single very wide room is allowed to slightly exceed it rather than
+    // spinning up an empty floor for it).
+    expect(allRooms(floors)).toHaveLength(bigOffice.length);
+    for (const floor of floors) expect(floor.widthTiles).toBeLessThanOrEqual(MAX_FLOOR_WIDTH_TILES + 40);
+  });
+
+  it("floors stay stable in count/composition across repeated calls even for the split case", () => {
+    const bigOffice: OfficeRoomInput[] = [
+      room("lobby", "lobby", 0),
+      ...Array.from({ length: 14 }, (_, i) => room(`dept-${i}`, "department", 10, { deptId: `d${i}` })),
+    ];
+    const a = buildFloors(bigOffice).map((f) => f.rooms.map((r) => r.key));
+    const b = buildFloors(bigOffice).map((f) => f.rooms.map((r) => r.key));
+    expect(a).toEqual(b);
+  });
+});
+
+describe("deskSlotTile / roomCenterTile — desk grid follows the room's OWN deskCols", () => {
   it("keeps desk slots inside the room's own rect for a small roster", () => {
-    const [room] = layoutRooms([rooms[1]]);
-    const rect = roomTileRect(room);
-    for (let i = 0; i < 4; i++) {
-      const slot = deskSlotTile(room, i);
+    const [floor] = buildFloors([room("dept-1", "department", 3, { deptId: "d1" })]);
+    const [r] = floor.rooms;
+    const rect = roomTileRect(r);
+    for (let i = 0; i < 3; i++) {
+      const slot = deskSlotTile(r, i);
+      expect(slot.x).toBeGreaterThanOrEqual(rect.x);
+      expect(slot.x).toBeLessThan(rect.x + rect.w);
+      expect(slot.y).toBeGreaterThanOrEqual(rect.y);
+      expect(slot.y).toBeLessThan(rect.y + rect.h);
+    }
+  });
+
+  it("still keeps every desk inside the room once occupancy widens the desk grid", () => {
+    const [floor] = buildFloors([room("dept-1", "department", 9, { deptId: "d1" })]);
+    const [r] = floor.rooms;
+    const rect = roomTileRect(r);
+    for (let i = 0; i < 9; i++) {
+      const slot = deskSlotTile(r, i);
       expect(slot.x).toBeGreaterThanOrEqual(rect.x);
       expect(slot.x).toBeLessThan(rect.x + rect.w);
       expect(slot.y).toBeGreaterThanOrEqual(rect.y);
@@ -60,18 +171,94 @@ describe("deskSlotTile / roomCenterTile", () => {
   });
 
   it("gives distinct desk slots for distinct indices", () => {
-    const [room] = layoutRooms([rooms[1]]);
-    const a = deskSlotTile(room, 0);
-    const b = deskSlotTile(room, 1);
-    expect(a).not.toEqual(b);
+    const [floor] = buildFloors([room("dept-1", "department", 4, { deptId: "d1" })]);
+    const [r] = floor.rooms;
+    expect(deskSlotTile(r, 0)).not.toEqual(deskSlotTile(r, 1));
   });
 
   it("centres a room within its own rect", () => {
-    const [room] = layoutRooms([rooms[1]]);
-    const rect = roomTileRect(room);
-    const center = roomCenterTile(room);
+    const [floor] = buildFloors([room("dept-1", "department", 2, { deptId: "d1" })]);
+    const [r] = floor.rooms;
+    const rect = roomTileRect(r);
+    const center = roomCenterTile(r);
     expect(center.x).toBeGreaterThan(rect.x);
     expect(center.x).toBeLessThan(rect.x + rect.w);
+  });
+});
+
+describe("buildWalkableGrid / findPath — walk the corridor, never through a wall (req #6)", () => {
+  const office: OfficeRoomInput[] = [
+    room("lobby", "lobby", 1),
+    room("agents", "agents", 2),
+    room("dept-1", "department", 4, { deptId: "d1" }),
+    room("dept-2", "department", 3, { deptId: "d2" }),
+    room("utility", "utility", 1),
+  ];
+  const [floor] = buildFloors(office);
+  const grid = buildWalkableGrid(floor);
+  const byKey = new Map(floor.rooms.map((r) => [r.key, r] as const));
+
+  it("finds a route between two rooms on the same floor", () => {
+    const a = byKey.get("dept-1")!;
+    const b = byKey.get("dept-2")!;
+    const path = roomToRoomPath(grid, a, b);
+    expect(path).not.toBeNull();
+    expect(path!.length).toBeGreaterThan(1);
+  });
+
+  it("the route actually passes through the corridor band, not a straight cut between rooms", () => {
+    const a = byKey.get("dept-1")!;
+    const b = byKey.get("dept-2")!;
+    const path = roomToRoomPath(grid, a, b)!;
+    const touchesCorridor = path.some((p) => p.y >= floor.corridorY - 0.01 && p.y <= floor.corridorY + CORRIDOR_W_TILES + 0.01);
+    expect(touchesCorridor).toBe(true);
+  });
+
+  it("every waypoint the BFS itself returns is a genuinely walkable cell", () => {
+    const a = byKey.get("lobby")!;
+    const b = byKey.get("utility")!;
+    const fromDoor = { x: a.doorX, y: a.side === "north" ? a.y + a.hTiles : a.y };
+    const toDoor = { x: b.doorX, y: b.side === "north" ? b.y + b.hTiles : b.y };
+    const path = findPath(grid, fromDoor, toDoor);
+    expect(path).not.toBeNull();
+    for (const p of path!) {
+      expect(grid.walk[p.y * grid.w + p.x]).toBe(1);
+    }
+  });
+
+  it("returns null when the goal is nowhere near a walkable cell", () => {
+    const path = findPath(grid, { x: 1, y: 1 }, { x: -500, y: -500 });
+    expect(path).toBeNull();
+  });
+
+  it("nearestWalkable snaps a fractional room-centre point onto the grid", () => {
+    const center = roomCenterTile(byKey.get("dept-1")!);
+    const snapped = nearestWalkable(grid, center.x, center.y);
+    expect(snapped).not.toBeNull();
+    expect(grid.walk[snapped!.y * grid.w + snapped!.x]).toBe(1);
+  });
+});
+
+describe("pathLength / pointAlongPath — distance-proportional interpolation along a corridor route", () => {
+  const path = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
+
+  it("computes the total polyline length", () => {
+    expect(pathLength(path)).toBeCloseTo(20, 5);
+  });
+
+  it("t=0 is the start and t=1 is the end", () => {
+    expect(pointAlongPath(path, 0)).toEqual({ x: 0, y: 0 });
+    expect(pointAlongPath(path, 1)).toEqual({ x: 10, y: 10 });
+  });
+
+  it("t=0.5 is halfway BY DISTANCE along the whole route, not by segment index", () => {
+    const mid = pointAlongPath(path, 0.5);
+    expect(mid).toEqual({ x: 10, y: 0 });
+  });
+
+  it("degrades gracefully for a single-point or empty path", () => {
+    expect(pointAlongPath([{ x: 3, y: 4 }], 0.7)).toEqual({ x: 3, y: 4 });
+    expect(pointAlongPath([], 0.5)).toEqual({ x: 0, y: 0 });
   });
 });
 
@@ -167,5 +354,22 @@ describe("lerp / clamp01", () => {
     expect(lerp(0, 10, 1)).toBe(10);
     expect(lerp(0, 10, 0.5)).toBe(5);
     expect(lerp(0, 10, 2)).toBe(10);
+  });
+});
+
+describe("isGenuinelyWorking — an agent works ONLY while a real run event backs it (req #5)", () => {
+  it("is false when nothing has ever arrived", () => {
+    expect(isGenuinelyWorking(null, Date.now())).toBe(false);
+  });
+
+  it("is true right at the recency boundary and false just past it", () => {
+    const now = 1_000_000;
+    expect(isGenuinelyWorking(now - WORKING_RECENCY_MS, now)).toBe(true);
+    expect(isGenuinelyWorking(now - WORKING_RECENCY_MS - 1, now)).toBe(false);
+  });
+
+  it("is true for an event that just happened", () => {
+    const now = 1_000_000;
+    expect(isGenuinelyWorking(now, now)).toBe(true);
   });
 });

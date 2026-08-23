@@ -1,11 +1,15 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDateTime } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/timeFormat";
+import { nextCursor, type AgentRunEvent } from "@/lib/agentEvents";
 import {
   KIND_LABEL, ASSURANCE_LABEL, tilesToPx,
-  roomTileRect, floorSizeTiles, deskSlotTile, roomCenterTile,
-  restingRoomKey, buildReplaySteps, totalReplayMs, lerp, catToken,
-  type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeAvatar, type ReplayStep,
+  roomTileRect, deskSlotTile, roomCenterTile, allRooms,
+  buildWalkableGrid, roomToRoomPath, pointAlongPath, isGenuinelyWorking,
+  restingRoomKey, buildReplaySteps, totalReplayMs, catToken,
+  DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
+  type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeFloor, type OfficeAvatar, type ReplayStep,
 } from "@/lib/office";
 import {
   LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS, STEEL_RAMP,
@@ -15,28 +19,21 @@ import {
 import "./office.css";
 
 // The Office canvas — hand-rolled Canvas 2D, no engine, no new dependency (platform-ui's four-dep
-// discipline holds). REAL SPRITES: human and internal-agent avatars are composited from the 24
-// licensed LPC sheets under public/office-sprites/ (see lib/office-sprites.ts for the layer
-// contract and legal/asset-licences.md for the licence position). Automations stay the procedural
-// grey box (LPC ships no robot) and external agents keep their procedural foreign silhouette —
-// only human/agent kinds gained real art.
+// discipline holds). Rewritten 2026-08-23 for owner feedback on the live prototype: ONE connected
+// floor plate with real corridors (not detached room boxes), floors when one plate isn't enough,
+// rooms sized to headcount, page-level scroll, and a working animation gated STRICTLY to real
+// agent-run activity (O4) — never to humans, who have no comparable activity feed.
 //
-// The sprite swap DID land almost entirely inside `drawAvatar()`, as this file's previous header
-// promised — layout, positions, hit-testing and interaction below are byte-for-byte what they were
-// before. One thing that promise understated: a real asset must be FETCHED and DECODED before it
-// can be drawn, which a procedural shape never needed. The "Sprite loading + compositing" block
-// just above `drawAvatar()` is that plumbing — an image cache, a palette-swap cache, and a tiny
-// pub/sub so a still-loading sprite's eventual arrival triggers exactly one extra redraw. It adds
-// new module-level state and one new subscription effect on the component; it does not touch
-// steadyPositions/replayPositions/pointerToAvatar or any other existing function's behaviour.
-//
-// Two render paths, both imperative (never a persistent requestAnimationFrame loop):
-//   1. `draw()` — called on mount, on scene/theme/resize/selection change. One-shot.
-//   2. The replay RAF loop — runs ONLY while a demo replay is playing, and is paused (not just
-//      throttled) on `visibilitychange` and whenever the canvas leaves the viewport
-//      (IntersectionObserver). This estate has had a busy loop pin a core at 46% CPU; a game loop
-//      in a background tab is the same bug wearing a costume. There is no "ambient" motion for this
-//      loop to drive in the first place — an avatar only moves from a real fixture event (plan §3).
+// Two render paths, both imperative:
+//   1. `draw()` — called on mount, on scene/floor/theme/resize/selection/working-state change.
+//      One-shot.
+//   2. The replay RAF loop — runs ONLY while a demo replay is playing, paused on
+//      `visibilitychange` and off-screen (IntersectionObserver).
+//   3. A THIRD, much coarser timer — the working-animation "pulse" — exists only while at least one
+//      agent avatar has been proven genuinely active by real run events in the last
+//      WORKING_RECENCY_MS (lib/office.ts). It is a ~450ms `setInterval`, not a per-frame RAF, and
+//      it stops entirely (cleared) the moment nobody is working. Paused by the SAME
+//      visibility/offscreen refs as the replay loop.
 
 interface TokenSet {
   page: string; card: string; raised: string; sunken: string;
@@ -105,9 +102,17 @@ function steadyPositions(scene: OfficeScene, roomByKey: Map<string, OfficeRoom>,
   return out;
 }
 
-/** Positions for avatars currently walking a replay step — placed at the room CENTRE (a meeting
- *  point, not a desk) while unsettled, and interpolated between room centres mid-transit. */
-function replayPositions(scene: OfficeScene, roomByKey: Map<string, OfficeRoom>, steps: ReplayStep[], elapsedMs: number): Positioned[] {
+/** Positions for avatars currently walking a replay step. Routes THROUGH THE CORRIDOR NETWORK
+ *  (req #6) via `getPath` — a room-centre → door → corridor → door → room-centre polyline built by
+ *  `lib/office.ts`'s hand-rolled BFS — rather than a straight line through whatever sits between
+ *  the two rooms. `getPath` returns null when the two rooms aren't on the same floor (or no route
+ *  resolves), in which case this falls back to the ORIGINAL two-point line between room centres —
+ *  a rendering simplification for a case the corridor model can't show on one floor, never a
+ *  fabricated route. */
+function replayPositions(
+  scene: OfficeScene, roomByKey: Map<string, OfficeRoom>, steps: ReplayStep[], elapsedMs: number,
+  getPath: (fromKey: string, toKey: string) => { x: number; y: number }[] | null,
+): Positioned[] {
   const byAvatar = new Map<string, ReplayStep[]>();
   for (const s of steps) {
     if (!byAvatar.has(s.avatarId)) byAvatar.set(s.avatarId, []);
@@ -131,10 +136,10 @@ function replayPositions(scene: OfficeScene, roomByKey: Map<string, OfficeRoom>,
     if (!fromRoom || !toRoom) continue;
     if (elapsedMs < current.endMs) {
       const t = current.endMs === current.startMs ? 1 : (elapsedMs - current.startMs) / (current.endMs - current.startMs);
-      const a0 = roomCenterTile(fromRoom), a1 = roomCenterTile(toRoom);
+      const route = getPath(current.fromRoomKey, current.toRoomKey) ?? [roomCenterTile(fromRoom), roomCenterTile(toRoom)];
       out.push({
         avatar, roomKey: t < 1 ? current.fromRoomKey : current.toRoomKey,
-        tile: { x: lerp(a0.x, a1.x, t), y: lerp(a0.y, a1.y, t) },
+        tile: pointAlongPath(route, t),
         inTransit: t < 1, transitLabel: current.reason,
       });
     } else {
@@ -144,14 +149,10 @@ function replayPositions(scene: OfficeScene, roomByKey: Map<string, OfficeRoom>,
   return out;
 }
 
-// Room shell geometry — a real wall band with a doorway gap, not a stroked rectangle. Kept as
-// module constants (not exported from lib/office.ts) because they are a RENDERING choice, not
-// layout math another consumer needs; the desk grid still has to agree with deskSlotTile()'s own
-// private DESK_COLS=3, called out at each use below.
+// Room shell geometry — a real wall band with a doorway gap, not a stroked rectangle. Kept as a
+// module constant (not exported from lib/office.ts) because it's a RENDERING choice, not layout
+// math another consumer needs.
 const WALL_TILES = 0.4;
-const DOOR_WIDTH_TILES = 1.8;
-const DESK_COLS = 3; // mirrors office.ts's own (private) desk-grid width — must stay in lock-step
-                      // with deskSlotTile() or a "vacant" desk would be drawn on top of an occupied one.
 
 /** Tiled floor: a base fill plus a checkerboard wash at low alpha — reads as a real floor surface
  *  instead of one flat rectangle with gridlines. Clipped to the wall-inset interior so the wash
@@ -181,15 +182,18 @@ function drawFloor(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; 
   ctx.restore();
 }
 
-/** Real walls with thickness, and a doorway gap centred on the bottom edge. `unassigned` (plan
- *  §4.3: "no department binding exists") keeps its PRE-EXISTING dashed-outline honesty marker —
- *  it gets a thin dashed line instead of a solid wall band, never the load-bearing wall a bound
- *  room gets, so the claim "this room isn't real" survives the new rendering unchanged. */
-function drawWalls(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, tokens: TokenSet, isHovered: boolean, kind: OfficeRoomKind) {
+/** Real walls with thickness, and a doorway gap on the wall that faces the corridor — the SOUTH
+ *  (bottom) wall for a "north"-side room, the NORTH (top) wall for a "south"-side room. This is
+ *  the one piece of rendering that had to change shape entirely for the corridor model: a room's
+ *  door is no longer "always the bottom wall", it's whichever wall genuinely touches circulation
+ *  space. `unassigned` (plan §4.3: "no department binding exists") keeps its dashed-outline
+ *  honesty marker instead of a load-bearing wall. */
+function drawWalls(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet, isHovered: boolean) {
+  const rect = roomTileRect(room);
   const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
   const color = isHovered ? tokens.accent : tokens.ink60;
 
-  if (kind === "unassigned") {
+  if (room.kind === "unassigned") {
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = isHovered ? 2 : 1;
@@ -201,14 +205,22 @@ function drawWalls(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; 
 
   const wall = tilesToPx(WALL_TILES);
   const doorW = tilesToPx(DOOR_WIDTH_TILES);
-  const doorX0 = x + (w - doorW) / 2;
-  const doorX1 = doorX0 + doorW;
+  const doorCx = tilesToPx(room.doorX);
+  const doorX0 = doorCx - doorW / 2;
+  const doorX1 = doorCx + doorW / 2;
+  const corridorWallIsBottom = room.side === "north";
   ctx.fillStyle = color;
-  ctx.fillRect(x, y, w, wall); // top
   ctx.fillRect(x, y, wall, h); // left
   ctx.fillRect(x + w - wall, y, wall, h); // right
-  ctx.fillRect(x, y + h - wall, doorX0 - x, wall); // bottom, left of the doorway
-  ctx.fillRect(doorX1, y + h - wall, x + w - doorX1, wall); // bottom, right of the doorway
+  if (corridorWallIsBottom) {
+    ctx.fillRect(x, y, w, wall); // top — solid, away from the corridor
+    ctx.fillRect(x, y + h - wall, doorX0 - x, wall); // bottom, left of the doorway
+    ctx.fillRect(doorX1, y + h - wall, x + w - doorX1, wall); // bottom, right of the doorway
+  } else {
+    ctx.fillRect(x, y + h - wall, w, wall); // bottom — solid, away from the corridor
+    ctx.fillRect(x, y, doorX0 - x, wall); // top, left of the doorway
+    ctx.fillRect(doorX1, y, x + w - doorX1, wall); // top, right of the doorway
+  }
   if (isHovered) {
     ctx.strokeStyle = tokens.accent;
     ctx.lineWidth = 2;
@@ -216,14 +228,16 @@ function drawWalls(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; 
   }
 }
 
-/** A name plate mounted on the top wall, replacing the previous floating text — reads as signage
- *  rather than a label hovering over the floor. */
-function drawNamePlate(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, room: OfficeRoom, tokens: TokenSet) {
-  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w);
+/** A name plate mounted on the wall AWAY from the corridor (the room's "front of house" wall,
+ *  opposite its own doorway) so it never collides with the doorway gap `drawWalls` just cut. */
+function drawNamePlate(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet) {
+  const rect = roomTileRect(room);
+  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
   const plateW = Math.min(w - tilesToPx(1.2), tilesToPx(6.5));
   const plateH = tilesToPx(1.35);
   const px = x + (w - plateW) / 2;
-  const py = y + tilesToPx(WALL_TILES) - 1;
+  const onTop = room.side === "north"; // door is on the bottom, so the nameplate sits up top
+  const py = onTop ? y + tilesToPx(WALL_TILES) - 1 : y + h - tilesToPx(WALL_TILES) - plateH + 1;
   ctx.fillStyle = tokens.raised;
   ctx.fillRect(px, py, plateW, plateH);
   ctx.strokeStyle = tokens.hairline;
@@ -243,17 +257,24 @@ function drawNamePlate(ctx: CanvasRenderingContext2D, rect: { x: number; y: numb
 /** How many EXTRA desks to draw empty, beyond the real occupants — always completes the current
  *  row (or draws one full row for an empty room) so a real workspace still reads as a workspace
  *  with nobody in it, rather than looking unfurnished. Never invents a person: these desks are
- *  drawn with no avatar and an explicit "Vacant seat" caption. */
-function vacantDeskSlots(occupantCount: number): number {
-  if (occupantCount === 0) return DESK_COLS;
-  const rem = occupantCount % DESK_COLS;
-  return rem === 0 ? 0 : DESK_COLS - rem;
+ *  drawn with no avatar and an explicit "Vacant seat" caption. `deskCols` is THIS room's own grid
+ *  width (lib/office.ts's `roomSizeTiles`, which grows with headcount) — never a fixed constant. */
+function vacantDeskSlots(occupantCount: number, deskCols: number): number {
+  if (occupantCount === 0) return deskCols;
+  const rem = occupantCount % deskCols;
+  return rem === 0 ? 0 : deskCols - rem;
 }
 
-/** A desk + chair + monitor suggestion at one desk slot. Drawn in the FURNITURE pass, before any
- *  avatar — so an occupied desk's seated figure (drawn afterward, in the avatars pass) naturally
- *  occludes the chair's centre instead of floating over an empty tile. */
-function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet, occupied: boolean) {
+/** A desk's monitor tint is the ONLY visual difference a working animation makes (req #5) — no new
+ *  sprite, no invented gesture. Three honest states, never a fourth: no real run behind this desk
+ *  at all (dim, unchanged from before); a run that is genuinely open but has gone quiet (a static
+ *  amber tint — "a visible state, not a looping animation implying live contact", plan §3); and a
+ *  run with a real event inside the last WORKING_RECENCY_MS (a soft accent glow that ALTERNATES
+ *  with `pulseOn`, the one animation in this whole canvas that runs continuously, and only while
+ *  this is true for at least one desk on screen). */
+type DeskActivity = "none" | "quiet" | "working";
+
+function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet, occupied: boolean, activity: DeskActivity = "none", pulseOn = false) {
   const cx = tilesToPx(tile.x), cy = tilesToPx(tile.y);
   const r = tilesToPx(0.62);
   ctx.fillStyle = tokens.hairlineSoft;
@@ -268,8 +289,18 @@ function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number },
   ctx.lineWidth = 1;
   ctx.strokeRect(cx - deskW / 2 + 0.5, deskY + 0.5, deskW - 1, deskH - 1);
   const monW = tilesToPx(0.55), monH = tilesToPx(0.36);
-  ctx.fillStyle = occupied ? tokens.ink60 : tokens.hairlineSoft;
+  ctx.save();
+  if (activity === "working") {
+    ctx.fillStyle = tokens.accent;
+    ctx.globalAlpha = pulseOn ? 1 : 0.5;
+  } else if (activity === "quiet") {
+    ctx.fillStyle = tokens.warning;
+    ctx.globalAlpha = 0.85;
+  } else {
+    ctx.fillStyle = occupied ? tokens.ink60 : tokens.hairlineSoft;
+  }
   ctx.fillRect(cx - monW / 2, deskY - monH, monW, monH);
+  ctx.restore();
   if (!occupied) {
     ctx.fillStyle = tokens.ink60;
     ctx.font = `italic 400 ${Math.round(tilesToPx(0.42))}px ${tokens.fontBody}`;
@@ -312,6 +343,68 @@ function drawLobbyChairs(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens
   }
 }
 
+/** A reception counter opposite the waiting chairs — the "real luxury setups" ask (req #7) reads
+ *  most in the lobby, since it's the one room every visitor sees first. Purely decorative
+ *  furniture, drawn once per lobby; it makes no binding claim of its own (the lobby's binding is
+ *  still the airlock queue, per its `boundTo` caption). */
+function drawReceptionDesk(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet) {
+  const rect = roomTileRect(room);
+  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
+  const wall = tilesToPx(WALL_TILES);
+  const deskW = tilesToPx(3.4), deskH = tilesToPx(0.9);
+  const dx = x + w - wall - deskW - tilesToPx(0.6);
+  const dy = y + h - wall - deskH - tilesToPx(0.5);
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = tokens.ink;
+  ctx.beginPath();
+  ctx.ellipse(dx + deskW / 2, dy + deskH + 3, deskW * 0.55, deskH * 0.45, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = tokens.raised;
+  ctx.fillRect(dx, dy, deskW, deskH);
+  ctx.strokeStyle = tokens.hairline;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(dx + 0.5, dy + 0.5, deskW - 1, deskH - 1);
+  // A slim accent trim along the counter's front face — the one warm "considered furniture" touch.
+  ctx.fillStyle = tokens.accent;
+  ctx.globalAlpha = 0.5;
+  ctx.fillRect(dx, dy + deskH - 3, deskW, 3);
+  ctx.globalAlpha = 1;
+}
+
+/** A small procedural potted plant — no new asset, just a pot + a cluster of leaves in the status-
+ *  ok green token. Static (never animated), placed at fixed, deterministic spots per room so the
+ *  same company always renders the same plant in the same place. */
+function drawPlant(ctx: CanvasRenderingContext2D, cx: number, baselineY: number, tokens: TokenSet) {
+  const potW = tilesToPx(0.5), potH = tilesToPx(0.42);
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = tokens.ink;
+  ctx.beginPath();
+  ctx.ellipse(cx, baselineY + 2, potW * 0.8, potH * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = tokens.raised;
+  ctx.beginPath();
+  ctx.moveTo(cx - potW / 2, baselineY - potH);
+  ctx.lineTo(cx + potW / 2, baselineY - potH);
+  ctx.lineTo(cx + potW / 2 - 2, baselineY);
+  ctx.lineTo(cx - potW / 2 + 2, baselineY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = tokens.hairline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = tokens.ok;
+  const leafR = tilesToPx(0.34);
+  for (const [ox, oy] of [[0, -0.55], [-0.42, -0.15], [0.42, -0.15]] as const) {
+    ctx.beginPath();
+    ctx.ellipse(cx + ox * leafR * 2, baselineY - potH + oy * leafR * 2, leafR, leafR * 0.75, ox * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 /** The utility room is "where the automations sit" (no department tone, plan §4.3) — a rack/server
  *  suggestion along the right wall gives it a visual identity distinct from a department room, on
  *  top of the same desk furniture its automation avatars still sit at. Status LEDs are STATIC
@@ -342,6 +435,82 @@ function drawServerRack(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens:
     ctx.arc(rx + rackW - 8, sy + 6, 2, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+/** The building's outer shell — a single connected plate (req #1), not a set of independent
+ *  boxes. Drawn once per floor, behind everything else. */
+function drawOuterShell(ctx: CanvasRenderingContext2D, floor: OfficeFloor, tokens: TokenSet) {
+  const w = tilesToPx(floor.widthTiles), h = tilesToPx(floor.heightTiles);
+  ctx.strokeStyle = tokens.ink60;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+}
+
+/** The corridor is what makes this ONE building rather than a grid of rooms (req #1) — a warm
+ *  "runner" floor tint (a single restrained accent wash, per req #7's "restrained warm palette"),
+ *  a hairline edge trim where it meets every room, and a few static, evenly-spaced ceiling light
+ *  pools for "a consistent single light direction" without an actual lighting engine. Nothing here
+ *  animates. */
+function drawCorridorFloor(ctx: CanvasRenderingContext2D, floor: OfficeFloor, tokens: TokenSet) {
+  const x = 0, y = tilesToPx(floor.corridorY), w = tilesToPx(floor.widthTiles), h = tilesToPx(CORRIDOR_W_TILES);
+  ctx.fillStyle = tokens.sunken;
+  ctx.fillRect(x, y, w, h);
+  ctx.save();
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = tokens.accent;
+  const runnerInset = h * 0.22;
+  ctx.fillRect(x, y + runnerInset, w, h - runnerInset * 2);
+  ctx.restore();
+  ctx.strokeStyle = tokens.hairlineSoft;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + 0.5); ctx.lineTo(x + w, y + 0.5);
+  ctx.moveTo(x, y + h - 0.5); ctx.lineTo(x + w, y + h - 0.5);
+  ctx.stroke();
+  // Static ceiling light pools — evenly spaced, single light direction, never animated.
+  const poolSpacing = tilesToPx(9);
+  ctx.save();
+  ctx.globalAlpha = 0.10;
+  ctx.fillStyle = tokens.raised;
+  for (let px = poolSpacing / 2; px < w; px += poolSpacing) {
+    ctx.beginPath();
+    ctx.ellipse(px, y + h / 2, poolSpacing * 0.32, h * 0.62, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** A small round table + two chairs set into a wide stretch of the ground-floor corridor — the
+ *  informal "commons" a real office corridor has, and the one piece of furniture in this file that
+ *  is deliberately NOT inside a bound room (it makes no binding claim; it's corridor furniture,
+ *  same honesty tier as the lobby's ambient chairs). Skipped when the corridor is too short to fit
+ *  it without crowding a doorway. */
+function drawCorridorNook(ctx: CanvasRenderingContext2D, floor: OfficeFloor, tokens: TokenSet) {
+  if (floor.index !== 0 || floor.widthTiles < 34) return;
+  const cx = tilesToPx(Math.min(floor.widthTiles - 10, 22));
+  const cy = tilesToPx(floor.corridorY + CORRIDOR_W_TILES / 2);
+  const r = tilesToPx(0.85);
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = tokens.ink;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.5, r * 1.2, r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  for (const [ox, oy] of [[-1.5, 0], [1.5, 0]] as const) {
+    ctx.fillStyle = tokens.raised;
+    ctx.beginPath();
+    ctx.ellipse(cx + ox * r, cy + oy * r, r * 0.34, r * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = tokens.card;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r, r * 0.62, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = tokens.hairline;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  drawPlant(ctx, cx + r * 2.2, cy + r * 0.6, tokens);
 }
 
 /** A soft contact shadow under a figure, single light direction (straight down) for every avatar
@@ -592,20 +761,41 @@ function drawAvatar(ctx: CanvasRenderingContext2D, pos: Positioned, tokens: Toke
   }
 }
 
+const WORKING_POLL_MS = 8000;
+const PULSE_TICK_MS = 450;
+
 export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0);
 
   // Stable "now" for the whole session — a demo snapshot, not a clock. Re-reading Date.now() per
   // render would make an avatar's resting room silently shift as fixture timestamps age past it.
   const [nowMs] = useState(() => Date.now());
 
-  const roomByKey = useMemo(() => new Map(scene.rooms.map((r) => [r.key, r] as const)), [scene.rooms]);
-  const floorSize = useMemo(() => floorSizeTiles(scene.rooms), [scene.rooms]);
-  const cssW = tilesToPx(floorSize.w), cssH = tilesToPx(floorSize.h);
+  const floors = scene.floors;
+  const floor = floors[selectedFloorIndex] ?? floors[0] ?? null;
+  const roomByKey = useMemo(() => new Map(allRooms(floors).map((r) => [r.key, r] as const)), [floors]);
+  const floorRoomKeys = useMemo(() => new Set((floor?.rooms ?? []).map((r) => r.key)), [floor]);
+  const grid = useMemo(() => (floor ? buildWalkableGrid(floor) : null), [floor]);
+  const getPath = useMemo(() => {
+    const cache = new Map<string, { x: number; y: number }[] | null>();
+    return (fromKey: string, toKey: string) => {
+      if (!floor || !grid) return null;
+      const cacheKey = `${fromKey}=>${toKey}`;
+      if (cache.has(cacheKey)) return cache.get(cacheKey)!;
+      const fromRoom = floor.rooms.find((r) => r.key === fromKey);
+      const toRoom = floor.rooms.find((r) => r.key === toKey);
+      const path = fromRoom && toRoom ? roomToRoomPath(grid, fromRoom, toRoom) : null;
+      cache.set(cacheKey, path);
+      return path;
+    };
+  }, [floor, grid]);
+
+  const cssW = tilesToPx(floor?.widthTiles ?? 0), cssH = tilesToPx(floor?.heightTiles ?? 0);
 
   const replayRef = useRef<{ steps: ReplayStep[]; startPerf: number; pausedAtPerf: number | null; total: number } | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -615,6 +805,15 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
   selectedIdRef.current = selectedId;
   hoveredIdRef.current = hoveredId;
 
+  // Paused refs shared by BOTH the replay RAF loop and the working-animation pulse timer below —
+  // one visibility/offscreen story for every continuously-ticking thing this canvas can run.
+  const pausedByVisibility = useRef(false);
+  const pausedByOffscreen = useRef(false);
+  // Current phase of the working-animation pulse (req #5) — a ref, not state, because `draw()`
+  // reads it synchronously at call time and a redraw is already triggered explicitly wherever this
+  // flips; making it state too would just double every working-desk redraw for no benefit.
+  const pulseOnRef = useRef(false);
+
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const onChange = () => setReducedMotion(mq.matches);
@@ -623,9 +822,64 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
+  // ── O4 — genuinely working (req #5) ────────────────────────────────────────────────────────
+  // Polls ONLY the avatars office-data.ts proved have a real, currently-open run (`activeRunId`)
+  // — never humans, who carry no such field at all (see office.ts's own doc comment on why). A
+  // plain `setInterval`, not a loop tied to rendering: it exists only while there is at least one
+  // such avatar, stops when the list is empty, and skips its own fetch while the tab is hidden.
+  const activeRunAvatars = useMemo(() => scene.avatars.filter((a): a is OfficeAvatar & { activeRunId: string } => !!a.activeRunId), [scene.avatars]);
+  const workingStateRef = useRef(new Map<string, { cursor: number; lastEventAtMs: number | null }>());
+  const [workingIds, setWorkingIds] = useState<Set<string>>(new Set());
+  const [lastHeardMs, setLastHeardMs] = useState<Map<string, number | null>>(new Map());
+
+  useEffect(() => {
+    if (activeRunAvatars.length === 0) {
+      setWorkingIds(new Set());
+      setLastHeardMs(new Map());
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      if (document.hidden) return;
+      const results = await Promise.all(activeRunAvatars.map(async (a) => {
+        const prior = workingStateRef.current.get(a.id) ?? { cursor: 0, lastEventAtMs: null };
+        try {
+          const res = await fetch(`/api/admin/agents/runs/${encodeURIComponent(a.activeRunId)}/events?since=${prior.cursor}`, { cache: "no-store" });
+          if (!res.ok) return { id: a.id, state: prior };
+          const data: { events?: AgentRunEvent[] } = await res.json();
+          const events = Array.isArray(data.events) ? data.events : [];
+          if (events.length === 0) return { id: a.id, state: prior };
+          const cursor = nextCursor(events, prior.cursor);
+          const latestTs = events.reduce((max, e) => {
+            const t = Date.parse(e.ts);
+            return Number.isNaN(t) ? max : Math.max(max, t);
+          }, prior.lastEventAtMs ?? 0);
+          return { id: a.id, state: { cursor, lastEventAtMs: latestTs } };
+        } catch {
+          return { id: a.id, state: prior };
+        }
+      }));
+      if (cancelled) return;
+      for (const r of results) workingStateRef.current.set(r.id, r.state);
+      const now = Date.now();
+      const nextWorking = new Set<string>();
+      const nextHeard = new Map<string, number | null>();
+      for (const [id, st] of workingStateRef.current) {
+        nextHeard.set(id, st.lastEventAtMs);
+        if (isGenuinelyWorking(st.lastEventAtMs, now)) nextWorking.add(id);
+      }
+      setWorkingIds(nextWorking);
+      setLastHeardMs(nextHeard);
+    };
+    poll();
+    const interval = setInterval(poll, WORKING_POLL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRunAvatars.map((a) => a.activeRunId).join(",")]);
+
   const draw = useCallback((elapsedMs: number | null) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !floor) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const tokens = readTokens(canvas);
@@ -640,34 +894,47 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
 
     const hoveredRoomKey = hoveredIdRef.current ? lastPositionsRef.current.find((p) => p.avatar.id === hoveredIdRef.current)?.roomKey : null;
 
-    // Pass 1 — floor + walls + nameplate for every room.
-    for (const room of scene.rooms) {
+    // Pass 0 — the building shell + corridor. This is what makes it ONE floor plate (req #1).
+    drawOuterShell(ctx, floor, tokens);
+    drawCorridorFloor(ctx, floor, tokens);
+    drawCorridorNook(ctx, floor, tokens);
+
+    // Pass 1 — floor + walls + nameplate for every room ON THIS FLOOR.
+    for (const room of floor.rooms) {
       const rect = roomTileRect(room);
       drawFloor(ctx, rect, tokens, room.kind);
-      drawWalls(ctx, rect, tokens, room.key === hoveredRoomKey, room.kind);
-      drawNamePlate(ctx, rect, room, tokens);
+      drawWalls(ctx, room, tokens, room.key === hoveredRoomKey);
+      drawNamePlate(ctx, room, tokens);
     }
 
-    // Pass 2 — furniture, keyed to who CANONICALLY rests in each room (ignoring any in-flight
-    // replay animation) so desks never flicker empty/full while someone is mid-walk elsewhere —
-    // the walking figure (pass 3) is drawn on top of its own still-occupied-looking desk during a
-    // replay, which reads as "stepped away," not as a rendering glitch.
-    const canonical = steadyPositions(scene, roomByKey, nowMs, new Set());
+    // Pass 2 — furniture, keyed to who CANONICALLY rests in each room on THIS floor (ignoring any
+    // in-flight replay animation elsewhere) so desks never flicker empty/full mid-replay.
+    const canonical = steadyPositions(scene, roomByKey, nowMs, new Set()).filter((p) => floorRoomKeys.has(p.roomKey));
     const canonicalByRoom = new Map<string, Positioned[]>();
     for (const p of canonical) {
       if (!canonicalByRoom.has(p.roomKey)) canonicalByRoom.set(p.roomKey, []);
       canonicalByRoom.get(p.roomKey)!.push(p);
     }
-    for (const room of scene.rooms) {
+    for (const room of floor.rooms) {
       const occupants = canonicalByRoom.get(room.key) ?? [];
       if (room.kind === "lobby") {
         drawLobbyChairs(ctx, room, tokens);
+        drawReceptionDesk(ctx, room, tokens);
+        drawPlant(ctx, tilesToPx(room.x + room.wTiles - 1.1), tilesToPx(room.y + room.hTiles - 1.0), tokens);
         for (const p of occupants) drawWaitingChair(ctx, p.tile, tokens);
         continue;
       }
       if (room.kind === "utility") drawServerRack(ctx, room, tokens);
-      for (const p of occupants) drawDesk(ctx, p.tile, tokens, true);
-      const vacant = vacantDeskSlots(occupants.length);
+      if (room.kind === "department") {
+        // A plant in the back inner corner, opposite the doorway — never on top of a desk slot.
+        const backY = room.side === "north" ? room.y + 0.9 : room.y + room.hTiles - 0.7;
+        drawPlant(ctx, tilesToPx(room.x + room.wTiles - 0.9), tilesToPx(backY), tokens);
+      }
+      for (const p of occupants) {
+        const activity: DeskActivity = p.avatar.activeRunId ? (workingIds.has(p.avatar.id) ? "working" : "quiet") : "none";
+        drawDesk(ctx, p.tile, tokens, true, activity, pulseOnRef.current);
+      }
+      const vacant = vacantDeskSlots(occupants.length, room.deskCols);
       for (let i = 0; i < vacant; i++) drawDesk(ctx, deskSlotTile(room, occupants.length + i), tokens, false);
     }
 
@@ -675,16 +942,17 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     const animatedIds = new Set(elapsedMs !== null && replayRef.current ? replayRef.current.steps.map((s) => s.avatarId) : []);
     const positions = [
       ...steadyPositions(scene, roomByKey, nowMs, animatedIds),
-      ...(elapsedMs !== null && replayRef.current ? replayPositions(scene, roomByKey, replayRef.current.steps, elapsedMs) : []),
-    ];
+      ...(elapsedMs !== null && replayRef.current ? replayPositions(scene, roomByKey, replayRef.current.steps, elapsedMs, getPath) : []),
+    ].filter((p) => floorRoomKeys.has(p.roomKey));
     lastPositionsRef.current = positions;
     for (const pos of positions) {
       drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current);
     }
-  }, [scene, roomByKey, nowMs, cssW, cssH]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds]);
 
-  // One-shot redraw on mount, scene change, resize, and theme flips (data-theme is an attribute
-  // change, not a resize — MutationObserver is the only signal for it).
+  // One-shot redraw on mount, scene/floor change, resize, and theme flips (data-theme is an
+  // attribute change, not a resize — MutationObserver is the only signal for it).
   useEffect(() => {
     draw(null);
     const onResize = () => draw(replayRef.current && replaying ? performance.now() - replayRef.current.startPerf : null);
@@ -704,11 +972,24 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     return () => { spriteReadyListeners.delete(onReady); };
   }, [draw, replaying]);
 
+  // ── The working-animation "pulse" (req #5) — a coarse setInterval, never a RAF loop, that
+  // exists ONLY while `workingIds` is non-empty and stops the instant it's empty again. Reduced
+  // motion collapses this to a single static "on" state (no toggling at all) rather than an
+  // instant cut mid-pulse, matching how buildReplaySteps treats reduced motion elsewhere. ────────
+  useEffect(() => {
+    if (workingIds.size === 0) { pulseOnRef.current = false; return; }
+    if (reducedMotion) { pulseOnRef.current = true; draw(null); return; }
+    const id = setInterval(() => {
+      if (pausedByVisibility.current || pausedByOffscreen.current) return;
+      pulseOnRef.current = !pulseOnRef.current;
+      draw(replayRef.current && replaying ? performance.now() - replayRef.current.startPerf : null);
+    }, PULSE_TICK_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingIds, reducedMotion, draw, replaying]);
+
   // ── Replay: a RAF loop that exists ONLY while playing, paused (not merely throttled) when the
   // tab is hidden or the canvas leaves the viewport. Nothing runs at all otherwise. ──────────────
-  const pausedByVisibility = useRef(false);
-  const pausedByOffscreen = useRef(false);
-
   const tick = useCallback(() => {
     const r = replayRef.current;
     if (!r) return;
@@ -803,39 +1084,68 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     if (id) setSelectedId(id);
   }, [pointerToAvatar]);
 
+  /** Selecting an avatar (from the canvas or the roster) jumps the floor selector to wherever it
+   *  actually is — otherwise picking someone on another floor would just select nothing visible. */
+  const selectAvatar = useCallback((id: string) => {
+    setSelectedId(id);
+    const avatar = scene.avatars.find((a) => a.id === id);
+    if (!avatar) return;
+    const room = roomByKey.get(restingRoomKey(avatar, scene.events, nowMs));
+    if (room && room.floor !== selectedFloorIndex) setSelectedFloorIndex(room.floor);
+  }, [scene.avatars, scene.events, roomByKey, nowMs, selectedFloorIndex]);
+
   const selected = scene.avatars.find((a) => a.id === selectedId) ?? null;
   const roster = useMemo(
     () => [...scene.avatars].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)),
     [scene.avatars],
   );
-  const selectedRoomLabel = selected ? roomByKey.get(restingRoomKey(selected, scene.events, nowMs))?.label : null;
+  const selectedRoom = selected ? roomByKey.get(restingRoomKey(selected, scene.events, nowMs)) : null;
   const selectedEvents = selected ? scene.events.filter((e) => e.avatarId === selected.id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)) : [];
+  const selectedLastHeard = selected ? lastHeardMs.get(selected.id) : undefined;
+  const selectedIsWorking = selected ? workingIds.has(selected.id) : false;
 
   return (
     <div className="office">
       <div className="office__toolbar">
         <span className="office__demo-badge" role="status">DEMO — not live</span>
         <p className="office__hint">
-          Rooms are real (this company&apos;s departments). Who is shown and any movement is fixture data —
-          there is no live presence feed yet. Nothing here is tracked or stored.
+          One connected floor — real departments open onto real corridors. Who is shown and any
+          movement is fixture data; there is no live presence feed yet. Nothing here is tracked or stored.
         </p>
         <button
           type="button"
           className="office__replay-btn"
           onClick={startReplay}
           disabled={replaying || scene.events.length === 0}
-          title={scene.events.length === 0 ? "No recorded movement events for this company" : "Replay the recorded delegation events"}
+          title={scene.events.length === 0 ? "No recorded movement events for this company" : "Replay the recorded delegation events, walking the corridors"}
         >
           {replaying ? "Replaying…" : "Replay movement"}
         </button>
       </div>
+
+      {floors.length > 1 && (
+        <div className="office__floor-selector" role="tablist" aria-label="Floor">
+          {floors.map((f, i) => (
+            <button
+              key={f.index}
+              type="button"
+              role="tab"
+              aria-selected={i === selectedFloorIndex}
+              className={`office__floor-btn${i === selectedFloorIndex ? " office__floor-btn--active" : ""}`}
+              onClick={() => setSelectedFloorIndex(i)}
+            >
+              Floor {i + 1}{i === 0 ? " · Lobby" : ""}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="office__body">
         <div className="office__canvas-wrap" style={{ width: cssW, height: cssH }}>
           <canvas
             ref={canvasRef}
             role="img"
-            aria-label="Office floor plan. Use the roster list to browse avatars by keyboard."
+            aria-label={`Office floor ${selectedFloorIndex + 1} plan. Use the roster list to browse avatars by keyboard.`}
             style={{ width: cssW, height: cssH }}
             onMouseMove={onMouseMove}
             onMouseLeave={() => setHoveredId(null)}
@@ -864,10 +1174,11 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
                 onBlur={() => setHoveredId((h) => (h === a.id ? null : h))}
                 onMouseEnter={() => setHoveredId(a.id)}
                 onMouseLeave={() => setHoveredId((h) => (h === a.id ? null : h))}
-                onClick={() => setSelectedId(a.id)}
+                onClick={() => selectAvatar(a.id)}
               >
                 <span className="office__roster-kind">{KIND_LABEL[a.kind]}</span>
                 <span className="office__roster-name">{a.name}</span>
+                {workingIds.has(a.id) && <span className="office__roster-working">Working</span>}
               </button>
             ))}
           </div>
@@ -879,7 +1190,7 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
                 <Eyebrow>{KIND_LABEL[selected.kind]}</Eyebrow>
                 <h3 className="office__detail-name">{selected.name}</h3>
                 <dl className="office__detail-list">
-                  <dt>Room</dt><dd>{selectedRoomLabel ?? "—"}</dd>
+                  <dt>Room</dt><dd>{selectedRoom ? `${selectedRoom.label} — Floor ${selectedRoom.floor + 1}` : "—"}</dd>
                   <dt>Record</dt>
                   <dd>
                     <code>{selected.recordKind}:{selected.recordId}</code>
@@ -895,6 +1206,18 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
                     <>
                       <dt>Assurance</dt>
                       <dd className={`office__assurance office__assurance--${selected.assurance}`}>{ASSURANCE_LABEL[selected.assurance]}</dd>
+                    </>
+                  )}
+                  {selected.activeRunId && (
+                    <>
+                      <dt>Activity</dt>
+                      <dd>
+                        {selectedIsWorking
+                          ? "Working now — real-time run events in the last minute."
+                          : selectedLastHeard != null
+                            ? `Run open, quiet — last heard ${formatRelativeTime(selectedLastHeard, nowMs)}.`
+                            : "Run open — no events observed yet."}
+                      </dd>
                     </>
                   )}
                 </dl>

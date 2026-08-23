@@ -476,11 +476,42 @@ const BRIDGE_HEALTH = {
   ],
 };
 const AGENT_GOALS: Record<string, unknown[]> = {
+  // Five entries (was two) so /office's Operations room — Supervisor + one seat per goal — seats
+  // 6 in demo mode, past the 3-occupant threshold where room footprint visibly grows (req #3 of
+  // the 2026-08-23 office rebuild). "g-1" is also the one goal with a genuinely open run wired
+  // below (agentGoalDetailFor/GOAL_RUN_EVENTS), so the office canvas has something real to poll
+  // for the working-animation demo (req #5) — everything else here stays exactly the ordinary
+  // goal-list fixture /agents already rendered.
   "co-agency": [
     { id: "g-1", goal: "Chase overdue approvals", status: "running", budgetSpent: 0.42, budgetTotal: 2, fanOut: 2 },
     { id: "g-2", goal: "Weekly status digest", status: "done", budgetSpent: 0.1, budgetTotal: 1, fanOut: 1 },
+    { id: "g-3", goal: "Reconcile client onboarding checklist", status: "running", budgetSpent: 0.2, budgetTotal: 1, fanOut: 1 },
+    { id: "g-4", goal: "Draft Q3 retro summary", status: "queued", budgetSpent: 0, budgetTotal: 1, fanOut: 0 },
+    { id: "g-5", goal: "Flag stale search-term reviews", status: "done", budgetSpent: 0.08, budgetTotal: 1, fanOut: 1 },
   ],
 };
+
+// The one goal (g-1) with a genuinely OPEN run — no `endedAt` — so office-data.ts's activeRunId
+// wiring (O4) has something real to resolve for the /office demo. Everything else in AGENT_GOALS
+// deliberately has NO matching entry here, so getAgentGoal degrades to "no active run" for them
+// exactly like it would for a real backend that hasn't been asked yet — this is a fixture, not a
+// blanket "always working" stub.
+const AGENT_GOAL_RUNS: Record<string, { runId: string; agent: string; status: string; startedAt: number; endedAt?: number }[]> = {
+  "g-1": [{ runId: "run-demo-g-1", agent: "ops-agent", status: "running", startedAt: Date.now() - 90_000 }],
+};
+
+// The run-events page this run's runId serves — see agentEvents.ts's AgentRunEvent shape. Returns
+// one fresh event on the FIRST poll (since <= 0) and nothing after, so a browser sitting on
+// /office sees "working" right after load and settles into "quiet" a WORKING_RECENCY_MS later,
+// exactly like a real run that produced one burst of activity and then paused — never an
+// infinitely-animating loop, which the honesty rules this feature is built against forbid anyway.
+function demoAgentRunEvents(runId: string, sinceSeq: number): { eventId: string; runId: string; goalId: string; seq: number; ts: string; kind: string; detail: string; durationMs: number | null; parentRunId: string | null }[] {
+  if (runId !== "run-demo-g-1" || sinceSeq >= 1) return [];
+  return [{
+    eventId: "evt-demo-g-1-1", runId, goalId: "g-1", seq: 1, ts: new Date().toISOString(),
+    kind: "tool", detail: "Checked overdue approvals queue", durationMs: 420, parentRunId: null,
+  }];
+}
 const KNOWLEDGE_SOURCES: Record<string, unknown[]> = {
   "co-agency": [
     { id: "k-1", source: "Brand guidelines.pdf", provenance: "Google Drive", status: "indexed" },
@@ -2466,6 +2497,17 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (p === "/api/admin/automation/bridge") return ok(BRIDGE_HEALTH);
   const goalsMatch = p.match(/^\/api\/([^/]+)\/agents\/goals$/);
   if (goalsMatch) return ok(AGENT_GOALS[goalsMatch[1]] ?? []);
+  const goalDetailMatch = p.match(/^\/api\/([^/]+)\/agents\/goals\/([^/]+)$/);
+  if (goalDetailMatch) {
+    const goal = (AGENT_GOALS[goalDetailMatch[1]] ?? []).find((g) => (g as { id: string }).id === goalDetailMatch[2]);
+    if (!goal) return { status: 404, json: { error: "goal not found" } };
+    return ok({ ...(goal as object), blackboard: [], runs: AGENT_GOAL_RUNS[goalDetailMatch[2]] ?? [] });
+  }
+  const runEventsMatch = p.match(/^\/api\/([^/]+)\/agents\/runs\/([^/]+)\/events$/);
+  if (runEventsMatch) {
+    const since = Number(url.searchParams.get("since") ?? 0) || 0;
+    return ok({ events: demoAgentRunEvents(runEventsMatch[2], since) });
+  }
   const sourcesMatch = p.match(/^\/api\/([^/]+)\/knowledge\/sources$/);
   if (sourcesMatch) return ok(KNOWLEDGE_SOURCES[sourcesMatch[1]] ?? []);
   if (p.match(/^\/api\/[^/]+\/knowledge\/sources\/[^/]+\/review$/) && m === "POST") return ok({ ok: true });

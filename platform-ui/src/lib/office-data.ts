@@ -10,9 +10,9 @@ import "server-only";
 // implying otherwise. No location HISTORY is stored anywhere — this function reads current org
 // data and returns a fresh scene on every call; nothing here is a table.
 import { listDepartmentBriefs, getDepartment, type DeptBrief } from "./departments";
-import { getAgentGoals, type AgentGoal } from "./admin";
+import { getAgentGoals, getAgentGoal, type AgentGoal } from "./admin";
 import {
-  layoutRooms,
+  buildFloors,
   type OfficeRoomInput,
   type OfficeAvatar,
   type OfficeMoveEvent,
@@ -40,13 +40,36 @@ export function deptRoomKey(deptId: string): string {
  *  floor away. */
 export async function getOfficeScene(u: string, t: string | null): Promise<OfficeScene> {
   const generatedAt = new Date().toISOString();
-  if (!t) return { rooms: [], avatars: [], events: [], generatedAt };
+  if (!t) return { floors: [], avatars: [], events: [], generatedAt };
 
   const depts: DeptBrief[] = await listDepartmentBriefs(u, t).catch(() => [] as DeptBrief[]);
   const workspaces = await Promise.all(
     depts.map((d) => getDepartment(u, t, d.id).catch(() => null)),
   );
   const goals: AgentGoal[] = await getAgentGoals(u, t).catch(() => [] as AgentGoal[]);
+
+  // O4 (req #5): resolve which of this tenant's goals has a genuinely OPEN run right now (no
+  // endedAt yet) — only those goals get an `activeRunId`, which is the one thing that lets the
+  // office canvas poll real run events and decide whether to show a working animation. A goal
+  // that is "running" per its own status but whose run detail can't be read (elevated-only,
+  // unavailable) simply gets no activeRunId — the avatar still renders, just without the
+  // animation, which is the correct degrade (never fabricate the id).
+  const activeGoals = goals.filter((g) => g.status === "queued" || g.status === "running");
+  const activeRunByGoal = new Map<string, string>();
+  if (activeGoals.length > 0) {
+    const details = await Promise.all(activeGoals.map((g) => getAgentGoal(u, t, g.id).catch(() => null)));
+    details.forEach((detail, i) => {
+      // `Array.isArray` guard, not just truthiness: DEMO_MODE's catch-all route (and a genuinely
+      // malformed backend response) can hand back `[]` in place of an object with a `.runs`
+      // array — this DEGRADES to "no active run", never a crash (matches agentEvents-data.ts's
+      // own `Array.isArray(res?.events)` discipline for exactly the same shape hazard).
+      const runs = detail && Array.isArray(detail.runs) ? detail.runs : [];
+      const openRun = [...runs]
+        .filter((r) => r.endedAt == null)
+        .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+      if (openRun) activeRunByGoal.set(activeGoals[i].id, openRun.runId);
+    });
+  }
 
   const sortedDepts = [...depts].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -90,6 +113,7 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     note: "The goal-tree orchestrator console. Agents are tenant-wide, not department-scoped, so it is housed in Operations by design — not a fallback, and not dependent on any department existing.",
   });
   goals.forEach((g, i) => {
+    const activeRunId = activeRunByGoal.get(g.id);
     avatars.push({
       id: `agent-goal-${g.id}`,
       kind: "agent",
@@ -100,7 +124,10 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
       recordId: g.id,
       recordLabel: g.goal,
       recordHref: `/agents/goals/${g.id}`,
-      note: `Real agent goal, status "${g.status}". Tenant-wide, not department-scoped, so it is housed in Operations by design.`,
+      note: activeRunId
+        ? `Real agent goal, status "${g.status}", with a run currently in flight. The desk's working animation reflects that run's OWN recent events (O4) — it stops the moment the run goes quiet.`
+        : `Real agent goal, status "${g.status}". Tenant-wide, not department-scoped, so it is housed in Operations by design.`,
+      ...(activeRunId ? { activeRunId } : {}),
     });
   });
 
@@ -180,22 +207,34 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
   // it — nothing here does, by construction, but a future binding failure gets a real diagnostic
   // room instead of silently landing nowhere. ──────────────────────────────────────────────────
   const usesUnassigned = avatars.some((a) => a.homeRoomKey === OFFICE_UNASSIGNED_KEY);
+  // Occupancy counted from each avatar's HOME room, not its current resting room — a room's
+  // footprint (req #3: "rooms will grow to accommodate employee") describes the department's real
+  // seat count, not a snapshot of a mid-replay animation. deriveRoomOccupancy centralises this so
+  // a room can never disagree with the avatar list that actually determines it.
+  const occupancyByRoom = new Map<string, number>();
+  for (const a of avatars) occupancyByRoom.set(a.homeRoomKey, (occupancyByRoom.get(a.homeRoomKey) ?? 0) + 1);
+  const occupancyOf = (key: string) => occupancyByRoom.get(key) ?? 0;
+
   const roomInputs: OfficeRoomInput[] = [
-    { key: OFFICE_LOBBY_KEY, label: "Lobby", kind: "lobby", boundTo: "Airlock queue — not built (O5)" },
-    { key: OFFICE_AGENTS_KEY, label: "Operations", kind: "agents", boundTo: "Tenant-wide agents — not department-scoped by design" },
+    { key: OFFICE_LOBBY_KEY, label: "Lobby", kind: "lobby", boundTo: "Airlock queue — not built (O5)", occupantCount: occupancyOf(OFFICE_LOBBY_KEY) },
+    { key: OFFICE_AGENTS_KEY, label: "Operations", kind: "agents", boundTo: "Tenant-wide agents — not department-scoped by design", occupantCount: occupancyOf(OFFICE_AGENTS_KEY) },
     ...sortedDepts.map((d) => ({
       key: deptRoomKey(d.id),
       label: d.name,
       kind: "department" as const,
       deptId: d.id,
       boundTo: `Org structure id: ${d.id}`,
+      occupantCount: occupancyOf(deptRoomKey(d.id)),
     })),
     ...(usesUnassigned
-      ? [{ key: OFFICE_UNASSIGNED_KEY, label: "Unassigned", kind: "unassigned" as const, boundTo: "Binding failure — a real avatar with no room to place it in" }]
+      ? [{ key: OFFICE_UNASSIGNED_KEY, label: "Unassigned", kind: "unassigned" as const, boundTo: "Binding failure — a real avatar with no room to place it in", occupantCount: occupancyOf(OFFICE_UNASSIGNED_KEY) }]
       : []),
-    { key: OFFICE_UTILITY_KEY, label: "Utility", kind: "utility" as const, boundTo: "No department — automations only" },
+    { key: OFFICE_UTILITY_KEY, label: "Utility", kind: "utility" as const, boundTo: "No department — automations only", occupantCount: occupancyOf(OFFICE_UTILITY_KEY) },
   ];
-  const rooms = layoutRooms(roomInputs);
+  // ONE connected building (req #1): buildFloors packs this fixed room order into a corridor
+  // spine, splitting onto further floors only if a single plate can't legibly hold them all
+  // (req #2). Lobby stays first in roomInputs, so it always lands on floor 0 by construction.
+  const floors = buildFloors(roomInputs);
 
-  return { rooms, avatars, events, generatedAt };
+  return { floors, avatars, events, generatedAt };
 }

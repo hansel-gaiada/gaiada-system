@@ -1,14 +1,18 @@
-// The Office — pure, client-safe types + layout/interpolation math for the `/office` prototype.
+// The Office — pure, client-safe types + layout/pathfinding math for the `/office` prototype.
 // See docs/superpowers/plans/2026-08-23-virtual-office-plan.md. This file holds NOTHING that
-// needs a backend: room/avatar/event SHAPES, the deterministic layout of rooms into a tile grid,
-// where an avatar rests "as of" a given instant, and the pure geometry a replay animation walks
-// through. `office-data.ts` (server-only) fills these shapes from real org data + fixtures;
-// `components/office/OfficeCanvas.tsx` (client) draws them.
+// needs a backend: room/avatar/event SHAPES, the deterministic layout of rooms into ONE connected
+// floor plate (a corridor spine with rooms opening onto it — not a grid of detached boxes), room
+// footprint derived from real headcount, hand-rolled grid pathfinding through the corridor
+// network, and the pure geometry a replay animation walks through. `office-data.ts` (server-only)
+// fills these shapes from real org data + fixtures; `components/office/OfficeCanvas.tsx` (client)
+// draws them.
 //
-// NO SPRITES. Per legal/asset-licences.md, nothing third-party is committed tonight — avatars are
-// drawn procedurally on canvas (shape + palette, keyed by kind — see KIND_LABEL/drawing notes
-// below). Swapping in real sprites later only touches the draw function; every shape here stays
-// the same, because "kind" and "position" are already the interface a sprite renderer would need.
+// Rewritten 2026-08-23 (owner feedback on the live grid-of-boxes prototype): "map the whole office
+// into 1 building ... make another screen[per floor] if not enough ... movement can really look
+// like walking the corridors". The load-bearing shift is that a room no longer owns an
+// independent (col,row) grid cell — every room is placed by `buildFloors()` along a shared
+// corridor, and its position, door and floor are all OUTPUTS of that one layout pass, never
+// independently chosen.
 
 // ── Taxonomy (shared with the Agent Floor's ops view — plan §4.4) ───────────────────────────────
 export type OfficeKind = "human" | "agent" | "automation" | "external";
@@ -33,9 +37,7 @@ export const ASSURANCE_LABEL: Record<AssuranceTier, string> = {
 // console/nav row already uses, so a room can never point at a department that doesn't exist.
 // "agents" is a first-class estate-level room (Operations — tenant-wide agents live here from
 // day one, independent of org structure), never a fallback. "unassigned" stays reserved for a
-// genuine binding failure — a real thing that has nowhere else to go — and is not created by
-// default; see office-data.ts's own comment on why conflating the two made a correct system read
-// as broken (an estate-level agent is not "unbound", it was simply never department-scoped).
+// genuine binding failure — a real thing that has nowhere else to go.
 export type OfficeRoomKind = "lobby" | "department" | "agents" | "utility" | "unassigned";
 
 export interface OfficeRoomInput {
@@ -45,22 +47,35 @@ export interface OfficeRoomInput {
   deptId?: string;
   /** What binds this room to a real thing, shown in its header. */
   boundTo: string;
+  /** Real headcount this room must seat in its steady state (home room) — drives footprint
+   *  (req #3: "rooms will grow to accommodate employee"). Never includes anyone only passing
+   *  through mid-replay; that would make a room's SIZE depend on a moment-to-moment animation
+   *  state, which is exactly the kind of derived-activity coupling plan §2 rules out elsewhere. */
+  occupantCount: number;
 }
 
 export interface OfficeRoom extends OfficeRoomInput {
-  /** Grid cell, in ROOM-sized units (not tiles) — see layoutRooms(). */
-  col: number;
-  row: number;
+  /** Tile-space rect, absolute WITHIN ITS OWN FLOOR — floors are independent footprints, rendered
+   *  one at a time (req #2), never stacked into one shared coordinate space. */
+  x: number;
+  y: number;
+  wTiles: number;
+  hTiles: number;
+  /** Desk columns THIS room was laid out with — grows with occupantCount (req #3). Callers must
+   *  use this instead of any fixed constant when computing desk slots. */
+  deskCols: number;
+  /** 0-based floor index (req #2). */
+  floor: number;
+  /** Which side of the corridor spine the room opens onto — its door sits on the wall touching
+   *  the corridor (south wall for a "north" room, north wall for a "south" room). */
+  side: "north" | "south";
+  /** Door centre, in the room's own x-axis tile coordinate (same space as `x`) — where the
+   *  doorway gap is cut into the corridor-facing wall. */
+  doorX: number;
 }
 
-// Tile grid constants. 16px is the LPC/GBA-era convention the plan freezes for when real sprites
-// land (§4.3b) — kept here even though nothing is sprited yet, so the floor already reads at the
-// scale a sprite renderer would need, and swapping in art later touches no geometry.
+// Tile grid constants. 16px is the LPC/GBA-era convention the plan freezes for sprites (§4.3b).
 export const TILE_PX = 16;
-export const ROOM_W_TILES = 10;
-export const ROOM_H_TILES = 7;
-export const ROOM_GAP_TILES = 2;
-export const GRID_COLS = 3;
 /** Integer-only zoom (plan §4.3b: "fractional scaling destroys pixel art") — the one multiplier
  *  between tile-space and canvas device pixels. */
 export const ZOOM = 2;
@@ -69,52 +84,330 @@ export function tilesToPx(tiles: number): number {
   return tiles * TILE_PX * ZOOM;
 }
 
-/** Packs a fixed order of rooms into a wrapping grid. Order is the caller's call (lobby first,
- *  departments alphabetical, unassigned, utility last) — this only assigns cells. */
-export function layoutRooms(inputs: OfficeRoomInput[]): OfficeRoom[] {
-  return inputs.map((r, i) => ({ ...r, col: i % GRID_COLS, row: Math.floor(i / GRID_COLS) }));
+// ── Room footprint from headcount (req #3) ───────────────────────────────────────────────────
+// Desk slots inside a room — leaving a header band clear for the room's nameplate, and wide
+// enough spacing that two neighbouring name labels don't collide.
+export const DESK_MARGIN_TILES = 1.6;
+/** Clearance from the room's own top edge to the FIRST desk row. Must clear the nameplate band
+ *  mounted there (WALL_TILES + ~1.35 tiles of plate, in OfficeCanvas.tsx's drawNamePlate) PLUS the
+ *  desk furniture's own header (a desk box sits visually above its seat tile, in the furniture
+ *  pass) — 2.6 left the desk box overlapping the nameplate text on every room whose door faces
+ *  south (nameplate stays up top); 3.6 was verified against a real render to clear it. */
+export const DESK_TOP_TILES = 3.6;
+export const DESK_SPACING_TILES = 3.0;
+/** A room with nobody real in it, and none imagined, is still a room — this is the floor beneath
+ *  which a room never shrinks regardless of occupantCount. Matches roomSizeTiles's own one-row
+ *  output so this is a real floor, not a lower number that the formula already exceeds. */
+export const ROOM_MIN_W_TILES = 9;
+export const ROOM_MIN_H_TILES = 7.6;
+
+/** How many desk COLUMNS a room of this occupancy lays out with. A department of 2 stays a tidy
+ *  3-wide room; a department of 9 widens rather than growing absurdly tall — the footprint reads
+ *  as "bigger room" in both dimensions, not one long corridor of desks. */
+export function deskColsForOccupancy(occupantCount: number): number {
+  if (occupantCount <= 3) return 3;
+  if (occupantCount <= 8) return 4;
+  return 5;
 }
 
-/** A room's rectangle in TILE units (not px) — multiply by TILE_PX for canvas coordinates. */
-export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: number; h: number } {
-  const x = room.col * (ROOM_W_TILES + ROOM_GAP_TILES);
-  const y = room.row * (ROOM_H_TILES + ROOM_GAP_TILES);
-  return { x, y, w: ROOM_W_TILES, h: ROOM_H_TILES };
+/** The room footprint (in tiles) that fits `occupantCount` real desks plus the SAME "complete the
+ *  current row" vacant-seat allowance the canvas already draws (a vacant desk is information, not
+ *  clutter — never a fixed pad of three). Pure and deterministic: same occupantCount always
+ *  produces the same size, which is what keeps the floor-plan allocator (`buildFloors`) stable
+ *  across renders. */
+export function roomSizeTiles(occupantCount: number): { wTiles: number; hTiles: number; deskCols: number } {
+  const deskCols = deskColsForOccupancy(occupantCount);
+  const seats = Math.max(occupantCount, 1); // an empty room still draws one row of vacant desks
+  const rows = Math.max(1, Math.ceil(seats / deskCols));
+  const w = DESK_MARGIN_TILES * 2 + (deskCols - 1) * DESK_SPACING_TILES + 1.4;
+  const h = DESK_TOP_TILES + rows * DESK_SPACING_TILES + 1.0;
+  return { wTiles: Math.max(ROOM_MIN_W_TILES, w), hTiles: Math.max(ROOM_MIN_H_TILES, h), deskCols };
 }
 
-/** Overall floor size in tiles, from the room with the largest col/row. */
-export function floorSizeTiles(rooms: OfficeRoom[]): { w: number; h: number } {
-  if (rooms.length === 0) return { w: ROOM_W_TILES, h: ROOM_H_TILES };
-  const maxCol = Math.max(...rooms.map((r) => r.col));
-  const maxRow = Math.max(...rooms.map((r) => r.row));
-  return {
-    w: (maxCol + 1) * (ROOM_W_TILES + ROOM_GAP_TILES) - ROOM_GAP_TILES,
-    h: (maxRow + 1) * (ROOM_H_TILES + ROOM_GAP_TILES) - ROOM_GAP_TILES,
+// ── The floor plate — one connected building, not detached boxes (req #1) ───────────────────────
+// A "double-loaded corridor" plan: a single corridor spine runs the width of the floor, and rooms
+// open onto it from both sides, door aligned to the corridor. This is a real floor-plan topology
+// (the standard office/hotel layout), not a decorative connector between independent boxes —
+// walking from one room to another means walking the corridor, because the corridor is the only
+// walkable path between rooms (see buildWalkableGrid/findPath below).
+export const CORRIDOR_W_TILES = 4;
+export const OUTER_MARGIN_TILES = 2;
+/** Gap between two adjacent rooms on the same side of the same corridor. */
+export const ROOM_GAP_TILES = 2;
+/** When placing the next room would push a floor's corridor past this length, close the floor and
+ *  start a new one (req #2: "if not enough make another screen"). Chosen so a small/medium
+ *  tenant's real department count comfortably fits one floor, while a large one visibly splits. */
+export const MAX_FLOOR_WIDTH_TILES = 96;
+export const DOOR_WIDTH_TILES = 1.8;
+
+export interface OfficeFloor {
+  /** 0-based; the floor selector shows `index + 1`. Lobby is always placed first in the input
+   *  order (office-data.ts's own room ordering), so it always lands on floor 0 — "Keep the Lobby
+   *  on the ground floor" falls out of the algorithm rather than needing a special case. */
+  index: number;
+  rooms: OfficeRoom[];
+  /** Top-of-corridor y, in this floor's own tile space. */
+  corridorY: number;
+  widthTiles: number;
+  heightTiles: number;
+}
+
+/** Packs an ordered list of rooms into one or more connected floor plates. DETERMINISTIC: the
+ *  only inputs are the room list's order and each room's occupantCount-derived size, so the same
+ *  org data always assigns the same room to the same floor across renders (req #2: "a department
+ *  must not move floors between renders") — there is no randomness and no reliance on wall-clock
+ *  time anywhere in this function.
+ *
+ *  Greedy corridor fill: walk the rooms in order, always placing the next room on whichever side
+ *  of the CURRENT floor's corridor is currently shorter (a simple balance heuristic, not a bin-
+ *  packing optimum — legibility matters more than density here). When the next room would push
+ *  the corridor past MAX_FLOOR_WIDTH_TILES, the current floor is closed and a new one started. */
+export function buildFloors(inputs: OfficeRoomInput[]): OfficeFloor[] {
+  const floors: OfficeFloor[] = [];
+  let floorRooms: OfficeRoom[] = [];
+  let cursorNorth = OUTER_MARGIN_TILES;
+  let cursorSouth = OUTER_MARGIN_TILES;
+  let northMaxH = 0;
+  let southMaxH = 0;
+  let floorIndex = 0;
+
+  const closeFloor = () => {
+    if (floorRooms.length === 0) return;
+    const corridorY = OUTER_MARGIN_TILES + northMaxH;
+    for (const r of floorRooms) {
+      r.y = r.side === "north" ? corridorY - r.hTiles : corridorY + CORRIDOR_W_TILES;
+    }
+    const widthTiles = Math.max(cursorNorth, cursorSouth) - ROOM_GAP_TILES + OUTER_MARGIN_TILES;
+    const heightTiles = OUTER_MARGIN_TILES + northMaxH + CORRIDOR_W_TILES + southMaxH + OUTER_MARGIN_TILES;
+    floors.push({ index: floorIndex, rooms: floorRooms, corridorY, widthTiles, heightTiles });
+    floorIndex += 1;
+    floorRooms = [];
+    cursorNorth = OUTER_MARGIN_TILES;
+    cursorSouth = OUTER_MARGIN_TILES;
+    northMaxH = 0;
+    southMaxH = 0;
   };
+
+  for (const input of inputs) {
+    const size = roomSizeTiles(input.occupantCount);
+    const provisionalSide: "north" | "south" = cursorNorth <= cursorSouth ? "north" : "south";
+    const provisionalCursor = provisionalSide === "north" ? cursorNorth : cursorSouth;
+    if (floorRooms.length > 0 && provisionalCursor + size.wTiles > MAX_FLOOR_WIDTH_TILES) {
+      closeFloor();
+    }
+    const side: "north" | "south" = cursorNorth <= cursorSouth ? "north" : "south";
+    const x = side === "north" ? cursorNorth : cursorSouth;
+    const room: OfficeRoom = {
+      ...input,
+      x,
+      y: 0, // fixed up in closeFloor, once the floor's corridor position is known
+      wTiles: size.wTiles,
+      hTiles: size.hTiles,
+      deskCols: size.deskCols,
+      floor: floorIndex,
+      side,
+      doorX: x + size.wTiles / 2,
+    };
+    floorRooms.push(room);
+    if (side === "north") {
+      cursorNorth = x + size.wTiles + ROOM_GAP_TILES;
+      northMaxH = Math.max(northMaxH, size.hTiles);
+    } else {
+      cursorSouth = x + size.wTiles + ROOM_GAP_TILES;
+      southMaxH = Math.max(southMaxH, size.hTiles);
+    }
+  }
+  closeFloor();
+  return floors;
 }
 
-// Desk slots inside a room — a small fixed grid, leaving a header band clear for the room's
-// label + caption, and wide enough spacing that two neighbouring name labels don't collide.
-const DESK_COLS = 3;
-const DESK_MARGIN_TILES = 1.6;
-const DESK_TOP_TILES = 3.4;
-const DESK_SPACING_TILES = 3.0;
+export function allRooms(floors: OfficeFloor[]): OfficeRoom[] {
+  return floors.flatMap((f) => f.rooms);
+}
 
-/** Centre of the Nth avatar's "desk" inside a room, in TILE units (fractional — used for both the
- *  resting position and the interpolation endpoints). Wraps past DESK_COLS onto further rows. */
+/** A room's rectangle in TILE units (not px) — multiply by TILE_PX*ZOOM (tilesToPx) for canvas
+ *  coordinates. Trivial now that layout already stamped x/y/wTiles/hTiles onto the room. */
+export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: number; h: number } {
+  return { x: room.x, y: room.y, w: room.wTiles, h: room.hTiles };
+}
+
+/** Centre of the Nth avatar's "desk" inside a room, in TILE units — uses the room's OWN deskCols
+ *  (variable per room, from roomSizeTiles), never a fixed constant, so a wide 9-person room's
+ *  desks line up with the walls that were actually sized for it. */
 export function deskSlotTile(room: OfficeRoom, index: number): { x: number; y: number } {
-  const rect = roomTileRect(room);
-  const col = index % DESK_COLS;
-  const row = Math.floor(index / DESK_COLS);
+  const cols = Math.max(1, room.deskCols);
+  const col = index % cols;
+  const row = Math.floor(index / cols);
   return {
-    x: rect.x + DESK_MARGIN_TILES + col * DESK_SPACING_TILES,
-    y: rect.y + DESK_TOP_TILES + row * DESK_SPACING_TILES,
+    x: room.x + DESK_MARGIN_TILES + col * DESK_SPACING_TILES,
+    y: room.y + DESK_TOP_TILES + row * DESK_SPACING_TILES,
   };
 }
 
 export function roomCenterTile(room: OfficeRoom): { x: number; y: number } {
-  const rect = roomTileRect(room);
-  return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+  return { x: room.x + room.wTiles / 2, y: room.y + room.hTiles / 2 };
+}
+
+// ── Pathfinding — walk the corridor, never through a wall (req #6) ──────────────────────────────
+// A coarse 1-tile-resolution walkable grid: corridor cells, plus each room's interior (inset by
+// one cell, standing in for its wall) with a doorway gap cut through to the corridor at the
+// room's own doorX. Hand-rolled BFS over 4-connected neighbours — "simple grid pathfinding", no
+// library, per the plan.
+export interface FloorGrid {
+  w: number;
+  h: number;
+  walk: Uint8Array; // 1 = walkable, 0 = wall/void
+}
+
+function cellIndex(grid: FloorGrid, x: number, y: number): number {
+  return y * grid.w + x;
+}
+
+function isWalkable(grid: FloorGrid, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= grid.w || y >= grid.h) return false;
+  return grid.walk[cellIndex(grid, x, y)] === 1;
+}
+
+export function buildWalkableGrid(floor: OfficeFloor): FloorGrid {
+  const w = Math.max(1, Math.ceil(floor.widthTiles));
+  const h = Math.max(1, Math.ceil(floor.heightTiles));
+  const walk = new Uint8Array(w * h);
+  const mark = (x: number, y: number) => {
+    const xi = Math.round(x);
+    const yi = Math.round(y);
+    if (xi >= 0 && xi < w && yi >= 0 && yi < h) walk[yi * w + xi] = 1;
+  };
+
+  const corridorY0 = Math.round(floor.corridorY);
+  const corridorY1 = Math.round(floor.corridorY + CORRIDOR_W_TILES);
+  for (let y = corridorY0; y < corridorY1; y++) {
+    for (let x = 0; x < w; x++) mark(x, y);
+  }
+
+  const doorHalf = Math.max(1, Math.round(DOOR_WIDTH_TILES / 2));
+  for (const room of floor.rooms) {
+    const x0 = Math.round(room.x);
+    const y0 = Math.round(room.y);
+    const x1 = Math.round(room.x + room.wTiles);
+    const y1 = Math.round(room.y + room.hTiles);
+    for (let y = y0 + 1; y < y1 - 1; y++) {
+      for (let x = x0 + 1; x < x1 - 1; x++) mark(x, y);
+    }
+    const doorX = Math.round(room.doorX);
+    const doorY = room.side === "north" ? y1 - 1 : y0;
+    for (let x = doorX - doorHalf; x <= doorX + doorHalf; x++) mark(x, doorY);
+  }
+  return { w, h, walk };
+}
+
+/** Nearest walkable cell to a (possibly fractional, possibly wall-inset) point, searched in
+ *  expanding rings. Lets callers hand in a room centre or desk slot without knowing exactly where
+ *  this grid's walls fell. */
+export function nearestWalkable(grid: FloorGrid, x: number, y: number, maxRadius = 6): { x: number; y: number } | null {
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  if (isWalkable(grid, cx, cy)) return { x: cx, y: cy };
+  for (let r = 1; r <= maxRadius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        if (isWalkable(grid, cx + dx, cy + dy)) return { x: cx + dx, y: cy + dy };
+      }
+    }
+  }
+  return null;
+}
+
+/** Hand-rolled BFS over the walkable grid — unweighted 4-neighbour, which is exactly right for a
+ *  tile corridor network (every step costs one tile). Returns an inclusive tile-centre waypoint
+ *  list from `start` to `goal`, or null if either point has no nearby walkable cell or no route
+ *  connects them. */
+export function findPath(grid: FloorGrid, start: { x: number; y: number }, goal: { x: number; y: number }): { x: number; y: number }[] | null {
+  const s = nearestWalkable(grid, start.x, start.y);
+  const g = nearestWalkable(grid, goal.x, goal.y);
+  if (!s || !g) return null;
+  const startIdx = cellIndex(grid, s.x, s.y);
+  const goalIdx = cellIndex(grid, g.x, g.y);
+  if (startIdx === goalIdx) return [s];
+
+  const visited = new Uint8Array(grid.w * grid.h);
+  const prev = new Int32Array(grid.w * grid.h).fill(-1);
+  visited[startIdx] = 1;
+  const queue: number[] = [startIdx];
+  const dirs: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let found = false;
+  for (let qi = 0; qi < queue.length && !found; qi++) {
+    const cur = queue[qi];
+    const cx = cur % grid.w;
+    const cy = Math.floor(cur / grid.w);
+    for (const [dx, dy] of dirs) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!isWalkable(grid, nx, ny)) continue;
+      const ni = cellIndex(grid, nx, ny);
+      if (visited[ni]) continue;
+      visited[ni] = 1;
+      prev[ni] = cur;
+      if (ni === goalIdx) { found = true; break; }
+      queue.push(ni);
+    }
+  }
+  if (!visited[goalIdx]) return null;
+
+  const path: { x: number; y: number }[] = [];
+  let cur = goalIdx;
+  for (;;) {
+    path.push({ x: cur % grid.w, y: Math.floor(cur / grid.w) });
+    if (cur === startIdx) break;
+    cur = prev[cur];
+  }
+  path.reverse();
+  return path;
+}
+
+/** The full walking route between two rooms on the SAME floor: room centre → its own door → the
+ *  corridor route between the two doors → the destination door → destination centre. Never a
+ *  straight line through a wall (req #6). Returns null when no corridor route connects the two
+ *  doors — callers fall back to a direct two-point line, which is a rendering simplification
+ *  (never a fabricated fact) for the rare case pathfinding can't resolve. */
+export function roomToRoomPath(grid: FloorGrid, fromRoom: OfficeRoom, toRoom: OfficeRoom): { x: number; y: number }[] | null {
+  const fromCenter = roomCenterTile(fromRoom);
+  const toCenter = roomCenterTile(toRoom);
+  const fromDoor = { x: fromRoom.doorX, y: fromRoom.side === "north" ? fromRoom.y + fromRoom.hTiles : fromRoom.y };
+  const toDoor = { x: toRoom.doorX, y: toRoom.side === "north" ? toRoom.y + toRoom.hTiles : toRoom.y };
+  const corridorLeg = findPath(grid, fromDoor, toDoor);
+  if (!corridorLeg) return null;
+  return [fromCenter, ...corridorLeg, toCenter];
+}
+
+/** Total Euclidean length (in tiles) of a polyline path — the denominator `pointAlongPath` walks
+ *  proportionally along. */
+export function pathLength(path: { x: number; y: number }[]): number {
+  let total = 0;
+  for (let i = 1; i < path.length; i++) {
+    total += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+  }
+  return total;
+}
+
+/** The point a fraction `t` of the way along a multi-segment path, by DISTANCE (not by segment
+ *  count) — so a long corridor leg and a short doorway hop both advance at the same visual speed.
+ *  Degenerates gracefully for 0/1-point paths and zero-length paths. */
+export function pointAlongPath(path: { x: number; y: number }[], t: number): { x: number; y: number } {
+  if (path.length === 0) return { x: 0, y: 0 };
+  if (path.length === 1) return path[0];
+  const total = pathLength(path);
+  if (total === 0) return path[0];
+  let remaining = clamp01(t) * total;
+  for (let i = 1; i < path.length; i++) {
+    const segLen = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+    if (remaining <= segLen || i === path.length - 1) {
+      const segT = segLen === 0 ? 0 : remaining / segLen;
+      return { x: lerp(path[i - 1].x, path[i].x, segT), y: lerp(path[i - 1].y, path[i].y, segT) };
+    }
+    remaining -= segLen;
+  }
+  return path[path.length - 1];
 }
 
 // ── Avatars ───────────────────────────────────────────────────────────────────────────────────
@@ -136,6 +429,13 @@ export interface OfficeAvatar {
   assurance?: AssuranceTier;
   /** Honesty note shown in the detail panel — e.g. "DEMO fixture", or what real data backs it. */
   note: string;
+  /** O4 (req #5): the id of this agent's real, currently in-flight run — set ONLY for an
+   *  `agent`-kind avatar whose goal genuinely has a run without an end time yet. The client polls
+   *  `GET /api/admin/agents/runs/:runId/events` for this id to decide whether to show a working
+   *  animation (recent real events) or a static "last heard" state (a run that's open but quiet).
+   *  Never set for `human` — humans have no comparable real activity feed (see plan §3), so a
+   *  human avatar must never carry this field, and OfficeCanvas never fabricates one. */
+  activeRunId?: string;
 }
 
 // ── Movement events — the ONLY thing that may move an avatar (plan §3: "motion is a claim") ─────
@@ -151,7 +451,7 @@ export interface OfficeMoveEvent {
 }
 
 export interface OfficeScene {
-  rooms: OfficeRoom[];
+  floors: OfficeFloor[];
   avatars: OfficeAvatar[];
   events: OfficeMoveEvent[];
   generatedAt: string;
@@ -221,4 +521,20 @@ export function hashId(id: string): number {
  *  automation (grey, no department tone by design) or the raw external palette. */
 export function catToken(id: string): string {
   return `--cat-${(hashId(id) % 8) + 1}`;
+}
+
+// ── O4 — "genuinely working" (req #5) ────────────────────────────────────────────────────────
+// A run is treated as actively working only while it has produced a REAL event within this
+// window. Longer than the runner's own step cadence so a normal thinking pause doesn't flicker
+// the animation off, short enough that a run that has gone quiet stops claiming to be live within
+// well under a minute — matching the plan's "working, last heard 4m ago" being a DIFFERENT,
+// non-animated state from this one.
+export const WORKING_RECENCY_MS = 45_000;
+
+/** Pure decision: given the latest known event timestamp for a run (ms epoch, or null if nothing
+ *  has arrived yet) and the current instant, is this genuinely working right now? Kept as its own
+ *  function so the 45s window is defined once and the component never re-derives it inline. */
+export function isGenuinelyWorking(lastEventAtMs: number | null, nowMs: number): boolean {
+  if (lastEventAtMs == null) return false;
+  return nowMs - lastEventAtMs <= WORKING_RECENCY_MS;
 }
