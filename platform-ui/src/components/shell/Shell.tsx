@@ -2,14 +2,13 @@ import type { ReactNode } from "react";
 import type { Me } from "@/lib/platform";
 import type { Prefs } from "@/lib/prefs";
 import { DEFAULT_PREFS } from "@/lib/prefs";
-import { canViewAllCompanies, isUnrestricted, accessibleCompanies, can } from "@/lib/rbac";
+import { canViewAllCompanies, isUnrestricted } from "@/lib/rbac";
 import { navFor } from "./nav";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { SpecialAccessBanner } from "./SpecialAccessBanner";
 import { AssistantFab } from "./AssistantFab";
 import { CommandPalette } from "./CommandPalette";
-import { CompanySpine } from "./CompanySpine";
 import { buildNavEntries, buildDeptEntries } from "@/lib/palette";
 import "./shell.css";
 
@@ -23,17 +22,10 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
   // records, fetched client-side from CommandPalette itself). Both builders are pure/client-safe.
   const paletteEntries = [...buildNavEntries(navFor(me, tenantId, departments)), ...buildDeptEntries(departments)];
 
-  // Company spine (§"the company spine") — every company the user can reach, plus a cap segment
-  // pointing at whichever cross-company surface this user actually has: Rollups if they can see it,
-  // otherwise the Organization overview (still cross-company-flavoured, never a dead link).
-  const spineCompanies = accessibleCompanies(me);
-  const spineCapHref = can(me, "rollups.view") || canViewAllCompanies(me) ? "/rollups" : "/organization";
-
   return (
     <div className="erp-app" data-density={prefs.density} data-width={prefs.width}>
       <a href="#main-content" className="skip-link">Skip to content</a>
       <Sidebar me={me} tenantId={tenantId} departments={departments} />
-      <CompanySpine companies={spineCompanies} current={tenantId} capHref={spineCapHref} />
       <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} />
       <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}>
         {special && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
