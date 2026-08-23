@@ -81,6 +81,15 @@ Never write "built", "done", "complete", or "production-ready". The vocabulary i
   moves HEAD under you and your files look mysteriously wrong. Re-read before assuming a
   regression; never `git checkout` a branch someone else may be on.
 - **cwd ≠ repo root.** Always pass absolute paths to Write/Edit.
+- **Generated files must be generated from a CLEAN worktree, never from this checkout.**
+  `docs/MAP.md` is derived from the FILESYSTEM, and this shared checkout routinely carries a dozen
+  untracked files from other sessions (in-flight migrations, scratch dirs, built binaries). Running
+  `node scripts/gen-map.mjs` here produces a MAP for *your filesystem*, not for the repository, and
+  CI — which checks out tracked files only — then fails `docs-map`. Use
+  `git worktree add --detach <tmp> HEAD`, generate there, copy the file back.
+  Corollary: a generated file has **no meaningful three-way merge**. Two sessions regenerating MAP
+  concurrently produced a merge that matched neither side and silently dropped a route. On any
+  conflict in a generated file, regenerate from the merged tree rather than resolving hunks.
 - **A missing field reads exactly like NULL.** An omitted column in a SELECT is
   indistinguishable from a NULL value — this produced two wrong conclusions. Check the select
   list before concluding "the data is empty".

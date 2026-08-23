@@ -62,6 +62,25 @@ Consequences worth internalizing before writing a migration or a backfill:
 - Unordered `LIMIT 1` constraint lookups in a migration pass locally and pick a different row on
   the server. Order explicitly.
 
+## Seeds — the rename trap
+
+**Renaming anything a seed resolves BY NAME requires a migration.** `agency.ts`'s `ensureCompany()`
+/ `ensureUser()` / `ensureClient()` are all `SELECT ... WHERE name = $1`, else `INSERT`. So changing
+a name in the seed does **not** rename the row on an existing database — it creates a SECOND one and
+leaves the original holding all the history. Every test still passes, because `testing/setup.ts`
+gives each file a FRESH database where the seed creates the row from nothing and the new name is
+simply the name.
+
+This shipped once (`Sanur Resort` → `Viceroy Bali`, caught on the live box before the seed was run;
+migration `202608230612` fixes it in place). When you rename, write the migration in the same change,
+and test it against a database that **already has the old name** — a fresh-DB assertion passes with
+the migration deleted.
+
+**Before running any seed against a real estate, look at what is already there.** Production is
+deliberately clean (real accounts and grants, zero clients/projects/invoices/memberships), so
+`seed:agency` — a full demo vertical — is the wrong tool for "give these people access".
+`seed:roster-access` exists for exactly that narrower job.
+
 ## Migrations
 
 `migrations/NNNN_*.sql`, applied in order by `src/db/migrate.ts` (and on every boot).
