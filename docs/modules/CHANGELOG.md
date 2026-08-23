@@ -1775,6 +1775,28 @@ it to a commit-range diff.
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
 
+### `Alpha 01.069.0145a` - 2026-08-23 - a camera, and agents that say what they are doing
+
+Manifest (counter +1, 0144 -> 0145): `platform-ui 0.45.0 -> 0.46.0`.
+
+**Camera on the office**: integer-step zoom (1x/2x/3x + Fit), cursor-anchored wheel, pointer and
+keyboard pan, and click-to-follow that releases on any manual camera move — with a chip, a Release
+button and an aria-live announcement, because releasing silently reads as a broken camera. Zoom
+persists on the existing prefs cookie. Integer steps only: fractional scaling destroys pixel art.
+
+**Emote bubbles** make the working state legible instead of a bare pulse, driven by the real event
+kind from the O4 feed — thinking / working / handing over / error, and `approval_wait` as a larger,
+always-opaque amber "!" that is deliberately the loudest thing on the floor. An agent blocked on a
+human is exactly what should be visible across a room without hunting for it. **Humans never
+emote** — guarded both in the data layer and again in the draw pass.
+
+Adopted from `harishkotra/agent-office` as ideas only. Its UI runs Phaser + Colyseus, and it ships
+no asset credits; ours stay traceable to a CREDITS.csv row apiece.
+
+Also: the check-in line's five CSS classes had been referenced since the component shipped and
+never had a rule, so the dashboard read "Not expected todayNot a working day…". And the O4 events
+row finally landed in the BFF contract, which had been dirty with another session's edits.
+
 ### `Alpha 01.068.0144a` - 2026-08-23 - the spine comes out
 
 Manifest (counter +1, 0143 -> 0144): `platform-ui 0.44.0 -> 0.45.0`.
