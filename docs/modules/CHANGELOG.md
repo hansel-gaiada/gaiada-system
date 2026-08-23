@@ -1360,9 +1360,24 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 
 ### `Alpha 01.064.0140a` - 2026-08-23 - the resort rename reaches the estate
 
-Manifest (counter +1, 0139 -> 0140): `platform-nest 0.35.0 -> 0.35.1`.
+Manifest (counter +1, 0139 -> 0140): `platform-nest 0.35.0 -> 0.35.1`,
+**`platform-ui 0.29.1 -> 0.41.0`**.
 
-A small, deliberate cut. `0139a` shipped IAM-15 and the corrected resort name in the SEED, but the
+> **Manifest corrected before this cut shipped.** As first written this entry declared
+> platform-nest alone and called itself "a small, deliberate cut". That was true of its *intent*
+> and no longer true of its *contents*: the platform-ui redesign (0.29.1 -> 0.40.0, then 0.41.0)
+> landed on `main` first, so it is an ancestor of this release and deploys with it. The app version
+> exists to answer "what is deployed, and which module set is it?" — leaving platform-ui out would
+> have shipped a whole-surface UI overhaul under a note about a resort rename. Correcting the
+> record rather than the history, since the release commit belongs to another session.
+>
+> **What rides along:** a dark-first token layer, the interactive/decorative accent split, a new
+> shell with the scope bar and company spine, a hand-rolled command palette, the PM re-skin, eight
+> new data primitives, an a11y and responsive sweep, and a DEMO-labelled `/office` prototype. See
+> the `platform-ui 0.40.0` entry above for the full account, including the seven contrast and
+> accessibility defects it uncovered.
+
+The platform-nest half is a small, deliberate cut. `0139a` shipped IAM-15 and the corrected resort name in the SEED, but the
 live estate still said `Sanur Resort` — and `seed:agency` resolves companies by name, so running it
 there would have forked the resort rather than renamed it. This cut carries migration `202608230612`,
 which renames in place, so the seed becomes safe to run against production for the first time since
