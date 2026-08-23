@@ -180,8 +180,24 @@ export const VERIFIED_IDEMPOTENT_LOW_WRITES: readonly string[] = ["tasks.update"
  * the PR for the specific tool being added; a per-tool proof, never a blanket audit (the same
  * discipline `VERIFIED_IDEMPOTENT_LOW_WRITES` above already uses). Do not delete this assertion when
  * extending the allowlist further — extend it and keep the check.
+ *
+ * ── SMM-35 (2026-08-23) — THIRD ENTRY: `social.createReplyDraft` ────────────────────────────────────
+ * Both prerequisites verified, by name:
+ *   (a) TRUE GLOBALLY as of D14-14, same mechanism as every other tool — nothing tool-specific to
+ *       verify here.
+ *   (b) `platform-nest/src/core/approval-executables.ts`'s
+ *       `registerSocialReplyDraftExecutableApproval()` registers `social.createReplyDraft` with a
+ *       real precondition (`social_inbox_threads` row exists ∧ not soft-deleted ∧ a non-empty `body`
+ *       was proposed — typed refusals `reply_thread_missing`/`empty_body`/`reply_thread_not_found`).
+ *       Not the fail-closed `NO_PRECONDITION_REASON` default.
+ *
+ * Consumer: `ai-agents/src/specialists.ts`'s `socialDrafter` (`writeSpecialists`) declares
+ * `high_write`. Deliberately NOT extended to `social.sendReply`/`social.publishPost` — those stay
+ * excluded on SECURITY grounds (SMM-26's "agents draft, never publish"), independent of whether they
+ * satisfy (a)/(b) (they do, and are registered — see `approval-executables.ts`'s own SMM-09/SMM-17
+ * sections — which is precisely why this allowlist does NOT simply mirror "every registered tool").
  */
-export const RERUN_CAPABLE_HIGH_WRITES: readonly string[] = ["pm.createTask", "pm.createDoc"];
+export const RERUN_CAPABLE_HIGH_WRITES: readonly string[] = ["pm.createTask", "pm.createDoc", "social.createReplyDraft"];
 
 /** D14-14 — the runner-only re-run transport tool. NEVER model-selectable: the write gate in
  *  `agent.ts` calls `AgentDeps.resolveApproval` directly, never via a tool a model chose from an
@@ -217,7 +233,12 @@ export const RESOLVE_EXECUTE_TOOL_NAME = "approvals.resolveExecute";
 // broker cannot drive it (D14-17's own finding, still true: it lives in `writeSpecialists` under a name
 // `ASSISTANT_AGENT_TOOLS` never mentions), so its `low_write` stays exactly as governed by
 // `VERIFIED_IDEMPOTENT_LOW_WRITES` above and is out of THIS guard's scope.
-export const ASSISTANT_FACING_AGENTS: readonly string[] = ["status-reporter", "approvals-chaser", "task-filer"];
+// SMM-35 — `social-drafter` is the second assistant-facing write-capable AgentDef (after
+// `task-filer`), added to this list alongside its `broker.ts`-side mirror
+// (`ASSISTANT_AGENT_TOOLS["social-drafter"]`). It holds no `low_write` at all (its one write is
+// `high_write`), so this specific check is a no-op for it today — listed here anyway so a FUTURE
+// low_write added to this agent is caught, not just a hypothetical one.
+export const ASSISTANT_FACING_AGENTS: readonly string[] = ["status-reporter", "approvals-chaser", "task-filer", "social-drafter"];
 
 /** Structural AgentDef check — deliberately duck-typed rather than instanceof/type-only. */
 function isAgentDef(value: unknown): value is AgentDef {

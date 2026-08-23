@@ -40,6 +40,7 @@ import {
   taskFiler,
   pmReporter,
   pmTaskManager,
+  socialDrafter,
   specialists,
   writeSpecialists,
 } from "./specialists";
@@ -112,6 +113,11 @@ describe("D14-12 — no-regression anchor: today's specialists, reconciled again
     "pm.passBall": { write: true, impact: "low" },
     "pm.setDueDate": { write: true, impact: "low" },
     "pm.comment": { write: true, impact: "low" },
+    // SMM-35 — platform-nest/src/modules/social/index.ts's `social.createReplyDraft`:
+    // `write: true, impact: "low"` (our own draft row, never sent). No `write` field on
+    // `social.listThreadMessages` (a read tool, same shape as every undefined entry above).
+    "social.listThreadMessages": undefined,
+    "social.createReplyDraft": { write: true, impact: "low" },
   };
 
   const getRegistryImpact = (name: string): RegistryToolImpact | undefined => realRegistry[name];
@@ -152,12 +158,19 @@ describe("D14-12 — no-regression anchor: today's specialists, reconciled again
     }
   });
 
+  it("social-drafter: social.createReplyDraft is hub impact:'low', yet reconciliation STAYS high_write — SMM-35's own honest divergence, proven against the real registry value (same D14-12 stricter-wins case task-filer's own assertion above proves for the PM pair)", () => {
+    expect(realRegistry["social.createReplyDraft"]).toEqual({ write: true, impact: "low" });
+    expect(socialDrafter.tools["social.createReplyDraft"]).toBe("high_write");
+    expect(effectiveImpact("high_write", getRegistryImpact("social.createReplyDraft"))).toBe("high_write");
+  });
+
   it("collects every AgentDef reachable from specialists.ts (both read-only and write-capable maps)", () => {
     const all = { ...specialists, ...writeSpecialists };
     expect(Object.keys(all).sort()).toEqual([
       "approvals-chaser",
       "pm-reporter",
       "pm-task-manager",
+      "social-drafter",
       "status-reporter",
       "task-filer",
       "task-triager",

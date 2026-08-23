@@ -207,6 +207,65 @@ export const taskFiler: AgentDef = {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
+// SMM-35 — `social-drafter`: closing the assistant's "no social write reachable from chat" gap.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Reachable ONLY through the platform-nest assistant broker's `writeSpecialists` route, same as
+// `task-filer` above (`ai-agents/CLAUDE.md`'s D13/D14 gate; `runner/service.ts` routes any name in
+// `writeSpecialists` through `runWriteAgent`).
+//
+// WHY `high_write` ON A HUB-`"low"` TOOL, AGAIN THE HONEST DIVERGENCE (see `taskFiler`'s own header
+// for the fuller argument — restated briefly rather than re-derived from scratch):
+//   - The HUB tier (`platform-nest/src/modules/social/index.ts`: `social.createReplyDraft` is
+//     `write:true, impact:"low"`) answers "how much damage can this do" — an insert into OUR OWN row,
+//     never sent, never network-visible, never client-visible. That is genuinely low blast radius.
+//   - This AgentDef's label answers "may an LLM commit this unattended, when it composed the args
+//     from a chat turn?" — D-A's answer is no, always, regardless of the hub tier. `high_write` is
+//     the truthful declaration of the policy actually in force for THIS caller.
+//
+// TWO PREREQUISITES, BOTH VERIFIED FOR THIS TOOL (see `agent-write-guard.test.ts`'s
+// `RERUN_CAPABLE_HIGH_WRITES` entry for `social.createReplyDraft` and its header for the full
+// citation):
+//   (a) the live `AgentDeps.resolveApproval` transport — TRUE globally since D14-14, unchanged by
+//       this ticket.
+//   (b) `platform-nest/src/core/approval-executables.ts`'s `registerSocialReplyDraftExecutableApproval()`
+//       registers `social.createReplyDraft` with a real precondition (thread exists ∧ not deleted ∧
+//       a non-empty body was proposed) — not the fail-closed `NO_PRECONDITION_REASON` default.
+//
+// DELIBERATELY NOT GIVEN `social.updateReplyDraft`/`social.approveReplyDraft`/`social.sendReply` —
+// see `approval-executables.ts`'s own SMM-35 section for the full "what this pass did not expose, and
+// why" reasoning (the send/publish tools stay excluded on SECURITY grounds, unrelated to file surface
+// or registration).
+//
+// `evaledProviders` is EMPTY — the SAME safe default `task-triager`/`task-filer` shipped with before
+// their own dedicated eval runs (see either header above). `evals/cases.ts`'s new social-drafter
+// cases (baseline + injection containment) are the eval half of D13's gate; this file's own CLAUDE.md
+// is explicit that an agent change without an eval case is unverifiable by construction. Running that
+// suite against a REAL provider and adding it here — spending the shared, weekly-rate-limited Ollama
+// Cloud quota to do so — is a follow-up an operator runs deliberately, per
+// docs/runbooks/agent-evaled-providers-enrollment.md, not something this ticket spends unilaterally.
+// Until then `runWriteAgent` forces this agent's `readOnlyProjection` — `social.listThreadMessages`
+// still works today; the write is CONTAINED, not merely undeclared.
+export const socialDrafter: AgentDef = {
+  name: "social-drafter",
+  systemPrompt:
+    "You are Gaiada's social inbox reply drafter. Your ONLY callable tools are exactly these two: " +
+    "social.listThreadMessages (read a thread's existing messages) and social.createReplyDraft " +
+    "(propose a reply). ALWAYS call social.listThreadMessages first so your reply actually answers " +
+    "what the thread says — never invent what a comment said. Draft exactly the reply you were asked " +
+    "for, in the tone the user requested; never invent a thread, never send anything, and never call " +
+    "any tool other than these two. Make one tool call at a time; every draft you propose is reviewed " +
+    "by a human before it is even filed for approval, and reviewed again before it is ever sent.",
+  tools: {
+    "social.listThreadMessages": "read",
+    "social.createReplyDraft": "high_write",
+  },
+  maxSteps: 6,
+  maxToolCalls: 4,
+  evaledProviders: [],
+};
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
 // P4-J5 — the write-capable PM specialist ("the AI agents also capable of full access if the RBAC is
 // enough" — owner request, 2026-08-04 Phase-4 plan, workstream J).
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -287,6 +346,7 @@ export const writeSpecialists: Record<string, AgentDef> = {
   [taskTriager.name]: taskTriager,
   [taskFiler.name]: taskFiler,
   [pmTaskManager.name]: pmTaskManager,
+  [socialDrafter.name]: socialDrafter,
 };
 
 /** The default supervisor over all registered specialists (WS8 §2.2). */

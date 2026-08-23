@@ -465,6 +465,15 @@ export const ASSISTANT_AGENT_TOOLS: Record<string, readonly string[]> = {
   // (`core/approval-executables.ts`'s `registerPmExecutableApprovals()`), so step 0.5 below passes for
   // this agent today; that registration is what T2's `RERUN_CAPABLE_HIGH_WRITES` allowlist consumes.
   "task-filer": ["projects.list", "tasks.list", "pm.createTask", "pm.createDoc"],
+  // SMM-35 (closing the assistant's remaining half): mirrors `task-filer`'s own shape exactly — one
+  // read the agent needs to compose a sane proposal (`social.listThreadMessages`, so it answers what
+  // a thread actually says) plus the ONE `high_write` it may propose. `social.createReplyDraft` only
+  // ever inserts our own draft row (never sent, never network-visible) and has its own D14 registry
+  // entry (`core/approval-executables.ts`'s `registerSocialReplyDraftExecutableApproval()`), so step
+  // 0.5 below passes for this agent today. Deliberately does NOT include `social.sendReply` or
+  // `social.publishPost` — see that registry entry's own header for why those stay excluded on
+  // SECURITY grounds (SMM-26's "agents draft, never publish"), not a registration gap.
+  "social-drafter": ["social.listThreadMessages", "social.createReplyDraft"],
 };
 
 /**
@@ -477,6 +486,7 @@ export const ASSISTANT_AGENT_TOOLS: Record<string, readonly string[]> = {
  */
 export const ASSISTANT_AGENT_WRITE_TOOLS: Record<string, readonly string[]> = {
   "task-filer": ["pm.createTask", "pm.createDoc"],
+  "social-drafter": ["social.createReplyDraft"],
 };
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════════
