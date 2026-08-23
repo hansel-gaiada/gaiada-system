@@ -18,6 +18,7 @@
     "provision:roster": "node dist/seed/provision-roster.js",
     "seed:roster-access": "node dist/seed/roster-access.js",
     "seed:employee-files": "node dist/seed/employee-files.js",
+    "seed:owner-grant": "node dist/seed/owner-grant.js",
     "import:nexus": "node dist/seed/nexus-import.js",
     "test": "vitest run",
     "test:mail-corpus": "vitest run src/mail",
