@@ -50,8 +50,7 @@ import { createCompany, createUser, addMembership, createProject, linkIdentity }
 import { seedAutomationAccounts } from "../seed/automation";
 import {
   resetExecutableApprovals,
-  registerCoreExecutableApprovals,
-  registerPmExecutableApprovals,
+  registerAllExecutableApprovals,
   getExecutable,
 } from "./approval-executables";
 import { executeApprovedAutomationWrite } from "./approval-execute";
@@ -71,9 +70,15 @@ describe.skipIf(!TEST_URL)("D14-17 — assistant write-tool registry: evaluated,
     await initTestDb();
     config.approvalGrantSecret = GRANT_SECRET;
     config.services.hub = { url: "http://hub.d1417.test", token: "hub-token", assuranceToken: "" };
+    // Restore the FULL production registry, not a subset. (A1) below asserts that EVERY
+    // `ASSISTANT_AGENT_WRITE_TOOLS` entry has an executable, so it can only be evaluated against the
+    // registry production actually boots with. Restoring Core+Pm only — which is what this used to do
+    // — made the assertion depend on whether some earlier suite in the same vitest worker had already
+    // reset the registry: run alone it passed, run after `approval-executables.test.ts` it failed on
+    // `social.createReplyDraft` (SMM-35's addition to the write-map). Use the same one function
+    // production boot uses so this can never drift again.
     resetExecutableApprovals();
-    registerCoreExecutableApprovals();
-    registerPmExecutableApprovals();
+    registerAllExecutableApprovals();
 
     co = await createCompany("D14-17 Assistant Write Registry Co");
     await seedAutomationAccounts(co);

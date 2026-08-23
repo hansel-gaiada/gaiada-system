@@ -308,14 +308,17 @@ export function getExecutable(toolName: string): ExecutableApprovalEntry | undef
  * SMM-09 `social.publishPost` entry + its `social.publishPostMetered` BAR, AND the SMM-17
  * `social.sendReply` entry registered below (they are all plain calls to
  * `registerExecutableApproval`/`registerBarredExecutable`, no different from a test fixture, once
- * the module has loaded). A test file that needs the deploy pair back after resetting calls
- * `registerCoreExecutableApprovals()`; one that needs the PM pair back calls
- * `registerPmExecutableApprovals()`; the webdev entry, `registerWebdevExecutableApprovals()`; the
- * social publish entry AND its bar, `registerSocialExecutableApprovals()`; the social reply entry,
- * `registerSocialReplyExecutableApprovals()`; and (SMM-22) whatever `config.social.usage.
- * meteredPublishEnabled` implies for `social.publishPostMetered` (barred, or lifted-and-registered),
- * `registerSocialMeteredExecutableApprovalIfEnabled()` — either way, do not hand-roll a second copy
- * of their lock/precondition.
+ * the module has loaded).
+ *
+ * ⚠ TO RESTORE, CALL `registerAllExecutableApprovals()` — the same function production boot uses.
+ * This doc used to enumerate the individual bootstraps to call back, and it went stale: it named
+ * three of the nine, so suites restored a partial registry and every LATER suite in the same vitest
+ * worker inherited the gap. That is what broke D14-17 (A1) on main (2026-08-23). Do not re-introduce
+ * a hand-written list here; there is exactly one, at the bottom of this file.
+ *
+ * The per-area bootstraps stay exported for the narrow case of a suite that deliberately wants ONLY
+ * its own area registered (and is the last word on the registry for its worker). If you are not sure
+ * you want that, you want `registerAllExecutableApprovals()`.
  *
  * ⚠ It clears the BARRED map too. That is the right direction for a test seam (a leftover bar would
  * make an unrelated suite's registration throw), and it is safe because the bar's real enforcement
@@ -448,7 +451,6 @@ export function registerCoreExecutableApprovals(): void {
   });
 }
 
-registerCoreExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // D14-15 — `pm.createTask` / `pm.createDoc`: the PM module's first two registry entries.
@@ -616,7 +618,6 @@ export function registerPmExecutableApprovals(): void {
   });
 }
 
-registerPmExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // D14-17 — Assistant write-tool entries (Phase-6 v1 proposal set): EVALUATED, ZERO NET-NEW ENTRIES.
@@ -748,7 +749,6 @@ export function registerWebdevExecutableApprovals(): void {
   });
 }
 
-registerWebdevExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-09 — `social.publishPost` (executable) and `social.publishPostMetered` (BARRED twin).
@@ -869,7 +869,6 @@ export function registerSocialExecutableApprovals(): void {
   });
 }
 
-registerSocialExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-17 — `social.sendReply`: the reply gate's registry entry, built by REUSING SMM-09's pattern.
@@ -962,7 +961,6 @@ export function registerSocialReplyExecutableApprovals(): void {
   });
 }
 
-registerSocialReplyExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-35 — `social.createReplyDraft`: closing the assistant's remaining half. NOT publish, NOT send.
@@ -1055,7 +1053,6 @@ export function registerSocialReplyDraftExecutableApproval(): void {
   });
 }
 
-registerSocialReplyDraftExecutableApproval();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-22 — the config-gated, explicit lift of `social.publishPostMetered`'s bar.
@@ -1159,7 +1156,6 @@ export function registerSocialMeteredExecutableApprovalIfEnabled(): void {
   });
 }
 
-registerSocialMeteredExecutableApprovalIfEnabled();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // P2-07 — `hr.hireEmployee` / `hr.transferEmployee` / `hr.terminateEmployee`: JML's registry entries.
@@ -1322,7 +1318,6 @@ export function registerJmlExecutableApprovals(): void {
   });
 }
 
-registerJmlExecutableApprovals();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // OWNER DECISION 2026-08-20 — the four DIRECT IAM writes become agent-reachable.
@@ -1517,4 +1512,39 @@ export function registerIamExecutableApprovals(): void {
   });
 }
 
-registerIamExecutableApprovals();
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// THE production bootstrap — one list, so it cannot go stale
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Each of the nine bootstraps above used to be invoked by its own bare call, inline, next to its
+// definition. That left NO single place naming the full set, and the doc on
+// `resetExecutableApprovals` listed only three of them. The result was a test seam that silently
+// under-restored: `resetExecutableApprovals()` clears all nine, a suite re-registered the two or
+// three it knew about, and every LATER suite in the same vitest worker saw a registry missing the
+// rest.
+//
+// That is not hypothetical — it is what broke `platform-nest` on main (2026-08-23). D14-17 (A1)
+// asserts every `ASSISTANT_AGENT_WRITE_TOOLS` entry has an executable; SMM-35 added
+// `social.createReplyDraft` to that map; `approval-executables.test.ts` and `approval-execute.test.ts`
+// both reset the registry and restore only their own entries; so D14-17, running later in the same
+// worker, found `social.createReplyDraft` undefined and failed. Production was never affected — the
+// entry is registered correctly at boot — but the gate that exists to catch a REAL missing executor
+// was firing on test pollution instead, which is exactly how a gate loses its teeth.
+//
+// So: ONE aggregate, called once below, and used by any suite that needs the registry back. The
+// order is byte-identical to the previous inline sequence — it matters, because
+// `registerSocialExecutableApprovals` also installs a BAR, and registering an entry for a barred
+// tool throws. Add a new bootstrap HERE, not as a fresh bare call.
+export function registerAllExecutableApprovals(): void {
+  registerCoreExecutableApprovals();
+  registerPmExecutableApprovals();
+  registerWebdevExecutableApprovals();
+  registerSocialExecutableApprovals();
+  registerSocialReplyExecutableApprovals();
+  registerSocialReplyDraftExecutableApproval();
+  registerSocialMeteredExecutableApprovalIfEnabled();
+  registerJmlExecutableApprovals();
+  registerIamExecutableApprovals();
+}
+
+registerAllExecutableApprovals();
