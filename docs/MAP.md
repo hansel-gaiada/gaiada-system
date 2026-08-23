@@ -27,8 +27,8 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:employee-files`, `seed:personas`, `seed:portal-clients`, `seed:roster-access`, `seed:search`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
-- `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `start`, `test`, `test:watch`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:employee-files`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
 
@@ -162,7 +162,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 138 (121 legacy `NNNN_`, 17 timestamped)
+- Applied files on disk: 140 (121 legacy `NNNN_`, 19 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -357,6 +357,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring/new`
 - `/notifications`
 - `/office`
+- `/office/credits`
 - `/organization`
 - `/organization/access`
 - `/organization/positions`
@@ -410,6 +411,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 Browser-facing route handlers (`route.ts`) — these exist only where the browser itself must hit a URL:
 
 - `/api/admin/agents/goals`
+- `/api/admin/agents/runs/[runId]/events`
 - `/api/admin/bot/actions/[state]`
 - `/api/admin/bot/actions/audit`
 - `/api/admin/bot/chats`
@@ -463,7 +465,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`
+Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `test-all.sh`, `wire-env.sh`
 
