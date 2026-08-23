@@ -141,6 +141,12 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       { label: "Assistant", href: "/assistant", icon: "assistant" },
       { label: "Knowledge", href: "/knowledge", icon: "box" },
       { label: "AI Agents", href: "/agents", icon: "agents" },
+      // The Office is the SPATIAL view of the same principals `/agents` lists — one event spine,
+      // two renderers (docs/superpowers/plans/2026-08-23-virtual-office-plan.md §1) — so it belongs
+      // beside its operational twin, not in a group of its own. It shipped in 6ecc954 with no nav
+      // entry at all and was reachable only by typing the URL, which is how a feature quietly does
+      // not exist. Staff-only comes free from `(app)/layout.tsx`'s isClientOnly redirect.
+      { label: "The Office", href: "/office", icon: "pulse" },
     ] },
     { label: "Systems", icon: "server", items: [
       { label: "WA/TG Bot", href: "/systems/bot", icon: "bot" },

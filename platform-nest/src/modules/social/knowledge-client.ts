@@ -25,6 +25,7 @@
 // engagement/variant's own DB row — never from a client-supplied field in the request body. That is
 // the property the leak test in social-ai-drafts.test.ts drives end to end.
 import { config } from "../../config";
+import type { Assurance } from "../../rbac/principal";
 import { newId, withGlobal } from "../../db";
 
 export interface KnowledgeHit {
@@ -64,10 +65,35 @@ async function selfLinkUpsert(userId: string): Promise<void> {
  *  REPLACES its prior chunks (WS8 D9.2) — safe to call every time the corpus is refreshed. Never
  *  throws: an unreachable/unconfigured knowledge service just means the following query() call
  *  returns fewer/no hits; it never fails the caller's write. */
+/** Which provenance the platform can HONESTLY assert for a brand-corpus ingest, from the only
+ *  authorship signal it actually has: the caller's assurance.
+ *
+ *  `auth/guards.ts` mints exactly two levels for a real caller — `"high"` on the interactive path
+ *  (an IdP JWT, or `x-user-id` in dev/tests) and `"linked"` on the OBO envelope path, which is how an
+ *  AGENT calls (`x-obo-provider`/`x-obo-external-id`/`x-obo-agent`). `"low"` is `ANONYMOUS`.
+ *
+ *  So ONLY `"high"` evidences an interactive human. `"linked"` is agent-driven by construction, and
+ *  `"low"` is unknown — both resolve to `"agent"`.
+ *
+ *  ⚠ I first wrote this as `assurance === "low" ? "agent" : "human"`, reasoning from
+ *  "automation principals are minted assurance low". That was WRONG in the dangerous direction: an
+ *  agent arriving through a VERIFIED identity link is `"linked"`, so the rule would have stamped its
+ *  output `"human"` — leaving the exact defect in place while appearing to fix it. Keep this
+ *  allow-list shaped (only `"high"` earns `"human"`) rather than deny-list shaped, so a future
+ *  assurance level added to the union defaults to the safe answer instead of the harmful one. */
+export function brandCorpusProvenance(assurance: Assurance): "human" | "agent" {
+  return assurance === "high" ? "human" : "agent";
+}
+
 export async function ingestBrandKnowledge(
   tenantId: string,
   clientId: string,
   chunks: string[],
+  /** REQUIRED, and deliberately not defaulted. See the note above the body's `provenance` field: the
+   *  wrong value here does not merely mislabel a row, it re-ranks it above genuine human guidance in
+   *  the retrieval that grounds the next AI draft. A default would let a new call site inherit the
+   *  dangerous direction silently, so `tsc` names every caller instead. */
+  provenance: "human" | "agent",
   opts?: KnowledgeClientOptions,
 ): Promise<void> {
   const svc = config.services.knowledge;
@@ -87,7 +113,17 @@ export async function ingestBrandKnowledge(
         acl: [scope],
         kind: "doc",
         chunks,
-        provenance: "human", // caller-supplied approved content, not agent-generated
+        // WAS HARDCODED `"human"` with the comment "caller-supplied approved content, not
+        // agent-generated". That claim was unfounded: this endpoint accepts arbitrary
+        // `body.chunks`, and `social.ingestBrandCorpus` is an MCP tool that EXECUTES UNATTENDED, so
+        // an agent could submit its own generated text and have it stamped as human-authored.
+        //
+        // Why it matters more than a label: WS8 scores retrieval as
+        // `cosine × confidence × provenance factor`, and `ai-agents/src/knowledge/store.ts` sets
+        // `confidence = provenance === "agent" ? 0.6 : 1`. Agent text mislabelled `human` therefore
+        // OUTRANKS real human brand guidance in the very retrieval that grounds the next draft —
+        // a self-reinforcing loop that degrades the corpus every cycle, invisibly.
+        provenance,
         trust: "trusted",
       }),
     });

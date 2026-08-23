@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **98** capabilities across **15** owners
-- **55** writes · 43 reads
-- Writes by impact: **high 10** · medium 16 · low 29
+- **99** capabilities across **15** owners
+- **56** writes · 43 reads
+- Writes by impact: **high 11** · medium 16 · low 29
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -52,7 +52,7 @@ unfalsifiable after.
 | pm | `pm` | 9 |
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
-| social | `social` | 11 |
+| social | `social` | 12 |
 | webdev | `webdev` | 4 |
 
 ## Capabilities
@@ -120,6 +120,7 @@ unfalsifiable after.
 | search | `search.runAudit` | — | — | write | `low` |
 | search | `search.setBudget` | `POST` | `/api/:tenantId/modules/search/change-proposals/:proposalId/apply-api` | write | `high` |
 | social | `social.addPostVariant` | `POST` | `/api/:tenantId/modules/social/posts/:postId/variants` | write | `low` |
+| social | `social.approvePostVariant` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/approve` | write | `high` |
 | social | `social.approveReplyDraft` | `POST` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId/approve` | write | `low` |
 | social | `social.approveReport` | `POST` | `/api/:tenantId/modules/social/reports/:id/approve` | write | `low` |
 | social | `social.checkPublishPreconditions` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/publish-preconditions` | read | — |

@@ -11,7 +11,7 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### social-media `0.5.28` — 2026-08-23 — the content-brief weekly sweep's automation identity (SMM-26 follow-up)
+### social-media `0.5.29` — 2026-08-23 — the content-brief weekly sweep's automation identity (SMM-26 follow-up)
 
 **Added** — closes the follow-up SMM-26 named and left for an architect decision (found by SMM-26's
 own MCP-surface audit; `docs/plans/smm-tracker.md`'s SMM-26-follow-up row): "the v1.0 design's
@@ -58,6 +58,54 @@ distinct fact from "never opted in", "opted in but nothing to brief", and "draft
 calls the gateway).
 
 Full detail: `docs/plans/smm-tracker.md`'s SMM-26-follow-up evidence block.
+
+### platform-nest `0.36.1` — 2026-08-23 — `seed:owner-grant`, and a lockout found on the estate
+
+**Fixed**
+- Production had **1 platform_admin and 0 owners**, so IAM-16's two-person appointment (D-9: one
+  superadmin + one owner) was unsatisfiable — no elevated appointment was possible through any
+  supported flow. The arithmetic had been checked in the REPO, where `seed:agency` grants Anthony
+  `owner`; the estate has never run that seed. A seeded fixture is not a deployed principal.
+- `seed:owner-grant` creates the owner and grants `owner` per company on the three companies that
+  exist. Creates no companies (owner decision) — the Viceroy venues and Bali Catering stay separate.
+- Also corrects two false claims about production in the previous release's seeds, and the blind
+  check behind both: `set_config(..., true)` inside `withGlobal` is a no-op (no transaction), so
+  every RLS-guarded count read zero and reported success.
+
+### social-media `0.5.28` — 2026-08-23 — brand-corpus provenance is derived, not asserted
+
+**Fixed (RAG integrity)** — `ingestBrandKnowledge` sent a literal `provenance: "human"`, commented
+"caller-supplied approved content, not agent-generated". That claim was unfounded: the endpoint accepts
+arbitrary `body.chunks`, and `social.ingestBrandCorpus` is an MCP tool that **executes unattended**, so
+an agent could submit its own output and have it stamped as human authorship.
+
+**Why this is more than a wrong label.** WS8 scores retrieval as `cosine × confidence × provenance
+factor`, and `ai-agents/src/knowledge/store.ts` sets `confidence = provenance === "agent" ? 0.6 : 1`.
+Agent text mislabelled `human` therefore **outranks genuine human brand guidance** in the very
+retrieval that grounds the next AI draft — a self-reinforcing loop that degrades the corpus every
+cycle with nothing visible from the outside. Provenance is now **derived** from the caller and the
+parameter is required with no default, so `tsc` names any new call site rather than letting it inherit
+the dangerous value.
+
+**⚠ The rule is allow-list shaped, and my first version of it was wrong in the harmful direction.** I
+initially wrote `assurance === "low" ? "agent" : "human"`, reasoning from "automation principals are
+minted assurance low". But `auth/guards.ts` mints only two levels for a real caller — `"high"` on the
+interactive path (IdP JWT, or `x-user-id` in dev/tests) and **`"linked"` on the OBO envelope path,
+which is how an agent calls**. An agent arriving through a verified identity link is `"linked"`, so
+that rule would have stamped its output `"human"` and left the defect fully intact while appearing
+fixed. The rule is now `assurance === "high" ? "human" : "agent"` — only `"high"` earns `"human"`, so a
+future assurance level added to the union defaults to the safe answer instead of the harmful one.
+
+**Flagged, not taken unilaterally** — the stronger fix is an assurance FLOOR on the endpoint (`notLow`,
+per `rbac/can.ts`): every successful ingest would then be provably human and the agent path closed
+outright rather than down-weighted. That removes an existing agent capability, which is a product
+decision rather than a defect fix, so it is the owner's call. **Known cost of the current fix:** a
+non-interactive caller's genuine guidelines are ingested at agent confidence (0.6).
+
+**Tests** — `social-ai-drafts.test.ts` 12/12 (+2). The fake WS8 fixture now records the claimed
+provenance, not just the text; a fixture that drops that field cannot catch this direction at all.
+Proven red-then-green by reintroducing my own deny-list mistake: the `"linked"` assertion fails with
+`expected 'human' to be 'agent'`. `src/modules/social` 579/0/0 (37 files).
 
 ### social-media `0.5.27` — 2026-08-23 — the publish "approve variant" endpoint (SMM-40)
 
@@ -1483,6 +1531,34 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.066.0143a` - 2026-08-23 - the estate can appoint again
+
+Manifest (counter +1, 0142 -> 0143): `platform-nest 0.36.0 -> 0.36.1`.
+
+Cut for one reason: since IAM-16 closed the legacy admin door, elevated appointment on production
+required a pair that did not exist there (1 platform_admin, 0 owners). This ships `seed:owner-grant`
+so the pair becomes satisfiable. Break-glass was never lost — seeds bypass the choke point — but the
+supported path was, and that is not a state to leave an estate in.
+
+Also carries the corrections to `0142a`'s two seeds: their headers claimed production was "clean"
+and that nothing had written to `employees`. Both false, both from the same blind pre-flight query.
+
+**Full module manifest** (rule 2):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.36.1`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.2` |
+| platform-ui | `0.41.0` | ai-agents | `0.8.0` | social-media | `0.5.26` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.2` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+**Verification:** owner-grant 7/7, including the arithmetic assertion (platform_admin >= 1 AND
+owner >= 1 from a fixture shaped like production) rather than just "the rows exist".
 
 ### `Alpha 01.065.0142a` - 2026-08-23 - the roster gets real access
 

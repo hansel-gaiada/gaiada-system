@@ -258,13 +258,18 @@ describe("AGN-6 · capability inventory is generated, not remembered", () => {
   });
 
   it("🔴 the committed artifact matches the live registry", () => {
-    expect(existsSync(ARTIFACT), `${ARTIFACT} is missing — run: npm run gen:capability-inventory`).toBe(true);
+    expect(existsSync(ARTIFACT), `${ARTIFACT} is missing — regenerate with: UPDATE_INVENTORY=1 npx vitest run src/modules/capability-inventory.test.ts`).toBe(true);
     const onDisk = readFileSync(ARTIFACT, "utf8").replace(/\r\n/g, "\n");
     expect(
       onDisk,
-      "docs/modules/CAPABILITY-INVENTORY.md no longer matches the registry. A tool was added, removed " +
-        "or reclassified without regenerating: run `npm run gen:capability-inventory`. This is the " +
-        "whole point of criterion 6 — an inventory that can drift is an inventory that lies.",
+      "docs/modules/CAPABILITY-INVENTORY.md no longer matches the registry. A tool was added, " +
+        "removed or reclassified without regenerating. Regenerate with:\n" +
+        "  UPDATE_INVENTORY=1 npx vitest run src/modules/capability-inventory.test.ts\n" +
+        "(There is NO `npm run gen:capability-inventory` — this suite IS the generator, because the " +
+        "registry is TypeScript and the other generators regex-parse source text. An earlier version " +
+        "of this message named that script anyway, which sent the next reader looking for a file that " +
+        "does not exist.)\n" +
+        "This is the whole point of criterion 6 — an inventory that can drift is an inventory that lies.",
     ).toBe(rendered.replace(/\r\n/g, "\n"));
   });
 

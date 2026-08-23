@@ -47,7 +47,8 @@ wired). Opt-in is `social_engagements.tool_scope.ai.autoWeeklyBrief`, absent-def
 opted-in tenant with no provisioned principal is refused (`principal_not_provisioned`), never
 silently skipped and never drafted ungrounded. See this file's own SMM-26-follow-up evidence block
 (just above "Small follow-ups", after the "What is actually left" table). Module `social-media
-0.5.28`.
+0.5.29` (0.5.28 was taken concurrently by another session's brand-corpus-provenance fix, landed on
+`main` first — see this note's own merge for the reconciliation).
 
 **Note (2026-08-23, senior-be, SMM-40):** the publish "approve variant" endpoint landed — the LAST
 item on this file's own "found but not fixed" list, closed by the owner's decision (D14 executable
@@ -2386,7 +2387,14 @@ mechanism already sufficient for this entire 34-tool surface; there was no hub-s
 as a gap.
 
 **Anything the spec did not answer, named rather than silently decided:** (1) the scheduled/n8n half
-of the flow (see above); (2) `social.ingestBrandCorpus`'s provenance-labeling finding (see above);
+of the flow (see above); (2) ~~`social.ingestBrandCorpus`'s provenance-labeling finding~~ **CLOSED
+2026-08-23** (module `0.5.28`) — provenance is now derived from caller assurance, not asserted. Note
+WS8 sets `confidence = provenance === "agent" ? 0.6 : 1` and scores on it, so the old hardcoded
+`"human"` made agent text OUTRANK real brand guidance in the retrieval grounding the next draft. My
+first rule (`!== "low" ⇒ human`) was wrong in the harmful direction: an agent on a verified identity
+link is `"linked"`, not `"low"`. Allow-list shaped now — only `"high"` earns `"human"`. The stronger
+fix (an assurance floor closing the agent path outright) is flagged for the owner, since it removes a
+capability; (3)
 (3) whether an agent-driven content brief should notify anyone when it lands (SMM-31's own
 `social.client_review.requested` notification precedent does not apply here — nothing here is
 client-visible yet) — left unbuilt, since nothing in the addendum asks for one and inventing a
