@@ -1775,6 +1775,34 @@ it to a commit-range diff.
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
 
+### `Alpha 01.067.0143a` - 2026-08-23 - one building, with corridors to walk down
+
+Manifest (counter +1, 0142 -> 0143): `platform-ui 0.43.1 -> 0.44.0`.
+
+The office was a grid of detached boxes. It is now **one connected floor**: a double-loaded
+corridor spine with rooms opening onto it through real doorways, and a hand-rolled BFS that routes
+a walk room -> door -> corridor -> door -> room. The corridor is topology, not decoration — the
+walkable grid makes a route travel it.
+
+- **Rooms size to headcount.** Desk columns grow 3 -> 4 -> 5 across occupancy thresholds. Vacant
+  seats complete the current row instead of padding every room to three, so an empty desk still
+  means an unfilled position rather than filler.
+- **Floors** exist with a selector, closing a plate when the next room would overflow it, and
+  assign deterministically so a department never migrates between renders. Unit-tested; the
+  current roster fits one floor, so the selector is not yet exercised on screen.
+- **Page-level scroll** — the nested `overflow: auto` that made the office scroll inside its own
+  box is gone.
+- **Working animation with a hard line under it.** Agents pulse only when their goal has a
+  genuinely open run with a real event inside 45s, polled from the events endpoint shipped in
+  0142a. Humans never pulse: there is no activity feed for people, and animating a colleague as
+  busy would invent exactly what this feature exists not to invent. Three honest states — no run,
+  open-but-quiet ("last heard Xm ago", static), genuinely active.
+- Also carried: static sprite files stopped running the auth middleware, and the AGN-6 capability
+  inventory was regenerated after `social.listThreadMessages` drifted the committed artifact.
+
+Still DEMO. Movement is fixture-driven; the badge comes off when the office is driven end-to-end
+by the live feed, not before.
+
 ### `Alpha 01.066.0142a` - 2026-08-23 - real people at the desks, and the wire that will make them move
 
 Manifest (counter +1, 0141 -> 0142): `platform-ui 0.42.0 -> 0.43.0`, `platform-nest 0.36.1 -> 0.36.2`.
