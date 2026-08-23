@@ -567,6 +567,41 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "variantId"],
       },
     },
+    // ── SMM-40: THE APPROVE ENDPOINT — mints the D14 grant `social.publishPost` was already ──────
+    // registered against (core/approval-executables.ts's SMM-09 section) but nothing ever filed.
+    // `write:true, impact:'high'` deliberately — NOT because an automation/agent principal is ever
+    // expected to reach it (Cerbos's `publish` action on `resource_social_post.yaml` is
+    // manager-tier/`social_manager` only, so a lower-tier caller is denied before impact is ever
+    // consulted), but because understating it would misrepresent what this tool does the moment
+    // Cerbos policy ever widens who may call it. `social.controller.ts#approvePublish`'s own header
+    // explains why filing is gated on the SAME `publish` action `dispatchPublish` uses rather than
+    // the weaker `submit` — the filing principal is who gets re-driven at execution time.
+    {
+      name: "social.approvePostVariant",
+      description:
+        "Mint the one-shot D14 approval `social.publishPost` needs to ever execute (D-6, "
+        + "publisher/direct.ts: dispatch refuses outright with no approval id). Flips the variant to "
+        + "`approved` (0105's own pre-existing status value) and files a suspended "
+        + "`automation_approvals` row for `social.publishPost` bound to a snapshot of THIS variant's "
+        + "content. Deciding it (POST /automation-approvals/:id/decide) is a separate step — this "
+        + "tool only files; approving is what executes. Editing the variant afterward reverts it to "
+        + "`draft` and moves its content hash, which is what makes the minted grant refuse "
+        + "`args_hash_mismatch` at execution time rather than publishing stale content. Idempotent: "
+        + "a variant with an already-live (undecided, or decided-but-not-yet-terminal) grant returns "
+        + "that same approval id rather than filing a sibling.",
+      minAssurance: "low",
+      ...SOCIAL_PUBLISH_TOOL_CLASSIFICATION,
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/social/variants/:variantId/approve",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          variantId: { type: "string", description: "The draft/in_review/already-approved post variant to file a publish approval for." },
+        },
+        required: ["tenantId", "variantId"],
+      },
+    },
     // ── SMM-33/24 (this pass): the client-review capability group (SMM-31/32, D-16) ────────────
     // Closes the largest gap the capability inventory found: `social.client_review.
     // {read,request,withdraw}` are real, grantable Cerbos permissions (declared above), and all

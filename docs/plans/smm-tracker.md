@@ -36,6 +36,42 @@ not afterwards.
 | P4 agents + assistant | **3** (+1 partial: SMM-35 summary-read only) | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
+**Note (2026-08-23, senior-be, SMM-40):** the publish "approve variant" endpoint landed — the LAST
+item on this file's own "found but not fixed" list, closed by the owner's decision (D14 executable
+approval, never a state column). `POST variants/:variantId/approve` mints the one-shot
+`automation_approvals` grant `social.publishPost` was already fully registered against
+(core/approval-executables.ts's pre-existing SMM-09 entry: real `lockKey`, real `precondition`,
+`neverAutoRetry`) — nothing had ever filed one, and nothing had ever written
+`social_post_variants.status = 'approved'`, the value 0105's own schema anticipated and the
+precondition's `unconsumed` stage already required. Cerbos: reused `publish`
+(`resource_social_post.yaml`, manager-tier — the SAME action `dispatchPublish` requires), NO new
+permission key. Deciding stays the pre-existing generic `automation-approvals` decide endpoint — no
+execute logic duplicated; "approving executes" falls out of the registry entry that already
+existed. The invalidation law is reused verbatim through `updateVariant`'s existing
+revert-to-draft-and-rehash path — proven red-then-green through the REAL executor (a hub call
+asserted, not inferred, to happen zero times on both a precondition refusal and a stale-content
+grant after an edit). A real idempotency bug (a stale, pre-edit grant could be handed back on a
+double-click) was caught by this ticket's own test and fixed before landing. One pre-existing,
+separate gap named rather than papered over: `identity_links` (populated only by the WhatsApp/
+Telegram dual-proof ceremony) means a manager with no linked identity has their mint decided
+successfully but fails EXECUTION with the correctly-typed, pre-existing `principal_unresolvable` —
+an IAM/OIDC gap, proven in both directions, out of this ticket's scope to close.
+
+**Evidence.** New `platform-nest/src/modules/social/social-publish-approve.test.ts`: **15/15**
+passed, driven red-then-green — the SAME 14 mint/decide/execute/invalidation cases were run against
+the pre-change code (`social.controller.ts`/`index.ts` stashed) first and every one 404s or fails on
+the endpoint's own absence, then restored and re-run 15/15 green. Full regression, this pass, with a
+PRIVATE Cerbos on port 13592 over this worktree's own policy directory (never the shared
+`gaiada-cerbos-1`, which another session's edits could invalidate) and `DATABASE_URL_TEST` against
+`gaiada-test-pg-2:55435`: `src/modules/social/**` + every D14 registry/executor suite
+(`core/approval-executables.test.ts`, `core/approval-execute.test.ts`,
+`core/d14-smm-09/17/22-*-registry.test.ts`) + `admin/role-grants.controller.test.ts` (the sibling
+filing-endpoint pattern this ticket's own endpoint was modelled on) — **42 files, 714/714 passed, 0
+failed** (measured directly, one continuous run). `tsc --noEmit` clean.
+`lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/`lint:postiz-deps` all green (no
+migration — still 138 files). `test:iam-chain-alignment` **25/25** (unaffected — no new permission
+key, no Cerbos policy edit). Module `social-media 0.5.27`.
+
 **Note (2026-08-23, qa, SMM-25):** the Playwright console suite landed — `e2e/social-console.spec.ts`
 (13 tests, new `social` project), driven twice (8-worker parallel and single-worker serial), both
 13/13. This is the whole-department merge gate the addendum named as the last outstanding piece.
@@ -2585,17 +2621,39 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
   Proven red-then-green (3 of 5 new tests go red without the check; the two null-matching ones stay
   green, so they are not vacuous either way). Two fixture facts that would each have masked the test:
   `created_by` is a `uuid` AND carries an FK to `users`, so real user rows are required.
-- No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by SMM-17)
-  — **STILL OPEN, and deliberately not built on 2026-08-23.** It is the only one of these eight that is
-  a FEATURE GAP rather than a defect, and it cannot be built without decisions that are not mine to
-  make: who may approve (a `social.post.approve` permission does not exist in the catalog, and
-  `docs/PERMISSION-CONTRACT.md` is a frozen Phase 1 contract, so adding one is a contract change);
-  whether approval is a distinct state on `social_post_variants` or a D14 executable approval like the
-  metered publish path; and what invalidates it (the caption/hashtag write path already recomputes
-  `args_sha256` and invalidates client sign-off, so an approval that does not follow that same state
-  law would be the second, divergent copy of it). Every other item on this list was closable by
-  reasoning from the code; this one needs an owner or architect decision first. The seven above are
-  closed — see each struck entry.
+- ~~No publish "approve variant" endpoint exists anywhere in the codebase (pre-existing, found by
+  SMM-17)~~ — **CLOSED 2026-08-23 (module `0.5.27`, SMM-40), the owner's decision breaking the
+  deadlock this entry named.** The owner ruled: a D14 executable approval, never a bare state column
+  — the SAME machinery `social.publishPostMetered` participates in. That resolved the "distinct state
+  vs D14 executable" fork this entry could not close by reasoning from the code alone. The "who may
+  approve" fork resolved WITHOUT a permission-contract change: `POST variants/:variantId/approve`
+  reuses the EXISTING `publish` Cerbos action (`resource_social_post.yaml`, manager-tier) — the SAME
+  action `dispatchPublish` already required — rather than a new `social.post.approve` catalog entry,
+  because the filing principal is who gets re-driven at execution time and must ALREADY hold
+  `publish` for that re-drive to ever pass. What was actually missing was narrower than "an approve
+  endpoint": `social.publishPost` was ALREADY a fully-formed D14 registry entry (real `lockKey`, real
+  `precondition`, `neverAutoRetry`, all landed with SMM-09) — nothing had ever MINTED the one-shot
+  grant it requires, and nothing had ever written `social_post_variants.status = 'approved'`, the
+  value 0105's own schema anticipated and the precondition's `unconsumed` stage already gated on.
+  The new endpoint does exactly those two things and nothing else; deciding stays the pre-existing
+  generic decide endpoint, so no execute logic is duplicated. The invalidation-law fork resolves for
+  free: the SAME `updateVariant`/`draftCaption`/`attachMedia` revert-to-`draft`-and-rehash path
+  already fires on an edited variant, so the minted grant's frozen `tool_args` snapshot stops
+  matching and the pre-existing `hash` stage refuses `args_hash_mismatch` — no second copy of the
+  state law. Proven red-then-green (the endpoint absent → every mint-path test 404s/skips; restored
+  → 15/15 green) and through the real executor (a hub call asserted, not inferred, to happen exactly
+  once when decided, and asserted to happen ZERO times both for a stale-content grant and for a
+  precondition refusal). A real idempotency bug was caught by this ticket's own test before landing —
+  see the module's own `0.5.27` CHANGELOG entry. One gap named, not fixed, and out of this ticket's
+  scope: `identity_links` (the WhatsApp/Telegram dual-proof ceremony's own table) is never populated
+  by an ordinary Keycloak/OIDC staff login, so a linkless manager's mint decides successfully but
+  fails EXECUTION with the pre-existing, correctly-typed `principal_unresolvable` — an IAM/OIDC gap,
+  proven in both directions, not a defect this ticket introduced or could close. All eight items on
+  this list are now closed — see each struck entry. Evidence:
+  `platform-nest/src/modules/social/social-publish-approve.test.ts` (new, 15/15), full regression
+  (`src/modules/social` + the D14 registry/executor suites + `admin/role-grants.controller.test.ts`)
+  reported clean in this same pass — see this file's own SMM-40 evidence block, immediately below the
+  scoreboard notes at the top of this file.
 
 **Not ours to finish:** the platform-app reviews (D-23 — Meta's Business Verification is the only serial
 prerequisite), the D-21 fork exception (granted, unapplied), and whether `DISABLE_REGISTRATION` blocks a
