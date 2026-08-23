@@ -673,6 +673,29 @@ services:
       SOCIAL_NETWORKS_ENABLED: ${SOCIAL_NETWORKS_ENABLED:-instagram,facebook,linkedin}
       SOCIAL_DEFAULT_USAGE_BUDGET_USD: ${SOCIAL_DEFAULT_USAGE_BUDGET_USD:-10}
 
+      # SMM-38 `direct` driver — LinkedIn/YouTube first-light credentials.
+      # Runbook: docs/runbooks/social-first-light-linkedin-youtube.md
+      #
+      # Passed through EMPTY on purpose. A var in `.env` does nothing unless it is listed here — the
+      # INTEGRATION_TOKEN_KEY incident (a 43-char value in `.env`, `""` in the container, three
+      # shipped features that could never have worked) is why these are declared before the values
+      # exist. Empty is the honest resting state: `checkLinkedInConnectReadiness` /
+      # `checkYouTubeConnectReadiness` refuse with a NAMED reason (`platform_app_not_registered`)
+      # rather than half-working, and no `:?` guard is used so absence stays a specific runtime
+      # refusal instead of blocking the whole stack from starting.
+      #
+      # All strings — the `${VAR:-}` + `??` "empty becomes 0" trap applies to NUMERIC vars only.
+      SOCIAL_LINKEDIN_CLIENT_ID: ${SOCIAL_LINKEDIN_CLIENT_ID:-}
+      SOCIAL_LINKEDIN_CLIENT_SECRET: ${SOCIAL_LINKEDIN_CLIENT_SECRET:-}
+      SOCIAL_LINKEDIN_REDIRECT_URI: ${SOCIAL_LINKEDIN_REDIRECT_URI:-}
+      SOCIAL_LINKEDIN_ORGANIZATION_URN: ${SOCIAL_LINKEDIN_ORGANIZATION_URN:-}
+      SOCIAL_YOUTUBE_CLIENT_ID: ${SOCIAL_YOUTUBE_CLIENT_ID:-}
+      SOCIAL_YOUTUBE_CLIENT_SECRET: ${SOCIAL_YOUTUBE_CLIENT_SECRET:-}
+      SOCIAL_YOUTUBE_REDIRECT_URI: ${SOCIAL_YOUTUBE_REDIRECT_URI:-}
+      # OQ-3 own-brand-first gate: only clients listed here may run the connect ceremony at all.
+      SOCIAL_OWN_BRAND_CLIENT_IDS: ${SOCIAL_OWN_BRAND_CLIENT_IDS:-}
+      SOCIAL_CONNECT_REDIRECT_URL: ${SOCIAL_CONNECT_REDIRECT_URL:-}
+
       # MON-12c — the Plane B sweep loop. Absent/anything-but-"1" means the runner never starts, and
       # that default is deliberate: this loop DIALS CLIENT WEBSITES, so probing a third party must be
       # a decision someone made and not a consequence of a container booting. Until this line existed
