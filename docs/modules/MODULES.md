@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.26` | IN PROGRESS | Social Media | 2026-08-23 |
+| social-media | `0.5.27` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1268,8 +1268,26 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.26` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.27` · IN PROGRESS
 
+**0.5.27 (2026-08-23, senior-be, SMM-40) — the publish "approve variant" endpoint: the last open
+follow-up SMM-17 named closed.** `POST variants/:variantId/approve` mints the D14 one-shot
+`automation_approvals` grant `social.publishPost` was already registered against but nothing ever
+filed — flips the variant to 0105's own pre-existing `'approved'` status (already required by the
+pre-existing precondition's `unconsumed` stage) and files an `origin:'agent'` row via
+`core/approval-filing.ts`'s shared INSERT, never a second copy of it. Deciding stays the EXISTING
+generic `automation-approvals` decide endpoint — no execute logic duplicated. The invalidation law
+is reused verbatim (an edit reverts the variant to `draft` and the minted grant's frozen args
+snapshot stops matching, refusing `args_hash_mismatch` through the real executor, hub asserted
+called zero times). Cerbos permission: reused `publish` (resource_social_post.yaml, manager-tier) —
+NO new permission key. A real idempotency bug (a stale, pre-edit grant could be handed back on a
+double-click) was caught by this ticket's own test and fixed before landing (exact `tool_args`
+equality, not containment). Named, not fixed: `identity_links` (WhatsApp/Telegram enrollment only,
+never populated by an ordinary staff OIDC login) means a linkless manager's approval decides
+successfully but fails EXECUTION with the pre-existing `principal_unresolvable` — an IAM/OIDC gap,
+proven in both directions, out of this ticket's scope. New test file
+`social-publish-approve.test.ts`, 15/15. Full detail: `docs/modules/CHANGELOG.md`'s `0.5.27` entry,
+`docs/plans/smm-tracker.md`'s SMM-40 evidence block.
 
 **0.5.23 (2026-08-23, senior-be) — two SECURITY-SHAPED follow-ups closed, both named honestly by
 earlier seats: OAuth state single-use (SMM-38c/38d), and SMM-22's Cerbos gap for an agent/automation-

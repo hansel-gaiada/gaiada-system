@@ -11,6 +11,58 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.27` — 2026-08-23 — the publish "approve variant" endpoint (SMM-40)
+
+**Added** — closes the last open follow-up `docs/plans/smm-tracker.md` named (found by SMM-17):
+nothing in this codebase ever MINTED the one-shot `automation_approvals` grant `social.publishPost`
+was already registered against (`core/approval-executables.ts`'s SMM-09 section — real `lockKey`,
+real `precondition`, `neverAutoRetry`, all pre-existing). Without a filed row, `dispatchPublish`
+could never resolve an `executing` approval and D-6 (`publisher/direct.ts`) refused every dispatch
+outright.
+
+**`POST /api/:tenantId/modules/social/variants/:variantId/approve`** (`social.controller.ts`,
+Cerbos `publish` on `resource_social_post.yaml` — the SAME manager-tier action `dispatchPublish`/
+`dispatchMeteredPublish` already require; NO new permission key). Flips the variant to 0105's own
+pre-existing `'approved'` status value (which the ALREADY-registered precondition's `unconsumed`
+stage already required and nothing had ever written) and files the `automation_approvals` row —
+`origin: 'agent'`, a snapshot of `variantPublishArgs` as `tool_args` — reusing
+`core/approval-filing.ts`'s `insertAutomationApprovalRow`/`notifyApprovalFiled`, never a third copy
+of that INSERT. Idempotent on an EXACT content match (a live grant for a DIFFERENT, since-edited
+snapshot of the same variant is never returned — see the fix note below). Deciding is a SEPARATE
+step through the pre-existing generic `POST /automation-approvals/:id/decide` — this ticket duplicates
+no decide/execute logic; "approving executes" falls out of the registry entry that already existed.
+New MCP tool `social.approvePostVariant` (`write:true, impact:'high'`, from the pinned
+`SOCIAL_PUBLISH_TOOL_CLASSIFICATION`).
+
+**The invalidation law is reused, not rebuilt.** `updateVariant`/`draftCaption`/`attachMedia` already
+revert an edited variant's `status` to `'draft'` and recompute `args_sha256`; a variant this endpoint
+approved, if edited afterward, reverts through that SAME path, and the minted grant's frozen
+`tool_args` snapshot stops matching, so the pre-existing `hash` stage refuses `args_hash_mismatch`
+at execution — no new column, no new invalidation code. Proven red-then-green: an edit-then-dispatch
+attempt through the real executor refuses `precondition_failed: args_hash_mismatch` with the hub
+asserted (not inferred) to have been called zero times.
+
+**A real bug caught by the ticket's OWN idempotency test, fixed before landing:** the first draft of
+the mint's dedupe check matched on `tool_args @> {variantId}` (containment) — meaning a live,
+undecided-or-not-yet-executed grant filed against an EARLIER snapshot of the variant would be handed
+back to a caller who had since edited the content, instead of a fresh grant against the new content.
+Fixed to an exact `tool_args = $args::jsonb` equality, so only a grant matching the variant's CURRENT
+content is ever considered "the same request" — `(D3)` in the new test file pins this in the failing
+direction it was first caught in.
+
+**A pre-existing, separate gap named rather than papered over:** `identity_links` is populated only
+by the WhatsApp/Telegram dual-proof enrollment ceremony, never by an ordinary Keycloak/OIDC staff
+login. `origin: 'agent'` is the correct D14 origin here (it re-drives at execution as the FILING
+PRINCIPAL's own identity, never an n8n workflow's, which is what lets the SAME `publish` Cerbos check
+`dispatchPublish` runs at execution time actually pass) — but a manager with no linked identity will
+have their approval decided successfully and then fail EXECUTION with the pre-existing, correctly
+typed `principal_unresolvable` refusal. Both the executing (linked) and refusing (linkless) paths are
+proven in `social-publish-approve.test.ts`; this is an IAM/OIDC identity-linking gap, not a defect in
+this ticket's own code, and is out of this ticket's scope to close.
+
+New test file `src/modules/social/social-publish-approve.test.ts`, 15/15 green. Full regression
+detail in `docs/plans/smm-tracker.md`'s SMM-40 evidence block.
+
 ### social-media `0.5.26` — 2026-08-23 — OAuth state is bound to the principal who started it
 
 **Fixed (security)** — closes the follow-up the previous pass named rather than absorbed:

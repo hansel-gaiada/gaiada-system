@@ -46,8 +46,14 @@ import { variantArgsSha256, variantPublishArgs, replyDispatchArgs, replyArgsSha2
 // (core/approval-executables.ts), never a UI-friendly second copy of the rules.
 import {
   PUBLISH_PRECONDITION_STAGES,
-  SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL,
+  SOCIAL_PUBLISH_TOOL, SOCIAL_PUBLISH_METERED_TOOL, SOCIAL_PUBLISH_TOOL_CLASSIFICATION,
 } from "./publish-precondition";
+// SMM-40 — the publish "approve variant" endpoint mints the D14 executable approval
+// `social.publishPost` is already registered against (core/approval-executables.ts's SMM-09
+// section: real lockKey, real precondition, neverAutoRetry). This controller's own job is JUST the
+// filing INSERT — reused from the SAME helper `automation-approvals.controller.ts#create()` and
+// `admin/role-grants.controller.ts`'s override-request endpoint both use, never a third copy of it.
+import { insertAutomationApprovalRow, notifyApprovalFiled } from "../../core/approval-filing";
 // SMM-31 — the client-review gate (composed IN FRONT of the six-stage chain, never inside it — see
 // client-review.ts's header) and the staff-side state machine for `social_post_client_reviews`.
 import { evaluatePublishPreconditionWithClientReview } from "./client-review";
@@ -1492,6 +1498,189 @@ export class SocialController {
       meteredTool: SOCIAL_PUBLISH_METERED_TOOL,
       estimatedCostUsd: costEstimate.ok ? costEstimate.costUsd : null,
       ...(costEstimate.ok ? {} : { costUnavailableReason: costEstimate.reason }),
+    };
+  }
+
+  // ==================================================== THE APPROVE ENDPOINT (SMM-40) ==========
+  //
+  // THE GAP THIS CLOSES (SMM-17's own named follow-up, `docs/plans/smm-tracker.md`): nothing in this
+  // codebase ever mints the one-shot `automation_approvals` grant `social.publishPost` is already
+  // registered against (core/approval-executables.ts's SMM-09 section — real `lockKey`, real
+  // `precondition`, `neverAutoRetry: true`, all pre-existing). Without a filed row, `dispatchPublish`
+  // can never resolve an `executing` approval (`resolveExecutingApprovalId`) and D-6
+  // (`publisher/direct.ts`) refuses every dispatch attempt outright. THIS endpoint is the mint.
+  //
+  // THE OWNER'S DECISION (binding, not relitigated here): a D14 executable approval, never a bare
+  // state column. What follows is NOT a second, competing mechanism — `social_post_variants.status`
+  // already carries an `'approved'` value in 0105's own CHECK (`svar_dispatched_has_approval`), and
+  // `evaluatePublishPrecondition`'s existing `unconsumed` stage ALREADY requires
+  // `status = 'approved'` before it will let the executor call the hub
+  // (`PUBLISH_REFUSAL.variantNotApproved`). Nothing before this ticket ever wrote that value, so the
+  // precondition refused every registered approval permanently — flipping it here is wiring the
+  // ALREADY-DECLARED schema up to the ALREADY-DECLARED gate, not inventing a parallel one.
+  //
+  // WHY `publish`, NOT `submit` (resource_social_post.yaml's OTHER staff-tier action, "file a
+  // variant into the WS4 approval queue"): the ORIGIN of the row this endpoint files is `'agent'`,
+  // and `core/approval-execute.ts#resolveRedrivePrincipal` re-drives an agent-origin row as the
+  // FILING PRINCIPAL'S OWN verified identity link — never the approver's. If a `submit`-tier
+  // principal (module_staff, who Cerbos denies `publish`) filed this, the executor's hub round trip
+  // would call BACK into `dispatchPublish` as that same staff identity, and its own `authorize(...,
+  // "publish")` would DENY — turning a clean, typed precondition refusal into a raw hub-side 403.
+  // Gating the WHOLE mint on `publish` means only a principal who could ALSO pass that later check
+  // may ever file one — "prefer hanging this off the existing D14 decider roles", literally: no new
+  // permission key, the SAME manager-tier action `dispatchPublish`/`dispatchMeteredPublish` already
+  // require. `submit` stays reserved for its own, still-unbuilt ticket (an agent-drafted variant
+  // entering staff review) — a distinct capability this ticket does not attempt.
+  //
+  // WHAT THIS ENDPOINT DELIBERATELY DOES NOT DO: it does not decide, and it does not execute. Filing
+  // (`status='pending'`) is separate from deciding, exactly like every other D14 surface
+  // (`admin/role-grants.controller.ts`'s override request returns the SAME `decideVia` shape) — a
+  // decider (any principal Cerbos grants `decide` on `automation_approval`, ordinarily this same
+  // manager tier) approves via the EXISTING generic
+  // `POST /api/:tenantId/automation-approvals/:id/decide`, and THAT is what executes
+  // (`automation-approvals.controller.ts#decide` -> `getExecutable` finds the pre-existing
+  // registration -> `execution_status='pending'` -> the already-drained `"automation_approval"`
+  // stream -> `executeApprovedAutomationWrite`). No decide logic is duplicated here.
+  //
+  // THE INVALIDATION LAW, REUSED, NOT REBUILT: this endpoint does not add a second copy of
+  // edit-invalidates-approval. `updateVariant`/`draftCaption`/`attachMedia` already revert
+  // `status` to `'draft'` and recompute `args_sha256` the instant approved content is edited
+  // (`approvalInvalidated` in their own responses). A variant this endpoint just approved, if
+  // edited afterward, reverts through that SAME code path — no new column, no new trigger — and the
+  // MINTED approval's `tool_args` (a snapshot of `variantPublishArgs` taken HERE, at mint time)
+  // stops matching the live row, so `evaluatePublishPrecondition`'s `hash` stage refuses
+  // `args_hash_mismatch` the moment anyone tries to execute it. Proven in
+  // `social-publish-approve.test.ts`.
+  //
+  // IDEMPOTENT MINT: a double-click (or an at-least-once caller) that finds a LIVE row already
+  // filed for this exact variant+tool (undecided, or decided but not yet terminal) returns that
+  // SAME row rather than filing a sibling — an approvals queue accumulating duplicate rows for one
+  // variant is its own failure mode (mirrors `requestClientReview`'s own `alreadyPending`
+  // idempotence, one section above, and role-grants' ON-CONFLICT idiom).
+  //
+  // A PRE-EXISTING GAP THIS TICKET NAMES RATHER THAN PAPERS OVER: `identity_links` is populated only
+  // by the dual-proof WhatsApp/Telegram enrollment ceremony (`identity.controller.ts`), never by an
+  // ordinary Keycloak/OIDC staff login. So an approval filed here by a manager with no such linked
+  // identity WILL be filed and WILL be decidable, but will fail EXECUTION with the pre-existing,
+  // correctly-typed `principal_unresolvable` refusal the instant a decider approves it
+  // (`core/approval-execute.ts`'s own, unmodified, "no fallback" invariant) — not a bug this ticket
+  // introduces, and not one this ticket can fix (it is an IAM/OIDC identity-linking gap, tracked
+  // separately). Both branches — a linked identity that DOES execute, and a linkless one that
+  // refuses loudly rather than silently — are proven in this ticket's own test file.
+  @Post("variants/:variantId/approve")
+  @HttpCode(201)
+  async approvePublish(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("variantId") variantId: string,
+  ) {
+    await authorize(req.principal, { kind: "social_post", id: variantId, tenantId, module: "social" }, "publish");
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    const requestedBy = req.principal.userId;
+
+    const result = await withTenants(
+      [tenantId],
+      async (c) => {
+        const { rows } = await c.query<{
+          account_id: string; body: string; first_comment: string | null; media: unknown;
+          settings: Record<string, unknown> | null; scheduled_at: Date | null; status: string;
+        }>(
+          `SELECT account_id, body, first_comment, media, settings, scheduled_at, status
+             FROM social_post_variants WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+          [variantId],
+        );
+        const row = rows[0];
+        if (!row) return { kind: "not_found" as const };
+        if (!EDITABLE_VARIANT_STATUSES.has(row.status)) {
+          return { kind: "conflict" as const, status: row.status };
+        }
+
+        const args = variantPublishArgs({
+          tenantId, id: variantId, accountId: row.account_id, body: row.body,
+          firstComment: row.first_comment, media: row.media, settings: row.settings,
+          scheduledAt: row.scheduled_at,
+        });
+
+        // Idempotent mint: a LIVE row (undecided, or decided but not yet a terminal
+        // execution_status) for this exact variant+tool already exists — return it rather than
+        // filing a sibling grant for the same content.
+        //
+        // The match is an EXACT `tool_args = $3` equality, never a `@>` containment on `variantId`
+        // alone. A prior grant that is still technically "live" (decided-but-not-yet-executed) but
+        // was minted against an EARLIER snapshot of this variant's content is NOT the same request:
+        // if it were returned here, a caller who edited between two clicks would be handed an
+        // approval id already doomed to refuse `args_hash_mismatch` the moment anyone tries to
+        // execute it, instead of the fresh, valid grant this second click is actually asking for.
+        // jsonb `=` compares parsed structure, not byte order, so key ordering never matters here.
+        const existing = await c.query<{ id: string }>(
+          `SELECT id FROM automation_approvals
+             WHERE tenant_id = $1 AND tool_name = $2 AND deleted_at IS NULL
+               AND tool_args = $3::jsonb
+               AND (status = 'pending'
+                    OR (status = 'approved' AND execution_status IN ('pending', 'executing')))
+             ORDER BY created_at DESC LIMIT 1`,
+          [tenantId, SOCIAL_PUBLISH_TOOL, JSON.stringify(args)],
+        );
+        if (existing.rows[0]) {
+          return { kind: "already_pending" as const, approvalId: existing.rows[0].id };
+        }
+
+        // The status flip IS the wiring this ticket exists to add — see this endpoint's own header.
+        // A no-op (0 rows) when the variant is already 'approved' (e.g. re-minting after a prior
+        // grant's precondition refused before ever reaching `schedulePost` — that branch never
+        // touches this column, per `dispatch.ts`'s own "never writes a domain row" precondition
+        // doctrine) is expected and safe, never an error.
+        await c.query(
+          `UPDATE social_post_variants SET status = 'approved', updated_at = now()
+             WHERE id = $1 AND status IN ('draft', 'in_review')`,
+          [variantId],
+        );
+
+        const approvalId = newId();
+        await insertAutomationApprovalRow(c, approvalId, {
+          tenantId,
+          workflowId: "social:publish-variant",
+          toolName: SOCIAL_PUBLISH_TOOL,
+          toolArgs: args as unknown as Record<string, unknown>,
+          impact: SOCIAL_PUBLISH_TOOL_CLASSIFICATION.impact,
+          reason: `Publish approval requested for post variant ${variantId}`,
+          // 'agent': re-driven at execution time as the FILING PRINCIPAL's own verified identity
+          // link (core/approval-execute.ts#resolveRedrivePrincipal) — never the approver's, and
+          // never an automation/n8n identity that could never hold `publish` in the first place.
+          // See this endpoint's own header for why `'automation'` is the wrong origin here.
+          origin: "agent",
+          requestedBy,
+        });
+        return { kind: "ok" as const, approvalId, input: {
+          tenantId, workflowId: "social:publish-variant", toolName: SOCIAL_PUBLISH_TOOL,
+          toolArgs: args as unknown as Record<string, unknown>, impact: SOCIAL_PUBLISH_TOOL_CLASSIFICATION.impact,
+          reason: `Publish approval requested for post variant ${variantId}`, origin: "agent", requestedBy,
+        } };
+      },
+      { modules: ["social"] },
+    );
+
+    if (result.kind === "not_found") throw new NotFoundException("post variant not found");
+    if (result.kind === "conflict") {
+      // `HttpErrorFilter` forwards only `message` (renamed to `error`), `field`, `existing` and
+      // `site` — a bare `status` sibling would be silently dropped (this file's own documented
+      // trap), so the current status rides IN the token itself rather than a field nobody reads.
+      throw new ConflictException({ message: `variant_not_approvable:${result.status}` });
+    }
+    if (result.kind === "already_pending") {
+      return {
+        id: result.approvalId, variantId, status: "pending", alreadyPending: true,
+        decideVia: `/api/${tenantId}/automation-approvals/${result.approvalId}/decide`,
+      };
+    }
+    // MAIL-06: notify the resolved decider set, exactly like the generic
+    // `automation-approvals.controller.ts#create()` path a hub-suspended write already gets — never
+    // a second, hand-rolled notification for this one filing route.
+    await notifyApprovalFiled(result.approvalId, result.input);
+    await writeActivity(tenantId, requestedBy, "approved", "social_post_variant", variantId, {
+      approvalId: result.approvalId,
+    });
+    return {
+      id: result.approvalId, variantId, status: "pending",
+      decideVia: `/api/${tenantId}/automation-approvals/${result.approvalId}/decide`,
     };
   }
 
