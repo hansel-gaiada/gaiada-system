@@ -117,6 +117,7 @@ import { startInboxTriageLoop, startInboxSlaGuardLoop } from "./modules/social/i
 // SMM-27 — the best-time-to-post stats sweep. FIFTH social ticket to hand its registration up
 // rather than edit this file; not one of them has collided here.
 import { startBestTimePullLoop } from "./modules/social/best-time-job";
+import { startContentBriefSweepLoop } from "./modules/social/content-brief-job";
 // SMM-10 — the reconcile safety poll + D-22's creator-info verifier install. Registering the
 // verifier is a pure in-memory decision (no network I/O — see publish-precondition.ts's own seam
 // doc), so it runs unconditionally at boot, unlike the interval-driven loop below.
@@ -479,6 +480,14 @@ async function bootstrap(): Promise<void> {
       startBestTimePullLoop(config.social.bestTime.intervalMs);
       // eslint-disable-next-line no-console
       console.log(`social best-time-to-post (smm-best-time) on: every ${config.social.bestTime.intervalMs}ms`);
+    }
+    // SMM-26 follow-up: the weekly per-opted-in-engagement content-brief sweep. Dark by default and
+    // a HARD gate (it spends ai-gateway-go calls per opted-in engagement) — see config.ts's own
+    // comment on config.social.contentBrief.weeklySweep.
+    if (config.social.contentBrief.weeklySweep.enabled) {
+      startContentBriefSweepLoop(config.social.contentBrief.weeklySweep.intervalMs);
+      // eslint-disable-next-line no-console
+      console.log(`social content-brief sweep (smm-content-brief-sweep) on: every ${config.social.contentBrief.weeklySweep.intervalMs}ms`);
     }
     if (config.social.triage.classifyEnabled) {
       startInboxTriageLoop(config.social.triage.classifyIntervalMs);
