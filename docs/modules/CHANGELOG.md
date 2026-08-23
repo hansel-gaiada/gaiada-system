@@ -1654,6 +1654,65 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
 
+### `Alpha 01.067.0144a` - 2026-08-23 - the work that was finished but never left the laptop
+
+Manifest (counter +1, 0143 -> 0144): `platform-nest 0.36.2 -> 0.36.3`, `platform-ui 0.43.0 ->
+0.43.1`, `mcp-hub 0.11.0 -> 0.11.1`, `observability 0.6.1 -> 0.6.2`, `infra 0.8.6 -> 0.8.7`.
+
+**This cut is mostly recovery, not new capability.** Ten commits that were complete and correct on a
+developer machine and had simply never been pushed — including `6d09855`, the fix for the CI failure
+that was itself keeping main red. `platform-nest` and `docs-map` had both been failing since the
+`0141a` cut for that reason: the repair existed, it just was not on the remote. Worth stating plainly
+because the symptom ("changes are not live") pointed at the pipeline, and the pipeline was fine
+throughout — three releases deployed successfully while this work sat unpushed.
+
+Two gates were also genuinely broken and are now fixed:
+
+- **`docs-map` was structurally unclearable.** It validates `docs/MAP.md`, but lived in `ci.yml`
+  behind `paths-ignore: ["**/*.md", "docs/**"]`. `MAP.md` is generated from the whole repo tree, so a
+  code push can stale it — while the regenerated MAP that fixes it is a docs-only change that ci.yml
+  ignores. Once red it stayed red until unrelated code landed. Now its own workflow, own concurrency
+  group (sharing ci's `cancel-in-progress` meant a docs push could cancel a full CI run), no filter.
+- **D14-17 (A1) was firing on test pollution, not on a real defect.** The executable-approval
+  registry is a module singleton; `resetExecutableApprovals()` clears all nine areas, and the suites
+  that reset it restored only their own. SMM-35 added `social.createReplyDraft` to
+  `ASSISTANT_AGENT_WRITE_TOOLS`, so the gate began asserting on a tool no resetting suite restored —
+  passing alone, failing after a resetting suite. Production was never affected. Root cause was
+  structural: nine bootstraps, nine bare module-load calls, no single place naming the set, and a doc
+  that listed three of the nine. Now one `registerAllExecutableApprovals()`, used by both boot and
+  test-restore, so it cannot drift again. A gate that cries wolf is a gate you stop trusting.
+
+Also lands, all additive: `agent_registry` and `risk_policy` + `infra_hosts.risk_weight` (the Hermes
+agent roster and risk ladder as DATA, not commits); `mcp-hub/src/risk.ts`, the pure tier algebra, not
+yet imported by any caller so it carries no runtime effect; `hermes-config/` (template + installer
+only — no secrets, `config.yaml.tmpl` references `${GAIADA_HUB_TOKEN}` by name) and `persona/`;
+33 new tests; and `synthetic-prober.exe` finally gitignored.
+
+**Observability:** `default-multi` — the receiver for `severity: ticket` and everything unmatched —
+had no working transport, so `GatewayBudgetNearCap` (~13 h/day) and `SyntheticJourneyFailing`
+(~14 h/day) fired for over 24 h and were delivered nowhere. It now carries a webhook leg. Note this
+config lives on the SumoPod box (project `gaiada-obs`), NOT in the tag deploy — verified already
+delivering there, 35 messages in 24 h.
+
+**Full module manifest** (rule 2):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.36.3`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.1` |
+| **platform-ui** | **`0.43.1`** | ai-agents | `0.8.1` | social-media | `0.5.31` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| **mcp-hub** | **`0.11.1`** | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.2` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| **observability** | **`0.6.2`** | **infra** | **`0.8.7`** | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+**Verification:** full `platform-nest` suite 405 files / 5885 tests green locally (file count
+reconciles with CI's red run at 404+1, proving the suite ran rather than aborting on a fast gate);
+the 22 registry-touching suites green with `--no-file-parallelism`, the harshest ordering for the
+pollution class that caused the failure; migration lints (names/RLS/withtenants) pass; CI green on
+all nine jobs; `docs-map` green in 15 s as its own workflow.
+
 ### `Alpha 01.066.0143a` - 2026-08-23 - the estate can appoint again
 
 Manifest (counter +1, 0142 -> 0143): `platform-nest 0.36.0 -> 0.36.1`.
