@@ -7,13 +7,28 @@ import {
   restingRoomKey, buildReplaySteps, totalReplayMs, lerp, catToken,
   type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeAvatar, type ReplayStep,
 } from "@/lib/office";
+import {
+  LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS, STEEL_RAMP,
+  spriteAssetPath, pickGender, pickSkinTone, hexToRgb,
+  type SpriteGender, type SpritePose,
+} from "@/lib/office-sprites";
 import "./office.css";
 
 // The Office canvas — hand-rolled Canvas 2D, no engine, no new dependency (platform-ui's four-dep
-// discipline holds). NO SPRITES: every avatar is drawn procedurally from shape + a design token,
-// per legal/asset-licences.md ("no third-party art committed tonight"). Swapping in real sprites
-// later touches only `drawAvatar()` below — every other function (layout, positions, interaction)
-// is already the interface a sprite renderer would need.
+// discipline holds). REAL SPRITES: human and internal-agent avatars are composited from the 24
+// licensed LPC sheets under public/office-sprites/ (see lib/office-sprites.ts for the layer
+// contract and legal/asset-licences.md for the licence position). Automations stay the procedural
+// grey box (LPC ships no robot) and external agents keep their procedural foreign silhouette —
+// only human/agent kinds gained real art.
+//
+// The sprite swap DID land almost entirely inside `drawAvatar()`, as this file's previous header
+// promised — layout, positions, hit-testing and interaction below are byte-for-byte what they were
+// before. One thing that promise understated: a real asset must be FETCHED and DECODED before it
+// can be drawn, which a procedural shape never needed. The "Sprite loading + compositing" block
+// just above `drawAvatar()` is that plumbing — an image cache, a palette-swap cache, and a tiny
+// pub/sub so a still-loading sprite's eventual arrival triggers exactly one extra redraw. It adds
+// new module-level state and one new subscription effect on the component; it does not touch
+// steadyPositions/replayPositions/pointerToAvatar or any other existing function's behaviour.
 //
 // Two render paths, both imperative (never a persistent requestAnimationFrame loop):
 //   1. `draw()` — called on mount, on scene/theme/resize/selection change. One-shot.
@@ -402,6 +417,96 @@ function fitLabel(ctx: CanvasRenderingContext2D, text: string, maxPx: number): s
   return `${text.slice(0, lo)}…`;
 }
 
+// ── Sprite loading + compositing (real LPC art) ─────────────────────────────────────────────────
+// A procedural shape needed none of this — it was drawn directly, every frame, from nothing but a
+// colour. A real PNG must be fetched and decoded first, so this block exists to pay that cost
+// exactly once per (gender, pose, tone) and never again. Nothing here is a layout or interaction
+// concern: it only ever hands `drawAvatar()` back a ready-to-draw 64x64 canvas, or `null` while
+// still loading (the caller falls back to the old procedural humanoid meanwhile).
+const rawImageCache = new Map<string, HTMLImageElement>();
+const recolorCache = new Map<string, HTMLCanvasElement>();
+const spriteCache = new Map<string, HTMLCanvasElement>();
+const spriteReadyListeners = new Set<() => void>();
+
+function notifySpriteReady() {
+  for (const fn of spriteReadyListeners) fn();
+}
+
+/** Returns the decoded image once loaded; otherwise starts the load (once) and returns null. */
+function getRawImage(src: string): HTMLImageElement | null {
+  const existing = rawImageCache.get(src);
+  if (existing) return existing.complete && existing.naturalWidth > 0 ? existing : null;
+  const img = new Image();
+  rawImageCache.set(src, img);
+  img.onload = () => notifySpriteReady();
+  // onerror deliberately left as a permanent miss — the caller's procedural fallback keeps the
+  // avatar visible even if a sprite path 404s, rather than the office silently losing a figure.
+  img.src = src;
+  return null;
+}
+
+/** One 64x64 crop of a layer's sheet, optionally palette-swapped from LIGHT_RAMP to `ramp` —
+ *  identical-length ramps, index for index, exact-value match (see office-sprites.ts). Only
+ *  body/head crops ever pass a ramp; clothing, shoes and hair are drawn exactly as authored. */
+function recolorFrame(img: HTMLImageElement, frame: { col: number; row: number }, ramp: string[] | null, cacheKey: string): HTMLCanvasElement {
+  const cached = recolorCache.get(cacheKey);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = FRAME_PX;
+  canvas.height = FRAME_PX;
+  const cctx = canvas.getContext("2d")!;
+  cctx.drawImage(img, frame.col * FRAME_PX, frame.row * FRAME_PX, FRAME_PX, FRAME_PX, 0, 0, FRAME_PX, FRAME_PX);
+  if (ramp) {
+    const sources = LIGHT_RAMP.map(hexToRgb);
+    const targets = ramp.map(hexToRgb);
+    const image = cctx.getImageData(0, 0, FRAME_PX, FRAME_PX);
+    const d = image.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue;
+      for (let s = 0; s < sources.length; s++) {
+        const [sr, sg, sb] = sources[s];
+        if (Math.abs(d[i] - sr) <= 2 && Math.abs(d[i + 1] - sg) <= 2 && Math.abs(d[i + 2] - sb) <= 2) {
+          const [tr, tg, tb] = targets[s];
+          d[i] = tr; d[i + 1] = tg; d[i + 2] = tb;
+          break;
+        }
+      }
+    }
+    cctx.putImageData(image, 0, 0);
+  }
+  recolorCache.set(cacheKey, canvas);
+  return canvas;
+}
+
+/** A fully composited, tone-applied 64x64 character frame — body, head, bottom, top, shoes, hair
+ *  (plan §4.4a's layer order). Built once per (gender, pose, tone key) and cached from then on.
+ *  Returns null until every layer image for this gender/pose has finished loading. */
+function getComposedSprite(gender: SpriteGender, pose: SpritePose, toneKey: string, ramp: string[]): HTMLCanvasElement | null {
+  const cacheKey = `${gender}:${pose}:${toneKey}`;
+  const cached = spriteCache.get(cacheKey);
+  if (cached) return cached;
+
+  const layers = LAYER_PATHS[gender];
+  const frame = POSE_FRAME[pose];
+  const frames: HTMLCanvasElement[] = [];
+  for (const { key, recolorable } of LAYER_ORDER) {
+    const variant = layers[key];
+    const src = spriteAssetPath(variant, pose);
+    const img = getRawImage(src);
+    if (!img) return null; // any missing layer stalls the whole composite — never a partial figure
+    frames.push(recolorFrame(img, frame, recolorable ? ramp : null, `${src}:${recolorable ? toneKey : "raw"}`));
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = FRAME_PX;
+  canvas.height = FRAME_PX;
+  const cctx = canvas.getContext("2d")!;
+  cctx.imageSmoothingEnabled = false;
+  for (const f of frames) cctx.drawImage(f, 0, 0);
+  spriteCache.set(cacheKey, canvas);
+  return canvas;
+}
+
 function drawAvatar(ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean) {
   const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
   const r = tilesToPx(0.62);
@@ -411,11 +516,31 @@ function drawAvatar(ctx: CanvasRenderingContext2D, pos: Positioned, tokens: Toke
   const slotWidthPx = tilesToPx(2.7);
   switch (avatar.kind) {
     case "human":
-      drawHumanoid(ctx, cx, cy, r, tokens.catColor(avatar.recordId), tokens.ink, false);
+    case "agent": {
+      // Kind taxonomy (plan §4.4): humans get a deterministic human skin ramp; internal agents
+      // reuse the identical sprite under the fixed "steel" ramp so they read as synthetic without
+      // ever being mistakable for a person. Sit is the default pose — an office is mostly people
+      // at desks; walk is used only for the brief window a replay has this avatar in transit.
+      const gender = pickGender(avatar.recordId);
+      const pose: SpritePose = pos.inTransit ? "walk" : "sit";
+      const toneKey: string = avatar.kind === "human" ? pickSkinTone(avatar.recordId) : "steel";
+      const ramp: string[] = avatar.kind === "human" ? SKIN_RAMPS[pickSkinTone(avatar.recordId)] : STEEL_RAMP;
+      const sprite = getComposedSprite(gender, pose, toneKey, ramp);
+      if (sprite) {
+        ctx.imageSmoothingEnabled = false;
+        // Native 64x64 frame at integer 1x scale = exactly 2 tiles at this canvas's TILE_PX*ZOOM
+        // (16*2=32px/tile) — the same footprint the old procedural figure already occupied, so no
+        // change was needed to office.ts's TILE_PX/ZOOM/desk-spacing constants (plan §4.3b:
+        // "integer scaling only"). Anchored so the sprite's feet land where the old figure's own
+        // base — and the contact shadow under it — already sat.
+        ctx.drawImage(sprite, cx - FRAME_PX / 2, cy - FRAME_PX * 0.6, FRAME_PX, FRAME_PX);
+      } else {
+        // Still loading (or a path 404'd) — same procedural stand-in this canvas always drew,
+        // never a blank tile.
+        drawHumanoid(ctx, cx, cy, r, avatar.kind === "human" ? tokens.catColor(avatar.recordId) : tokens.steel, tokens.ink, avatar.kind === "agent");
+      }
       break;
-    case "agent":
-      drawHumanoid(ctx, cx, cy, r, tokens.steel, tokens.ink, true);
-      break;
+    }
     case "automation":
       drawAutomation(ctx, cx, cy, r, tokens.grey, tokens.ink);
       break;
@@ -569,6 +694,15 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     return () => { window.removeEventListener("resize", onResize); mo.disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draw]);
+
+  // Sprites load asynchronously (real PNGs, not a procedural shape) — this is the one-line
+  // subscription that turns "a composite finally became ready" into a redraw, matching the
+  // one-shot-redraw discipline above rather than starting any kind of loop. No RAF, no polling.
+  useEffect(() => {
+    const onReady = () => draw(replayRef.current && replaying ? performance.now() - replayRef.current.startPerf : null);
+    spriteReadyListeners.add(onReady);
+    return () => { spriteReadyListeners.delete(onReady); };
+  }, [draw, replaying]);
 
   // ── Replay: a RAF loop that exists ONLY while playing, paused (not merely throttled) when the
   // tab is hidden or the canvas leaves the viewport. Nothing runs at all otherwise. ──────────────
@@ -782,8 +916,10 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
       </div>
 
       <p className="office__footnote">
-        Generated {formatDateTime(scene.generatedAt)}. Sprites drop in later behind this same
-        interface (kind + position) — nothing here is a rendering dead end.
+        Generated {formatDateTime(scene.generatedAt)}. Character art is the Universal LPC
+        Spritesheet Character Generator, used under its OGA-BY / CC0 licence terms —
+        {" "}
+        <a href="/office/credits">see the full credits</a>.
       </p>
     </div>
   );

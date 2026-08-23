@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "e2e:a11y": "playwright test e2e/a11y-axe.spec.ts --project=chromium --workers=1"
+    "e2e:a11y": "playwright test e2e/a11y-axe.spec.ts --project=chromium --workers=1",
+    "gen:office-credits": "node scripts/generate-office-credits.mjs"
   },
   "dependencies": {
     "next": "^15.3.0",

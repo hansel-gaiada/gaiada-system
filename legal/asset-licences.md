@@ -8,8 +8,11 @@ This exists because asset licences do not inherit from a repository's code licen
 misread as "free" when they are non-commercial, and become impossible to reconstruct two years
 later when nobody remembers where a tile came from.
 
-Status: **no third-party art committed yet.** The row below is a decision on record, not a shipped
-dependency.
+Status: **24 LPC sprite files committed 2026-08-23** under `platform-ui/public/office-sprites/`
+(body/head/hair/torso/legs/feet, male + female, `walk.png` + `sit.png` — the exact set verified
+electable OGA-BY 3.0 / CC0 below). The credits surface obliged by this file's own rules ships at
+`/office/credits`, generated from `CREDITS.csv` by `platform-ui/scripts/generate-office-credits.mjs`
+— see that script and `platform-ui/src/lib/office-credits.generated.ts`.
 
 ---
 
