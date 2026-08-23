@@ -24,3 +24,6 @@ CREDENTIALS.local.md
 # `git add -A` in any session would otherwise sweep an entire second checkout into a commit —
 # and this repo is worked by several concurrent sessions that do exactly that.
 .claude/
+
+# Go build artifact (SAC-signed local build; never ship)
+infra/observability/synthetic-prober/synthetic-prober.exe

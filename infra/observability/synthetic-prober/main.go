@@ -7,6 +7,23 @@
 // Journeys are declared as JSON (env PROBER_JOURNEYS or file PROBER_JOURNEYS_FILE), so adding a new
 // user-journey probe is config, not code. Secrets (bearer tokens) are injected via ${ENV} expansion
 // in the header value so they never sit in the journey file.
+//
+// ── 2026-08-23: THE BLIND SPOT THIS FILE USED TO HAVE (tracker B16) ───────────────────────────────
+// A journey asserting only `expectStatus: 200` + a body substring CANNOT SEE A PRIMARY-PROVIDER
+// OUTAGE, because the Gateway fails over and still returns 200 with text. That is not theoretical:
+// Hermes was wedged for 24h while `gateway-complete` reported ok=true the entire time, and the
+// estate only found out by reading the shim's journal by hand.
+//
+// The fix is `recordJSON`: named top-level response fields become METRIC ATTRIBUTES, so
+// `synthetic_journey_up{journey="gateway-complete",provider="gemini"}` makes WHICH provider served
+// visible to alerting. Failover stops being silent without being treated as an outage — a working
+// fallback should be *visible*, not page-worthy, and `expectJSON` is there for the cases that truly
+// must fail.
+//
+// `intervalMs`/`timeoutMs` are PER-JOURNEY (tracker H0d2). One global interval forced a real
+// tradeoff: the LLM journey ran at health-check cadence (30s = 2,880 calls/day) and exhausted the
+// Gateway's 2,000/day cap, which then 429'd REAL USER TRAFFIC for the rest of every day. Cheap
+// liveness probes and expensive functional probes do not belong on the same clock.
 package main
 
 import (
@@ -40,11 +57,22 @@ type Journey struct {
 	ExpectStatus int               `json:"expectStatus"`
 	// Optional substring the response body must contain for the journey to count as a success.
 	ExpectBody string `json:"expectBody"`
+	// Top-level JSON response fields that MUST equal these values, else the journey fails. Use for
+	// invariants, not for things that are allowed to vary (a working failover is not a failure).
+	ExpectJSON map[string]string `json:"expectJSON"`
+	// Top-level JSON response fields whose VALUE becomes a metric attribute. This is how a silent
+	// degradation becomes visible: record `provider` and failover shows up as a label change.
+	RecordJSON []string `json:"recordJSON"`
+	// Per-journey overrides. Zero = fall back to the global PROBE_INTERVAL_MS / 10s client timeout.
+	IntervalMs int `json:"intervalMs"`
+	TimeoutMs  int `json:"timeoutMs"`
 }
 
 type result struct {
 	up    float64
 	durMs float64
+	// Recorded response fields, surfaced as metric attributes (see recordJSON).
+	attrs []attribute.KeyValue
 }
 
 var (
@@ -90,12 +118,44 @@ func runJourney(ctx context.Context, client *http.Client, j Journey) result {
 		want = 200
 	}
 	ok := resp.StatusCode == want && (j.ExpectBody == "" || strings.Contains(string(respBody), j.ExpectBody))
+
+	// Decode once for both expectJSON and recordJSON. A body that is not an object simply yields no
+	// fields — it must not turn a healthy journey into a failure, so the error is deliberately
+	// ignored and only DECLARED expectations can fail below.
+	var fields map[string]any
+	if len(j.ExpectJSON) > 0 || len(j.RecordJSON) > 0 {
+		_ = json.Unmarshal(respBody, &fields)
+	}
+
+	for k, wantVal := range j.ExpectJSON {
+		got, _ := fields[k].(string)
+		if got != wantVal {
+			ok = false
+			log.Warn("journey field mismatch", "journey", j.Name, "field", k, "want", wantVal, "got", got)
+		}
+	}
+
+	// Attributes are recorded even when the journey FAILED — knowing which provider served a bad
+	// response is exactly the diagnostic that was missing before.
+	attrs := make([]attribute.KeyValue, 0, len(j.RecordJSON))
+	for _, k := range j.RecordJSON {
+		v, _ := fields[k].(string)
+		if v == "" {
+			v = "unknown" // never emit an empty label — an absent value is itself a signal
+		}
+		attrs = append(attrs, attribute.String(k, v))
+	}
+
 	up := 0.0
 	if ok {
 		up = 1.0
 	}
-	log.Info("journey", "name", j.Name, "status", resp.StatusCode, "ok", ok, "ms", dur)
-	return result{up: up, durMs: dur}
+	logArgs := []any{"name", j.Name, "status", resp.StatusCode, "ok", ok, "ms", dur}
+	for _, a := range attrs {
+		logArgs = append(logArgs, string(a.Key), a.Value.AsString())
+	}
+	log.Info("journey", logArgs...)
+	return result{up: up, durMs: dur, attrs: attrs}
 }
 
 func loadJourneys() []Journey {
@@ -148,8 +208,9 @@ func main() {
 		mu.Lock()
 		defer mu.Unlock()
 		for name, r := range results {
-			o.ObserveFloat64(upG, r.up, metric.WithAttributes(attribute.String("journey", name)))
-			o.ObserveFloat64(durG, r.durMs, metric.WithAttributes(attribute.String("journey", name)))
+			a := append([]attribute.KeyValue{attribute.String("journey", name)}, r.attrs...)
+			o.ObserveFloat64(upG, r.up, metric.WithAttributes(a...))
+			o.ObserveFloat64(durG, r.durMs, metric.WithAttributes(a...))
 		}
 		return nil
 	}, upG, durG)
@@ -160,21 +221,42 @@ func main() {
 			intervalMs = n
 		}
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
 	log.Info("synthetic prober started", "journeys", len(journeys), "intervalMs", intervalMs)
 
-	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
-	defer ticker.Stop()
-	run := func() {
-		for _, j := range journeys {
-			r := runJourney(ctx, client, j)
-			mu.Lock()
-			results[j.Name] = r
-			mu.Unlock()
-		}
+	// One goroutine per journey, each on its OWN clock. A single shared ticker meant the slowest and
+	// most expensive journey dictated the cadence of the cheapest — see the header note on the cap.
+	var wg sync.WaitGroup
+	for _, j := range journeys {
+		wg.Add(1)
+		go func(j Journey) {
+			defer wg.Done()
+
+			every := intervalMs
+			if j.IntervalMs > 0 {
+				every = j.IntervalMs
+			}
+			timeout := 10 * time.Second
+			if j.TimeoutMs > 0 {
+				timeout = time.Duration(j.TimeoutMs) * time.Millisecond
+			}
+			// Per-journey client: a shared 10s timeout was cutting off real LLM completions that
+			// legitimately take 5–10s, producing "outages" that were only ever client-side.
+			client := &http.Client{Timeout: timeout}
+			log.Info("journey scheduled", "name", j.Name, "intervalMs", every, "timeoutMs", int(timeout/time.Millisecond))
+
+			step := func() {
+				r := runJourney(ctx, client, j)
+				mu.Lock()
+				results[j.Name] = r
+				mu.Unlock()
+			}
+			step()
+			t := time.NewTicker(time.Duration(every) * time.Millisecond)
+			defer t.Stop()
+			for range t.C {
+				step()
+			}
+		}(j)
 	}
-	run()
-	for range ticker.C {
-		run()
-	}
+	wg.Wait()
 }

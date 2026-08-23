@@ -62,8 +62,27 @@ route:
       repeat_interval: 1h
 
 receivers:
-  # Default: Telegram + email (two independent paths) for tickets and anything unmatched.
+  # Default: the receiver for `severity: ticket` AND for anything unmatched.
+  #
+  # ⚠ 2026-08-23 — THIS RECEIVER HAD NO WORKING TRANSPORT, AND IT IS THE ONE THAT MATTERS MOST.
+  # It carried only Telegram and email. Both were placeholders in every environment
+  # (`ops@notify.gaiada.invalid` via a Mailpit sink; `ALERT_CHAT_ID=100000000` with a bot token that
+  # fails `getMe`). Meanwhile `page-all` had the webhook legs — so the ONE receiver with a real
+  # transport was the one reached least often.
+  #
+  # The cost was measured, not theoretical: `GatewayBudgetNearCap` fired ~13 h/day and
+  # `SyntheticJourneyFailing` ~14 h/day for over 24 h — both `severity: ticket`, both routed here,
+  # both delivered nowhere — while the AI gateway 429'd real user traffic for a third of every day.
+  #
+  # The webhook leg below is what makes the DEFAULT path capable of reaching a human. Do not remove it
+  # on the grounds that "pages already have it": the default route is where most alerts land.
   - name: default-multi
+    webhook_configs:
+      # Primary reachable transport. Set ALERT_WEBHOOK_URL to an ntfy topic (or Slack/Discord webhook).
+      # Left unset this posts to an unresolvable host and fails loudly in the Alertmanager log —
+      # which is still strictly better than the previous state, where it failed SILENTLY.
+      - url: "${ALERT_WEBHOOK_URL}"
+        send_resolved: true
     telegram_configs:
       - bot_token: "${TELEGRAM_BOT_TOKEN}"
         chat_id: ${ALERT_CHAT_ID}

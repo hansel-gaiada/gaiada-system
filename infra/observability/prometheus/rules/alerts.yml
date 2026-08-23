@@ -152,9 +152,28 @@ groups:
       # Known bound (design doc §8, unchanged by this generalization): a host dark longer than the
       # 48h lookback drops out of the expression entirely — the console's inventory-driven "never"
       # state is the long-horizon catch for that case, not this alert.
+      # ⚠ CORRECTED 2026-08-23 — `env!=""` added. The comment above states that grouping by (host, env)
+      # "adds no new grouping key that could split a host's series in two", because env is a functional
+      # dependent of host. **That is false in practice, and it produced a permanent false page.**
+      # Measured on the live estate:
+      #     host=gda-aicenter env="production"  age=46s      ✓
+      #     host=sumopod      env="ops"         age=48s      ✓
+      #     host=sumopod      env=""            age=142077s  ← FIRED
+      # sumopod had a RETIRED label-set: `up` series that predate env being stamped. They stopped
+      # ~39.5h ago, so their group is permanently stale and the alert pages forever — for a host whose
+      # live series are one second old.
+      #
+      # Any label-set change on any host reproduces this: the OLD grouping keeps a frozen timestamp
+      # inside the 48h lookback and fires until it ages out — then "resolves" for the wrong reason,
+      # which is worse than never firing, because it teaches an operator the alert is noise.
+      #
+      # `env!=""` is the minimal correct filter: every real host stamps env (MSO-01 §4), so an
+      # env-less series is by definition a retired or misconfigured label-set rather than a host.
+      # A host genuinely missing env is caught by the console's inventory-driven "never" state
+      # (design doc §6), which is the intended long-horizon catch and does not depend on this rule.
       - alert: RemoteWriteStalled
         expr: |
-          (time() - max by (host, env) (last_over_time(timestamp(up{host!=""})[48h:1m]))) > 600
+          (time() - max by (host, env) (last_over_time(timestamp(up{host!="",env!=""})[48h:1m]))) > 600
         for: 0m
         labels:
           severity: page
