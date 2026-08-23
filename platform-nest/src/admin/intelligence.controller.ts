@@ -7,7 +7,12 @@
 // *triggering* user's authority, so only platform-wide admins may read it (§4). Degrades to
 // []/404 when the runner isn't configured or unreachable, same fail-soft convention as the rest
 // of this controller.
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, HttpException, NotFoundException, Param, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+//
+// O4 (2026-08-23) adds `GET :tenantId/agents/runs/:runId/events` — the data path for the office
+// canvas's real (non-demo) agent activity feed, proxying the S0 event spine
+// (`ai-agents/src/runner/store.ts`'s `agent_run_events`, commit 2160fb5). Same gate as the run
+// transcript above; see that endpoint's own comment for the polling-vs-SSE call.
+import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, HttpException, NotFoundException, Param, Post, Query, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { config, knowledgeIngestEnabled } from "../config";
 import { authorize } from "../core/http";
@@ -71,6 +76,22 @@ interface RunnerRunRow {
   endedAt: number;
 }
 
+// S0/O4 — the runner's `agent_run_events` row shape (ai-agents/src/runner/store.ts's
+// `RunEventRow`). `tenantId` is deliberately NOT whitelisted through by `reshapeEvent` below —
+// every other reshape in this file drops it too (the caller already knows its own tenant from
+// the route param).
+interface RunnerEventRow {
+  eventId: string;
+  runId: string;
+  goalId: string;
+  seq: number;
+  ts: string;
+  kind: string;
+  detail: string;
+  durationMs: number | null;
+  parentRunId: string | null;
+}
+
 /** Runner's GoalListItem -> the UI's AgentGoal (platform-ui/src/lib/admin.ts): budgetSpent =
  *  modelCalls+toolCalls, budgetTotal from the budget caps, fanOut passthrough, plus the
  *  additive lifecycle/error/approval fields. */
@@ -104,6 +125,22 @@ function reshapeRun(r: RunnerRunRow) {
     provider: r.provider,
     startedAt: r.startedAt,
     endedAt: r.endedAt,
+  };
+}
+
+/** Whitelist the runner's in-flight step-event shape onto the wire, same discipline as
+ *  `reshapeGoal`/`reshapeRun` above — the runner's payload is never passed through raw. */
+function reshapeEvent(e: RunnerEventRow) {
+  return {
+    eventId: e.eventId,
+    runId: e.runId,
+    goalId: e.goalId,
+    seq: e.seq,
+    ts: e.ts,
+    kind: e.kind,
+    detail: e.detail,
+    durationMs: e.durationMs,
+    parentRunId: e.parentRunId,
   };
 }
 
@@ -177,6 +214,58 @@ export class IntelligenceController {
       return reshapeRun(r);
     } catch {
       throw new NotFoundException("run not found");
+    }
+  }
+
+  // O4 (the office canvas's backend half) — in-flight step events for one run. Same gate as
+  // `agentRun` just above (elevated, or the caller is the ASST-21 handoff's own owner): a step's
+  // `detail` string can carry the same tool-output text a full transcript can, so it gets the same
+  // authority check, not the looser goal-list `authorize(activity read)` gate.
+  //
+  // POLLING, not SSE, and that is a deliberate call, not a placeholder for "SSE later" — see
+  // `ai-agents/src/runner/events-bus.ts`'s own header: the runner's fan-out is a bare in-process
+  // `EventEmitter` because the runner is single-replica today. Proxying `/runs/:id/events/stream`
+  // through platform-nest would chain SSE through two hops (browser -> platform-nest ->
+  // agent-runner) for a backend that cannot yet fan out across replicas anyway, adding a second
+  // long-lived-connection failure mode (platform-nest restarts/redeploys far more often than a
+  // dev would want to drop a demo-critical live view) for no capability the `since` cursor doesn't
+  // already give a single first consumer: `GET .../events?since=<seq>` is resumable (a client that
+  // missed a poll just asks for what it's missing), needs no hijacked response / heartbeat / cap
+  // bookkeeping on this side, and is exactly what `platformFetch` (a plain HTTP client, not an
+  // EventSource) can drive from `platform-ui` without inventing a second egress mechanism. If the
+  // runner is ever horizontally scaled AND the UI outgrows polling latency, the SSE proxy is a
+  // straight lift of `portal-stream.controller.ts`'s pattern on top of this same authority check —
+  // deferred, not designed away.
+  //
+  // Never 404s, mirroring the runner's own `GET /runs/:id/events` (see `store.ts`'s
+  // `GoalStore.listEvents` doc): an in-flight run frequently has no `agent_runs` row yet, so
+  // gating this on one existing (like `agentRun` above does via the runner's `getRun` 404) would
+  // defeat the entire point of an in-flight endpoint. Degrades to `{ events: [] }` on an
+  // unconfigured/unreachable runner too, same fail-soft convention as `agentGoals` above.
+  @Get(":tenantId/agents/runs/:runId/events")
+  async agentRunEvents(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("runId") runId: string,
+    @Query("since") sinceRaw?: string,
+  ) {
+    if (!isElevated(req)) {
+      const handoff = await withTenants([tenantId], (c) => fetchHandoffByRunId(c, runId), { modules: ["assistant"] });
+      if (!handoff) throw new ForbiddenException("platform admin required");
+      await authorize(req.principal, { kind: "agent_run", tenantId, ownerId: handoff.ownerUserId, origin: "assistant_handoff" }, "read");
+    }
+    const since = Math.max(Number(sinceRaw ?? 0) || 0, 0);
+    const svc = config.services.agents;
+    if (!svc.url) return { events: [] };
+    try {
+      const res = (await getJson(
+        `${svc.url.replace(/\/$/, "")}/runs/${encodeURIComponent(runId)}/events?tenant=${encodeURIComponent(tenantId)}&since=${since}`,
+        svc.token,
+      )) as { events?: RunnerEventRow[] };
+      if (!Array.isArray(res.events)) return { events: [] };
+      return { events: res.events.map(reshapeEvent) };
+    } catch {
+      return { events: [] };
     }
   }
 

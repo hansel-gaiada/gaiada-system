@@ -142,6 +142,27 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
         if (req.method === "GET" && url.startsWith("/goals/missing")) {
           return send(404, { error: "goal not found" });
         }
+        // O4 — `/runs/run-1/events`. Checked BEFORE the bare `/runs/run-1` detail route below:
+        // that route matches on `url.startsWith("/runs/run-1")`, which a naive ordering would let
+        // swallow `/runs/run-1/events?...` too (it's a string prefix of it). Echoes the `tenant=`
+        // query param the controller forwarded so tests can prove tenant scoping isn't
+        // hardcoded/lost, and honors `since` exactly like the real runner's `GoalStore.listEvents`
+        // (strictly greater than, ascending).
+        if (req.method === "GET" && url.startsWith("/runs/run-1/events")) {
+          const sinceMatch = /since=(\d+)/.exec(url);
+          const since = sinceMatch ? Number(sinceMatch[1]) : 0;
+          const tenantMatch = /tenant=([^&]+)/.exec(url);
+          const tenantParam = tenantMatch ? decodeURIComponent(tenantMatch[1]) : "";
+          // Simulates the runner's own tenant filter (store.ts's `listEvents` is `WHERE tenant_id=$2`):
+          // only the tenant these events actually belong to gets any rows back.
+          if (tenantParam !== tenant) return send(200, { events: [] });
+          const all = [
+            { eventId: "e1", runId: "run-1", goalId: "goal-1", seq: 1, ts: "2026-08-23T00:00:01Z", kind: "model", detail: "planned", durationMs: 120, parentRunId: null },
+            { eventId: "e2", runId: "run-1", goalId: "goal-1", seq: 2, ts: "2026-08-23T00:00:02Z", kind: "tool", detail: "search ok", durationMs: 300, parentRunId: null },
+            { eventId: "e3", runId: "run-1", goalId: "goal-1", seq: 3, ts: "2026-08-23T00:00:03Z", kind: "delegate", detail: "-> researcher", durationMs: null, parentRunId: "run-1" },
+          ];
+          return send(200, { events: all.filter((e) => e.seq > since) });
+        }
         if (req.method === "GET" && url.startsWith("/runs/run-1")) {
           return send(200, {
             runId: "run-1", goalId: "goal-1", agent: "researcher", status: "ok", outcome: "found 3 docs",
@@ -153,6 +174,16 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
         // "run-1" above on purpose: "run-1" has NO `assistant_handoffs` row anywhere in this suite,
         // which is exactly what keeps it proving the UNCHANGED elevated-only path; this one gets a
         // handoff row inserted by the ASST-21 tests below, so the two can never be confused.
+        //
+        // Same ordering rule as above: `/events` checked BEFORE the bare run-detail route.
+        if (req.method === "GET" && url.startsWith(`/runs/${HANDOFF_RUN_ID}/events`)) {
+          const sinceMatch = /since=(\d+)/.exec(url);
+          const since = sinceMatch ? Number(sinceMatch[1]) : 0;
+          const all = [
+            { eventId: "he1", runId: HANDOFF_RUN_ID, goalId: "goal-handoff-1", seq: 1, ts: "2026-08-23T00:00:01Z", kind: "tool", detail: "projects.list ok", durationMs: 80, parentRunId: null },
+          ];
+          return send(200, { events: all.filter((e) => e.seq > since) });
+        }
         if (req.method === "GET" && url.startsWith(`/runs/${HANDOFF_RUN_ID}`)) {
           return send(200, {
             runId: HANDOFF_RUN_ID, goalId: "goal-handoff-1", agent: "status-reporter", status: "ok",
@@ -231,6 +262,69 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
   });
 
   // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // O4 — run events proxy (the office canvas's backend data path). Same elevated-only gate as the
+  // run transcript above (reused, not reimplemented); whitelisted reshape; the `since` cursor.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("O4: run events proxy", () => {
+    it("is elevated-only, like the run transcript", async () => {
+      const forbidden = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events`, headers: asUser(member) });
+      expect(forbidden.statusCode).toBe(403);
+
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+    });
+
+    it("reshapes the runner's event rows to the whitelisted shape, ordered, with the delegation edge", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      const body = r.json() as { events: Array<Record<string, unknown>> };
+      expect(body.events).toEqual([
+        { eventId: "e1", runId: "run-1", goalId: "goal-1", seq: 1, ts: "2026-08-23T00:00:01Z", kind: "model", detail: "planned", durationMs: 120, parentRunId: null },
+        { eventId: "e2", runId: "run-1", goalId: "goal-1", seq: 2, ts: "2026-08-23T00:00:02Z", kind: "tool", detail: "search ok", durationMs: 300, parentRunId: null },
+        { eventId: "e3", runId: "run-1", goalId: "goal-1", seq: 3, ts: "2026-08-23T00:00:03Z", kind: "delegate", detail: "-> researcher", durationMs: null, parentRunId: "run-1" },
+      ]);
+      // No `tenantId` field leaks through — reshapeEvent whitelists it out like every other
+      // reshape in this file.
+      expect(body.events[0]).not.toHaveProperty("tenantId");
+    });
+
+    it("the `since` cursor: since=0 returns everything, since=<last seq> returns only what's newer", async () => {
+      const first = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events?since=0`, headers: asUser(admin) });
+      expect(first.statusCode).toBe(200);
+      const firstBody = first.json() as { events: Array<{ seq: number }> };
+      expect(firstBody.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+      const lastSeq = firstBody.events[firstBody.events.length - 1].seq;
+
+      const second = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events?since=${lastSeq}`, headers: asUser(admin) });
+      expect(second.statusCode).toBe(200);
+      const secondBody = second.json() as { events: Array<{ seq: number }> };
+      expect(secondBody.events).toEqual([]); // nothing newer than the cursor the caller already has
+
+      const middle = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events?since=1`, headers: asUser(admin) });
+      expect((middle.json() as { events: Array<{ seq: number }> }).events.map((e) => e.seq)).toEqual([2, 3]);
+    });
+
+    it("tenant scoping: the route's tenantId is forwarded to the runner, not hardcoded or dropped — a different tenant sees no rows for the same runId", async () => {
+      const otherTenant = await createCompany("Agency B3-Other", ["agency"]);
+      // `admin` is platform_admin @ global, so the elevated gate itself does not discriminate by
+      // tenant — this proves scoping happens where it must: the `tenant=` query param the
+      // controller sends to the runner, which the stub above echoes back against.
+      const r = await app.inject({ method: "GET", url: `/api/${otherTenant}/agents/runs/run-1/events`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      expect((r.json() as { events: unknown[] }).events).toEqual([]);
+    });
+
+    it("degrades to { events: [] } when AGENTS_URL is unconfigured", async () => {
+      const prev = config.services.agents;
+      config.services.agents = { url: "", token: "" };
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/run-1/events`, headers: asUser(admin) });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ events: [] });
+      config.services.agents = prev;
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
   // ASST-21 — the additive handoff-owner carve-out, and its regression guard.
   // ══════════════════════════════════════════════════════════════════════════════════════════════
   // Design: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md ("### ASST-21").
@@ -296,6 +390,19 @@ describe.skipIf(!TEST_URL)("agent goals proxy (B3)", () => {
       expect(r.statusCode).toBe(200);
       const run = r.json() as { steps: Array<{ kind: string; detail: string }> };
       expect(run.steps).toEqual([{ kind: "tool", detail: "projects.list ok" }]);
+    });
+
+    // O4 — the events proxy reuses the SAME gate line as the transcript above, so the owner
+    // carve-out extends to it for free; pinned here so a future refactor that splits the gates
+    // apart gets caught.
+    it("the same owner-scoped carve-out extends to the events proxy (same gate, reused not reimplemented)", async () => {
+      const r = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/${HANDOFF_RUN_ID}/events`, headers: asUser(owner) });
+      expect(r.statusCode).toBe(200);
+      const body = r.json() as { events: Array<{ detail: string }> };
+      expect(body.events).toEqual([{ eventId: "he1", runId: HANDOFF_RUN_ID, goalId: "goal-handoff-1", seq: 1, ts: "2026-08-23T00:00:01Z", kind: "tool", detail: "projects.list ok", durationMs: 80, parentRunId: null }]);
+
+      const other = await app.inject({ method: "GET", url: `/api/${tenant}/agents/runs/${HANDOFF_RUN_ID}/events`, headers: asUser(sameCompanyOther) });
+      expect(other.statusCode).toBe(403);
     });
 
     it("a DIFFERENT same-company user CANNOT read it", async () => {
