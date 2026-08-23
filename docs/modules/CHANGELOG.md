@@ -11,6 +11,41 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.31` — 2026-08-23 — correcting how SMM-35's agent gate actually works
+
+**This corrects the mechanism `0.5.30` claimed, not its outcome.** That entry said no real LLM can
+drive `social.createReplyDraft` unattended "until an operator runs the D13 eval + enrolls it".
+Verified against the code, that is **not what gates it**:
+
+- `evaledProviders` is **detective, not preventive**. `ai-agents/src/obs/collector.ts`'s own header
+  says it "closes a DETECTIVE half of the D13 failover gate"; `writesOnUnevaledProvider` feeds the
+  `agent_writes_on_unevaled_provider` gauge. Nothing refuses a write because a provider is unenrolled.
+  So `evaledProviders: []` **counts** such writes; it does not stop them.
+- The hub's suspension does not apply either. `mcp-hub/src/policy.ts` suspends
+  `isUnattended && write && impact !== "low"`, and `social.createReplyDraft` is declared
+  `impact: "low"` platform-side — the refusal message itself reads "only low-impact writes run
+  unattended". So an unattended agent holding this tool creates a draft row **without any approval**,
+  by design.
+
+**What IS true, and what actually makes it safe.** Two separate gates on two separate surfaces, both
+intentional and both mirroring the established `taskFiler` precedent:
+1. **Via `/assistant`** — `high_write` in `ai-agents/src/specialists.ts` forces the ASST-23 confirm,
+   then approve, then D14 execute. Preventive, and evidenced by `0.5.30`'s card-state test.
+2. **Via the hub, unattended** — no approval, because the write's blast radius is genuinely low: it
+   inserts one `social_inbox_messages` row at `status='draft'`, never sent, never network-visible,
+   never client-visible. That is the real safety argument, and it is a sound one.
+
+The `high_write`-on-hub-`low` divergence is deliberate: `high_write` answers "may this run without a
+human confirming from a chat turn?" (D-A: no, always), which is a different question from the hub's
+impact tier. Both classifications are correct for their own surface.
+
+**Why this correction matters more than the wording:** a reader who believed enrollment was
+preventive would reasonably add a second unattended agent write and expect the same non-existent
+gate to hold it. The honest rule is that **blast radius is the gate for unattended agent writes**, and
+`evaledProviders` only tells you afterwards that an unenrolled provider did one.
+
+**Unchanged:** all code, all tests, all figures from `0.5.30`. This is a documentation correction only.
+
 ### social-media `0.5.30` — 2026-08-23 — closing SMM-35's remaining half: one social write reachable from `/assistant` (senior-be)
 
 **Added** — the assistant's "social summary" READ landed a pass ago (SMM-35); this pass exposes exactly
