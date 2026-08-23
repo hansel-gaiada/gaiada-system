@@ -16,6 +16,7 @@
     "seed:search": "node dist/seed/search.js",
     "seed:portal-clients": "node dist/seed/portal-clients.js",
     "provision:roster": "node dist/seed/provision-roster.js",
+    "seed:roster-access": "node dist/seed/roster-access.js",
     "import:nexus": "node dist/seed/nexus-import.js",
     "test": "vitest run",
     "test:mail-corpus": "vitest run src/mail",
