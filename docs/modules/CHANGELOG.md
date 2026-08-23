@@ -11,6 +11,41 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.28` — 2026-08-23 — brand-corpus provenance is derived, not asserted
+
+**Fixed (RAG integrity)** — `ingestBrandKnowledge` sent a literal `provenance: "human"`, commented
+"caller-supplied approved content, not agent-generated". That claim was unfounded: the endpoint accepts
+arbitrary `body.chunks`, and `social.ingestBrandCorpus` is an MCP tool that **executes unattended**, so
+an agent could submit its own output and have it stamped as human authorship.
+
+**Why this is more than a wrong label.** WS8 scores retrieval as `cosine × confidence × provenance
+factor`, and `ai-agents/src/knowledge/store.ts` sets `confidence = provenance === "agent" ? 0.6 : 1`.
+Agent text mislabelled `human` therefore **outranks genuine human brand guidance** in the very
+retrieval that grounds the next AI draft — a self-reinforcing loop that degrades the corpus every
+cycle with nothing visible from the outside. Provenance is now **derived** from the caller and the
+parameter is required with no default, so `tsc` names any new call site rather than letting it inherit
+the dangerous value.
+
+**⚠ The rule is allow-list shaped, and my first version of it was wrong in the harmful direction.** I
+initially wrote `assurance === "low" ? "agent" : "human"`, reasoning from "automation principals are
+minted assurance low". But `auth/guards.ts` mints only two levels for a real caller — `"high"` on the
+interactive path (IdP JWT, or `x-user-id` in dev/tests) and **`"linked"` on the OBO envelope path,
+which is how an agent calls**. An agent arriving through a verified identity link is `"linked"`, so
+that rule would have stamped its output `"human"` and left the defect fully intact while appearing
+fixed. The rule is now `assurance === "high" ? "human" : "agent"` — only `"high"` earns `"human"`, so a
+future assurance level added to the union defaults to the safe answer instead of the harmful one.
+
+**Flagged, not taken unilaterally** — the stronger fix is an assurance FLOOR on the endpoint (`notLow`,
+per `rbac/can.ts`): every successful ingest would then be provably human and the agent path closed
+outright rather than down-weighted. That removes an existing agent capability, which is a product
+decision rather than a defect fix, so it is the owner's call. **Known cost of the current fix:** a
+non-interactive caller's genuine guidelines are ingested at agent confidence (0.6).
+
+**Tests** — `social-ai-drafts.test.ts` 12/12 (+2). The fake WS8 fixture now records the claimed
+provenance, not just the text; a fixture that drops that field cannot catch this direction at all.
+Proven red-then-green by reintroducing my own deny-list mistake: the `"linked"` assertion fails with
+`expected 'human' to be 'agent'`. `src/modules/social` 579/0/0 (37 files).
+
 ### social-media `0.5.27` — 2026-08-23 — the publish "approve variant" endpoint (SMM-40)
 
 **Added** — closes the last open follow-up `docs/plans/smm-tracker.md` named (found by SMM-17):

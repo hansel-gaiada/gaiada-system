@@ -73,7 +73,7 @@ import { validateVariant, estimateCostUsd, isNetwork, type Network, type QuotaSn
 // `publish-precondition.ts`/`dispatch.ts` too — never a second copy of the arithmetic.
 import { resolveXPricing, readUsageSnapshot } from "./usage-ledger";
 import { completeViaGateway } from "./gateway-client";
-import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope } from "./knowledge-client";
+import { ingestBrandKnowledge, queryBrandKnowledge, brandCorpusScope, brandCorpusProvenance } from "./knowledge-client";
 // SMM-26 — the smm-agent-content-brief flow's own DB/AI orchestration; this controller validates
 // the request shape and calls authorize(), content-brief.ts owns everything past that (see its
 // own header for why authorize() never lives there).
@@ -566,7 +566,27 @@ export class SocialController {
     const eng = await this.loadEngagementForAi(tenantId, engagementId);
     if (eng.toolScope.ai?.drafting !== true) refuse("ai_drafting_disabled");
 
-    await ingestBrandKnowledge(tenantId, eng.clientId, chunks);
+    // PROVENANCE IS DERIVED, never taken from the caller — an agent would simply assert "human".
+    //
+    // The platform cannot see authorship here. The one signal it CAN substantiate is assurance:
+    // `auth/guards.ts` mints `"high"` only on the interactive path and `"linked"` on the OBO
+    // envelope path, which is how an agent calls. See `brandCorpusProvenance` for the full rule and
+    // for the inverted first version of it that would have left this defect in place.
+    //
+    // The two errors are NOT symmetric, which is what settles it: labelling agent text `human`
+    // promotes it above real brand guidance in the RAG scoring that grounds the next draft (see
+    // knowledge-client.ts), while labelling human text `agent` merely scores it 0.6 instead of 1.0.
+    // One corrupts the corpus permanently and silently; the other slightly under-weights a
+    // legitimate document. So `low` resolves to "agent".
+    //
+    // KNOWN COST, named rather than hidden: a human who has not stepped up gets their genuine
+    // guidelines ingested at agent confidence. The stronger fix is an assurance FLOOR on this
+    // endpoint (`notLow`, per rbac/can.ts) — then every successful ingest is provably human and the
+    // agent path is closed outright rather than down-weighted. That removes an existing agent
+    // capability, which is a product decision rather than a defect fix, so it is flagged for the
+    // owner instead of taken unilaterally.
+    const provenance = brandCorpusProvenance(req.principal.assurance);
+    await ingestBrandKnowledge(tenantId, eng.clientId, chunks, provenance);
     const scope = brandCorpusScope(tenantId, eng.clientId);
 
     await withTenants(

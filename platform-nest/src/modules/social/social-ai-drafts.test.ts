@@ -64,6 +64,7 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
   let engB: string;
   let fakeServer: Server;
   let ingested: Record<string, string[]>;
+  let ingestedProvenance: Record<string, string>;
   let searches: Array<{ scope: string; query: string }>;
 
   async function makeAccount(client: string, network = "instagram"): Promise<string> {
@@ -127,6 +128,7 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
     // (store.search: `acl = '{}' OR scope = ANY(acl)`, and ingest sets `acl:[scope]`) — a fixture
     // that actually behaves like the isolation boundary, not just a stub that echoes the input.
     ingested = {};
+    ingestedProvenance = {};
     searches = [];
     fakeServer = createServer((req, res) => {
       let raw = "";
@@ -135,6 +137,9 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
         const body = raw ? JSON.parse(raw) : {};
         if (req.method === "POST" && req.url === "/ingest") {
           ingested[body.sourceRef as string] = body.chunks as string[];
+          // Record WHAT WAS CLAIMED about authorship, not just the text — a fixture that drops this
+          // field cannot catch the corpus-poisoning direction at all.
+          ingestedProvenance[body.sourceRef as string] = body.provenance as string;
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ written: (body.chunks as string[]).length }));
         } else if (req.method === "POST" && req.url === "/search") {
@@ -379,5 +384,35 @@ describe.skipIf(!TEST_URL)("social brand-voice RAG + AI drafting (SMM-19)", () =
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("invalid_ids");
+  });
+
+  // ── provenance: the corpus-poisoning direction ────────────────────────────────────────────────
+  it("stamps an INTERACTIVE human's ingest as provenance 'human'", async () => {
+    // `asUser` goes through guards.ts's dev `x-user-id` path, which mints assurance "high" — the
+    // only level that evidences an interactive human.
+    const res = await app.inject({
+      method: "POST", url: `/api/${A}/modules/social/engagements/${engA}/brand-corpus/ingest`, headers: asUser(uA),
+      payload: { chunks: ["Our tone is warm and specific."] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(ingestedProvenance[`social-brand:${A}:${clientA}`]).toBe("human");
+  });
+
+  it("never hardcodes 'human' — the value travels from the caller's assurance", async () => {
+    // The regression this guards: `ingestBrandKnowledge` sent a literal `provenance: "human"` with
+    // the comment "caller-supplied approved content, not agent-generated". That claim was unfounded —
+    // this endpoint takes arbitrary `body.chunks`, and `social.ingestBrandCorpus` is an MCP tool that
+    // EXECUTES UNATTENDED, so an agent could have its own output stamped as human authorship. It
+    // matters beyond the label: WS8 scores retrieval as `cosine × confidence × provenance factor` and
+    // sets `confidence = provenance === "agent" ? 0.6 : 1` (ai-agents/src/knowledge/store.ts), so
+    // mislabelled agent text OUTRANKS genuine brand guidance in the retrieval that grounds the next
+    // draft — a self-reinforcing loop, invisible from the outside.
+    const { brandCorpusProvenance } = await import("./knowledge-client");
+    expect(brandCorpusProvenance("high")).toBe("human");
+    // "linked" is the OBO-envelope path — how an AGENT calls. THIS is the assertion that fails if
+    // anyone reintroduces a deny-list rule like `!== "low"`: an agent with a verified identity link
+    // is "linked", not "low", so such a rule stamps it "human" and the defect silently returns.
+    expect(brandCorpusProvenance("linked")).toBe("agent");
+    expect(brandCorpusProvenance("low")).toBe("agent");
   });
 });
