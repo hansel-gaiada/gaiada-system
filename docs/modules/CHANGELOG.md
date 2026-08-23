@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.36.0` — 2026-08-23 — two targeted seeds: roster ACCESS, and the HR people file
+
+**Added**
+- **`seed:roster-access`** — users, company memberships, role grants and org-chart seats for the real
+  roster, and nothing else. Written instead of running `seed:agency` because checking the live estate
+  first showed it is deliberately CLEAN (3 companies, 53 users, 52 grants; zero
+  clients/projects/tasks/invoices/memberships/positions). `seed:agency` is a full demo vertical —
+  running it to give nineteen people a `users` row would have injected all of it. The suite's most
+  important assertion is the negative one: the business-data tables must still be empty afterwards.
+- **`seed:employee-files`** — `employees` rows for the roster. Migration 0109 created that table in
+  Phase 2 and NOTHING had ever written to it. Kept separate from roster-access because access and
+  employment are different claims: automation/bot principals are ordinary `users` rows by design, and
+  `employees.user_id` is nullable so a `pending_start` candidate can exist before any account.
+
+**Two traps these had to route around**
+- `company_memberships` and `employees` are both RLS-walled, and `employees` needs the MODULE guc too
+  (`app_module_allowed('hr')`). A write without it succeeds having written zero rows. The HR suite
+  therefore reads the table twice — with and without `{ modules: ["hr"] }` — and asserts they
+  DISAGREE; a reader that also forgot the scope would read zero and agree with a broken seed.
+- Both scripts REFUSE if `Gaia Digital Agency` is absent rather than creating it. Creating a company
+  by name is the fork that hit the resort (migration 202608230612).
+
+**Deliberately left NULL:** `hire_date` (nobody supplied one; a fabricated HR date is worse than an
+absent one) and `manager_user_id` (0109 §2.1 makes it an OVERRIDE of the org chart, not the reporting
+line — the chart already answers that from the lead seats).
+
 ### platform-nest `0.35.1` — 2026-08-23 — the resort rename needed a migration, and one DELETE was RLS-blind
 
 **Fixed**
@@ -1357,6 +1383,40 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.065.0142a` - 2026-08-23 - the roster gets real access
+
+Manifest (counter +2, 0140 -> 0142): `platform-nest 0.35.1 -> 0.36.0`,
+`social-media 0.5.25 -> 0.5.26`.
+
+The cut that makes the 19 provisioned Keycloak accounts actually usable. They have been able to
+AUTHENTICATE since 0139a and to do nothing else — only 1 of 20 had a `users` row, and none had a
+company membership, which is what `inTenant` is built from. This ships `seed:roster-access` and
+`seed:employee-files` so that can be fixed without running the demo showcase into a clean estate.
+
+⚠ SHIPPING THE SEEDS IS NOT RUNNING THEM. Both are opt-in scripts; the deploy only puts them on the
+box. They are run deliberately afterwards, against a live estate whose state was checked first.
+
+Also carries `social-media 0.5.26` (OAuth state bound to the principal who started it) from another
+session — a tag builds `main`, so it ships whatever is on the tip, and saying so here beats leaving
+it to a commit-range diff.
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.36.0`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.2` |
+| platform-ui | `0.41.0` | ai-agents | `0.8.0` | **social-media** | **`0.5.26`** |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.2` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+**Verification:** roster-access 6/6 and employee-files 6/6, each including a negative control — the
+business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
+and asserting the reads disagree. tsc and `lint:withtenants` clean.
 
 ### `Alpha 01.064.0140a` - 2026-08-23 - the resort rename reaches the estate
 
