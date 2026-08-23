@@ -36,6 +36,19 @@ not afterwards.
 | P4 agents + assistant | **3** (+1 partial: SMM-35 summary-read only) | 3 |
 | Decision-gated | — | 3 (1 dead) |
 
+**Note (2026-08-23, senior-integrator, SMM-26 follow-up):** the "weekly per opted-in engagement"
+content-brief sweep landed — the SMM-26 follow-up this file named and left for an architect
+decision. Owner-authorised: a dedicated automation principal, ONE PER TENANT, never one global
+principal (tested against WS8's real `/search` predicate — a global principal would leak every
+opted-in tenant's whole internal corpus into every other tenant's sweep call, not just each one's own
+brand corpus). New `src/seed/social-content-brief-automation.ts` (mint/lookup, least-privilege — no
+Cerbos role) + `src/modules/social/content-brief-job.ts` (the sweep, dark by default, `main.ts`
+wired). Opt-in is `social_engagements.tool_scope.ai.autoWeeklyBrief`, absent-defaults-false. An
+opted-in tenant with no provisioned principal is refused (`principal_not_provisioned`), never
+silently skipped and never drafted ungrounded. See this file's own SMM-26-follow-up evidence block
+(just above "Small follow-ups", after the "What is actually left" table). Module `social-media
+0.5.28`.
+
 **Note (2026-08-23, senior-be, SMM-40):** the publish "approve variant" endpoint landed — the LAST
 item on this file's own "found but not fixed" list, closed by the owner's decision (D14 executable
 approval, never a state column). `POST variants/:variantId/approve` mints the one-shot
@@ -2535,10 +2548,138 @@ pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
 |---|---|
 | **SMM-22 follow-ups** | ~~Usage panel not browser-driven (unit/type-checked only)~~ **CLOSED 2026-08-23** — driven in a browser, 14/14 (see the e2e note below); ~~`resource_mcp_tool.yaml` not updated for the agent/automation-origin metered-tool re-drive case~~ **CLOSED 2026-08-23, senior-be — see "Security follow-ups closed" evidence block above** (was already correctly denied; closed as documentation + regression test); X's real billing trigger (request-acceptance vs. confirmed-publish) is unverified against a live account (D-23) |
 | **SMM-25** full-stack e2e | 🟡 partial, and permanently so until D-23 clears — the DEMO_MODE Playwright console suite landed this pass (13/13); the LIVE half cannot be built by anyone today (no credential exists anywhere in the estate) |
-| **SMM-26 follow-up** | the v1.0 design's "weekly per opted-in engagement" scheduled sweep for the content-brief flow was deliberately NOT built — needs an architect decision on an automation service identity before a principal-less job can legitimately call WS8's per-principal-scoped RAG search |
+| ~~**SMM-26 follow-up**~~ | ~~the v1.0 design's "weekly per opted-in engagement" scheduled sweep for the content-brief flow was deliberately NOT built — needs an architect decision on an automation service identity before a principal-less job can legitimately call WS8's per-principal-scoped RAG search~~ **CLOSED 2026-08-23 (senior-integrator)** — a dedicated, PER-TENANT automation principal, owner-authorised; the sweep now ships dark-by-default. See this file's own SMM-26-follow-up evidence block, immediately below this table. |
 | **SMM-27** | ✅ merged 2026-08-23 — see this file's own SMM-27 evidence block (P4 table above); the last unbuilt ticket in the department |
 | **SMM-35** | 🟡 partial — assistant "social summary" read landed; no social write reachable from `/assistant` this pass (own named cross-repo gap) |
 | **SMM-29 / 34** | Decision-gated (ClipsAI; generative images, waiting on `render-gateway-go` to leave `0.0.0`) |
+
+**SMM-26-follow-up evidence (2026-08-23, senior-integrator).** Worktree was CURRENT at cut time —
+`git rev-parse HEAD`/`origin/main` matched exactly, no merge needed. `content-brief.ts` was read
+first and confirmed byte-identical to `main` (a prior seat's attempt at this same follow-up left no
+trace — its worktree was lost mid-task, per this handoff's own briefing — so nothing was inherited or
+reconciled, only re-derived from source).
+
+**The identity decision and what forced it.** SMM-26 named the obstacle precisely: a principal-less
+scheduled job cannot legitimately call WS8's per-principal-scoped `/search`
+(`knowledge-client.ts#queryBrandKnowledge` requires a real `userId` and returns `[]` without one). The
+owner's authorised answer — mint a dedicated automation principal, per `platform-nest/CLAUDE.md`'s
+standing rule that automation/bot principals are rows in `users`, never a second principal table — is
+adopted. Read first, as instructed: `src/core/automation-approvals.controller.ts`,
+`src/core/approval-execute.ts`, `src/core/hub-client.ts`, `seed/automation.ts`, `seed/claude-seats.ts`.
+**No existing automation principal was reusable** — `seed:automation`'s roster
+(`AUTOMATION_ACCOUNTS`) is n8n-workflow-scoped service accounts that call Cerbos-gated mcp-hub tools;
+none is content-brief-shaped, and (see below) none could safely be reused across tenants even if one
+existed, since every existing account is minted against exactly ONE fixed tenant (the agency) by
+design.
+
+**One principal PER TENANT, never one global principal — TESTED against the real mechanism, not
+argued from the trap note alone.** Read `src/rbac/principal.ts#assemblePrincipal` directly: the field
+WS8's tenant pre-filter actually consumes is `companies` (the union of ACTIVE `company_memberships` +
+`client_contacts` rows), **not** `rootCompanies`/`home_company_id` (the field the "a global grant has
+no root" trap note is about — that trap governs Cerbos `inRoot` checks, which this principal never
+reaches, see below). Then read `ai-agents/src/knowledge/service.ts#resolveEnvelope` (`tenantSet:
+principal.companies ?? []`) and `ai-agents/src/knowledge/store.ts#search`'s own SQL directly: the
+predicate is `tenant_id = ANY($1::uuid[]) AND (acl = '{}' OR $2 = ANY(acl))` with **no third parameter
+narrowing `$1` back down to one tenant per call** — `$1` is the CALLER'S WHOLE tenant set, not the
+tenant the current request claims to be about. Cross-referenced against
+`docs/modules/knowledge/README.md`'s own two-tier table: `acl = '{}'` ("whole tenant") is the DEFAULT
+for every internal-tier document — clients, projects, tasks, meetings, reports, org structure, files,
+not only the brand corpus `queryBrandKnowledge` scopes by `acl`. **Conclusion, forced by this reading,
+not assumed beforehand:** a single global automation principal holding memberships across every
+opted-in tenant would be a candidate, on ANY one tenant's sweep call, to retrieve every OTHER opted-in
+tenant's entire internal ERP corpus — the exact "automation identity that can read every tenant's
+corpus is worse than no sweep" failure this follow-up was told to avoid. The fix is structural: each
+tenant gets its OWN `users` row with EXACTLY ONE active `company_memberships` row, so `companies` can
+never contain a second tenant BY CONSTRUCTION.
+
+**The scope boundary, TESTED, not merely intended.**
+`src/seed/social-content-brief-automation.test.ts` (6/6, against `gaiada-test-pg-2`) drives the REAL
+`assemblePrincipal()` call against two seeded tenants' provisioned principals and asserts
+`principalA.companies` is **exactly** `[tenantA]` and `principalB.companies` is **exactly**
+`[tenantB]` — each never containing the other. Also proven: the principal resolves `assurance:
+"linked"` (NOT `"low"` — this task's own briefing flagged "automation ⇒ low" as unreliable at the
+platform boundary, and this specific caller shape — an OBO envelope over a verified `identity_links`
+row, minted lazily by `queryBrandKnowledge`'s own pre-existing `selfLinkUpsert`, the SAME path a human
+caller's userId already rides — resolves `"linked"`, confirmed by driving it rather than assuming
+either value); holds **zero** role grants; and `users.home_company_id` is `NULL` (deliberately —
+`companies` reads from `company_memberships`, never `home_company_id`, so setting it would change
+nothing this principal needs while inviting a future root-gated check to treat it as anchored
+somewhere it has no business being). Idempotency also proven directly: re-running
+`ensureContentBriefAutomationPrincipal` for the same tenant returns the SAME `userId` and leaves
+`company_memberships` at exactly one row.
+
+**What this principal is (and is not) authorized for.** It never passes through Cerbos — no role, no
+permission-catalog entry, no policy edit (`docs/PERMISSION-CONTRACT.md` untouched) — because the
+sweep calls `runContentBrief` IN-PROCESS, never through `social.controller.ts`'s `authorize()`, the
+SAME "scheduled sweeps are platform-nest jobs, not permissioned endpoints" precedent
+`inbox-sync-job.ts`/`inbox-triage-job.ts`/`best-time-job.ts` already established (SMM-15/16/27). Its
+ONLY function is to be a resolvable identity for WS8's OBO principal lookup — least privilege,
+verified by the test above (zero roles), not merely claimed.
+
+**The sweep (`content-brief-job.ts`) and the opt-in.** `social_engagements.tool_scope.ai
+.autoWeeklyBrief` — additive jsonb, no migration, absent-defaults-**false** (the OPPOSITE polarity
+from `ai.drafting`'s own absent-defaults-true in `content-brief.ts`, since an unattended weekly draft
+spending gateway calls with nobody watching needs an explicit, affirmative opt-in rather than
+inheriting the on-demand tool's permissive default). The sweep LOOKS UP, never mints, the per-tenant
+principal (`findContentBriefAutomationPrincipal`) — deliberately: minting mid-sweep would make a
+fresh identity's standing read access an implicit side effect of an opted-in toggle, and this
+integrator's own mandate is that cross-service authority is never ambient. An opted-in engagement
+whose tenant has no provisioned principal is counted `principal_not_provisioned`, a FOURTH fact kept
+distinct from "never opted in" (`tool_scope.ai.autoWeeklyBrief` absent or explicitly `false`), "opted
+in but nothing to brief" (a real `refuse` outcome from `runContentBrief` itself, e.g.
+`ai_drafting_disabled`), and "drafted" — proven in `content-brief-job.test.ts` (6/6): the refused
+tenant's engagement writes ZERO rows to `social_posts` and the gateway mock is asserted to have NEVER
+been called, so this is a genuine refusal, not a silent skip dressed up as one. Dark by default and a
+HARD gate (`config.social.contentBrief.weeklySweep.enabled`, unset ⇒ off) — it spends
+`ai-gateway-go` calls per opted-in engagement, the same "hard gate, not perf opt-in" discipline
+`inboxPull`/`triage`/`bestTime` already carry. Wired in `main.ts` (surgical edit — this file was not
+off-limits to this ticket, only `social.controller.ts`/`index.ts` were).
+
+**Provisioning is a deliberate, operator-run seed, not a self-provisioning step inside the sweep.**
+`npm run seed:social-content-brief-automation -- <tenantId>` (new script, `src/seed/social-content-
+brief-automation.ts`) — idempotent, self-healing, mirrors `seed:automation`'s own contract. The same
+"give these people access" posture `seed:roster-access` uses for human grants, applied here to a
+machine one: an operator decides, visibly, that a tenant's engagements may be swept unattended,
+rather than the first opt-in toggle silently minting a new standing identity.
+
+**Test counts, all measured directly on this worktree.** `social-content-brief-automation.test.ts`
+(`src/seed/`, run alone since it sits outside `src/modules/social`): **6/6** passed (the
+identity/boundary proof, above). Full regression against a PRIVATE Cerbos (port 23592 over this
+worktree's own policy directory — never the shared `gaiada-cerbos-1`) and `DATABASE_URL_TEST`
+against `gaiada-test-pg-2:55435`: `src/modules/social/**` + the three
+`d14-smm-{09,17,22}-social-*-registry.test.ts` files — the SAME scope SMM-26's own baseline was
+measured against — **41 files, 670/670 passed, 0 failed, 0 skipped**, one continuous run.
+`content-brief-job.test.ts` (6/6, included in that 670) and the pre-existing `content-brief.test.ts`
+(8/8, unaffected by this pass's changes) both included and both green. `tsc --noEmit` clean across
+the whole repo (measured directly on the same worktree).
+`lint:withtenants` (378 files, clean) / `lint:migration-rls` (138 migrations: 53 baselined, 85
+enforced, clean) / `lint:migration-names` (138 files, clean) / `lint:postiz-deps` (784 source files,
+zero Postiz imports, clean) — no migration this pass, migration count unchanged at 138.
+`test:iam-chain-alignment` not re-run — no permission/Cerbos-policy change (this principal never
+reaches Cerbos). Private Cerbos torn down after the run (`docker rm -f cerbos-si-smm26`).
+
+**Not driven: the seed's CLI entrypoint (`require.main === module` branch) itself.** `tsx` is not
+installed in this worktree (no devDependency, no global), so `DATABASE_URL=... tsx src/seed/social-
+content-brief-automation.ts <tenantId>` — the documented ops invocation — was not run verbatim. The
+function it calls, `ensureContentBriefAutomationPrincipal`, IS proven end-to-end against real
+Postgres (the 6/6 test above calls it directly, no mock); only the thin argv-parsing/`console.log`
+wrapper around it is unverified. Named plainly rather than silently assumed equivalent.
+
+**Anything the spec did not answer, named rather than silently decided.** (1) The WS8-side half of
+the scope boundary — that `acl='{}'` internal-tier documents are readable by ANY member of a tenant,
+regardless of the `scope` a caller asks for — lives in `ai-agents/`, a separate project, and is named
+here and in the seed file's own header rather than fixed; closing it (a real per-call `tenantId`
+narrowing parameter on `/search`, or a stricter default ACL) is a WS8 contract change out of this
+ticket's authority. (2) No cap exists on how many opted-in engagements ONE tenant's sweep tick will
+process — every existing per-tick job in this module caps SOMETHING (`maxPostsPerAccountPerRun`,
+`maxThreadsPerTenantPerRun`) but "how many engagements does one tenant get to opt in" was not asked
+for and a self-imposed number felt like exactly the "invented threshold" this module is told not to
+add without cause; flagged as a follow-up if a tenant's opted-in count ever grows large enough to
+matter. (3) Whether a tenant's operator is notified when `principal_not_provisioned` fires repeatedly
+(an opted-in-but-silently-refused engagement could go unnoticed) is left unbuilt — nothing in this
+follow-up's own ask requested a notification channel, and inventing one felt like the same
+"silent half-feature" this program's discipline warns against; the sweep's own return value already
+carries the count for whoever builds an ops dashboard over it.
 
 **Small follow-ups the seats named rather than silently absorbed:**
 - ~~`social.client_review.withdrawn` has no registered event handler, unlike `.requested`/`.decided`~~
