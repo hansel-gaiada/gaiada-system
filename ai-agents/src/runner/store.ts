@@ -249,6 +249,13 @@ function listItem(r: GoalDbRow): GoalListItem {
   };
 }
 
+/** Quote a Postgres identifier for interpolation. Role names come from `SELECT current_user`, not
+ *  user input, but an identifier still cannot be parameterised in a GRANT/REVOKE — so it is quoted
+ *  properly rather than concatenated raw. */
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
 export class PgGoalStore implements GoalStore {
   private migrateUrl: string;
   constructor(
@@ -330,6 +337,28 @@ export class PgGoalStore implements GoalStore {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_run_events_run_seq ON agent_run_events (run_id, seq);
         CREATE INDEX IF NOT EXISTS idx_agent_run_events_goal_ts ON agent_run_events (goal_id, ts);
       `);
+
+      // APPEND-ONLY, ENFORCED BY THE DATABASE — not merely by the fact that no code path issues an
+      // UPDATE or DELETE today. This table is an audit trail: its whole value is that a row, once
+      // written, is what happened. "We don't write that query" is a convention one future
+      // refactor away from being false, and the failure is silent — a rewritten event reads
+      // exactly like a real one.
+      //
+      // Only applied when `migrateUrl` is set, i.e. when DDL and runtime are genuinely DIFFERENT
+      // roles. With a single shared role the REVOKE would strip the emitter's own ability to write
+      // and the spine would fail closed on the first step. Better to leave the guarantee at the
+      // application layer in that configuration and say so, than to break the runner in dev.
+      //
+      // The runtime role is READ from the runtime pool rather than hardcoded — the connection
+      // string is deployment config, and a hardcoded role name would silently target the wrong
+      // grantee (or none) the moment it changed.
+      if (this.migrateUrl) {
+        const { rows } = await this.pool.query<{ role: string }>("SELECT current_user AS role");
+        const runtimeRole = rows[0]?.role;
+        if (runtimeRole) {
+          await ddl.query(`REVOKE UPDATE, DELETE ON agent_run_events FROM ${quoteIdent(runtimeRole)}`);
+        }
+      }
     } finally {
       if (ddl !== this.pool) await ddl.end();
     }
