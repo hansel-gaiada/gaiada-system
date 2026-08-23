@@ -34,4 +34,9 @@ export function middleware(req: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/((?!_next|fonts|favicon.ico).*)"] };
+// `office-sprites` joins `fonts` here for the same reason fonts were excluded: they are static
+// public assets, not routes. /office is authenticated so the sprites were never actually exposed
+// by gating them, but every one of the 24 files was running the edge middleware on each request —
+// pure overhead on a path that has no session to check, and it also puts a redirect in front of
+// an asset that should just be cacheable.
+export const config = { matcher: ["/((?!_next|fonts|office-sprites|favicon.ico).*)"] };
