@@ -1775,6 +1775,18 @@ it to a commit-range diff.
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
 
+### `Alpha 01.068.0144a` - 2026-08-23 - the spine comes out
+
+Manifest (counter +1, 0143 -> 0144): `platform-ui 0.44.0 -> 0.45.0`.
+
+Removes the company spine. It was a Phase 2 design bet — a tone-coded strip showing every company
+at once — and the owner's first reaction to it on the live product was to ask what it was. The
+sidebar already carries an explicit, labelled company switcher inches away; the spine had no label
+and no affordance saying it was interactive. A control the owner has to ask about has failed.
+
+`companyColor.ts` goes with it as dead code. It was defended on the grounds those tones also drove
+row rails in cross-company tables; a grep proved that was planned, never built.
+
 ### `Alpha 01.067.0143a` - 2026-08-23 - one building, with corridors to walk down
 
 Manifest (counter +1, 0142 -> 0143): `platform-ui 0.43.1 -> 0.44.0`.
