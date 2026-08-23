@@ -233,6 +233,23 @@ jobs:
           # so storage is no longer the constraint — rollback range is. 3 releases meant a regression
           # noticed late had no tag left to roll back to. Still a multiple of 3 for the reason below.
           min-versions-to-keep: 30
+          # NEVER delete a TAGGED version. Added 2026-08-23 after `alpha-01.064.0140a` built and
+          # signed all ten components and then failed its own deploy with
+          # `MANIFEST_UNKNOWN: .../gaiada-wa-chat-bot/manifests/alpha-01.064.0140a` — this step runs
+          # inside build-sign, i.e. BEFORE the deploy job it feeds, and reported "Total versions
+          # deleted till now: 4".
+          #
+          # The header above already names the hazard ("a tag whose .sig has been pruned can no
+          # longer be deployed to at all") but nothing enforced it: with this input left at its
+          # `false` default and `ignore-versions` at `^$` (matching nothing), a release's own
+          # artifacts were eligible for deletion by the very job that produced them.
+          #
+          # Untagged versions are orphaned manifests and layers — exactly what garbage collection
+          # is for. Tagged versions are releases, their `.sig`s and their SBOMs, and deleting one
+          # destroys the ability to deploy or roll back to that cut. Retention now shrinks only by
+          # dropping untagged cruft; if storage ever becomes the constraint again, delete old tags
+          # deliberately rather than letting a prune step race a deploy.
+          delete-only-untagged-versions: true
           # GITHUB_TOKEN can delete versions of a package OWNED BY this repo. These packages are
           # user-namespace (`ghcr.io/hansel-gaiada/...`), and if they are not linked to the repository
           # GitHub refuses and this step logs a 403 — which `continue-on-error` turns into a warning
