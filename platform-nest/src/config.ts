@@ -864,15 +864,13 @@ const configBase = {
         spikeRenotifyMinutes: Number(process.env.SOCIAL_INBOX_SPIKE_RENOTIFY_MINUTES ?? 0),
       },
     },
-    // SMM-26 — the `smm-agent-content-brief` flow (content-brief.ts). Deliberately ONE knob, not a
-    // scheduled-loop block like `inboxPull`/`triage` above: this ticket ships the ON-DEMAND,
-    // principal-driven MCP tool/endpoint only (one engagement per call, real RAG grounding via the
-    // caller's own OBO userId) — NOT the v1.0 design's "weekly per opted-in engagement" scheduled
-    // sweep, because a principal-less scheduled sweep cannot legitimately call WS8's per-principal-
-    // scoped `/search` (knowledge-client.ts's own header: the tenant pre-filter needs a resolvable
-    // caller identity) without either leaving drafts permanently ungrounded or borrowing a human's
-    // identity dishonestly — both named as follow-ups requiring an architect decision on an
-    // automation service identity, not improvised here.
+    // SMM-26 — the `smm-agent-content-brief` flow (content-brief.ts). SMM-26 shipped ONE knob (the
+    // ON-DEMAND, principal-driven MCP tool/endpoint) and deliberately NOT the v1.0 design's "weekly
+    // per opted-in engagement" scheduled sweep, naming the reason as a follow-up requiring an
+    // architect decision on an automation service identity (docs/plans/smm-tracker.md's own SMM-26
+    // follow-up row). That decision is now made (owner-authorised): a dedicated, PER-TENANT
+    // automation principal (`seed/social-content-brief-automation.ts`) — see `content-brief-job.ts`'s
+    // header for why per-tenant, not one global principal, is the only safe shape.
     //
     // `maxVariantsPerCall` bounds how many (idea, account) pairings ONE call will draft — an N-ideas
     // x M-enabled-networks request has no natural ceiling otherwise. A SELF-IMPOSED budget on THIS
@@ -880,6 +878,23 @@ const configBase = {
     // `inboxPull.maxPostsPerAccountPerRun`/`triage.maxThreadsPerTenantPerRun` above.
     contentBrief: {
       maxVariantsPerCall: Number(process.env.SOCIAL_CONTENT_BRIEF_MAX_VARIANTS_PER_CALL ?? 20),
+      // The scheduled sweep (`smm-content-brief-sweep`, content-brief-job.ts). DARK BY DEFAULT, same
+      // convention as every other background sweep in this file — and a HARD gate, not a perf
+      // opt-in, because unlike a purge/read job this one SPENDS ai-gateway-go calls per opted-in
+      // engagement it finds. Absent ANY opted-in engagement (the toggle lives on
+      // `social_engagements.tool_scope.ai.autoWeeklyBrief`, additive jsonb, no migration) or ANY
+      // provisioned per-tenant principal, a tick still runs but drafts nothing and spends nothing —
+      // "opted in", "opted in but nothing to brief", and "the sweep never ran" stay three distinct,
+      // observable facts (this file's own standing "absent ≠ zero" discipline), never collapsed.
+      weeklySweep: {
+        enabled:
+          process.env.SOCIAL_CONTENT_BRIEF_SWEEP_ENABLED === "1"
+          || process.env.SOCIAL_CONTENT_BRIEF_SWEEP_ENABLED === "true",
+        // Weekly by default, matching the design's own "weekly per opted-in engagement" framing —
+        // an OPERATIONAL cadence, not a business number; an operator who wants a different cadence
+        // overrides it.
+        intervalMs: Number(process.env.SOCIAL_CONTENT_BRIEF_SWEEP_INTERVAL_MS ?? 7 * 24 * 3600 * 1000),
+      },
     },
     // SMM-27 — best-time-to-post: a nightly CLASSICAL STATS sweep (best-time-job.ts), never a
     // gateway call — no model, no prompt, deliberate per the ticket's own binding instruction.

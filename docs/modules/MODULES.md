@@ -49,7 +49,7 @@ versions below; the running build reports it at `GET /health`.
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.28` | IN PROGRESS | Social Media | 2026-08-23 |
+| social-media | `0.5.29` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1268,7 +1268,36 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.28` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.29` · IN PROGRESS
+
+**0.5.29 (2026-08-23, senior-integrator, SMM-26 follow-up) — the "weekly per opted-in engagement"
+content-brief sweep, closing the identity question SMM-26 named and left for an architect decision.**
+Owner-authorised: a dedicated automation principal, **one PER TENANT, never one global principal** —
+tested, not assumed, against the real `assemblePrincipal()`/`company_memberships` mechanism
+(`social-content-brief-automation.test.ts`, 6/6). A single global principal holding memberships across
+every opted-in tenant would be a candidate, via WS8's own tenant-set-wide + `acl='{}'` `/search`
+predicate (read directly in `ai-agents/src/knowledge/store.ts` — no per-call `tenantId` narrows it),
+to retrieve every OTHER opted-in tenant's entire internal ERP corpus on any one tenant's sweep call —
+exactly the "automation identity that can read every tenant's corpus is worse than no sweep" failure
+this follow-up was told to avoid. New `src/seed/social-content-brief-automation.ts` (mint/lookup,
+least-privilege: no role, no Cerbos grant — this identity never passes through Cerbos, only WS8's OBO
+principal lookup) + new `src/modules/social/content-brief-job.ts` (the scheduled sweep itself, dark by
+default via `config.social.contentBrief.weeklySweep`, wired in `main.ts`). Opt-in lives on
+`social_engagements.tool_scope.ai.autoWeeklyBrief` (additive jsonb, no migration), absent-defaults-
+FALSE (the opposite polarity from `ai.drafting`'s absent-defaults-true, since an unattended weekly
+draft spending gateway calls needs an explicit opt-in). The sweep LOOKS UP, never mints, the
+per-tenant principal — an opted-in tenant with none provisioned is counted
+`principal_not_provisioned`, a fourth fact kept distinct from "never opted in", "opted in but nothing
+to brief" and "drafted" (`content-brief-job.test.ts`, 6/6, proves the refusal writes zero rows and
+never calls the gateway). Full detail: `docs/plans/smm-tracker.md`'s SMM-26-follow-up evidence block.
+
+**0.5.28 (2026-08-23, senior-be) — brand-corpus provenance is derived from the caller's assurance,
+never asserted by the caller.** `ingestBrandKnowledge` sent a literal `provenance: "human"` even
+though `social.ingestBrandCorpus` is an unattended-executable MCP tool an agent can call with its own
+generated text — a self-reinforcing corpus-degradation loop (WS8 scores agent-provenance content at
+confidence 0.6, but mislabelled `human` content scores 1.0 and outranks genuine guidance). Fixed:
+provenance is now derived (`assurance === "high" ? "human" : "agent"`) and required with no default.
+Full detail: `docs/modules/CHANGELOG.md`'s `0.5.28` entry.
 
 **0.5.27 (2026-08-23, senior-be, SMM-40) — the publish "approve variant" endpoint: the last open
 follow-up SMM-17 named closed.** `POST variants/:variantId/approve` mints the D14 one-shot

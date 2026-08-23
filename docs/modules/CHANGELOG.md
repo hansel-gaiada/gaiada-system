@@ -11,6 +11,54 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.29` — 2026-08-23 — the content-brief weekly sweep's automation identity (SMM-26 follow-up)
+
+**Added** — closes the follow-up SMM-26 named and left for an architect decision (found by SMM-26's
+own MCP-surface audit; `docs/plans/smm-tracker.md`'s SMM-26-follow-up row): "the v1.0 design's
+'weekly per opted-in engagement' scheduled sweep for the content-brief flow was deliberately NOT
+built — needs an architect decision on an automation service identity before a principal-less job
+can legitimately call WS8's per-principal-scoped RAG search." The owner authorised minting a
+dedicated automation principal (`platform-nest/CLAUDE.md`'s own standing rule: automation/bot
+principals are rows in `users`, never a second principal table).
+
+**The identity: ONE automation principal PER TENANT, never one global principal — tested, not
+assumed.** New `src/seed/social-content-brief-automation.ts` (`ensureContentBriefAutomationPrincipal`/
+`findContentBriefAutomationPrincipal`). WS8's own `/search` predicate
+(`ai-agents/src/knowledge/store.ts#search`, read directly) is `tenant_id = ANY(callerTenantSet) AND
+(acl = '{}' OR scope = ANY(acl))`, with NO per-call `tenantId` parameter narrowing `callerTenantSet`
+(`principal.companies`, resolved from ACTIVE `company_memberships`) back down. Every internal-tier
+document defaults to `acl = '{}'` — "readable by any member of the tenant"
+(`docs/modules/knowledge/README.md`'s own table: not only the brand corpus, but clients, projects,
+tasks, meetings, reports, org structure, files). A single global principal holding memberships across
+every opted-in tenant would therefore be a candidate, on ANY one tenant's sweep call, to retrieve
+EVERY OTHER opted-in tenant's entire internal ERP corpus — exactly the "automation identity that can
+read every tenant's corpus is worse than no sweep" failure this follow-up was told to avoid. Each
+tenant instead gets its OWN `users` row holding EXACTLY ONE active `company_memberships` row, so its
+resolved `companies` (and so WS8's `callerTenantSet`) can never contain a second tenant BY
+CONSTRUCTION — proven directly against a real `assemblePrincipal()` call
+(`social-content-brief-automation.test.ts`, 6/6), not merely argued. Least privilege: no role grant,
+no Cerbos policy edit, no permission-catalog entry (`docs/PERMISSION-CONTRACT.md` untouched) — this
+principal never passes through Cerbos, only WS8's OBO principal lookup, because the sweep calls
+`runContentBrief` in-process, the same "scheduled sweeps are platform-nest jobs, not permissioned
+endpoints" precedent `inbox-sync-job.ts`/`inbox-triage-job.ts`/`best-time-job.ts` already established.
+`users.home_company_id` is deliberately left NULL — this principal has no root-gated Cerbos rule to
+anchor, and WS8's tenant-set reads `company_memberships`, never `home_company_id`.
+
+**The sweep itself:** new `src/modules/social/content-brief-job.ts`
+(`pullTenantContentBriefSweep`/`runContentBriefSweep`/`startContentBriefSweepLoop`), dark by default
+via `config.social.contentBrief.weeklySweep` (a HARD gate, not a perf opt-in — it spends
+`ai-gateway-go` calls per opted-in engagement), wired in `main.ts`. Opt-in lives on
+`social_engagements.tool_scope.ai.autoWeeklyBrief` (additive jsonb key, no migration), and defaults
+to **false** on absence — the opposite polarity from `ai.drafting`'s own absent-defaults-true, since
+an unattended weekly draft spending gateway calls with nobody watching needs an explicit,
+affirmative opt-in. The sweep LOOKS UP, never mints, the per-tenant principal: an opted-in
+engagement whose tenant has none provisioned is counted `principal_not_provisioned` — a fourth,
+distinct fact from "never opted in", "opted in but nothing to brief", and "drafted"
+(`content-brief-job.test.ts`, 6/6, proves the refusal writes zero rows to `social_posts` and never
+calls the gateway).
+
+Full detail: `docs/plans/smm-tracker.md`'s SMM-26-follow-up evidence block.
+
 ### platform-nest `0.36.1` — 2026-08-23 — `seed:owner-grant`, and a lockout found on the estate
 
 **Fixed**
