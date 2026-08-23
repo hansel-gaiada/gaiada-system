@@ -74,6 +74,25 @@ licensing tier. Dropping self-host ComfyUI removes the infra half.
    billing means an error loop is a spending loop. Note the local precedent — an empty env var read as
    `0` once produced a busy loop at 46% CPU; the same shape against a rented GPU bills for it.
 
+## 5b · DECIDED (2026-08-23, owner)
+
+**Approved: a ceilinged spend, booked to CREATIVE — not to social.** No ceiling was named, so build to
+the design's own image envelope, **$200/mo**, and treat that as the fail-closed cap until told otherwise.
+
+Why the cost-centre split matters rather than being bookkeeping: **OQ-2's `$0` posture for social
+survives intact.** Social does not pay — it *requests* renders, exactly as it already calls the AI
+gateway without holding provider keys. The custody rule ("only the Gateway holds provider keys") applies
+unchanged, with the render gateway as the key-holder for GPU providers. So SMM-34 stops being a reversal
+of OQ-2 and becomes a cross-department consumption, which is a shape this estate already has.
+
+**Scope: the image slice only** (§4's left column) — plausibly 4–6 of the 27 `CR-*` tickets. Video stays
+out, so SMM-29 (ClipsAI) stays gated and the $300 video envelope is not created. The FLUX quarantine tier
+and self-hosted ComfyUI stay out.
+
+**Unchanged by this decision:** the two untrimmables in §5, and §7's caveat that provider pricing and
+model licences were not verified and must be checked at build time — the $200 envelope is only meaningful
+against real per-second rates.
+
 ## 6 · Recommendation
 
 **Do not start the gateway build yet. Get the spend decision first** (§3) — it is one answer and it

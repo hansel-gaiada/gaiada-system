@@ -63,7 +63,29 @@ only on assets the developer administers, which is exactly OQ-3 ("own brand firs
 6. **Copy out:** Client ID and Client Secret. The code already sends `access_type=offline` and
    `prompt=consent`, so a refresh token is issued without further config.
 
+## 2b · Prerequisite — the own-brand client must exist
+
+**Production has ZERO `clients` rows** (deliberately — it holds real accounts and grants and nothing
+demo), so `SOCIAL_OWN_BRAND_CLIENT_IDS` has nothing to point at until you create one:
+
+```bash
+npm run seed:own-brand-social -- <tenantId>      # prints the client id to paste into .env
+```
+
+It creates exactly one client (`Gaiada`) and one engagement, idempotently, and is **non-destructive** on
+re-run. Deliberately NOT `seed:agency` — that is a full demo vertical and the wrong tool for a clean
+production estate.
+
 ## 3 · Wiring — `.env` on the VPS
+
+> 🔐 **CREDENTIAL HANDOFF (owner decision, 2026-08-23): you set the values, I verify blind.**
+> Edit `.env` on the VPS yourself. **Do not paste secrets into a chat, a commit, or a log** — two were
+> pasted during this build and had to be rotated, and a transcript persists, so anything pasted should be
+> treated as compromised. I confirm the wiring without ever seeing a value, by checking each var is
+> non-empty inside the container and by driving the readiness endpoint until it stops refusing (§4).
+> Only the Gateway is supposed to hold provider keys in this estate anyway.
+
+
 
 ```bash
 # --- LinkedIn ---
