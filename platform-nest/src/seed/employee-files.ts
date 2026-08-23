@@ -1,9 +1,17 @@
 // The HR people file — `employees` rows for the real roster.
 //
-// ⚠ NOTHING HAS EVER WRITTEN TO THIS TABLE. Migration 0109 created it in IAM Phase 2 (P2-01, "the
-// HR-owned people file") and it has stood empty since: `grep "INSERT INTO employees"` over `src/`
-// finds only tests. So the estate has users, and now seats, but no HR record of anyone — which is
-// why `employment_status`, `hire_date` and the whole JML surface have had nothing real to act on.
+// ⚠⚠ CORRECTED (2026-08-23): an earlier version of this header said "NOTHING HAS EVER WRITTEN TO
+// THIS TABLE". That was wrong. `grep "INSERT INTO employees"` over `src/` does only find tests, but
+// the live estate already held NINETEEN rows, written 2026-08-20 — the department seed reaches this
+// table through a helper rather than a literal INSERT, so grepping for the statement missed it.
+//
+// The claim survived because the pre-flight count that "confirmed" it used
+// `set_config(..., true)` inside `withGlobal`, which opens no transaction — so the GUC was discarded
+// and RLS returned zero. Two independent checks agreed on the wrong answer because both were blind
+// in the same way. Grep is not a census of what a table contains; only the table is.
+//
+// What is still true: those 19 rows are the OLD placeholder roster (`@gaia.test`), so the real staff
+// had no HR record until this script ran.
 //
 // ── WHY THIS IS SEPARATE FROM `seed:roster-access` ────────────────────────────────────────────────
 // Access and employment are different claims. A bot, an automation principal or a contractor can

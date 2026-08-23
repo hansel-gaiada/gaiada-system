@@ -76,10 +76,25 @@ migration `202608230612` fixes it in place). When you rename, write the migratio
 and test it against a database that **already has the old name** — a fresh-DB assertion passes with
 the migration deleted.
 
-**Before running any seed against a real estate, look at what is already there.** Production is
-deliberately clean (real accounts and grants, zero clients/projects/invoices/memberships), so
-`seed:agency` — a full demo vertical — is the wrong tool for "give these people access".
-`seed:roster-access` exists for exactly that narrower job.
+**Before running any seed against a real estate, look at what is already there — and make sure the
+look is not lying to you.**
+
+⚠ **`set_config(..., true)` inside `withGlobal` IS A NO-OP.** `is_local = true` scopes a setting to
+the current transaction, and `withGlobal` opens none (it just leases a client), so each statement is
+its own implicit transaction and the GUC is gone before the next query runs. Every RLS-guarded count
+then returns **zero and reports success**. This produced a confident, wrong survey of production on
+2026-08-23 ("the estate is clean") which was then used to justify a design decision; the estate
+actually held 4 clients, 17 projects, 8 invoices and 19 employee rows. Use `withTenants` — it opens
+the transaction — and pass `{ modules: [...] }` for module-owned tables.
+
+⚠ **Grep is not a census.** `grep "INSERT INTO employees"` over `src/` finds only tests, and that was
+read as "nothing has ever written to this table". Nineteen rows existed; the department seed reaches
+the table through a helper. Ask the database what a table contains, never the source.
+
+`seed:agency` is a full demo vertical (clients, projects, invoices, IT devices, files). For "give
+these people access" use `seed:roster-access`, and for HR records `seed:employee-files` — not because
+production is clean (it is not), but because access, employment and business data are separable
+changes and should stay that way.
 
 ## Migrations
 

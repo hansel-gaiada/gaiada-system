@@ -58,7 +58,11 @@ function installHubStub(): void {
   const stub = vi.fn(async (url: string, init: any) => {
     if (!String(url).startsWith("http://hub.smm40.test")) return realFetch(url as any, init);
     hubCalls.push({ url: String(url), headers: init.headers as Record<string, string> });
-    return { ok: true, status: 200, text: async () => "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n\n" };
+    // The `: Promise<string>` annotation is load-bearing. Without it, `text` is inferred through
+    // `realFetch(...)` on the line above — which resolves back to this same stub — and tsc reports
+    // TS7023 ("implicitly has return type 'any' ... referenced directly or indirectly in one of its
+    // return expressions"). It compiles fine in isolation and fails in a full `tsc --noEmit`.
+    return { ok: true, status: 200, text: async (): Promise<string> => "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n\n" };
   });
   vi.stubGlobal("fetch", stub as unknown as typeof fetch);
 }

@@ -1,19 +1,31 @@
 // Give the real roster ERP ACCESS — and nothing else.
 //
-// ⚠ WHY THIS EXISTS RATHER THAN JUST RUNNING `seed:agency`. That seed is the obvious tool and it
-// would have been the wrong one. Checked against the live estate before running it:
+// ⚠ WHY THIS EXISTS RATHER THAN JUST RUNNING `seed:agency`.
 //
-//     companies 3 · users 53 · user_roles 52 · memberships 0 · positions 0
-//     clients 0 · projects 0 · tasks 0 · invoices 0 · deliverables 0
+// ⚠⚠ CORRECTION (2026-08-23, same night): the ORIGINAL version of this comment justified the script
+// by claiming production was "deliberately clean — zero clients/projects/tasks/invoices". THAT WAS
+// FALSE, and the way it was false matters more than the claim.
 //
-// Production is DELIBERATELY CLEAN — real accounts and role grants, no showcase data. `seed:agency`
-// is a full demo vertical: it creates clients, projects, tasks, milestones, invoices, IT devices,
-// files, notifications and compliance gates. Running it to give nineteen people a `users` row would
-// have injected all of that into an estate that has none, and "the seed was idempotent" is no defence
-// when the rows it idempotently creates are demo data nobody asked for.
+// The pre-flight query used `set_config('app.current_tenant_ids', ..., true)` inside `withGlobal`.
+// `withGlobal` opens NO TRANSACTION (src/db/index.ts — it just leases a client), and `is_local=true`
+// scopes a setting to the current transaction. Outside one, each statement is its own implicit
+// transaction, so the GUC was discarded before the very next query ran. Every count came back zero
+// through RLS and reported success. The zero-row trap, hit while running the check meant to avoid it.
 //
-// So this script does the ONE thing that was actually asked for: make the roster able to sign in and
-// be recognised. Users, memberships, role grants, org-chart seats. No business data.
+// The estate actually holds 4 clients, 17 projects, 8 invoices and 17 deliverables, seeded in July
+// and August. Re-measured with `withTenants`, which does open a transaction.
+//
+// ── SO WHY KEEP THIS SCRIPT? ──────────────────────────────────────────────────────────────────────
+// The "don't pollute a clean estate" argument is gone. What remains is still sufficient, and it is
+// the honest reason:
+//   · It is TARGETED. `seed:agency` also creates the holding's other companies, Anthony's `owner`
+//     grants, and a department/PM/IT/invoice portfolio. Those are separate decisions with their own
+//     review; "give nineteen people access" should not smuggle them in.
+//   · It is IDEMPOTENT and its report says what it actually changed, re-read from the database rather
+//     than inferred from a helper's return value.
+//   · It REFUSES on a missing company instead of creating one (the 202608230612 fork hazard).
+// Access and business data are different changes, and keeping them separable is worth a small script
+// even on an estate that already has both.
 //
 // ── WHAT "ACCESS" MINIMALLY REQUIRES, AND WHY EACH PIECE IS HERE ──────────────────────────────────
 //   1. a `users` row      — a Keycloak account alone authenticates but resolves to no principal.
