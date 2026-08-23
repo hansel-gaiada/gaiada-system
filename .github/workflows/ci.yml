@@ -307,15 +307,11 @@ jobs:
   # Cheapest job in the file — no npm ci, no services, one Node script over the checkout. Note the
   # workflow's `paths-ignore` means a docs-only commit skips it; that is correct, because the map
   # is derived from CODE, and code changes are exactly what this catches.
-  docs-map:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: docs/MAP.md is current (regenerate with `node scripts/gen-map.mjs`)
-        run: node scripts/gen-map.mjs --check
+  # docs-map MOVED OUT of this workflow -> .github/workflows/docs-map.yml
+  # It validated docs/MAP.md while this workflow's `paths-ignore` skips `docs/**` and
+  # `**/*.md`, so the regenerated MAP that fixes the gate could never re-run it. The gate
+  # was stuck red on main from Alpha 01.065.0141a until 2026-08-23 for that reason.
+  # Do NOT move it back without also carving docs/MAP.md out of the filter above.
 
   # WS9 observability config-lint: promtool (rules + scrape), amtool (alertmanager, env-rendered),
   # and a YAML/JSON parse fallback. otelcol validate is skipped in CI (large binary); the collector

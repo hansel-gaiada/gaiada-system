@@ -1,0 +1,42 @@
+# docs/MAP.md freshness gate — deliberately SEPARATE from ci.yml.
+#
+# WHY ITS OWN WORKFLOW: this job used to live in ci.yml, which carries
+# `paths-ignore: ["**/*.md", "docs/**", ...]` for cost control. That made the gate
+# UNCLEARABLE. MAP.md is generated from the whole repo tree, so a code-only push can
+# stale it — and the regenerated `docs/MAP.md` that fixes it is, by definition, a
+# docs-only change, which ci.yml ignores. The gate therefore went red on one push and
+# stayed red until some unrelated code landed. It sat red on main from the
+# Alpha 01.065.0141a cut until 2026-08-23 for exactly this reason.
+#
+# So: no paths-ignore here. This is one checkout + one node script (a few seconds), and
+# the repo is public, so the runner minutes are free — the cost argument that justifies
+# ci.yml's filter does not apply at this size.
+#
+# Its own `concurrency` group also matters: sharing ci.yml's group
+# (`ci-${{ github.ref }}`, cancel-in-progress) meant a docs push could CANCEL an
+# in-flight full CI run just to check one markdown file.
+name: docs-map
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: docs-map-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docs-map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: docs/MAP.md is current (regenerate with `node scripts/gen-map.mjs`)
+        run: node scripts/gen-map.mjs --check
