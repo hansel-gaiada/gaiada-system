@@ -5,8 +5,9 @@ import {
   buildWalkableGrid, findPath, nearestWalkable, roomToRoomPath, pathLength, pointAlongPath,
   restingRoomKey, buildReplaySteps, totalReplayMs, hashId, catToken, lerp, clamp01,
   isGenuinelyWorking, WORKING_RECENCY_MS,
-  CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES,
-  type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor,
+  CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES, DESK_TOP_TILES,
+  ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
+  type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor, type Camera,
 } from "./office";
 
 function room(key: string, kind: OfficeRoomInput["kind"], occupantCount: number, extra: Partial<OfficeRoomInput> = {}): OfficeRoomInput {
@@ -371,5 +372,148 @@ describe("isGenuinelyWorking — an agent works ONLY while a real run event back
   it("is true for an event that just happened", () => {
     const now = 1_000_000;
     expect(isGenuinelyWorking(now, now)).toBe(true);
+  });
+});
+
+describe("deskSlotTile — desk rows anchor to the room's OWN nameplate wall, consistently (polish fix)", () => {
+  it("a north room's first row sits DESK_TOP_TILES below its own top edge (its nameplate wall)", () => {
+    const [floor] = buildFloors([{ key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 4 }]);
+    const [r] = floor.rooms;
+    expect(r.side).toBe("north"); // the very first room always lands north (shorter-side heuristic)
+    const slot = deskSlotTile(r, 0);
+    expect(slot.y).toBeCloseTo(r.y + DESK_TOP_TILES, 5);
+  });
+
+  it("a south room's first row sits DESK_TOP_TILES above its own bottom edge (its nameplate wall) — the MIRROR of north, not a re-run of the same formula", () => {
+    // Two same-height rooms in a row: buildFloors' "shorter side" heuristic puts the second one
+    // south, since the first already grew the north cursor past the south cursor.
+    const [floor] = buildFloors([
+      { key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 4 },
+      { key: "d2", label: "d2", kind: "department", boundTo: "x", occupantCount: 4 },
+    ]);
+    const south = floor.rooms.find((r) => r.side === "south")!;
+    expect(south).toBeTruthy();
+    const slot = deskSlotTile(south, 0);
+    expect(slot.y).toBeCloseTo(south.y + south.hTiles - DESK_TOP_TILES, 5);
+  });
+
+  it("both anchoring directions keep every desk inside the room's own rect (existing invariant, still holds)", () => {
+    const [floor] = buildFloors([
+      { key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 9 },
+      { key: "d2", label: "d2", kind: "department", boundTo: "x", occupantCount: 9 },
+    ]);
+    for (const r of floor.rooms) {
+      const rect = roomTileRect(r);
+      for (let i = 0; i < 9; i++) {
+        const slot = deskSlotTile(r, i);
+        expect(slot.y).toBeGreaterThanOrEqual(rect.y);
+        expect(slot.y).toBeLessThan(rect.y + rect.h);
+      }
+    }
+  });
+});
+
+describe("Camera — zoom / pan / follow maths (req #1, pure functions per the ticket's own instruction)", () => {
+  const camera1x: Camera = { scale: 1, centerX: 500, centerY: 300 };
+
+  describe("fitZoomLevel", () => {
+    it("picks the largest integer step that shows the whole plate", () => {
+      // Content 300x200 fits at 2x (600x400) inside an 800x600 viewport, but not at 3x (900x600 > 800 wide).
+      expect(fitZoomLevel(300, 200, 800, 600)).toBe(2);
+    });
+
+    it("never returns a fractional or a step outside ZOOM_LEVELS", () => {
+      const z = fitZoomLevel(1000, 800, 400, 300);
+      expect(ZOOM_LEVELS).toContain(z);
+    });
+
+    it("falls back to the smallest step (1) when even 1x can't fit the whole plate", () => {
+      expect(fitZoomLevel(5000, 4000, 800, 600)).toBe(1);
+    });
+
+    it("falls back to 1 for a degenerate (zero-size) plate rather than picking the largest step", () => {
+      expect(fitZoomLevel(0, 0, 800, 600)).toBe(1);
+    });
+
+    it("is deterministic for the same inputs", () => {
+      expect(fitZoomLevel(640, 480, 900, 700)).toBe(fitZoomLevel(640, 480, 900, 700));
+    });
+  });
+
+  describe("clampCamera — the plate can never be lost off-screen", () => {
+    it("leaves an in-bounds centre untouched", () => {
+      const c = clampCamera(camera1x, 2000, 1500, 800, 600);
+      expect(c.centerX).toBeCloseTo(500, 5);
+      expect(c.centerY).toBeCloseTo(300, 5);
+    });
+
+    it("pulls a centre that would show past the LEFT/TOP edge back to the boundary", () => {
+      const c = clampCamera({ scale: 1, centerX: -1000, centerY: -1000 }, 2000, 1500, 800, 600);
+      expect(c.centerX).toBeCloseTo(400, 5); // half the viewport, in content px at scale 1
+      expect(c.centerY).toBeCloseTo(300, 5);
+    });
+
+    it("pulls a centre that would show past the RIGHT/BOTTOM edge back to the boundary", () => {
+      const c = clampCamera({ scale: 1, centerX: 10_000, centerY: 10_000 }, 2000, 1500, 800, 600);
+      expect(c.centerX).toBeCloseTo(2000 - 400, 5);
+      expect(c.centerY).toBeCloseTo(1500 - 300, 5);
+    });
+
+    it("locks to the plate's own centre on an axis where the SCALED plate is smaller than the viewport — no pan is possible there", () => {
+      // A 300x200 plate at 2x is 600x400 — smaller than an 800x600 viewport on both axes.
+      const c = clampCamera({ scale: 2, centerX: 999, centerY: -999 }, 300, 200, 800, 600);
+      expect(c.centerX).toBeCloseTo(150, 5);
+      expect(c.centerY).toBeCloseTo(100, 5);
+    });
+
+    it("is idempotent — clamping an already-clamped camera changes nothing", () => {
+      const once = clampCamera({ scale: 1, centerX: 10_000, centerY: -10_000 }, 2000, 1500, 800, 600);
+      const twice = clampCamera(once, 2000, 1500, 800, 600);
+      expect(twice).toEqual(once);
+    });
+  });
+
+  describe("zoomCameraAtPoint — cursor-anchored zoom", () => {
+    it("keeps the CONTENT point under the pointer fixed on screen across a zoom change", () => {
+      const viewportW = 800, viewportH = 600;
+      const pointerVX = 200, pointerVY = 150; // somewhere off-centre in the viewport
+      const before = camera1x;
+      const beforeContent = viewportToContentPoint(before, pointerVX, pointerVY, viewportW, viewportH);
+      const after = zoomCameraAtPoint(before, 3, pointerVX, pointerVY, viewportW, viewportH);
+      const afterContent = viewportToContentPoint(after, pointerVX, pointerVY, viewportW, viewportH);
+      expect(afterContent.x).toBeCloseTo(beforeContent.x, 6);
+      expect(afterContent.y).toBeCloseTo(beforeContent.y, 6);
+      expect(after.scale).toBe(3);
+    });
+
+    it("zooming exactly at the viewport's own centre leaves the centre unchanged (a button-style zoom, not cursor-anchored)", () => {
+      const viewportW = 800, viewportH = 600;
+      const after = zoomCameraAtPoint(camera1x, 2, viewportW / 2, viewportH / 2, viewportW, viewportH);
+      expect(after.centerX).toBeCloseTo(camera1x.centerX, 6);
+      expect(after.centerY).toBeCloseTo(camera1x.centerY, 6);
+    });
+
+    it("is a no-op (same object identity) when the target scale equals the current one", () => {
+      const after = zoomCameraAtPoint(camera1x, 1, 123, 456, 800, 600);
+      expect(after).toBe(camera1x);
+    });
+  });
+
+  describe("cssTransformForCamera / viewportToContentPoint — inverse of each other", () => {
+    it("round-trips a content point through the transform and back", () => {
+      const viewportW = 800, viewportH = 600;
+      const camera: Camera = { scale: 2, centerX: 1234, centerY: 567 };
+      // A point at the exact centre of the viewport must map back to the camera's own centre.
+      const content = viewportToContentPoint(camera, viewportW / 2, viewportH / 2, viewportW, viewportH);
+      expect(content.x).toBeCloseTo(camera.centerX, 6);
+      expect(content.y).toBeCloseTo(camera.centerY, 6);
+    });
+
+    it("produces a translate+scale string using the camera's own integer scale", () => {
+      const camera: Camera = { scale: 3, centerX: 100, centerY: 100 };
+      const css = cssTransformForCamera(camera, 800, 600);
+      expect(css).toContain("scale(3)");
+      expect(css).toMatch(/^translate\(-?\d+(\.\d+)?px, -?\d+(\.\d+)?px\) scale\(3\)$/);
+    });
   });
 });

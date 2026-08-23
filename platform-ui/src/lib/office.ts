@@ -5,7 +5,8 @@
 // footprint derived from real headcount, hand-rolled grid pathfinding through the corridor
 // network, and the pure geometry a replay animation walks through. `office-data.ts` (server-only)
 // fills these shapes from real org data + fixtures; `components/office/OfficeCanvas.tsx` (client)
-// draws them.
+// draws them. Also holds the CAMERA math (zoom/pan/follow, 2026-08-23 addition) — pure, so its
+// clamping/fit/cursor-anchor arithmetic is unit-tested directly rather than only by screenshot.
 //
 // Rewritten 2026-08-23 (owner feedback on the live grid-of-boxes prototype): "map the whole office
 // into 1 building ... make another screen[per floor] if not enough ... movement can really look
@@ -13,6 +14,8 @@
 // independent (col,row) grid cell — every room is placed by `buildFloors()` along a shared
 // corridor, and its position, door and floor are all OUTPUTS of that one layout pass, never
 // independently chosen.
+
+import type { AgentRunEventKind } from "./agentEvents";
 
 // ── Taxonomy (shared with the Agent Floor's ops view — plan §4.4) ───────────────────────────────
 export type OfficeKind = "human" | "agent" | "automation" | "external";
@@ -29,6 +32,20 @@ export const ASSURANCE_LABEL: Record<AssuranceTier, string> = {
   anonymous: "Anonymous",
   low: "Low assurance",
   verified: "Verified",
+};
+
+// ── Emote bubbles (req #2, 2026-08-23) — one glyph per REAL agent-run event kind ─────────────────
+// Maps `AgentRunEvent.kind` (agentEvents.ts) to the short label a bubble/roster row shows. Never
+// used for a human: `activeRunId` (the thing that gates whether an avatar is even eligible for a
+// bubble) is only ever set on an `agent`-kind avatar by office-data.ts — there is no equivalent
+// activity feed for a human, and OfficeCanvas.tsx double-checks `kind === "agent"` at its own draw
+// call site rather than trusting this alone (see that file's header comment on the two layers).
+export const EMOTE_LABEL: Record<AgentRunEventKind, string> = {
+  model: "Thinking",
+  tool: "Working",
+  delegate: "Handing over",
+  approval_wait: "Waiting on you",
+  error: "Error",
 };
 
 // ── Rooms ─────────────────────────────────────────────────────────────────────────────────────
@@ -95,6 +112,11 @@ export const DESK_MARGIN_TILES = 1.6;
  *  south (nameplate stays up top); 3.6 was verified against a real render to clear it. */
 export const DESK_TOP_TILES = 3.6;
 export const DESK_SPACING_TILES = 3.0;
+/** The real, gutter-safe width a desk's name label may use before it risks touching its neighbour
+ *  — DERIVED from `DESK_SPACING_TILES` (never an independent literal chosen by eye in the canvas
+ *  file) so the two can never drift apart. 0.3 tiles of clearance either side of a label is enough
+ *  that two full-width labels on adjacent desks still leave a visible gap. */
+export const NAME_SLOT_TILES = DESK_SPACING_TILES - 0.3;
 /** A room with nobody real in it, and none imagined, is still a room — this is the floor beneath
  *  which a room never shrinks regardless of occupantCount. Matches roomSizeTiles's own one-row
  *  output so this is a real floor, not a lower number that the formula already exceeds. */
@@ -233,14 +255,28 @@ export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: numbe
 
 /** Centre of the Nth avatar's "desk" inside a room, in TILE units — uses the room's OWN deskCols
  *  (variable per room, from roomSizeTiles), never a fixed constant, so a wide 9-person room's
- *  desks line up with the walls that were actually sized for it. */
+ *  desks line up with the walls that were actually sized for it.
+ *
+ *  Row anchoring is to the room's OWN NAMEPLATE WALL, never the doorway wall — consistently,
+ *  regardless of which side of the corridor the room sits on (polish fix, 2026-08-23: rows used to
+ *  anchor to `room.y`/the room's top edge unconditionally, which is the nameplate wall for a
+ *  "north" room but the DOORWAY wall for a "south" one — desks hugged the nameplate in one and the
+ *  door in the other. `drawNamePlate`/the back-corner plant already got this right by keying off
+ *  `room.side`; this now matches them). A "north" room's nameplate is on `room.y` (its door is on
+ *  the corridor-facing wall opposite it), so desks start `DESK_TOP_TILES` down from there and grow
+ *  toward the door. A "south" room's nameplate is on its FAR edge (`room.y + hTiles`), so desks
+ *  start `DESK_TOP_TILES` UP from there and grow toward the door at the top — the mirror image,
+ *  not a re-run of the same formula. */
 export function deskSlotTile(room: OfficeRoom, index: number): { x: number; y: number } {
   const cols = Math.max(1, room.deskCols);
   const col = index % cols;
   const row = Math.floor(index / cols);
+  const y = room.side === "north"
+    ? room.y + DESK_TOP_TILES + row * DESK_SPACING_TILES
+    : room.y + room.hTiles - DESK_TOP_TILES - row * DESK_SPACING_TILES;
   return {
     x: room.x + DESK_MARGIN_TILES + col * DESK_SPACING_TILES,
-    y: room.y + DESK_TOP_TILES + row * DESK_SPACING_TILES,
+    y,
   };
 }
 
@@ -408,6 +444,102 @@ export function pointAlongPath(path: { x: number; y: number }[], t: number): { x
     remaining -= segLen;
   }
   return path[path.length - 1];
+}
+
+// ── Camera — zoom / pan / follow (req #1, 2026-08-23) ────────────────────────────────────────────
+// The camera is a VIEWPORT transform, never a redraw. `OfficeCanvas.tsx` still renders the whole
+// floor plate into the canvas at its native content size (unchanged from before this feature); the
+// camera only changes what CSS `transform` places that already-drawn bitmap under, inside a
+// fixed-size viewport `<div>` with `overflow: hidden`. That is what "the camera is a transform on
+// the existing canvas" (the ticket's own words) means literally — no second render path, no game
+// engine, and the canvas keeps drawing in one coordinate space regardless of zoom/pan.
+//
+// Integer-only zoom (req #1: "fractional scaling destroys pixel art"): a CSS `scale()` of an
+// integer multiplies whole device pixels onto whole device pixels, so nearest-neighbour sampling
+// (the canvas already sets `image-rendering: pixelated`) reproduces every source pixel as an exact
+// NxN block — no blending, no seams. A fractional CSS scale would resample between source pixels
+// and blur the sprite art the same way an un-integer TILE_PX/ZOOM would (see that constant's own
+// comment above).
+export type ZoomLevel = 1 | 2 | 3;
+export const ZOOM_LEVELS: readonly ZoomLevel[] = [1, 2, 3];
+
+export interface Camera {
+  scale: ZoomLevel;
+  /** The content-space (css px, i.e. the SAME space `tilesToPx` already produces — pre-camera-
+   *  scale) point currently centred in the viewport. */
+  centerX: number;
+  centerY: number;
+}
+
+/** The largest integer step in `ZOOM_LEVELS` that shows the WHOLE plate inside a viewport of the
+ *  given size — "Fit" (req #1). Falls back to the smallest step (1) both when the content is
+ *  degenerate (no floor yet) and when even 1x can't fit the whole plate in the viewport (a very
+ *  wide floor plate on a small window) — 1 is still the closest any integer step gets to "the
+ *  whole plate", and `clampCamera` below is what lets panning reach the rest. */
+export function fitZoomLevel(contentW: number, contentH: number, viewportW: number, viewportH: number): ZoomLevel {
+  if (contentW <= 0 || contentH <= 0 || viewportW <= 0 || viewportH <= 0) return 1;
+  let best: ZoomLevel = 1;
+  for (const z of ZOOM_LEVELS) {
+    if (contentW * z <= viewportW && contentH * z <= viewportH) best = z;
+  }
+  return best;
+}
+
+/** Clamp a camera's centre so the plate can never be lost off-screen (req #1). On an axis where
+ *  the SCALED plate is smaller than the viewport, there is nothing to pan — the centre locks to
+ *  the plate's own centre on that axis (never lets the plate drift to one side leaving a gap on
+ *  the other). Otherwise the centre is bounded so the viewport's edge never crosses the plate's
+ *  own edge. */
+export function clampCamera(camera: Camera, contentW: number, contentH: number, viewportW: number, viewportH: number): Camera {
+  const clampAxis = (center: number, contentSize: number, viewportSize: number, scale: number): number => {
+    const half = viewportSize / (2 * scale);
+    if (contentSize <= viewportSize / scale) return contentSize / 2;
+    return Math.min(contentSize - half, Math.max(half, center));
+  };
+  return {
+    scale: camera.scale,
+    centerX: clampAxis(camera.centerX, contentW, viewportW, camera.scale),
+    centerY: clampAxis(camera.centerY, contentH, viewportH, camera.scale),
+  };
+}
+
+/** Cursor-anchored zoom (req #1): change scale while keeping the CONTENT point currently under
+ *  the pointer (given in viewport px, relative to the viewport's own top-left) fixed on screen —
+ *  the same behaviour every pixel-editor/map app's scroll-zoom has. Pure: does not clamp its own
+ *  result (callers run it through `clampCamera` after, same as any other camera mutation). */
+export function zoomCameraAtPoint(
+  camera: Camera, nextScale: ZoomLevel, pointerVX: number, pointerVY: number, viewportW: number, viewportH: number,
+): Camera {
+  if (nextScale === camera.scale) return camera;
+  const contentX = camera.centerX + (pointerVX - viewportW / 2) / camera.scale;
+  const contentY = camera.centerY + (pointerVY - viewportH / 2) / camera.scale;
+  return {
+    scale: nextScale,
+    centerX: contentX - (pointerVX - viewportW / 2) / nextScale,
+    centerY: contentY - (pointerVY - viewportH / 2) / nextScale,
+  };
+}
+
+/** The CSS `transform` string that places the canvas (drawn at its native content size, top-left
+ *  at the origin) so that `camera` is what the viewport shows. Derivation: a viewport-space point
+ *  should land at `scale*(contentPoint - centre) + viewportSize/2`; `translate(t) scale(s)` (CSS
+ *  composes right-to-left) computes `s*p + t`, so `t = viewportSize/2 - scale*centre`. */
+export function cssTransformForCamera(camera: Camera, viewportW: number, viewportH: number): string {
+  const tx = viewportW / 2 - camera.centerX * camera.scale;
+  const ty = viewportH / 2 - camera.centerY * camera.scale;
+  return `translate(${tx}px, ${ty}px) scale(${camera.scale})`;
+}
+
+/** Inverse of the transform above: a viewport-space point (e.g. a pointer event's coordinates
+ *  relative to the viewport) back to content-space (the same space avatar tile positions are
+ *  already computed in), for hit-testing under an active camera. */
+export function viewportToContentPoint(
+  camera: Camera, viewportX: number, viewportY: number, viewportW: number, viewportH: number,
+): { x: number; y: number } {
+  return {
+    x: camera.centerX + (viewportX - viewportW / 2) / camera.scale,
+    y: camera.centerY + (viewportY - viewportH / 2) / camera.scale,
+  };
 }
 
 // ── Avatars ───────────────────────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
 // preference belongs to `lib/prefs.ts` (a display setting, not assistant domain data), matching how
 // `(app)/account/actions.ts::savePrefs` already owns the density/width/theme writes for the same
 // cookie.
-import { getPrefs, writePrefs, type Theme } from "./prefs";
+import { getPrefs, writePrefs, type Theme, type OfficeZoom } from "./prefs";
 
 /** Fire-and-forget from `AssistantWorkspace`'s toggle click — the client already holds the
  *  authoritative UI state the instant it clicks (same "optimistic, not awaited for correctness" shape
@@ -26,4 +26,13 @@ export async function setAssistantRailCollapsedAction(collapsed: boolean): Promi
 export async function setThemeAction(theme: Theme): Promise<void> {
   const current = await getPrefs();
   await writePrefs({ ...current, theme });
+}
+
+/** Same optimistic shape as `setThemeAction` above — `OfficeCanvas.tsx` has already applied the
+ *  zoom step (a pure CSS transform, see `lib/office.ts`'s camera math) before calling this; the
+ *  visible change never waits on a round trip, this only persists the choice for the NEXT visit to
+ *  `/office`. No `revalidatePath`: nothing else server-rendered reads this cookie. */
+export async function setOfficeZoomAction(officeZoom: OfficeZoom): Promise<void> {
+  const current = await getPrefs();
+  await writePrefs({ ...current, officeZoom });
 }

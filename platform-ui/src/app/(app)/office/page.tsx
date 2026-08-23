@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { getPrefs } from "@/lib/prefs";
 import { getOfficeScene } from "@/lib/office-data";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -28,6 +29,7 @@ export default async function OfficePage() {
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   const scene = await getOfficeScene(userId, tenant);
+  const prefs = await getPrefs();
 
   return (
     <>
@@ -41,7 +43,7 @@ export default async function OfficePage() {
       {!tenant ? (
         <EmptyNote>Select a company to see its office.</EmptyNote>
       ) : (
-        <OfficeCanvas scene={scene} />
+        <OfficeCanvas scene={scene} initialZoom={prefs.officeZoom} />
       )}
     </>
   );

@@ -1,15 +1,19 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { formatDateTime } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/timeFormat";
-import { nextCursor, type AgentRunEvent } from "@/lib/agentEvents";
+import { nextCursor, type AgentRunEvent, type AgentRunEventKind } from "@/lib/agentEvents";
+import type { OfficeZoom } from "@/lib/prefs";
+import { setOfficeZoomAction } from "@/lib/prefsActions";
 import {
-  KIND_LABEL, ASSURANCE_LABEL, tilesToPx,
+  KIND_LABEL, ASSURANCE_LABEL, EMOTE_LABEL, tilesToPx, NAME_SLOT_TILES,
   roomTileRect, deskSlotTile, roomCenterTile, allRooms,
   buildWalkableGrid, roomToRoomPath, pointAlongPath, isGenuinelyWorking,
   restingRoomKey, buildReplaySteps, totalReplayMs, catToken,
   DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
+  ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeFloor, type OfficeAvatar, type ReplayStep,
+  type Camera, type ZoomLevel,
 } from "@/lib/office";
 import {
   LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS, STEEL_RAMP,
@@ -676,13 +680,98 @@ function getComposedSprite(gender: SpriteGender, pose: SpritePose, toneKey: stri
   return canvas;
 }
 
-function drawAvatar(ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean) {
+/** A speech-bubble above a genuinely-working agent's head, one glyph per REAL event `kind`
+ *  (req #2). Purely procedural canvas drawing — no image asset, so it survives zoom/pan (it is
+ *  drawn every content-space redraw, at content-space size, same as everything else on this
+ *  canvas; the camera's CSS transform magnifies it along with the sprite). `approval_wait` gets
+ *  deliberately the LOUDEST treatment (bigger radius, a solid warning fill instead of the neutral
+ *  "raised" tone every other kind uses, full opacity with no pulse-fade) — "an agent stuck waiting
+ *  on a person is exactly what someone should spot across a room" (ticket). The caller is what
+ *  guarantees this never renders for a human — see drawAvatar's own call site. */
+function drawEmoteBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, kind: AgentRunEventKind, tokens: TokenSet, pulseOn: boolean) {
+  const isAlert = kind === "approval_wait";
+  const isError = kind === "error";
+  const r = tilesToPx(isAlert ? 0.58 : 0.42);
+  const bg = isAlert ? tokens.warning : isError ? tokens.danger : tokens.raised;
+  const border = isAlert || isError ? tokens.ink : tokens.hairline;
+  const fg = isAlert || isError ? tokens.page : tokens.ink;
+
+  ctx.save();
+  ctx.globalAlpha = isAlert ? 1 : (pulseOn ? 1 : 0.7); // the alert tier never fades — always fully lit
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = isAlert ? 2 : 1;
+  ctx.strokeStyle = border;
+  ctx.stroke();
+  // A small pointer tail toward the avatar's head, like a speech bubble.
+  ctx.beginPath();
+  ctx.moveTo(cx - 3, cy + r - 1);
+  ctx.lineTo(cx + 3, cy + r - 1);
+  ctx.lineTo(cx, cy + r + 5);
+  ctx.closePath();
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = fg;
+  ctx.strokeStyle = fg;
+  switch (kind) {
+    case "model": { // thinking — an ellipsis
+      ctx.lineWidth = 1;
+      for (const dx of [-4, 0, 4]) { ctx.beginPath(); ctx.arc(cx + dx, cy, 1.4, 0, Math.PI * 2); ctx.fill(); }
+      break;
+    }
+    case "tool": { // working — a small gear
+      ctx.beginPath(); ctx.arc(cx, cy, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 1.8;
+      for (const [dx, dy] of [[0, -5], [0, 5], [-5, 0], [5, 0]] as const) {
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + dx, cy + dy); ctx.stroke();
+      }
+      break;
+    }
+    case "delegate": { // handing over — an arrow
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.moveTo(cx - 5, cy); ctx.lineTo(cx + 3, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 3, cy - 3); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx + 3, cy + 3); ctx.closePath(); ctx.fill();
+      break;
+    }
+    case "approval_wait": { // blocked on a human — bold, unmissable
+      ctx.font = `900 ${Math.round(r * 1.25)}px ${tokens.fontBody}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("!", cx, cy - 1);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      break;
+    }
+    case "error": {
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.moveTo(cx - 3.5, cy - 3.5); ctx.lineTo(cx + 3.5, cy + 3.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 3.5, cy - 3.5); ctx.lineTo(cx - 3.5, cy + 3.5); ctx.stroke();
+      break;
+    }
+  }
+  ctx.restore();
+}
+
+function drawAvatar(
+  ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean,
+  scale: ZoomLevel, emoteKind: AgentRunEventKind | null, pulseOn: boolean,
+) {
   const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
   const r = tilesToPx(0.62);
   const { avatar } = pos;
   drawContactShadow(ctx, cx, cy, r, tokens);
-  // Desks sit DESK_SPACING_TILES apart; leave a little gutter so adjacent labels never touch.
-  const slotWidthPx = tilesToPx(2.7);
+  // Desks sit DESK_SPACING_TILES apart; NAME_SLOT_TILES (lib/office.ts) is the real gutter-safe
+  // width derived from that same spacing, never an independent guess. At camera zoom >=2x the
+  // reader has deliberately chosen to look closer at THIS room — the truncation budget widens so a
+  // long name (an agent-goal title, not a short person name) has a real chance of showing in full,
+  // rather than staying permanently clipped at every zoom level the same way it was at 1x (owner
+  // feedback: "Chase ov…", "Weekly s…" truncated even with plenty of screen space once zoomed in).
+  const slotWidthPx = tilesToPx(NAME_SLOT_TILES) * (scale >= 2 ? 1.6 : 1);
   switch (avatar.kind) {
     case "human":
     case "agent": {
@@ -759,13 +848,19 @@ function drawAvatar(ctx: CanvasRenderingContext2D, pos: Positioned, tokens: Toke
     ctx.fillText(pos.transitLabel, cx, cy - r * 2.6, tilesToPx(6));
     ctx.textAlign = "left";
   }
+  // The emote bubble (req #2) sits ABOVE the transit label's own y (r*2.6 up) so the rare overlap
+  // of "in transit" + "genuinely working" never collides. `emoteKind` is null for every avatar
+  // except a genuinely-working `agent` with a real event kind — see the Pass 3 call site for the
+  // two-layer guarantee that a human never reaches this branch.
+  if (emoteKind) drawEmoteBubble(ctx, cx, cy - r * 3.6, emoteKind, tokens, pulseOn);
 }
 
 const WORKING_POLL_MS = 8000;
 const PULSE_TICK_MS = 450;
 
-export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
+export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initialZoom: OfficeZoom }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [replaying, setReplaying] = useState(false);
@@ -797,13 +892,151 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
 
   const cssW = tilesToPx(floor?.widthTiles ?? 0), cssH = tilesToPx(floor?.heightTiles ?? 0);
 
+  // ── Camera — zoom / pan / follow (req #1) ──────────────────────────────────────────────────
+  // `zoomPref` is the persisted PREFERENCE ("fit" or a pinned integer step — see lib/prefs.ts's
+  // OfficeZoom, same auto-vs-pinned shape Theme already uses); the actual `scale` used to render
+  // is always DERIVED from it plus the current floor's content size and the measured viewport size
+  // — never stored redundantly, so it can never disagree with either. `center` is the one piece of
+  // camera state that's a plain value: the content-space point the viewport is centred on.
+  const [zoomPref, setZoomPref] = useState<OfficeZoom>(initialZoom);
+  const [viewportSize, setViewportSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const [center, setCenter] = useState<{ x: number; y: number }>(() => ({ x: cssW / 2, y: cssH / 2 }));
+  const [followingId, setFollowingId] = useState<string | null>(null);
+  const [followReleasedNotice, setFollowReleasedNotice] = useState(false);
+  const [, startZoomTransition] = useTransition();
+  const followReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragRef = useRef<{ startVX: number; startVY: number; startCenter: { x: number; y: number }; moved: boolean } | null>(null);
+
+  const scale = useMemo<ZoomLevel>(() => {
+    const vw = viewportSize.w || cssW || 1, vh = viewportSize.h || cssH || 1;
+    return zoomPref === "fit" ? fitZoomLevel(cssW, cssH, vw, vh) : zoomPref;
+  }, [zoomPref, cssW, cssH, viewportSize]);
+
+  const camera = useMemo<Camera>(() => {
+    const vw = viewportSize.w || cssW || 1, vh = viewportSize.h || cssH || 1;
+    return clampCamera({ scale, centerX: center.x, centerY: center.y }, cssW, cssH, vw, vh);
+  }, [scale, center, cssW, cssH, viewportSize]);
+
+  // Mirrored into refs for the wheel listener below, which registers ONCE (native, non-passive —
+  // React's synthetic wheel handler is passive and can't preventDefault) and must always read the
+  // LATEST camera/scale/size rather than closing over the values from whenever it was attached.
+  const cameraRef = useRef(camera); cameraRef.current = camera;
+  const scaleRef = useRef(scale); scaleRef.current = scale;
+  const viewportSizeRef = useRef(viewportSize); viewportSizeRef.current = viewportSize;
+  const cssSizeRef = useRef({ w: cssW, h: cssH }); cssSizeRef.current = { w: cssW, h: cssH };
+
+  /** Clicking an avatar, a manual pan, or a manual zoom releases follow (req #1: "make releasing
+   *  obvious") — a transient notice is set alongside so the release is announced, not just a chip
+   *  silently vanishing. Cheap to call unconditionally: a no-op when nothing was being followed. */
+  const releaseFollow = useCallback(() => {
+    setFollowingId((prev) => {
+      if (prev === null) return prev;
+      setFollowReleasedNotice(true);
+      if (followReleaseTimerRef.current) clearTimeout(followReleaseTimerRef.current);
+      followReleaseTimerRef.current = setTimeout(() => setFollowReleasedNotice(false), 2500);
+      return null;
+    });
+  }, []);
+
+  useEffect(() => () => { if (followReleaseTimerRef.current) clearTimeout(followReleaseTimerRef.current); }, []);
+
+  // Measure the viewport's real rendered size — the camera's viewport-space math (fit/clamp/
+  // cursor-anchored zoom) needs actual pixels, not a CSS length string.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setViewportSize({ w: Math.round(entry.contentRect.width), h: Math.round(entry.contentRect.height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Switching floors changes the content-space coordinate system entirely (each floor is its own
+  // independent footprint) — recentre on the new floor and drop any in-flight follow, which would
+  // otherwise keep pointing at wherever the old floor's coordinates happened to land.
+  useEffect(() => {
+    setCenter({ x: cssW / 2, y: cssH / 2 });
+    setFollowingId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFloorIndex]);
+
+  const stepZoom = useCallback((delta: 1 | -1) => {
+    const idx = ZOOM_LEVELS.indexOf(scaleRef.current);
+    const nextScale = ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + delta))];
+    if (nextScale === scaleRef.current) return;
+    const vw = viewportSizeRef.current.w || cssSizeRef.current.w || 1, vh = viewportSizeRef.current.h || cssSizeRef.current.h || 1;
+    const next = zoomCameraAtPoint(cameraRef.current, nextScale, vw / 2, vh / 2, vw, vh);
+    setCenter({ x: next.centerX, y: next.centerY });
+    setZoomPref(nextScale);
+    releaseFollow();
+    startZoomTransition(() => { void setOfficeZoomAction(nextScale); });
+  }, [releaseFollow]);
+
+  const goToFit = useCallback(() => {
+    setZoomPref("fit");
+    setCenter({ x: cssSizeRef.current.w / 2, y: cssSizeRef.current.h / 2 });
+    releaseFollow();
+    startZoomTransition(() => { void setOfficeZoomAction("fit"); });
+  }, [releaseFollow]);
+
+  // Cursor-anchored scroll-wheel zoom (req #1) — a native, non-passive listener: React's own
+  // onWheel is attached passive by default, so `preventDefault()` inside it is silently ignored
+  // and the page would scroll underneath the zoom. Registers ONCE; reads current values via the
+  // refs above rather than re-subscribing on every camera change.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const vx = e.clientX - rect.left, vy = e.clientY - rect.top;
+      const idx = ZOOM_LEVELS.indexOf(scaleRef.current);
+      const dir = e.deltaY < 0 ? 1 : -1;
+      const nextScale = ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + dir))];
+      if (nextScale === scaleRef.current) return;
+      const vw = viewportSizeRef.current.w || cssSizeRef.current.w || 1, vh = viewportSizeRef.current.h || cssSizeRef.current.h || 1;
+      const next = zoomCameraAtPoint(cameraRef.current, nextScale, vx, vy, vw, vh);
+      setCenter({ x: next.centerX, y: next.centerY });
+      setZoomPref(nextScale);
+      releaseFollow();
+      startZoomTransition(() => { void setOfficeZoomAction(nextScale); });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Arrow-key panning (req #1: keyboard accessibility) on the focusable viewport. `+`/`-` mirror
+   *  the toolbar zoom buttons for a keyboard user who has already tabbed to the viewport. */
+  const onViewportKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = 64 / scale;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      releaseFollow();
+      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+      setCenter((c) => ({ x: c.x + dx, y: c.y + dy }));
+    } else if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      stepZoom(1);
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      stepZoom(-1);
+    }
+  }, [scale, releaseFollow, stepZoom]);
+
   const replayRef = useRef<{ steps: ReplayStep[]; startPerf: number; pausedAtPerf: number | null; total: number } | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastPositionsRef = useRef<Positioned[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const hoveredIdRef = useRef<string | null>(null);
+  const followingIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
   hoveredIdRef.current = hoveredId;
+  followingIdRef.current = followingId;
 
   // Paused refs shared by BOTH the replay RAF loop and the working-animation pulse timer below —
   // one visibility/offscreen story for every continuously-ticking thing this canvas can run.
@@ -828,21 +1061,26 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
   // plain `setInterval`, not a loop tied to rendering: it exists only while there is at least one
   // such avatar, stops when the list is empty, and skips its own fetch while the tab is hidden.
   const activeRunAvatars = useMemo(() => scene.avatars.filter((a): a is OfficeAvatar & { activeRunId: string } => !!a.activeRunId), [scene.avatars]);
-  const workingStateRef = useRef(new Map<string, { cursor: number; lastEventAtMs: number | null }>());
+  const workingStateRef = useRef(new Map<string, { cursor: number; lastEventAtMs: number | null; lastEventKind: AgentRunEventKind | null }>());
   const [workingIds, setWorkingIds] = useState<Set<string>>(new Set());
   const [lastHeardMs, setLastHeardMs] = useState<Map<string, number | null>>(new Map());
+  // The latest REAL event kind per avatar (req #2) — drives which emote glyph draws. Kept separate
+  // from `lastHeardMs` (rather than folding kind into that map) because most existing consumers of
+  // `lastHeardMs` only ever wanted the timestamp; adding kind there would force them to unwrap it.
+  const [emoteKinds, setEmoteKinds] = useState<Map<string, AgentRunEventKind | null>>(new Map());
 
   useEffect(() => {
     if (activeRunAvatars.length === 0) {
       setWorkingIds(new Set());
       setLastHeardMs(new Map());
+      setEmoteKinds(new Map());
       return;
     }
     let cancelled = false;
     const poll = async () => {
       if (document.hidden) return;
       const results = await Promise.all(activeRunAvatars.map(async (a) => {
-        const prior = workingStateRef.current.get(a.id) ?? { cursor: 0, lastEventAtMs: null };
+        const prior = workingStateRef.current.get(a.id) ?? { cursor: 0, lastEventAtMs: null, lastEventKind: null };
         try {
           const res = await fetch(`/api/admin/agents/runs/${encodeURIComponent(a.activeRunId)}/events?since=${prior.cursor}`, { cache: "no-store" });
           if (!res.ok) return { id: a.id, state: prior };
@@ -850,11 +1088,15 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
           const events = Array.isArray(data.events) ? data.events : [];
           if (events.length === 0) return { id: a.id, state: prior };
           const cursor = nextCursor(events, prior.cursor);
-          const latestTs = events.reduce((max, e) => {
+          let latestTs = prior.lastEventAtMs ?? 0;
+          let latestKind = prior.lastEventKind;
+          for (const e of events) {
             const t = Date.parse(e.ts);
-            return Number.isNaN(t) ? max : Math.max(max, t);
-          }, prior.lastEventAtMs ?? 0);
-          return { id: a.id, state: { cursor, lastEventAtMs: latestTs } };
+            if (Number.isNaN(t) || t < latestTs) continue;
+            latestTs = t;
+            latestKind = e.kind;
+          }
+          return { id: a.id, state: { cursor, lastEventAtMs: latestTs, lastEventKind: latestKind } };
         } catch {
           return { id: a.id, state: prior };
         }
@@ -864,12 +1106,15 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
       const now = Date.now();
       const nextWorking = new Set<string>();
       const nextHeard = new Map<string, number | null>();
+      const nextEmotes = new Map<string, AgentRunEventKind | null>();
       for (const [id, st] of workingStateRef.current) {
         nextHeard.set(id, st.lastEventAtMs);
+        nextEmotes.set(id, st.lastEventKind);
         if (isGenuinelyWorking(st.lastEventAtMs, now)) nextWorking.add(id);
       }
       setWorkingIds(nextWorking);
       setLastHeardMs(nextHeard);
+      setEmoteKinds(nextEmotes);
     };
     poll();
     const interval = setInterval(poll, WORKING_POLL_MS);
@@ -946,10 +1191,18 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     ].filter((p) => floorRoomKeys.has(p.roomKey));
     lastPositionsRef.current = positions;
     for (const pos of positions) {
-      drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current);
+      // Two independent layers keep an emote bubble off a human, not one: office-data.ts only
+      // ever sets `activeRunId` on an `agent`-kind avatar (humans have no comparable activity
+      // feed — see that file's own doc comment), AND this call site re-checks `kind === "agent"`
+      // itself rather than trusting the field alone. `workingIds` is the same 45s-freshness gate
+      // the desk monitor tint already uses (req #2: "same 45s freshness rule already implemented").
+      const emoteKind = pos.avatar.kind === "agent" && pos.avatar.activeRunId && workingIds.has(pos.avatar.id)
+        ? (emoteKinds.get(pos.avatar.id) ?? null)
+        : null;
+      drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds]);
+  }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds, scale, emoteKinds]);
 
   // One-shot redraw on mount, scene/floor change, resize, and theme flips (data-theme is an
   // attribute change, not a resize — MutationObserver is the only signal for it).
@@ -999,6 +1252,14 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     }
     const elapsed = performance.now() - r.startPerf;
     draw(elapsed);
+    // Follow mode (req #1): re-centre on the followed avatar's just-drawn position every frame —
+    // `draw()` above just populated `lastPositionsRef` for this exact instant. This is the ONLY
+    // place camera follow keeps up with movement, because a replay step is the ONLY way an avatar's
+    // position changes at all (steady-state avatars don't move between renders).
+    if (followingIdRef.current) {
+      const followed = lastPositionsRef.current.find((p) => p.avatar.id === followingIdRef.current);
+      if (followed) setCenter({ x: tilesToPx(followed.tile.x), y: tilesToPx(followed.tile.y) });
+    }
     if (elapsed >= r.total) {
       replayRef.current = null;
       setReplaying(false);
@@ -1059,40 +1320,80 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
   // Redraw (one-shot) whenever hover/selection changes — a discrete state change, not an animation.
   useEffect(() => { if (!replaying) draw(null); }, [selectedId, hoveredId, replaying, draw]);
 
-  const pointerToAvatar = useCallback((clientX: number, clientY: number): string | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const x = clientX - rect.left, y = clientY - rect.top;
+  /** Hit-test a point given in VIEWPORT space (relative to the fixed, un-transformed viewport div
+   *  — never the canvas's own bounding rect, which moves/scales under the camera transform) —
+   *  inverted through the current camera into content space before comparing against
+   *  `lastPositionsRef`, which is always in content space regardless of zoom. */
+  const pointerToAvatarAtViewport = useCallback((vx: number, vy: number): string | null => {
+    const vw = viewportSize.w || cssW || 1, vh = viewportSize.h || cssH || 1;
+    const content = viewportToContentPoint(camera, vx, vy, vw, vh);
     let best: { id: string; d2: number } | null = null;
     for (const pos of lastPositionsRef.current) {
       const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
-      const d2 = (cx - x) ** 2 + (cy - y) ** 2;
+      const d2 = (cx - content.x) ** 2 + (cy - content.y) ** 2;
       const hitR = tilesToPx(1.1);
       if (d2 <= hitR * hitR && (!best || d2 < best.d2)) best = { id: pos.avatar.id, d2 };
     }
     return best?.id ?? null;
-  }, []);
-
-  const onMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const id = pointerToAvatar(e.clientX, e.clientY);
-    if (id !== hoveredIdRef.current) setHoveredId(id);
-  }, [pointerToAvatar]);
-
-  const onClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const id = pointerToAvatar(e.clientX, e.clientY);
-    if (id) setSelectedId(id);
-  }, [pointerToAvatar]);
+  }, [camera, viewportSize, cssW, cssH]);
 
   /** Selecting an avatar (from the canvas or the roster) jumps the floor selector to wherever it
-   *  actually is — otherwise picking someone on another floor would just select nothing visible. */
+   *  actually is, AND engages follow mode (req #1: "clicking an avatar centres the camera on it and
+   *  keeps it centred while it moves"). Centres from `steadyPositions` directly rather than
+   *  `lastPositionsRef` — a roster click that also switches floors needs the NEW floor's position
+   *  before the next draw() has even run, and `lastPositionsRef` would still hold the OLD floor's
+   *  contents at that instant. */
   const selectAvatar = useCallback((id: string) => {
     setSelectedId(id);
     const avatar = scene.avatars.find((a) => a.id === id);
     if (!avatar) return;
     const room = roomByKey.get(restingRoomKey(avatar, scene.events, nowMs));
     if (room && room.floor !== selectedFloorIndex) setSelectedFloorIndex(room.floor);
-  }, [scene.avatars, scene.events, roomByKey, nowMs, selectedFloorIndex]);
+    const pos = steadyPositions(scene, roomByKey, nowMs, new Set()).find((p) => p.avatar.id === id);
+    if (pos) setCenter({ x: tilesToPx(pos.tile.x), y: tilesToPx(pos.tile.y) });
+    setFollowingId(id);
+  }, [scene, roomByKey, nowMs, selectedFloorIndex]);
+
+  /** Pointer handling on the fixed VIEWPORT (never the canvas, which moves under the camera
+   *  transform) — one state machine covering hover, click-to-select, and drag-to-pan (req #1),
+   *  unified via Pointer Events so mouse/touch/pen all get the same behaviour. A press only becomes
+   *  a "drag" once it moves past a small threshold; short of that it resolves as a click (select),
+   *  matching how every drag-capable map/canvas UI distinguishes the two. */
+  const onViewportPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    dragRef.current = { startVX: e.clientX - rect.left, startVY: e.clientY - rect.top, startCenter: { x: camera.centerX, y: camera.centerY }, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [camera]);
+
+  const onViewportPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const vx = e.clientX - rect.left, vy = e.clientY - rect.top;
+    const drag = dragRef.current;
+    if (drag) {
+      const dx = vx - drag.startVX, dy = vy - drag.startVY;
+      if (!drag.moved && Math.hypot(dx, dy) > 4) { drag.moved = true; releaseFollow(); }
+      if (drag.moved) {
+        setCenter({ x: drag.startCenter.x - dx / scale, y: drag.startCenter.y - dy / scale });
+        return;
+      }
+    }
+    const id = pointerToAvatarAtViewport(vx, vy);
+    if (id !== hoveredIdRef.current) setHoveredId(id);
+  }, [scale, releaseFollow, pointerToAvatarAtViewport]);
+
+  const onViewportPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (drag && drag.moved) return; // it was a pan, not a click
+    const rect = e.currentTarget.getBoundingClientRect();
+    const id = pointerToAvatarAtViewport(e.clientX - rect.left, e.clientY - rect.top);
+    if (id) selectAvatar(id);
+  }, [pointerToAvatarAtViewport, selectAvatar]);
+
+  const onViewportPointerLeave = useCallback(() => {
+    if (!dragRef.current) setHoveredId(null);
+  }, []);
 
   const selected = scene.avatars.find((a) => a.id === selectedId) ?? null;
   const roster = useMemo(
@@ -1112,6 +1413,22 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
           One connected floor — real departments open onto real corridors. Who is shown and any
           movement is fixture data; there is no live presence feed yet. Nothing here is tracked or stored.
         </p>
+        <div className="office__zoom" role="group" aria-label="Camera zoom">
+          <button type="button" className="office__zoom-btn" onClick={() => stepZoom(-1)} disabled={scale === ZOOM_LEVELS[0]} aria-label="Zoom out">−</button>
+          <span className="office__zoom-level">{scale}×</span>
+          <button type="button" className="office__zoom-btn" onClick={() => stepZoom(1)} disabled={scale === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]} aria-label="Zoom in">+</button>
+          <button type="button" className={`office__zoom-fit${zoomPref === "fit" ? " office__zoom-fit--active" : ""}`} onClick={goToFit}>Fit</button>
+        </div>
+        {followingId && selected && (
+          <div className="office__follow-chip">
+            Following {selected.name}
+            <button type="button" onClick={() => releaseFollow()}>Release</button>
+          </div>
+        )}
+        {!followingId && followReleasedNotice && <span className="office__follow-notice">Follow released — camera moved</span>}
+        <div aria-live="polite" className="office-sr-only">
+          {followingId && selected ? `Following ${selected.name}.` : followReleasedNotice ? "Follow released." : ""}
+        </div>
         <button
           type="button"
           className="office__replay-btn"
@@ -1141,15 +1458,22 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
       )}
 
       <div className="office__body">
-        <div className="office__canvas-wrap" style={{ width: cssW, height: cssH }}>
+        <div
+          ref={viewportRef}
+          className="office__viewport"
+          tabIndex={0}
+          role="img"
+          aria-label={`Office floor ${selectedFloorIndex + 1} plan, at ${scale}× zoom${followingId && selected ? `, following ${selected.name}` : ""}. Drag or use the arrow keys to pan; scroll or the +/− buttons to zoom. Use the roster list below to browse avatars by keyboard.`}
+          onPointerDown={onViewportPointerDown}
+          onPointerMove={onViewportPointerMove}
+          onPointerUp={onViewportPointerUp}
+          onPointerLeave={onViewportPointerLeave}
+          onKeyDown={onViewportKeyDown}
+        >
           <canvas
             ref={canvasRef}
-            role="img"
-            aria-label={`Office floor ${selectedFloorIndex + 1} plan. Use the roster list to browse avatars by keyboard.`}
-            style={{ width: cssW, height: cssH }}
-            onMouseMove={onMouseMove}
-            onMouseLeave={() => setHoveredId(null)}
-            onClick={onClick}
+            aria-hidden="true"
+            style={{ width: cssW, height: cssH, transform: cssTransformForCamera(camera, viewportSize.w || cssW || 1, viewportSize.h || cssH || 1) }}
           />
         </div>
 
@@ -1159,6 +1483,13 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
             <div><span className="office__legend-swatch office__legend-swatch--agent" /> Internal agent — steel, synthetic</div>
             <div><span className="office__legend-swatch office__legend-swatch--automation" /> Automation — grey box, no face</div>
             <div><span className="office__legend-swatch office__legend-swatch--external" /> External agent — foreign shape + assurance</div>
+          </div>
+
+          <div className="office__legend office__legend-emotes" aria-hidden="true">
+            <Eyebrow>Emote bubbles — working agents only</Eyebrow>
+            {(Object.keys(EMOTE_LABEL) as AgentRunEventKind[]).map((k) => (
+              <div key={k} className={`office__legend-emote${k === "approval_wait" ? " office__legend-emote--alert" : ""}`}>{EMOTE_LABEL[k]}</div>
+            ))}
           </div>
 
           <div className="office__roster" role="listbox" aria-label="Everyone on the floor">
@@ -1178,7 +1509,14 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
               >
                 <span className="office__roster-kind">{KIND_LABEL[a.kind]}</span>
                 <span className="office__roster-name">{a.name}</span>
-                {workingIds.has(a.id) && <span className="office__roster-working">Working</span>}
+                {workingIds.has(a.id) && (() => {
+                  const kind = emoteKinds.get(a.id) ?? null;
+                  return (
+                    <span className={`office__roster-working${kind === "approval_wait" ? " office__roster-working--alert" : ""}`}>
+                      {kind ? EMOTE_LABEL[kind] : "Working"}
+                    </span>
+                  );
+                })()}
               </button>
             ))}
           </div>
@@ -1213,7 +1551,7 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
                       <dt>Activity</dt>
                       <dd>
                         {selectedIsWorking
-                          ? "Working now — real-time run events in the last minute."
+                          ? `Working now (${EMOTE_LABEL[emoteKinds.get(selected.id) ?? "tool"]}) — real-time run events in the last minute.`
                           : selectedLastHeard != null
                             ? `Run open, quiet — last heard ${formatRelativeTime(selectedLastHeard, nowMs)}.`
                             : "Run open — no events observed yet."}

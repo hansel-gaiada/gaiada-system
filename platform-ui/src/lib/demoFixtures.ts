@@ -498,6 +498,11 @@ const AGENT_GOALS: Record<string, unknown[]> = {
 // blanket "always working" stub.
 const AGENT_GOAL_RUNS: Record<string, { runId: string; agent: string; status: string; startedAt: number; endedAt?: number }[]> = {
   "g-1": [{ runId: "run-demo-g-1", agent: "ops-agent", status: "running", startedAt: Date.now() - 90_000 }],
+  // g-3 ("Reconcile client onboarding checklist") also has a genuinely open run — added alongside
+  // g-1 (2026-08-23) so the /office emote-bubble demo has a real `approval_wait` case to show, not
+  // just `tool`. Still a labelled DEMO fixture, same as g-1 — this does not claim a human is
+  // actually waiting on anything real.
+  "g-3": [{ runId: "run-demo-g-3", agent: "ops-agent", status: "running", startedAt: Date.now() - 60_000 }],
 };
 
 // The run-events page this run's runId serves — see agentEvents.ts's AgentRunEvent shape. Returns
@@ -505,12 +510,24 @@ const AGENT_GOAL_RUNS: Record<string, { runId: string; agent: string; status: st
 // /office sees "working" right after load and settles into "quiet" a WORKING_RECENCY_MS later,
 // exactly like a real run that produced one burst of activity and then paused — never an
 // infinitely-animating loop, which the honesty rules this feature is built against forbid anyway.
+// Two distinct runs/kinds (g-1: `tool`, g-3: `approval_wait`) so the office canvas's emote-bubble
+// mapping (req #2 of the 2026-08-23 camera/emote pass) has more than one glyph to actually show in
+// the shipped demo, not just in unit tests.
 function demoAgentRunEvents(runId: string, sinceSeq: number): { eventId: string; runId: string; goalId: string; seq: number; ts: string; kind: string; detail: string; durationMs: number | null; parentRunId: string | null }[] {
-  if (runId !== "run-demo-g-1" || sinceSeq >= 1) return [];
-  return [{
-    eventId: "evt-demo-g-1-1", runId, goalId: "g-1", seq: 1, ts: new Date().toISOString(),
-    kind: "tool", detail: "Checked overdue approvals queue", durationMs: 420, parentRunId: null,
-  }];
+  if (sinceSeq >= 1) return [];
+  if (runId === "run-demo-g-1") {
+    return [{
+      eventId: "evt-demo-g-1-1", runId, goalId: "g-1", seq: 1, ts: new Date().toISOString(),
+      kind: "tool", detail: "Checked overdue approvals queue", durationMs: 420, parentRunId: null,
+    }];
+  }
+  if (runId === "run-demo-g-3") {
+    return [{
+      eventId: "evt-demo-g-3-1", runId, goalId: "g-3", seq: 1, ts: new Date().toISOString(),
+      kind: "approval_wait", detail: "Waiting for a human to confirm an onboarding checklist exception", durationMs: null, parentRunId: null,
+    }];
+  }
+  return [];
 }
 const KNOWLEDGE_SOURCES: Record<string, unknown[]> = {
   "co-agency": [

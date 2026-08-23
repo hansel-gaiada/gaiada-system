@@ -38,6 +38,74 @@
   color: var(--erp-ink-60);
 }
 
+.office-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+.office__zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.office__zoom-btn {
+  font: 700 14px var(--font-body);
+  color: var(--ink-strong);
+  background: var(--surface-card);
+  border: 1px solid var(--erp-hairline);
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+.office__zoom-btn:hover:not(:disabled) { background: var(--tint-hover); }
+.office__zoom-btn:disabled { color: var(--erp-ink-50); cursor: not-allowed; opacity: 0.6; }
+.office__zoom-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.office__zoom-level {
+  font: 600 12px var(--font-body);
+  color: var(--erp-ink-60);
+  min-width: 28px;
+  text-align: center;
+}
+
+.office__zoom-fit {
+  font: 600 12px var(--font-body);
+  color: var(--ink-strong);
+  background: var(--surface-card);
+  border: 1px solid var(--erp-hairline);
+  padding: var(--space-4) var(--space-8);
+  cursor: pointer;
+}
+.office__zoom-fit:hover { background: var(--tint-hover); }
+.office__zoom-fit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.office__zoom-fit--active { color: var(--ink-strong); background: var(--tint-active); border-color: var(--accent); }
+
+.office__follow-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font: 600 12px var(--font-body);
+  color: var(--accent-fg);
+  background: var(--tint-active);
+  border: 1px solid var(--accent);
+  padding: var(--space-4) var(--space-8);
+  white-space: nowrap;
+}
+.office__follow-chip button {
+  font: 600 11px var(--font-body);
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  padding: 1px var(--space-8);
+  cursor: pointer;
+}
+.office__follow-chip button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.office__follow-notice {
+  font: 600 12px var(--font-body);
+  color: var(--status-warning-fg);
+  white-space: nowrap;
+}
+
 .office__replay-btn {
   font: 600 13px var(--font-body);
   color: var(--ink-strong);
@@ -80,25 +148,54 @@
   flex-wrap: wrap;
 }
 
-.office__canvas-wrap {
-  /* The floor plate sizes itself to its own content (width/height are set inline from the
-     selected floor's real tile size) and the PAGE scrolls it — this element must never own a
-     vertical scrollbar of its own. A very wide floor may still scroll horizontally in its own
-     contained strip (owner's exception: "horizontal overflow on a very wide plate may stay a
-     contained scroll, but vertical must be the page"). */
-  overflow-x: auto;
-  overflow-y: visible;
+.office__viewport {
+  /* The CAMERA's fixed window (2026-08-23) — replaces the old content-sized scroll wrap. The
+     plate is drawn at its own native content size (unchanged) and the canvas is transformed
+     (translate+scale, see OfficeCanvas.tsx's cssTransformForCamera) to sit under THIS fixed
+     viewport, which owns `overflow: hidden` rather than a scrollbar: panning/zooming replaces
+     scrolling as the way to see a wide plate, per the ticket's own framing ("the floor plate is
+     wide and currently needs horizontal scrolling"). */
+  position: relative;
+  overflow: hidden;
   border: 0.5px solid var(--erp-hairline);
-  max-width: 100%;
-  flex: 0 0 auto;
+  /* Generous on purpose — the old design's own rule was "vertical is the PAGE's to scroll, never
+     the plate's own scrollbar" (see the `.office__side` comment for the matching width change);
+     that still holds here, it just means the viewport is sized to typically cover a small/medium
+     tenant's whole floor at 1x rather than a small fixed box that forces needless vertical
+     panning. A very wide multi-department floor may still need horizontal panning at 1x — that is
+     the accepted trade-off of "integer zoom only" (req #1), not a sizing bug. */
+  flex: 1 1 640px;
+  min-width: 320px;
+  height: min(95vh, 900px);
+  min-height: 460px;
+  background: var(--surface-page);
+  cursor: grab;
+  touch-action: none; /* dragging pans the camera — never the page underneath it */
+}
+.office__viewport:active { cursor: grabbing; }
+.office__viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.office__viewport canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  /* Nearest-neighbour scaling — an integer CSS `scale()` (see ZOOM_LEVELS) then reproduces every
+     source pixel as an exact NxN block instead of blurring it, which is the whole point of
+     restricting zoom to integer steps. */
+  image-rendering: pixelated;
+  will-change: transform;
 }
 
-.office__canvas-wrap canvas {
-  display: block;
-}
+.office__legend-emotes { margin-top: var(--space-4); }
+.office__legend-emote { padding-left: var(--space-16); }
+.office__legend-emote--alert { color: var(--status-warning-fg); font-weight: 600; }
 
 .office__side {
-  flex: 1 1 280px;
+  /* Fixed width, no grow — the viewport (above) is what should absorb extra horizontal space now
+     that it's a real camera rather than a content-sized box, so a wide floor needs the least
+     possible amount of horizontal panning at 1x. */
+  flex: 0 0 300px;
   min-width: 260px;
   display: flex;
   flex-direction: column;
@@ -167,6 +264,10 @@
   text-transform: uppercase;
   color: var(--accent-fg);
 }
+/* The roster's non-canvas equivalent of the emote bubble's loudest treatment (req #2:
+   "approval_wait ... give it the most visually distinct treatment") — a keyboard/screen-reader
+   user browsing the roster gets the same escalation a sighted canvas user gets from the bubble. */
+.office__roster-working--alert { color: var(--status-warning-fg); }
 
 .office__detail {
   border: 0.5px solid var(--erp-hairline);

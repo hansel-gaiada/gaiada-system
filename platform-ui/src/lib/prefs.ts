@@ -7,6 +7,12 @@ export type Density = "comfortable" | "compact";
 export type Width = "standard" | "wide";
 /** "auto" follows prefers-color-scheme; the other two pin the theme. */
 export type Theme = "auto" | "light" | "dark";
+/** The Office canvas's camera zoom (`lib/office.ts`'s `ZoomLevel`, plus "fit" — the same
+ *  auto-vs-pinned shape `Theme` already uses: "fit" follows whatever the current floor/viewport
+ *  computes, the three numbers pin an explicit integer step). Duplicated as a literal union rather
+ *  than importing `ZoomLevel` from `lib/office.ts` — this file is `server-only` and must stay
+ *  importable without pulling a client-safe module's whole surface in for one type. */
+export type OfficeZoom = "fit" | 1 | 2 | 3;
 
 export interface Prefs {
   density: Density;
@@ -17,18 +23,22 @@ export interface Prefs {
    *  gaiada_prefs, don't invent a new store" convention density/width/theme already set (see
    *  AssistantWorkspace + lib/prefsActions.ts). */
   assistantRailCollapsed: boolean;
+  /** The Office canvas's camera zoom (2026-08-23) — same cookie, same "don't invent new storage"
+   *  instruction as `assistantRailCollapsed` above. */
+  officeZoom: OfficeZoom;
 }
 
 // Width defaults to "wide" (no max-width): the suite is dominated by tables, boards and console
 // grids, which the 1180px reading measure squeezed into needless horizontal scrolling on a normal
 // desktop. "standard" stays available in Account -> Content width for anyone who prefers the
 // narrower measure for the prose-shaped pages.
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "wide", theme: "auto", assistantRailCollapsed: false };
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "wide", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit" };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
 const WIDTHS: Width[] = ["standard", "wide"];
 const THEMES: Theme[] = ["auto", "light", "dark"];
+const OFFICE_ZOOMS: OfficeZoom[] = ["fit", 1, 2, 3];
 
 export async function getPrefs(): Promise<Prefs> {
   const jar = await cookies();
@@ -43,6 +53,7 @@ export async function getPrefs(): Promise<Prefs> {
       assistantRailCollapsed: typeof parsed.assistantRailCollapsed === "boolean"
         ? parsed.assistantRailCollapsed
         : DEFAULT_PREFS.assistantRailCollapsed,
+      officeZoom: OFFICE_ZOOMS.includes(parsed.officeZoom as OfficeZoom) ? (parsed.officeZoom as OfficeZoom) : DEFAULT_PREFS.officeZoom,
     };
   } catch {
     return DEFAULT_PREFS;
