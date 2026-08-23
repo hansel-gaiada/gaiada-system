@@ -93,6 +93,58 @@ and self-hosted ComfyUI stay out.
 model licences were not verified and must be checked at build time — the $200 envelope is only meaningful
 against real per-second rates.
 
+## 5c · The image slice, mapped to real tickets (2026-08-23)
+
+The 27 `CR-*` tickets already exist with dependencies, seat tiers and acceptance criteria, so this is a
+selection from §12, not a new ticket set.
+
+**⚠ Correcting §4's own estimate.** I guessed "4–6 tickets". **It is 9.** I under-counted the
+foundation: CR-01–CR-05 are unavoidable before any render can happen, and no amount of scope-trimming
+removes them. Worth stating plainly rather than quietly revising — an estimate that halves the real
+number is how a wave gets committed to on the wrong basis.
+
+### The spine — 9 tickets
+
+| Ticket | Why it is unavoidable for SMM-34 | Seat | Effort flag |
+|---|---|---|---|
+| **CR-01** | `0036_module_creative.sql` — RLS retrofit on the already-shipped `creative_assets` + the §04 columns | senior-db | **opus·medium** — retrofitting RLS on a live table |
+| **CR-02** | `creative` ModuleContract + Nest module; `CreativeController` moves into it | senior-be | default |
+| **CR-03** | Cerbos policies ×5 + derived roles + `lib/rbac.ts` mirror | medior | default |
+| **CR-04** | Render Gateway skeleton: scaffold, job envelope, idempotent `POST /jobs`, `GET /jobs/:id` | senior-be | default (mirrors ai-gateway-go) |
+| **CR-05** | Config plumbing both sides + `.env.example` + compose slot | junior | default |
+| **CR-06** | **Router + metering choke point** — cost-ordered routing, circuit breakers, and the stop-loss chain. This is the money-safety spine | senior-be | **opus·medium** — double-dispatch, stampede, mid-run-failover ban, true-up |
+| **CR-12** | **ComfyUI serverless backend** — seeds `gen-qwen / gen-sdxl / gen-zimage / edit-qwen / bgremove-birefnet@1`. **This is the generation capability itself** | senior-integrator | default (QA gate mandatory) |
+| **CR-13** | **The two gates** — spend gate + the reuse/license gate. Non-negotiable per §5 | senior-be | **opus·high** — a bypass puts NC pixels in a client deliverable or burns unapproved money |
+| **CR-21** | The **SMM seam** — approved-only listing, and the ledger booking `requester_module='social'` exactly once | medior | default |
+
+**Correction to §4's table:** it listed "self-hosted headless ComfyUI" as deferrable, and that is right —
+but **CR-12 is ComfyUI on RunPod *serverless*, which is the rent-by-second path and IS in scope.** Those
+are two different things and the §4 wording blurred them.
+
+### Deferred, and what each defers
+- **CR-00, CR-07, CR-08, CR-10, CR-11** — the upscale/relight path (P1). A different capability.
+- **CR-14, CR-15, CR-16** — the human-facing Generate & Edit canvas.
+- **CR-17–CR-20, CR-22** — analyze/CLIP search, library v2, imgproxy renditions, rights expiry.
+- **CR-23–CR-26** — all video. Keeps SMM-29 gated and the $300 envelope uncreated, as decided.
+
+### Two consequences of trimming that the owner should weigh
+
+1. **CR-13 bundles the FLUX premium tier** with the two gates. The decision defers FLUX, so CR-13 ships
+   with its FLUX route unimplemented — the ticket needs splitting, or its acceptance criterion
+   "FLUX route unreachable without tier+permission" is satisfied trivially by the route not existing.
+   Either is defensible; it should be a stated choice, not discovered in review.
+2. **Deferring CR-09 means spending money blind.** CR-09 carries the *Jobs & Usage* tab — the queue and
+   the ledger view. Without it there is no surface showing spend against the $200 cap while it accrues.
+   The cap is enforced fail-closed in CR-06 either way, so this is not a safety hole; it is an
+   operability one. **My recommendation: pull CR-09 in, making it 10.** Watching the first paid pipeline
+   in this estate is worth one senior-fe ticket, and "we discovered the cap by hitting it" is a bad first
+   experience of a budget you just approved.
+
+Likewise, with CR-14 deferred there is **no hand-drivable UI for generation** — SMM's composer would be
+the first surface to exercise it, which is the frontend-first drift this program keeps getting burned by.
+CR-09 partly mitigates that by making jobs observable; if it is also cut, the first proof that generation
+works is a social post.
+
 ## 6 · Recommendation
 
 **Do not start the gateway build yet. Get the spend decision first** (§3) — it is one answer and it
