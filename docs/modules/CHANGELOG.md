@@ -1546,6 +1546,37 @@ it to a commit-range diff.
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
 
+### `Alpha 01.065.0141a` - 2026-08-23 - the half of the redesign nobody could reach
+
+Manifest (counter +1, 0140 -> 0141): `platform-ui 0.41.0 -> 0.42.0`.
+
+`0140a` shipped the dark-first redesign. This cut ships the ability to SEE it.
+
+Three defects, all found by the owner opening the deployed app, and all the same
+kind — the product working correctly while showing something untrue:
+
+- **No theme toggle existed.** The only control was a `<select>` on `/account`, and the
+  default is `auto`. On a light-mode machine that renders the derived light theme, which
+  was deliberately built to stay close to the old linen-and-bronze identity. The owner
+  judged a dark-first redesign entirely on its conservative half and reasonably concluded
+  little had changed. Auto/Light/Dark now sits beside the command palette.
+- **`/office` had no navigation entry** and was reachable only by typing the URL. A route
+  nobody can find is a route that does not exist.
+- **Estate-level agents rendered as binding failures.** Agents and automations exist from
+  day one, independent of org structure; only employees arrive with departments. The code
+  knew goals were tenant-wide and still filed them under "Unassigned — No department
+  binding", so a company with no departments looked broken rather than new. They now live
+  in a first-class Operations room.
+
+Also in this cut: the office canvas became an actual workplace (tiled floors, walls with
+doorways, nameplates, desks with chairs and monitors, labelled vacant seats, lobby chairs,
+a utility rack), and the release pipeline stopped deleting the images it was about to
+deploy — `0140a` failed its first deploy with `MANIFEST_UNKNOWN` because the prune step
+runs inside `build-sign`, before the deploy job it feeds.
+
+Still not shipped: real sprite art. The licence question resolved (elect OGA-BY/CC0, no
+share-alike), the asset set is chosen, the wiring is next.
+
 ### `Alpha 01.064.0140a` - 2026-08-23 - the resort rename reaches the estate
 
 Manifest (counter +1, 0139 -> 0140): `platform-nest 0.35.0 -> 0.35.1`,
