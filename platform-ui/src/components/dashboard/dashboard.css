@@ -98,6 +98,18 @@
 .checkin-card__pill { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 9px; border: 0.5px solid currentColor; }
 .checkin-card__pill--submitted { color: var(--erp-accent); }
 .checkin-card__pill--quiet { color: var(--erp-ink-50); }
+/* CheckinLine — the compact idle states (excused / submitted / not-expected). These class names
+   were referenced by CheckinCard.tsx from the day it shipped but NEVER had a rule, so the pill and
+   the note rendered as bare adjacent inline spans with no separator: "Not expected todayNot a
+   working day, or you're on approved leave." Read as a typo in the copy; it was a missing
+   stylesheet. Flex with a gap is the fix — spacing belongs to layout, not to padding a string. */
+.checkin-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.checkin-line__pill { font: 700 11px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--erp-ink-60); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); padding: 3px 9px; white-space: nowrap; }
+.checkin-line__pill--submitted { color: var(--status-ok-fg); border-color: var(--status-ok); }
+.checkin-line__note { font: 400 13px/20px var(--font-body); color: var(--erp-ink-60); }
+.checkin-line__blockers { font: 400 13px/20px var(--font-body); color: var(--status-warning-fg); }
+.checkin-line__compliance { flex-basis: 100%; }
+
 .checkin-card__streak { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 0.5px solid var(--erp-hairline); }
 .checkin-card__streak-chip { font: 700 11px var(--font-body); color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 4px 10px; }
 .checkin-card__streak-chip--quiet { font-weight: 400; color: var(--erp-ink-60); border-color: var(--erp-hairline); }
