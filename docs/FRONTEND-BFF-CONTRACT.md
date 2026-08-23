@@ -3712,3 +3712,26 @@ the employment-status read is module-scoped, so a company without `hr` gets `emp
 
 It is a CLI (`npm run iam:backfill`), dry-run by default, and deliberately not an HTTP surface: applying
 it is a reviewed one-time operation, and an endpoint would invite a button. See PERMISSION-CONTRACT §13.
+
+## 21. Command palette tier-3 live search (UI redesign Phase 2, 2026-08-22) — `platform-ui/src/app/api/search/palette/route.ts` — **NO new backend endpoint; a browser-reachable BFF route only**
+
+`docs/design/2026-08-22-ui-redesign-ia-and-migration.md` §4.1 flagged tier-3 (live-record) palette
+results as a possible contract addition, "architect's call whether it fans out to existing list
+endpoints or gets a dedicated search endpoint." Resolved here, in the direction the spec itself
+named as available and lower-risk: **fans out to existing list endpoints**, via the SAME aggregator
+the pre-existing `/search` page already calls (`platform-ui/src/lib/search.ts::globalSearch`, itself
+built on `lib/entities.ts`'s `listCompanies/listProjects/listTasks/listCampaigns/listMembers`). No
+new platform-nest route, no new Cerbos policy — this is a second, keystroke-driven UI onto reads that
+already exist and are already RBAC-narrowed by the backend calls those readers make.
+
+- `GET /api/search/palette?q=<string>` (platform-ui internal route, not platform-nest) — session-
+  authed (`getSessionUserId`), resolves the active tenant the same way `/search` does, returns `{
+  groups: SearchGroup[] }` (same shape as `lib/search.ts`'s `SearchGroup[]`, each group's `hits`
+  capped to 5 for a keystroke-responsive list). `q.length < 2` short-circuits to `{ groups: [] }`
+  with no read at all, matching `globalSearch`'s own floor.
+- No session → `401` with an empty `groups` array (never a throw — the palette degrades to its
+  static tiers 1/2, which need no network call at all).
+- If/when a dedicated `/api/:t/search` backend endpoint is ever built (better relevance, cross-
+  entity ranking, pagination beyond what a client-side aggregator can do), this route becomes a
+  one-file swap — `CommandPalette.tsx` and the `/search` page both already consume a stable
+  `SearchGroup[]` shape and neither needs to change.

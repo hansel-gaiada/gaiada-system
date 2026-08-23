@@ -1,0 +1,31 @@
+# Zedano — Hermes agent configuration.
+#
+# Rendered to /opt/hermes-zen/config.yaml on gda-aicenter. Secrets are referenced by NAME only and
+# resolved from /opt/hermes-zen/.env on the box — never inlined, never committed.
+#
+# Captured from the live box 2026-08-23. See ./README.md and
+# docs/superpowers/plans/2026-08-22-hermes-runtime-plan.md.
+
+model:
+  # ⚠ PLANNED CHANGE (runtime plan §7.4): this must move to the ai-gateway rather than naming a
+  # provider directly. CLAUDE.md's non-negotiable is "Only the Gateway holds provider keys" — while
+  # Hermes holds its own credential it runs outside the gateway's DLP, daily cost cap, egress audit
+  # and failover. Repointing here is also what closes the free-tier capacity question, because the
+  # router stops choosing its own provider at all.
+  provider: "gemini"
+  default: "gemini-3.1-flash-lite"
+
+# Gaiada MCP Hub — lets Zedano ACT on ERP data (projects, tasks, rollups), not just answer.
+# The hub mints the principal itself from the OBO headers; clients cannot assert their own
+# assurance, so these identify Hermes rather than grant it anything.
+#
+# ⚠ This block is the ONE wire that defines Hermes' tool surface. When `agent_registry` and the
+# per-principal tool view land (tracker P1), it becomes GENERATED from the registry rather than
+# hand-maintained — otherwise the tool view drifts from the registry silently.
+mcp_servers:
+  gaiada:
+    url: "http://127.0.0.1:3003/mcp"
+    headers:
+      Authorization: "Bearer ${GAIADA_HUB_TOKEN}"
+      x-obo-provider: "hermes"
+      x-obo-external-id: "zedano@gaiada.com"
