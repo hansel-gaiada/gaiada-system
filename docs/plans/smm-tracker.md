@@ -184,9 +184,6 @@ before any network call, backed by ONE map on `direct.ts` shared with its own pe
 a second hand-maintained list. `youtube:media_upload=direct` moves from "reported unsafe" to
 "principle-safe, credential-gated only" — the SAME D-23 gap every other flip in this wave already
 carries. Module: `social-media 0.5.11 · IN PROGRESS`.
-| P3 content ops | 2 (+2 partial) | 8 |
-| P4 agents + assistant | **3** | 3 ✅ |
-| Decision-gated | — | 3 (1 dead) |
 
 Module: `social-media 0.5.6 · IN PROGRESS` — publish loop **DEV-VERIFIED against the mock driver**;
 live network publishing **deferred to staging** (D-23); client-review stage **DEV-VERIFIED end to
@@ -2656,13 +2653,22 @@ same pass) and any regression test proving the denial for this real tool name. C
 
 ---
 
-## What is actually left (2026-08-22, updated same day by SMM-26's own pass)
+## What is actually left (2026-08-23, consolidated)
 
-**38 tickets merged.** P0, P1, P2, P3, the whole `direct`-driver wave, and SMM-26 (the first P4
-ticket) are all closed. Module `0.5.16`; `src/modules/social` + the three
-`d14-smm-{09,17,22}-social-*-registry.test.ts` files 599/0/5 (this pass's own directly-measured
-figure — see SMM-26's evidence block below for the full arithmetic). `platform-ui` untouched this
-pass (off-limits file surface), still 2592/0/0 per SMM-22's own figure.
+**Every phase is closed and every named follow-up is closed.** P0, P1, P2, P3, P4 and the whole
+`direct`-driver wave are landed; SMM-40 (the publish "approve variant" endpoint) was added and closed
+in the same pass that closed the last of the nine follow-ups. Module **`0.5.31`**.
+
+**Directly measured on `main` at consolidation, not carried forward from an earlier pass:**
+`src/modules/social` + the D14 registry files + both social seeds = **41 files, 610 passed, 0 failed,
+0 skipped**. `platform-ui` = **2778 passed** (whole project — other departments' work is in that
+number too, so it is not a social-only figure and should not be quoted as one).
+
+**Three earlier numbers in this file were stale and are superseded by the above:** "38 tickets
+merged", module `0.5.16`, and `599/0/5`. A summary edited in pieces across many passes drifts from its
+own detail — this section had also acquired three orphaned scoreboard rows stranded mid-prose by a
+merge, one of which reported P3 as `2 of 8` while the real scoreboard said `8 of 8`. Both are fixed.
+If you find a figure here that no command in this file reproduces, distrust it and re-measure.
 
 | Remaining | Note |
 |---|---|
