@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **99** capabilities across **15** owners
-- **56** writes · 43 reads
+- **100** capabilities across **15** owners
+- **56** writes · 44 reads
 - Writes by impact: **high 11** · medium 16 · low 29
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -147,6 +147,7 @@ unfalsifiable after.
 | social | `social.listEngagements` | `GET` | `/api/:tenantId/modules/social/engagements` | read | — |
 | social | `social.listPosts` | `GET` | `/api/:tenantId/modules/social/posts` | read | — |
 | social | `social.listReports` | `GET` | `/api/:tenantId/modules/social/reports` | read | — |
+| social | `social.listThreadMessages` | `GET` | `/api/:tenantId/modules/social/threads/:threadId/messages` | read | — |
 | social | `social.provisionPublisherOrg` | `POST` | `/api/:tenantId/modules/social/publisher-orgs` | write | `medium` |
 | social | `social.publishPost` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish` | write | `high` |
 | social | `social.publishPostMetered` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/publish-metered` | write | `high` |
