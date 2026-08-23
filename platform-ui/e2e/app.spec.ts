@@ -131,19 +131,38 @@ test("department Home shows live KPIs, a project health ring, activity feed, and
   await page.goto("/departments/dept-1");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
 
-  // KPI strip — real numbers from the seeded PM demo store (Active=2, Due
-  // soon=3, Blocked=1 across the department's own tasks; Progress=43% from
-  // the one owned project), not the P1-06 all-zero placeholders.
+  // KPI strip — real numbers DERIVED from the seeded PM demo store, not the P1-06 all-zero
+  // placeholders. These literals track `lib/demoPm.ts`, so re-derive them when it changes; that
+  // is exactly what was missed here. Active was 2 and is now 3 because the P3-06 fixture added a
+  // second dept-1-owned project whose `t-web2-b` is in_progress. Web Dev's three active tasks are
+  // `t-4` (u-dev, in_progress), `t-web-b` (assigned to the dept-1-div-1 division) and `t-web2-b` —
+  // all genuinely the department's own under the poly-assignee rule in `departments.ts::belongs`,
+  // which counts a task assigned to the department, to a division under it, or to a person placed
+  // in it. The KPI was right; the literal was stale.
   const kpi = (label: string) => page.locator(".dept-kpi", { hasText: label }).locator(".dept-kpi__value");
-  await expect(kpi("Active")).toHaveText("2");
-  await expect(kpi("Due soon")).toHaveText("3");
+  await expect(kpi("Active")).toHaveText("3");
+  // "Due soon" is `daysUntil(due) <= 7` with NO lower bound (departments.ts::isDueSoon), so it
+  // counts overdue tasks as well as imminent ones. Every seeded due date is now in the past, so
+  // this is every not-done task carrying a date — t-4, t-5 (blocked still counts; only `done` is
+  // excluded), t-web-b and t-web2-b = 4. It is saturated and therefore stable: it cannot drift
+  // further with the calendar, only when the fixture changes.
+  await expect(kpi("Due soon")).toHaveText("4");
   await expect(kpi("Blocked")).toHaveText("1");
-  await expect(kpi("Progress")).toHaveText("43%");
+  // Progress is the MEAN of each owned project's progress (computeDeptKpis), so it moved when
+  // P3-06 gave Web Dev a second owned project: it is now avg(p-web-1, p-web-2) = 47%, not the
+  // single-project 43%. Same root cause as Active and Due soon above — one fixture addition,
+  // three stale literals, and only the first was visible because the assertions run in order.
+  await expect(kpi("Progress")).toHaveText("47%");
 
-  // Project health ring for the one owned project, flagged at risk.
+  // Project health rings. Web Dev owns TWO projects since the P3-06 fixture, not one — so the
+  // unqualified /at risk/ lookup below became a strict-mode violation (both rings carry the badge)
+  // rather than a genuine assertion failure. Scoped to the named project the assertion is actually
+  // about, which is what it always meant; an unscoped getByText that happens to be unique is a
+  // latent failure waiting for a second row.
+  const ring = page.locator(".dept-ring-card", { hasText: "Client site redesign" });
   await expect(page.getByRole("link", { name: "Client site redesign" })).toBeVisible();
-  await expect(page.getByText(/at risk/i)).toBeVisible();
-  await expect(page.getByText(/overdue.*blocked|blocked.*overdue/i)).toBeVisible();
+  await expect(ring.getByText(/at risk/i)).toBeVisible();
+  await expect(ring.getByText(/overdue.*blocked|blocked.*overdue/i)).toBeVisible();
 
   // Activity feed — real F2 rows for this department, not the empty teach-state.
   await expect(page.getByText("Task: Wire homepage hero")).toBeVisible();
