@@ -1,0 +1,31 @@
+/* TopBar theme control (Auto/Light/Dark) — a segmented radiogroup, sized to sit flush against the
+   ⌘K trigger it lives beside (see command-palette.css's .erp-top__cmdk for the sibling it matches
+   height with). Tokens only, per the design-system guard in styles/tokens.test.ts. */
+.erp-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  border: 0.5px solid var(--erp-hairline);
+  padding: 2px;
+  flex: 0 0 auto;
+}
+
+.erp-theme__opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: color 0.15s var(--erp-ease), background-color 0.15s var(--erp-ease);
+}
+.erp-theme__opt:hover { color: var(--text-primary); }
+.erp-theme__opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.erp-theme__opt--active { background: var(--tint-active); color: var(--accent); }
+
+@media (pointer: coarse) {
+  .erp-theme__opt { width: 44px; height: 44px; }
+}

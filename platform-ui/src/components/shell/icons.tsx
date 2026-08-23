@@ -35,6 +35,11 @@ const PATHS = {
   bot: "M7 7h10v9H7z M9 16v3 M15 16v3 M10 11h.01 M14 11h.01 M12 4v3",
   automation: "M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0 -16 0 M12 8v4l3 2",
   assistant: "M4 5h16v11H8l-4 4V5z M8 9h8 M8 12.5h5",
+  // Theme toggle glyphs (§ shell TopBar) — sun/moon are the two pinned states; `auto` is a
+  // half-filled circle (device-follows) rather than a third invented metaphor.
+  sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z M12 2v2 M12 20v2 M4.2 4.2l1.4 1.4 M18.4 18.4l1.4 1.4 M2 12h2 M20 12h2 M4.2 19.8l1.4-1.4 M18.4 5.6l1.4-1.4",
+  moon: "M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z",
+  auto: "M12 20a8 8 0 1 0 0-16v16z M12 4a8 8 0 1 0 0 16",
 };
 
 export type IconName = keyof typeof PATHS;

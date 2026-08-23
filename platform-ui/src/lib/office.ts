@@ -31,7 +31,12 @@ export const ASSURANCE_LABEL: Record<AssuranceTier, string> = {
 // Binding model (plan §4.3): a Room is bound to a REAL entity, never invented. `deptId` is the
 // org-structure department node id when kind === "department" — the same id every department
 // console/nav row already uses, so a room can never point at a department that doesn't exist.
-export type OfficeRoomKind = "lobby" | "department" | "utility" | "unassigned";
+// "agents" is a first-class estate-level room (Operations — tenant-wide agents live here from
+// day one, independent of org structure), never a fallback. "unassigned" stays reserved for a
+// genuine binding failure — a real thing that has nowhere else to go — and is not created by
+// default; see office-data.ts's own comment on why conflating the two made a correct system read
+// as broken (an estate-level agent is not "unbound", it was simply never department-scoped).
+export type OfficeRoomKind = "lobby" | "department" | "agents" | "utility" | "unassigned";
 
 export interface OfficeRoomInput {
   key: string;

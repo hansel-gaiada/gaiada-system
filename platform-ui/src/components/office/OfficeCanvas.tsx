@@ -5,7 +5,7 @@ import {
   KIND_LABEL, ASSURANCE_LABEL, tilesToPx,
   roomTileRect, floorSizeTiles, deskSlotTile, roomCenterTile,
   restingRoomKey, buildReplaySteps, totalReplayMs, lerp, catToken,
-  type OfficeScene, type OfficeRoom, type OfficeAvatar, type ReplayStep,
+  type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeAvatar, type ReplayStep,
 } from "@/lib/office";
 import "./office.css";
 
@@ -129,29 +129,217 @@ function replayPositions(scene: OfficeScene, roomByKey: Map<string, OfficeRoom>,
   return out;
 }
 
-function drawRoom(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet, isHovered: boolean) {
-  const rect = roomTileRect(room);
-  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
-  ctx.fillStyle = room.kind === "lobby" ? tokens.raised : room.kind === "department" ? tokens.card : tokens.sunken;
+// Room shell geometry — a real wall band with a doorway gap, not a stroked rectangle. Kept as
+// module constants (not exported from lib/office.ts) because they are a RENDERING choice, not
+// layout math another consumer needs; the desk grid still has to agree with deskSlotTile()'s own
+// private DESK_COLS=3, called out at each use below.
+const WALL_TILES = 0.4;
+const DOOR_WIDTH_TILES = 1.8;
+const DESK_COLS = 3; // mirrors office.ts's own (private) desk-grid width — must stay in lock-step
+                      // with deskSlotTile() or a "vacant" desk would be drawn on top of an occupied one.
+
+/** Tiled floor: a base fill plus a checkerboard wash at low alpha — reads as a real floor surface
+ *  instead of one flat rectangle with gridlines. Clipped to the wall-inset interior so the wash
+ *  never bleeds under the walls drawn over it. */
+function drawFloor(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, tokens: TokenSet, kind: OfficeRoomKind) {
+  const wall = tilesToPx(WALL_TILES);
+  const x = tilesToPx(rect.x) + wall, y = tilesToPx(rect.y) + wall;
+  const w = tilesToPx(rect.w) - wall * 2, h = tilesToPx(rect.h) - wall * 2;
+  // Operations (agents) reads with the same raised tone as the Lobby — both are estate-level
+  // shared spaces, distinct from a department's own card-tone floor.
+  ctx.fillStyle = kind === "lobby" || kind === "agents" ? tokens.raised : kind === "department" ? tokens.card : tokens.sunken;
   ctx.fillRect(x, y, w, h);
-  // A faint tile grid inside the room — reads as a tile map even with no sprites on it yet.
-  ctx.strokeStyle = tokens.hairlineSoft;
+  const tile = tilesToPx(1);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.fillStyle = tokens.hairlineSoft;
+  ctx.globalAlpha = 0.4;
+  const cols = Math.ceil(w / tile) + 1, rows = Math.ceil(h / tile) + 1;
+  for (let ty = 0; ty < rows; ty++) {
+    for (let tx = 0; tx < cols; tx++) {
+      if ((tx + ty) % 2 === 0) continue;
+      ctx.fillRect(x + tx * tile, y + ty * tile, tile, tile);
+    }
+  }
+  ctx.restore();
+}
+
+/** Real walls with thickness, and a doorway gap centred on the bottom edge. `unassigned` (plan
+ *  §4.3: "no department binding exists") keeps its PRE-EXISTING dashed-outline honesty marker —
+ *  it gets a thin dashed line instead of a solid wall band, never the load-bearing wall a bound
+ *  room gets, so the claim "this room isn't real" survives the new rendering unchanged. */
+function drawWalls(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, tokens: TokenSet, isHovered: boolean, kind: OfficeRoomKind) {
+  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
+  const color = isHovered ? tokens.accent : tokens.ink60;
+
+  if (kind === "unassigned") {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isHovered ? 2 : 1;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.restore();
+    return;
+  }
+
+  const wall = tilesToPx(WALL_TILES);
+  const doorW = tilesToPx(DOOR_WIDTH_TILES);
+  const doorX0 = x + (w - doorW) / 2;
+  const doorX1 = doorX0 + doorW;
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, wall); // top
+  ctx.fillRect(x, y, wall, h); // left
+  ctx.fillRect(x + w - wall, y, wall, h); // right
+  ctx.fillRect(x, y + h - wall, doorX0 - x, wall); // bottom, left of the doorway
+  ctx.fillRect(doorX1, y + h - wall, x + w - doorX1, wall); // bottom, right of the doorway
+  if (isHovered) {
+    ctx.strokeStyle = tokens.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  }
+}
+
+/** A name plate mounted on the top wall, replacing the previous floating text — reads as signage
+ *  rather than a label hovering over the floor. */
+function drawNamePlate(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, room: OfficeRoom, tokens: TokenSet) {
+  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w);
+  const plateW = Math.min(w - tilesToPx(1.2), tilesToPx(6.5));
+  const plateH = tilesToPx(1.35);
+  const px = x + (w - plateW) / 2;
+  const py = y + tilesToPx(WALL_TILES) - 1;
+  ctx.fillStyle = tokens.raised;
+  ctx.fillRect(px, py, plateW, plateH);
+  ctx.strokeStyle = tokens.hairline;
   ctx.lineWidth = 1;
-  const tilePx = tilesToPx(1);
-  for (let tx = 1; tx < rect.w; tx++) { ctx.beginPath(); ctx.moveTo(x + tx * tilePx, y); ctx.lineTo(x + tx * tilePx, y + h); ctx.stroke(); }
-  for (let ty = 1; ty < rect.h; ty++) { ctx.beginPath(); ctx.moveTo(x, y + ty * tilePx); ctx.lineTo(x + w, y + ty * tilePx); ctx.stroke(); }
-  ctx.strokeStyle = isHovered ? tokens.accent : tokens.hairline;
-  ctx.lineWidth = isHovered ? 2 : 1;
-  if (room.kind === "unassigned") ctx.setLineDash([6, 4]); else ctx.setLineDash([]);
-  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx.setLineDash([]);
+  ctx.strokeRect(px + 0.5, py + 0.5, plateW - 1, plateH - 1);
   ctx.fillStyle = tokens.ink;
-  ctx.font = `700 ${Math.round(tilesToPx(0.85))}px ${tokens.fontBody}`;
+  ctx.font = `700 ${Math.round(tilesToPx(0.5))}px ${tokens.fontBody}`;
+  ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillText(room.label, x + 6, y + 4);
+  ctx.fillText(fitLabel(ctx, room.label, plateW - 10), px + plateW / 2, py + 3);
   ctx.fillStyle = tokens.ink60;
-  ctx.font = `400 ${Math.round(tilesToPx(0.6))}px ${tokens.fontBody}`;
-  ctx.fillText(room.boundTo, x + 6, y + tilesToPx(1) + 2, w - 12);
+  ctx.font = `400 ${Math.round(tilesToPx(0.36))}px ${tokens.fontBody}`;
+  ctx.fillText(fitLabel(ctx, room.boundTo, plateW - 10), px + plateW / 2, py + tilesToPx(0.62));
+  ctx.textAlign = "left";
+}
+
+/** How many EXTRA desks to draw empty, beyond the real occupants — always completes the current
+ *  row (or draws one full row for an empty room) so a real workspace still reads as a workspace
+ *  with nobody in it, rather than looking unfurnished. Never invents a person: these desks are
+ *  drawn with no avatar and an explicit "Vacant seat" caption. */
+function vacantDeskSlots(occupantCount: number): number {
+  if (occupantCount === 0) return DESK_COLS;
+  const rem = occupantCount % DESK_COLS;
+  return rem === 0 ? 0 : DESK_COLS - rem;
+}
+
+/** A desk + chair + monitor suggestion at one desk slot. Drawn in the FURNITURE pass, before any
+ *  avatar — so an occupied desk's seated figure (drawn afterward, in the avatars pass) naturally
+ *  occludes the chair's centre instead of floating over an empty tile. */
+function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet, occupied: boolean) {
+  const cx = tilesToPx(tile.x), cy = tilesToPx(tile.y);
+  const r = tilesToPx(0.62);
+  ctx.fillStyle = tokens.hairlineSoft;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.55, r * 1.05, r * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const deskW = tilesToPx(1.9), deskH = tilesToPx(0.55);
+  const deskY = cy - r * 2.0 - deskH;
+  ctx.fillStyle = tokens.raised;
+  ctx.fillRect(cx - deskW / 2, deskY, deskW, deskH);
+  ctx.strokeStyle = tokens.hairline;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx - deskW / 2 + 0.5, deskY + 0.5, deskW - 1, deskH - 1);
+  const monW = tilesToPx(0.55), monH = tilesToPx(0.36);
+  ctx.fillStyle = occupied ? tokens.ink60 : tokens.hairlineSoft;
+  ctx.fillRect(cx - monW / 2, deskY - monH, monW, monH);
+  if (!occupied) {
+    ctx.fillStyle = tokens.ink60;
+    ctx.font = `italic 400 ${Math.round(tilesToPx(0.42))}px ${tokens.fontBody}`;
+    ctx.textAlign = "center";
+    ctx.fillText("Vacant seat", cx, cy + r * 1.6);
+    ctx.textAlign = "left";
+  }
+}
+
+/** The lobby is the airlock waiting area (plan §4.3), not a workspace — a simple chair, no desk,
+ *  at whatever avatar sits there (the external-agent demo seat), plus a few ambient chairs along
+ *  the left wall so an empty lobby still reads as a waiting room. */
+function drawWaitingChair(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet) {
+  const cx = tilesToPx(tile.x), cy = tilesToPx(tile.y);
+  const r = tilesToPx(0.62);
+  ctx.fillStyle = tokens.raised;
+  ctx.fillRect(cx - r * 0.9, cy - r * 0.1, r * 1.8, r * 1.3);
+  ctx.strokeStyle = tokens.hairline;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx - r * 0.9 + 0.5, cy - r * 0.1 + 0.5, r * 1.8 - 1, r * 1.3 - 1);
+  ctx.fillRect(cx - r * 0.9, cy - r * 1.3, r * 1.8, r * 1.2);
+}
+
+function drawLobbyChairs(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet) {
+  const rect = roomTileRect(room);
+  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), h = tilesToPx(rect.h);
+  const wall = tilesToPx(WALL_TILES);
+  const startY = y + tilesToPx(2.3);
+  const spacing = tilesToPx(1.3);
+  for (let i = 0; i < 3; i++) {
+    const cy = startY + i * spacing;
+    if (cy > y + h - wall - tilesToPx(0.6)) break;
+    const cx = x + wall + tilesToPx(0.7);
+    ctx.fillStyle = tokens.raised;
+    ctx.fillRect(cx - tilesToPx(0.32), cy, tilesToPx(0.64), tilesToPx(0.5));
+    ctx.strokeStyle = tokens.hairline;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - tilesToPx(0.32) + 0.5, cy + 0.5, tilesToPx(0.64) - 1, tilesToPx(0.5) - 1);
+    ctx.fillRect(cx - tilesToPx(0.32), cy - tilesToPx(0.4), tilesToPx(0.64), tilesToPx(0.4));
+  }
+}
+
+/** The utility room is "where the automations sit" (no department tone, plan §4.3) — a rack/server
+ *  suggestion along the right wall gives it a visual identity distinct from a department room, on
+ *  top of the same desk furniture its automation avatars still sit at. Status LEDs are STATIC
+ *  (never animated — no ambient motion is the rule this whole canvas is built against). */
+function drawServerRack(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet) {
+  const rect = roomTileRect(room);
+  const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w);
+  const wall = tilesToPx(WALL_TILES);
+  const rackW = tilesToPx(1.3), rackH = tilesToPx(3.0);
+  const rx = x + w - wall - rackW - tilesToPx(0.4);
+  const ry = y + tilesToPx(2.2);
+  ctx.fillStyle = tokens.raised;
+  ctx.fillRect(rx, ry, rackW, rackH);
+  ctx.strokeStyle = tokens.hairline;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rx + 0.5, ry + 0.5, rackW - 1, rackH - 1);
+  const slats = 5;
+  const slatH = rackH / slats;
+  for (let i = 0; i < slats; i++) {
+    const sy = ry + i * slatH;
+    ctx.strokeStyle = tokens.hairlineSoft;
+    ctx.beginPath();
+    ctx.moveTo(rx + 4, sy + slatH - 4);
+    ctx.lineTo(rx + rackW - 4, sy + slatH - 4);
+    ctx.stroke();
+    ctx.fillStyle = i % 3 === 0 ? tokens.warning : tokens.ok;
+    ctx.beginPath();
+    ctx.arc(rx + rackW - 8, sy + 6, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** A soft contact shadow under a figure, single light direction (straight down) for every avatar
+ *  on the floor — cheap depth without a lighting model. Drawn first inside drawAvatar so the shape
+ *  composites on top of it. */
+function drawContactShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, tokens: TokenSet) {
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = tokens.ink;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.85, r * 0.9, r * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawHumanoid(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string, ink: string, synthetic: boolean) {
@@ -218,6 +406,7 @@ function drawAvatar(ctx: CanvasRenderingContext2D, pos: Positioned, tokens: Toke
   const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
   const r = tilesToPx(0.62);
   const { avatar } = pos;
+  drawContactShadow(ctx, cx, cy, r, tokens);
   // Desks sit DESK_SPACING_TILES apart; leave a little gutter so adjacent labels never touch.
   const slotWidthPx = tilesToPx(2.7);
   switch (avatar.kind) {
@@ -325,8 +514,39 @@ export function OfficeCanvas({ scene }: { scene: OfficeScene }) {
     ctx.fillRect(0, 0, cssW, cssH);
 
     const hoveredRoomKey = hoveredIdRef.current ? lastPositionsRef.current.find((p) => p.avatar.id === hoveredIdRef.current)?.roomKey : null;
-    for (const room of scene.rooms) drawRoom(ctx, room, tokens, room.key === hoveredRoomKey);
 
+    // Pass 1 — floor + walls + nameplate for every room.
+    for (const room of scene.rooms) {
+      const rect = roomTileRect(room);
+      drawFloor(ctx, rect, tokens, room.kind);
+      drawWalls(ctx, rect, tokens, room.key === hoveredRoomKey, room.kind);
+      drawNamePlate(ctx, rect, room, tokens);
+    }
+
+    // Pass 2 — furniture, keyed to who CANONICALLY rests in each room (ignoring any in-flight
+    // replay animation) so desks never flicker empty/full while someone is mid-walk elsewhere —
+    // the walking figure (pass 3) is drawn on top of its own still-occupied-looking desk during a
+    // replay, which reads as "stepped away," not as a rendering glitch.
+    const canonical = steadyPositions(scene, roomByKey, nowMs, new Set());
+    const canonicalByRoom = new Map<string, Positioned[]>();
+    for (const p of canonical) {
+      if (!canonicalByRoom.has(p.roomKey)) canonicalByRoom.set(p.roomKey, []);
+      canonicalByRoom.get(p.roomKey)!.push(p);
+    }
+    for (const room of scene.rooms) {
+      const occupants = canonicalByRoom.get(room.key) ?? [];
+      if (room.kind === "lobby") {
+        drawLobbyChairs(ctx, room, tokens);
+        for (const p of occupants) drawWaitingChair(ctx, p.tile, tokens);
+        continue;
+      }
+      if (room.kind === "utility") drawServerRack(ctx, room, tokens);
+      for (const p of occupants) drawDesk(ctx, p.tile, tokens, true);
+      const vacant = vacantDeskSlots(occupants.length);
+      for (let i = 0; i < vacant; i++) drawDesk(ctx, deskSlotTile(room, occupants.length + i), tokens, false);
+    }
+
+    // Pass 3 — the people/agents/automations themselves, always on top of their own furniture.
     const animatedIds = new Set(elapsedMs !== null && replayRef.current ? replayRef.current.steps.map((s) => s.avatarId) : []);
     const positions = [
       ...steadyPositions(scene, roomByKey, nowMs, animatedIds),

@@ -1,14 +1,16 @@
 import Link from "next/link";
 import type { Me } from "@/lib/platform";
+import type { Theme } from "@/lib/prefs";
 import { listNotifications } from "@/lib/entities";
 import { Icon } from "./icons";
 import { Eyebrow } from "@/components/ui";
 import { NewMenu } from "./NewMenu";
 import { NavToggle } from "./NavToggle";
 import { CommandPaletteTrigger } from "./CommandPaletteTrigger";
+import { ThemeToggle } from "./ThemeToggle";
 import { can } from "@/lib/rbac";
 
-export async function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: string | null; moduleLabel: string }) {
+export async function TopBar({ me, tenantId, moduleLabel, theme }: { me: Me; tenantId: string | null; moduleLabel: string; theme: Theme }) {
   const dateLine = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
 
   // Unread notification count for the bell badge — degrades to 0 if the feed
@@ -43,6 +45,7 @@ export async function TopBar({ me, tenantId, moduleLabel }: { me: Me; tenantId: 
           above rather than replacing it (see CommandPaletteTrigger.tsx's header for why the spec's
           "subsumes" wording isn't implemented literally). Cmd/Ctrl-K opens it from anywhere. */}
       <CommandPaletteTrigger />
+      <ThemeToggle theme={theme} />
       <div className="erp-top__actions">
         <NewMenu items={newItems} />
         <Link href="/notifications" className="erp-top__bell" aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}>

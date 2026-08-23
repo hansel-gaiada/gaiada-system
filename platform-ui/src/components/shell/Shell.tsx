@@ -34,7 +34,7 @@ export function Shell({ me, tenantId, moduleLabel, prefs = DEFAULT_PREFS, depart
       <a href="#main-content" className="skip-link">Skip to content</a>
       <Sidebar me={me} tenantId={tenantId} departments={departments} />
       <CompanySpine companies={spineCompanies} current={tenantId} capHref={spineCapHref} />
-      <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} />
+      <TopBar me={me} tenantId={tenantId} moduleLabel={moduleLabel} theme={prefs.theme} />
       <main id="main-content" className="erp-main erp-scroll" tabIndex={-1}>
         {special && <SpecialAccessBanner unrestricted={isUnrestricted(me)} />}
         <div className="erp-main__inner">{children}</div>

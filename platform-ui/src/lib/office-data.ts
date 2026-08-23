@@ -20,7 +20,15 @@ import {
 } from "./office";
 
 export const OFFICE_LOBBY_KEY = "lobby";
+export const OFFICE_AGENTS_KEY = "agents";
 export const OFFICE_UTILITY_KEY = "utility";
+// Reserved for a GENUINE binding failure (a real avatar with nowhere real to stand) — never
+// created by default. Agents used to land here on the reasoning "goals are tenant-wide, not
+// department-scoped" — true, but the wrong conclusion: tenant-wide is not unbound, it's an estate-
+// level room of its own (OFFICE_AGENTS_KEY, below), present from day one regardless of org
+// structure. "Unassigned" reading as a peer room made a correct system look broken (the owner's
+// read on a company with zero departments). Nothing in this file currently produces an avatar that
+// needs it; the room is only added to the scene if one ever does (see the `usesUnassigned` check).
 export const OFFICE_UNASSIGNED_KEY = "unassigned";
 
 export function deptRoomKey(deptId: string): string {
@@ -41,22 +49,6 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
   const goals: AgentGoal[] = await getAgentGoals(u, t).catch(() => [] as AgentGoal[]);
 
   const sortedDepts = [...depts].sort((a, b) => a.name.localeCompare(b.name));
-  // Short on-canvas captions (the room header has room for one line, not a sentence) — the fuller
-  // honesty text lives in each avatar's `note` and the page's own BackendPending banner, both
-  // rendered off-canvas where a real line-wrap is available.
-  const roomInputs: OfficeRoomInput[] = [
-    { key: OFFICE_LOBBY_KEY, label: "Lobby", kind: "lobby", boundTo: "Airlock queue — not built (O5)" },
-    ...sortedDepts.map((d) => ({
-      key: deptRoomKey(d.id),
-      label: d.name,
-      kind: "department" as const,
-      deptId: d.id,
-      boundTo: `Org structure id: ${d.id}`,
-    })),
-    { key: OFFICE_UNASSIGNED_KEY, label: "Unassigned", kind: "unassigned" as const, boundTo: "No department binding" },
-    { key: OFFICE_UTILITY_KEY, label: "Utility", kind: "utility" as const, boundTo: "No department — automations only" },
-  ];
-  const rooms = layoutRooms(roomInputs);
 
   const avatars: OfficeAvatar[] = [];
 
@@ -81,30 +73,34 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
   });
 
   // ── Internal agents — the always-present supervisor console + one seat per real goal ───────
+  // ESTATE-level, not department-level (owner correction, 2026-08-23): agents exist from day one,
+  // independent of org structure — a company with zero departments still has a running Supervisor.
+  // They stand in Operations (OFFICE_AGENTS_KEY), a real room of its own, not "Unassigned" — that
+  // key is reserved for a genuine binding failure, and "tenant-wide" is not a failure to bind.
   avatars.push({
     id: "agent-supervisor",
     kind: "agent",
     name: "Supervisor",
-    homeRoomKey: OFFICE_UNASSIGNED_KEY,
+    homeRoomKey: OFFICE_AGENTS_KEY,
     deskIndex: 0,
     recordKind: "console",
     recordId: "agents-console",
     recordLabel: "Supervisor orchestrator — this company's goal tree",
     recordHref: "/agents",
-    note: "The goal-tree orchestrator console. Goals are tenant-wide, not department-scoped, so it stands in Unassigned rather than a fabricated department seat.",
+    note: "The goal-tree orchestrator console. Agents are tenant-wide, not department-scoped, so it is housed in Operations by design — not a fallback, and not dependent on any department existing.",
   });
   goals.forEach((g, i) => {
     avatars.push({
       id: `agent-goal-${g.id}`,
       kind: "agent",
       name: g.agent ?? g.goal.slice(0, 24),
-      homeRoomKey: OFFICE_UNASSIGNED_KEY,
+      homeRoomKey: OFFICE_AGENTS_KEY,
       deskIndex: i + 1,
       recordKind: "agent-goal",
       recordId: g.id,
       recordLabel: g.goal,
       recordHref: `/agents/goals/${g.id}`,
-      note: `Real agent goal, status "${g.status}". No department binding exists for goals in this data model yet.`,
+      note: `Real agent goal, status "${g.status}". Tenant-wide, not department-scoped, so it is housed in Operations by design.`,
     });
   });
 
@@ -160,7 +156,7 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     events.push({
       id: "evt-1",
       avatarId: "agent-supervisor",
-      fromRoomKey: OFFICE_UNASSIGNED_KEY,
+      fromRoomKey: OFFICE_AGENTS_KEY,
       toRoomKey: deptRoomKey(webDev.id),
       at: new Date(now - 6 * 60_000).toISOString(),
       reason: `Delegated a goal to ${webDev.name}`,
@@ -176,6 +172,30 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
       });
     }
   }
+
+  // ── Rooms — built last, now that every avatar's real homeRoomKey is known. Lobby, Operations
+  // (agents) and Utility are ESTATE-level: present for every company regardless of org structure,
+  // so a holding company with zero departments still reads as an inhabited office, not an empty
+  // grid (owner correction, 2026-08-23). "Unassigned" is added only if some avatar genuinely needs
+  // it — nothing here does, by construction, but a future binding failure gets a real diagnostic
+  // room instead of silently landing nowhere. ──────────────────────────────────────────────────
+  const usesUnassigned = avatars.some((a) => a.homeRoomKey === OFFICE_UNASSIGNED_KEY);
+  const roomInputs: OfficeRoomInput[] = [
+    { key: OFFICE_LOBBY_KEY, label: "Lobby", kind: "lobby", boundTo: "Airlock queue — not built (O5)" },
+    { key: OFFICE_AGENTS_KEY, label: "Operations", kind: "agents", boundTo: "Tenant-wide agents — not department-scoped by design" },
+    ...sortedDepts.map((d) => ({
+      key: deptRoomKey(d.id),
+      label: d.name,
+      kind: "department" as const,
+      deptId: d.id,
+      boundTo: `Org structure id: ${d.id}`,
+    })),
+    ...(usesUnassigned
+      ? [{ key: OFFICE_UNASSIGNED_KEY, label: "Unassigned", kind: "unassigned" as const, boundTo: "Binding failure — a real avatar with no room to place it in" }]
+      : []),
+    { key: OFFICE_UTILITY_KEY, label: "Utility", kind: "utility" as const, boundTo: "No department — automations only" },
+  ];
+  const rooms = layoutRooms(roomInputs);
 
   return { rooms, avatars, events, generatedAt };
 }

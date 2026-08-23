@@ -5,7 +5,7 @@
 // preference belongs to `lib/prefs.ts` (a display setting, not assistant domain data), matching how
 // `(app)/account/actions.ts::savePrefs` already owns the density/width/theme writes for the same
 // cookie.
-import { getPrefs, writePrefs } from "./prefs";
+import { getPrefs, writePrefs, type Theme } from "./prefs";
 
 /** Fire-and-forget from `AssistantWorkspace`'s toggle click — the client already holds the
  *  authoritative UI state the instant it clicks (same "optimistic, not awaited for correctness" shape
@@ -15,4 +15,15 @@ import { getPrefs, writePrefs } from "./prefs";
 export async function setAssistantRailCollapsedAction(collapsed: boolean): Promise<void> {
   const current = await getPrefs();
   await writePrefs({ ...current, assistantRailCollapsed: collapsed });
+}
+
+/** Same shape as `setAssistantRailCollapsedAction` above — the TopBar theme toggle
+ *  (`components/shell/ThemeToggle.tsx`) has already stamped `data-theme` on `<html>` itself before
+ *  calling this, so the visible change never waits on a round trip; this only persists the choice
+ *  for the next request (middleware-free routes like `/login` read `<html data-theme>` straight
+ *  from `getPrefs()` in `app/layout.tsx`, so it has to land in the same cookie). No
+ *  `revalidatePath`: the current page already reflects the change via the DOM write. */
+export async function setThemeAction(theme: Theme): Promise<void> {
+  const current = await getPrefs();
+  await writePrefs({ ...current, theme });
 }
