@@ -927,6 +927,31 @@ export const socialModule: ModuleContract = {
         required: ["tenantId", "threadId", "messageId"],
       },
     },
+    // ── SMM-35: THE READ THE ASSISTANT'S REPLY-DRAFTING AGENT NEEDS ────────────────────────────
+    // `listThreadMessages` (social.controller.ts) has existed since SMM-17 as a plain `read`
+    // verification endpoint ("SMM-18's own triage-queue UI is not duplicated here") but was never
+    // declared as an MCP tool — nobody needed it outside the UI. The new `social-drafter` assistant
+    // agent (ai-agents/src/specialists.ts) is the first caller that does: it has to see a thread's
+    // existing messages before it can compose a reply that answers them. Declaring the SAME endpoint
+    // here adds no new logic, no new Cerbos action (still `social_inbox`/`read`), and no write.
+    {
+      name: "social.listThreadMessages",
+      description:
+        "List one engagement-inbox thread's messages (inbound + outbound), oldest first. Read-only, "
+        + "makes no network call. Use this before drafting a reply so the reply actually answers what "
+        + "the thread says.",
+      minAssurance: "low",
+      method: "GET",
+      pathTemplate: "/api/:tenantId/modules/social/threads/:threadId/messages",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          threadId: { type: "string", description: "The engagement-inbox thread to read." },
+        },
+        required: ["tenantId", "threadId"],
+      },
+    },
     {
       name: SOCIAL_REPLY_TOOL,
       description:

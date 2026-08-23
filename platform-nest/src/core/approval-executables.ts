@@ -41,6 +41,12 @@ import { evaluatePublishPreconditionWithClientReview } from "../modules/social/c
 // SMM-17 — the reply gate, built by reusing SMM-09's pattern rather than reinventing it. See this
 // file's own SMM-17 section, below the SMM-09 one, for the full reasoning.
 import { SOCIAL_REPLY_TOOL, replyLockKey, evaluateReplyPrecondition } from "../modules/social/reply-precondition";
+// SMM-35 — the assistant's first social write proposal, `social.createReplyDraft`. See this file's
+// own SMM-35 section, below the SMM-17 one, for the full reasoning. `declareSocialModuleScope` is
+// the SAME self-declaration every other social precondition in this file already makes (imported
+// from the leaf module directly, rather than through publish-precondition.ts's re-export, since this
+// entry has no other reason to depend on that file).
+import { declareSocialModuleScope } from "../modules/social/module-scope";
 // SMM-22 — the config-gated bar lift for social.publishPostMetered. See this file's own SMM-22
 // section for the full reasoning; `resolveXPricing` is the money guard the boot check verifies.
 import { config } from "../config";
@@ -957,6 +963,99 @@ export function registerSocialReplyExecutableApprovals(): void {
 }
 
 registerSocialReplyExecutableApprovals();
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// SMM-35 — `social.createReplyDraft`: closing the assistant's remaining half. NOT publish, NOT send.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// The tracker's own prior SMM-35 pass excluded every social write from `/assistant` for one of two
+// reasons: `social.publishPost`/`social.publishPostMetered`/`social.sendReply` on SECURITY grounds
+// (a public, irreversible act — "agents draft, never publish" since SMM-26), and
+// `social.draftContentBrief` on a STRUCTURAL one (it needs an `ai-agents` AgentDef this ticket's own
+// file surface never named). This entry is the genuinely low-blast-radius write that clears BOTH
+// bars: `social.createReplyDraft` (`social.controller.ts#createReplyDraft`) only ever INSERTs OUR OWN
+// row — never sent, never network-visible, never client-visible — mirroring the reasoning
+// `pm.createTask`/`pm.createDoc` already established for `task-filer` (T2, ASST-23): a hub tier of
+// `write:true, impact:"low"` (it is our own draft row, in-tenant, reversible) and an AgentDef-level
+// `high_write` declaration ANYWAY, because D-A's rule ("every assistant write is a proposal a human
+// decides, never a silent commit") answers a DIFFERENT question than the hub's blast-radius tier —
+// see `ai-agents/src/specialists.ts`'s `taskFiler` section for the fuller restatement of why that is
+// the honest label, not a workaround.
+//
+// Deliberately NOT exposed in this same pass, and why:
+//   - `social.updateReplyDraft`/`social.approveReplyDraft` — a second write per turn multiplies the
+//     registry/eval/allowlist surface for no new capability this pass needs to prove; a natural
+//     follow-up once `social.createReplyDraft` has a real enrolled provider (see
+//     `ai-agents/src/specialists.ts`'s `socialDrafter.evaledProviders`).
+//   - `social.sendReply`/`social.publishPost` — unchanged from the prior pass's own "no" (SECURITY,
+//     not a file-surface gap): a chat "confirm" click is not a more scrutinized gate than the
+//     existing approvals-inbox review for a PUBLIC, irreversible act, and SMM-26's standing invariant
+//     forbids it outright regardless.
+//
+// ── THE PRECONDITION: DELIBERATELY THIN, BECAUSE A DRAFT HAS ALMOST NOTHING TO STALE-CHECK ──────────
+// Unlike publish/reply-SEND (whose precondition re-derives a whole gate: scope, hash, single-use,
+// budget, retention), a CREATE has no prior state to have gone stale — there is no row yet for an
+// edit to have invalidated, no grant to have already been consumed. The only things that can have
+// changed between "the model proposed this" and "a human approved it" are: the thread got deleted,
+// or the proposal was malformed. Both are checked, server-side, under the lock, same as every other
+// entry in this file.
+//
+// ── WHY `neverAutoRetry: true` — NOT COPIED FROM PUBLISH/REPLY, INDEPENDENTLY DERIVED ──────────────
+// Publish/reply set this because an ambiguous failure (`hub_unreachable`/`tool_error`) leaves the
+// PUBLIC act's landed-or-not unobservable. A draft create has a different problem: the server mints
+// a FRESH `newId()` and unconditionally `INSERT`s (`social.controller.ts#createReplyDraft`) — there
+// is no client-supplied or content-derived idempotency key an in-executor auto-retry could check
+// before re-sending, so a retry after a lost response would create a SECOND draft row rather than
+// re-applying the same one (the exact `pm.comment` shape `ai-agents/src/agent-write-guard.test.ts`'s
+// header names as the reason THAT tool stays unregistered). Two duplicate drafts are a much smaller
+// blast radius than a duplicate public reply, but still not something to create unattended — a human
+// re-driving via D14-07's retry endpoint is the safe form of the same operation, exactly as it is for
+// every other `neverAutoRetry` entry in this file.
+//
+// ── LOCK KEY: THE THREAD, NOT A MESSAGE (THERE IS NO MESSAGE YET) ───────────────────────────────────
+// `tool_args.threadId` — the only stable identifier that exists before the row is created. Two
+// concurrently-approved create-draft proposals for the SAME thread serialize behind each other; two
+// for different threads never contend.
+
+function socialCreateReplyDraftLockKey(toolArgs: Record<string, unknown>): string {
+  const threadId = typeof toolArgs.threadId === "string" ? toolArgs.threadId.trim() : "";
+  return threadId ? `social.createReplyDraft:${threadId}` : "social.createReplyDraft:(malformed)";
+}
+
+async function socialCreateReplyDraftPrecondition(
+  client: PoolClient,
+  toolArgs: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  // Self-declared, same idiom every other social precondition in this file uses (D5's own trap:
+  // module-owned tables read ZERO ROWS with no error under an unset `app.scopes`).
+  await declareSocialModuleScope(client);
+  const threadId = typeof toolArgs.threadId === "string" ? toolArgs.threadId.trim() : "";
+  if (!threadId) return { ok: false, reason: "reply_thread_missing" };
+  const body = typeof toolArgs.body === "string" ? toolArgs.body.trim() : "";
+  if (!body) return { ok: false, reason: "empty_body" };
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT id FROM social_inbox_threads WHERE id = $1 AND deleted_at IS NULL`,
+    [threadId],
+  );
+  if (!rows[0]) return { ok: false, reason: "reply_thread_not_found" };
+  return { ok: true };
+}
+
+/**
+ * Registers `social.createReplyDraft`. Exported for the same reason the SMM-09/SMM-17 bootstraps
+ * are: a test file that calls `resetExecutableApprovals()` and wants this entry back afterward
+ * should call this rather than hand-roll a second copy of the lock/precondition.
+ */
+export function registerSocialReplyDraftExecutableApproval(): void {
+  registerExecutableApproval({
+    toolName: "social.createReplyDraft",
+    lockKey: socialCreateReplyDraftLockKey,
+    precondition: socialCreateReplyDraftPrecondition,
+    neverAutoRetry: true,
+  });
+}
+
+registerSocialReplyDraftExecutableApproval();
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-22 — the config-gated, explicit lift of `social.publishPostMetered`'s bar.

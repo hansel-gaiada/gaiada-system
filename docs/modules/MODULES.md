@@ -43,13 +43,13 @@ versions below; the running build reports it at `GET /health`.
 | observability | `0.6.1` | DEV-VERIFIED | WS9 | 2026-08-06 |
 | infra | `0.8.6` | PROTOTYPED | WS10 | 2026-08-06 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
-| ai-agents | `0.8.0` | PROTOTYPED | WS8 | 2026-08-23 |
+| ai-agents | `0.8.1` | PROTOTYPED | WS8 | 2026-08-23 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
-| social-media | `0.5.29` | IN PROGRESS | Social Media | 2026-08-23 |
+| social-media | `0.5.30` | IN PROGRESS | Social Media | 2026-08-23 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -340,6 +340,16 @@ agent-runner service lives, goal/run store persists, goal execution follows appr
 **Known gaps:** steps 4â€“6 (memory/RAG ownership, local-model registry, eval-gated trainer) not built; the
 eval harness is the root gate for more autonomy.
 **Future plans:** eval harness â†’ memory/RAG â†’ local-model registry â†’ trainer.
+**0.8.1 (SMM-35, closing the assistant's remaining social-write gap):** new write-capable specialist
+`social-drafter` (`specialists.ts`) — reads `social.listThreadMessages`, proposes
+`social.createReplyDraft` as `high_write` (the same honest hub-tier divergence `task-filer` established),
+`evaledProviders: []` — reads work, the write stays CONTAINED until an operator runs the D13 eval +
+tool-contract suite and enrolls a provider. New baseline + adversarial eval cases in `evals/cases.ts`;
+`agent-write-guard.test.ts`'s `RERUN_CAPABLE_HIGH_WRITES`/`ASSISTANT_FACING_AGENTS` extended by name.
+Full suite 204/0/53 (pre-existing DB-dependent skips). NOTE: this section's own header version
+(`0.4.0`) and the scoreboard line above (now `0.8.1`) disagree — a pre-existing drift this pass found
+but did not silently reconcile (out of this ticket's scope); flagged for whoever next touches this
+section's narrative.
 
 ## hermes-gateway â€” Local-Model Shim Â· `0.2.0` Â· PROTOTYPED
 
@@ -1268,7 +1278,27 @@ SM-23 (this reconciliation) â†’ SM-24.
 
 </details>
 
-## social-media — SMM · Organic Publishing · `0.5.29` · IN PROGRESS
+## social-media — SMM · Organic Publishing · `0.5.30` · IN PROGRESS
+
+
+**0.5.30 (2026-08-23, senior-be, SMM-35 closing pass) — one social write reachable from `/assistant`,
+through the full propose → confirm → approve → D14 chain.** The prior SMM-35 pass landed the assistant's
+"social summary" READ and left a named gap: NO social write reachable from chat. This pass closes it
+with exactly ONE write — `social.createReplyDraft` (own-row draft, never sent, never network-visible) —
+via a new `ai-agents` write-specialist `social-drafter` and a new D14 registry entry
+(`core/approval-executables.ts`'s `registerSocialReplyDraftExecutableApproval()`). `social.publishPost`/
+`social.publishPostMetered`/`social.sendReply` stay excluded on the SAME security grounds the prior
+pass named (SMM-26's "agents draft, never publish"); `social.draftContentBrief` stays excluded on the
+same cross-repo `ai-agents`-AgentDef + D13-enrollment structural gap the prior pass named, unchanged by
+this pass. New MCP tool `social.listThreadMessages` (read wrapper on SMM-17's pre-existing endpoint).
+Proven red-then-green (registry temporarily disabled → all 14 new registry tests fail on the tool's own
+absence; restored → 14/14 green) and end to end through the real assistant HTTP surface (a new
+card-state test in `assistant-broker.test.ts`, mirroring the existing `pm.createTask` one). Agentic-native
+scoring: human path DEV-VERIFIED; n8n path unaffected (already reachable via plain HTTP); agent path
+PROTOTYPED only — `evaledProviders: []` on `social-drafter` means a real model cannot drive this
+unattended until an operator runs the D13 eval suite and enrolls a provider, named as the deliberate
+remaining gap. Full detail: `docs/modules/CHANGELOG.md`'s `0.5.30` entry.
+
 
 **0.5.29 (2026-08-23, senior-integrator, SMM-26 follow-up) — the "weekly per opted-in engagement"
 content-brief sweep, closing the identity question SMM-26 named and left for an architect decision.**

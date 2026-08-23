@@ -49,7 +49,10 @@ import {
 // ASST-23 (§7.4/T3a) — the registry-gate refusal test mutates the in-process executable registry
 // (mirrors d14-17-assistant-write-registry.test.ts's own beforeAll pattern) and the card-state test
 // drives the REAL executor after a REAL decide() call — no second, parallel implementation of either.
-import { getExecutable, registerCoreExecutableApprovals, registerPmExecutableApprovals, resetExecutableApprovals } from "../../core/approval-executables";
+import {
+  getExecutable, registerCoreExecutableApprovals, registerPmExecutableApprovals,
+  registerSocialReplyDraftExecutableApproval, resetExecutableApprovals,
+} from "../../core/approval-executables";
 import { executeApprovedAutomationWrite } from "../../core/approval-execute";
 
 // ══════════════════════════════════════ pure units (no DB needed) ═══════════════════════════════
@@ -381,7 +384,12 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
     // wire. Nobody else is in the map at all — deny-by-default.
     // ASST-23 (§7.4/T3a) — `owner` also sees task-filer's tools, incl. both write tools, so the
     // registry-gate (step 0.5) and card-state tests below exercise wall 1 too, not just the new gate.
-    hub.visibility.set(owner, ["projects.list", "tasks.list", "clients.list", "pm.createTask", "pm.createDoc"]);
+    // SMM-35 — `owner` also sees social-drafter's tools, so the card-state test below (which proves
+    // the assistant surface can reach `social.createReplyDraft` end to end) exercises wall 1 too.
+    hub.visibility.set(owner, [
+      "projects.list", "tasks.list", "clients.list", "pm.createTask", "pm.createDoc",
+      "social.listThreadMessages", "social.createReplyDraft",
+    ]);
     hub.visibility.set(restricted, ["clients.list"]);
 
     config.services.hub = { url: hub.url, token: "hub-token", assuranceToken: "" };
@@ -643,6 +651,11 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
       expect(msgs[1].errorKind).toBe("tool_not_executable");
     } finally {
       registerPmExecutableApprovals(); // restore pm.createTask/pm.createDoc for every test after this one
+      // SMM-35 — restore social.createReplyDraft too: `resetExecutableApprovals()` above wipes the
+      // WHOLE process-wide registry, not just the PM entries this test was originally written
+      // against, and the card-state test for social.createReplyDraft further down this SAME file
+      // depends on it still being registered.
+      registerSocialReplyDraftExecutableApproval();
     }
   });
 
@@ -701,6 +714,94 @@ describe.skipIf(!TEST_URL)("Assistant tool broker (ASST-17) — live PG + Cerbos
     // a mutation of the transcript (§2.5's own invariant, restated as a live assertion here).
     const rawRow = await toolCallRows(messageId);
     expect(rawRow[0].status).toBe("pending");
+  });
+
+  // ── SMM-35 — CLOSING THE ASSISTANT'S REMAINING HALF: social.createReplyDraft, THROUGH THIS SAME
+  // CARD-STATE PATH, NOT A SEPARATE ONE ─────────────────────────────────────────────────────────────
+  // Mirrors the pm.createTask card-state test immediately above verbatim (same fake-runner marker,
+  // same real decide() endpoint, same real executor) — proof that the confirm -> approve -> D14 chain
+  // is generic per tool, not something this ticket had to re-implement. The one thing this test adds
+  // that the PM one does not need: a REAL `social_inbox_threads` row, because
+  // `social.createReplyDraft`'s own precondition (`core/approval-executables.ts`'s SMM-35 section)
+  // actually re-checks the thread exists — proven here through the full HTTP surface, not just the
+  // registry-level test (`d14-smm-35-social-reply-draft-registry.test.ts`).
+  it("card state: a suspended origin='agent' social.createReplyDraft, once decided AND executed, shows up EXECUTED on a fresh GET thread — via the real decide() endpoint and the real executor, never a second implementation", async () => {
+    const clientId = newId();
+    await withTenants([A], (c) => c.query(`INSERT INTO clients (id, tenant_id, name, origin_site) VALUES ($1,$2,'SMM-35 Broker Client','central')`, [clientId, A]));
+    const orgId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO social_publisher_orgs (id, tenant_id, client_id, driver, postiz_org_id, api_key_ref, status, origin_site)
+         VALUES ($1,$2,$3,'postiz',$4,'default','active','central')`,
+        [orgId, A, clientId, `smm35-broker-org-${Date.now()}`],
+      ),
+      { modules: ["social"] },
+    );
+    const accountId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO social_accounts
+           (id, tenant_id, client_id, publisher_org_id, network, handle, postiz_integration_id, status, quota, origin_site)
+         VALUES ($1,$2,$3,$4,'linkedin',$5,$6,'connected','{}','central')`,
+        [accountId, A, clientId, orgId, `@smm35-broker-${Date.now()}`, `smm35-broker-int-${Date.now()}`],
+      ),
+      { modules: ["social"] },
+    );
+    const threadId = newId();
+    await withTenants(
+      [A],
+      (c) => c.query(
+        `INSERT INTO social_inbox_threads (id, tenant_id, account_id, network, kind, external_thread_id, status, last_message_at, origin_site)
+         VALUES ($1,$2,$3,'linkedin','comment',$4,'open',now(),'central')`,
+        [threadId, A, accountId, `smm35-broker-thread-${Date.now()}`],
+      ),
+      { modules: ["social"] },
+    );
+
+    const approvalId = newId();
+    await withTenants([A], (c) =>
+      c.query(
+        `INSERT INTO automation_approvals
+           (id, tenant_id, workflow_id, tool_name, tool_args, impact, reason, requested_by, origin, agent_name, origin_site)
+         VALUES ($1,$2,'social-drafter','social.createReplyDraft',$3::jsonb,'high','suspend: high-impact write',$4,'agent','social-drafter',$5)`,
+        [approvalId, A, JSON.stringify({ tenantId: A, threadId, body: "Yes, we ship worldwide!" }), owner, config.originSite],
+      ),
+    );
+
+    const threadForChat = await newThread(owner, "social reply card state");
+    const { streamUrl } = await sendToolMessage(owner, threadForChat, `TOOLRUN_SUSPEND:${approvalId} draft a reply`, "social-drafter");
+    const body = await readStream(streamUrl, owner);
+    expect(body).toContain("event: approval_required");
+    expect(body).toContain(approvalId);
+
+    const preDecision = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadForChat}`, headers: asUser(owner) });
+    const preMsgs = (preDecision.json() as { messages: Array<{ toolCalls: Array<{ toolName: string; status: string; approvalId: string | null; approval: { status: string; executionStatus: string } | null }> }> }).messages;
+    expect(preMsgs[1].toolCalls).toHaveLength(1);
+    expect(preMsgs[1].toolCalls[0]).toMatchObject({ toolName: "social.createReplyDraft", status: "pending", approvalId, approval: { status: "pending", executionStatus: "not_applicable" } });
+
+    // The human decides — the REAL endpoint, as the REAL company_admin decider, exactly as a person
+    // would from the approvals inbox. This is D14's existing surface; this ticket adds no new one.
+    const decideRes = await app.inject({
+      method: "POST", url: `/api/${A}/automation-approvals/${approvalId}/decide`, headers: asUser(admin), payload: { decision: "approved" },
+    });
+    expect(decideRes.statusCode).toBe(200);
+
+    // The real executor: the SAME precondition (`core/approval-executables.ts`'s
+    // `socialCreateReplyDraftPrecondition`) re-checks the thread exists, under this test's OWN
+    // real row — this is what proves the write is genuinely reachable, not just registered.
+    const outcome = await executeApprovedAutomationWrite(A, approvalId);
+    expect(outcome.status).toBe("executed");
+
+    const postDecision = await app.inject({ method: "GET", url: `/api/${A}/assistant/threads/${threadForChat}`, headers: asUser(owner) });
+    const postMsgs = (postDecision.json() as { messages: Array<{ toolCalls: Array<{ toolName: string; approvalId: string | null; approval: { status: string; executionStatus: string; executionError: string | null } | null }> }> }).messages;
+    expect(postMsgs[1].toolCalls).toHaveLength(1);
+    expect(postMsgs[1].toolCalls[0]).toMatchObject({
+      toolName: "social.createReplyDraft",
+      approvalId,
+      approval: { status: "approved", executionStatus: "executed", executionError: null },
+    });
   });
 
   it("a failed tool run persists a typed error_kind and still attributes every row to the chatting user", async () => {

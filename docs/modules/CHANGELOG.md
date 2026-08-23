@@ -11,6 +11,93 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### social-media `0.5.30` — 2026-08-23 — closing SMM-35's remaining half: one social write reachable from `/assistant` (senior-be)
+
+**Added** — the assistant's "social summary" READ landed a pass ago (SMM-35); this pass exposes exactly
+ONE social WRITE through the SAME ASST-23 propose -> confirm -> approve -> D14 chain, deliberately not
+the publish/reply-send tools. Blast-radius argument: `social.createReplyDraft`
+(`social.controller.ts#createReplyDraft`, SMM-17) only ever inserts OUR OWN draft row — never sent,
+never network-visible, never client-visible — the same "agents draft, never publish" shape SMM-26
+already established for content briefs. `social.publishPost`/`social.publishPostMetered`/
+`social.sendReply` stay excluded on SECURITY grounds (a chat "confirm" click is not a more scrutinized
+gate than the existing approvals-inbox review for a public, irreversible act) — unchanged from SMM-35's
+own prior "no". `social.draftContentBrief` stays excluded too — still blocked on the SAME cross-repo
+`ai-agents` AgentDef + D13 eval-enrollment gap SMM-35 named, and `content-brief.ts` is a concurrent
+seat's file this pass could not touch regardless.
+
+New `core/approval-executables.ts` SMM-35 section: `registerSocialReplyDraftExecutableApproval()`
+registers `social.createReplyDraft` with a real, self-declared-scope precondition (thread exists ∧ not
+soft-deleted ∧ a non-empty body was proposed — typed refusals `reply_thread_missing`/`empty_body`/
+`reply_thread_not_found`) and `neverAutoRetry: true` (a CREATE mints a fresh id per call, so an
+in-executor auto-retry after a lost response would duplicate the draft, not re-apply it — independently
+derived from publish/reply's own reasoning, not copied). New MCP tool `social.listThreadMessages`
+(`index.ts`) — a read-only wrapper around SMM-17's pre-existing `GET threads/:threadId/messages`
+verification endpoint, declared as a tool for the first time because the new agent needs to see a
+thread before it can draft an answer to it.
+
+New `ai-agents/src/specialists.ts` AgentDef `social-drafter`: `social.listThreadMessages` (read) +
+`social.createReplyDraft` (`high_write` — the SAME honest divergence from the hub's `low` tier
+`task-filer` already established: the hub tier answers blast radius, the AgentDef label answers "may an
+LLM commit this unattended", and D-A's answer is no, always). `evaledProviders: []` — the same safe
+default `task-triager`/`task-filer` shipped with before their own dedicated eval runs; reads work today,
+the write is CONTAINED (not merely undeclared) until an operator runs the D13 eval suite against a real
+provider. New eval cases (`evals/cases.ts`): a read-only happy path, a proposes-createReplyDraft case,
+and an adversarial containment probe (injected thread text cannot trick the agent into calling
+`social.sendReply`, which is entirely off its allow-list). `agent-write-guard.test.ts`'s
+`RERUN_CAPABLE_HIGH_WRITES`/`ASSISTANT_FACING_AGENTS` allowlists extended, by name, with both
+prerequisites cited.
+
+**Reachability proven, not merely registered.** New
+`platform-nest/src/core/d14-smm-35-social-reply-draft-registry.test.ts` (14 tests: registry doctrine,
+lockKey, the precondition direct including the module-GUC regression, and the real executor —
+positive control, single-use, no-auto-retry) driven red-then-green: with the registration temporarily
+disabled, all 14 fail on the tool's own absence (`no_precondition_registered`, the D14-02 fail-closed
+fallback); restored, 14/14 green. A new card-state test in `assistant-broker.test.ts` mirrors the
+existing `pm.createTask` one verbatim for `social.createReplyDraft` — a real thread seeded, a suspended
+`origin='agent'` approval decided through the REAL `POST .../automation-approvals/:id/decide` endpoint
+and executed through the REAL executor, showing EXECUTED on a fresh `GET thread` — proving the surface
+end to end from the assistant's own HTTP boundary, not just the registry in isolation. That test's own
+setup surfaced and fixed a real hygiene bug in a PRE-EXISTING test in the same file: its "step 0.5"
+registry-gate test calls `resetExecutableApprovals()` (a process-wide singleton) and its own `finally`
+only restored the PM entries it knew about at write time, silently unregistering
+`social.createReplyDraft` for every test after it in file-declaration order — fixed by also restoring
+the social entry there.
+
+**Test counts, measured directly.** `platform-nest`: the new registry file 14/14; `src/modules/social`
++ `src/modules/assistant` + every touched D14 registry/executable file together (58 files, 862 tests):
+**860 passed, 0 failed, 2 skipped** (`assistant-real-gateway.qa.test.ts`, a pre-existing live-gateway
+skip, unrelated). One transient "tuple concurrently updated" DB-role-creation flake on
+`reply-dispatch.test.ts` when run in a smaller, separate invocation — re-run alone, 6/6 green,
+confirmed as the shared-test-Postgres phantom-failure class this program's own docs name, not a
+regression. `tsc --noEmit` clean. `lint:withtenants`/`lint:migration-rls`/`lint:migration-names`/
+`lint:postiz-deps` all green (no migration — still 138 files). `test:iam-chain-alignment` **25/25**
+(unaffected — no new permission key, no Cerbos policy edit; `social.listThreadMessages` reuses the
+existing `social_inbox`/`read` action). `ai-agents`: full suite **204 passed, 0 failed, 53 skipped**
+(pre-existing DB-dependent skips, untouched by this pass) — `agent-write-guard.test.ts`,
+`impact-reconciliation.test.ts` and `evals/harness.test.ts` all updated and green with the new agent.
+
+**Scored against the agentic-native bar.** Human: a staff member chatting with the assistant can now
+have it draft an inbox reply, review the proposal, and send it for the SAME approvals-inbox review any
+other write gets — DEV-VERIFIED via the card-state test. n8n: unaffected — this ticket touches only the
+assistant's own agent-runner path, not the automation/n8n filing path, which already had
+`social.createReplyDraft` reachable via the plain HTTP endpoint before this ticket. Agent: PROTOTYPED,
+not DEV-VERIFIED — the platform-side chain (propose/confirm/decide/execute) is proven against a
+SCRIPTED fake runner, never a real model; `socialDrafter.evaledProviders` is empty on purpose, so a
+REAL LLM cannot yet drive this path unattended until an operator runs the D13 eval + tool-contract
+suite against a live provider and enrolls it — named as the remaining, deliberate gap, not a silent
+skip.
+
+**What stays out of scope, named rather than silently decided:** (1) `social.updateReplyDraft`/
+`social.approveReplyDraft` are NOT given to `social-drafter` — a second/third write per turn multiplies
+the registry/eval/allowlist surface for no new capability this pass needed to prove; a natural follow-up
+once `social.createReplyDraft` has a real enrolled provider. (2) The D13 eval-enrollment run itself (a
+live model call against the shared, weekly-rate-limited Ollama Cloud quota) was judged out of bounds to
+spend unilaterally, per this program's own standing note on that resource — an operator decision, not a
+platform-nest ticket's. (3) No UI change: the composer's agent picker already sources from
+`GET .../assistant/capabilities`'s `toolAgents` generically (ASST-18), so `social-drafter` appears there
+with zero FE code — not verified in a real browser this pass (backend-only ticket; platform-ui unrelated
+files, no change).
+
 ### social-media `0.5.29` — 2026-08-23 — the content-brief weekly sweep's automation identity (SMM-26 follow-up)
 
 **Added** — closes the follow-up SMM-26 named and left for an architect decision (found by SMM-26's
