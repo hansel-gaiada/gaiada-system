@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.35.1` — 2026-08-23 — the resort rename needed a migration, and one DELETE was RLS-blind
+
+**Fixed**
+- **`Sanur Resort` -> `Viceroy Bali` now renames IN PLACE** (migration `202608230612`). b48df97
+  corrected the name in the seed and every suite passed — because each test file gets a FRESH
+  database, so the seed created the resort from nothing. On an existing database `ensureCompany()`
+  resolves BY NAME, finds no `Viceroy Bali`, and INSERTS: the live estate would have kept
+  `Sanur Resort` with all its history and gained a second, empty resort holding the venues and the
+  owner grants. Found by listing the live companies before running the seed. The migration preserves
+  the id and children, and REFUSES if both names already exist — merging two companies is an owner
+  decision, not something a migration may guess.
+- **`DELETE FROM position_roles` had no tenant GUC.** Migrations run as `platform_owner`
+  (NOBYPASSRLS) against a FORCE-RLS table, so it would have matched zero rows and reported success.
+  Caught by `lint:migration-rls` in CI — I had run that linter earlier in the session, but before
+  the migration existed. Affected rows were zero either way (the position_roles guard refuses the
+  role by name), but a silently-empty DELETE is indistinguishable from a working one.
+
+**Testing**
+- `resort-rename.db.test.ts` seeds the OLD state by hand and asserts convergence. A fresh-DB
+  assertion would pass with the migration deleted, which is precisely how this was missed. It
+  executes the .sql directly rather than via `migrate()` — the harness repoints the app pool at
+  NOSUPERUSER `platform_app_test`, so `migrate()` from a test hits "permission denied for schema
+  public".
+
 ### social-media `0.5.26` — 2026-08-23 — OAuth state is bound to the principal who started it
 
 **Fixed (security)** — closes the follow-up the previous pass named rather than absorbed:
@@ -1333,6 +1357,43 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+### `Alpha 01.064.0140a` - 2026-08-23 - the resort rename reaches the estate
+
+Manifest (counter +1, 0139 -> 0140): `platform-nest 0.35.0 -> 0.35.1`.
+
+A small, deliberate cut. `0139a` shipped IAM-15 and the corrected resort name in the SEED, but the
+live estate still said `Sanur Resort` — and `seed:agency` resolves companies by name, so running it
+there would have forked the resort rather than renamed it. This cut carries migration `202608230612`,
+which renames in place, so the seed becomes safe to run against production for the first time since
+b48df97.
+
+**Why it is cut on its own rather than folded into the next feature release:** the 19 staff Keycloak
+accounts provisioned after `0139a` can authenticate but have no ERP `users` row, and `seed:agency` is
+what creates those. That seed is blocked on this migration. Cutting now unblocks the roster instead
+of leaving nineteen people with half an account for another release cycle.
+
+Also in it: the `position_roles` DELETE that ran with no tenant GUC (NOBYPASSRLS + FORCE RLS = zero
+rows, reported as success), and two MAP.md regeneration fixes — generated files must come from a
+clean `git worktree`, because this checkout carries fourteen untracked files that skew them, and a
+three-way merge of a generated file silently drops lines.
+
+**Full module manifest** (rule 2 - what makes this build reconstructible):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.35.1`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.2` |
+| platform-ui | `0.41.0` | ai-agents | `0.8.0` | social-media | `0.5.25` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.2` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+**Verification:** the rename migration is proven against a database that ALREADY HAS the old name —
+in-place (same id, children and FKs intact) and idempotent — plus holding-backbone 8/8,
+`lint:migration-rls` and `lint:migration-names` clean, and `gen-map --check` clean inside a worktree.
 
 ### `Alpha 01.063.0139a` - 2026-08-23 - Phase 3 closes: the platform has one elevated tier again
 
