@@ -12,6 +12,7 @@ import { createRole, grantRole, addMembership } from "../testing/fixtures";
 import { seedDepartmentsAndHr, type SeededDepartments } from "./departments";
 import { AGENCY_DEPTS, STAFF } from "./roster";
 import { seedPositions } from "./positions";
+import { resolveSeedActor, assertNotRetired } from "./seed-actor";
 
 // ── THE REAL ESTATE (corrected 2026-08-22, owner-supplied + verified against public sources) ─────
 // `Sanur Resort` was a placeholder and wrong on two counts: the resort is VICEROY BALI and it is in
@@ -71,8 +72,18 @@ async function ensureCompany(name: string, modules: string[], type: string, pare
   return id;
 }
 async function ensureUser(email: string, name: string, title: string): Promise<string> {
-  const found = await withGlobal((c) => c.query<{ id: string }>(`SELECT id FROM users WHERE email=$1`, [email]));
-  if (found.rows[0]) return found.rows[0].id;
+  // ⚠ `deleted_at` IS SELECTED ON PURPOSE. This lookup had no such filter, so once the seeded
+  // personas were soft-deleted it still found them and returned their ids — re-running the seed would
+  // attribute fresh data to a retired principal and put the ghosts back on every surface, reporting
+  // success the whole way. Filtering them out silently would be no better: the INSERT below would
+  // then hit the unique index on `users.email` with a confusing error. So it refuses, loudly.
+  const found = await withGlobal((c) =>
+    c.query<{ id: string; deleted_at: Date | null }>(`SELECT id, deleted_at FROM users WHERE email=$1`, [email]),
+  );
+  if (found.rows[0]) {
+    assertNotRetired(email, found.rows[0].deleted_at);
+    return found.rows[0].id;
+  }
   const id = newId();
   await withGlobal((c) => c.query(`INSERT INTO users (id, email, name, title, origin_site) VALUES ($1,$2,$3,$4,$5)`, [id, email, name, title, site()]));
   return id;
@@ -113,13 +124,22 @@ export async function seedAgency(): Promise<SeededAgency> {
   const cateringId = await ensureCompany(CATERING_NAME, [], "catering", holdingId);
 
   // ---- People ----
+  // ⚠ `actor()` PREFERS THE REAL EMPLOYEE. These six were always fixture personas, and this seed
+  // creating them is why the ERP listed invented staff. On any database that has the roster, each one
+  // now resolves to the person who actually does that job — so the seed stops manufacturing ghosts
+  // instead of the cleanup having to remove them afterwards. On a fresh database with no roster
+  // (every test) `resolveSeedActor` returns null and the fixture is created exactly as before, so the
+  // demo vertical still seeds from nothing.
+  const actor = async (email: string, name: string, title: string): Promise<string> =>
+    (await resolveSeedActor(email)) ?? (await ensureUser(email, name, title));
+
   const users = {
-    admin: await ensureUser("owner@gaiada-creative.test", "Ayu (Owner)", "Managing Director"),
-    pm: await ensureUser("pm@gaiada-creative.test", "Budi (PM)", "Project Manager"),
-    designer: await ensureUser("design@gaiada-creative.test", "Citra (Design)", "Senior Designer"),
-    copy: await ensureUser("copy@gaiada-creative.test", "Dewi (Copy)", "Copywriter"),
-    approver: await ensureUser("approver@gaiada-creative.test", "Eka (Client Lead)", "Client Lead"),
-    exec: await ensureUser("exec@gaiada.test", "Gaiada Exec", "Group Executive"),
+    admin: await actor("owner@gaiada-creative.test", "Ayu (Owner)", "Managing Director"),
+    pm: await actor("pm@gaiada-creative.test", "Budi (PM)", "Project Manager"),
+    designer: await actor("design@gaiada-creative.test", "Citra (Design)", "Senior Designer"),
+    copy: await actor("copy@gaiada-creative.test", "Dewi (Copy)", "Copywriter"),
+    approver: await actor("approver@gaiada-creative.test", "Eka (Client Lead)", "Client Lead"),
+    exec: await actor("exec@gaiada.test", "Gaiada Exec", "Group Executive"),
     superadmin: await ensureUser("hansel@gaiada.com", "Clement Hansel", "AI Manager"),
     resortGm: await ensureUser("gm@viceroybali.test", "Wayan (GM)", "General Manager"),
     // The holding owner (D-8). A real person, so the address is the real domain rather than .test.

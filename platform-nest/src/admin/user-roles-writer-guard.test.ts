@@ -141,6 +141,16 @@ const TRUSTED_WRITERS: Record<string, string> = {
     "they are the trusted bootstrap that has to be able to write the rows the guarded surfaces " +
     "cannot (the elevated tier's own grants among them). It writes the LITERAL 'client' role by " +
     "name at hardcoded 'company' scope regardless.",
+  "src/seed/client-logins.ts":
+    "seed script, same execution context and same write as `seed/portal-clients.ts` above — and the " +
+    "same LITERAL role: `SELECT id FROM roles WHERE company_id IS NULL AND name = 'client'`, at " +
+    "hardcoded 'company' scope, for a contact resolved from `client_contacts`. Nothing caller-chosen " +
+    "reaches the role or the scope. It exists because portal-clients grants that role and this " +
+    "script did not: it created a contact and a Keycloak account without it, producing a login that " +
+    "authenticated fine and then got `403 cerbos denied read on portal` on every route — a login " +
+    "into an empty portal, which reads as success from the outside. Verified on the live estate " +
+    "before and after. It re-asserts the grant for EVERY seeded contact, not only newly created " +
+    "ones, so a contact that predates the fix is repaired rather than left quietly broken.",
   "src/testing/fixtures.ts":
     "test-only `grantRole()` helper — its role/scope arguments come from TEST code, never from a " +
     "live request, and the file is never imported by production code. `src/testing/personas.ts` " +

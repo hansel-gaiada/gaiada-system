@@ -29,6 +29,7 @@ import { config } from "../config";
 import { deriveBlobPlacements, diffMembershipSweep, isUuidShaped, todayIso, type BlobPlacement, type OpenPrimaryMembership } from "../core/dept-resolution";
 import { allocateTaskSeq, deriveUniqueShortCode } from "../core/project-short-codes";
 import { EMPLOYEES, AGENCY_DEPTS } from "./roster";
+import { resolveSeedActor, assertNotRetired } from "./seed-actor";
 
 const site = () => config.originSite;
 const DAY_MINUTES = 480;
@@ -669,10 +670,17 @@ if (require.main === module) {
       `SELECT id FROM companies WHERE name = $1 AND deleted_at IS NULL`, ["Gaia Digital Agency"]));
     const tenantId = t.rows[0]?.id;
     if (!tenantId) throw new Error("agency company not found — run seed:agency first");
-    const actor = await withGlobal((c) => c.query<{ id: string }>(
-      `SELECT id FROM users WHERE email = $1`, ["owner@gaiada-creative.test"]));
-    const actorId = actor.rows[0]?.id;
-    if (!actorId) throw new Error("seed actor (owner@gaiada-creative.test) not found — run seed:agency first");
+    // ⚠ The real employee first. This resolved `owner@gaiada-creative.test` directly and with no
+    // `deleted_at` filter, so after the personas were retired it still found the soft-deleted row and
+    // stamped every record this seed writes with a principal that no longer exists — invisibly, since
+    // the ids are valid and nothing errors. `resolveSeedActor` returns the GM who does that job now,
+    // and falls back to the fixture only on a database with no roster.
+    const successorId = await resolveSeedActor("owner@gaiada-creative.test");
+    const actor = await withGlobal((c) => c.query<{ id: string; deleted_at: Date | null }>(
+      `SELECT id, deleted_at FROM users WHERE email = $1`, ["owner@gaiada-creative.test"]));
+    if (!successorId && actor.rows[0]) assertNotRetired("owner@gaiada-creative.test", actor.rows[0].deleted_at);
+    const actorId = successorId ?? actor.rows[0]?.id;
+    if (!actorId) throw new Error("seed actor not found — run seed:agency first");
     const clients = (await withTenants([tenantId], (c) => c.query<{ id: string }>(
       `SELECT id FROM clients WHERE tenant_id = $1 AND name = ANY($2::text[]) ORDER BY name`,
       [tenantId, ["Bali Beach Resort", "Nusa Coffee Co"]]))).rows.map((r) => r.id);
