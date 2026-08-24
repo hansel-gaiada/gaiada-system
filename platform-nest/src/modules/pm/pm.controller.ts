@@ -17,6 +17,7 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { allocateTaskSeq, deriveUniqueShortCode, displayCode } from "../../core/project-short-codes";
 import { todayIso, addDaysIso } from "../../core/dept-resolution";
+import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
 // P4-E2 — the person-axis boundary this endpoint reuses verbatim rather than re-deriving (see the
 // endpoint's own header comment for why). Mirrors reports.controller.ts's import of the same file;
 // the reverse direction (reports/document-builder.ts, report-rollups.ts importing `effectiveStatuses`
@@ -1689,6 +1690,9 @@ export class PmController {
     // regardless of what kind the ball itself carries.
     const ballIds = parseUuidArrayParam(query.ball, "ball");
     const milestoneIds = parseUuidArrayParam(query.milestone, "milestone");
+    // CC-1: `?clientId=<uuid>` narrows to one client's tasks, `?clientId=internal` to tasks on
+    // clientless projects. Parsed here with the other facets; applied in the CTE below.
+    const clientFilter = parseClientFilter(query.clientId);
 
     const dueFrom = typeof query.dueFrom === "string" ? query.dueFrom : undefined;
     const dueTo = typeof query.dueTo === "string" ? query.dueTo : undefined;
@@ -1744,6 +1748,16 @@ export class PmController {
       if (ballIds.length) cteConditions.push(`t.assignee->>'refId' = ANY(${push(ballIds)}::text[])`);
       if (tagIds.length) cteConditions.push(`t.tags && ${push(tagIds)}::uuid[]`);
       if (milestoneIds.length) cteConditions.push(`t.milestone_id = ANY(${push(milestoneIds)}::uuid[])`);
+      // CC-1 — the client facet. Cheaper than the design anticipated: this CTE already
+      // `JOIN projects p ON p.id = t.project_id` (for the project name), so the client is a plain
+      // column predicate here, not the EXISTS subquery the plan described. `p.client_id IS NULL` is
+      // the internal case, and it is COMPLETE — `pm_tasks.project_id` is NOT NULL, so every task has a
+      // project and the join can never drop a row.
+      if (clientFilter.kind !== "all") {
+        const f = clientFilterSql(clientFilter, "p.client_id", params.length + 1);
+        for (const v of f.params) push(v);
+        cteConditions.push(f.sql);
+      }
       if (dueFrom) cteConditions.push(`t.due_date >= ${push(dueFrom)}::date`);
       if (dueTo) cteConditions.push(`t.due_date <= ${push(dueTo)}::date`);
       if (q) {
@@ -2027,6 +2041,22 @@ export class PmController {
     const n = normalizePmTaskInput(b ?? {});
     const { title, assignee } = n;
     await authorize(req.principal, { kind: "pm_task", tenantId, projectId: n.projectId }, "create");
+    // ── ASSIGNING SOMEONE ELSE IS STILL A MANAGEMENT ACTION (2026-08-24) ─────────────────────────
+    // `create` opened to `member` in the same change (resource_pm_task.yaml) so that an ordinary
+    // employee can RAISE a task. That is where the widening stops. This handler applies the
+    // payload's `assignee` verbatim — and notifies the person named — so without this check,
+    // "any employee may raise a task" would silently have meant "any employee may put work on any
+    // colleague's plate", which is a different decision and was not the one made.
+    //
+    // Raising unassigned, or assigning it to YOURSELF, needs only `create`. Naming anyone else —
+    // or assigning to a department/division, where the responsible is by definition someone else —
+    // needs `manage`, which stays leads/admins. This mirrors `patchTask`'s ownership-change check a
+    // few dozen lines below, deliberately: the two paths reach the same JSONB blob and the same
+    // dual-write, and one of them being stricter than the other is how a gap gets found later by
+    // someone routing a create through the lenient door.
+    if (assignee && assignee.responsibleId !== req.principal.userId) {
+      await authorize(req.principal, { kind: "pm_task", tenantId, projectId: n.projectId }, "manage");
+    }
     const { id } = await withTenants([tenantId], (c) => createPmTaskInTx(c, tenantId, req.principal.userId, n));
     if (assignee?.responsibleId) {
       await notify(tenantId, assignee.responsibleId, req.principal.userId, "assignment", {
@@ -2550,6 +2580,23 @@ export class PmController {
     // DB below, never trusted from a client-supplied param, so there is nothing to authorize
     // against here beyond the source task's own tenant/id.
     await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "create");
+    // ── THE SECOND DOOR ONTO SOMEONE ELSE'S PLATE (2026-08-24) ───────────────────────────────────
+    // A duplicate COPIES the source task's assignee blob (see the INSERT below) and notifies that
+    // person. So once `create` opened to `member` (PERMISSION-CONTRACT §16), this endpoint became a
+    // way to hand work to a colleague without ever holding `manage` — the exact reach `createTask`'s
+    // own guard refuses. This was not spotted by reading the diff; `pm.test.ts`'s "a plain member
+    // cannot duplicate a task (create-gated)" went from red to green and said so.
+    //
+    // Pre-read outside the transaction, exactly as `patchTask` does before its ownership check —
+    // `authorize()` opens its own connection for the audit write, so it must not be called from
+    // inside an already-open `withTenants` closure. The 404-for-unknown-id ordering is unchanged:
+    // the `create` check above still runs first.
+    const sourceForGate = await withTenants([tenantId], (c) => fetchTask(c, taskId));
+    if (!sourceForGate) throw new NotFoundException("task not found");
+    const sourceAssignee = sourceForGate.assignee as Assignee | null;
+    if (sourceAssignee && sourceAssignee.responsibleId !== req.principal.userId) {
+      await authorize(req.principal, { kind: "pm_task", tenantId, id: taskId }, "manage");
+    }
     const id = newId();
     const source = await withTenants([tenantId], async (c) => {
       const task = await fetchTask(c, taskId);

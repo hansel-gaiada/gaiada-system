@@ -150,6 +150,35 @@ export interface Principal {
     /** The acting human's `users.id`. Resolved by the guard, never taken on faith from the body. */
     userId: string;
   };
+
+  /**
+   * ── WHY THIS PRINCIPAL IS ANONYMOUS (2026-08-24) ────────────────────────────────────────────────
+   *
+   * Set by the AuthGuard when an OBO envelope WAS presented and could not be resolved to a verified,
+   * active user. The degrade to `ANONYMOUS` is correct and stays — an unknown WhatsApp number must
+   * still reach the public surface — but it was SILENT, and that cost real diagnostic time: every
+   * subsequent route answered `403 not authorized: cerbos denied <action> on <kind>`, which reads as
+   * a policy bug in the resource being asked for. The actual cause was one bad identifier in the
+   * envelope, three layers up, and nothing in the response pointed at it.
+   *
+   * ⚠ AUTHORIZATION-NEUTRAL, like `via` and unlike `actFor`. Nothing in Cerbos, `check()`, or the
+   * permission expansion reads it. It changes only what a denial SAYS. The principal denies exactly
+   * as it denied before this field existed — the 403 now just names the reason it is anonymous
+   * instead of describing the symptom.
+   *
+   * Absent on every other principal, including a legitimately anonymous caller who presented no
+   * envelope at all: there is nothing unresolved about not having asked.
+   */
+  oboUnresolved?: {
+    /** `no-identity-link` — the (provider, external_id) pair matches no `identity_links` row at all.
+     *  `link-unverified` — a link exists but has never completed dual-proof enrollment (`verified_at`
+     *  is null), so it names a claim, not an identity.
+     *  `user-inactive` — the link is verified, but the user it points at is deleted, disabled, or
+     *  otherwise no longer assembles into a principal. */
+    reason: "no-identity-link" | "link-unverified" | "user-inactive";
+    provider: string;
+    externalId: string;
+  };
 }
 
 export const ANONYMOUS: Principal = {
@@ -421,18 +450,39 @@ export async function auditDecision(
   const detail: Record<string, unknown> = { action, reason };
   if (resourceId !== null && uuidId === null) detail.resourceId = resourceId;
 
-  await withTenants([tenantId], (c) =>
-    c.query(
-      `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'authz')`,
-      [
-        tenantId,
-        p.userId,
-        allow ? "authz.allow" : "authz.deny",
-        resourceKind,
-        uuidId,
-        JSON.stringify(detail),
-      ],
-    ),
-  );
+  // ⚠ SAME BUG CLASS, SECOND INSTANCE (2026-08-24) — this time on `tenant_id`, not
+  // `target_entity_id`. A WELL-FORMED uuid naming a company that does not exist is a perfectly
+  // ordinary request (a typo, a stale bookmark, a probe). Cerbos correctly denies it, and then the
+  // audit write for that denial violated `activities_tenant_id_fkey` — so the caller received a
+  // **500** for a decision that had already been made correctly, exactly the outcome the TR-25
+  // comment above exists to forbid. `tenant-param.ts` catches the malformed shape at the router;
+  // this catches the well-formed-but-unknown id, which no shape check can.
+  //
+  // Swallowed NARROWLY: only foreign-key violations (23503), and only after logging. An unknown
+  // company has no activity feed to file under, so there is no trail being lost — there was never
+  // one to write to. Every other failure still throws, because a broken audit write against a REAL
+  // tenant is a genuine fault and must not be hidden: this trail is what makes least privilege
+  // accountable, and a blanket catch here would be the quiet end of it.
+  try {
+    await withTenants([tenantId], (c) =>
+      c.query(
+        `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'authz')`,
+        [
+          tenantId,
+          p.userId,
+          allow ? "authz.allow" : "authz.deny",
+          resourceKind,
+          uuidId,
+          JSON.stringify(detail),
+        ],
+      ),
+    );
+  } catch (e) {
+    if ((e as { code?: string }).code !== "23503") throw e;
+    console.warn(
+      `[authz-audit] decision not filed: company ${tenantId} does not exist ` +
+        `(${allow ? "allow" : "deny"} ${action} on ${resourceKind}). The decision itself stands.`,
+    );
+  }
 }

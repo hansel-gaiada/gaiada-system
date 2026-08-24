@@ -145,6 +145,23 @@ CLOSED. Do not merge them into one "client scope" abstraction, and do not "harde
 `clientId=internal` means `client_id IS NULL`, never `is_internal = true` — the two disagree on the
 live estate, and keying on the flag makes some clientless rows reachable from no scope at all.
 
+## `:tenantId` is validated at the router, not at 602 call sites
+
+`core/tenant-param.ts` registers a root Fastify `preValidation` hook (from `buildApp()`, **before**
+`app.init()` — Fastify snapshots the hook list into each route's context at registration, so a hook
+added afterwards applies to no Nest route and fails silently). A non-uuid `:tenantId` is a **400**;
+before this it travelled into `withTenants([...])` and died as a 500 at the RLS uuid cast.
+
+- It keys off the route HAVING a `tenantId` param, so a controller written next month is covered.
+  Static-segment routes (`/api/admin/*`, `/api/me`) never see it — Fastify's router prefers static.
+- It runs before the `AuthGuard`, deliberately. The disclosure is "this route takes a tenant id",
+  which the URL already said; the alternative is 602 live uuid casts reachable unauthenticated.
+- **Shape only, never authorization.** A well-formed uuid for a company you may not touch still goes
+  to Cerbos and RLS and is still denied there.
+- The well-formed-but-NONEXISTENT company is the case no shape check can catch: `auditDecision`
+  used to 500 on `activities_tenant_id_fkey` while filing the (correct) denial. It now swallows
+  **23503 only**, with a warning — same bug class as the TR-25 note in that function.
+
 ## Authorization
 
 **Cerbos is authoritative.** `src/rbac/` holds the policy-side plumbing plus the alignment
@@ -159,6 +176,12 @@ contract change.
   and a second principal table would fork every policy.
 - Every automation principal is minted `assurance: "low"` by construction.
 - `isElevated` means owner/superadmin, **not** staff.
+- An **unresolvable OBO envelope still degrades to `ANONYMOUS`** (an unknown external identity must
+  reach the public surface) — but no longer silently. The guard records
+  `Principal.oboUnresolved` (`no-identity-link` | `link-unverified` | `user-inactive`) and
+  `authorize()` appends it to the denial reason, so a bad identifier three layers up stops
+  presenting as `cerbos denied read on portal`. Authorization-neutral, like `via`: it changes what a
+  denial SAYS, never the decision, and the original reason stays first.
 
 ## Modules
 

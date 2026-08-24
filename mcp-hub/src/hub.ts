@@ -17,6 +17,7 @@ import { auditToolCall, principalRef, type GrantAudit } from "./audit";
 import { RESOURCE_TEMPLATES, canReadResources, readResource } from "./resources";
 import { PROMPTS, canUsePrompts, getPrompt } from "./prompts";
 import { verifyExecutionGrant, type VerifiedExecutionGrant } from "./approval-grant";
+import { validateToolArgs, invalidArgsMessage } from "./validate-args";
 
 export interface HubServerOptions {
   /** Raw `x-approval-grant` header value from the tool call, if the caller sent one (D14-04).
@@ -63,8 +64,29 @@ export function buildHubServer(principal: Principal, options: HubServerOptions =
       auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "deny", reason: decision.reason, ...(grantAudit ? { grant: grantAudit } : {}) });
       return { content: [{ type: "text" as const, text: decision.reason }], isError: true };
     }
+    // ── ARGUMENT VALIDATION (2026-08-24), the one gate between MCP and a handler ──────────────────
+    // Ordered AFTER authorization on purpose: a caller who may not call this tool learns only that,
+    // never its argument names or shape. Validation failure is NOT a policy denial — the caller was
+    // allowed and the request was malformed — so it audits as `allow` + `ok:false` with a reason,
+    // keeping the deny-rate signal meaning "policy refused" and nothing else.
+    // `checked.args` (defaults applied, `"5"` → `5`) is what the handler receives, so the string
+    // interpolation every handler does can no longer produce `/api/undefined/...`.
+    //
+    // ⚠ IT IS ALSO AFTER THE D14-04 GRANT CHECK, AND THAT ORDER IS LOAD-BEARING. `argsSha256` binds
+    // a grant to the EXACT args the approval was filed from — raw, because the suspending first
+    // attempt never reached this line either. Verifying against `checked.args` instead would hash a
+    // different object than the platform stored and fail every legitimate re-drive with
+    // `args_mismatch`. Nothing is widened by the split: the grant still pins the raw bytes, and
+    // validation is deterministic on them, so a caller cannot present args approved for one call
+    // and have them coerce into another.
+    const checked = validateToolArgs(decision.tool.inputSchema, args);
+    if (!checked.ok) {
+      const reason = invalidArgsMessage(name, checked.errors, decision.tool.inputSchema);
+      auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: false, reason, ...(grantAudit ? { grant: grantAudit } : {}) });
+      return { content: [{ type: "text" as const, text: reason }], isError: true };
+    }
     try {
-      const text = await decision.tool.handler(args, principal);
+      const text = await decision.tool.handler(checked.args, principal);
       auditToolCall({ ts: Date.now(), tool: name, principal: principalRef(principal), decision: "allow", ok: true, ...(grantAudit ? { grant: grantAudit } : {}) });
       return { content: [{ type: "text" as const, text }] };
     } catch (err) {

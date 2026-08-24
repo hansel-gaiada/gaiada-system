@@ -146,9 +146,63 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
     expect(comments.some((cm) => cm.body.startsWith("AI Tracker:") && cm.author_id === null)).toBe(true);
   });
 
-  it("a plain member cannot create or delete a task (manage-gated)", async () => {
-    const create = await createTask({ title: "nope" }, asUser(member));
-    expect(create.statusCode).toBe(403);
+  // ── OWNER DECISION 2026-08-24 (PERMISSION-CONTRACT §16) ────────────────────────────────────────
+  // This block used to be one assertion — "a plain member cannot create or delete a task" — which
+  // encoded the state the agency probe flagged: 14 of 19 staff could not file work against their
+  // own department's board, because `create` shared a Cerbos rule with `delete`/`manage`. `create`
+  // is now split out and open to `member`; `delete` and `manage` are unchanged.
+  //
+  // The three cases below are one decision, not three: raising a task is ordinary work, assigning
+  // one to somebody else is a management act, and the second must not ride in on the first.
+  describe("a plain member raises tasks, but does not hand work out", () => {
+    it("may create a task", async () => {
+      const create = await createTask({ title: "member-raised" }, asUser(member));
+      expect(create.statusCode).toBe(201);
+    });
+
+    it("may create a task assigned to THEMSELVES", async () => {
+      const create = await createTask(
+        {
+          title: "member-self-assigned",
+          assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+        },
+        asUser(member),
+      );
+      expect(create.statusCode).toBe(201);
+    });
+
+    it("🔴 may NOT create a task assigned to someone else — that still needs `manage`", async () => {
+      // The whole reason the grant needed a code-side guard: `createTask` applies the payload's
+      // assignee verbatim and notifies the person named, so `create` alone would have meant "any
+      // employee may put work on any colleague's plate". Mirrors patchTask's ownership check.
+      const create = await createTask(
+        {
+          title: "member-assigns-the-boss",
+          assignee: { kind: "person", refId: manager, refName: "Manager Mo", responsibleId: manager, responsibleName: "Manager Mo" },
+        },
+        asUser(member),
+      );
+      expect(create.statusCode).toBe(403);
+    });
+
+    it("🔴 may NOT create a task assigned to a DEPARTMENT — the responsible is someone else by definition", async () => {
+      const create = await createTask(
+        {
+          title: "member-assigns-a-unit",
+          assignee: { kind: "department", refId: "d-web", refName: "Web Dev", responsibleId: manager, responsibleName: "Manager Mo" },
+        },
+        asUser(member),
+      );
+      expect(create.statusCode).toBe(403);
+    });
+
+    it("a manager may still assign to anyone — the guard did not over-correct", async () => {
+      const create = await createTask({
+        title: "manager-assigns",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      });
+      expect(create.statusCode).toBe(201);
+    });
   });
 
   // ---------------- Custom fields (P2-03, D17 framework reuse) ----------------
@@ -947,10 +1001,33 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(blockedIds.has(child!.status)).toBe(false);
     });
 
-    it("a plain member cannot duplicate a task (create-gated)", async () => {
+    // ── OWNER DECISION 2026-08-24 (PERMISSION-CONTRACT §16) ──────────────────────────────────────
+    // This was a single 403 assertion while `create` was lead-only. `create` is now open to
+    // `member`, and flipping this case to 201 is what EXPOSED the real gap: a duplicate copies the
+    // source task's assignee and notifies them, so a member duplicating a lead-assigned task would
+    // have put work on that lead's plate without ever holding `manage`. Both halves are pinned.
+    it("a plain member may duplicate an UNASSIGNED task (it is a create)", async () => {
       const id = (await createTask({ title: "Guard me" }).then((r) => r.json())).id as string;
       const r = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks/${id}/duplicate`, headers: asUser(member) });
+      expect(r.statusCode).toBe(201);
+    });
+
+    it("🔴 a plain member may NOT duplicate a task assigned to SOMEONE ELSE — the copy carries the assignee", async () => {
+      const id = (await createTask({
+        title: "Owned by the boss",
+        assignee: { kind: "person", refId: manager, refName: "Manager Mo", responsibleId: manager, responsibleName: "Manager Mo" },
+      }).then((r) => r.json())).id as string;
+      const r = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks/${id}/duplicate`, headers: asUser(member) });
       expect(r.statusCode).toBe(403);
+    });
+
+    it("a plain member may duplicate a task assigned to THEMSELVES", async () => {
+      const id = (await createTask({
+        title: "Mine already",
+        assignee: { kind: "person", refId: member, refName: "Member Mel", responsibleId: member, responsibleName: "Member Mel" },
+      }).then((r) => r.json())).id as string;
+      const r = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks/${id}/duplicate`, headers: asUser(member) });
+      expect(r.statusCode).toBe(201);
     });
 
     it("404s for an unknown source task id", async () => {
@@ -2455,9 +2532,18 @@ describe.skipIf(!TEST_URL)("PM subsystem (§5)", () => {
       expect(r.statusCode).toBe(200);
     });
 
-    it("a member still cannot create or delete a task — only the ball gate moved", async () => {
-      const created = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: asMember(), payload: { projectId, title: "nope" } });
-      expect(created.statusCode).toBe(403);
+    // Updated 2026-08-24 (PERMISSION-CONTRACT §16): `create` is no longer lead-only, so the control
+    // case here can no longer be "a member cannot create". The invariant this block actually
+    // guards — that moving the BALL is member-level while changing OWNERSHIP is not — is unchanged,
+    // and creating a task assigned to someone else is an ownership change by any other name.
+    it("a member may create a plain task, but still cannot create one owned by someone else", async () => {
+      const plain = await app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers: asMember(), payload: { projectId, title: "ok" } });
+      expect(plain.statusCode).toBe(201);
+      const owned = await app.inject({
+        method: "POST", url: `/api/${tenant}/pm/tasks`, headers: asMember(),
+        payload: { projectId, title: "nope", assignee: own(manager, manager) },
+      });
+      expect(owned.statusCode).toBe(403);
     });
   });
 

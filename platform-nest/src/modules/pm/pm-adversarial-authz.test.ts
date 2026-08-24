@@ -332,8 +332,21 @@ describe.skipIf(!TEST_URL)("PM adversarial authz (P4-J7)", () => {
       const { t, manager, member, projectId } = await freshTenant("tier-member");
       const seeded = (await app.inject({ method: "POST", url: `/api/${t}/pm/tasks`, headers: asUser(manager), payload: { projectId, title: "seed" } })).json() as { id: string };
 
-      const create = await app.inject({ method: "POST", url: `/api/${t}/pm/tasks`, headers: asUser(member), payload: { projectId, title: "nope" } });
-      expect(create.statusCode).toBe(403);
+      // ── OWNER DECISION 2026-08-24 (PERMISSION-CONTRACT §16) ────────────────────────────────
+      // `create` used to be 403 here, bundled into one Cerbos rule with `delete`/`manage`. It is
+      // now member-level: raising a task is ordinary work. What did NOT move is naming somebody
+      // else as responsible — that is still `manage`, and asserting BOTH in the same case is the
+      // point, because the tier boundary this test guards is exactly the line between them.
+      const create = await app.inject({ method: "POST", url: `/api/${t}/pm/tasks`, headers: asUser(member), payload: { projectId, title: "member raises" } });
+      expect(create.statusCode).toBe(201);
+      const assignOther = await app.inject({
+        method: "POST", url: `/api/${t}/pm/tasks`, headers: asUser(member),
+        payload: {
+          projectId, title: "nope",
+          assignee: { kind: "person", refId: manager, refName: "Mgr", responsibleId: manager, responsibleName: "Mgr" },
+        },
+      });
+      expect(assignOther.statusCode).toBe(403);
       const del = await app.inject({ method: "DELETE", url: `/api/${t}/pm/tasks/${seeded.id}`, headers: asUser(member) });
       expect(del.statusCode).toBe(403);
       const tagCreate = await app.inject({ method: "POST", url: `/api/${t}/pm/projects/${projectId}/tags`, headers: asUser(member), payload: { label: "x", color: "slate" } });

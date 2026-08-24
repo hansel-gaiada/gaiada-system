@@ -32,6 +32,24 @@ files (`platform-tools`, `platform-write-tools`, `pm-tools`, `delivery-tools`, `
 `work-activity-tools`, `module-tools`) are the *dispatchers* for those defs. Full primitive
 surface: **Tools · Resources (`gaiada://…`) · Prompts**.
 
+## Arguments are validated against the advertised schema
+
+`hub.ts` holds the **only** invocation of a tool handler, and `validate-args.ts` gates it: a call is
+checked against the tool's own `inputSchema` (`type · properties · required · enum · items ·
+default`) before dispatch. A tool added later — including one aggregated from a module, which no
+hub-side code ever sees — is covered because it declared a schema, not because anyone added a check.
+
+- Until 2026-08-24 nothing enforced `required`. An omitted argument became the literal string
+  `"undefined"` in a platform URL (`GET /api/undefined/projects`) and died as a 500 at a uuid cast.
+  Read tools wasted a round trip; write tools carried it into a mutation.
+- Validation runs **after** authorization (so a denied caller learns nothing about arguments) and
+  **after** the D14-04 grant check (`argsSha256` binds the RAW args the approval was filed from —
+  hashing the validated ones would fail every legitimate re-drive with `args_mismatch`).
+- A rejection audits as `allow` + `ok:false` + `reason`. It is not a policy denial; keep
+  `decision:"deny"` meaning "policy refused" and nothing else.
+- `"5"`→`5` and `"true"`→`true` are coerced (lossless, and it is what LLM clients actually send);
+  `5`→`"5"` is not.
+
 ## Two gates every write passes
 
 1. **Workflow scoping** (`automation-policy.ts`) — each n8n workflow is least-privilege by its

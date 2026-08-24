@@ -39,23 +39,47 @@ describe.skipIf(!TEST_URL)("IAM-VERIFY-01 · real HTTP drive as personas", () =>
   // 1. PM (pm_task) — role arm + permission arm, driven through the real endpoint.
   // ══════════════════════════════════════════════════════════════════════════════════════════
   describe("PM — pm_task, both arms, through /pm/tasks", () => {
-    it("ALLOW — company_admin, manager CAN create a task; DENY — member, viewer CANNOT", async () => {
+    // ── OWNER DECISION 2026-08-24 (PERMISSION-CONTRACT §16) ──────────────────────────────────
+    // `member` moved from the DENY list to the ALLOW list here. It used to be denied because
+    // `create` shared a Cerbos rule with `delete`/`manage`, which left 14 of 19 seeded staff
+    // unable to file work against their own department's board. `viewer` stays denied — the
+    // widening named `member`, not everyone — and that is what makes this case still a boundary
+    // rather than a formality.
+    it("ALLOW — company_admin, manager, member CAN create a task; DENY — viewer CANNOT", async () => {
       const p = await seedPersonaTenant(["company_admin", "manager", "member", "viewer"]);
       const projectId = await createProject(p.tenantId, "IAM-VERIFY PM project");
-      for (const persona of ["company_admin", "manager"] as const) {
+      for (const persona of ["company_admin", "manager", "member"] as const) {
         const res = await app.inject({
           method: "POST", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as(persona),
           payload: { projectId, title: `task by ${persona}` },
         });
         expect(res.statusCode, `persona "${persona}" create pm_task`).toBe(201);
       }
-      for (const persona of ["member", "viewer"] as const) {
+      for (const persona of ["viewer"] as const) {
         const res = await app.inject({
           method: "POST", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as(persona),
           payload: { projectId, title: `task by ${persona}` },
         });
         expect(isDeniedStatus(res.statusCode), `persona "${persona}" create pm_task should be denied, got ${res.statusCode}`).toBe(true);
       }
+    });
+
+    // The other half of §16, driven through the same real endpoint: opening `create` must not have
+    // opened "assign work to a colleague". A member naming someone else as responsible is refused;
+    // `manage` is what that needs, and `member` does not hold it.
+    it("DENY — a member CANNOT create a task owned by someone else (that is `manage`)", async () => {
+      const p = await seedPersonaTenant(["manager", "member"]);
+      const projectId = await createProject(p.tenantId, "IAM-VERIFY PM ownership project");
+      const otherUserId = p.users.manager!;
+      const res = await app.inject({
+        method: "POST", url: `/api/${p.tenantId}/pm/tasks`, headers: p.as("member"),
+        payload: {
+          projectId,
+          title: "member assigns the lead",
+          assignee: { kind: "person", refId: otherUserId, refName: "Lead", responsibleId: otherUserId, responsibleName: "Lead" },
+        },
+      });
+      expect(isDeniedStatus(res.statusCode), `member create-with-other-assignee should be denied, got ${res.statusCode}`).toBe(true);
     });
 
     // HIER-3 (2026-08-11): the "DENY — team_lead cannot create OR even READ a pm_task" case that

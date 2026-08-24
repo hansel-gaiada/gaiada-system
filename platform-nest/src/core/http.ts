@@ -10,15 +10,46 @@ import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
 
+/**
+ * ── NAMING THE CAUSE WHEN AN UNRESOLVED ENVELOPE IS THE CAUSE (2026-08-24) ───────────────────────
+ *
+ * An OBO envelope the AuthGuard could not resolve degrades to `ANONYMOUS` — deliberately; see
+ * `Principal.oboUnresolved`. The degrade was silent, so the FIRST evidence of a bad identifier was
+ * `403 not authorized: cerbos denied read on portal`, which describes the symptom and points at the
+ * wrong layer. Someone chasing it reads the policy for a resource that was never involved.
+ *
+ * The decision is untouched: this appends to the REASON, never to the outcome. An anonymous
+ * principal denies exactly as it did before — the sentence just ends by saying why it was anonymous.
+ * The original reason stays FIRST so anything matching on it (the audit trail, the bot's error
+ * handling, tests) keeps matching.
+ *
+ * Exported for `obo-unresolved.test.ts`, which pins the wording without standing up Cerbos and a
+ * database to reach `authorize()`'s deny branch.
+ */
+export function explainDenial(principal: Principal, reason: string): string {
+  const u = principal.oboUnresolved;
+  if (!u) return reason;
+  const why = {
+    "no-identity-link": "it is not enrolled",
+    "link-unverified": "its enrollment was never verified",
+    "user-inactive": "the user it points at is not active",
+  }[u.reason];
+  return (
+    `${reason} — you were authorized as an ANONYMOUS principal because the identity envelope ` +
+    `${u.provider}:${u.externalId} could not be resolved (${why}); this is an identity problem, not a policy one`
+  );
+}
+
 /** RBAC gate: throws ForbiddenException (403) on deny, UnauthorizedException (401) on a
  *  revoked session for mutations (D11). Returns void on allow. */
 export async function authorize(principal: Principal, resource: Resource, action: string): Promise<void> {
   const decision = await check(principal, resource, action);
   if (!decision.allow) {
+    const reason = explainDenial(principal, decision.reason);
     await auditDecision(
-      resource.tenantId ?? null, principal, action, resource.kind, resource.id ?? null, false, decision.reason,
+      resource.tenantId ?? null, principal, action, resource.kind, resource.id ?? null, false, reason,
     );
-    throw new ForbiddenException(`not authorized: ${decision.reason}`);
+    throw new ForbiddenException(`not authorized: ${reason}`);
   }
 
   // ── DELEGATION: THE SECOND CHECK (2026-08-22) ───────────────────────────────────────────────────

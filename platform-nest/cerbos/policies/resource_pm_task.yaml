@@ -17,8 +17,31 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager", "member", "viewer"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
-    # Management actions (create/delete + assignee/meta changes + suggestion confirm) — leads/admins.
-    - actions: ["create", "delete", "manage"]
+    # ── RAISING A TASK IS NOT A MANAGEMENT ACTION (2026-08-24, owner-accepted) ────────────────────
+    # `create` used to sit in the same rule as `delete`/`manage`, so only the 5 department leads who
+    # hold `manager` could raise a PM task at all — 14 of 19 staff could not file work against the
+    # board their own department runs on. The general `/tasks` surface let them create a CORE task
+    # instead, which is a dead end: that endpoint takes only title + customFields, fires no
+    # notification, and has no PATCH at all, so the task could never be assigned, scheduled or
+    # updated afterwards.
+    #
+    # `create` is therefore split out and opened to `member`. `delete` and `manage` are UNCHANGED and
+    # stay leads/admins — and `manage` is the load-bearing half: it is what gates every ownership
+    # change on PATCH and every tracker-suggestion confirm.
+    #
+    # ⚠ THE SPLIT ALONE IS NOT THE WHOLE GRANT. `createTask` authorizes `create` and then applies the
+    # payload's `assignee` verbatim, so opening `create` would also have meant "any employee may
+    # assign work to any colleague" — a different decision from "any employee may raise a task", and
+    # not the one that was made. `pm.controller.ts`'s create handler now demands `manage` when the
+    # payload names a responsible other than the caller, mirroring the ownership-change check the
+    # PATCH path in that same file has always applied. Do not open `create` in some other surface
+    # without carrying that guard with it.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Management actions (delete + assignee/meta changes + suggestion confirm) — leads/admins.
+    - actions: ["delete", "manage"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }

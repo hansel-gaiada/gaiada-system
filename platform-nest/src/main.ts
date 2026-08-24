@@ -141,6 +141,9 @@ import { startMailSenderLoop } from "./mail/sender";
 import type { FastifyInstance } from "fastify";
 import { registerInboundRawBodyCapture } from "./mail/inbound/raw-body";
 import { registerRequestContext } from "./core/request-context";
+// 2026-08-24 — `:tenantId` shape validation. See src/core/tenant-param.ts for why this is a root
+// hook rather than a pipe on 602 `@Param("tenantId")` call sites.
+import { registerTenantParamValidation } from "./core/tenant-param";
 
 export async function buildApp(): Promise<NestFastifyApplication> {
   // Fastify logs are pino JSON with trace_id/span_id when OTEL is on, else stay off (unchanged
@@ -211,6 +214,12 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // parameter through 263 call sites. See src/core/request-context.ts for why ambient beats explicit
   // here: an opt-in audit field is forgotten exactly where it mattered, and nothing fails when it is.
   registerRequestContext(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
+  // 2026-08-24 — reject a malformed `:tenantId` with 400 before it reaches a uuid cast in RLS.
+  // Same placement rule as the two hooks above and for the same hard reason: Fastify snapshots the
+  // root hook list into each route's context when the route is REGISTERED, which `app.init()` below
+  // is what triggers. A hook added after it would apply to no Nest route at all — and would fail
+  // silently, since "nothing rejected" is indistinguishable from "nothing malformed arrived".
+  registerTenantParamValidation(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
   await app.init();
   return app;
 }

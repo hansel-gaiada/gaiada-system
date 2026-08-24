@@ -127,6 +127,22 @@ export class AuthGuard implements CanActivate {
           return true;
         }
       }
+      // ── WHY THE DEGRADE IS NO LONGER SILENT (2026-08-24) ────────────────────────────────────────
+      // Falling through to ANONYMOUS is right — an unknown external identity must still be able to
+      // reach the public surface, and refusing the request outright here would turn "I don't know
+      // you" into "you are banned". What was wrong is that it said NOTHING: every route afterwards
+      // answered `cerbos denied <action> on <kind>`, which sends whoever is debugging into the
+      // policy for a resource that was never the problem. `authorize()` reads this to name the
+      // actual cause. Three distinguishable states, because the fix for each is different — enroll,
+      // finish enrollment, or reactivate the user.
+      const oboUnresolved = {
+        reason: !row ? ("no-identity-link" as const)
+          : !row.verified_at ? ("link-unverified" as const)
+          : ("user-inactive" as const),
+        provider,
+        externalId,
+      };
+
       // The anonymous principal keeps `via` too: an unauthenticated agent-driven call is still
       // agent-driven, and that is exactly the request whose provenance is worth recording.
       //
@@ -134,7 +150,7 @@ export class AuthGuard implements CanActivate {
       // the intersection would be empty anyway — but the reason to drop it is legibility, not
       // arithmetic: carrying it would produce "act-for denied for <uuid>" when the actual problem is
       // that the caller is unauthenticated, sending whoever debugs it after the wrong identity.
-      req.principal = { ...ANONYMOUS, via };
+      req.principal = { ...ANONYMOUS, via, oboUnresolved };
       return true;
     }
     throw new UnauthorizedException("x-user-id or an OBO envelope required");

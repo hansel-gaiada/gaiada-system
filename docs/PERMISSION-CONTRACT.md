@@ -1052,3 +1052,163 @@ act), but it is not yet an identity Cerbos can authorize as itself.
 
 **The staging gate therefore stands, narrowed:** the four direct tools are now gated and attributed, so
 the remaining pre-staging requirement is the persona work, not the attribution hole.
+
+## 16. `member` may raise a PM task (owner decision, 2026-08-24)
+
+Same family as §12.5, in the opposite direction. §12.5 asked "why does the baseline role hold a
+`delete` key?" and narrowed. This asks "why does the baseline role NOT hold a `create` key?" and
+widens — and both questions were answered by probing the live engine, not by reading a bundle.
+
+### 16.1 The finding
+
+An adversarial probe of the agency vertical reported that an ordinary employee cannot raise a task.
+Half right, and the half that was wrong matters: `member` already holds `core.task.create`, and
+`resource_task.yaml` allows it under `inTenant && notLow`. What was closed is the **PM module**
+surface — `resource_pm_task.yaml` bundled `create` into one rule with `delete` and `manage`, naming
+only `company_admin`/`manager`. Of 19 seeded staff, 5 hold `manager` (one lead per department, by
+`seed:roster-access`'s `MANAGER_LEVELS`), so 14 could not file work against the board their own
+department runs on.
+
+The escape hatch that made this survivable also made it invisible: the general `/tasks` UI posts to
+the CORE endpoint, which `member` may call. But that door is a stub —
+`core.controller.ts`'s `POST :tenantId/projects/:projectId/tasks` accepts only `title` +
+`customFields`, sets no assignee/status/due date, fires no notification, and has **no PATCH sibling
+at all** (the UI carries a comment saying so). An employee could create a task they could then never
+assign, schedule, or update. Both doors write the same `tasks` table, so this read as "tasks work"
+right up until someone tried to do anything with one.
+
+### 16.2 The decision
+
+**`member` gains `pm.task.create` and nothing else.** `resource_pm_task.yaml`'s
+`["create","delete","manage"]` rule is split: `create` names `company_admin`/`manager`/`member`;
+`delete` and `manage` are byte-for-byte unchanged and stay leads/admins. `manage` is the
+load-bearing half — it gates every ownership change on `patchTask` and every tracker-suggestion
+confirm.
+
+Mirror: `202608241615_iam_member_pm_task_create.sql` (one row, the 0094/0098/0099 idiom, with a
+row-count assertion so a missed join cannot pass as a no-op). `role-permission-bundles.json`
+regenerated from the policy — `member` 72 → 73 pairs.
+
+### 16.3 ⚠ The grant alone would have been the WRONG decision
+
+`createTask` authorizes `create` and then applies the payload's `assignee` verbatim, notifying the
+person named. So opening `create` would also have meant *"any employee may put work on any
+colleague's plate"* — a different decision, and not the one made.
+
+`pm.controller.ts`'s create handler therefore demands `manage` when the payload names a responsible
+other than the caller. Raising unassigned, or self-assigning, needs only `create`; naming anyone else
+— or a department/division, where the responsible is by definition someone else — needs `manage`.
+This mirrors `patchTask`'s existing ownership-change check deliberately: the two paths reach the same
+JSONB blob and the same `pm_task_assignees` dual-write, and one being more lenient than the other is
+exactly how a gap gets found later by someone routing a create through the weaker door.
+
+**If that guard is ever removed, the migration's one row silently becomes the wider grant.**
+
+### 16.4 Proven, not assumed
+
+Cerbos was restarted (it does not hot-reload) and probed directly. With a single
+`member @ company` grant on `pm_task`: `create` → `EFFECT_ALLOW`, `update` → `EFFECT_ALLOW`,
+`manage` → `EFFECT_DENY`, `delete` → `EFFECT_DENY`. The role arm carries no `inRoot` conjunct, so
+the §12-era anchoring hazard does not apply to this grant — unlike the permission arm's
+`perm_pm_task_create` rule, which is unchanged and still root-bounded.
+
+### 16.5 The transferable lesson
+
+A capability can be "present" and still not exist. `member` held a task-create permission, a task
+create endpoint answered 201, and the department's actual task surface was still closed to 14 of 19
+people. Neither the bundle nor a route inventory would have shown that — only asking whether the
+work an employee is expected to do can actually be done end to end.
+
+---
+
+## 17. Finance & Accounting F0 — 3 new kinds, 13 keys, role-arm only (2026-08-24)
+
+Design: [`docs/blueprints/finance-accounting-foundation.md`](blueprints/finance-accounting-foundation.md).
+Tracker: [`docs/plans/2026-08-24-finance-PROGRESS.md`](plans/2026-08-24-finance-PROGRESS.md).
+Landed by `202608241014_iam_finance_f0_permissions.sql`.
+
+### 17.1 The kinds
+
+| Cerbos kind | Governs | Actions |
+|---|---|---|
+| `finance_config` | The accounting VOCABULARY — chart of accounts, dimensions, fiscal calendar structure, currencies, exchange rates, company accounting settings | `read` `create` `update` `delete` |
+| `finance_period` | The CLOSE LIFECYCLE — the `OPEN → SOFT_LOCK → HARD_LOCK` state machine | `read` `lock` `reopen` `close` |
+| `finance_control` | GOVERNANCE — the segregation-of-duties matrix, cross-company elevation grants, the finance access log | `read` `assign_duty` `waive_conflict` `grant_access` `revoke_access` |
+
+**The split follows segregation-of-duties lines, not code layout.** Closing a period is the
+`period_close` duty (control function AUTHORISE); editing the chart of accounts is RECORD. The
+blueprint's matrix (§2.2) forbids one person holding `journal_post` + `period_close`, and that is
+only expressible if closing is separately grantable. Folded into one `finance` kind, every
+accountant who could add an account could also declare the year final.
+
+### 17.2 Holders
+
+| Role | Reach |
+|---|---|
+| `finance_staff` | `finance.config.read`, `finance.period.read` — **only these two.** Reads the vocabulary and the calendar so documents can be coded. Cannot see the duty matrix at all. |
+| `finance_manager` (the controller) | All of `finance_config`, all of `finance_period`, and `finance.control.read` — **none of `finance_control`'s writes.** The controller runs the books; they do not decide who else may reach them. |
+| `company_admin` | All of `finance_config`, all of `finance_control`, `finance.period.read/lock/close` — **but NOT `finance.period.reopen`.** Soft-locking is administrative; reversing the accountant's lock is an accounting judgement. |
+| `owner` | All 13 keys (permission-native role, no Cerbos rules). |
+| `member` `viewer` `manager` `org_unit_lead` `client` | **Nothing.** Unlike the HR kinds, finance has no self-service surface — there is no "your own" general ledger. |
+
+### 17.3 Assurance tiers
+
+`finance_config` writes and all reads sit at `notLow`. Everything that widens reach over money is
+D4 `assurance == "high"`: `finance.period.close` (irreversible — it asserts the figures are final)
+and **every** `finance_control` write.
+
+### 17.4 Two things this contract does NOT decide
+
+1. **WHICH COMPANIES a principal may see.** That is resolved by the ownership graph in
+   `202608241010_finance_ownership_and_scope.sql` (owner ruling D-F8): a holding owner reaches
+   subsidiaries because they own them, not because of a bundle row. Both mechanisms must pass.
+2. **Whether a period may be hard-locked.** Cerbos answers "may this principal attempt to close";
+   the database answers "is this period in a state that may be closed" — `FINANCE_PERIOD_UNSIGNED`
+   refuses a HARD_LOCK with no named accountant sign-off (ruling D-F5). Authorization and data
+   invariants are kept in separate places on purpose.
+
+### 17.5 ROLE-ARM ONLY — no `perm_*` mirror, for any of the three
+
+Same posture as `resource_employee.yaml` (P2-02) and `resource_hr_payroll.yaml` (HR-FULL), with two
+independent reasons: **F0 is schema only** (no handlers exist yet, so a mirror would grant reach to
+an unservable surface), and **`finance_control` cannot be mirrored safely even later** — `attr.perms`
+carries no record of which rule a key came through, so a mirrored `assign_duty` would collapse "in a
+company you are staffed to" into an unconditional grant over the duty matrix itself. Same
+granularity gap `resource_hr_case.yaml` documents for `hr.case.read`.
+
+---
+
+## 18. Finance F1 — the ledger kind (2026-08-24)
+
+Landed by `202608241016_iam_finance_f1_ledger_permissions.sql` alongside the ledger schema in
+`202608241015`. One new kind, `finance_ledger`, 4 keys. Extends §17.
+
+| Action | Meaning | Holders |
+|---|---|---|
+| `read` | See journal entries and lines | `finance_staff`, `finance_manager`, `company_admin` |
+| `verify` | Run the chain integrity check | `finance_staff`, `finance_manager`, `company_admin` |
+| `post` | Create a journal | **`finance_manager` only** |
+| `reverse` | Correct one by posting its mirror | **`finance_manager` only** |
+
+**There is no `update` and no `delete`, and that absence is the contract.** A posted journal cannot
+be edited or removed — `FINANCE_LEDGER_IMMUTABLE` refuses both at the trigger for every principal,
+including a platform admin acting through psql. Cataloguing those actions would advertise an
+operation that can never succeed.
+
+**`verify` is the one finance key that is not `sensitive`.** It returns problems, not figures, and
+its entire value is that anyone can run it — an integrity check runnable only by the person who
+could have broken the chain is not an integrity check.
+
+**Why `company_admin` reads but does not post.** Because it is a platform-ADMINISTRATIVE role and
+creating entries in the book of record is accounting work — the same ground as its exclusion from
+`finance.period.reopen` in §17.
+
+⚠ **This is NOT a segregation-of-duties argument, and the distinction is load-bearing.** An earlier
+draft of the policy header claimed it was, and that claim does not survive the generated bundle:
+`finance_manager` holds BOTH `finance.ledger.post` and `finance.period.close`, because closing the
+books is the controller's job. **Segregation of duties binds per company, per PERSON, through
+`finance_duty_assignments` + `finance_sod_check()` — never through role bundles.** That is precisely
+what lets a real conflict be waived deliberately, with a named compensating control recorded against
+it, instead of being either impossible (so people work around it) or invisible (so nobody knows).
+If a future change tries to enforce SoD by withholding a role key, re-read this paragraph first.
+

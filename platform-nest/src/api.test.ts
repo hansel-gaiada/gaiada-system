@@ -171,6 +171,32 @@ describe.skipIf(!TEST_URL)("platform API", () => {
       headers: { ...svc, "x-obo-provider": "whatsapp", "x-obo-external-id": "628999@c.us" },
     });
     expect(unverified.statusCode).toBe(403); // minimal principal → deny-by-default
+    // 2026-08-24: the denial now NAMES the cause. The degrade to an anonymous principal is
+    // unchanged and still correct — what was wrong is that it was silent, so a bad identifier in
+    // the envelope surfaced as `cerbos denied read on project` and sent the reader into the policy
+    // for a resource that was never the problem. See Principal.oboUnresolved / http.ts.
+    expect(unverified.json().error).toContain("whatsapp:628999@c.us");
+    expect(unverified.json().error).toContain("enrollment was never verified");
+  });
+
+  it("a malformed :tenantId is a 400, not a 500 — it never reaches the uuid cast in RLS", async () => {
+    // Both of these answered `500 [unhandled-exception]` before src/core/tenant-param.ts: the raw
+    // path segment was carried into withTenants() and only died deep inside RLS. `undefined` is not
+    // hypothetical — it is exactly what a client produces when the id it meant to interpolate was
+    // absent (the same shape as the MCP hub's `String(args.tenantId)` on a missing argument).
+    for (const bad of ["undefined", "not-a-uuid", "null"]) {
+      const r = await app.inject({ method: "GET", url: `/api/${bad}/projects`, headers: asUser(member) });
+      expect(r.statusCode, `GET /api/${bad}/projects`).toBe(400);
+      expect(r.json().error).toContain("invalid tenantId");
+    }
+    // A well-formed uuid for a company that does not exist is NOT a shape problem — it goes on to
+    // authorization and is refused there. This is a shape check; it grants and denies nothing.
+    const wellFormed = await app.inject({
+      method: "GET",
+      url: "/api/00000000-0000-4000-8000-000000000000/projects",
+      headers: asUser(member),
+    });
+    expect(wellFormed.statusCode).toBe(403);
   });
 
   it("D11: a disabled user is cut off immediately", async () => {
