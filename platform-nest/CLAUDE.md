@@ -24,7 +24,10 @@ npm run gen:role-bundles     # regenerates Cerbos role bundles from the permissi
 ```
 
 Seeds: `seed:agency` (first-deploy vertical), `seed:personas`, `seed:departments`,
-`seed:automation`, `seed:claude-seats`, `seed:search`, `seed:portal-clients`.
+`seed:automation`, `seed:claude-seats`, `seed:search`, and the portal demo's THREE halves —
+`seed:portal-clients` (identity + delivery) → `seed:portal-workspace` (milestones, deliverables,
+invoices, agreements) → `seed:portal-engagement` (post reviews + change requests). Run in that
+order; each resolves the previous one's clients by name.
 
 ### Tests need real infrastructure
 
@@ -91,6 +94,30 @@ the transaction — and pass `{ modules: [...] }` for module-owned tables.
 read as "nothing has ever written to this table". Nineteen rows existed; the department seed reaches
 the table through a helper. Ask the database what a table contains, never the source.
 
+⚠ **A new script must read the seed that already owns the shape it is writing.** `seed:client-logins`
+created a portal contact (user row + `client_contacts` row + Keycloak account) and never granted the
+global `client` role. The login WORKED and every portal route answered
+`403 cerbos denied read on portal` — a login that succeeds into an empty portal, which reads as
+success from the outside. `seed:portal-clients` had always granted that role and says why in a
+comment three lines long. Same class as the rename trap: the older seed encodes a requirement the
+new one cannot see from the schema.
+
+⚠ **On a live estate, look for the whole class, not the row that failed.** Rewriting a user FK across
+~30 tables aborted twice — once on a CHECK enforcing a denormalised mirror column, once on an
+append-only ledger's UPDATE trigger — each time rolling back every move. The fix both times was to
+ask `pg_constraint` / `pg_trigger` for EVERY table with a `users` FK that carries that kind of guard,
+not to patch the one that raised. That census also surfaced `company_memberships.user_id` sitting in
+the move set, which would have handed a real employee a retired persona's company access and
+`primary_role_id`; it never fired only because `UNIQUE (tenant_id, user_id)` made every attempt
+collide.
+
+⚠ **A temporary Keycloak password does not appear in the user's `requiredActions`.** It is flagged on
+the CREDENTIAL, so the admin API returns `[]` and that looks exactly like "no interstitial". Prove it
+from the login flow instead: a valid temporary password 302s to
+`login-actions/required-action?execution=UPDATE_PASSWORD`, while a wrong password re-renders the form
+with an error. Headless PKCE cannot complete the first case, so `sso-login.sh` failing on a staff
+account is not evidence the password is wrong.
+
 `seed:agency` is a full demo vertical (clients, projects, invoices, IT devices, files). For "give
 these people access" use `seed:roster-access`, and for HR records `seed:employee-files` — not because
 production is clean (it is not), but because access, employment and business data are separable
@@ -105,6 +132,18 @@ this file deliberately does not name them, because a hardcoded head is stale wit
 otherwise, and the unused numbers below head are dead reservations, not gaps to backfill.
 Tenant-scoped FKs are mixed (some composite, some not) — match the table you're extending rather
 than "fixing" its neighbours.
+
+## Client filtering is NOT authorization
+
+`core/client-filter.ts` parses the staff `?clientId=` list facet (`<uuid>` | `internal` | absent).
+`core/portal-scope.ts` decides what an external client contact may REACH. **Same noun, opposite
+failure mode** — the filter fails OPEN (a malformed value shows everything, because a filter that
+fails closed hides real work and looks identical to "there is nothing here"); the boundary fails
+CLOSED. Do not merge them into one "client scope" abstraction, and do not "harden" the filter to
+403 on another client's id: staff isolation is RLS + Cerbos, and narrowing a list is not a grant.
+
+`clientId=internal` means `client_id IS NULL`, never `is_internal = true` — the two disagree on the
+live estate, and keying on the flag makes some clientless rows reachable from no scope at all.
 
 ## Authorization
 
