@@ -247,3 +247,84 @@ chain. This is evidence for the bar on the PM task surface, not a pass for "ever
 capability". Read surfaces, approvals, n8n flows and the client portal remain unmeasured —
 `dailyReads` runs on the OBO arm only, so it contributes nothing to the comparison. Widening the
 human arm across the read scenarios is the cheapest next increase in coverage.
+
+---
+
+# F6 — the agent layer produces nothing. **0 of 110.** · **HIGH — the headline result**
+
+This is the finding the whole exercise exists to have produced, and it only became visible once
+agents were driven continuously rather than probed once.
+
+**120 real goals submitted to the live runner. 110 finished. Zero produced useful work.**
+
+```
+budget_exhausted  53
+ok                48     <-- see below
+failed             9
+queued/running    10
+```
+
+Representative outcomes, verbatim:
+
+> `budget_exhausted` — *"per-run toolCalls budget exhausted — run suspended for human resume, nothing committed"*
+> `ok` — *"Unable to produce status report: projects.list and tasks.list both failed with 500 errors. No project or task data was returned, so open task load per department and biggest risk cannot be determined."*
+> `ok` — *"Unable to retrieve project data because projects.list failed repeatedly. No status report can be produced."*
+
+Filtering all 110 finished goals for an outcome that does **not** report failure returns exactly
+**one**, and that one is itself a `failed` goal (`tool not on the agent's allow-list:
+mcp__gaiada__pm_listTasks`). So the true success count is **zero**.
+
+## Why: F1 and F2, compounding
+
+The platform log shows what the agents are actually sending:
+
+```
+GET /api/undefined/projects              -> uuid: "undefined"
+GET /api/undefined/projects/undefined/tasks
+GET /api/live-02/pm/tasks                -> uuid: "live-02"
+GET /api/gaiada/pm/tasks                 -> uuid: "gaiada"
+GET /api/Gaiada/pm/tasks                 -> uuid: "Gaiada"
+GET /api/live-02/modules/agency/approvals/pending
+```
+
+`live-02` is the **simulation's run id**, which appears in the goal text. The model has no validated
+`tenantId` to supply (F1: the hub advertises `required` and enforces nothing), so it **guesses one
+from surrounding context** — the run id, the company name, the literal string `undefined`. Each guess
+reaches Postgres as a uuid cast (F2) and returns 500. The agent retries, burns its tool-call budget,
+and suspends.
+
+That is the whole failure loop, and it means **F1 and F2 are not two tidy input-validation bugs. They
+are jointly the reason the agentic layer does not work at all.** Their severity should be read
+accordingly.
+
+## F7 — a goal that accomplished nothing is reported `ok` · **HIGH**
+
+48 goals carry `status: "ok"` while their own `outcome` says the work was impossible. Any supervisor
+view, dashboard or report counting `status = ok` would show **48 successes today**.
+
+This is the most dangerous finding here, and it is independent of F1/F2: even after those are fixed,
+a goal that fails to achieve its objective must not terminate `ok`. The status is derived from "the
+run completed without throwing" rather than from "the objective was met". A human reading the office
+canvas sees busy agent desks; a human reading the goal list sees `ok`; and neither is true.
+
+## F8 — an agent called a tool that is not on its own allow-list · **MEDIUM**
+
+`failed — tool not on the agent's allow-list: mcp__gaiada__pm_listTasks`. Either the agent's prompt
+advertises a tool its allow-list denies, or the allow-list and the registry have drifted apart. Nine
+goals ended `failed`; this is the shape of at least one of them.
+
+## Correction to run 2's `POST /pm/tasks` conclusion
+
+The earlier section attributes all `POST /pm/tasks` 5xx to restart turbulence. That was wrong for one
+of the seven. Six fall inside 08:30:37–08:32:27, but one fired at **08:48:41**, sixteen minutes after
+the platform stabilised:
+
+```
+POST /api/019fb652-c68b-728f-b779-04465fcec5ae/pm/tasks
+  -> invalid input syntax for type uuid: "not-a-uuid"
+```
+
+The tenant is valid; the **body** carries `projectId: "not-a-uuid"` (the `create-task-bad-project`
+edge probe, which fires on a tick stride — hence the apparently random timing). So uuid validation is
+missing on **body fields as well as path parameters**, and F2's scope is wider than first recorded.
+It returns 500 where 400 belongs, same as the path case.
