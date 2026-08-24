@@ -718,7 +718,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-      start_period: 10s
+      # start_period was 10s, giving a total budget of 10s + 20x5s = 110s. This platform takes
+      # ~130s to reach "Server listening" on the VPS (module registration, Cerbos, DB, OTel), so
+      # compose declared it unhealthy ~19s BEFORE it was ready. That aborts `up -d` with
+      # "dependency failed to start", which leaves every dependent (platform-ui, mcp-hub,
+      # knowledge, report-renderer, agent-runner) in the CREATED state, never started -- and the
+      # box then serves 502 from nginx even though platform itself comes healthy a few seconds
+      # later. That is exactly the 2026-08-24 outage. Failures inside start_period do not count
+      # toward `retries`, so a generous start_period costs nothing on a fast boot: the container
+      # is marked healthy on the first successful probe either way.
+      start_period: 300s
     depends_on:
       postgres:
         condition: service_healthy

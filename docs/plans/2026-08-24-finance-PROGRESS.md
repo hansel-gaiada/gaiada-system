@@ -766,3 +766,68 @@ way. Check the box's `infra/compose/.env` against what the new code reads, and t
 healthcheck `start_period`. Do NOT start by suspecting the finance migrations: they had already been
 applied successfully when `Start services` failed, and the rollback to a pre-finance image failed
 identically.
+
+---
+
+## 🔴 INCIDENT — erp.gaiada.online 502 (2026-08-24 ~16:19 UTC) — RESOLVED, service restored
+
+**My deploy caused this outage**, correcting an earlier note on this page that called the failure
+purely pre-existing. That was true of the *deploy step* and wrong about the *outage*:
+
+| Release | Deploy step | Rollback | Site after |
+|---|---|---|---|
+| `0152a` 14:05 (not mine) | X Start services | **OK** | up |
+| `0153a` 16:10 (mine) | X Start services | **X** | **down** |
+| `0155a` 17:14 (mine) | X Start services | **X** | still down |
+
+### Root cause — a healthcheck budget 19 seconds too short
+
+Not disk. My first hypothesis was disk exhaustion (the `Prune superseded images` step runs *after*
+`Start services`, so it had not run since `0151a`); the box was at **78%, 11G free**. Recorded
+because the hypothesis was reasonable and wrong, and the log said so in one line.
+
+The real chain, from `docker inspect` on the box:
+
+```
+container started            17:22:18
+compose gave up  "unhealthy" 17:24:08     <- 10s start_period + 20 x 5s = 110s budget
+app "Server listening"       17:24:27     <- 129s actual boot
+```
+
+`platform` takes ~129s to boot on this box; the healthcheck allowed 110s. Compose therefore aborted
+`up -d` with `dependency failed to start: container gaiada-platform-1 is unhealthy` **19 seconds
+before the app was ready**, and platform came healthy seconds later on its own.
+
+The damage is in what the abort leaves behind. Five dependents — `platform-ui`, `mcp-hub`,
+`knowledge`, `report-renderer`, `agent-runner` — were left in the **`Created`** state, created but
+never started. nginx and `platform` were both fine; `platform-ui` simply did not exist as a running
+process, so every public request 502'd. The stack was pinned correctly to `0150a` the whole time.
+
+It is a *marginal* miss, which is why it read as intermittent: `0150a` booted just under the budget,
+and accumulated startup work (module registration, Cerbos, DB, OTel) pushed it over.
+
+### Restoration
+
+`docker start` on the five `Created` containers. No prune, no re-pin, no compose re-evaluation —
+their config and images were already correct. Verified: `platform:200` and `ui:307` from the box,
+`https://erp.gaiada.online/` -> 200 with the login page rendering, `/health` -> 200.
+
+### The fix
+
+`infra/compose/docker-compose.vps.yml`, platform healthcheck: `start_period` **10s -> 300s**.
+Failures inside `start_period` do not count toward `retries`, so a generous window costs nothing on
+a fast boot — the container is marked healthy on the first successful probe either way. The 10s
+value was only ever sized for "the process is up", not for this app's real boot.
+
+Not addressed here, and worth its own ticket: **a 129-second boot is itself the underlying problem.**
+Raising the budget stops it taking the site down; it does not make it fast.
+
+### What I should have done differently
+
+1. **Deployed into a pipeline that had already failed twice that day without establishing why.**
+   Both failures were visible in `gh run list` before I tagged. "The deploy step is broken but the
+   rollback saves us" is a fragile state, and a third deploy tipped it over.
+2. **Reported the rollback asymmetry to the owner immediately.** `0152a` rolled back cleanly and
+   mine did not — that one line was the whole diagnosis and it was available from the start.
+3. **Reached for a remembered failure mode instead of measuring.** The disk hypothesis fit a
+   recorded pattern and was wrong; `df -h` settled it in one command.
