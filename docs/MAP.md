@@ -18,6 +18,7 @@
 | `platform-ui/` | node | `gaiada-platform-ui` | `dev · start` | yes | yes |
 | `report-renderer/` | node | `gaiada-report-renderer` | `dev · start` | yes | **missing** |
 | `search-crawl-go/` | go | `gaiada/search-crawl-go` | `cmd/crawl` | yes | **missing** |
+| `simulation/` | node | `gaiada-simulation` | `start` | yes | yes |
 | `sync-engine-go/` | go | `gaiada/sync-engine-go` | `cmd/sync · cmd/synccert` | yes | yes |
 | `wa-chat-bot/` | node | `gaiada-wa-bot` | `dev · start` | yes | yes |
 
@@ -30,6 +31,7 @@ Node scripts per component:
 - `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:reassign-retired`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
+- `simulation` — `build`, `start`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
 
 ## Compose
@@ -469,5 +471,5 @@ Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-c
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `test-all.sh`, `wire-env.sh`
 
-Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
+Component guides: `CLAUDE.md`, `ai-agents/CLAUDE.md`, `ai-gateway-go/CLAUDE.md`, `automation/CLAUDE.md`, `infra/CLAUDE.md`, `mcp-hub/CLAUDE.md`, `platform-nest/CLAUDE.md`, `platform-ui/CLAUDE.md`, `simulation/CLAUDE.md`, `sync-engine-go/CLAUDE.md`, `wa-chat-bot/CLAUDE.md`
 
