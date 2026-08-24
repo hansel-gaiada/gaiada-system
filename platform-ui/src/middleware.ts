@@ -39,4 +39,11 @@ export function middleware(req: NextRequest) {
 // by gating them, but every one of the 24 files was running the edge middleware on each request —
 // pure overhead on a path that has no session to check, and it also puts a redirect in front of
 // an asset that should just be cacheable.
-export const config = { matcher: ["/((?!_next|fonts|office-sprites|favicon.ico).*)"] };
+// `office-env` (the 135-file Waha environment pack, 2026-08-24) joins them for the same reason,
+// and it is worth recording that it did NOT join them when the pack landed: the assets were
+// committed, deployed, and served 307-to-login to every unauthenticated request while
+// `office-sprites` beside them served 200. In a browser they still worked — the session cookie
+// rides along — so nothing looked broken; the cost was 135 files running the edge middleware on
+// every request and a redirect standing in front of something that should simply be cacheable.
+// The comment above already said this. Adding assets means adding them here.
+export const config = { matcher: ["/((?!_next|fonts|office-sprites|office-env|favicon.ico).*)"] };
