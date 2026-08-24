@@ -37,6 +37,18 @@
 // for an agent principal. Out of scope here — this script does not touch `users` — but it is why
 // the agent was indistinguishable from staff in the first place.
 //
+// ── SCOPED TO THE AGENCY ON PURPOSE, AND THERE IS A KNOWN RESIDUE ─────────────────────────────────
+// This only ever looks at `Gaia Digital Agency`, so it does NOT clean the other companies. Checked
+// after the live run: `Viceroy Bali` still holds three placeholder HR files —
+// `exec@gaiada.test`, `owner@gaiada-creative.test`, and `gm@sanur-resort.test` (a resort GM persona
+// that was never part of the agency roster at all) — beside one real `@gaiada.com` employee.
+//
+// Deliberately left alone rather than swept in. The owner's instruction was to move the retired
+// people's work onto "the current employee we have", and there IS no Viceroy roster: deleting these
+// would leave that company with one employee and no GM, removing data with nothing to replace it.
+// Widening this script's tenant scope would do that silently on the next run, which is why the
+// residue is documented here instead of the scope being quietly broadened.
+//
 // ⚠ DRY RUN BY DEFAULT. This deletes rows from an HR table on a live estate; `--confirm` is required.
 import { withGlobal, withTenants, closePool } from "../db";
 import { STAFF } from "./roster";
