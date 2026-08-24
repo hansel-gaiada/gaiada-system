@@ -11,6 +11,34 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.36.4` — 2026-08-24 — IAM-14c, the org-tree refresh, and two test-infra fixes
+
+**Added**
+- **IAM-14c — `core.integration_connection.manage`.** The company tier of the credential-vault kind
+  gets its own key, so `owner` (permission-native, zero Cerbos rules) can administer a company's
+  integrations instead of only its own. `member`/`viewer` gain nothing — they do not hold it, which is
+  the entire reason a NEW key was minted rather than the existing four mirrored more widely.
+  Additive: the four per-row rules are byte-identical and both controller suites pass unchanged.
+- **`seed:org-structure-refresh`.** The org tree is one JSON blob in `company_org_structure`, and
+  `seed:agency` writes it `ON CONFLICT DO NOTHING` ("never overwrite edits made in the org builder").
+  Correct, but it makes a stale tree STICKY — the ERP kept rendering the invented roster after the
+  real one landed, and no amount of re-seeding would have changed it. This upserts, refuses when the
+  tree does not look seed-shaped (org-builder work is unreconstructible), and refuses when a roster
+  member has no `users` row.
+
+**Fixed**
+- **The test harness raced across concurrent sessions.** `platform_app_test` is one role in the
+  cluster's global catalog; two sessions running `CREATE/ALTER ROLE` on it collide with
+  `tuple concurrently updated`, which is NOT `duplicate_object` and so escaped the existing handler.
+  It cost three unrelated files in one run with zero failed assertions. Now retried, narrowly.
+- **The HR third-wall list was 9 tables; the wave made it 42.** `module-hr-rls.test.ts` now verifies
+  FORCE RLS and a `tenant_isolation FOR ALL` policy on all 42, including payroll and compensation.
+  ⚠ Those policies are built with `EXECUTE format(...)` in a DO loop, so grepping migrations for
+  `CREATE POLICY tenant_isolation ON hr_` finds ZERO and looks like 42 unprotected tables. It is not
+  — grep cannot see dynamic SQL. Ask `pg_policies`.
+- The capability-inventory guard named `npm run gen:capability-inventory`, which has never existed;
+  the suite IS the generator (`UPDATE_INVENTORY=1`).
+
 ### social-media `0.5.31` — 2026-08-23 — correcting how SMM-35's agent gate actually works
 
 **This corrects the mechanism `0.5.30` claimed, not its outcome.** That entry said no real LLM can
@@ -1774,6 +1802,28 @@ it to a commit-range diff.
 **Verification:** roster-access 6/6 and employee-files 6/6, each including a negative control — the
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
+
+### `Alpha 01.070.0146a` - 2026-08-24 - the ERP finally shows the real people
+
+Manifest (counter +1, 0145 -> 0146): `platform-nest 0.36.3 -> 0.36.4`.
+
+⚠ CUT SPECIFICALLY TO SHIP THE ORG-TREE REFRESH. The roster landed three releases ago and the ERP
+still rendered "Gede Pratama" and "Komang Adi", because the org tree is a single JSON blob that
+`seed:agency` writes `ON CONFLICT DO NOTHING` — so it was stale AND unfixable by re-seeding. Every
+table was correct; the surface people actually look at was not. `seed:org-structure-refresh` ships
+here and is run against the estate immediately after.
+
+Also carries IAM-14c (`integration_connection.manage` — the company tier as its own key, so `owner`
+can administer a company's integrations), the shared-role harness retry, and the HR third-wall list
+grown 9 -> 42 tables.
+
+⚠ `platform-nest 0.37.0` is deliberately NOT used here: a concurrent session had already claimed it
+for the CC-01..03 client-hub wave whose entries were still uncommitted at cut time. This is 0.36.4 to
+avoid colliding with work that had not landed yet.
+
+**Verification:** full backend suite 5904 passed / 1 failed at gate time, and that one failure (the
+HR list) is fixed in this cut; iam-14c 9/9 vs live Cerbos; org-structure-refresh 6/6; both
+integration controller suites 27/27 UNCHANGED, which is the evidence IAM-14c is additive.
 
 ### `Alpha 01.069.0145a` - 2026-08-23 - a camera, and agents that say what they are doing
 
