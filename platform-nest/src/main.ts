@@ -567,10 +567,40 @@ async function bootstrap(): Promise<void> {
     // accounting, independent of the module-dispatch and reconciler groups above) — makes the P1-04
     // department ActivityFeed LIVE off pm/meeting/pipeline events. One-shot backfill runs first (and
     // is itself idempotent, so it's safe to run on every boot) so restarts never re-skip history.
-    await runWorkActivityBackfill();
-    startWorkActivityConsumerLoop();
-    // eslint-disable-next-line no-console
-    console.log("work-activity consumer on: streams [pm_task, pm_project, meeting_recording, pipeline_run]");
+    //
+    // ── NOT AWAITED, DELIBERATELY: THIS IS OFF THE BOOT CRITICAL PATH ──────────────────────────
+    // This used to be `await`ed before app.listen(). On the live box the backfill took ~117s of a
+    // ~129s boot, the container healthcheck allowed 110s, so compose declared platform unhealthy
+    // 19s BEFORE it was ready and aborted `up -d` — leaving platform-ui, mcp-hub, knowledge,
+    // report-renderer and agent-runner in the CREATED state and the site serving 502 (2026-08-24).
+    // The healthcheck budget was raised too, but the real defect is that NOTHING answering a
+    // request needs this: it replays history into the department ActivityFeed. /health now answers
+    // immediately and the feed fills in behind it.
+    //
+    // Ordering is still backfill -> consumer, and that is load-bearing: the consumer advances the
+    // stream position, so starting it first could carry it past history the backfill exists to
+    // replay. On failure we retry with backoff instead of starting the consumer. That preserves
+    // the old fail-closed intent — an unhandled throw here used to kill the process and let the
+    // restart policy try again — WITHOUT taking the whole API down to retry a background job.
+    void (async () => {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await runWorkActivityBackfill();
+          break;
+        } catch (err) {
+          // Capped backoff, retried indefinitely: this is exactly the old crash-restart loop, minus
+          // the outage. Giving up instead would leave the feed permanently missing history with
+          // nothing but one stale log line to say so.
+          const waitMs = Math.min(60_000, 2_000 * 2 ** (attempt - 1));
+          // eslint-disable-next-line no-console
+          console.error(`work-activity backfill failed (attempt ${attempt}), retrying in ${waitMs}ms`, err);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      }
+      startWorkActivityConsumerLoop();
+      // eslint-disable-next-line no-console
+      console.log("work-activity consumer on: streams [pm_task, pm_project, meeting_recording, pipeline_run]");
+    })();
   }
   // Knowledge (D9 RAG) corpus refresh: mirrors gaiada.com into the PUBLIC tier and every company's
   // ERP records into the INTERNAL tier, on an interval. Without this the vector store stays empty and

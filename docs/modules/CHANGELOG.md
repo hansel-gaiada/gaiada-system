@@ -11,6 +11,42 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.38.1` - platform boots in seconds, not minutes (2026-08-25) - IN PROGRESS
+
+**Fixed**
+- `src/main.ts` - `runWorkActivityBackfill()` is no longer `await`ed ahead of `app.listen()`.
+- `src/core/work-activity-backfill.ts` - the history scan skips already-ingested rows.
+- `infra/compose/docker-compose.vps.yml` - platform healthcheck `start_period` 10s -> 300s.
+
+**Why (the 2026-08-24 502)**
+- platform took ~129s to reach "Server listening" on the live box. Its healthcheck allowed
+  10s + 20x5s = 110s, so compose called it unhealthy **19 seconds before it was ready** and
+  aborted `up -d` with "dependency failed to start". The abort is the damage: it leaves
+  platform-ui, mcp-hub, knowledge, report-renderer and agent-runner in the **CREATED** state,
+  never started. nginx and platform were both healthy; platform-ui simply was not running, so
+  every public request 502'd. Both automatic rollbacks failed identically, for this reason.
+- ~117s of that 129s was one statement: the work-activity backfill re-read the **entire**
+  `activities` history for every company on every boot, then did three sequential round-trips per
+  row (fallbackTitle, hintPayload, ingestWorkActivity) purely for ingest's `ON CONFLICT` to throw
+  the result away.
+
+**Notes**
+- ★ **Two independent defects, fixed independently.** The healthcheck budget was too tight AND the
+  boot was too slow; either alone would have caused this again. Raising the budget without fixing
+  the boot just moves the cliff.
+- The anti-join preserves semantics exactly. `work_activity`'s dedupe key is
+  `(tenant_id, source, source_ref)` and `source_ref` IS the activity's id, so an existing row means
+  already-ingested. The rerun contract was already "every row dedupes and reports 0" - it now
+  reaches the same end state without doing the work. `source_ref` is TEXT and `activities.id` is
+  UUID; the suite caught the missing cast (`operator does not exist: text = uuid`). The UUID side
+  is cast, never `source_ref`, so the index stays usable.
+- **Backfill -> consumer ordering is still load-bearing** and preserved. The consumer advances the
+  stream position, so starting it first could carry it past the history the backfill replays. On
+  failure the chain retries with capped backoff rather than starting the consumer - the old
+  crash-and-restart intent, without taking the whole API down to retry a background job.
+- Not fixed: `report-renderer` carries the same 10s `start_period`. It currently reaches healthy in
+  ~20s so it is not biting, but it is the same latent shape.
+
 ### finance `0.10.0` - the /finance console + the config seed (2026-08-25) - PROTOTYPED
 
 **Added**

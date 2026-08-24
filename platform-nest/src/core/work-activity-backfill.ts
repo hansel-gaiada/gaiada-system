@@ -98,10 +98,32 @@ function mergeActorIntoPayload(payload: Record<string, unknown>, actorUserId: st
 async function backfillTenant(tenantId: string): Promise<number> {
   const rows = await withTenants([tenantId], (c) =>
     c.query<ActivityRow>(
-      `SELECT id, actor_id, verb, target_entity_type, target_entity_id, metadata, occurred_at
-       FROM activities
-       WHERE target_entity_type = ANY($1::text[]) AND target_entity_id IS NOT NULL
-       ORDER BY occurred_at ASC`,
+      // ── THE ANTI-JOIN IS WHAT MAKES THIS CHEAP ON A RESTART ────────────────────────────────────
+      // This runs on EVERY boot. Without the NOT EXISTS it re-reads the company's entire activity
+      // history and then does three sequential round-trips per row (fallbackTitle, hintPayload,
+      // ingestWorkActivity) only for ingestWorkActivity's ON CONFLICT to discard the result. On the
+      // live box that was ~117s of the platform's ~129s boot — which overran the container
+      // healthcheck budget, aborted `docker compose up -d`, and took the site down on 2026-08-24.
+      //
+      // `work_activity`'s dedupe key is (tenant_id, source, source_ref) and source_ref IS this
+      // activity's id, so an existing row means this activity is already ingested. Matching on
+      // source_ref alone is sufficient because activities.id is globally unique — a row cannot
+      // collide across sources — and the tenant leg is already enforced: both tables are read
+      // inside this withTenants([tenantId]) scope, so RLS constrains the subquery too.
+      //
+      // This changes no semantics. The rerun contract was ALREADY "every row dedupes and reports
+      // 0"; skipping those rows reaches the same end state without doing the work. The one
+      // behavioural difference is that a rerun no longer refreshes title/payload on rows already
+      // present — which was never this function's job. Live edits arrive through
+      // work-activity-consumer.ts, whose own ON CONFLICT DO UPDATE still refreshes them.
+      `SELECT a.id, a.actor_id, a.verb, a.target_entity_type, a.target_entity_id, a.metadata, a.occurred_at
+       FROM activities a
+       WHERE a.target_entity_type = ANY($1::text[]) AND a.target_entity_id IS NOT NULL
+         -- source_ref is TEXT and activities.id is UUID, so the cast is required (caught by the
+         -- suite below: "operator does not exist: text = uuid"). Cast the UUID side, never
+         -- source_ref, so the (tenant_id, source, source_ref) index stays usable.
+         AND NOT EXISTS (SELECT 1 FROM work_activity wa WHERE wa.source_ref = a.id::text)
+       ORDER BY a.occurred_at ASC`,
       [ENTITY_TYPES],
     ),
   );
