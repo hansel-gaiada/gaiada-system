@@ -99,8 +99,12 @@ describe.skipIf(!RUN)("HR-FULL — the department, driven end-to-end over HTTP",
 
   afterAll(async () => {
     await app?.close();
+    // `setRedis(redis)` handed ownership to the module-level client, and `closeRedis()` quits it.
+    // Calling `redis.quit()` as well is a DOUBLE-CLOSE and throws "Connection is closed." from
+    // ioredis' event handler — which surfaces as a FAILED SUITE even though every test passed.
+    // Worth stating plainly: this was here from the start and was missed because a grep for
+    // "Tests " does not match "Test Files ", so a green test count hid a red file.
     await closeRedis();
-    await redis?.quit();
     await teardownTestDb();
   });
 

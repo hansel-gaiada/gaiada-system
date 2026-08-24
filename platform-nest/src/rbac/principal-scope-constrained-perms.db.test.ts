@@ -131,11 +131,30 @@ describe.skipIf(!TEST_URL)("IAM-SEC-06 · assemblePrincipal() drops perms from a
       expect(g.scopeId).toBe(orgUnitId);
     }
     const keys = p!.perms!.map((g) => g.key).sort();
+    // LMS-L1 (2026-08-24) added eight lms.* keys to org_unit_lead: the owner's "each HOD authors
+    // their department's training and grades their unit's learners" requirement is expressed
+    // through THIS role, so a department head's resolved permission set genuinely grew.
+    //
+    // Every one of them still resolves at scopeType=org_unit / scopeId=<their unit> — asserted by
+    // the loop above, which is the property this suite actually guards. The list is here to make a
+    // change in REACH visible in a diff, and this one is intended.
     expect(keys).toEqual([
       "core.position.assign", "core.position.read", "core.position.unassign",
       "core.role_grant.create", "core.role_grant.read", "core.role_grant.revoke",
+      "lms.course.create", "lms.course.publish", "lms.course.retire", "lms.course.update",
+      "lms.enrollment.create", "lms.enrollment.grade", "lms.enrollment.read", "lms.enrollment.update",
       "reports.appraisal.read", "reports.document.read_department",
     ]);
+    // NOTE what is absent: `lms.course.read`. A department head browses the catalogue through their
+    // MEMBER grant at COMPANY scope, not through org_unit_lead at unit scope — the read rule names
+    // `member`, not `org_unit_lead`. Two grants, two scopes, and this suite only sees the unit-scoped
+    // one. That is the correct shape: catalogue read is company-wide, authoring is unit-bounded.
+    //
+    // The invariant that matters more than the list: a department head must NOT have gained the
+    // ability to excuse their own team from mandatory training, nor to export the register.
+    expect(keys).not.toContain("lms.enrollment.waive");
+    expect(keys).not.toContain("lms.enrollment.export");
+    expect(keys).not.toContain("lms.course.delete");
   });
 
   it("ACCEPTANCE: a legitimate client@company grant is completely unaffected", async () => {

@@ -41,6 +41,7 @@ import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
 import { hrModule } from "./modules/hr";
+import { lmsModule } from "./modules/lms";
 import { socialModule } from "./modules/social";
 import { assistantModule } from "./modules/assistant";
 import { searchModule } from "./modules/search";
@@ -408,6 +409,7 @@ async function bootstrap(): Promise<void> {
   registerModule(knowledgeModule);
   registerModule(automationConsoleModule);
   registerModule(hrModule);
+  registerModule(lmsModule);
   registerModule(assistantModule);
   registerModule(searchModule);
   registerModule(reportsModule);

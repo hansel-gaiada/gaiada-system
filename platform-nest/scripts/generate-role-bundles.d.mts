@@ -10,7 +10,9 @@
 //     `type RealRole = (typeof REAL_ROLES)[number]` from it). HIER-2/0102 added `org_unit_lead`
 //     (20 -> 21); HIER-3 (2026-08-11) retired `team_lead` (21 -> 20); SMM-30 (2026-08-12) added
 //     `social_staff`/`social_manager` (20 -> 22); MON-10b (2026-08-19) added
-//     `monitoring_staff`/`monitoring_manager` (22 -> 24) — keep this tuple in lockstep
+//     `monitoring_staff`/`monitoring_manager` (22 -> 24); FINANCE-F0 and LMS-L1 (both 2026-08-24)
+//     added `finance_staff`/`finance_manager` and `lms_staff`/`lms_manager` (24 -> 28) — keep this
+//     tuple in lockstep
 //     with the .mjs's own REAL_ROLES array; a mismatch here is a TS error at every importer, not a
 //     silent drift, which is the point of hand-writing it rather than inferring `string[]`.
 //   - `PERMISSION_NATIVE_ROLES` (IAM-14): roles with NO Cerbos rules, whose reach IS their bundle
@@ -33,6 +35,13 @@ export const REAL_ROLES: readonly [
   "webdev_staff", "webdev_manager",
   "social_staff", "social_manager",
   "monitoring_staff", "monitoring_manager",
+  // FINANCE-F0 and LMS-L1, both 2026-08-24. Added TOGETHER because this file caught both omissions
+  // in the same typecheck — which is the mechanism working as designed: two concurrent sessions each
+  // added a module tier to the .mjs, neither updated this tuple, and the mismatch surfaced as a TS
+  // error at every importer rather than as a suite that silently stopped comparing two roles (the
+  // exact defect the header records for webdev_staff/webdev_manager).
+  "finance_staff", "finance_manager",
+  "lms_staff", "lms_manager",
 ];
 
 export const PERMISSION_NATIVE_ROLES: readonly ["owner"];

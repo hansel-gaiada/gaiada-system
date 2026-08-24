@@ -92,6 +92,9 @@ import { HrPolicyController } from "./modules/hr/hr-policy.controller";
 import { RecruitmentController } from "./modules/hr/recruitment.controller";
 import { PayrollController } from "./modules/hr/payroll.controller";
 import { HrLifecycleController } from "./modules/hr/hr-lifecycle.controller";
+// LMS L1 — its OWN module (not filed under hr): the learning catalogue and the learner surface.
+import { LmsCatalogueController } from "./modules/lms/lms-catalogue.controller";
+import { LmsLearnController } from "./modules/lms/lms-learn.controller";
 import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
@@ -133,6 +136,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, ClientsController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
+    LmsCatalogueController, LmsLearnController,
     AssistantController, SearchController,
     SocialController,
     // SMM-23: report review/approve/preview/deliver lifecycle, on its OWN controller class — same
