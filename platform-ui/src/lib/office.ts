@@ -569,6 +569,24 @@ export interface OfficeAvatar {
    *  Never set for `human` — humans have no comparable real activity feed (see plan §3), so a
    *  human avatar must never carry this field, and OfficeCanvas never fabricates one. */
   activeRunId?: string;
+  /** SIM-01 (2026-08-24) — the moment this avatar's REAL work signal goes stale, as an ISO string.
+   *
+   *  This is the humans' counterpart to `activeRunId`, and it is a SEPARATE field on purpose: the
+   *  doc above says a human avatar must never carry `activeRunId`, and that rule is right — an
+   *  agent run is a specific thing a person does not have. What a person does have is a stream of
+   *  real recorded actions (`activities`: created / commented / updated), and `office-data.ts`
+   *  turns the most recent one into this timestamp.
+   *
+   *  Semantics deliberately differ from `activeRunId`'s: there is nothing to poll. The value is
+   *  computed once per scene from data the server already read, and the canvas simply compares it
+   *  to the clock. That keeps the human feed free of the per-avatar polling the agent feed needs,
+   *  which matters at 26 seats.
+   *
+   *  Absent means "no recent recorded action", which renders exactly as it does today — a still
+   *  desk. It never means "idle": somebody can be working hard on something the ERP never sees.
+   *  The detail-panel note says so, because a floor that implies otherwise would be a surveillance
+   *  claim the data cannot support. */
+  busyUntil?: string;
   /** Automations only (2026-08-24) — the real signal `resolveAutomationState` below turns into an
    *  animation. Undefined means "this avatar carries no execution-tracking claim at all" (e.g. the
    *  two estate-level systems-console seats, which are not gated through automation-approvals) —

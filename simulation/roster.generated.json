@@ -1,0 +1,304 @@
+{
+    "people": [
+        {
+            "name": "Andre",
+            "email": "andre@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "c992954f-659c-4c6a-a61e-602885d47e8a",
+            "whatsapp": "+99900000001",
+            "department": "Creatives",
+            "placeholder": false
+        },
+        {
+            "name": "Citra (Design)",
+            "email": "design@gaiada-creative.test",
+            "roles": [
+                "member"
+            ],
+            "userId": "019fb652-c69a-74b6-b83b-104ed4867fc5",
+            "whatsapp": null,
+            "department": "Creatives",
+            "placeholder": true
+        },
+        {
+            "name": "Elmer",
+            "email": "elmer@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "066d0280-40a1-4cfe-bb50-d8cd1cc5cb3a",
+            "whatsapp": "+99900000004",
+            "department": "Creatives",
+            "placeholder": false
+        },
+        {
+            "name": "Monic",
+            "email": "monic@gaiada.com",
+            "roles": [
+                "manager",
+                "member"
+            ],
+            "userId": "3ca6a1a1-0a10-4074-80b0-f73d3272991f",
+            "whatsapp": "+99900000011",
+            "department": "Creatives",
+            "placeholder": false
+        },
+        {
+            "name": "Rifat",
+            "email": "rifat@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "2a9ca58f-0462-4a09-9d65-15612185ccb3",
+            "whatsapp": "+99900000015",
+            "department": "Creatives",
+            "placeholder": false
+        },
+        {
+            "name": "Ayu (Owner)",
+            "email": "owner@gaiada-creative.test",
+            "roles": [
+                "company_admin",
+                "member"
+            ],
+            "userId": "019fb652-c694-75d8-848c-6f0a01126e4e",
+            "whatsapp": null,
+            "department": "GM",
+            "placeholder": true
+        },
+        {
+            "name": "Budi (PM)",
+            "email": "pm@gaiada-creative.test",
+            "roles": [
+                "it_admin",
+                "manager",
+                "member"
+            ],
+            "userId": "019fb652-c698-708c-b4e8-890fdd4077bf",
+            "whatsapp": null,
+            "department": "GM",
+            "placeholder": true
+        },
+        {
+            "name": "Edward",
+            "email": "edward@gaiada.com",
+            "roles": [
+                "manager",
+                "member"
+            ],
+            "userId": "c4990e24-d60f-412c-bd17-db5d0f05cf8e",
+            "whatsapp": "+99900000003",
+            "department": "GM",
+            "placeholder": false
+        },
+        {
+            "name": "Eka (Client Lead)",
+            "email": "approver@gaiada-creative.test",
+            "roles": [
+                "agency_approver",
+                "member"
+            ],
+            "userId": "019fb652-c69f-7464-9f72-6192c1954e95",
+            "whatsapp": null,
+            "department": "GM",
+            "placeholder": true
+        },
+        {
+            "name": "Gaiada Exec",
+            "email": "exec@gaiada.test",
+            "roles": [
+                "member"
+            ],
+            "userId": "019fb652-c6a1-748d-9b7a-34c811eaeac5",
+            "whatsapp": null,
+            "department": "GM",
+            "placeholder": true
+        },
+        {
+            "name": "Dewi (Copy)",
+            "email": "copy@gaiada-creative.test",
+            "roles": [
+                "member"
+            ],
+            "userId": "019fb652-c69d-722d-9d80-0153d4904c53",
+            "whatsapp": null,
+            "department": "SEO",
+            "placeholder": true
+        },
+        {
+            "name": "Fajri",
+            "email": "fajri@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "bcf09439-bec0-4f45-9a00-da9e347aba79",
+            "whatsapp": "+99900000006",
+            "department": "SEO",
+            "placeholder": false
+        },
+        {
+            "name": "Ika",
+            "email": "ika@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "f72c6fa8-6f4b-4728-9e45-69a7304cab7a",
+            "whatsapp": "+99900000008",
+            "department": "SEO",
+            "placeholder": false
+        },
+        {
+            "name": "Maya",
+            "email": "maya@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "dd33f67e-e896-4e5b-a7fe-d1c304e8278f",
+            "whatsapp": "+99900000010",
+            "department": "SEO",
+            "placeholder": false
+        },
+        {
+            "name": "Rai",
+            "email": "rai@gaiada.com",
+            "roles": [
+                "manager",
+                "member"
+            ],
+            "userId": "238657fd-1932-4a0e-9b62-8bcd8b78d2cf",
+            "whatsapp": "+99900000013",
+            "department": "SEO",
+            "placeholder": false
+        },
+        {
+            "name": "Sophi",
+            "email": "sophi@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "02ac256e-d6d9-440e-94f6-293aa7f20a8e",
+            "whatsapp": "+99900000017",
+            "department": "SEO",
+            "placeholder": false
+        },
+        {
+            "name": "Welly",
+            "email": "welly@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "fedfa5df-08f4-485b-9749-4f6f19a96ae4",
+            "whatsapp": "+99900000019",
+            "department": "SEO",
+            "placeholder": false
+        },
+        {
+            "name": "Radit",
+            "email": "radit@gaiada.com",
+            "roles": [
+                "manager",
+                "member"
+            ],
+            "userId": "83e3639a-f170-4417-8bc1-82a4ddd16e13",
+            "whatsapp": "+99900000012",
+            "department": "Social Media",
+            "placeholder": false
+        },
+        {
+            "name": "Azlan",
+            "email": "azlan@gaiada.com",
+            "roles": [
+                "manager",
+                "member"
+            ],
+            "userId": "23ed6dd6-346c-485a-8a08-43d06411e0b7",
+            "whatsapp": "+99900000002",
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Clement Hansel",
+            "email": "hansel@gaiada.com",
+            "roles": [
+                "company_admin",
+                "manager",
+                "member",
+                "platform_admin"
+            ],
+            "userId": "019fb652-c6a3-72cf-818a-8dd2912e8f67",
+            "whatsapp": null,
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Fadhil",
+            "email": "fadhil@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "c9569402-cb6a-4600-982f-c35216ea7e74",
+            "whatsapp": "+99900000005",
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Gusde",
+            "email": "gusde@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "25382b66-626f-4942-b6aa-e3131ba0a335",
+            "whatsapp": "+99900000007",
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Kadek Arie",
+            "email": "kadek.arie@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "07130c29-29f1-44f4-8205-69d577ff7158",
+            "whatsapp": "+99900000009",
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Reva",
+            "email": "reva@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "a3a14fcc-2fbe-444f-a991-81afe787e56b",
+            "whatsapp": "+99900000014",
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Ruli",
+            "email": "ruli@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "7fc2d477-1286-4755-8667-53aae30b7092",
+            "whatsapp": "+99900000016",
+            "department": "Web Dev",
+            "placeholder": false
+        },
+        {
+            "name": "Tini",
+            "email": "tini@gaiada.com",
+            "roles": [
+                "member"
+            ],
+            "userId": "d541019c-3bda-4cca-8012-676383bb275b",
+            "whatsapp": "+99900000018",
+            "department": "Web Dev",
+            "placeholder": false
+        }
+    ],
+    "tenantId": "019fb652-c68b-728f-b779-04465fcec5ae",
+    "generatedAt": "2026-08-24T06:58:22.736807+00:00"
+}

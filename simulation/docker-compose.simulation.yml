@@ -1,0 +1,64 @@
+# The simulation harness, as its OWN compose project.
+#
+# WHY A SEPARATE PROJECT AND NOT A SERVICE IN THE gaiada PROJECT
+# -------------------------------------------------------------
+# `docker compose ... --remove-orphans` deletes any container in the named project whose service is
+# absent from the file set given on that command line. The estate's deploy path routinely runs compose
+# with a subset of its files, and that has already destroyed containers on this box. A harness that
+# vanishes on the next deploy — or worse, whose presence makes a deploy delete something else — is
+# not acceptable, so this runs as project `gaiada-sim` and joins the estate's network from outside.
+#
+# Bring up:   docker compose -p gaiada-sim -f docker-compose.simulation.yml up -d --build
+# Follow:     docker compose -p gaiada-sim -f docker-compose.simulation.yml logs -f
+# Stop:       docker compose -p gaiada-sim -f docker-compose.simulation.yml down
+#
+# NEVER add --remove-orphans to those commands: with -p gaiada-sim it would be scoped to this project
+# only, but the habit is what causes the accident.
+
+services:
+  simulation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gaiada-simulation:local
+    container_name: gaiada-sim-driver
+    # `no` rather than `unless-stopped`: this writes to a live estate. If the driver dies, a human
+    # should look at why before it starts writing again — an auto-restarting harness that fails
+    # halfway through every scenario would fill the corpus with identical truncated runs.
+    restart: "no"
+    env_file:
+      # Inherits PLATFORM_SERVICE_TOKEN and AGENT_RUNNER_TOKEN from the estate's own env, which is
+      # how the harness gets its credentials without anybody reading or copying them.
+      - ../infra/compose/.env
+    environment:
+      SIM_MODE: "${SIM_MODE:-fast}"
+      SIM_RUN_ID: "${SIM_RUN_ID:-}"
+      SIM_MAX_TICKS: "${SIM_MAX_TICKS:-0}"
+      SIM_TICK_SECONDS: "${SIM_TICK_SECONDS:-}"
+      SIM_DRY_RUN: "${SIM_DRY_RUN:-0}"
+      SIM_TENANT_ID: "${SIM_TENANT_ID:-019fb652-c68b-728f-b779-04465fcec5ae}"
+      # Service aliases on gaiada_default — the same names the estate's own services use.
+      SIM_PLATFORM_URL: "http://platform:3004"
+      SIM_RUNNER_URL: "http://agent-runner:3006"
+      SIM_HUB_URL: "http://mcp-hub:3003"
+      SIM_N8N_URL: "http://n8n:5678"
+      SIM_PUBLIC_URL: "https://erp.gaiada.online"
+      SIM_LOG_DIR: "/var/lib/gaiada-sim/logs"
+      SIM_PASSWORD_FILE: "/run/secrets/sim-staff.pw"
+    volumes:
+      # The corpus. A bind mount rather than a named volume so the owner can read, copy and analyse
+      # it with ordinary tools without going through docker.
+      - /var/lib/gaiada-sim/logs:/var/lib/gaiada-sim/logs
+      # The staff password, read-only, for the human identity path. Absent until
+      # scripts/enable-staff-logins.sh has run; the driver degrades to the service/agent paths and
+      # records that it did, rather than failing to start.
+      - /etc/gaiada/sim-staff.pw:/run/secrets/sim-staff.pw:ro
+    networks:
+      - estate
+
+networks:
+  estate:
+    # Pre-existing, created by the estate's own compose project. `external: true` means this file
+    # never creates or removes it — bringing this project down cannot disturb the estate's network.
+    external: true
+    name: gaiada_default

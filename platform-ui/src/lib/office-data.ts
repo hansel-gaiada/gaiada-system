@@ -10,6 +10,7 @@ import "server-only";
 // implying otherwise. No location HISTORY is stored anywhere — this function reads current org
 // data and returns a fresh scene on every call; nothing here is a table.
 import { listDepartmentBriefs, getDepartment, type DeptBrief } from "./departments";
+import { platformFetch } from "./platform";
 import { getAgentGoals, getAgentGoal, type AgentGoal } from "./admin";
 import { listAutomationApprovals, type AutomationApproval } from "./automationApprovals";
 import {
@@ -37,6 +38,45 @@ export function deptRoomKey(deptId: string): string {
   return `dept-${deptId}`;
 }
 
+/** SIM-01 — one row of the tenant's real recorded activity. Only the four fields the office needs;
+ *  the endpoint returns more, and reading only what is used keeps this immune to the rest changing. */
+interface OfficeActivityRow {
+  actor_id?: string | null;
+  verb?: string;
+  target_entity_type?: string;
+  target_entity_id?: string | null;
+  occurred_at?: string;
+}
+
+/** How long one recorded action keeps a desk looking busy. Matched to the agent feed's own 45s
+ *  freshness rule times four: an agent emits an event every few seconds while it works, whereas a
+ *  person saves something every few minutes, so the same window would blink a human desk off
+ *  between two genuinely continuous pieces of work. Three minutes reads as "at their desk"; much
+ *  longer and the floor stops distinguishing today's work from this morning's. */
+const HUMAN_BUSY_WINDOW_MS = 3 * 60_000;
+
+/** SIM-01 — the humans' activity feed.
+ *
+ *  Reads the SAME `/api/:t/activity` stream the audit console already reads, rather than adding a
+ *  new endpoint: every write in the platform funnels through `writeActivity`, so this is already the
+ *  authoritative record of who did something and when. Returns a map of userId -> most recent action.
+ *
+ *  Degrades to an empty map on ANY failure, matching this file's existing discipline: a floor with
+ *  still desks is a correct floor when the feed is unavailable. What it must never do is invent
+ *  activity — a fabricated busy desk is a claim about a named person's working hours. */
+async function readActivity(u: string, t: string): Promise<{ byActor: Map<string, OfficeActivityRow>; rows: OfficeActivityRow[] }> {
+  const rows = await platformFetch<OfficeActivityRow[]>(`/api/${t}/activity?limit=100`, u).catch(() => [] as OfficeActivityRow[]);
+  const list = Array.isArray(rows) ? rows : [];
+  const byActor = new Map<string, OfficeActivityRow>();
+  for (const r of list) {
+    // The endpoint orders newest-first, so the FIRST row seen for an actor is their latest. Relying
+    // on that rather than comparing timestamps keeps this correct even for rows sharing a timestamp.
+    if (!r.actor_id) continue;
+    if (!byActor.has(r.actor_id)) byActor.set(r.actor_id, r);
+  }
+  return { byActor, rows: list };
+}
+
 /** Builds the office scene for the active company. Every reader degrades to an empty list on its
  *  own failure (matching lib/pm.ts's own discipline) — a partial backend never throws the whole
  *  floor away. */
@@ -49,6 +89,9 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     depts.map((d) => getDepartment(u, t, d.id).catch(() => null)),
   );
   const goals: AgentGoal[] = await getAgentGoals(u, t).catch(() => [] as AgentGoal[]);
+  // SIM-01 — the human activity feed, read once for the whole scene (never per avatar).
+  const activity = await readActivity(u, t);
+  const nowMs = Date.now();
 
   // ── Real automation execution signal (2026-08-24) — driven by automation_approvals, the SAME
   // reader the department console's "Waiting on me" rail and the unified approvals inbox already
@@ -135,6 +178,17 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     const ws = workspaces[di];
     if (!ws) return;
     ws.people.forEach((p, pi) => {
+      // SIM-01 — a REAL recorded action within the window makes this desk read as busy. `last` is
+      // this person's most recent row from the tenant's own activity stream; absent means the ERP
+      // has simply not recorded anything for them lately, which is NOT the same as idle.
+      const last = activity.byActor.get(p.id);
+      const lastMs = last?.occurred_at ? Date.parse(last.occurred_at) : NaN;
+      // `Number.isFinite` guard, not truthiness: `Date.parse` of a malformed timestamp is NaN, and
+      // NaN + window is NaN, which would produce an `Invalid Date` ISO string and throw on toISOString.
+      const busyUntil =
+        Number.isFinite(lastMs) && nowMs - lastMs < HUMAN_BUSY_WINDOW_MS
+          ? new Date(lastMs + HUMAN_BUSY_WINDOW_MS).toISOString()
+          : undefined;
       avatars.push({
         id: `human-${p.id}`,
         kind: "human",
@@ -145,7 +199,12 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
         recordId: p.id,
         recordLabel: `${p.name} — ${d.name}`,
         recordHref: `/departments/${d.id}`,
-        note: `Real org placement in "${d.name}". This is a seat, not a live location — the office does not track where anyone actually is (plan §2).`,
+        note:
+          `Real org placement in "${d.name}". This is a seat, not a live location — the office does not track where anyone actually is (plan §2).` +
+          (busyUntil
+            ? ` Their desk is active because the ERP recorded "${last?.verb ?? "an action"}" from them at ${last?.occurred_at}. It reflects RECORDED WORK ONLY — not presence, and not hours.`
+            : " No recorded action in the last few minutes. That means the ERP has logged nothing recently, NOT that this person is idle."),
+        ...(busyUntil ? { busyUntil } : {}),
       });
     });
   });
@@ -254,31 +313,62 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     note: "DEMO FIXTURE. The airlock intent queue this seat represents (plan §4.3/O5) is not built — nothing here reflects a real external caller.",
   });
 
-  // ── Movement — fixture events with real timestamps, skipped where the real data can't support
-  // them (never invents a destination department that doesn't exist for this tenant). ─────────
+  // ── Movement — DERIVED FROM REAL HANDOFFS (SIM-01, 2026-08-24) ─────────────────────────────────
+  // Previously two hardcoded fixture events. Now: when two DIFFERENT people both act on the SAME
+  // entity, the work changed hands, and that is a real event with a real timestamp and two real
+  // names. The avatar that acted FIRST walks to the second person's room, which is the direction a
+  // handoff actually travels — the person finishing brings it over.
+  //
+  // WHAT THIS IS NOT: it is not presence and not a claim that anyone physically moved. It is a
+  // visualisation of a recorded handoff, and the event's own `reason` says which two records it was
+  // derived from so the detail panel can never imply more than the data supports.
+  //
+  // Bounded to a handful: the replay animates each event in turn, and a floor replaying forty walks
+  // reads as noise rather than as an office.
   const events: OfficeMoveEvent[] = [];
-  const webDev = sortedDepts.find((d) => d.name.toLowerCase().includes("web"));
-  const seo = sortedDepts.find((d) => d.name.toLowerCase().includes("seo") && d.id !== webDev?.id);
-  const now = Date.now();
-  if (webDev) {
-    events.push({
-      id: "evt-1",
-      avatarId: "agent-supervisor",
-      fromRoomKey: OFFICE_AGENTS_KEY,
-      toRoomKey: deptRoomKey(webDev.id),
-      at: new Date(now - 6 * 60_000).toISOString(),
-      reason: `Delegated a goal to ${webDev.name}`,
-    });
-    if (seo) {
-      events.push({
-        id: "evt-2",
-        avatarId: "agent-supervisor",
-        fromRoomKey: deptRoomKey(webDev.id),
-        toRoomKey: deptRoomKey(seo.id),
-        at: new Date(now - 2 * 60_000).toISOString(),
-        reason: `Handed the follow-up to ${seo.name}`,
-      });
+  const homeRoomByUser = new Map<string, { avatarId: string; roomKey: string; name: string }>();
+  for (const a of avatars) {
+    if (a.kind === "human" && a.recordKind === "person") {
+      homeRoomByUser.set(a.recordId, { avatarId: a.id, roomKey: a.homeRoomKey, name: a.name });
     }
+  }
+
+  // Group the activity rows by the entity they touched, preserving the newest-first order the
+  // endpoint returns.
+  const byEntity = new Map<string, OfficeActivityRow[]>();
+  for (const r of activity.rows) {
+    if (!r.target_entity_id || !r.actor_id) continue;
+    const key = `${r.target_entity_type ?? "?"}:${r.target_entity_id}`;
+    const list = byEntity.get(key);
+    if (list) list.push(r);
+    else byEntity.set(key, [r]);
+  }
+
+  const MAX_DERIVED_EVENTS = 4;
+  for (const [, rows] of byEntity) {
+    if (events.length >= MAX_DERIVED_EVENTS) break;
+    if (rows.length < 2) continue;
+    // Newest first, so `rows[0]` is the LATER actor (the receiver) and the next distinct actor
+    // below it is the EARLIER one (the sender).
+    const receiver = rows[0]!;
+    const sender = rows.find((r) => r.actor_id && r.actor_id !== receiver.actor_id);
+    if (!sender || !receiver.actor_id || !sender.actor_id) continue;
+
+    const from = homeRoomByUser.get(sender.actor_id);
+    const to = homeRoomByUser.get(receiver.actor_id);
+    // Both must be people the office actually draws. An activity by someone outside the org tree
+    // (an automation principal, a client contact) has no seat, and inventing one would put a
+    // stranger on the floor.
+    if (!from || !to || from.roomKey === to.roomKey) continue;
+
+    events.push({
+      id: `move-${sender.actor_id.slice(0, 8)}-${receiver.actor_id.slice(0, 8)}`,
+      avatarId: from.avatarId,
+      fromRoomKey: from.roomKey,
+      toRoomKey: to.roomKey,
+      at: sender.occurred_at ?? new Date(nowMs).toISOString(),
+      reason: `${from.name} handed work to ${to.name} — derived from two real ${receiver.target_entity_type ?? "record"} actions, not from any location tracking`,
+    });
   }
 
   // ── Rooms — built last, now that every avatar's real homeRoomKey is known. Lobby, Operations

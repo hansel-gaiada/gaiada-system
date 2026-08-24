@@ -852,6 +852,22 @@ function deskActivityFor(avatar: OfficeAvatar, workingIds: Set<string>, nowMs: n
     // `just_ran` state exists to draw.
     if (state === "just_ran") return "quiet";
   }
+  // SIM-01 (2026-08-24) — the HUMANS' busy signal, and the reason it is a different mechanism from
+  // `activeRunId` above rather than a reuse of it.
+  //
+  // `activeRunId` is a POLLED feed: it has a "quiet" state because a run can be open but silent, and
+  // the canvas learns that only by asking. `busyUntil` is a PRECOMPUTED deadline that office-data.ts
+  // derives from the tenant's real `activities` stream, so there is nothing to poll and no "quiet"
+  // state to represent — either a real recorded action is still inside its window or the desk is
+  // still. That also keeps 26 human seats from adding 26 pollers to the page.
+  //
+  // Checked LAST so it can never override a more specific signal, and gated on `Number.isFinite`
+  // rather than truthiness because Date.parse of a malformed timestamp is NaN, and every comparison
+  // against NaN is false — which would silently read as "not busy" instead of surfacing bad data.
+  if (avatar.busyUntil) {
+    const busyUntilMs = Date.parse(avatar.busyUntil);
+    if (Number.isFinite(busyUntilMs) && busyUntilMs > nowMs) return "working";
+  }
   return "none";
 }
 

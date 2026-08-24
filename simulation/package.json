@@ -1,0 +1,16 @@
+{
+  "name": "gaiada-simulation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Total-estate work simulation harness — drives the REAL ERP surface as real employees, agents and automations, and persists every step as an analysable corpus",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3"
+  }
+}
