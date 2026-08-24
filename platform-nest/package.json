@@ -22,6 +22,8 @@
     "seed:owner-grant": "node dist/seed/owner-grant.js",
     "seed:org-structure-refresh": "node dist/seed/org-structure-refresh.js",
     "seed:retire-placeholder-hr": "node dist/seed/retire-placeholder-hr.js",
+    "seed:reassign-retired": "node dist/seed/reassign-retired.js",
+    "seed:client-logins": "node dist/seed/client-logins.js",
     "seed:own-brand-social": "node dist/seed/own-brand-social.js",
     "import:nexus": "node dist/seed/nexus-import.js",
     "test": "vitest run",
