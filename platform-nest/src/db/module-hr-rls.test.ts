@@ -64,45 +64,70 @@ describe.skipIf(!TEST_URL)("HR module RLS — served-tenant + third-wall (0028)"
   // "CREATE POLICY tenant_isolation ON hr_" finds ZERO and looks like 42 unprotected tables. It is
   // not: grep cannot see dynamic SQL. The assertions below read pg_class and pg_policies instead,
   // which is the only way to answer this question honestly.
-  const HR_TABLES = [
-    "hr_allowance_types", "hr_application_events", "hr_applications", "hr_attendance",
-    "hr_benefit_enrollments", "hr_benefit_plans", "hr_candidates", "hr_case_events",
-    "hr_cases", "hr_checklist_templates", "hr_compensation", "hr_employee_allowances",
-    "hr_holiday_calendars", "hr_holidays", "hr_interview_panelists", "hr_interviews",
-    "hr_job_events", "hr_leave_accruals", "hr_leave_balances", "hr_leave_policies",
-    "hr_leave_policy_assignments", "hr_leave_requests", "hr_loan_installments", "hr_loan_repayments",
-    "hr_loan_requests", "hr_offers", "hr_pay_grades", "hr_payroll_inputs",
-    "hr_payroll_runs", "hr_payslip_lines", "hr_payslips", "hr_pipeline_stages",
-    "hr_record_reminders", "hr_records", "hr_requisitions", "hr_review_cycles",
-    "hr_review_participants", "hr_scorecards", "hr_separations", "hr_statutory_parameter_sets",
-    "hr_statutory_parameters", "hr_tax_profiles",
+  // ⚠ DISCOVERED FROM THE SCHEMA, NOT HAND-LISTED — and the previous hand list is exactly why.
+  //
+  // This was a literal array of 42 names, grown from what the live estate had. CI failed on it:
+  // 33 of those tables are created by HR migrations that are UNTRACKED in this shared checkout
+  // (another session's in-flight work), so a CI runner — which checks out tracked files only — has
+  // 9. The list was describing one working tree rather than the repository, the same class of
+  // mistake as generating docs/MAP.md in place.
+  //
+  // A hand list also gets the guarantee backwards. What matters is not "these 42 named tables have
+  // the wall" but "EVERY hr_* table has the wall, including one added tomorrow by someone who never
+  // reads this file". Discovering the set makes the new table's absence of a policy a FAILURE
+  // instead of a name nobody added to an array.
+  //
+  // The floor stops it passing vacuously: these nine come from migration 0028, which is tracked, so
+  // they exist on every database this suite can run against. Without the floor, a schema where the
+  // hr module failed to migrate at all would report success over an empty sweep — "0 tables, all
+  // compliant" is the shape of false negative this repo keeps getting bitten by.
+  const HR_TABLES_FLOOR = [
+    "hr_attendance", "hr_cases", "hr_checklist_templates", "hr_leave_balances", "hr_leave_requests",
+    "hr_loan_installments", "hr_loan_repayments", "hr_loan_requests", "hr_records",
   ];
 
-  it("all 42 hr_* tables FORCE RLS (rls.test.ts sweep invariant)", async () => {
+  /** Every `hr_*` table that actually exists here. */
+  async function hrTables(): Promise<string[]> {
+    const { rows } = await withGlobal((c) =>
+      c.query<{ relname: string }>(
+        `SELECT relname FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relkind = 'r' AND n.nspname = 'public' AND c.relname LIKE 'hr\_%'
+          ORDER BY relname`,
+      ),
+    );
+    return rows.map((r) => r.relname);
+  }
+
+  it("every hr_* table that exists FORCES RLS", async () => {
+    const tables = await hrTables();
+    for (const t of HR_TABLES_FLOOR) {
+      expect(tables, `${t} comes from migration 0028 and must exist`).toContain(t);
+    }
+
     const { rows } = await withGlobal((c) =>
       c.query<{ relname: string; relforcerowsecurity: boolean }>(
         `SELECT relname, relforcerowsecurity FROM pg_class
           WHERE relkind='r' AND relname = ANY($1::text[]) ORDER BY relname`,
-        [HR_TABLES],
+        [tables],
       ),
     );
-    // Every named table must EXIST as well as force RLS — a typo in the list above would otherwise
-    // quietly reduce this test's coverage rather than fail it.
-    expect(rows.map((r) => r.relname)).toEqual(HR_TABLES);
+    expect(rows.length, "every discovered table must be readable back").toBe(tables.length);
     for (const r of rows) expect(r.relforcerowsecurity, `${r.relname} must FORCE RLS`).toBe(true);
   });
 
   it("each hr_* table has exactly one FOR-ALL tenant_isolation policy (sweep-compatible name)", async () => {
+    const tables = await hrTables();
     const { rows } = await withGlobal((c) =>
       c.query<{ tablename: string; policyname: string; cmd: string }>(
         `SELECT tablename, policyname, cmd FROM pg_policies
-          WHERE tablename LIKE 'hr\\_%' ORDER BY tablename`,
+          WHERE schemaname = 'public' AND tablename LIKE 'hr\_%' ORDER BY tablename`,
       ),
     );
-    // This one IS a `LIKE 'hr\_%'` sweep, so it catches a table the list above forgot. Asserted as
-    // the table SET rather than a count: "expected 9 to be 6" says nothing about which table arrived
-    // or whether it got a policy, which is the whole question.
-    expect(rows.map((r) => r.tablename)).toEqual(HR_TABLES);
+    // Asserted as the table SET, not a count: "expected 9 to be 6" says nothing about WHICH table
+    // arrived without a policy, which is the entire question. A new hr_* table with no
+    // tenant_isolation policy shows up here as a missing name.
+    expect(rows.map((r) => r.tablename)).toEqual(tables);
     for (const r of rows) {
       expect(r.policyname, r.tablename).toBe("tenant_isolation");
       expect(r.cmd, r.tablename).toBe("ALL");
