@@ -1220,8 +1220,13 @@ rather than quietly deleted.
    pretending a default.
 4. **DEPLOYED `alpha-01.071.0150a` (2026-08-24).** Five migrations applied to the live database
    after a verified backup; Cerbos restarted and reloaded the three new policies; all services
-   healthy. **`seed:hr-config` has NOT been run on live** — the console renders empty states until
-   it is, and each one says what is missing. The statutory set will be UNRATIFIED when seeded.
+   healthy. **`seed:hr-config` HAS been run on live** (2026-08-24): 1 calendar + 17 holidays, 3 leave
+   policies + assignments, 9 pipeline stages, 7 pay grades, 6 allowance types, 5 BPJS plans, 1
+   statutory set (24 params). Verified as superuser, independently of the seed's own read; the 23
+   employees / 41 records / 39 cases / 17 leave requests already on the box are untouched, and zero
+   personal data was written. A second run created nothing — idempotence proven on live.
+   **The statutory set is UNRATIFIED** and payroll will not finalize a run against it without a
+   recorded override; finance/counsel ratifies from `/hr/settings`.
 
 ---
 

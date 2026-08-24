@@ -140,10 +140,32 @@ Live on `erp.gaiada.online`. Evidence from the deploy job's own log, not from th
   gate now uses `ps -a`, so the crash loop this program hid once before would have been caught.
 - `all services healthy` after the wait.
 
-⚠ **`seed:hr-config` was NOT run on live** — owner chose deploy-without-seed. Until it is, the HR
-console renders empty states (no holiday calendar, no leave policy, no funnel, no statutory set), and
-every one of those states explains what is missing rather than inventing a default. One command when
-wanted: `npm run seed:hr-config`.
+#### SEEDED on live — 2026-08-24
+
+`seed:hr-config` run against the live database. Surveyed BEFORE (all eight config tables at zero;
+23 employees / 41 records / 39 cases / 17 leave requests already present) and verified AFTER **as
+superuser**, independently of the seed's own read — because a seed that reports success having
+written nothing is this program's signature failure, and its own count is not evidence.
+
+| | before | after |
+|---|---|---|
+| holiday calendar / holidays | 0 / 0 | 1 / 17 (15 public + 2 *cuti bersama*, both `deducts=true`) |
+| leave policies / assignments | 0 / 0 | 3 / 3 |
+| pipeline stages | 0 | 9 |
+| pay grades · allowance types · benefit plans | 0 · 0 · 0 | 7 · 6 · 5 |
+| statutory set / parameters | 0 / 0 | 1 / 24 |
+| **employees · records · cases · leave** | **23 · 41 · 39 · 17** | **23 · 41 · 39 · 17 (untouched)** |
+| candidates · compensation · payslips · requisitions | 0 | 0 (zero personal data written) |
+
+The vacation policy landed as `upfront / 5760min / wait=12mo` — UU 13/2003 art. 79. Sick and unpaid
+are `none`, because Indonesian sick leave is a paid-wage rule and not a counted entitlement.
+
+**Idempotence proven ON LIVE, not just in a test:** a second run created nothing (`existing=` for
+every section) and every count was identical afterwards. That matters because this seed will re-run
+on future deploys.
+
+**The statutory set is UNRATIFIED** (`ratified_by=NULL`), confirmed by direct query. Payroll
+calculates against it and refuses to finalize without a recorded override.
 
 ⚠ **A concurrent session's release commit swept this work in.** `c4f6198` is titled for that
 session's agent/bot changes but contains all 59 HR-FULL files. The tag `alpha-01.071.0150a` is
