@@ -20,6 +20,7 @@ import {
   type AgentDef,
   type AgentDeps,
   type AgentRun,
+  type AgentStep,
   type Envelope,
   type EmitStep,
 } from "../agent";
@@ -110,8 +111,58 @@ function budgetForAgent(agent: string, reg: AgentRegistry): BudgetCaps {
 
 // ---- typed-outcome → goal-status mapping (design §3.2) -----------------------------------------
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// SIM-F7 (2026-08-24) — a goal that achieved nothing must not report `ok`.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// A continuous simulation ran 120 real goals against this runner. 48 finished with `status: "ok"`
+// while their OWN outcome text said the work had been impossible:
+//
+//   ok — "Unable to produce status report: projects.list and tasks.list both failed with 500 errors.
+//         No project or task data was returned, so open task load per department cannot be determined."
+//
+// Every dashboard, supervisor view and report that counts `status = "ok"` would have shown 48
+// successes that day. That is the system lying about itself, and it is INDEPENDENT of whatever made
+// the tools fail: fix the tools and this stays wrong, just less often and therefore less visibly.
+//
+// The cause is that `ok` was derived from "the agent returned a final answer without throwing",
+// which is a statement about the LOOP, not about the OBJECTIVE. An agent that cannot get data will
+// still dutifully write a final answer explaining that it could not.
+//
+// WHAT THIS DOES NOT DO: it does not read the outcome text. Grepping a model's prose for "unable" is
+// a heuristic that fails in both directions — it would catch a successful report that merely mentions
+// the word, and miss a failure phrased politely. Instead it uses the fact the runner ALREADY records
+// structurally: every tool step's detail ends in " ok" or " failed", a vocabulary `traceFromRun`
+// (above) already depends on and parses.
+//
+// THE RULE: a run that called at least one tool and had EVERY one of them fail did not achieve its
+// objective, whatever its prose says. Deliberately narrow on both sides —
+//   * `toolSteps.length === 0` is untouched: an agent that legitimately needed no tools (a pure
+//     reasoning answer) is a real success and must keep reporting `ok`.
+//   * ONE successful tool call is enough to leave the verdict alone. Partial success is a judgement
+//     this layer cannot make, and guessing at it would trade a loud lie for a quiet one.
+//
+// It maps to the EXISTING `failed` status rather than adding an enum value, so no consumer contract
+// changes — and `failed` is the honest word: the goal did not do what it was asked.
+function everyToolCallFailed(steps: AgentStep[]): boolean {
+  const toolSteps = steps.filter((s) => s.kind === "tool");
+  if (toolSteps.length === 0) return false;
+  return toolSteps.every((s) => / failed$/.test(s.detail));
+}
+
 function mapTrace(t: AgentTrace): FinishGoalPatch {
-  if (t.status === "ok") return { status: "ok", outcome: t.outcome };
+  if (t.status === "ok") {
+    if (everyToolCallFailed(t.steps)) {
+      return {
+        status: "failed",
+        outcome:
+          `${t.outcome}\n[runner: every tool call in this run failed, so the goal did not achieve its objective — ` +
+          `reported as failed rather than ok even though the agent returned a final answer]`,
+        errorKind: "no_successful_tool_call",
+      };
+    }
+    return { status: "ok", outcome: t.outcome };
+  }
   if (t.status === "approval_required") return { status: "suspended", outcome: t.outcome, errorKind: t.status };
   if (t.status === "budget_exhausted") return { status: "budget_exhausted", outcome: t.outcome, errorKind: t.status };
   // tool_not_allowed | protocol_error | unknown_error

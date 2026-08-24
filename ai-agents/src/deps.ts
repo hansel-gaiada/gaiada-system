@@ -89,7 +89,70 @@ async function complete(prompt: string): Promise<string> {
   return body.text;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// SIM-F9 (2026-08-24) — the run's tenant is supplied by the RUNNER, never by the model.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// THE DEFECT THIS CLOSES, measured rather than reasoned about. A continuous simulation submitted 120
+// real goals to the live runner; 110 finished and ZERO produced useful work — 53 exhausted their
+// tool-call budget, 48 reported `ok` while their own outcome said the work was impossible.
+//
+// The platform log showed why. Every agent tool takes `tenantId`, but nothing ever TOLD the agent
+// what it was: `buildPrompt` (agent.ts) composes the system prompt, the tool NAMES, and the goal —
+// no tenant, and no argument schemas either, so the model could not even see that the argument
+// existed. It did the only thing it could and guessed from surrounding context:
+//
+//     GET /api/undefined/projects
+//     GET /api/live-02/pm/tasks        <- the SIMULATION'S OWN RUN ID, lifted from the goal text
+//     GET /api/gaiada/pm/tasks
+//     GET /api/Gaiada/pm/tasks
+//
+// Each guess reached Postgres as a uuid cast and returned 500; the agent retried, burned its budget
+// and suspended. That loop was the entire agent layer.
+//
+// WHY INJECT SERVER-SIDE RATHER THAN PUT THE TENANT IN THE PROMPT. Telling the model would work most
+// of the time, which is the problem. Injection is strictly better on three counts:
+//   1. it cannot be got wrong — no prompt compliance, no truncation, no transcript drift;
+//   2. it removes a CROSS-TENANT hazard. A model that can name a tenant can name someone else's;
+//      once this estate holds more than one company that stops being a correctness bug and becomes a
+//      data-boundary one. The model should never have been holding this dial.
+//   3. it costs no tokens and no reasoning steps.
+//
+// WHY IT OVERRIDES A MODEL-SUPPLIED VALUE INSTEAD OF ONLY FILLING A GAP. A run is bound to exactly
+// one tenant — `runner/service.ts` wraps the whole execution in `tenantContext.run(g.tenantId, …)`,
+// and `goals.tenant_id` is the authority. So a model-supplied tenant is either redundant or wrong,
+// and there is no third case. Honouring it when it disagrees would be honouring a guess over the
+// record. The disagreement is reported to the caller (see `onTenantOverride`) precisely because it
+// is the signal that the model was guessing at all.
+//
+// SAFE FOR TOOLS THAT DO NOT TAKE A TENANT: the hub's own validator permits unknown properties (see
+// `mcp-hub/src/validate-args.ts`), so an extra key on a tool that never declares one is ignored
+// rather than rejected. Injecting unconditionally therefore needs no schema knowledge here — which
+// matters, because this module deliberately has none.
+//
+// FAIL-SOFT: outside a `tenantContext.run(...)` — the CLI, direct `runAgent()` callers, tests —
+// `getStore()` is undefined and args pass through untouched, exactly as before this existed.
+export function withRunTenant(
+  args: Record<string, unknown>,
+  onTenantOverride?: (supplied: unknown, actual: string) => void,
+): Record<string, unknown> {
+  const tenantId = tenantContext.getStore();
+  if (!tenantId) return args;
+  const supplied = args.tenantId;
+  if (supplied !== undefined && supplied !== tenantId) onTenantOverride?.(supplied, tenantId);
+  return { ...args, tenantId };
+}
+
 async function callTool(name: string, args: Record<string, unknown>, envelope: Envelope): Promise<string> {
+  // The one place a tool's arguments leave this process, so the one place the tenant has to be true.
+  const sealed = withRunTenant(args, (supplied, actual) => {
+    // Not a throw: the call is about to succeed with the CORRECT tenant, and failing it would turn a
+    // model's harmless guess into a dead run. Recorded because a disagreement here is the visible
+    // symptom of the model inventing an identifier, which is worth seeing in the logs.
+    console.warn(
+      `[agent] tool ${name} supplied tenantId ${JSON.stringify(supplied)} — overridden with the run's tenant ${actual}`,
+    );
+  });
   const res = await fetch(`${config.hubUrl}/mcp`, {
     method: "POST",
     headers: {
@@ -102,7 +165,7 @@ async function callTool(name: string, args: Record<string, unknown>, envelope: E
       // sends byte-identical headers to before this existed.
       ...(envelope.agent ? { "x-obo-agent": envelope.agent } : {}),
     },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: sealed } }),
   });
   if (!res.ok) throw new Error(`hub ${res.status}`);
   const raw = await res.text();
