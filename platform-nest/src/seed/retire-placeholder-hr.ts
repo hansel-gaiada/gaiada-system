@@ -22,6 +22,21 @@
 // own. Duplicating that here would be a second, divergent implementation of a sweep that already
 // works.
 //
+// ── THE 18TH ROW IS AN AI AGENT, AND IT IS IN SCOPE ───────────────────────────────────────────────
+// The live dry run listed 18 candidates, not the 17 ghosts: the extra is `zedano@gaiada.com`,
+// "Zedano (Hermes agent)", title "AI Agent". It is caught because the roster has no such person,
+// and it SHOULD be caught — an agent principal is not an employee, and an HR file for one makes
+// every HR surface list an AI as staff.
+//
+// Checked before deleting rather than after: its `users` row dates from 2026-07-31 and survives
+// untouched (this script only ever writes `employees`); the `employees` row was written 2026-08-20
+// by the department seed as a side effect; `agent_registry` holds no row pointing at it; and no
+// foreign key anywhere references `employees`. So nothing reads what is being removed.
+//
+// Noted separately: that `users` row carries `kind = 'employee'`, which is the wrong discriminator
+// for an agent principal. Out of scope here — this script does not touch `users` — but it is why
+// the agent was indistinguishable from staff in the first place.
+//
 // ⚠ DRY RUN BY DEFAULT. This deletes rows from an HR table on a live estate; `--confirm` is required.
 import { withGlobal, withTenants, closePool } from "../db";
 import { STAFF } from "./roster";

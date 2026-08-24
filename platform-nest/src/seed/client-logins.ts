@@ -63,11 +63,45 @@ const TARGETS: Target[] = [
 
 const JUNK_CONTACT_PATTERN = "%@example.invalid";
 
+/** Grant the global `client` role at this company, idempotently.
+ *
+ *  ⚠ WITHOUT THIS THE LOGIN WORKS AND THE PORTAL IS EMPTY — which is the worst shape of failure,
+ *  because "I can sign in" reads as success. Verified live: `wira@balibeach.test` authenticated
+ *  fine and every portal route answered
+ *  `403 {"error":"not authorized: cerbos denied read on portal"}`, while the four pre-existing
+ *  contacts returned a full overview. The ONLY difference between them was this row — none of the
+ *  five has a `company_memberships` row, so a membership is not what portal access hangs on.
+ *
+ *  `seed:portal-clients` has always done this and says why ("the contact has a tenant but no role,
+ *  and every portal action is denied"). This script created a contact without reading that, which
+ *  is the same lesson as the rest of this cleanup: the seed that owns a shape knows something the
+ *  new script does not.
+ *
+ *  Applied to EVERY target rather than only the created one, so a contact that predates this and
+ *  is missing the grant gets repaired instead of staying quietly broken. */
+async function grantClientRole(userId: string, tenantId: string): Promise<boolean> {
+  return withGlobal(async (c) => {
+    const role = await c.query<{ id: string }>(
+      `SELECT id FROM roles WHERE company_id IS NULL AND name = 'client'`,
+    );
+    if (!role.rows[0]) return false; // seeded by migration 0072; absent means migrations are behind
+    await c.query(
+      `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id)
+       VALUES (gen_random_uuid(), $1, $2, 'company', $3) ON CONFLICT DO NOTHING`,
+      [userId, role.rows[0].id, tenantId],
+    );
+    return true;
+  });
+}
+
 export interface ClientLoginsResult {
   dryRun: boolean;
   contactsCreated: string[];
   passwordsSet: string[];
   accountsCreated: string[];
+  /** Contacts that hold the global `client` role after this run. A login without it reaches an
+   *  empty portal, so this is reported rather than assumed. */
+  roleGranted: string[];
   junkRevoked: number;
   failed: { email: string; reason: string }[];
 }
@@ -84,6 +118,7 @@ export async function provisionClientLogins(opts: { dryRun: boolean }): Promise<
     contactsCreated: [],
     passwordsSet: [],
     accountsCreated: [],
+    roleGranted: [],
     junkRevoked: 0,
     failed: [],
   };
@@ -161,7 +196,23 @@ export async function provisionClientLogins(opts: { dryRun: boolean }): Promise<
         }
       }
 
-      // ── 3 · the Keycloak account + a KNOWN password ─────────────────────────────────────────────
+      // ── 3 · the global `client` role ─────────────────────────────────────────────────────────────
+      // Before Keycloak on purpose: if the password step fails, the authz side is still correct and
+      // a re-run only has to redo the password.
+      if (opts.dryRun) {
+        out.roleGranted.push(`${target.email} (would ensure client role)`);
+      } else {
+        const ok = await grantClientRole(userId, tenantId);
+        if (!ok) {
+          throw new Error(
+            "the global `client` role does not exist (migration 0072 seeds it) — refusing to hand " +
+              "out a login that would reach an empty portal",
+          );
+        }
+        out.roleGranted.push(target.email);
+      }
+
+      // ── 4 · the Keycloak account + a KNOWN password ─────────────────────────────────────────────
       if (opts.dryRun) {
         const kc = await kcFind(target.email);
         out.passwordsSet.push(`${target.email} (${kc ? "account exists — would reset password" : "would create account"})`);
@@ -190,7 +241,7 @@ export async function provisionClientLogins(opts: { dryRun: boolean }): Promise<
     }
   }
 
-  // ── 4 · revoke the `.invalid` test artifacts ────────────────────────────────────────────────────
+  // ── 5 · revoke the `.invalid` test artifacts ────────────────────────────────────────────────────
   const junk = await withTenants(
     [tenantId],
     (c) =>
@@ -228,6 +279,8 @@ async function main(): Promise<void> {
   for (const e of r.contactsCreated) console.log(`  + ${e}`);
   console.log(`Keycloak accounts ${dryRun ? "to create" : "created"}: ${r.accountsCreated.length}`);
   for (const e of r.accountsCreated) console.log(`  + ${e}`);
+  console.log(`client role ${dryRun ? "to ensure" : "ensured"}: ${r.roleGranted.length}`);
+  for (const e of r.roleGranted) console.log(`  * ${e}`);
   console.log(`passwords ${dryRun ? "to set" : "set"}: ${r.passwordsSet.length}`);
   for (const e of r.passwordsSet) console.log(`  = ${e}`);
   console.log(`junk contacts ${dryRun ? "to revoke" : "revoked"}: ${r.junkRevoked}`);
