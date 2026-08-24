@@ -169,3 +169,81 @@ durable intake path (200, ~30–60ms).
 `created.jsonl` for precise teardown. Inbound injection is gated **twice** — a config flag *and* a
 live check that the bot's session cannot deliver (allow-list of safe states, fails closed). Nothing
 was sent to any real handset and no provider quota was spent.
+
+---
+
+# Run 2 — `live-02`, with BOTH identity arms live
+
+1,497 steps, 37+ ticks, live-paced. `scripts/enable-staff-logins.sh` had been run, so this is the
+first run where `humanPathLive: true` and the parity table means anything.
+
+A real deploy (`alpha-01.071.0149b`) landed **mid-run**, at 08:29:48. That was not planned, and it
+turned out to be the most valuable thing that happened.
+
+## F5 — a deploy drops live traffic on the floor · **MEDIUM · operational · NEW**
+
+The simulation was driving real work when `gaiada-platform-1` restarted. Measured blast radius:
+
+| Window | What |
+|---|---|
+| 08:29:46 – 08:30:12 (**26s**) | **43 transport failures** — connection refused / fetch failed, no HTTP status at all |
+| 08:30:37 – 08:32:27 (**~2 min**) | **26 × 5xx** across `POST /pm/tasks`, `GET /projects`, `GET /notifications`, `GET /pm/tasks?assignee=me`, `GET /pm/productivity` |
+
+So a routine deploy produces roughly **two and a half minutes** in which a logged-in employee gets
+connection errors and then server errors on essentially every read surface. Not one endpoint — all
+of them.
+
+This is invisible to every existing check. CI does not deploy; the post-deploy gate reads a healthy
+`/health` *after* the dust settles; nobody is clicking during the window. It is visible only because
+something was driving real traffic through it, which is precisely what a continuous simulation is
+for.
+
+**Fix shape:** drain before stop (connection draining at nginx, or a `stop_grace_period` plus a
+readiness gate so the proxy stops routing before the container goes), and/or retry-once on
+idempotent GETs at the BFF. Worth a deliberate decision — at 7 possible concurrent logins the
+current behaviour may be perfectly acceptable, and "we accept a 2-minute window" is a fine answer.
+What is not fine is not knowing.
+
+**Not a defect, and worth separating:** the 5xx on those five endpoints are restart turbulence, NOT
+endpoint bugs. Every one falls inside the restart window and none recurs outside it. A reader of
+`findings.jsonl` who sees `5xx GET /api/:id/projects` and files a ticket against the projects
+endpoint would be chasing a ghost.
+
+## F1 and F2 are still present in `alpha-01.071.0149b`
+
+The two known defects fire **straight through** the restart — 08:23:09 to 08:39:23, spanning both
+the old and the new build:
+
+```
+5xx GET /api/undefined/projects    n=7   08:23:09 .. 08:39:23
+5xx GET /api/not-a-uuid/pm/tasks   n=7   08:23:09 .. 08:39:23
+malformed-path-segment             n=8   08:23:09 .. 08:39:23
+```
+
+So whatever `0149b` contained, it did not close the unvalidated `:tenantId` path. Recorded because
+"a fix was deployed" and "the defect is gone" are different claims, and only the second one counts.
+
+## The agentic-native bar: first real measurement
+
+Six endpoints were driven on **both** the human (real OIDC session) and OBO (service-on-behalf-of)
+arms:
+
+| Endpoint | human | obo |
+|---|---|---|
+| `GET /pm/tasks/:id/assignment-history` | 57 ok / 0 fail | 38 ok / 0 fail |
+| `PATCH /pm/tasks/:id` | 114 ok / 0 fail | 76 ok / 0 fail |
+| `POST /comments` | 171 ok / 0 fail | 122 ok / 1 fail |
+| `POST /pm/tasks` | 57 ok / 6 fail | 60 ok / 9 fail |
+| `POST /pm/tasks/:id/follow` | 57 ok / 0 fail | 38 ok / 0 fail |
+| `POST /pm/tasks/:id/time` | 57 ok / 0 fail | 38 ok / 0 fail |
+
+**No genuine parity gap.** The single `POST /comments` failure is at 08:30:12 — inside the restart
+window, status 0, `fetch failed`. The `POST /pm/tasks` failures hit BOTH arms and are likewise the
+restart. Every deliberate authorization difference behaved identically under a human and under a
+service principal.
+
+**Scope, stated plainly so this is not over-read:** six endpoints, all of them on the delivery
+chain. This is evidence for the bar on the PM task surface, not a pass for "every department
+capability". Read surfaces, approvals, n8n flows and the client portal remain unmeasured —
+`dailyReads` runs on the OBO arm only, so it contributes nothing to the comparison. Widening the
+human arm across the read scenarios is the cheapest next increase in coverage.
