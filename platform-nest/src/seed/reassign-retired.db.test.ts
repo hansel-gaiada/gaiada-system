@@ -15,6 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb, TEST_URL, adminPool } from "../testing/setup";
 import { createCompany, createUser, createRole, grantRole, createProject } from "../testing/fixtures";
+import { withTenants } from "../db";
 import { reassignRetired } from "./reassign-retired";
 import { STAFF } from "./roster";
 
@@ -36,8 +37,29 @@ describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
     ).rows[0].id;
 
     // Work owned by the retired person: a project (ownership) and a role grant (identity).
-    await createProject(tenantId, "Ghost-owned project", retiredId);
+    const projectId = await createProject(tenantId, "Ghost-owned project", retiredId);
     await grantRole(retiredId, await createRole("manager"), "company", tenantId);
+
+    // A task ASSIGNMENT held by the retired person. `pm_task_assignees` denormalises the user id
+    // into `assignee_ref` and a CHECK enforces the two agree, so this row is the fixture that
+    // distinguishes "moved the FK" from "moved the row" — see MIRRORED in the script.
+    await withTenants(
+      [tenantId],
+      async (c) => {
+        const t = await c.query<{ id: string }>(
+          `INSERT INTO pm_tasks (id, tenant_id, project_id, title, origin_site)
+           VALUES (gen_random_uuid(), $1, $2, 'Ghost-assigned task', 'test') RETURNING id`,
+          [tenantId, projectId],
+        );
+        await c.query(
+          `INSERT INTO pm_task_assignees
+             (tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, origin_site, valid_from, valid_to)
+           VALUES ($1, $2, 'responsible', 'person', $3::text, $3::uuid, 'test', now(), NULL)`,
+          [tenantId, t.rows[0].id, retiredId],
+        );
+      },
+      { modules: ["pm"] },
+    );
   }, 240_000);
 
   afterAll(async () => {
@@ -63,6 +85,22 @@ describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
       ["Ghost-owned project"],
     );
     expect(owner.rows[0].owner_id, "gede@gaia.test's project should now belong to reva@gaiada.com").toBe(targetId);
+  });
+
+  it("🔴 moves a MIRRORED column with its FK, instead of aborting on the CHECK", async () => {
+    // The regression this pins actually happened: the first live `--confirm` run aborted on
+    // `pm_task_assignees_ref_matches_user` and rolled back ~1,300 row moves, because the script
+    // rewrote `user_id` and left `assignee_ref` pointing at the retired persona.
+    //
+    // Both halves are asserted. Checking only `user_id` would pass against a script that skipped
+    // the table entirely, and checking only that the run did not throw would pass against one that
+    // swallowed the failure as an un-movable "collision".
+    const row = await adminPool().query<{ user_id: string; assignee_ref: string }>(
+      `SELECT user_id, assignee_ref FROM pm_task_assignees WHERE assignee_kind = 'person'`,
+    );
+    expect(row.rows.length, "the assignee fixture should still exist — it must be MOVED, not deleted").toBe(1);
+    expect(row.rows[0].user_id, "the assignment should now belong to reva@gaiada.com").toBe(targetId);
+    expect(row.rows[0].assignee_ref, "the denormalised mirror must follow the FK").toBe(targetId);
   });
 
   it("🔴 does NOT move role grants — that would be a privilege change, not a data move", async () => {

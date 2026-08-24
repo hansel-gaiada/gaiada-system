@@ -73,6 +73,37 @@ const NEVER_MOVE = new Set([
 /** Deleted rather than moved — see category 2. */
 const DELETE_INSTEAD = new Set(["notifications.user_id"]);
 
+/** Columns that MIRROR a user id elsewhere in the same row, with a CHECK enforcing the two agree.
+ *  Rewriting the FK alone violates the CHECK, so the mirror must move in the SAME statement.
+ *
+ *  ⚠ THIS IS A CENSUS, NOT A REACTION TO ONE FAILURE. The first `--confirm` run aborted on
+ *  `pm_task_assignees_ref_matches_user`. Patching that one table would have left the next mirror to
+ *  be discovered the same way — by a failed run against a live estate — so instead the estate was
+ *  asked for EVERY check constraint on a users-FK table whose definition mentions the FK column.
+ *  Five exist. Four cannot be broken by changing *which* user id is present, because they only
+ *  constrain the row's SHAPE and this script never nulls a column:
+ *
+ *    agent_registry_enabled_requires_evidence   NOT enabled OR (eval_suite AND identity_user_id) NOT NULL
+ *    pm_task_assignees_person_user              (assignee_kind = 'person') = (user_id IS NOT NULL)
+ *    spcr_decision_is_complete                  status/decided_by/decided_at agree
+ *    wcr_portal_has_requester                   portal source implies client_id + requested_by
+ *
+ *  The fifth is a genuine denormalised mirror and is the entry below:
+ *    CHECK (assignee_kind <> 'person' OR assignee_ref = user_id::text)
+ *
+ *  Value is a SQL fragment appended to the SET list. `$2` is the TARGET user id in both the bulk
+ *  and the row-by-row statement, so one fragment serves both. The CASE is not decoration: rows with
+ *  `assignee_kind <> 'person'` carry a non-user ref (a team, a placeholder) that must be left alone
+ *  — though the sibling `pm_task_assignees_person_user` check means such a row has a NULL user_id
+ *  and cannot match our WHERE in the first place. Belt and braces on a live rewrite. */
+const MIRRORED: Record<string, string> = {
+  // `($2::uuid)::text`, not `$2::text`: the SET list also contains `user_id = $2`, so Postgres
+  // deduces uuid there and text here and rejects the whole statement with "inconsistent types
+  // deduced for parameter $2". Casting FROM uuid keeps one deduced type across both clauses.
+  "pm_task_assignees.user_id":
+    "assignee_ref = CASE WHEN assignee_kind = 'person' THEN ($2::uuid)::text ELSE assignee_ref END",
+};
+
 const MODULES = [
   "agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr",
   "assistant", "search", "reports", "webdev", "social", "monitoring",
@@ -164,9 +195,17 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
           // bulk update runs inside a SAVEPOINT; on a unique violation it falls back to row-by-row
           // and reports how many could not move, rather than aborting the whole reassignment or
           // silently dropping them.
+          //
+          // ⚠ ONLY a unique violation is recoverable, and the narrowness is deliberate. A CHECK
+          // violation means this column MIRRORS a user id somewhere else in the row (see MIRRORED)
+          // and the mirror is not being moved with it. Falling back to row-by-row would "handle"
+          // that by skipping every single row and reporting them as un-movable collisions — a
+          // cleanup that reports partial success while leaving the work with a person who does not
+          // exist. It must abort loudly instead, so the mirror gets added to the map.
+          const setList = MIRRORED[where] ? `${col} = $2, ${MIRRORED[where]}` : `${col} = $2`;
           await c.query("SAVEPOINT reassign_bulk");
           try {
-            const r = await c.query(`UPDATE ${tbl} SET ${col} = $2 WHERE ${col} = $1`, [fromId, toId]);
+            const r = await c.query(`UPDATE ${tbl} SET ${setList} WHERE ${col} = $1`, [fromId, toId]);
             await c.query("RELEASE SAVEPOINT reassign_bulk");
             out.moved.push({ where: `${where}  ${from} -> ${to}`, rows: r.rowCount ?? 0 });
           } catch (err) {
@@ -180,7 +219,7 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
             for (const row of idsRes.rows) {
               await c.query("SAVEPOINT reassign_one");
               try {
-                await c.query(`UPDATE ${tbl} SET ${col} = $2 WHERE id = $1`, [row.id, toId]);
+                await c.query(`UPDATE ${tbl} SET ${setList} WHERE id = $1`, [row.id, toId]);
                 await c.query("RELEASE SAVEPOINT reassign_one");
                 ok++;
               } catch {
