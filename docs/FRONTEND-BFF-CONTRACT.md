@@ -1484,7 +1484,7 @@ this wave adds the routes. **Every response below is `GoogleConnectionView` — 
 |---|---|---|---|
 | ✅ | POST | `/api/:t/reports/facts/recompute` | `{from, to}` (YYYY-MM-DD dates, inclusive). Idempotent backfill/recompute of `report_work_facts` over the window. Validates window ≤400 days; 422 if larger. Returns `{from, to, days, factRows, autoMissedCheckins, driftFindings, jobRunId}`. Authz: `report_admin` role. |
 | ✅ | GET | `/api/:t/reports/document` | Query: `grain` (person\|project\|department\|company), `scopeRef`, `periodKind` (day\|week\|month\|custom), `start` (YYYY-MM-DD), `end` (optional, required when `periodKind=custom`), `servedTenant` (optional, department-grain only), `revision` (optional pin). Returns `ReportDocument` JSON (§6.1). Sealed calendar periods serve stored document; custom/open periods compute live. Authz: per-grain matrix (§8). |
-| ✅ | GET | `/api/:t/reports/overview` | Query: `grain`, `periodKind`, `start`, `end`. Returns `{periodKind, start, end, scopes:[{scopeRef, scopeName, kpis:[]}]}` (console landing, headline KPIs per scope). Authz: per-grain read. |
+| ✅ | GET | `/api/:t/reports/overview` | Query: `grain`, `periodKind`, `start`, `end`. Returns `{periodKind, start, end, scopes:[{scopeRef, scopeName, kpis:[]}]}` (console landing, headline KPIs per scope). Authz: per-grain read. **UI consumers: `lib/reports-data.ts::getReportOverview` — the project/department report pages use it as a scope PICKER; the GM console's cockpit + Departments tab (GM-03/04) use it as the DATA, at `grain=company` and `grain=department`.** ⚠ It carries **no `sealed` flag and no `generatedAt`** (unlike `ReportDocument.header`), so a consumer must not present these figures as the sealed record — `GmProvenance` states that limit in the UI rather than implying either answer. |
 | ✅ | GET | `/api/:t/reports/metrics` | Query: `metricKey`, `grain` (optional), `from` (YYYY-MM-DD), `to`. Returns raw governed-metric series (power users/MCP). Calendar periods and custom ranges both read live from `report_work_facts`. Authz: per-grain read. |
 | ✅ | GET | `/api/:t/reports/periods` | Query: `kind` (day\|week\|month\|custom, optional), `from`, `to`. Lists report periods and seal status. Calendar kinds auto-vivify; customs list only existing rows. Authz: `report_period` read. |
 | ✅ | GET | `/api/:t/reports/periods/:id` | One period's seal state + revision. Authz: `report_period` read. |
@@ -1502,7 +1502,7 @@ this wave adds the routes. **Every response below is `GoogleConnectionView` — 
 | ✅ | GET | `/api/:t/checkins/today` | Returns `{expected, alreadySubmitted, draft}`. Draft is live-prefilled from today's activity/time. Authz: self only. |
 | ✅ | POST | `/api/:t/checkins` | `{date?, summary, blockers?}` → checkin row. `summary` required, non-empty. Authz: self only (subject == principal, enforced). Emits `checkin.created` event. |
 | ✅ | GET | `/api/:t/checkins` | Query: `userId`, `from`, `to`. History (self; manager for own unit; HR-appraisal role). Authz: per-grain matrix (§8). |
-| ✅ | GET | `/api/:t/checkins/compliance` | Query: `unit`, `periodKind`, `start`, `end` (optional, required when `periodKind=custom`). Compliance grid (expected/submitted/missed/excused). Authz: lead/exec/HR or self-for-own-row (TR-39). |
+| ✅ | GET | `/api/:t/checkins/compliance` | Query: `unit`, `periodKind`, `start`, `end` (optional, required when `periodKind=custom`). Compliance grid (expected/submitted/missed/excused). Authz: lead/exec/HR or self-for-own-row (TR-39). **UI consumer since GM-07: `lib/checkins-data.ts::getCheckinCompliance`, read by the GM console's People tab.** Three behaviours a consumer must honour, all of them load-bearing: ① **it does NOT 403 a plain member** — it degrades to a one-row self grid, so `rows.length === 1` is not an error and must not be presented as a team view; ② **`unit` in the response is an ECHO of what the server actually scoped to**, which it rewrites for a unit-scoped (dept-lead) caller — read the echo, never the request; ③ **`complianceRate` is `null`, never `0`, when `expectedDays === 0`** — "nobody was due" is not "nobody complied", and rendering `null` as 0% invents a company-wide failure. `lib/checkins.ts::rollUpCompliance` sums numerators/denominators rather than averaging per-person rates (averaging weights one expected day the same as twenty, which is how a headline figure ends up disagreeing with the grid beneath it). |
 | ✅ | POST | `/api/:t/checkins/:id/excuse` | `{reason}` → audited excuse. Authz: lead (own unit)/HR. |
 | ✅ | GET | `/api/:t/checkins/pending-reminders` | Query: `date`. Internal for n8n: expected-but-missing list + WA identity link presence. Authz: service/admin. |
 
@@ -4030,3 +4030,51 @@ both reads apply the same server-side predicate, so a row there means the two fi
 Surfaced rather than dropped, because a dropped row is invisible. Demo fixtures mirror the facet
 (including `internal`) for the same reason: a fixture that ignored `?clientId=` would make every
 client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
+
+---
+
+## Finance & Accounting — `/api/:tenantId/finance/*`
+
+**BUILT** in `platform-nest/src/modules/finance/finance.controller.ts`. Consumed by
+`platform-ui/src/lib/finance.ts` and `/finance`. Design:
+`docs/blueprints/finance-accounting-foundation.md`. Authorization: PERMISSION-CONTRACT §17–§24.
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| GET | `/finance/accounts?q=` | `Account[]` | `finance_config:read` |
+| GET | `/finance/periods` | `FiscalPeriod[]` | `finance_period:read` |
+| GET | `/finance/trial-balance?asOf=&from=` | `{ rows, totalDebit, totalCredit, balanced }` | `finance_statement:read` |
+| GET | `/finance/profit-and-loss?from=&to=` | `StatementRow[]` — **both bounds required** | `finance_statement:read` |
+| GET | `/finance/balance-sheet?asOf=&fyStart=` | `{ rows, assets, liabilities, equity, balanced }` — **`fyStart` required** | `finance_statement:read` |
+| GET | `/finance/general-ledger/:code?from=&to=` | GL rows with a running balance | `finance_statement:read` |
+| GET | `/finance/journals?limit=` | `JournalSummary[]` | `finance_ledger:read` |
+| GET | `/finance/journals/:entryId` | `JournalDetail` incl. lines + hash | `finance_ledger:read` |
+| POST | `/finance/journals` | `{ id }` | `finance_ledger:post` |
+| POST | `/finance/journals/:entryId/reverse` | `{ id }` | `finance_ledger:reverse` |
+| GET | `/finance/ledger/verify` | `{ problems, clean }` | `finance_ledger:verify` |
+| GET | `/finance/ar/aging?asOf=` · `/finance/ap/aging?asOf=` | aging rows | `finance_ar\|ap:read` |
+| GET | `/finance/ar/reconcile` · `/finance/ap/reconcile` | `{ position, problems, clean }` | `…:reconcile` |
+| GET | `/finance/tax/ppn?from=&to=` | PPN summary | `finance_tax:read` |
+| GET | `/finance/tax/efaktur-exceptions?from=&to=` | exception rows | `finance_tax:read` |
+| GET | `/finance/periods/:periodId/close-readiness` | `{ blockers, ready }` | `finance_bank:reconcile` |
+| GET | `/finance/events/backlog` · POST `/finance/events/process` | event queue | `finance_posting_rule:read\|process` |
+
+### Three contract rules a consumer must not "simplify"
+
+1. **`fyStart` on the balance sheet is REQUIRED, not defaulted.** "Profit so far" is meaningless
+   without knowing when the fiscal year began, and not every company's starts in January. A default
+   would silently render a wrong sheet.
+2. **A P&L needs BOTH bounds.** It is flow, not stock — "as at a date" is a category error and the
+   endpoint 400s.
+3. **The verdict endpoints must not degrade to `[]`.** `ledger/verify`, `ar|ap/reconcile` and
+   `close-readiness` all mean *"problems found; empty = pass"*. A consumer that folds a 403/404 into
+   an empty list renders a green tick for a check that never ran. `lib/finance.ts` splits its
+   readers into `financeData` (may degrade) and `financeVerdict` (returns `null`) for exactly this.
+
+### Errors
+
+`FINANCE_*` refusals are mapped by `FinanceErrorFilter` to `{ error, code }` with 400 (malformed),
+404 (unknown) or **409** (well-formed but the books refuse — a locked period, an immutable journal,
+a control account). Unrecognised `FINANCE_*` codes default to 409 with their own message, so a
+refusal added by a later migration is mapped by construction.
+

@@ -77,10 +77,30 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     ...departments.filter((d) => isGmRow(d.name)),
     ...departments.filter((d) => !isGmRow(d.name)),
   ];
+  // Finance has a bespoke console at /finance rather than the generic /departments/[id] shell —
+  // it is an operating surface (aging, the close gate, integrity checks), not a department read.
+  // `wallet` over `chart` for the same reason: this is where money is worked, not charted.
+  //
+  // ⚠ AND IT MUST NOT PRODUCE TWO ROWS. An estate's org structure frequently DOES contain a
+  // department called Finance (nav.test.ts's own wide-estate fixture has one), so appending a
+  // functional row unconditionally — the way HR and IT are appended — would render "Finance" twice:
+  // once to /departments/<id> and once to /finance. Two identical labels pointing at different
+  // screens is the kind of thing a user learns to distrust rather than report.
+  //
+  // So: if the org structure claims the name, that row is re-pointed at the console. Only when no
+  // department claims it is a functional row appended. Exactly one Finance row either way, and it
+  // always opens the real console.
+  const isFinanceRow = (name: string) => deptSlug(name) === "finance";
+  const orgHasFinance = orderedDepartments.some((d) => isFinanceRow(d.name));
   const deptItems: NavItem[] = [
-    ...orderedDepartments.map((d) => ({ label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName })),
+    ...orderedDepartments.map((d) =>
+      isFinanceRow(d.name)
+        ? { label: d.name, href: "/finance", icon: "wallet" as IconName }
+        : { label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName },
+    ),
     { label: "HR", href: "/hr", icon: "hr" },
     { label: "IT", href: "/it", icon: "pulse" },
+    ...(orgHasFinance ? [] : [{ label: "Finance", href: "/finance", icon: "wallet" as IconName }]),
   ];
   const groups: NavGroup[] = [
     // "Me" is FIRST and ungated (employee-portal wave A). Every principal with a staff surface has a

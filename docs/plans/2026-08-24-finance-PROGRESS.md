@@ -711,3 +711,58 @@ and delivered nothing usable.
 **Still not deployable, and the reason has changed.** There is now a working surface — but the
 checkout carries ~42 files of other sessions' in-flight work (LMS, GM console), and a deploy is
 `git push --tags` over the whole tree. That is a coordination problem, not a finance one.
+
+---
+
+## DEPLOY ATTEMPT — `alpha-01.071.0153a` (2026-08-24 16:07 UTC)
+
+**Result: code and schema are LIVE; the running containers are NOT.** Precisely:
+
+| Step | Outcome |
+|---|---|
+| `main` push (`9a15a64` + MAP fix `4f6a772`) | ✅ on origin |
+| Tag `alpha-01.071.0153a` | ✅ pushed |
+| `build-sign` × 10 components (cosign keyless + SBOM + SLSA) | ✅ all green |
+| `docs-map` | ✅ green after regenerating MAP from a clean worktree |
+| **`Run migrations`** | ✅ **the 13 finance migrations APPLIED to the live database** |
+| `Start services` | ❌ `gaiada-platform-1` unhealthy |
+| Rollback to `0150a` | ❌ also unhealthy — and that is the tell |
+
+### ⚠ The deploy failure is PRE-EXISTING and not caused by this work
+
+| Release | Failed at | Subject |
+|---|---|---|
+| `0150a` 09:57 | — | **last successful deploy** |
+| `0151a` 13:38 | `Build and push` | fix(authz,hub): validate tool args and :tenantId |
+| `0152a` 14:05 | **`Start services`** | release: add the missing client-filter module |
+| `0153a` 16:10 | **`Start services`** | this finance release |
+
+`0152a` failed at the identical step **two hours before this work was tagged**, and the rollback to
+`0150a` was unhealthy too. The box has not accepted a deploy since 09:57.
+
+**It is also not the finance code.** The built app was booted locally against a fresh database from
+current HEAD — which contains `0152a`'s changes *and* finance — and it started cleanly, applied all
+migrations, passed `validateModulePermissions()` for all 21 declared finance permissions, and
+listened on 3004. So the image is good; something about the BOX rejects it. The most likely shapes,
+given this program's own history: a new env var not passed through the compose `environment:` block,
+or a healthcheck window too short for boot. Diagnosing it needs SSH, which this session does not have.
+
+### Is the current state safe?
+
+Yes, and deliberately so. The migrations are **additive throughout** — no `ALTER` of an existing
+column, no `UPDATE`, no `DELETE` (`lint-migration-rls` green across all 13). The running `0150a`
+code does not know the `finance_*` tables exist and ignores them. Newer schema under older app is
+the normal forward-only posture, not a broken state. The deploy log says so itself:
+*"Rolled back to alpha-01.071.0150a. Schema was NOT reverted."*
+
+**What it means in practice:** the finance schema is on the live database and will be there when the
+box next accepts a deploy. The finance API and module are not serving yet. Nothing is half-applied.
+
+### Handover for whoever fixes the box
+
+The question is why `gaiada-platform-1` fails its healthcheck on the server when the same image
+boots locally. Start with `0152a` (client-filter module) — it is the first release that failed this
+way. Check the box's `infra/compose/.env` against what the new code reads, and the platform service's
+healthcheck `start_period`. Do NOT start by suspecting the finance migrations: they had already been
+applied successfully when `Start services` failed, and the rollback to a pre-finance image failed
+identically.

@@ -11,6 +11,39 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.10.0` - the /finance console + the config seed (2026-08-25) - PROTOTYPED
+
+**Added**
+- `platform-ui/src/lib/finance.ts` - the data layer, with TWO deliberate degradation strategies.
+- `platform-ui/src/app/(app)/finance/page.tsx` - the overview console: position KPIs, the four
+  integrity verdicts, the close gate, AR/AP aging and the fiscal calendar.
+- `platform-ui/src/lib/demoFinance.ts` - DEMO_MODE fixtures (the build gate runs in demo mode).
+- `platform-nest/src/seed/finance-config.ts` + `.db.test.ts` - `npm run seed:finance-config`.
+- `docs/FRONTEND-BFF-CONTRACT.md` - the finance section.
+
+**Notes**
+- ★ **A verdict must never degrade to a pass.** Four figures on this page are checks that mean
+  "problems found; empty = pass". The estate's usual `skipUnavailable(p, [])` would render a green
+  tick for a check that never ran. So `lib/finance.ts` has `financeData` (may degrade) and
+  `financeVerdict` (returns null), and the page renders "not checked" as visually distinct from a
+  pass. This is the single most important line in the UI work.
+- **The nav dedupes Finance.** An org structure frequently contains a department called Finance
+  (nav.test.ts's own wide-estate fixture has one), so appending a functional row the way HR and IT
+  are appended would render "Finance" twice, pointing at two different screens. The org row is
+  re-pointed at the console instead; a functional row is added only when no department claims the
+  name. Pinned by test.
+- **`listPeriods` distinguishes 403 from 404**, because the page keys its empty state off it - and
+  "you have no finance access" and "this company has no calendar" need opposite sentences. The
+  first draft told a member with no access to go and run a seed script.
+- **The demo fixture is deliberately not all-green**: one subledger does not tie and the current
+  period is unsigned, so the "does not tie" badge, the problem table and the close blockers are
+  reachable in a browser. A books-perfect demo cannot exercise the parts of this console that
+  matter.
+- **The seed does NOT sign off a period.** It seats a finance_manager and a finance_staff, enables
+  the module, instantiates the chart and cuts the calendar - but stamping `signed_off_by` with a
+  seeded persona would satisfy the D-F5 control while destroying the only thing it protects.
+  Nothing else is blocked by it.
+
 ### finance `0.9.0` - FA Application Layer (2026-08-24) - PROTOTYPED
 
 The surface a person can actually reach. Until this, the whole program was schema + SQL + policy.
@@ -42,6 +75,49 @@ The surface a person can actually reach. Until this, the whole program was schem
 - **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
   money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
 
+### lms `0.2.0` — L2 The general track and the training tenant (2026-08-25) — PROTOTYPED
+
+The wave with the widest reach and no execution risk: content every employee takes, and the
+isolated place ERP exercises are practised in.
+
+**Added**
+- `202608241550_lms_l2_general_track_and_training_tenant.sql` — `companies.is_training` with a
+  partial unique index (at most ONE, ever), `lms_cohorts` / `lms_cohort_members`,
+  `lms_training_reset_tables` (the allow-list, as DATA) and the append-only `lms_training_resets`.
+- `src/seed/lms-general-track.ts` + `seed:lms-general-track` — three published courses and one
+  mandatory path. Sixteen assessed questions.
+- `src/modules/lms/mandatory-assignment.ts` + `lms:assign-mandatory` — the enrolment sweep,
+  dry-run by default.
+- `src/modules/lms/training-tenant-reset.ts` + `lms:reset-training` — the bounded reset. Dry-run
+  by default; `--execute` additionally requires `--i-have-read-the-plan`.
+- `src/modules/lms/spec-redaction.ts`, `spec-redaction.test.ts` (7), `lms-l2.db.test.ts` (16),
+  and 4 new HTTP assertions in `lms-l1-acceptance.test.ts` (21 total).
+
+**Fixed — both silent, neither would have thrown**
+- **The quiz answer key was readable by every learner.** `GET /courses/:id` returned
+  `lms_activities.spec` verbatim and `resource_lms_course.yaml` names `member` in its read rule
+  deliberately. High scores on a mandatory track look exactly like training that works. Redacted
+  by default now, stripped by FIELD NAME at any depth rather than by knowing each kind's shape —
+  the kinds L5/L6 add are precisely what a shape-aware stripper would miss. `?includeAnswers=1`
+  re-authorizes for `update`; a learner asking is refused rather than quietly redacted.
+- **The training-tenant reset left the membership door open.** `revokeCohortAccess` deleted
+  `company_memberships` under `withGlobal`, but that table carries FORCE RLS — zero rows, success
+  reported. `user_roles` has no RLS, so the other half of the same function worked. Caught by an
+  assertion that the REAL company's membership survived, not by anything failing.
+
+**Notes**
+- **Reset, not delete, and the bound is in the database.** 186 tables carry `tenant_id` and there
+  is no hard-delete path for a company. The runner reads an allow-list table and NEVER derives one
+  from `information_schema`; the tenant is resolved from `is_training` and cannot be passed in.
+- **Per-table row counts, never a total.** A total hides the table that matched zero rows when it
+  should have matched hundreds — which is how the RLS zero-row trap presents.
+- **An unrecognised `applies_to` matches NOBODY.** 'unit' and 'discipline' arrive with L4; reading
+  an unknown scope as "all" would enrol the whole company in one department's path.
+- An employee with no `users` row is NAMED in the sweep output, never counted — a hole in
+  coverage reported as a number is one nobody closes.
+
+**Not yet true:** no company carries `is_training`, so the reset refuses outright; nothing is
+deployed and `lms` is enabled on no live company.
 ### lms `0.1.0` — L1 Learning foundation (2026-08-24) — PROTOTYPED
 
 The LMS the owner asked for: **all departments, all levels**, operational and management alike.

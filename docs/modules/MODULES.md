@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.38.0` | IN PROGRESS | WS1 | 2026-08-24 |
-| platform-ui | `0.49.0` | IN PROGRESS | WS5 | 2026-08-24 |
+| platform-ui | `0.50.0` | IN PROGRESS | WS5 | 2026-08-24 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.11.1` | PROTOTYPED | WS2 | 2026-08-20 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -51,9 +51,9 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
-| lms | `0.1.0` | PROTOTYPED | Cross-cutting | 2026-08-24 |
+| lms | `0.2.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
-| finance | `0.9.0` | PROTOTYPED | Finance & Accounting | 2026-08-24 |
+| finance | `0.10.0` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.2` | PROTOTYPED | Cross-cutting | 2026-08-23 |
@@ -1232,7 +1232,7 @@ rather than quietly deleted.
 
 ---
 
-## lms — Learning · Certification · `0.1.0` · PROTOTYPED
+## lms — Learning · Certification · `0.2.0` · PROTOTYPED
 
 **Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
 
@@ -1275,12 +1275,41 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   security posture. What is gated is other people's progress (`lms.progress.view`) and the bulk
   register (`lms.enrollment.export`, high assurance).
 
+### What L2 added (2026-08-25)
+
+- **The mandatory general track**, as real content: `seed:lms-general-track` publishes three
+  courses — Using the ERP, Working with Claude, and Fundamentals (security, personal data, the
+  client-confidentiality line) — plus one ordered path marked mandatory, with a 30-day due
+  window and a 24-month certificate. Sixteen assessed questions across three quizzes.
+- **The assignment sweep** (`lms:assign-mandatory`): enrols every `active` and `on_leave`
+  employee. A SWEEP, not an event consumer — a missed event is silent and permanent, and the
+  failure it produces is "somebody was never assigned the mandatory training".
+- **The training tenant** (`202608241550`): `companies.is_training` with a partial unique index,
+  `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
+  append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
+  two flags to execute.
+
+### Two defects L2 fixed, both silent
+
+- **The answer key shipped with the questions.** `GET /courses/:id` returned
+  `lms_activities.spec` verbatim, and `resource_lms_course.yaml` names `member` in its read rule
+  on purpose — so every employee could read the key to their own mandatory assessment. The
+  result (high scores on the general track) is indistinguishable from the training working. It
+  could not bite before L2 because no quiz existed. Now redacted by default and unredacted only
+  under `?includeAnswers=1`, which re-authorizes for `update`.
+- **The reset left the membership door open.** `revokeCohortAccess` deleted
+  `company_memberships` inside `withGlobal` — but that table carries FORCE RLS, so the DELETE
+  matched zero rows and reported success. `user_roles` genuinely has no RLS, which is why the
+  other half worked: two tables, one function, opposite requirements. A trainee would have kept
+  the training tenant in their company switcher after disposal.
+
 ### Not yet true
 
-Nothing LMS is deployed, and the `lms` module is **not enabled on any live company** — the four UI
-pages render `ModuleDisabled` everywhere until it is. No content exists: the mandatory general
-track (ERP usage, Claude usage, fundamentals) is L2, the HOD authoring surface is L3, the Web Dev
-curriculum across FE/BE/UI-UX/DevOps/Cyber/QA is L4, and the lab runner is L5–L6.
+Nothing LMS is deployed, and the `lms` module is **not enabled on any live company** — the UI
+pages render `ModuleDisabled` everywhere until it is, and both L2 CLIs refuse to run rather than
+write zero rows and report success. **No training tenant exists yet**: no company carries
+`is_training`, so `lms:reset-training` refuses outright. The HOD authoring surface is L3, the Web
+Dev curriculum across FE/BE/UI-UX/DevOps/Cyber/QA is L4, and the lab runner is L5–L6.
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.2` Â· DEV-VERIFIED (schema/RLS/Cerbos layer; the site-audit capability itself is PLANNED)
 

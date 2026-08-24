@@ -17,6 +17,7 @@ import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
 import { lmsDemo } from "./demoLms";
+import { financeDemo } from "./demoFinance";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 
@@ -811,6 +812,25 @@ function toSeatRow(c: DemoConnection) {
 const IDENTITY_LINKS = [
   { id: "il-1", user_id: "u-pm", user_name: "Dewi Santoso", provider: "whatsapp", external_id: "628999@c.us", verified_at: "2026-06-01T00:00:00Z" },
   { id: "il-2", user_id: "u-dev", user_name: "Made Putra", provider: "telegram", external_id: "tg:5551", verified_at: null },
+];
+
+// IAM Phase 2 seats (GM-07). `unitNodeId` values are the org-structure node ids `lib/org.ts`'s
+// `defaultStructure` generates for the agency, so a consumer that groups by unit lines up with the
+// chart the rest of the app draws. `roleSet` is left empty: the P2-05 reconciler that would turn a
+// seat's intended roles into real grants is NOT BUILT, and seeding role sets here would imply an
+// authorization path that does not exist.
+const DEMO_POSITIONS = [
+  { id: "pos-1", tenantId: "co-agency", unitNodeId: "dept-5", title: "General Manager", isLead: true, status: "active", orphaned: false, roleSet: [], currentHolders: 1, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  { id: "pos-2", tenantId: "co-agency", unitNodeId: "dept-1", title: "Tech Lead · Head of Web Dev", isLead: true, status: "active", orphaned: false, roleSet: [], currentHolders: 1, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  { id: "pos-3", tenantId: "co-agency", unitNodeId: "dept-1-div-1", title: "Web Developer", isLead: false, status: "active", orphaned: false, roleSet: [], currentHolders: 3, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  { id: "pos-4", tenantId: "co-agency", unitNodeId: "dept-3", title: "SEO Manager", isLead: true, status: "active", orphaned: false, roleSet: [], currentHolders: 1, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  { id: "pos-5", tenantId: "co-agency", unitNodeId: "dept-2", title: "Creative Manager", isLead: true, status: "active", orphaned: false, roleSet: [], currentHolders: 1, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  // ── VACANT: real seats, zero holders. Never give these a holder. ──
+  { id: "pos-6", tenantId: "co-agency", unitNodeId: "dept-1", title: "Project Manager", isLead: false, status: "active", orphaned: false, roleSet: [], currentHolders: 0, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  { id: "pos-7", tenantId: "co-agency", unitNodeId: "dept-2", title: "Creative", isLead: false, status: "active", orphaned: false, roleSet: [], currentHolders: 0, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  { id: "pos-8", tenantId: "co-agency", unitNodeId: "dept-4", title: "Social Media Specialist", isLead: false, status: "active", orphaned: false, roleSet: [], currentHolders: 0, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-01-06T00:00:00Z" },
+  // ── RETIRED: exercises "a retired seat is not a vacancy". ──
+  { id: "pos-9", tenantId: "co-agency", unitNodeId: "dept-3", title: "Backlink Specialist", isLead: false, status: "retired", orphaned: false, roleSet: [], currentHolders: 0, createdAt: "2026-01-06T00:00:00Z", updatedAt: "2026-06-01T00:00:00Z" },
 ];
 
 const COMPLIANCE_GATES = [
@@ -1949,6 +1969,13 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const lms = lmsDemo(method, p, url.searchParams);
   if (lms) return lms;
 
+  // Finance reads (/api/:t/finance/*) — read-only fixture store (lib/demoFinance.ts). Placed beside
+  // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a
+  // finance path with a generic {ok:true}. A cheerful stub on THIS surface would render a balanced
+  // trial balance and a clean reconciliation for a company that has neither.
+  const finance = financeDemo(method, p, url.searchParams);
+  if (finance) return finance;
+
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
   const meetings = meetingsDemo(method, p, url.searchParams, body);
   if (meetings) return meetings;
@@ -2737,6 +2764,22 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (p.match(/^\/api\/[^/]+\/compliance-gates$/)) return ok(COMPLIANCE_GATES);
   if (p.match(/^\/api\/[^/]+\/compliance-gates\/[^/]+$/)) return ok({ ok: true });
   if (p.match(/^\/api\/[^/]+\/audit$/)) return ok(ACTIVITY);
+
+  // ---- IAM Phase 2 — positions / seats (lib/iam.ts's `listPositions`; consumed by the GM console's
+  // People tab, GM-07). Mirrors the real roster's shape: filled seats carry a holder, and the
+  // owner's UNFILLED seats are real rows with `currentHolders: 0`.
+  //
+  // ⚠ Vacancies are POSITIONS, NEVER PEOPLE (platform-nest `seed/roster.ts` states this in caps).
+  // The three zero-holder rows below stand for the owner's actual named-but-unfilled seats — one
+  // Project Manager, three Creatives, six Social Media Specialists in the real roster — and must not
+  // be "fixed" by inventing holders for them: a fake holder here would show up as a fake headcount
+  // in every consumer.
+  //
+  // A `retired` row is included on purpose: it is the only way a consumer's "a retired seat is not a
+  // vacancy" rule gets exercised at all, and getting that wrong makes every reorg read as a hiring
+  // gap.
+  if (p.match(/^\/api\/[^/]+\/positions$/) && m === "GET") return ok({ positions: DEMO_POSITIONS, scope: "tenant" });
+  if (p.match(/^\/api\/[^/]+\/positions\/attachable-roles$/)) return ok({ roles: [] });
 
   // ---- MAIL-15 — mail log + entity threads (lib/mail.ts) ----
   // A12: fixture addresses use the reserved TLD `*.gaiada.invalid`, same as the compiled backend
