@@ -831,3 +831,60 @@ Raising the budget stops it taking the site down; it does not make it fast.
    mine did not — that one line was the whole diagnosis and it was available from the start.
 3. **Reached for a remembered failure mode instead of measuring.** The disk hypothesis fit a
    recorded pattern and was wrong; `df -h` settled it in one command.
+
+---
+
+## Deploy of `alpha-01.071.0156a` — finance is LIVE (2026-08-24 18:33 UTC)
+
+Release + deploy both green, and verified on the box rather than from the workflow's colour.
+
+| Check | Result |
+|---|---|
+| `.deployed-tag` | `alpha-01.071.0156a` |
+| `/health` version | `Alpha 01.071.0156a` (no rollback misreport) |
+| `/health` modules | includes **`finance`** |
+| Containers in created/exited/restarting | **none** |
+| **platform boot** | container 18:33:01 -> listening 18:33:14 = **13s** (was 129s) |
+| Public `/` and `/login` | 200, login page renders |
+| finance routes | `periods` `accounts` `ledger/verify` `tax/ppn` -> **401**; `finance/nonsense` -> **404** |
+| finance schema | **38 `finance_*` tables present** |
+
+The 401/404 pair is the point: a control probe proves the 401s mean "mounted and auth-gated"
+rather than "swallowed by a catch-all that 401s everything".
+
+### Two things this deploy needed that a deploy does not do
+
+`deploy.yml` rsyncs **observability, cerbos and keycloak only** — it does **not** ship
+`docker-compose.vps.yml`, and the box's `~/gaiada` is not a git repo. The healthcheck fix would
+never have reached the box through a release. Applied by hand: box copy verified byte-identical to
+`HEAD~1` first (no local edits to lose), backed up to `.bak-20260824-healthcheck`, replaced from
+git, then validated with `docker compose config` over the full three-file set.
+
+**That is a standing deploy gap, not a one-off:** a compose fix committed to git is not live until
+somebody remembers to copy it up, and nothing warns you.
+
+### Status: DEPLOYED and UNSEEDED — not DEV-VERIFIED
+
+All 38 tables are **empty**: `finance_accounts` 0, `finance_fiscal_periods` 0,
+`finance_journal_entries` 0, `finance_duty_assignments` 0. `/finance` will therefore render the
+"this company has no fiscal calendar" empty state — which is the console behaving correctly, not a
+fault.
+
+I could not complete an authenticated end-to-end drive. `scripts/sso-login.sh` returns a valid
+token (the platform logs `verified token for sub=...`), but `GET /api/me` on :3004 still 401s in
+~3ms, i.e. rejected before token verification on that route. Unresolved. **So the honest status is
+PROTOTYPED + deployed, NOT DEV-VERIFIED** — nobody has driven finance against live data.
+
+### Seeding live is an owner decision, deliberately not taken
+
+`npm run seed:finance-config` writes a chart of accounts and cuts a fiscal calendar. On the books
+of record that is an accounting decision, not a dev convenience, and two blueprint questions are
+still open: **Q3** (which companies must be bank-ready) and **Q4** (entities + PKP status). A
+fiscal year start guessed wrong is corrected by reversal, never by editing — by design. Needs:
+which companies, and each one's fiscal year start.
+
+### Follow-ups
+
+- **`report-renderer` carries the same `start_period: 10s`.** Reaches healthy in ~20s today, so it
+  is not biting — but it is the identical latent shape and the same 502 if its boot ever grows.
+- **Compose files reach the box by hand** (above). Worth folding into `deploy.yml`.
