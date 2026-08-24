@@ -69,6 +69,18 @@ const REASSIGN: Record<string, string> = {
 const NEVER_MOVE = new Set([
   "identity_links.user_id",
   "user_roles.user_id",
+  // ⚠ ADDED AFTER THE LIVE RUN, AND IT IS THE MOST SERIOUS OMISSION THIS SCRIPT HAD. A
+  // `company_memberships` row is WHICH COMPANY a person belongs to, and it carries
+  // `primary_role_id` — so moving one would hand a real employee a retired persona's company
+  // access and primary role. Exactly the privilege-change-as-data-migration this file's header
+  // warns about, and it was in the move set for the whole first live run.
+  //
+  // Nothing leaked, and that was verified rather than assumed: all 18 rows are still on the
+  // retired identities, and no `@gaiada.com` account holds a membership it should not. The only
+  // reason is luck — `UNIQUE (tenant_id, user_id)` meant every single move collided, because the
+  // real staff already had their memberships. If one target had been missing a membership, the
+  // ghost's would have transferred silently and been reported as a success.
+  "company_memberships.user_id",
   "org_unit_memberships.user_id",
   "org_unit_memberships.created_by",
   "position_assignments.user_id",
@@ -77,6 +89,18 @@ const NEVER_MOVE = new Set([
 
 /** Deleted rather than moved — see category 2. */
 const DELETE_INSTEAD = new Set(["notifications.user_id"]);
+
+/** Owned by a DIFFERENT script, so this one must not touch it.
+ *
+ *  A ghost's `employees` row is an HR FILE for a person who never existed. Moving it onto a real
+ *  employee would not transfer employment — it would create a SECOND HR file for them, or (because
+ *  of `UNIQUE (tenant_id, user_id)`) collide and be reported as an un-movable row forever. The
+ *  correct disposal is deletion, which is `seed:retire-placeholder-hr`'s entire job and which that
+ *  script does with its own refuse-on-empty-read guard. Two scripts writing the same table by
+ *  different rules is how a cleanup ends up half-applied. */
+const HANDLED_ELSEWHERE: Record<string, string> = {
+  "employees.user_id": "seed:retire-placeholder-hr deletes these",
+};
 
 /** Append-only AUDIT LEDGERS. The database refuses UPDATE *and* DELETE on these tables with a
  *  `RAISE EXCEPTION` trigger, so there is no version of this script that can move them.
@@ -142,12 +166,15 @@ export interface ReassignResult {
   /** Left in place because the table is an append-only ledger — see IMMUTABLE_HISTORY. Reported so
    *  the deviation from "move everything" is visible in the run output instead of invisible. */
   immutableHistory: { where: string; rows: number }[];
+  /** Skipped because another seed owns the disposal — see HANDLED_ELSEWHERE. */
+  handledElsewhere: { where: string; rows: number; by: string }[];
   unmapped: string[];
 }
 
 export async function reassignRetired(opts: { dryRun: boolean }): Promise<ReassignResult> {
   const out: ReassignResult = {
-    dryRun: opts.dryRun, moved: [], deleted: [], skippedCollisions: [], immutableHistory: [], unmapped: [],
+    dryRun: opts.dryRun, moved: [], deleted: [], skippedCollisions: [], immutableHistory: [],
+    handledElsewhere: [], unmapped: [],
   };
 
   const emails = [...Object.keys(REASSIGN), ...new Set(Object.values(REASSIGN))];
@@ -188,6 +215,17 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
       for (const { tbl, col } of fks.rows) {
         const where = `${tbl}.${col}`;
         if (NEVER_MOVE.has(where)) continue;
+
+        if (HANDLED_ELSEWHERE[where]) {
+          const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
+          const n = await c.query<{ n: string }>(
+            `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
+            [ids],
+          );
+          const rows = Number(n.rows[0].n);
+          if (rows > 0) out.handledElsewhere.push({ where, rows, by: HANDLED_ELSEWHERE[where] });
+          continue;
+        }
 
         if (IMMUTABLE_HISTORY.has(where)) {
           // Counted, not moved. A bare `continue` here would make the ledger rows vanish from the
@@ -307,6 +345,9 @@ async function main(): Promise<void> {
     for (const h of r.immutableHistory) console.log(`  ${String(h.rows).padStart(5)}  ${h.where}`);
     console.log("  These events really were recorded against the retired personas; rewriting them");
     console.log("  would forge the audit trail rather than transfer work.");
+  }
+  for (const h of r.handledElsewhere) {
+    console.log(`SKIPPED — ${h.by}: ${h.rows} row(s)  ${h.where}`);
   }
   if (r.unmapped.length) console.log(`NOTE: ${r.unmapped.join("; ")}`);
   if (dryRun) {

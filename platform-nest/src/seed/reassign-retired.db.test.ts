@@ -157,6 +157,65 @@ describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
     expect(Number(gained.rows[0].n), "reva must NOT have inherited a manager grant from a ghost").toBe(0);
   });
 
+  it("🔴 does NOT move company memberships — that is company access, not data", async () => {
+    // The omission that survived a whole live run. `company_memberships` says which company a
+    // person belongs to and carries `primary_role_id`, so moving one hands a real employee a
+    // retired persona's access. On the estate it only failed to happen because UNIQUE
+    // (tenant_id, user_id) made every move collide; here the target has NO membership, so a
+    // regression would actually transfer it.
+    const before = await adminPool().query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM company_memberships WHERE user_id = $1`,
+      [targetId],
+    );
+    await withTenants(
+      [tenantId],
+      (c) =>
+        c.query(
+          `INSERT INTO company_memberships (id, tenant_id, user_id, status, origin_site)
+           VALUES (gen_random_uuid(), $1, $2, 'active', 'test')
+           ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+          [tenantId, retiredId],
+        ),
+      { modules: [] },
+    );
+
+    await reassignRetired({ dryRun: false });
+
+    const ghost = await adminPool().query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM company_memberships WHERE user_id = $1`,
+      [retiredId],
+    );
+    expect(Number(ghost.rows[0].n), "the retired persona must KEEP its membership").toBe(1);
+    const after = await adminPool().query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM company_memberships WHERE user_id = $1`,
+      [targetId],
+    );
+    expect(
+      Number(after.rows[0].n),
+      "reva must NOT have gained company access from a ghost",
+    ).toBe(Number(before.rows[0].n));
+  });
+
+  it("🔴 leaves ghost HR files to seed:retire-placeholder-hr instead of merging them", async () => {
+    // Moving an `employees` row would give a real person a SECOND HR file, or collide forever on
+    // UNIQUE (tenant_id, user_id) and be reported as un-movable on every future run. Deletion is
+    // the right disposal and another script owns it.
+    await withTenants(
+      [tenantId],
+      (c) =>
+        c.query(
+          `INSERT INTO employees (tenant_id, user_id, display_name, work_email, employment_status, origin_site)
+           VALUES ($1, $2, 'Gede Pratama', 'gede@gaia.test', 'active', 'test')`,
+          [tenantId, retiredId],
+        ),
+      { modules: ["hr"] },
+    );
+    const r = await reassignRetired({ dryRun: true });
+    expect(r.handledElsewhere.some((h) => h.where === "employees.user_id")).toBe(true);
+    expect(r.moved.some((m) => m.where.startsWith("employees."))).toBe(false);
+    expect(r.skippedCollisions.some((m) => m.where.startsWith("employees."))).toBe(false);
+  });
+
   it("is idempotent — a second run finds nothing left to move", async () => {
     const r = await reassignRetired({ dryRun: false });
     expect(r.moved.filter((m) => m.where.startsWith("projects.owner_id"))).toEqual([]);
