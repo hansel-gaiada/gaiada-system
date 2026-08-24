@@ -96,21 +96,20 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  # platform-nest (WS1 core) — its suite is meaningful only against live Postgres + Cerbos, so
-  # it gets a dedicated job. The vitest harness (src/testing/setup.ts) DROP SCHEMAs + applies
-  # migrations itself and repoints at a NOBYPASSRLS role, so CI only supplies a superuser test DB,
-  # Cerbos, and Redis (event/relay suites self-skip without REDIS_URL).
+  # platform-nest (WS1 core) — its suite is meaningful only against live Postgres + Cerbos, so it
+  # gets a dedicated job. The vitest harness builds its own schema and repoints at a NOBYPASSRLS
+  # role, so CI only supplies a superuser test DB, Cerbos, and Redis: src/testing/global-setup.ts
+  # migrates ONE template database per run and src/testing/setup.ts gives each test file its own
+  # database copied from it. (It used to re-run all 166 migrations per file, which was 1219s of a
+  # 22.6-minute workflow — see those two files for the measurements.)
   platform-nest:
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s
-          --health-timeout 5s --health-retries 10
+      # Postgres is NOT a service container — see the "Start Postgres" step below. It needs server
+      # command-line flags (`-c max_connections=...`), and `services:` has no way to pass any:
+      # `options` reaches `docker create`, never the image's own entrypoint arguments. Cerbos in
+      # this same job already runs as a step for the analogous reason (it needs a bind mount of the
+      # checked-out policies), so this is the established shape here rather than a new one.
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -127,6 +126,26 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: platform-nest/package-lock.json
+      # Durability is switched OFF and the connection ceiling raised. Both are specific to this
+      # throwaway CI database; neither is a setting to put anywhere near the real estate:
+      #   * fsync / full_page_writes / synchronous_commit off — the only cost of losing this data to
+      #     a crash is re-running the job. Since the suite stopped replaying migrations per file
+      #     (src/testing/global-setup.ts) its remaining I/O is ~292 `CREATE DATABASE ... TEMPLATE`
+      #     data-directory copies plus fixture writes, and those copies are fsync-bound.
+      #   * max_connections=200 — file parallelism (4 workers, several pg Pools each) plus the
+      #     per-file maintenance connections sit uncomfortably close to the default 100, and
+      #     exhausting it fails dozens of unrelated files in beforeAll at once, which reads like a
+      #     code regression rather than a capacity limit.
+      - name: Start Postgres (tuned for a disposable test cluster)
+        run: |
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres \
+            postgres:17-alpine \
+            -c max_connections=200 -c fsync=off -c full_page_writes=off \
+            -c synchronous_commit=off
+          for i in $(seq 1 30); do
+            docker exec postgres pg_isready -U postgres && break || sleep 1
+          done
       # Cerbos runs as a step (not a service) so it can mount the checked-out policy repo.
       - name: Start Cerbos
         run: |
@@ -138,6 +157,46 @@ jobs:
           done
       - run: npm ci
       - run: npm run typecheck
+      - run: npm test
+        env:
+          DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
+          CERBOS_URL: http://localhost:3592
+          REDIS_URL: redis://localhost:6379
+          # REDIS_URL_TEST is the name every suite in the repo actually reads (18 files:
+          # events/relay + consumer, collab, hr, service-assignments, the reports PDF-export
+          # and TR-29 suites, ...). REDIS_URL alone is read by nothing under test, so the
+          # redis service container above was running and being ignored, and the suites
+          # skipped themselves — silently, until TR-29's preflight turned that skip into a
+          # loud failure. Same URL, correct name; this is what un-skips them.
+          REDIS_URL_TEST: redis://localhost:6379
+
+  # ── STATIC GATES, LIFTED OUT OF platform-nest (2026-08-24) ───────────────────────────────────
+  # These were steps INSIDE the platform-nest job, sequenced ahead of its `npm test`. Every one of
+  # them is pure static analysis — YAML/JSON/source parsing, no Postgres, no Cerbos PDP, no Redis —
+  # so they were paying for that job's container startup and `npm ci` for no reason, and, worse:
+  #
+  #   a failing gate ABORTED the full suite. A red step ends the job, so `npm test` never ran and
+  #   the 20-minute suite produced NO signal at all. That is not hypothetical — on 2026-08-24 the
+  #   IAM chain-alignment gate went red (permission-catalog.json gained five `finance_*` kinds
+  #   whose `resource_finance_*.yaml` policies were not committed alongside it) and main went
+  #   several commits with zero full-suite result while looking merely "red".
+  #
+  # In their own job they still fail loudly and still fail FAST — faster, in fact, since they no
+  # longer queue behind `npm ci` + two containers — but they can no longer mask the suite. This
+  # also drops ~75s of duplicated vitest boots out of the critical path.
+  nest-static-gates:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform-nest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform-nest/package-lock.json
+      - run: npm ci
       # A1: grep/AST-lite guard on the withTenants() tenant-scoping choke-point — fails if any
       # file outside the sanctioned reconciler/allowlist passes a multi-tenant or computed
       # (non-single-element) tenant array. See scripts/lint-withtenants.mjs for the rationale.
@@ -163,47 +222,119 @@ jobs:
       # proprietary platform into the AGPL derivative-work conversation the whole design exists to
       # stay out of. Licensing boundary first, architecture second — not a reviewer's spot-check.
       - run: npm run lint:postiz-deps
-      # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate.
-      #
-      # A13 makes the committed corpus (platform-nest/src/mail/__fixtures__/inbound/) a permanent
-      # regression suite, not dev scaffolding: "a live provider will never conveniently send forged
-      # senders, replayed message-ids, oversized bodies, or hostile HTML on demand". `npm test` below
-      # already runs it as part of the whole suite, so this step is deliberately redundant — it exists
-      # so a corpus regression is legible as its own red step, fails BEFORE the 20-minute full suite,
-      # and survives any future narrowing of `npm test`. Staging APPENDS real captured Brevo samples
-      # here rather than replacing anything.
-      - name: Mail inbound adversarial corpus (A13 — permanent regression gate)
-        run: npm run test:mail-corpus
-        env:
-          DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
-          CERBOS_URL: http://localhost:3592
-          # Distinct prefix so this step's per-file databases cannot collide with the full-suite step
-          # that follows (src/testing/setup.ts derives the DB name from the test path, so two runs
-          # against one Postgres would otherwise drop each other's schema mid-run).
-          TEST_DB_PREFIX: mailcorpus
       # IAM-07b — promotes the wave-3 "Cerbos alignment audit" (previously a one-off manual run:
       # `cerbos compile` + a by-hand diff of the policy matrix against permission-catalog.json) into
-      # a permanent, named, CI-enforced gate. Both files are STATIC (no DB, no live Cerbos PDP — pure
-      # YAML/JSON parsing), so this step needs neither the Postgres nor the Cerbos container above;
-      # it is redundant with the `npm test` step that follows (same two files run there too) by the
-      # same deliberate design as the mail-corpus step immediately above: a chain-alignment
-      # regression is legible as its own red step, fails fast (before the full suite), and survives
-      # any future narrowing of `npm test`'s scope. See docs/superpowers/plans/2026-08-10-iam-07b-
-      # report.md for the chain map this closes (links 1 and the catalog<->groups link).
+      # a permanent, named, CI-enforced gate. Both files are STATIC (no DB, no live Cerbos PDP —
+      # pure YAML/JSON parsing), which is exactly why it belongs in this job. It stays redundant
+      # with the full suite (the same two files run there too) by deliberate design: a
+      # chain-alignment regression is legible as its own red step and survives any future narrowing
+      # of `npm test`'s scope. See docs/superpowers/plans/2026-08-10-iam-07b-report.md for the chain
+      # map this closes (links 1 and the catalog<->groups link).
       - name: IAM permission-contract chain alignment (IAM-07b — CI promotion of the wave-3 audit)
         run: npm run test:iam-chain-alignment
-      - run: npm test
+
+  # MAIL-13 / design A13 — the inbound adversarial corpus as a NAMED, FAIL-FAST gate.
+  #
+  # A13 makes the committed corpus (platform-nest/src/mail/__fixtures__/inbound/) a permanent
+  # regression suite, not dev scaffolding: "a live provider will never conveniently send forged
+  # senders, replayed message-ids, oversized bodies, or hostile HTML on demand". The full suite
+  # runs it too, so this is deliberately redundant — it exists so a corpus regression is legible as
+  # its own red result and survives any future narrowing of `npm test`. Staging APPENDS real
+  # captured Brevo samples here rather than replacing anything.
+  #
+  # It is its OWN JOB rather than a step in platform-nest (where it was until 2026-08-24) for the
+  # same reason as nest-static-gates above: as a step it aborted the full suite on failure, so a
+  # corpus regression cost us the other ~430 files' result as well. Unlike those gates it is
+  # genuinely DB-backed, so it cannot join them — it needs its own Postgres and Cerbos. Running in
+  # parallel with platform-nest, that costs no wall clock.
+  mail-corpus:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform-nest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform-nest/package-lock.json
+      - name: Start Postgres (tuned for a disposable test cluster — see platform-nest job)
+        run: |
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres \
+            postgres:17-alpine \
+            -c max_connections=200 -c fsync=off -c full_page_writes=off \
+            -c synchronous_commit=off
+          for i in $(seq 1 30); do
+            docker exec postgres pg_isready -U postgres && break || sleep 1
+          done
+      - name: Start Cerbos
+        run: |
+          docker run -d --name cerbos -p 3592:3592 \
+            -v "$PWD/cerbos:/config:ro" -v "$PWD/cerbos/policies:/policies:ro" \
+            ghcr.io/cerbos/cerbos:0.54.0 server --config=/config/cerbos.yaml
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
+          done
+      - run: npm ci
+      - run: npm run test:mail-corpus
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
           CERBOS_URL: http://localhost:3592
-          REDIS_URL: redis://localhost:6379
-          # REDIS_URL_TEST is the name every suite in the repo actually reads (18 files:
-          # events/relay + consumer, collab, hr, service-assignments, the reports PDF-export
-          # and TR-29 suites, ...). REDIS_URL alone is read by nothing under test, so the
-          # redis service container above was running and being ignored, and the suites
-          # skipped themselves — silently, until TR-29's preflight turned that skip into a
-          # loud failure. Same URL, correct name; this is what un-skips them.
-          REDIS_URL_TEST: redis://localhost:6379
+          # Distinct prefix so this job's template + per-file databases cannot collide with the
+          # full-suite job's (src/testing/db-names.ts derives every name from the test path and this
+          # prefix, so two runs against one Postgres would otherwise drop each other's schema
+          # mid-run). Vestigial now that the two run on separate runners with separate Postgres
+          # containers, but kept: it is what makes the pair safe if they are ever recombined, or run
+          # against a shared server locally.
+          TEST_DB_PREFIX: mailcorpus
+
+  # IAM-03b's assemblePrincipal() benchmark. vitest.config.ts excludes it from `npm test` because
+  # that run is now parallel, and a benchmark sharing a 4-vCPU runner with three sibling workers
+  # measures contention rather than the code — it blew the 20s testTimeout outright, and the p95s and
+  # EXPLAIN ANALYZE plans it prints for a human were inflated by whatever ran beside it.
+  #
+  # Its OWN job, not a step in platform-nest, for both reasons that shaped the two jobs above: a red
+  # benchmark must not abort the ~430-file suite (and vice versa), and on a dedicated runner it gets
+  # a genuinely idle machine — a strictly better place to measure than alongside the suite's own
+  # Postgres and Cerbos. Runs in parallel with everything else, so it costs no wall clock.
+  nest-perf:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform-nest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform-nest/package-lock.json
+      - name: Start Postgres (tuned for a disposable test cluster — see platform-nest job)
+        run: |
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_PASSWORD=postgres \
+            postgres:17-alpine \
+            -c max_connections=200 -c fsync=off -c full_page_writes=off \
+            -c synchronous_commit=off
+          for i in $(seq 1 30); do
+            docker exec postgres pg_isready -U postgres && break || sleep 1
+          done
+      - name: Start Cerbos
+        run: |
+          docker run -d --name cerbos -p 3592:3592 \
+            -v "$PWD/cerbos:/config:ro" -v "$PWD/cerbos/policies:/policies:ro" \
+            ghcr.io/cerbos/cerbos:0.54.0 server --config=/config/cerbos.yaml
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
+          done
+      - run: npm ci
+      - run: npm run test:perf
+        env:
+          DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
+          CERBOS_URL: http://localhost:3592
+          TEST_DB_PREFIX: perfrun
 
   # ai-gateway is the Go service (ai-gateway-go/); it replaced the retired Node gateway.
   gateway-go:
@@ -282,11 +413,42 @@ jobs:
           cache: npm
           cache-dependency-path: platform-ui/package-lock.json
       - run: npm ci
+      # Next's build cache. Keyed on the lockfile plus every source file, with a lockfile-only
+      # prefix fallback: an exact hit is rare (any source edit misses it, and a source edit is what
+      # triggers this workflow), but `restore-keys` means a MISS still restores the last build's
+      # cache, which is the case that matters — Next then reuses unchanged compilation and the build
+      # step drops from ~78s to well under half that. Never a correctness risk: the cache holds
+      # compiler output keyed by content, and `next build` revalidates it.
+      - name: Cache .next/cache
+        uses: actions/cache@v4
+        with:
+          path: platform-ui/.next/cache
+          key: next-${{ hashFiles('platform-ui/package-lock.json') }}-${{ hashFiles('platform-ui/src/**', 'platform-ui/*.ts', 'platform-ui/*.js', 'platform-ui/*.json') }}
+          restore-keys: |
+            next-${{ hashFiles('platform-ui/package-lock.json') }}-
+            next-
+      # `playwright install --with-deps` re-downloaded a ~120MB Chromium on every single run (26s).
+      # The version is pinned by the lockfile, so the download is byte-identical until Playwright
+      # itself is bumped — which is exactly what the key encodes. No restore-keys on purpose: a
+      # PARTIAL match here would restore a browser build that does not match the installed
+      # Playwright client, and the mismatch surfaces as an opaque launch failure rather than a
+      # cache miss. Better to re-download on a version bump.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('platform-ui/package-lock.json') }}
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
         env:
           DEMO_MODE: "1"
+      # Left running UNCONDITIONALLY, and still with `--with-deps`, even on a cache hit. The cache
+      # above covers the ~120MB browser download in ~/.cache/ms-playwright; it cannot cover the
+      # host apt libraries `--with-deps` installs, which live outside any cacheable path and would
+      # leave Chromium unable to launch if skipped. This command is idempotent and detects the
+      # already-present browser, so a cache hit turns it from "download + apt" into "apt" — the
+      # saving comes from the cache, not from branching on it.
       - name: Install Playwright browser (smoke only)
         run: npx playwright install chromium --with-deps
       - name: Smoke e2e against the built app

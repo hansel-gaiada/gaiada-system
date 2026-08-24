@@ -22,7 +22,11 @@ describe.skipIf(!REDIS)("event→n8n bridge loop (live Redis)", () => {
     };
   });
   afterAll(async () => {
-    await redis.flushall();
+    // flushDB, not flushALL. FLUSHALL wipes every logical Redis database, which since file
+    // parallelism was enabled (vitest.config.ts) means it would delete the fixtures of the suites
+    // running concurrently in the other workers — src/testing/per-worker-env.ts gives each worker
+    // its own database precisely so that cannot happen, and FLUSHALL would reach straight past it.
+    await redis.flushdb();
     await closeRedis();
   });
 
