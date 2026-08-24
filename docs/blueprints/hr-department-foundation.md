@@ -107,7 +107,12 @@ implemented — the engine refuses rather than producing a plausible wrong figur
 
 ### 3.3 · Still open after HR-FULL
 
-- **LMS / learning — COMMITTED, DEFERRED (owner, 2026-08-24).** The owner asked for a learning
+- **LMS / learning — SCOPED (owner, 2026-08-24). Design now lives in its own blueprint:
+  [`lms-foundation.md`](./lms-foundation.md).** It outgrew a bullet here: the owner scoped it for ALL
+  eight departments and all levels (operational AND management), with a mandatory general track and
+  an executable-lab tier for Web Dev. It is no longer an HR sub-feature.
+
+  Original note, kept because the seams it names are still the right ones: The owner asked for a learning
   management surface inside HR: teach employees, and refresh existing staff with newer knowledge.
   **Deliberately sequenced LAST**, after the rest of the HR work is closed out — recorded here so it
   is a scheduled commitment rather than a remembered intention.
