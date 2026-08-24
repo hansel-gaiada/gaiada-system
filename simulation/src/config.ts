@@ -49,6 +49,10 @@ export const config = {
   runnerUrl: optional("SIM_RUNNER_URL", "http://agent-runner:3006"),
   hubUrl: optional("SIM_HUB_URL", "http://mcp-hub:3003"),
   n8nUrl: optional("SIM_N8N_URL", "http://n8n:5678"),
+  botUrl: optional("SIM_BOT_URL", "http://bot:3001"),
+  /** The real WAHA container, consulted ONLY to ask whether its session could actually deliver a
+   *  message. Never used to send. */
+  wahaUrl: optional("SIM_WAHA_URL", "http://waha:3000"),
   /** The PUBLIC origin, used only for the OIDC token exchange — Keycloak issues tokens against the
    *  public issuer, so minting one over the internal alias would produce an issuer the platform
    *  rejects. */
@@ -92,6 +96,22 @@ export const config = {
   /** Belt-and-braces guard against ever pointing this at something that is not a dev estate.
    *  Set SIM_ALLOW_TENANT to override deliberately. */
   dryRun: optional("SIM_DRY_RUN", "0") === "1",
+
+  /** Port the fake external boundary listens on, inside the container. */
+  fakeExternalsPort: intEnv("SIM_FAKE_EXTERNALS_PORT", 4599),
+
+  /** The bot's webhook shared secret, inherited from the estate's env. The webhook is FAIL-CLOSED
+   *  without it — every event is rejected 401. Optional here so the harness still starts when it is
+   *  absent; the inbound scenario then reports why it skipped rather than 401-ing in a loop. */
+  botWebhookSecret: optional("WEBHOOK_SECRET", ""),
+
+  /** Inject simulated WhatsApp messages at the bot?
+   *
+   *  Default on, but the scenario ALSO refuses at runtime unless the real WAHA session is provably
+   *  unable to deliver (see `whatsappInbound`). Two independent gates, because processing an inbound
+   *  message can make the bot attempt an outbound REPLY, and this estate runs a live WAHA container.
+   *  A flag on its own would be one typo away from messaging a real handset. */
+  inboundWhatsapp: optional("SIM_INBOUND_WHATSAPP", "1") === "1",
 } as const;
 
 export type Config = typeof config;

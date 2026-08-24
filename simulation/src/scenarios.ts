@@ -12,6 +12,7 @@ import { config } from "./config.js";
 import { call } from "./http.js";
 import { logCreated, logFinding, type ActorPath } from "./log.js";
 import { actorFor, doersIn, leadOf, pick, staff, staffIn, placeholders, type Person } from "./roster.js";
+import { wahaInboundMessage, wahaSessionStatus } from "./fake-externals.js";
 
 const T = config.tenantId;
 
@@ -450,6 +451,123 @@ export async function approvalTouch(ctx: ScenarioContext): Promise<ScenarioResul
     expect: [200, 403, 404],
   });
   return { name: "approval:queue", ran: true, note: `read as ${approver.name} (retained placeholder actor)` };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// 6. The world calls in — a WhatsApp message arrives at the bot.
+//
+// This is the inbound half of the fake boundary, and the more valuable half: inbound is where the
+// estate does its own parsing, durable persistence and dispatch. The payload is WAHA's real shape,
+// read off `wa-chat-bot/src/waha.ts::normalize()` rather than invented — a plausible-but-wrong
+// envelope would be silently dropped by `normalizeWahaEvent` and the scenario would report a
+// cheerful 200 while the bot ignored every message.
+//
+// ⚠ THE SAFETY GATE, AND WHY IT IS A RUNTIME CHECK RATHER THAN A FLAG.
+// Processing an inbound message can make the bot attempt an outbound REPLY through the REAL WAHA
+// container on this box. So before injecting anything, this asks WAHA what its session status is,
+// and proceeds ONLY if the session provably cannot deliver (anything other than WORKING). If the
+// session is live, the scenario skips and says so. A config flag alone is one typo away from
+// messaging a stranger's handset; a flag plus a live check is not.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+let wahaDeliveryPossible: boolean | null = null;
+
+async function sessionCouldDeliver(): Promise<boolean> {
+  if (wahaDeliveryPossible !== null) return wahaDeliveryPossible;
+
+  // ASK THE BOT, NOT WAHA. Two reasons, and the second is the important one:
+  //   1. WAHA's `/api/sessions` requires an API key (it answers 401 without one), and the harness
+  //      has no business holding another credential just to ask a yes/no safety question.
+  //   2. The BOT is the component that would actually send the reply. Its own `/health` reports the
+  //      session state it would use, so it is the more truthful source for "could a reply leave
+  //      this estate" — WAHA being reachable says nothing about whether the bot is wired to it.
+  //
+  // Anything other than a definite non-delivering state FAILS CLOSED. "I could not check" is not
+  // "it is safe": the cost of being wrong one way is a skipped scenario, and the other way is a
+  // real message to a real person.
+  try {
+    const res = await fetch(`${config.botUrl.replace(/\/$/, "")}/health`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) {
+      wahaDeliveryPossible = true;
+      return true;
+    }
+    const body = (await res.json()) as { session?: string };
+    const session = String(body.session ?? "").toUpperCase();
+    // The states in which WhatsApp cannot deliver. Deliberately an ALLOW-LIST of safe states rather
+    // than a deny-list of unsafe ones: a WAHA release that adds a new status must default to unsafe.
+    const cannotDeliver = new Set(["STOPPED", "FAILED", "SCAN_QR_CODE", "STARTING", ""]);
+    wahaDeliveryPossible = !cannotDeliver.has(session);
+  } catch {
+    wahaDeliveryPossible = true;
+  }
+  return wahaDeliveryPossible;
+}
+
+export async function whatsappInbound(ctx: ScenarioContext): Promise<ScenarioResult> {
+  const name = "external:whatsapp-inbound";
+  if (!config.inboundWhatsapp) return { name, ran: false, note: "disabled by SIM_INBOUND_WHATSAPP=0" };
+  if (!config.botWebhookSecret) {
+    return { name, ran: false, note: "no bot webhook secret in env — the webhook is fail-closed and would 401" };
+  }
+  if (await sessionCouldDeliver()) {
+    logFinding({
+      key: "inbound-skipped-live-waha",
+      severity: "info",
+      title: "WhatsApp inbound injection skipped — the real session could deliver",
+      detail:
+        "The WAHA session is WORKING (or its state could not be read, which fails closed). Injecting an inbound message could make the bot reply to a real handset, so the scenario refused. This is the gate working, not a defect.",
+      evidence: { wahaUrl: config.wahaUrl },
+    });
+    return { name, ran: false, note: "real WAHA session could deliver — refusing to inject" };
+  }
+
+  const who = pick(staff, ctx.tick);
+  if (!who || !who.whatsapp) return { name, ran: false, note: "no drivable staff phone" };
+
+  const messages = [
+    "Morning — any update on the villa landing page?",
+    "Client just called about the September promo, can someone look?",
+    "The booking form is throwing an error on mobile.",
+    "Sending the new brand assets over shortly.",
+  ];
+
+  const envelope = wahaInboundMessage({
+    fromPhone: who.whatsapp,
+    senderName: `${who.name} ${config.marker}`,
+    text: `${pick(messages, ctx.tick)} ${config.marker}`,
+  });
+
+  // The bot authenticates the hook with `?token=<secret>`, matching how WAHA is configured to call
+  // it. Sent as a query parameter rather than a header because that is the shape the real caller
+  // uses, and testing a different shape would prove nothing about the real path.
+  const res = await call({
+    method: "POST",
+    base: config.botUrl,
+    path: `/webhook?token=${encodeURIComponent(config.botWebhookSecret)}`,
+    body: envelope,
+    actor: { name: who.name, userId: who.userId, email: who.email, department: who.department, path: "external" },
+    scenario: name,
+    step: "inbound-message",
+    // 200 = accepted. 503 = the bot could not make the event durable, which it returns deliberately
+    // so WAHA retries — real backpressure, not a defect.
+    expect: [200, 503],
+  });
+
+  // A session lifecycle event too: the disconnect case is the one operators care about most, and it
+  // was silently dropped by the bot until recently.
+  if (ctx.tick % 7 === 0) {
+    await call({
+      method: "POST",
+      base: config.botUrl,
+      path: `/webhook?token=${encodeURIComponent(config.botWebhookSecret)}`,
+      body: wahaSessionStatus("FAILED"),
+      actor: { name: "waha", path: "external" },
+      scenario: name,
+      step: "inbound-session-failed",
+      expect: [200, 503],
+    });
+  }
+
+  return { name, ran: true, note: `inbound as ${who.name} (${res.status})` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

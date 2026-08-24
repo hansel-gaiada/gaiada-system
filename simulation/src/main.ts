@@ -21,6 +21,7 @@ import { config } from "./config.js";
 import { initCorpus, writeSummary, logFinding, corpusPaths } from "./log.js";
 import { departments, rosterSummary, staff, type Person } from "./roster.js";
 import { tokenFor, humanPathLive } from "./token.js";
+import { startFakeExternals } from "./fake-externals.js";
 import {
   agentWork,
   approvalTouch,
@@ -28,6 +29,7 @@ import {
   deliveryChain,
   edgeProbes,
   followAgentRuns,
+  whatsappInbound,
   type ScenarioContext,
   type ScenarioResult,
 } from "./scenarios.js";
@@ -101,6 +103,12 @@ async function main(): Promise<void> {
     });
   }
 
+  // The fake external boundary. Started BEFORE any scenario runs so an outbound call can never
+  // race a not-yet-listening stub and get recorded as a transport failure that was really a startup
+  // ordering bug in the harness.
+  const externals = await startFakeExternals(config.fakeExternalsPort);
+  console.log("[sim] fake external boundary listening on", externals.port, "(nothing it receives leaves this container)");
+
   let tick = 0;
   const started = Date.now();
 
@@ -145,6 +153,13 @@ async function main(): Promise<void> {
       (r.ran ? ran : skipped).push(r.name);
     }
 
+    // ── Strand E: the world calls in. Gated twice (config + a live WAHA session check) before it
+    //    injects anything, because an inbound message can provoke a real outbound reply.
+    if (tick % 2 === 0) {
+      const r = await guard("external:whatsapp-inbound", () => whatsappInbound(ctx));
+      (r.ran ? ran : skipped).push(r.name + (r.note ? " (" + r.note + ")" : ""));
+    }
+
     writeSummary({
       tick,
       elapsedSeconds: Math.round((Date.now() - started) / 1000),
@@ -169,6 +184,7 @@ async function main(): Promise<void> {
     finishedAt: new Date().toISOString(),
     stopped: true,
   });
+  await externals.close();
   console.log("[sim] stopped after", tick, "ticks. Corpus at", paths.runDir);
 }
 
