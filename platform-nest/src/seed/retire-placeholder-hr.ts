@@ -37,100 +37,148 @@
 // for an agent principal. Out of scope here — this script does not touch `users` — but it is why
 // the agent was indistinguishable from staff in the first place.
 //
-// ── SCOPED TO THE AGENCY ON PURPOSE, AND THERE IS A KNOWN RESIDUE ─────────────────────────────────
-// This only ever looks at `Gaia Digital Agency`, so it does NOT clean the other companies. Checked
-// after the live run: `Viceroy Bali` still holds three placeholder HR files —
-// `exec@gaiada.test`, `owner@gaiada-creative.test`, and `gm@sanur-resort.test` (a resort GM persona
-// that was never part of the agency roster at all) — beside one real `@gaiada.com` employee.
+// ── EVERY COMPANY, NOT JUST THE AGENCY (owner decision 2026-08-24) ────────────────────────────────
+// This was agency-only, and the residue was real: `Viceroy Bali` held three placeholder HR files —
+// `exec@gaiada.test`, `owner@gaiada-creative.test`, and `gm@sanur-resort.test`, a resort GM persona
+// that was never in the agency roster at all — beside one real `@gaiada.com` employee.
 //
-// Deliberately left alone rather than swept in. The owner's instruction was to move the retired
-// people's work onto "the current employee we have", and there IS no Viceroy roster: deleting these
-// would leave that company with one employee and no GM, removing data with nothing to replace it.
-// Widening this script's tenant scope would do that silently on the next run, which is why the
-// residue is documented here instead of the scope being quietly broadened.
+// I left them, on the grounds that deleting them would strip a company to one employee and no GM with
+// nothing to replace them. The owner resolved it: all of this is mock, none of it is operational data,
+// and an ERP listing invented employees is the actual problem. Scope is now ALL companies.
+//
+// ⚠ THE REAL-STAFF TEST HAD TO CHANGE WITH IT, and this is the part to read before touching this
+// file. `REAL_EMAILS` comes from the AGENCY roster, so a multi-company sweep measures every company
+// against the agency's staff list. That is safe only while no other company has a roster of its own.
+// The moment one does — a Viceroy hire, a Bali Catering hire — their HR file would look like a
+// placeholder here. The domain half of the test is what stops that being silent today, and a
+// per-company roster is what has to replace it then.
 //
 // ⚠ DRY RUN BY DEFAULT. This deletes rows from an HR table on a live estate; `--confirm` is required.
 import { withGlobal, withTenants, closePool } from "../db";
 import { STAFF } from "./roster";
 
-const AGENCY_NAME = "Gaia Digital Agency";
-
-/** Real staff are the roster's `@gaiada.com` addresses. Everything else in `employees` for this
- *  tenant is a placeholder or a seed actor — but the set is computed from the ROSTER rather than from
- *  a domain check alone, so a future real hire on another domain is not silently deleted. */
+/** Real staff are the roster's `@gaiada.com` addresses. Everything else in `employees` is a
+ *  placeholder or a seed actor — but the set is computed from the ROSTER rather than from a domain
+ *  check alone, so a future real hire on another domain is not silently deleted. */
 const REAL_EMAILS = new Set(STAFF.filter((s) => s.level !== "fixture").map((s) => s.email));
+const REAL_DOMAIN = "@gaiada.com";
+
+/** A row is a candidate if it is not a known person, OR if it is not a PERSON at all.
+ *
+ *  Two independent tests, and the second one exists because the first one broke something. Adding the
+ *  domain clause (so a future `@viceroybali.com` hire is not deleted by an agency-roster check) also
+ *  spares anything sitting on `@gaiada.com` — including `zedano@gaiada.com`, the Hermes orchestrator
+ *  whose HR file is the whole reason this script's candidate count was 18 instead of 17. The domain
+ *  clause would have quietly restored that bug.
+ *
+ *  So non-person principals are caught on `users.kind` instead, which is what PK-01 built the
+ *  discriminator FOR. That is strictly better than the email heuristic it replaces: an HR file for a
+ *  bot, an n8n workflow or a client contact is wrong regardless of its address, and `kind` says so
+ *  without guessing from a name or a job title. */
+function isPlaceholder(workEmail: string | null, principalKind: string | null): boolean {
+  if (principalKind !== null && principalKind !== "employee") return true;
+  if (!workEmail) return true; // an HR file with no work email is not a person we can account for
+  return !REAL_EMAILS.has(workEmail) && !workEmail.endsWith(REAL_DOMAIN);
+}
 
 export interface RetireResult {
-  tenantId: string;
+  /** Per company, so a partial sweep is visible instead of hidden inside a total. */
+  perCompany: { tenantId: string; company: string; candidates: { email: string; name: string }[]; deleted: number }[];
   candidates: { email: string; name: string }[];
   deleted: number;
   dryRun: boolean;
 }
 
 export async function retirePlaceholderHr(opts: { dryRun: boolean }): Promise<RetireResult> {
-  const t = await withGlobal((c) =>
-    c.query<{ id: string }>(`SELECT id FROM companies WHERE name = $1 AND deleted_at IS NULL`, [AGENCY_NAME]),
+  const companies = await withGlobal((c) =>
+    c.query<{ id: string; name: string }>(`SELECT id, name FROM companies WHERE deleted_at IS NULL ORDER BY name`),
   );
-  if (!t.rows[0]) throw new Error(`retirePlaceholderHr: no company named "${AGENCY_NAME}"`);
-  const tenantId = t.rows[0].id;
+  if (companies.rows.length === 0) {
+    throw new Error("retirePlaceholderHr: no companies — refusing to report a clean sweep on no data.");
+  }
 
-  // ⚠ `employees` is FORCE RLS *and* module-gated on `hr`. Without `{ modules: ["hr"] }` this reads
-  // ZERO rows and reports "nothing to do" — which for a cleanup script is the most dangerous possible
-  // false negative, because "0 candidates" looks like success.
-  const rows = await withTenants(
-    [tenantId],
-    (c) =>
-      c.query<{ id: string; work_email: string | null; display_name: string }>(
-        `SELECT id, work_email, display_name FROM employees WHERE tenant_id = $1 ORDER BY work_email`,
-        [tenantId],
-      ),
-    { modules: ["hr"] },
-  );
+  const result: RetireResult = { perCompany: [], candidates: [], deleted: 0, dryRun: opts.dryRun };
+  let rowsReadAcrossEstate = 0;
 
-  if (rows.rows.length === 0) {
+  for (const co of companies.rows) {
+    // ⚠ `employees` is FORCE RLS *and* module-gated on `hr`. Without `{ modules: ["hr"] }` this reads
+    // ZERO rows and reports "nothing to do" — which for a cleanup script is the most dangerous
+    // possible false negative, because "0 candidates" looks exactly like success.
+    const rows = await withTenants(
+      [co.id],
+      (c) =>
+        c.query<{ id: string; work_email: string | null; display_name: string; principal_kind: string | null }>(
+          // LEFT JOIN, not an inner one: an `employees` row whose `user_id` is NULL or dangling is
+          // itself a placeholder, and an inner join would drop it from the read entirely — leaving a
+          // ghost behind while reporting a clean sweep.
+          `SELECT e.id, e.work_email, e.display_name, u.kind AS principal_kind
+             FROM employees e
+             LEFT JOIN users u ON u.id = e.user_id
+            WHERE e.tenant_id = $1
+            ORDER BY e.work_email`,
+          [co.id],
+        ),
+      { modules: ["hr"] },
+    );
+    rowsReadAcrossEstate += rows.rows.length;
+
+    // ⚠ THE refuse-on-empty GUARD MOVED, and dropping it per company was necessary rather than
+    // careless. A company with no HR files at all is now an ordinary case — `D & A Syrowatka` has
+    // none — so throwing here would abort the sweep on correct data. The guard now applies to the
+    // WHOLE RUN (below): zero rows across every company is what a missing module scope looks like,
+    // whereas zero rows in one company is just a company with no employees.
+    const candidates = rows.rows.filter((r) => isPlaceholder(r.work_email, r.principal_kind));
+    const entry = {
+      tenantId: co.id,
+      company: co.name,
+      candidates: candidates.map((r) => ({ email: r.work_email ?? "(no work_email)", name: r.display_name })),
+      deleted: 0,
+    };
+
+    if (!opts.dryRun && candidates.length > 0) {
+      entry.deleted = await withTenants(
+        [co.id],
+        async (c) => {
+          const r = await c.query(`DELETE FROM employees WHERE tenant_id = $1 AND id = ANY($2::uuid[])`, [
+            co.id,
+            candidates.map((x) => x.id),
+          ]);
+          return r.rowCount ?? 0;
+        },
+        { modules: ["hr"] },
+      );
+      // A silent partial delete would leave ghosts behind while reporting success.
+      if (entry.deleted !== candidates.length) {
+        throw new Error(
+          `retirePlaceholderHr: ${co.name} — expected to delete ${candidates.length} row(s) but deleted ` +
+            `${entry.deleted}. Refusing to report a clean sweep.`,
+        );
+      }
+    }
+
+    result.perCompany.push(entry);
+    result.candidates.push(...entry.candidates);
+    result.deleted += entry.deleted;
+  }
+
+  if (rowsReadAcrossEstate === 0) {
     throw new Error(
-      "retirePlaceholderHr: read ZERO employees rows. That is almost certainly a missing module scope " +
-        "rather than an empty table — refusing to report a clean sweep on no data.",
+      "retirePlaceholderHr: read ZERO employees rows across EVERY company. That is almost certainly a " +
+        "missing module scope rather than an estate with no employees — refusing to report a clean sweep.",
     );
   }
 
-  const candidates = rows.rows.filter((r) => !r.work_email || !REAL_EMAILS.has(r.work_email));
-  const result: RetireResult = {
-    tenantId,
-    candidates: candidates.map((r) => ({ email: r.work_email ?? "(no work_email)", name: r.display_name })),
-    deleted: 0,
-    dryRun: opts.dryRun,
-  };
-  if (opts.dryRun || candidates.length === 0) return result;
-
-  result.deleted = await withTenants(
-    [tenantId],
-    async (c) => {
-      const r = await c.query(`DELETE FROM employees WHERE tenant_id = $1 AND id = ANY($2::uuid[])`, [
-        tenantId,
-        candidates.map((x) => x.id),
-      ]);
-      return r.rowCount ?? 0;
-    },
-    { modules: ["hr"] },
-  );
-
-  // A silent partial delete would leave ghosts behind while reporting success.
-  if (result.deleted !== candidates.length) {
-    throw new Error(
-      `retirePlaceholderHr: expected to delete ${candidates.length} row(s) but deleted ${result.deleted}. ` +
-        `Refusing to report a clean sweep.`,
-    );
-  }
   return result;
 }
 
 async function main(): Promise<void> {
   const dryRun = !process.argv.includes("--confirm");
   const r = await retirePlaceholderHr({ dryRun });
-  console.log(`tenant: ${r.tenantId}`);
   console.log(`${dryRun ? "would remove" : "removed"}: ${r.candidates.length} placeholder HR file(s)`);
-  for (const c of r.candidates) console.log(`  - ${c.email}  (${c.name})`);
+  for (const co of r.perCompany) {
+    console.log(`  ${co.company} — ${co.candidates.length} candidate(s)`);
+    for (const c of co.candidates) console.log(`    - ${c.email}  (${c.name})`);
+  }
   if (dryRun) {
     console.log("\nDRY RUN — this deletes rows from an HR table on a live estate.");
     console.log("Re-run with:  npm run seed:retire-placeholder-hr -- --confirm");

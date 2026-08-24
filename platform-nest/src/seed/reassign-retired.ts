@@ -37,7 +37,7 @@ import { withGlobal, withTenants, closePool } from "../db";
 
 /** Retired identity -> the real person doing that job now. Mapped BY FUNCTION (owner decision), from
  *  the roster's own titles, so the work lands with whoever would actually pick it up today. */
-const REASSIGN: Record<string, string> = {
+export const REASSIGN: Record<string, string> = {
   // Leadership / client-facing
   "owner@gaiada-creative.test": "edward@gaiada.com", // Ayu, Managing Director -> GM
   "approver@gaiada-creative.test": "edward@gaiada.com", // Eka, Client Lead -> GM
@@ -63,6 +63,14 @@ const REASSIGN: Record<string, string> = {
   // Social
   "made.ayu@gaia.test": "radit@gaiada.com",
   "komang.dewi@gaia.test": "radit@gaiada.com",
+  // Viceroy Bali — ADDED 2026-08-24 after a full census showed 17 rows nobody had mapped. This map
+  // was written for the AGENCY roster, so the resort's own seeded GM persona was never in it and its
+  // work (13 work_activity rows, a project, a task assignment, an HR file) stayed with a persona
+  // while every report said the cleanup had succeeded. A census across every users-FK column found
+  // it; the earlier per-mapping reports could not, because they only ever counted rows for identities
+  // already in this map. Edward is the correct target rather than a convenience: he is the GM and
+  // already holds a Viceroy membership, so nothing here grants access that did not exist.
+  "gm@sanur-resort.test": "edward@gaiada.com",
 };
 
 /** Identity/authorization columns. Never reassigned — see category 3 in the header. */
