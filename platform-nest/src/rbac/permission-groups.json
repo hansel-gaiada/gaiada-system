@@ -7,8 +7,8 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 94,
-      "grantablePermissionsInCatalog": 286,
-      "permissionsCoveredByGroups": 264,
+      "grantablePermissionsInCatalog": 287,
+      "permissionsCoveredByGroups": 265,
       "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 54
@@ -475,11 +475,12 @@
       "key": "integrations_manage",
       "name": "Manage Integrations",
       "domain": "core",
-      "description": "Create, edit, or delete third-party integration connections (OAuth/API credentials).",
+      "description": "Create, edit, or delete third-party integration connections (OAuth/API credentials), and administer the company's connections including other people's and company-owned rows (manage, IAM-14c).",
       "permissions": [
         "core.integration_connection.create",
         "core.integration_connection.update",
-        "core.integration_connection.delete"
+        "core.integration_connection.delete",
+        "core.integration_connection.manage"
       ],
       "sensitive": true
     },

@@ -51,6 +51,30 @@ export function cerbosOwnerId(ownerKind: string, ownerId: string): string {
   return ownerKind === "user" ? ownerId : "";
 }
 
+/**
+ * IAM-14c — which ACTION to authorize for a given target row.
+ *
+ * The four per-row actions (`read`/`create`/`update`/`delete`) are the SELF tier: member and viewer
+ * hold them, gated on `owns`. Reaching anyone else's row, or a company-owned one, is a different
+ * capability and now has its own key — `core.integration_connection.manage`.
+ *
+ * ⚠ THIS IS THE BEHAVIOURAL HALF OF THE KEY SPLIT, AND IT IS WHY THE SPLIT WORKS. Without it the
+ * new `manage` action would exist in the policy and catalog and never be checked, so `owner` — which
+ * is permission-native and therefore reaches this kind only through the perm arm — would still be
+ * unable to touch a company connection. Adding the key without changing the caller would have been
+ * dead config that looked like a fix.
+ *
+ * company_admin/manager are unaffected: they hold `manage` on the role arm. member/viewer stay
+ * denied on other people's rows exactly as before, because they hold no `manage`.
+ *
+ * `authCerbosOwnerId` is what the caller already passes to Cerbos: the row's owner for a user row,
+ * `""` for a company row or someone else's. So "is this mine" is `=== me`, and `me` being empty
+ * (an unauthenticated/service principal) can never accidentally match `""`.
+ */
+export function connectionAction(perRowAction: string, authCerbosOwnerId: string, me: string): string {
+  return me !== "" && authCerbosOwnerId === me ? perRowAction : "manage";
+}
+
 @Controller("api")
 @UseGuards(AuthGuard)
 export class IntegrationsController {
@@ -84,7 +108,11 @@ export class IntegrationsController {
     } else {
       throw new BadRequestException("owner must be me | company | user:<id>");
     }
-    await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: authOwnerId }, "read");
+    await authorize(
+      req.principal,
+      { kind: "integration_connection", tenantId, ownerId: authOwnerId },
+      connectionAction("read", authOwnerId, me),
+    );
     return listConnections(tenantId, { ...filter, provider });
   }
 
@@ -107,10 +135,12 @@ export class IntegrationsController {
       // point a company row's owner elsewhere.
       ownerId = tenantId;
     }
+    const createAuthOwner = cerbosOwnerId(ownerKind, ownerId);
     await authorize(
       req.principal,
-      { kind: "integration_connection", tenantId, ownerId: cerbosOwnerId(ownerKind, ownerId) },
-      "create",
+      { kind: "integration_connection", tenantId, ownerId: createAuthOwner },
+      // Creating a COMPANY connection is a company-tier act (`manage`); creating your own is `create`.
+      connectionAction("create", createAuthOwner, me),
     );
     return createConnection(tenantId, {
       ownerKind, ownerId, provider: body.provider,
@@ -132,10 +162,11 @@ export class IntegrationsController {
         `status must be one of ${[...CLIENT_SETTABLE_STATUSES].join(",")} (linked is set by the token path; use DELETE to revoke)`,
       );
     }
+    const patchAuthOwner = cerbosOwnerId(row.owner_kind, row.owner_id);
     await authorize(
       req.principal,
-      { kind: "integration_connection", id, tenantId, ownerId: cerbosOwnerId(row.owner_kind, row.owner_id) },
-      "update",
+      { kind: "integration_connection", id, tenantId, ownerId: patchAuthOwner },
+      connectionAction("update", patchAuthOwner, req.principal.userId ?? ""),
     );
     return patchConnection(tenantId, id, {
       externalAccount: body.externalAccount, meta: body.meta, status: body.status, scopes: body.scopes,
@@ -145,10 +176,11 @@ export class IntegrationsController {
   @Delete(":tenantId/integrations/connections/:id")
   async revoke(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
     const row = await this.loadOrThrow(tenantId, id);
+    const revokeAuthOwner = cerbosOwnerId(row.owner_kind, row.owner_id);
     await authorize(
       req.principal,
-      { kind: "integration_connection", id, tenantId, ownerId: cerbosOwnerId(row.owner_kind, row.owner_id) },
-      "delete",
+      { kind: "integration_connection", id, tenantId, ownerId: revokeAuthOwner },
+      connectionAction("delete", revokeAuthOwner, req.principal.userId ?? ""),
     );
     return revokeConnection(tenantId, id);
   }

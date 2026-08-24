@@ -30,6 +30,32 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════ IAM-14c (2026-08-23) — `manage`: the company tier as a NAMED action ══════════
+    # The four actions above stay EXACTLY as they were — this is additive, and deliberately so: a
+    # company_admin acting on their OWN row still authorizes `read`/`update`/etc. and still matches
+    # the rule above. Nothing that worked stops working.
+    #
+    # What `manage` adds is a name for "administer ANY connection in this company", which the four
+    # actions previously expressed only by NOT carrying `owns`. The controllers now authorize
+    # `manage` when the target row is not the caller's own, which:
+    #   · leaves company_admin/manager allowed (they hold `manage` on the role arm, below),
+    #   · leaves member/viewer denied, exactly as before — they hold no `manage`,
+    #   · and finally lets a PERMISSION-NATIVE role (`owner`) reach the company tier, which was the
+    #     one real coverage gap left after IAM-14b did the self tier.
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The permission arm for `manage`. Safe to mirror UNCONDITIONALLY (no `owns`) precisely because
+    # the key is new: member and viewer do not hold it, so there is no Pattern-B holder to over-grant.
+    # That is the whole reason the split was worth an extra action rather than a wider mirror of the
+    # existing four — see derived_roles.yaml's IAM-14c block.
+    - actions: ["manage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_integration_connection_manage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # Self-service: a member (or higher, incl. viewer with a live grant) fully manages their OWN
     # user-owned connection. Guarded by `owns` so it fails CLOSED if a handler omits ownerId — the
     # rule simply doesn't match rather than leaking. viewer included so a read-only staffer can still

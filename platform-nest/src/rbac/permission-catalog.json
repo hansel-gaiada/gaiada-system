@@ -13,10 +13,10 @@
     "sensitive": "assessed 2026-08-10 for step-up auth + D-10 approval routing; touches HR/people data, finance, client commitments, deploys/provisioning, credentials/identity, or cross-company access. Owner review pending — tighten additively, loosen only by owner decision.",
     "counts": {
       "cerbosKinds": 78,
-      "concretePairs": 301,
-      "grantable": 286,
+      "concretePairs": 302,
+      "grantable": 287,
       "relationship": 15,
-      "sensitive": 108
+      "sensitive": 109
     },
     "countsNote": "DERIVED from `permissions` below — re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently — the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 — two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged — no new Cerbos kind, no new relationship-class permission. P2-02 (2026-08-13): +18 grantable (4 new Cerbos kinds — role_grant/position/employee/it_account, design §6.2; role_grant/position are role-arm ONLY, permanently-unwired perm mirror per IAM-04c §9 option C; employee/it_account are role-arm only THIS wave, deferred pending their handlers). Kind count 68 -> 72 (+4). Relationship count (15) unchanged — none of the 18 new keys are relationship-class. MON-10b (2026-08-19): +14 grantable across 5 new Cerbos kinds (monitor/monitor_incident/monitor_maintenance/monitor_channel/status_page), 72 -> 77. SM-76 (2026-08-23, docs/plans/2026-08-23-seo-audit-capability.md §6): +3 grantable (search.finding.triage, search.finding.accept_risk [sensitive], search.property.attest [sensitive]) — 1 new Cerbos kind (`resource_search_finding`), 77 -> 78; `search.property.attest` is a new action on the EXISTING `resource_search_property` kind, so the kind count moves by only +1 though 2 of the 3 new keys are on the new kind. Sensitive count 106 -> 108 (+2: accept_risk and attest are both the CONCEALING/accountability direction, design §6).",
     "uiGrantable": {
@@ -1020,6 +1020,18 @@
       "description": "Edit third-party integration connections (OAuth/API).",
       "cerbosKind": "integration_connection",
       "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.integration_connection.manage",
+      "domain": "core",
+      "resource": "integration_connection",
+      "action": "manage",
+      "description": "Administer ANY of the company's integration connections — company-owned rows and other users' rows. Distinct from the four per-row actions, which are self-scoped for member/viewer.",
+      "cerbosKind": "integration_connection",
+      "cerbosAction": "manage",
       "class": "grantable",
       "sensitive": true,
       "uiGrantable": true

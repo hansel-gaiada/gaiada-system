@@ -17,7 +17,7 @@ import {
 import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../auth/guards";
 import { authorize } from "./http";
-import { cerbosOwnerId } from "./integrations.controller";
+import { cerbosOwnerId, connectionAction } from "./integrations.controller";
 import { CLIENT_SETTABLE_STATUSES, getConnectionRow, type ConnectionDbRow } from "./integrations.service";
 import { getPersonSeat, listTeamSeats, mapSeat, patchSeat, unmapSeat } from "./claude-seats.service";
 
@@ -45,21 +45,23 @@ export class ClaudeSeatsController {
     const sel = owner ?? "me";
     if (sel === "me") {
       if (!me) throw new BadRequestException("owner=me requires an authenticated user");
-      await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: me }, "read");
+      // Own seat: the SELF tier, so the per-row action still applies (IAM-14c).
+      await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: me }, connectionAction("read", me, me));
       const seat = await getPersonSeat(tenantId, me);
       return seat ? [seat] : [];
     }
     if (sel === "team") {
       // Company-wide roster (every member's seat) -> ownerId="" -> company.manage tier only, same
       // gate as the generic API's owner=company case.
-      await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: "" }, "read");
+      // IAM-14c: the company-wide roster is the company tier, which now has its own key.
+      await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: "" }, connectionAction("read", "", me));
       return listTeamSeats(tenantId);
     }
     if (sel.startsWith("user:")) {
       const uid = sel.slice("user:".length);
       if (!uid) throw new BadRequestException("owner=user:<id> requires an id");
       const authOwnerId = uid === me ? me : "";
-      await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: authOwnerId }, "read");
+      await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: authOwnerId }, connectionAction("read", authOwnerId, me));
       const seat = await getPersonSeat(tenantId, uid);
       return seat ? [seat] : [];
     }
@@ -75,7 +77,7 @@ export class ClaudeSeatsController {
     if (!body?.codeSeatEmail) throw new BadRequestException("codeSeatEmail is required");
     // Mapping your own seat is self-service; mapping someone else's is company.manage (admin mapping).
     const authOwnerId = personId === me ? me : "";
-    await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: authOwnerId }, "create");
+    await authorize(req.principal, { kind: "integration_connection", tenantId, ownerId: authOwnerId }, connectionAction("create", authOwnerId, req.principal.userId ?? ""));
     return mapSeat(tenantId, {
       personId, codeSeatEmail: body.codeSeatEmail, designLogin: body.designLogin, createdBy: me || null,
     });

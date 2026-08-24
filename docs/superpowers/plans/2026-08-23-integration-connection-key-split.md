@@ -1,8 +1,8 @@
 # `integration_connection` — the company-tier key split
 
-**Status: BLOCKED ON AN OWNER DECISION.** No code changed. This is the analysis, the two viable
-shapes, and a recommendation — written so the decision is a five-minute read rather than a
-re-investigation.
+**Status: RULED (owner, 2026-08-24) → Design A. SHIPPED as IAM-14c.** The analysis below is kept
+verbatim, because the reasoning for rejecting the cheap shape is the part worth re-reading. What
+actually got built is recorded in the addendum at the end.
 
 ## The gap, precisely
 
@@ -88,3 +88,57 @@ down as an exception with an expiry, not as the design.
 No code, no migration, no catalog edit. A frozen contract (`docs/PERMISSION-CONTRACT.md`) plus the
 credential-vault kind plus an API change is not a combination to land unattended on an owner's
 behalf, and the analysis above is worth more than a half-built version of the wrong shape.
+
+
+---
+
+# ADDENDUM — what shipped (IAM-14c, 2026-08-24)
+
+**Design A, as recommended.** `core.integration_connection.manage` is a real Cerbos action with its
+own catalog key, `sensitive: true`, held by `company_admin` / `manager` / `platform_admin` / `owner`
+and by **neither `member` nor `viewer`**.
+
+**Additive, deliberately.** The four per-row rules were left byte-identical, so a `company_admin`
+acting on their own row still authorizes `read`/`update` and still matches the original rule. Nothing
+that worked stopped working — verified by `integrations.test.ts` and `claude-seats.test.ts` passing
+unchanged (27/27).
+
+**The behavioural half was larger than this doc anticipated, in one way that matters.** The plan said
+"the company-wide endpoints authorize `manage`". There *are* no company-wide endpoints: the same four
+endpoints serve both tiers, distinguished only by the `ownerId` handed to Cerbos. So the split is
+expressed as one shared helper —
+
+```ts
+connectionAction(perRowAction, authCerbosOwnerId, me)   // own row → per-row action; else → "manage"
+```
+
+— applied at all 11 authorize sites across **both** controllers (`integrations` and `claude-seats`,
+which reuses the kind verbatim). Without that caller change the new key would have been dead config
+that looked like a fix: `owner` reaches this kind only through the perm arm, so nothing would have
+improved for it.
+
+**Live PDP probes, before/after the change (the decisions, not the rules):**
+
+| principal | row | action | result |
+|---|---|---|---|
+| `manage` key only (owner's shape) | company-owned | `manage` | ALLOW ← the gap closed |
+| four old keys only (member's shape) | company-owned | `manage` | DENY ← no over-grant |
+| four old keys only | own | `read` | ALLOW ← self tier untouched |
+| `company_admin` role | company-owned | `manage` | ALLOW ← role arm intact |
+| `member` role | company-owned | `manage` | DENY |
+| `company_admin` role | own | `read` | ALLOW ← unchanged |
+
+**The `owner` mirror was the trap this doc flagged, and it was real.** IAM-14 seeded
+`owner = company_admin` as a one-time `INSERT..SELECT`; keys added later do not propagate, and
+`owner-role.db.test.ts` asserts the two bundles are equal. The migration mirrors it explicitly and
+self-checks that it did, plus asserts that `member`/`viewer`/`client` hold the key ZERO times — the
+one assertion that keeps the unconditional perm-arm mirror safe.
+
+**Catalog bookkeeping that adding a key requires** (all four are tripwires that fire deliberately):
+`_meta.counts` in `permission-catalog.json`; membership of a permission group (`integrations_manage`,
+already sensitive) plus that file's own `_meta`; and three hardcoded "sanity" count pins across
+`cerbos-catalog-alignment`, `permission-groups-catalog-parity` and `ui-grantable-catalog`.
+
+**Gates:** `iam-14c-integration-connection-manage.test.ts` 9/9 against live Cerbos; `src/rbac`
+754/754; the two controller suites 27/27 unchanged; `cerbos compile` clean; `lint:migration-rls`
+clean; the 1:1 `(cerbosKind, cerbosAction)` invariant still holds at zero duplicates.

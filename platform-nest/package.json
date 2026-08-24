@@ -20,6 +20,7 @@
     "seed:employee-files": "node dist/seed/employee-files.js",
     "seed:social-content-brief-automation": "node dist/seed/social-content-brief-automation.js",
     "seed:owner-grant": "node dist/seed/owner-grant.js",
+    "seed:org-structure-refresh": "node dist/seed/org-structure-refresh.js",
     "seed:own-brand-social": "node dist/seed/own-brand-social.js",
     "import:nexus": "node dist/seed/nexus-import.js",
     "test": "vitest run",

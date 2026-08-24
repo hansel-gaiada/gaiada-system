@@ -2231,3 +2231,32 @@ derivedRoles:
             request.principal.attr.perms.exists(g, g.key == "core.integration_connection.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
+
+    # ══════════ IAM-14c (2026-08-23) — the COMPANY tier, as its own key ══════════
+    # The four `_self` roles above deliberately carry `variables.owns`, which is why they were safe to
+    # add on a Pattern-B kind: member and viewer already hold those same four keys, so mirroring them
+    # unconditionally would have handed every member the company's whole credential vault
+    # (IAM-04-B5's refusal, and still correct).
+    #
+    # ⚠ THE COST OF THAT REFUSAL WAS `owner`. Being permission-native (IAM-04c §3 — zero policy
+    # rules), it reached this kind ONLY through the perm arm, so an owner could manage their own
+    # connections and NOTHING on a company they own. That is the gap this fixes.
+    #
+    # ⚠ WHY A NEW KEY RATHER THAN A WIDER MIRROR OF THE EXISTING FOUR. A scope-suffixed key
+    # (`…read_any` beside `…read`) would need two catalog entries sharing one
+    # (cerbosKind, cerbosAction) pair. ZERO of the ~300 grantable entries do that;
+    # `cerbos-catalog-alignment.test.ts` builds those pairs as a Set (duplicates collapse silently)
+    # and separately requires every entry's action to exist as a literal in the policy. So the split
+    # has to be a real ACTION, not a second key on an existing one.
+    #
+    # `manage` is therefore its own action, its own catalog key, and held by company_admin/manager/
+    # platform_admin/owner — never member or viewer. One key that says "administer this company's
+    # connections" beats four that say it only by omission of `owns`.
+    - name: perm_integration_connection_manage
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "core.integration_connection.manage" && (
+              g.scopeType == "global" ||
+              (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))

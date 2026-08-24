@@ -105,7 +105,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // §6): +3 pairs (search.finding.triage, search.finding.accept_risk, search.property.attest) / +1
     // kind (`resource_search_finding` — `search.property.attest` is a new action on the EXISTING
     // `resource_search_property` kind), 298/77 -> 301/78.
-    expect(catalog.length).toBe(301);
+    // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
+    // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
+    expect(catalog.length).toBe(302);
     expect(catalogKindSet.size).toBe(78);
   });
 

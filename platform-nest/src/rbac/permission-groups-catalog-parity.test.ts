@@ -89,7 +89,9 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // change; the RELATIONSHIP count below IS an invariant and must not move without a ruling.
     // MON-10b (2026-08-19): +14 grantable (monitoring). SM-76 (2026-08-23, seo-audit-capability §6):
     // +3 grantable, 283 -> 286.
-    expect(grantable.length).toBe(286);
+    // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
+    // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
+    expect(grantable.length).toBe(287);
     expect(relationshipKeys.size).toBe(15);
   });
 

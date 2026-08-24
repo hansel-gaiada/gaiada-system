@@ -66,8 +66,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // MON-10b (2026-08-19): +14 grantable (monitoring). SM-76 (2026-08-23, seo-audit-capability §6):
     // +3 grantable (search.finding.triage, search.finding.accept_risk, search.property.attest),
     // 298/283 -> 301/286.
-    expect(permissions.length).toBe(301);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(286);
+    // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
+    // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
+    expect(permissions.length).toBe(302);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(287);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
