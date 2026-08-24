@@ -23,6 +23,7 @@ const AGENCY = "Gaia Digital Agency";
 let tenantId: string;
 let retiredId: string;
 let targetId: string;
+let taskId: string;
 
 describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
   beforeAll(async () => {
@@ -51,13 +52,28 @@ describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
            VALUES (gen_random_uuid(), $1, $2, 'Ghost-assigned task', 'test') RETURNING id`,
           [tenantId, projectId],
         );
+        taskId = t.rows[0].id;
         await c.query(
           `INSERT INTO pm_task_assignees
              (tenant_id, task_id, role, assignee_kind, assignee_ref, user_id, origin_site, valid_from, valid_to)
            VALUES ($1, $2, 'responsible', 'person', $3::text, $3::uuid, 'test', now(), NULL)`,
-          [tenantId, t.rows[0].id, retiredId],
+          [tenantId, taskId, retiredId],
         );
       },
+      { modules: ["pm"] },
+    );
+
+    // A row in an APPEND-ONLY ledger. The DB refuses UPDATE on it, so the script must leave it and
+    // say so.
+    await withTenants(
+      [tenantId],
+      (c) =>
+        c.query(
+          `INSERT INTO pm_task_assignment_events
+             (id, tenant_id, task_id, ref_id, ref_kind, responsible_id, status_id, changed_by)
+           VALUES (gen_random_uuid(), $1, $2, $3::text, 'person', $3::uuid, 'todo', $3::uuid)`,
+          [tenantId, taskId, retiredId],
+        ),
       { modules: ["pm"] },
     );
   }, 240_000);
@@ -101,6 +117,27 @@ describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
     expect(row.rows.length, "the assignee fixture should still exist — it must be MOVED, not deleted").toBe(1);
     expect(row.rows[0].user_id, "the assignment should now belong to reva@gaiada.com").toBe(targetId);
     expect(row.rows[0].assignee_ref, "the denormalised mirror must follow the FK").toBe(targetId);
+  });
+
+  it("🔴 leaves an append-only ledger alone and REPORTS it, rather than aborting", async () => {
+    // The second live failure: `pm_task_assignment_events` has a trigger that raises on UPDATE, so
+    // the run died and rolled back every move. The ledger must now be skipped — but a bare skip
+    // would be its own defect, because a run that leaves work behind while printing only successes
+    // is indistinguishable from a clean sweep. Both halves are asserted.
+    const r = await reassignRetired({ dryRun: true });
+    const led = r.immutableHistory.find((h) => h.where.startsWith("pm_task_assignment_events."));
+    expect(led, "the ledger rows must be REPORTED, not silently skipped").toBeDefined();
+    expect(led!.rows).toBeGreaterThan(0);
+    expect(
+      r.moved.some((m) => m.where.startsWith("pm_task_assignment_events.")),
+      "an append-only ledger must never appear as moved",
+    ).toBe(false);
+
+    const still = await adminPool().query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM pm_task_assignment_events WHERE changed_by = $1`,
+      [retiredId],
+    );
+    expect(Number(still.rows[0].n), "the ledger still records what actually happened").toBe(1);
   });
 
   it("🔴 does NOT move role grants — that would be a privilege change, not a data move", async () => {

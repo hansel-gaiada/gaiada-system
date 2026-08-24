@@ -13,7 +13,7 @@
 // only in a commit message, because anyone later auditing Edward's attendance needs to know those
 // rows were transferred from a seeded persona and are not evidence of anything.
 //
-// ── THREE CATEGORIES, HANDLED DIFFERENTLY, AND THE DIFFERENCE IS THE POINT ────────────────────────
+// ── FOUR CATEGORIES, HANDLED DIFFERENTLY, AND THE DIFFERENCE IS THE POINT ─────────────────────────
 //
 // 1. MOVED — ownership, attribution, assignment, and (per the ruling above) personal history.
 //    These are "the data under them" in the sense the request meant.
@@ -28,6 +28,11 @@
 //    person a fake person's access, which is a privilege change wearing a data-migration costume.
 //    The last two are already correct anyway: the org-structure refresh's membership sweep closed the
 //    retired placements and opened the real ones.
+//
+// 4. LEFT IN PLACE AND REPORTED — two append-only audit ledgers whose UPDATE the database refuses
+//    outright (see IMMUTABLE_HISTORY). This is the one place the "move everything" ruling is not
+//    honoured, because honouring it would mean forging an audit trail rather than transferring work.
+//    The run prints what it left, so the exception is visible rather than inferred from a total.
 import { withGlobal, withTenants, closePool } from "../db";
 
 /** Retired identity -> the real person doing that job now. Mapped BY FUNCTION (owner decision), from
@@ -73,6 +78,26 @@ const NEVER_MOVE = new Set([
 /** Deleted rather than moved — see category 2. */
 const DELETE_INSTEAD = new Set(["notifications.user_id"]);
 
+/** Append-only AUDIT LEDGERS. The database refuses UPDATE *and* DELETE on these tables with a
+ *  `RAISE EXCEPTION` trigger, so there is no version of this script that can move them.
+ *
+ *  ⚠ THIS IS A DELIBERATE DEVIATION FROM THE OWNER'S "MOVE EVERYTHING" DECISION, and it is the
+ *  right one. An audit ledger row says "at time T, this person changed that assignment". Rewriting
+ *  it would not transfer work — it would forge the record of who did what. The schema is stating
+ *  that as an invariant, and the correct response is to leave the ledger alone and REPORT what was
+ *  left, rather than to strip the trigger. The retired personas therefore remain named in these two
+ *  tables, which is honest: those events really were recorded against them.
+ *
+ *  Censused the same way as MIRRORED, not discovered one failure at a time — every UPDATE trigger on
+ *  a users-FK table. Three exist; `service_assignments`'s
+ *  `trg_service_assignments_freeze_identity` only freezes provider/target tenant and module_key, so
+ *  its four user columns move normally and are absent below. */
+const IMMUTABLE_HISTORY = new Set([
+  "pm_task_assignment_events.changed_by",
+  "pm_task_assignment_events.responsible_id",
+  "report_appraisal_acks.actor_user_id",
+]);
+
 /** Columns that MIRROR a user id elsewhere in the same row, with a CHECK enforcing the two agree.
  *  Rewriting the FK alone violates the CHECK, so the mirror must move in the SAME statement.
  *
@@ -114,11 +139,16 @@ export interface ReassignResult {
   moved: { where: string; rows: number }[];
   deleted: { where: string; rows: number }[];
   skippedCollisions: { where: string; rows: number }[];
+  /** Left in place because the table is an append-only ledger — see IMMUTABLE_HISTORY. Reported so
+   *  the deviation from "move everything" is visible in the run output instead of invisible. */
+  immutableHistory: { where: string; rows: number }[];
   unmapped: string[];
 }
 
 export async function reassignRetired(opts: { dryRun: boolean }): Promise<ReassignResult> {
-  const out: ReassignResult = { dryRun: opts.dryRun, moved: [], deleted: [], skippedCollisions: [], unmapped: [] };
+  const out: ReassignResult = {
+    dryRun: opts.dryRun, moved: [], deleted: [], skippedCollisions: [], immutableHistory: [], unmapped: [],
+  };
 
   const emails = [...Object.keys(REASSIGN), ...new Set(Object.values(REASSIGN))];
   const users = await withGlobal((c) =>
@@ -158,6 +188,20 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
       for (const { tbl, col } of fks.rows) {
         const where = `${tbl}.${col}`;
         if (NEVER_MOVE.has(where)) continue;
+
+        if (IMMUTABLE_HISTORY.has(where)) {
+          // Counted, not moved. A bare `continue` here would make the ledger rows vanish from the
+          // report, and a run that leaves work behind while printing only successes is exactly the
+          // failure mode this script is supposed to avoid.
+          const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
+          const n = await c.query<{ n: string }>(
+            `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
+            [ids],
+          );
+          const rows = Number(n.rows[0].n);
+          if (rows > 0) out.immutableHistory.push({ where, rows });
+          continue;
+        }
 
         if (DELETE_INSTEAD.has(where)) {
           const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
@@ -256,6 +300,13 @@ async function main(): Promise<void> {
   if (r.skippedCollisions.length) {
     console.log(`COULD NOT MOVE (unique-constraint clash — the target already has that row): ${total(r.skippedCollisions)}`);
     for (const s of r.skippedCollisions) console.log(`  ${String(s.rows).padStart(5)}  ${s.where}`);
+  }
+  if (r.immutableHistory.length) {
+    const t = total(r.immutableHistory);
+    console.log(`LEFT IN PLACE — append-only audit ledger, the DB forbids UPDATE: ${t} row(s)`);
+    for (const h of r.immutableHistory) console.log(`  ${String(h.rows).padStart(5)}  ${h.where}`);
+    console.log("  These events really were recorded against the retired personas; rewriting them");
+    console.log("  would forge the audit trail rather than transfer work.");
   }
   if (r.unmapped.length) console.log(`NOTE: ${r.unmapped.join("; ")}`);
   if (dryRun) {
