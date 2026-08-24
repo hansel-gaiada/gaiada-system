@@ -11,12 +11,14 @@ import "server-only";
 // data and returns a fresh scene on every call; nothing here is a table.
 import { listDepartmentBriefs, getDepartment, type DeptBrief } from "./departments";
 import { getAgentGoals, getAgentGoal, type AgentGoal } from "./admin";
+import { listAutomationApprovals, type AutomationApproval } from "./automationApprovals";
 import {
   buildFloors,
   type OfficeRoomInput,
   type OfficeAvatar,
   type OfficeMoveEvent,
   type OfficeScene,
+  type AutomationSignal,
 } from "./office";
 
 export const OFFICE_LOBBY_KEY = "lobby";
@@ -47,6 +49,59 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     depts.map((d) => getDepartment(u, t, d.id).catch(() => null)),
   );
   const goals: AgentGoal[] = await getAgentGoals(u, t).catch(() => [] as AgentGoal[]);
+
+  // ── Real automation execution signal (2026-08-24) — driven by automation_approvals, the SAME
+  // reader the department console's "Waiting on me" rail and the unified approvals inbox already
+  // use. `null` (as opposed to `[]`) is the deliberate signal that THIS particular read genuinely
+  // failed — `listAutomationApprovals` already degrades a 403/404 to `[]` internally (a legitimate
+  // "nothing visible", the same house rule every lib/*.ts reader follows), so a `null` here means
+  // something worse actually broke. `autoChecked` folds that into ONE honest flag: false only when
+  // a real read failure means we cannot make ANY claim about an automation's state, never when the
+  // tenant simply has zero rows. */
+  const [pendingAuto, approvedAuto, rejectedAuto] = await Promise.all([
+    listAutomationApprovals(u, t, { status: "pending" }).catch(() => null),
+    listAutomationApprovals(u, t, { status: "approved" }).catch(() => null),
+    listAutomationApprovals(u, t, { status: "rejected" }).catch(() => null),
+  ]);
+  const autoChecked = pendingAuto !== null && approvedAuto !== null && rejectedAuto !== null;
+  // `origin === "automation"` only — an "agent" origin row is a suspended AGENT write (already
+  // surfaced through that agent's own run events/approval_wait emote above), never an automation's.
+  const pendingAutoRows = (pendingAuto ?? []).filter((r) => r.origin === "automation");
+  const decidedAutoRows = [...(approvedAuto ?? []), ...(rejectedAuto ?? [])].filter((r) => r.origin === "automation");
+  // One real desk per distinct real workflow_id — more honest than folding every automation-origin
+  // row onto one umbrella avatar, which would let two genuinely different workflows (one waiting on
+  // a human, one mid-execution) silently overwrite each other's real state on a single desk.
+  const workflowIds = [...new Set([...pendingAutoRows, ...decidedAutoRows].map((r) => r.workflow_id))].sort();
+
+  function automationSignalFor(workflowId: string): AutomationSignal {
+    const pendingApproval = pendingAutoRows.some((r) => r.workflow_id === workflowId);
+    if (!autoChecked) {
+      return { checked: false, pendingApproval, executionStatus: null, asOfMs: null, executionError: null };
+    }
+    const decided = decidedAutoRows
+      .filter((r) => r.workflow_id === workflowId)
+      .sort((a, b) => Date.parse(b.decided_at ?? b.created_at) - Date.parse(a.decided_at ?? a.created_at))[0] as
+      AutomationApproval | undefined;
+    const executionStatus = decided?.execution_status ?? null;
+    const executedAtMs = decided?.executed_at ? Date.parse(decided.executed_at) : null;
+    // A failure can occur before an execution ever reaches `executed_at` (e.g. "hub_unreachable"
+    // never got that far — see the demo fixture aa-4) — `decided_at` is the real timestamp closest
+    // to when the failure became known, so it anchors freshness for THAT case only. Every other
+    // status needs a genuine `executed_at` to count as "recently active" — never invents one.
+    const failedAtMs = executionStatus === "failed" && decided?.decided_at ? Date.parse(decided.decided_at) : null;
+    const asOfMs = executedAtMs ?? failedAtMs;
+    return {
+      checked: true,
+      pendingApproval,
+      executionStatus,
+      asOfMs: asOfMs != null && !Number.isNaN(asOfMs) ? asOfMs : null,
+      executionError: decided?.execution_error ?? null,
+    };
+  }
+
+  function humanizeWorkflowId(id: string): string {
+    return id.replace(/^wf-/, "").replace(/[-_]+/g, " ");
+  }
 
   // O4 (req #5): resolve which of this tenant's goals has a genuinely OPEN run right now (no
   // endedAt yet) — only those goals get an `activeRunId`, which is the one thing that lets the
@@ -131,7 +186,12 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     });
   });
 
-  // ── Automations — bound to the real systems consoles; no department tone by design ─────────
+  // ── Automations — bound to the real systems consoles; ORIGINALLY reasoned "no department tone
+  // by design" (kept below, not deleted — see office.ts's `automationColorToken` for the owner
+  // override that now consciously supersedes it: an automation DOES get a department tone once one
+  // genuinely applies, settable colour first, department second, grey only when truly unbound).
+  // Neither seat below has a real department binding today, so both still correctly render grey —
+  // that is the fallback chain doing its job, not the override going unused. ───────────────────────
   avatars.push(
     {
       id: "automation-bot",
@@ -143,7 +203,7 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
       recordId: "systems-bot",
       recordLabel: "WA/TG Bot console",
       recordHref: "/systems/bot",
-      note: "Bound to the real WA/TG Bot admin console. It runs a fixed script and owns no decisions — no department tone.",
+      note: "Bound to the real WA/TG Bot admin console. It runs a fixed script and owns no decisions — no department tone. Not gated through automation-approvals, so it carries no execution signal at all (static, like before this feature) — never a fabricated 'unknown'.",
     },
     {
       id: "automation-workflow",
@@ -158,6 +218,27 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
       note: "Bound to the real Automation systems console. It runs a fixed script and owns no decisions — no department tone.",
     },
   );
+
+  // ── One real desk per distinct automation-origin workflow_id (2026-08-24) — this is the honest
+  // signal the two console seats above don't carry: a genuinely pending, executing or failed real
+  // row, never fabricated. `deptId` is left unset for every one of these (see the block comment
+  // above) — none has a real department binding yet, so grey is the correct, honest result of the
+  // fallback chain, not a gap in it. ──────────────────────────────────────────────────────────────
+  workflowIds.forEach((wfId, i) => {
+    avatars.push({
+      id: `automation-workflow-${wfId}`,
+      kind: "automation",
+      name: humanizeWorkflowId(wfId),
+      homeRoomKey: OFFICE_UTILITY_KEY,
+      deskIndex: 2 + i,
+      recordKind: "automation-workflow",
+      recordId: wfId,
+      recordLabel: `Automation workflow: ${wfId}`,
+      recordHref: "/systems/automation",
+      note: "Real automation workflow, tracked via the automation-approvals inbox (the same reader behind the department console's \"Waiting on me\" rail). Its desk animation reflects that workflow's own real pending/decided rows — never a fabricated state.",
+      automationSignal: automationSignalFor(wfId),
+    });
+  });
 
   // ── One external-agent demo seat — the airlock this represents is not built (O5) ───────────
   avatars.push({

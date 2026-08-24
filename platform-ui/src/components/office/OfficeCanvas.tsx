@@ -12,8 +12,9 @@ import {
   restingRoomKey, buildReplaySteps, totalReplayMs, catToken,
   DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
   ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
+  resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_STATE_LABEL,
   type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeFloor, type OfficeAvatar, type ReplayStep,
-  type Camera, type ZoomLevel,
+  type Camera, type ZoomLevel, type AutomationActivityState,
 } from "@/lib/office";
 import {
   LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS, STEEL_RAMP,
@@ -26,7 +27,12 @@ import "./office.css";
 // discipline holds). Rewritten 2026-08-23 for owner feedback on the live prototype: ONE connected
 // floor plate with real corridors (not detached room boxes), floors when one plate isn't enough,
 // rooms sized to headcount, page-level scroll, and a working animation gated STRICTLY to real
-// agent-run activity (O4) — never to humans, who have no comparable activity feed.
+// agent-run activity (O4) — never to humans, who have no comparable activity feed. Extended
+// 2026-08-24 to automations: the SAME three-state honesty model (executing / waiting on a human /
+// failed, resolved by `resolveAutomationState` in lib/office.ts), driven by real
+// automation_approvals rows rather than a run's event feed, but sharing every rendering mechanism
+// below with agents (the emote bubble, the desk-tint pulse, the shared pulse timer) rather than
+// duplicating them.
 //
 // Two render paths, both imperative:
 //   1. `draw()` — called on mount, on scene/floor/theme/resize/selection/working-state change.
@@ -35,9 +41,10 @@ import "./office.css";
 //      `visibilitychange` and off-screen (IntersectionObserver).
 //   3. A THIRD, much coarser timer — the working-animation "pulse" — exists only while at least one
 //      agent avatar has been proven genuinely active by real run events in the last
-//      WORKING_RECENCY_MS (lib/office.ts). It is a ~450ms `setInterval`, not a per-frame RAF, and
-//      it stops entirely (cleared) the moment nobody is working. Paused by the SAME
-//      visibility/offscreen refs as the replay loop.
+//      WORKING_RECENCY_MS (lib/office.ts), OR at least one automation currently resolves to
+//      `executing`/`awaiting_approval`. It is a ~450ms `setInterval`, not a per-frame RAF, shared by
+//      both sources rather than one loop each, and it stops entirely (cleared) the moment neither
+//      is true. Paused by the SAME visibility/offscreen refs as the replay loop.
 
 interface TokenSet {
   page: string; card: string; raised: string; sunken: string;
@@ -47,6 +54,11 @@ interface TokenSet {
   /** Resolves a principal id to its `--cat-N` colour, live from the token layer — never a literal,
    *  and never cached across a theme change (this closure re-reads on every draw() call). */
   catColor: (id: string) => string;
+  /** Resolves an ARBITRARY CSS custom property name to its live value — the generic form
+   *  `catColor` is built on, exposed directly for `automationColorToken`'s fallback chain (which
+   *  can hand back any of a settable token, a `catToken(deptId)`, or the fixed grey token, and
+   *  doesn't need its own bespoke resolver for that). */
+  resolveToken: (name: string) => string;
 }
 
 function readTokens(el: HTMLElement): TokenSet {
@@ -56,10 +68,11 @@ function readTokens(el: HTMLElement): TokenSet {
     page: v("--surface-page"), card: v("--surface-card"), raised: v("--surface-raised"), sunken: v("--surface-sunken"),
     hairline: v("--erp-hairline"), hairlineSoft: v("--erp-hairline-soft"),
     ink: v("--ink-strong"), ink60: v("--erp-ink-60"),
-    accent: v("--accent"), steel: v("--n-7"), grey: v("--n-8"), external: v("--accent-secondary"),
+    accent: v("--accent"), steel: v("--n-7"), grey: v(AUTOMATION_GREY_TOKEN), external: v("--accent-secondary"),
     ok: v("--status-ok"), warning: v("--status-warning"), danger: v("--status-danger"),
     fontBody: v("--font-body") || "sans-serif",
     catColor: (id: string) => v(catToken(id)),
+    resolveToken: v,
   };
 }
 
@@ -275,8 +288,11 @@ function vacantDeskSlots(occupantCount: number, deskCols: number): number {
  *  amber tint — "a visible state, not a looping animation implying live contact", plan §3); and a
  *  run with a real event inside the last WORKING_RECENCY_MS (a soft accent glow that ALTERNATES
  *  with `pulseOn`, the one animation in this whole canvas that runs continuously, and only while
- *  this is true for at least one desk on screen). */
-type DeskActivity = "none" | "quiet" | "working";
+ *  this is true for at least one desk on screen). A FOURTH state, `failed` (2026-08-24), extends
+ *  this to real automations: a steady danger tint, deliberately never pulsing (req: "distinct and
+ *  not alarming-by-default-forever" — the freshness window in `resolveAutomationState` is what
+ *  already bounds how long this shows, so the tint itself doesn't need to shout on top of that). */
+type DeskActivity = "none" | "quiet" | "working" | "failed";
 
 function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet, occupied: boolean, activity: DeskActivity = "none", pulseOn = false) {
   const cx = tilesToPx(tile.x), cy = tilesToPx(tile.y);
@@ -300,6 +316,9 @@ function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number },
   } else if (activity === "quiet") {
     ctx.fillStyle = tokens.warning;
     ctx.globalAlpha = 0.85;
+  } else if (activity === "failed") {
+    ctx.fillStyle = tokens.danger;
+    ctx.globalAlpha = 1;
   } else {
     ctx.fillStyle = occupied ? tokens.ink60 : tokens.hairlineSoft;
   }
@@ -757,6 +776,44 @@ function drawEmoteBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.restore();
 }
 
+/** The one place that decides which emote glyph (if any) an avatar earns — agent and automation
+ *  share this so the bubble/desk-tint/roster-badge call sites never re-derive the mapping three
+ *  different ways. An agent's kind comes from its own real, currently-fresh run event (O4,
+ *  unchanged); an automation's comes from `resolveAutomationState` (2026-08-24) reusing the exact
+ *  same bubble glyphs — `tool` for executing, `approval_wait` for the loud "blocked on a human"
+ *  case, `error` for a fresh failure. `idle`/`unknown` earn no bubble at all: idle is still, and
+ *  unknown is a quiet detail-panel fact, not a loud one. Never called for `human` — humans have no
+ *  comparable activity model at either call site (see office.ts's own doc on why). */
+function emoteKindFor(
+  avatar: OfficeAvatar, workingIds: Set<string>, emoteKinds: Map<string, AgentRunEventKind | null>, nowMs: number,
+): AgentRunEventKind | null {
+  if (avatar.kind === "agent" && avatar.activeRunId && workingIds.has(avatar.id)) {
+    return emoteKinds.get(avatar.id) ?? null;
+  }
+  if (avatar.kind === "automation" && avatar.automationSignal) {
+    const state = resolveAutomationState(avatar.automationSignal, nowMs);
+    if (state === "executing") return "tool";
+    if (state === "awaiting_approval") return "approval_wait";
+    if (state === "failed") return "error";
+  }
+  return null;
+}
+
+/** Desk-tint activity for an avatar's own furniture (Pass 2) — the same real signals
+ *  `emoteKindFor` reads, translated into the coarser `DeskActivity` the desk drawing understands.
+ *  An automation `executing` OR `awaiting_approval` both read as "working" (the accent glow) —
+ *  matching how an agent's own `approval_wait` already glows too, with the LOUD distinction carried
+ *  by the bubble on top, not the desk tint underneath. `idle`/`unknown` draw nothing extra. */
+function deskActivityFor(avatar: OfficeAvatar, workingIds: Set<string>, nowMs: number): DeskActivity {
+  if (avatar.activeRunId) return workingIds.has(avatar.id) ? "working" : "quiet";
+  if (avatar.kind === "automation" && avatar.automationSignal) {
+    const state: AutomationActivityState = resolveAutomationState(avatar.automationSignal, nowMs);
+    if (state === "executing" || state === "awaiting_approval") return "working";
+    if (state === "failed") return "failed";
+  }
+  return "none";
+}
+
 function drawAvatar(
   ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean,
   scale: ZoomLevel, emoteKind: AgentRunEventKind | null, pulseOn: boolean,
@@ -765,13 +822,20 @@ function drawAvatar(
   const r = tilesToPx(0.62);
   const { avatar } = pos;
   drawContactShadow(ctx, cx, cy, r, tokens);
-  // Desks sit DESK_SPACING_TILES apart; NAME_SLOT_TILES (lib/office.ts) is the real gutter-safe
-  // width derived from that same spacing, never an independent guess. At camera zoom >=2x the
-  // reader has deliberately chosen to look closer at THIS room — the truncation budget widens so a
-  // long name (an agent-goal title, not a short person name) has a real chance of showing in full,
-  // rather than staying permanently clipped at every zoom level the same way it was at 1x (owner
-  // feedback: "Chase ov…", "Weekly s…" truncated even with plenty of screen space once zoomed in).
-  const slotWidthPx = tilesToPx(NAME_SLOT_TILES) * (scale >= 2 ? 1.6 : 1);
+  // Desks sit DESK_SPACING_TILES apart; NAME_SLOT_TILES (lib/office.ts) is the gutter-safe width
+  // derived from that same spacing, never an independent guess.
+  //
+  // NO ZOOM MULTIPLIER. A previous pass widened this budget to 1.6x at zoom >= 2, reasoning that a
+  // reader who zoomed in wants the full name. That is wrong, and the Utility room proved it: four
+  // automations with long names rendered as one run-on smear
+  // ("A/TG summ…n8n workflow r…device alert…nightly report"). Zooming scales the whole canvas —
+  // the text AND the gap between desks grow together — so the label never gains room relative to
+  // its neighbour. Allowing 1.6x guarantees overlap at exactly the zoom level someone chose in
+  // order to read more clearly.
+  //
+  // The real fix for long names is the detail panel and the roster, which both show them in full.
+  // A label is a locator, not the content.
+  const slotWidthPx = tilesToPx(NAME_SLOT_TILES);
   switch (avatar.kind) {
     case "human":
     case "agent": {
@@ -799,9 +863,14 @@ function drawAvatar(
       }
       break;
     }
-    case "automation":
-      drawAutomation(ctx, cx, cy, r, tokens.grey, tokens.ink);
+    case "automation": {
+      // Colour fallback chain (owner override, 2026-08-24) — see automationColorToken's own doc.
+      // No per-automation colour SETTING exists yet (no settings UI ships in this pass), so the
+      // first argument is always null today; department, then grey, is the real chain exercised.
+      const colorToken = automationColorToken(null, avatar.deptId ?? null);
+      drawAutomation(ctx, cx, cy, r, tokens.resolveToken(colorToken), tokens.ink);
       break;
+    }
     case "external":
       drawExternal(ctx, cx, cy, r, tokens.external, tokens.ink);
       break;
@@ -1069,6 +1138,23 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   // `lastHeardMs` only ever wanted the timestamp; adding kind there would force them to unwrap it.
   const [emoteKinds, setEmoteKinds] = useState<Map<string, AgentRunEventKind | null>>(new Map());
 
+  // Automations (2026-08-24): no poll exists for these — office-data.ts already resolved the real
+  // signal server-side, once, at this page's own render; there is nothing further to fetch client-
+  // side (single-egress rule: adding a poll route here for a signal that doesn't change second-to-
+  // second would just be a second loop for no real freshness gain). `automationPulseIds` is the
+  // static (per this render's `nowMs`) set of automations currently `executing` or
+  // `awaiting_approval` — the ONLY thing the shared pulse timer below needs to decide whether it
+  // has any automation reason to keep running, on top of its existing agent reason.
+  const automationPulseIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of scene.avatars) {
+      if (a.kind !== "automation" || !a.automationSignal) continue;
+      const state = resolveAutomationState(a.automationSignal, nowMs);
+      if (state === "executing" || state === "awaiting_approval") ids.add(a.id);
+    }
+    return ids;
+  }, [scene.avatars, nowMs]);
+
   useEffect(() => {
     if (activeRunAvatars.length === 0) {
       setWorkingIds(new Set());
@@ -1176,7 +1262,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
         drawPlant(ctx, tilesToPx(room.x + room.wTiles - 0.9), tilesToPx(backY), tokens);
       }
       for (const p of occupants) {
-        const activity: DeskActivity = p.avatar.activeRunId ? (workingIds.has(p.avatar.id) ? "working" : "quiet") : "none";
+        const activity = deskActivityFor(p.avatar, workingIds, nowMs);
         drawDesk(ctx, p.tile, tokens, true, activity, pulseOnRef.current);
       }
       const vacant = vacantDeskSlots(occupants.length, room.deskCols);
@@ -1191,14 +1277,13 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
     ].filter((p) => floorRoomKeys.has(p.roomKey));
     lastPositionsRef.current = positions;
     for (const pos of positions) {
-      // Two independent layers keep an emote bubble off a human, not one: office-data.ts only
-      // ever sets `activeRunId` on an `agent`-kind avatar (humans have no comparable activity
-      // feed — see that file's own doc comment), AND this call site re-checks `kind === "agent"`
-      // itself rather than trusting the field alone. `workingIds` is the same 45s-freshness gate
-      // the desk monitor tint already uses (req #2: "same 45s freshness rule already implemented").
-      const emoteKind = pos.avatar.kind === "agent" && pos.avatar.activeRunId && workingIds.has(pos.avatar.id)
-        ? (emoteKinds.get(pos.avatar.id) ?? null)
-        : null;
+      // Two independent layers keep an emote bubble off a human, not one: office-data.ts only ever
+      // sets `activeRunId`/`automationSignal` on an `agent`/`automation`-kind avatar respectively
+      // (humans have no comparable activity feed — see that file's own doc comment), AND
+      // `emoteKindFor` re-checks `kind` itself rather than trusting either field alone. `workingIds`
+      // is the same 45s-freshness gate the desk monitor tint already uses for agents; automations
+      // resolve their own freshness inside `resolveAutomationState` using that identical window.
+      const emoteKind = emoteKindFor(pos.avatar, workingIds, emoteKinds, nowMs);
       drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1230,7 +1315,10 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   // motion collapses this to a single static "on" state (no toggling at all) rather than an
   // instant cut mid-pulse, matching how buildReplaySteps treats reduced motion elsewhere. ────────
   useEffect(() => {
-    if (workingIds.size === 0) { pulseOnRef.current = false; return; }
+    // ONE shared interval covers every animating principal — agents AND automations both feed the
+    // same boolean gate, never a second timer per source (perf req: "several animating principals
+    // at once must not spin up several loops").
+    if (workingIds.size === 0 && automationPulseIds.size === 0) { pulseOnRef.current = false; return; }
     if (reducedMotion) { pulseOnRef.current = true; draw(null); return; }
     const id = setInterval(() => {
       if (pausedByVisibility.current || pausedByOffscreen.current) return;
@@ -1239,7 +1327,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
     }, PULSE_TICK_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workingIds, reducedMotion, draw, replaying]);
+  }, [workingIds, automationPulseIds, reducedMotion, draw, replaying]);
 
   // ── Replay: a RAF loop that exists ONLY while playing, paused (not merely throttled) when the
   // tab is hidden or the canvas leaves the viewport. Nothing runs at all otherwise. ──────────────
@@ -1486,7 +1574,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
           </div>
 
           <div className="office__legend office__legend-emotes" aria-hidden="true">
-            <Eyebrow>Emote bubbles — working agents only</Eyebrow>
+            <Eyebrow>Emote bubbles — working agents &amp; automations only</Eyebrow>
             {(Object.keys(EMOTE_LABEL) as AgentRunEventKind[]).map((k) => (
               <div key={k} className={`office__legend-emote${k === "approval_wait" ? " office__legend-emote--alert" : ""}`}>{EMOTE_LABEL[k]}</div>
             ))}
@@ -1509,13 +1597,12 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
               >
                 <span className="office__roster-kind">{KIND_LABEL[a.kind]}</span>
                 <span className="office__roster-name">{a.name}</span>
-                {workingIds.has(a.id) && (() => {
-                  const kind = emoteKinds.get(a.id) ?? null;
-                  return (
-                    <span className={`office__roster-working${kind === "approval_wait" ? " office__roster-working--alert" : ""}`}>
-                      {kind ? EMOTE_LABEL[kind] : "Working"}
-                    </span>
-                  );
+                {(() => {
+                  const kind = emoteKindFor(a, workingIds, emoteKinds, nowMs);
+                  if (!kind) return null;
+                  const cls = kind === "approval_wait" ? " office__roster-working--alert"
+                    : kind === "error" ? " office__roster-working--error" : "";
+                  return <span className={`office__roster-working${cls}`}>{EMOTE_LABEL[kind]}</span>;
                 })()}
               </button>
             ))}
@@ -1555,6 +1642,15 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
                           : selectedLastHeard != null
                             ? `Run open, quiet — last heard ${formatRelativeTime(selectedLastHeard, nowMs)}.`
                             : "Run open — no events observed yet."}
+                      </dd>
+                    </>
+                  )}
+                  {selected.kind === "automation" && selected.automationSignal && (
+                    <>
+                      <dt>Activity</dt>
+                      <dd>
+                        {AUTOMATION_STATE_LABEL[resolveAutomationState(selected.automationSignal, nowMs)]}
+                        {selected.automationSignal.executionError ? ` (${selected.automationSignal.executionError})` : ""}
                       </dd>
                     </>
                   )}

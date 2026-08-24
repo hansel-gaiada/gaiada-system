@@ -736,6 +736,21 @@ const AUTOMATION_APPROVALS: Record<string, unknown>[] = [
     execution_error: "hub_unreachable: timed out after 3 attempts", execution_result: null,
     execution_attempts: 1,
   },
+  // The Office (2026-08-24) — a THIRD, distinct real workflow_id genuinely mid-execution, so the
+  // office's automation desks have two simultaneously-distinct real states to show side by side:
+  // aa-1 (wf-device-alert, still pending above) reads as "waiting on a human"; this one reads as
+  // "executing" — never the same desk claiming both, which is exactly why office-data.ts keys a
+  // desk per real workflow_id instead of one umbrella automation avatar. `executed_at: null` is
+  // deliberate: an execution genuinely IN FLIGHT hasn't finished yet, so it has none.
+  {
+    id: "aa-5", workflow_id: "wf-nightly-report", tool_name: "reports.generate.nightly",
+    tool_args: { scope: "tenant" }, impact: "medium",
+    reason: "Scheduled nightly report generation — a standing approved workflow, no per-run approval needed.",
+    status: "approved", origin: "automation", agent_name: null, requested_by: "system",
+    decided_by: DEMO_USER_ID, decided_at: "2026-07-20T00:00:00Z", created_at: "2026-07-20T00:00:00Z",
+    execution_status: "executing", executed_at: null, executed_by: null,
+    execution_error: null, execution_result: null, execution_attempts: 1,
+  },
 ];
 
 // ---- F1 connections vault + C1 Claude seats (WSUX-14 vault, WSUX-16/17 UI) ----
@@ -1677,6 +1692,80 @@ function tenantFromPath(pathname: string): string | null {
   return m ? m[1] : null;
 }
 
+// ── CC-1 · demo-mode client faceting ────────────────────────────────────────────────────────────
+//
+// Mirrors `platform-nest/src/core/client-filter.ts` closely enough that DEMO_MODE exercises the same
+// three cases the backend does: absent (everything), a client id, and the reserved `internal`
+// (rows with no client). A fixture that ignored `?clientId=` would make every client-scoped surface
+// look correct in demo mode while showing the whole tenant — the "demo fixtures hide frontend-first
+// drift" failure this file's own header warns about.
+
+/** Filter a fixture list by `?clientId=`, on whichever key that fixture uses for the client. */
+function applyDemoClientFilter<T extends Record<string, unknown>>(
+  rows: T[],
+  clientId: string | null,
+  key: string,
+): T[] {
+  if (!clientId) return rows;
+  if (clientId.toLowerCase() === "internal") return rows.filter((r) => r[key] == null);
+  return rows.filter((r) => r[key] === clientId);
+}
+
+/** Which client each demo project belongs to. Derived from `PROJECTS` at call time rather than
+ *  hand-listed, so it cannot drift from the fixture the `/projects` route serves. */
+function demoProjectClient(projectId: string): string | null {
+  for (const list of Object.values(PROJECTS)) {
+    for (const pr of list) {
+      const row = pr as { id?: string; client_id?: string | null };
+      if (row.id === projectId) return row.client_id ?? null;
+    }
+  }
+  return null;
+}
+
+/** Every task the PM demo store holds, flattened — used by the hub aggregate fixture. */
+function demoAllTasks(): { id: string; projectId: string; status: string; dueDate: string | null }[] {
+  const res = pmDemo("GET", "/api/co-agency/pm/tasks", new URLSearchParams(), undefined);
+  if (!res) return [];
+  const json = res.json as { items?: unknown[] } | unknown[];
+  const items = (Array.isArray(json) ? json : json.items ?? []) as {
+    id: string; projectId: string; status: string; dueDate: string | null;
+  }[];
+  return items;
+}
+
+/** ISO timestamp N days before now, for fixture `since` values that should read as ages. */
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString();
+}
+
+/** Apply the client facet to a PM-store result for the TASK LIST route only.
+ *
+ *  This lives here, not in `demoPm.ts`, because the project→client mapping is in THIS file's
+ *  `PROJECTS` fixture and `demoPm` is imported by this module — reaching back the other way would
+ *  make the two modules circular. The real backend has no such split: `pm.controller.ts` joins
+ *  `projects` and filters in SQL.
+ *
+ *  Without this, the client hub's Work tab would receive every tenant task in demo mode and render
+ *  the other clients' work in its "tasks outside this client's projects" warning card — a fixture
+ *  gap presenting as a data-integrity alarm.
+ */
+function applyDemoTaskClientFilter(res: DemoResult, path: string, url: URL): DemoResult {
+  if (!/^\/api\/[^/]+\/pm\/tasks$/.test(path)) return res;
+  const clientId = url.searchParams.get("clientId");
+  if (!clientId) return res;
+  const json = res.json as { items?: unknown[]; nextCursor?: unknown } | unknown[];
+  const items = (Array.isArray(json) ? json : json.items ?? []) as { projectId: string }[];
+  const wantInternal = clientId.toLowerCase() === "internal";
+  const kept = items.filter((t) => {
+    const owner = demoProjectClient(t.projectId);
+    return wantInternal ? owner == null : owner === clientId;
+  });
+  return { ...res, json: Array.isArray(json) ? kept : { ...json, items: kept } };
+}
+
 function ok(json: unknown): DemoResult {
   return { status: 200, json };
 }
@@ -1852,7 +1941,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
 
   // PM surface + task comments — stateful in-memory store (lib/demoPm.ts).
   const pm = pmDemo(method, p, url.searchParams, body);
-  if (pm) return pm;
+  if (pm) return applyDemoTaskClientFilter(pm, p, url);
 
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
   const meetings = meetingsDemo(method, p, url.searchParams, body);
@@ -2121,7 +2210,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const projMatch = p.match(/^\/api\/([^/]+)\/projects$/);
   if (projMatch) {
     if (m === "POST") return { status: 201, json: { id: `p-new-${Date.now()}` } };
-    return ok(PROJECTS[projMatch[1]] ?? []);
+    // CC-1: mirror the backend facet, including the `internal` sentinel. A fixture that ignored the
+    // parameter would make the client hub's Work tab show EVERY project in demo mode — which is
+    // exactly the "demo fixtures hide frontend-first drift" trap this file's own header warns about.
+    return ok(applyDemoClientFilter(
+      (PROJECTS[projMatch[1]] ?? []) as Record<string, unknown>[],
+      url.searchParams.get("clientId"),
+      "client_id",
+    ));
   }
   const projDetailMatch = p.match(/^\/api\/[^/]+\/projects\/([^/]+)$/);
   if (projDetailMatch) {
@@ -2295,10 +2391,76 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       INVOICES.push(inv);
       return { status: 201, json: { id: inv.id } };
     }
-    return ok(INVOICES);
+    return ok(applyDemoClientFilter(INVOICES, url.searchParams.get("clientId"), "clientId"));
   }
 
   // Clients
+  // CC-2 — the client hub aggregate. Deliberately built FROM the other fixtures rather than
+  // hand-written: a standalone literal would drift from the projects/invoices/deliverables stores the
+  // Work tab reads, and the hub would disagree with its own tabs in demo mode.
+  const clientOverview = p.match(/^\/api\/([^/]+)\/clients\/([^/]+)\/overview$/);
+  if (clientOverview) {
+    const [, tenantSlug, cid] = clientOverview;
+    const client = CLIENTS.find((c) => c.id === cid);
+    if (!client) return { status: 404, json: { error: "client not found" } };
+    const projects = (PROJECTS[tenantSlug] ?? []).filter((pr) => (pr as { client_id?: string }).client_id === cid) as Record<string, unknown>[];
+    const projectIds = new Set(projects.map((pr) => pr.id as string));
+    const tasks = demoAllTasks().filter((t) => projectIds.has(t.projectId));
+    const deliverables = DELIVERABLES.filter((d) => d.client_id === cid);
+    const invoices = INVOICES.filter((i) => i.clientId === cid);
+    const today = new Date().toISOString().slice(0, 10);
+    const invoiced = invoices
+      .filter((i) => i.status !== "void" && i.status !== "draft")
+      .reduce((n, i) => n + Number(i.total ?? 0), 0);
+    // One pending payment and one untriaged request on the first demo client, so "waiting on us" is a
+    // REACHABLE state in demo mode. A demo that only ever shows an empty ball list cannot be reviewed.
+    const needsUs = cid === "cl-1"
+      ? [
+          { kind: "payment", id: "dpay-1", label: "Confirm a client-recorded payment", context: "USD 2,400", href: "/billing/inv-1", since: daysAgoIso(11) },
+          { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/requests` },
+        ]
+      : [];
+    const needsClient = cid === "cl-1"
+      ? [{ kind: "contract", id: "dk-1", label: "Awaiting client signature", context: "Statement of Work — redesign", href: `/clients/${cid}/commercial`, since: daysAgoIso(4) }]
+      : [];
+    const money = invoices.length
+      ? {
+          currency: String(invoices[0].currency ?? "USD"),
+          invoiced,
+          drafted: 0,
+          paid: 0,
+          pendingConfirmation: cid === "cl-1" ? 2400 : 0,
+          outstanding: invoiced,
+          overdueCount: invoices.filter((i) => i.status === "sent" && String(i.periodEnd) < today).length,
+          openCount: invoices.filter((i) => i.status === "sent").length,
+        }
+      : null;
+    const doneTasks = tasks.filter((t) => t.status === "done").length;
+    return ok({
+      client: { id: client.id, name: client.name, status: client.status ?? null, contact: client.contact ?? null },
+      projects: {
+        total: projects.length,
+        active: projects.filter((pr) => !["done", "complete", "archived", "cancelled"].includes(String(pr.status))).length,
+        done: projects.filter((pr) => ["done", "complete"].includes(String(pr.status))).length,
+        percent: tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0,
+      },
+      tasks: {
+        total: tasks.length,
+        open: tasks.filter((t) => t.status !== "done").length,
+        overdue: tasks.filter((t) => t.status !== "done" && t.dueDate && t.dueDate < today).length,
+        blocked: tasks.filter((t) => t.status === "blocked").length,
+      },
+      deliverables: {
+        total: deliverables.length,
+        delivered: deliverables.filter((d) => ["delivered", "approved", "done"].includes(String(d.status))).length,
+        overdue: deliverables.filter((d) => String(d.due_date ?? "") < today && !["delivered", "approved", "done"].includes(String(d.status))).length,
+      },
+      nextMilestone: null,
+      money: { byCurrency: money ? [money] : [], primary: money },
+      needsUs,
+      needsClient,
+    });
+  }
   const clientOne = p.match(/^\/api\/[^/]+\/clients\/([^/]+)$/);
   if (clientOne && m === "DELETE") { const i = CLIENTS.findIndex((c) => c.id === clientOne[1]); if (i >= 0) CLIENTS.splice(i, 1); return ok({ ok: true }); }
   const clientsMatch = p.match(/^\/api\/[^/]+\/clients$/);

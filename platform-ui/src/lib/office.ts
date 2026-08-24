@@ -16,6 +16,7 @@
 // independently chosen.
 
 import type { AgentRunEventKind } from "./agentEvents";
+import type { ExecutionStatus } from "./approvalsShared";
 
 // ── Taxonomy (shared with the Agent Floor's ops view — plan §4.4) ───────────────────────────────
 export type OfficeKind = "human" | "agent" | "automation" | "external";
@@ -568,6 +569,22 @@ export interface OfficeAvatar {
    *  Never set for `human` — humans have no comparable real activity feed (see plan §3), so a
    *  human avatar must never carry this field, and OfficeCanvas never fabricates one. */
   activeRunId?: string;
+  /** Automations only (2026-08-24) — the real signal `resolveAutomationState` below turns into an
+   *  animation. Undefined means "this avatar carries no execution-tracking claim at all" (e.g. the
+   *  two estate-level systems-console seats, which are not gated through automation-approvals) —
+   *  the canvas must render those exactly as before this field existed, never as "unknown" (that
+   *  word is reserved for a signal that WAS checked and came back unresolved; see
+   *  `AutomationSignal.checked`). Never set for `human` or `agent` — those have their own activity
+   *  models. */
+  automationSignal?: AutomationSignal;
+  /** Automations only, COLOUR PURPOSES ONLY (owner override, 2026-08-24) — see
+   *  `automationColorToken`'s own doc for the fallback chain this feeds, and for why it consciously
+   *  overrides office-data.ts's earlier "automations carry no department tone" reasoning (kept in
+   *  place there, not deleted, so that reasoning isn't silently erased). Undefined for every
+   *  automation today — none has a real department binding yet — which correctly falls through to
+   *  grey; this is never used to change WHERE an automation sits (`homeRoomKey`) or any other fact
+   *  about it. */
+  deptId?: string;
 }
 
 // ── Movement events — the ONLY thing that may move an avatar (plan §3: "motion is a claim") ─────
@@ -669,4 +686,95 @@ export const WORKING_RECENCY_MS = 45_000;
 export function isGenuinelyWorking(lastEventAtMs: number | null, nowMs: number): boolean {
   if (lastEventAtMs == null) return false;
   return nowMs - lastEventAtMs <= WORKING_RECENCY_MS;
+}
+
+// ── Automations — the SAME three-state honesty model, driven by automation_approvals ────────────
+// (2026-08-24: "make the office visibly busy... from real data"). The real signal is
+// `lib/automationApprovals.ts`'s per-tenant rows: a still-`pending` row means a human is being
+// waited on; a DECIDED row's `execution_status`/`executed_at`/`execution_error` says what actually
+// happened to the write once approved (that file's own header — a pending row is always
+// `not_applicable` there, never confused with "idle"). office-data.ts assembles the raw
+// `AutomationSignal` per automation from those real rows; everything below is the PURE decision
+// over that signal, so it's testable with plain data and never needs a live backend to verify.
+export interface AutomationSignal {
+  /** False when the automation-approvals reader genuinely could not be consulted for this
+   *  automation (a real fetch failure — NOT a 403/404, which `listAutomationApprovals` already
+   *  degrades to a legitimate empty list, the same house rule every other lib/*.ts reader follows).
+   *  `resolveAutomationState` treats `checked: false` as UNKNOWN regardless of what the other
+   *  fields say — never coerced to "idle" just because they're empty too (the exact trap this
+   *  ticket calls out: "a row the reader cannot see is ABSENT ... never as not_applicable"). */
+  checked: boolean;
+  /** True while a decision-pending row exists for this automation right now. */
+  pendingApproval: boolean;
+  /** The most recent DECIDED row's execution_status this reader could see, or null when nothing
+   *  has ever been decided for this automation. Never read off a pending row (always
+   *  `not_applicable` there per automationApprovals.ts's own header). */
+  executionStatus: ExecutionStatus | null;
+  /** ms epoch of the freshest REAL timestamp behind that execution attempt — `executed_at` when
+   *  the automation actually ran, or (only for a `failed` status) `decided_at` when the attempt
+   *  never got as far as recording one (e.g. "hub_unreachable" before it started). Null means
+   *  genuinely nothing timestamped is known — never a fabricated "just now". */
+  asOfMs: number | null;
+  executionError: string | null;
+}
+
+/** Real automations share the SAME freshness window O4 already uses for "is an agent genuinely
+ *  working right now" (`WORKING_RECENCY_MS` above) rather than inventing a second number — both
+ *  questions are identical ("did something real happen here recently enough to still call it
+ *  live"), and a second constant would just be two competing opinions about the same fact with no
+ *  reason either value should differ. If a real difference is ever needed, extract a SECOND named
+ *  constant with a comment saying why — don't let call sites drift by re-using the number inline. */
+export type AutomationActivityState = "executing" | "awaiting_approval" | "failed" | "idle" | "unknown";
+
+/** Pure: signal in, state out — priority order matters. A pending approval is the LOUDEST fact
+ *  regardless of any stale execution history (an automation blocked on a human is exactly what
+ *  should be visible across a room, same rule as an agent's `approval_wait`). A `failed` status
+ *  only reads as failed WITHIN the freshness window — outside it, the same failure fades to idle
+ *  rather than staying alarming forever (req: "distinct and not alarming-by-default-forever"). A
+ *  fresh `executed_at` with no failure — including a genuinely in-flight `executing` status, which
+ *  needs no freshness check at all because "in-flight" is already a live fact — reads as executing:
+ *  the desk just did (or is doing) something real. Everything else is idle: nothing recent, and
+ *  idle is still. */
+export function resolveAutomationState(signal: AutomationSignal, nowMs: number): AutomationActivityState {
+  if (!signal.checked) return "unknown";
+  if (signal.pendingApproval) return "awaiting_approval";
+  const fresh = signal.asOfMs != null && nowMs - signal.asOfMs <= WORKING_RECENCY_MS;
+  if (signal.executionStatus === "failed") return fresh ? "failed" : "idle";
+  if (signal.executionStatus === "executing") return "executing";
+  return fresh ? "executing" : "idle";
+}
+
+/** Detail-panel copy for each state (req: unknown must "say so ... rather than rendering a
+ *  confident idle") — parallel to `EMOTE_LABEL` above, kept as its own map because these are full
+ *  sentences for the panel, not bubble-glyph labels. */
+export const AUTOMATION_STATE_LABEL: Record<AutomationActivityState, string> = {
+  executing: "Executing now — a real, recent run behind this desk.",
+  awaiting_approval: "Waiting on a human approval right now.",
+  failed: "Failed on its last real execution attempt.",
+  idle: "Idle — nothing recent.",
+  unknown: "Unknown — the automation-approvals reader could not be confirmed just now. Not the same as idle.",
+};
+
+/** The desk-tint fallback's grey — the honest default for an automation bound to no department
+ *  (still the common case: see `automationColorToken`'s own doc). Named so `OfficeCanvas.tsx`'s
+ *  `readTokens()` and this fallback chain share one literal instead of two independent guesses at
+ *  the same CSS custom property. */
+export const AUTOMATION_GREY_TOKEN = "--n-8";
+
+/** Automation colour fallback chain (owner override, 2026-08-24): automations DO get a department
+ *  tone when one genuinely applies, consciously overriding office-data.ts's earlier "automations
+ *  carry no department tone by design" reasoning — that reasoning is left in place on the avatars
+ *  it was written for rather than deleted, so read THIS comment as superseding it, not erasing it.
+ *  Resolution order: (1) a real per-automation colour SETTING, when one exists — no settings UI or
+ *  storage ships in this pass, so `settingToken` is always `null`/`undefined` today; the parameter
+ *  exists so a future setting slots into this exact chain without redesigning it (2) the
+ *  department's own `--cat-N` tone — the SAME deterministic id -> tone hash `catToken` already
+ *  gives every human bound to that department, just fed the department id instead of a person id,
+ *  so the same department paints the same tone everywhere it appears (3) grey, the honest default
+ *  when the automation is bound to no department at all (still every real automation today). Pure:
+ *  takes the already-resolved ids, never reaches into a store itself. */
+export function automationColorToken(settingToken: string | null | undefined, deptId: string | null | undefined): string {
+  if (settingToken) return settingToken;
+  if (deptId) return catToken(deptId);
+  return AUTOMATION_GREY_TOKEN;
 }

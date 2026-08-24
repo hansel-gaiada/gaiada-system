@@ -5,9 +5,11 @@ import {
   buildWalkableGrid, findPath, nearestWalkable, roomToRoomPath, pathLength, pointAlongPath,
   restingRoomKey, buildReplaySteps, totalReplayMs, hashId, catToken, lerp, clamp01,
   isGenuinelyWorking, WORKING_RECENCY_MS,
+  resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN,
   CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES, DESK_TOP_TILES,
   ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor, type Camera,
+  type AutomationSignal,
 } from "./office";
 
 function room(key: string, kind: OfficeRoomInput["kind"], occupantCount: number, extra: Partial<OfficeRoomInput> = {}): OfficeRoomInput {
@@ -515,5 +517,76 @@ describe("Camera — zoom / pan / follow maths (req #1, pure functions per the t
       expect(css).toContain("scale(3)");
       expect(css).toMatch(/^translate\(-?\d+(\.\d+)?px, -?\d+(\.\d+)?px\) scale\(3\)$/);
     });
+  });
+});
+
+// ── Automations — the same three-state honesty model, driven by automation_approvals (2026-08-24)
+function signal(overrides: Partial<AutomationSignal> = {}): AutomationSignal {
+  return { checked: true, pendingApproval: false, executionStatus: null, asOfMs: null, executionError: null, ...overrides };
+}
+
+describe("resolveAutomationState — pure signal-in, state-out (the resolver 'motion is a claim' rides on)", () => {
+  it("is UNKNOWN whenever checked is false, regardless of what the other fields claim", () => {
+    // The exact trap the ticket calls out: every other field here looks exactly like "idle" would,
+    // but `checked: false` means the reader never actually confirmed that — must never be coerced
+    // into a confident idle.
+    expect(resolveAutomationState(signal({ checked: false }), 1_000_000)).toBe("unknown");
+    expect(resolveAutomationState(signal({ checked: false, pendingApproval: true }), 1_000_000)).toBe("unknown");
+    expect(resolveAutomationState(signal({ checked: false, executionStatus: "executing" }), 1_000_000)).toBe("unknown");
+  });
+
+  it("is IDLE, not unknown, when checked is true and genuinely nothing is happening", () => {
+    // The other half of the same distinction: a real, confirmed "nothing to report" is idle, not
+    // unknown — the two must never collapse into the same value from opposite reasons.
+    expect(resolveAutomationState(signal(), 1_000_000)).toBe("idle");
+  });
+
+  it("a pending approval wins even over a fresh in-flight execution — the loudest fact always shows", () => {
+    const now = 1_000_000;
+    const s = signal({ pendingApproval: true, executionStatus: "executing", asOfMs: now });
+    expect(resolveAutomationState(s, now)).toBe("awaiting_approval");
+  });
+
+  it("an in-flight execution_status is EXECUTING with no freshness check at all", () => {
+    const now = 1_000_000;
+    const s = signal({ executionStatus: "executing", asOfMs: null });
+    expect(resolveAutomationState(s, now)).toBe("executing");
+  });
+
+  it("a recently executed row (any non-failed status) reads as EXECUTING within the shared freshness window", () => {
+    const now = 1_000_000;
+    const s = signal({ executionStatus: "executed", asOfMs: now - WORKING_RECENCY_MS });
+    expect(resolveAutomationState(s, now)).toBe("executing");
+    expect(resolveAutomationState({ ...s, asOfMs: now - WORKING_RECENCY_MS - 1 }, now)).toBe("idle");
+  });
+
+  it("a failed execution is FAILED only within the freshness window, then fades to idle — never alarming forever", () => {
+    const now = 1_000_000;
+    const fresh = signal({ executionStatus: "failed", asOfMs: now - WORKING_RECENCY_MS, executionError: "boom" });
+    expect(resolveAutomationState(fresh, now)).toBe("failed");
+    const stale = signal({ executionStatus: "failed", asOfMs: now - WORKING_RECENCY_MS - 1, executionError: "boom" });
+    expect(resolveAutomationState(stale, now)).toBe("idle");
+  });
+
+  it("a failed status with no asOfMs at all (never even reached executed_at) is idle, never a fabricated failure", () => {
+    const s = signal({ executionStatus: "failed", asOfMs: null, executionError: "hub_unreachable" });
+    expect(resolveAutomationState(s, 1_000_000)).toBe("idle");
+  });
+});
+
+describe("automationColorToken — settable colour, then department tone, then grey (owner override, 2026-08-24)", () => {
+  it("falls all the way to grey when neither a setting nor a department applies", () => {
+    expect(automationColorToken(null, null)).toBe(AUTOMATION_GREY_TOKEN);
+    expect(automationColorToken(undefined, undefined)).toBe(AUTOMATION_GREY_TOKEN);
+  });
+
+  it("uses the department's own deterministic --cat-N tone when one applies and no setting overrides it", () => {
+    const token = automationColorToken(null, "dept-42");
+    expect(token).toMatch(/^--cat-[1-8]$/);
+    expect(token).toBe(catToken("dept-42")); // same hash every human bound to that department gets
+  });
+
+  it("a real per-automation setting wins over the department tone", () => {
+    expect(automationColorToken("--cat-3", "dept-42")).toBe("--cat-3");
   });
 });
