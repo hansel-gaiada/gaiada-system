@@ -196,3 +196,29 @@ brand art.** Those need a human author precisely so that they can be owned.
 An AI-generated asset is not automatically safe. The generator's output carries no licence, but it
 can still carry someone else's character design, and that is a separate question this row answers
 separately.
+
+---
+
+## Decided: "Futuristic AI Pixel Art 32x32" — AI-generated, 52 complete characters adopted
+
+| Field | Value |
+|---|---|
+| **Asset** | `Character_Asset_Futuristic_AI_Pixel_Art_32x32`, delivered by the Creative team 2026-08-24 (323 PNG) |
+| **Source** | **Generated with ChatGPT by the Gaiada Creative team**, same provenance as the Waha pack above |
+| **Licence** | **None, and none needed** — no human author, so no third-party copyright subsists. Same reasoning, same consequence: we hold no copyright in it either, so it must never be the source of a logo or brand art |
+| **Date assessed** | 2026-08-24 |
+| **Adopted** | **52 files** — 4 AI agent androids, 6 cyber cats, 6 cyber dogs, 6 skin-tone characters, 30 uniform characters |
+| **Excluded** | 98 blank files (see below) and the 120 hair / 53 eye layer pieces, which have nothing to layer onto until the clothing layers exist |
+
+### The similarity question is closed on this pack
+
+Every one of the 30 uniforms is an original sci-fi concept — *Quantum Pilot, Chrome Nomad, Photon
+Monk, Singularity Knight*. Nothing is named for, or drawn from, a protected character. This is what
+the previous pack's "Special Uniform" category should have been, and it is why that category is
+excluded there and adopted here.
+
+### What the delivery got right
+
+All 323 files are **exactly 32x32**, native (uniform-block size 1px, so it is genuinely drawn at
+32 rather than downscaled), with clean transparent cut-outs and **no catalogue card frames** — the
+three defects that blocked the Waha character tree are all fixed.
