@@ -9,7 +9,7 @@ import {
   KIND_LABEL, ASSURANCE_LABEL, EMOTE_LABEL, tilesToPx, NAME_SLOT_TILES,
   roomTileRect, deskSlotTile, roomCenterTile, allRooms,
   buildWalkableGrid, roomToRoomPath, pointAlongPath, isGenuinelyWorking,
-  restingRoomKey, buildReplaySteps, totalReplayMs, catToken,
+  restingRoomKey, buildReplaySteps, totalReplayMs, catToken, hashId,
   DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
   ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_STATE_LABEL,
@@ -17,10 +17,13 @@ import {
   type Camera, type ZoomLevel, type AutomationActivityState,
 } from "@/lib/office";
 import {
-  LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS, STEEL_RAMP,
+  LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS,
   spriteAssetPath, pickGender, pickSkinTone, hexToRgb,
   type SpriteGender, type SpritePose,
 } from "@/lib/office-sprites";
+import {
+  CHAR_PX, CHAR_DRAW_SCALE, agentSpritePath, automationSpritePath, activeBobPx,
+} from "@/lib/officeChars";
 import "./office.css";
 
 // The Office canvas — hand-rolled Canvas 2D, no engine, no new dependency (platform-ui's four-dep
@@ -894,16 +897,33 @@ function drawAvatar(
   // A label is a locator, not the content.
   const slotWidthPx = tilesToPx(NAME_SLOT_TILES);
   switch (avatar.kind) {
-    case "human":
     case "agent": {
+      // Purpose-drawn android (2026-08-24). Replaces the LPC body under a steel ramp, which was
+      // always a stand-in for exactly this: "an unmistakably synthetic look". A recoloured human
+      // reads as a grey person; this reads as a machine.
+      const sprite = getRawImage(agentSpritePath(avatar.recordId, hashId));
+      if (sprite) {
+        ctx.imageSmoothingEnabled = false;
+        const size = CHAR_PX * CHAR_DRAW_SCALE;
+        const bob = activeBobPx(emoteKind !== null, pulseOn);
+        ctx.drawImage(sprite, cx - size / 2, cy - size * 0.6 - bob, size, size);
+      } else {
+        drawHumanoid(ctx, cx, cy, r, tokens.steel, tokens.ink, true);
+      }
+      break;
+    }
+    case "human": {
       // Kind taxonomy (plan §4.4): humans get a deterministic human skin ramp; internal agents
       // reuse the identical sprite under the fixed "steel" ramp so they read as synthetic without
       // ever being mistakable for a person. Sit is the default pose — an office is mostly people
       // at desks; walk is used only for the brief window a replay has this avatar in transit.
+      // Humans stay on LPC ON PURPOSE. Those sheets carry real `walk` and `sit` poses; the new
+      // 32px pack has one frame and one direction, so switching would trade a working walk cycle
+      // for correct scale. That trade is worth making when the four directions land, not before.
       const gender = pickGender(avatar.recordId);
       const pose: SpritePose = pos.inTransit ? "walk" : "sit";
-      const toneKey: string = avatar.kind === "human" ? pickSkinTone(avatar.recordId) : "steel";
-      const ramp: string[] = avatar.kind === "human" ? SKIN_RAMPS[pickSkinTone(avatar.recordId)] : STEEL_RAMP;
+      const toneKey: string = pickSkinTone(avatar.recordId);
+      const ramp: string[] = SKIN_RAMPS[pickSkinTone(avatar.recordId)];
       const sprite = getComposedSprite(gender, pose, toneKey, ramp);
       if (sprite) {
         ctx.imageSmoothingEnabled = false;
@@ -916,7 +936,7 @@ function drawAvatar(
       } else {
         // Still loading (or a path 404'd) — same procedural stand-in this canvas always drew,
         // never a blank tile.
-        drawHumanoid(ctx, cx, cy, r, avatar.kind === "human" ? tokens.catColor(avatar.recordId) : tokens.steel, tokens.ink, avatar.kind === "agent");
+        drawHumanoid(ctx, cx, cy, r, tokens.catColor(avatar.recordId), tokens.ink, false);
       }
       break;
     }
@@ -925,7 +945,28 @@ function drawAvatar(
       // No per-automation colour SETTING exists yet (no settings UI ships in this pass), so the
       // first argument is always null today; department, then grey, is the real chain exercised.
       const colorToken = automationColorToken(null, avatar.deptId ?? null);
-      drawAutomation(ctx, cx, cy, r, tokens.resolveToken(colorToken), tokens.ink);
+      const sprite = getRawImage(automationSpritePath(avatar.recordId, hashId));
+      if (sprite) {
+        // The department colour moves to a ring UNDER the sprite rather than being lost. The
+        // owner's override asked for a settable department tone on automations; purpose-drawn
+        // animals arrive with their own fixed palettes, so tinting the art would both fight the
+        // artwork and make twelve distinguishable variants look like twelve muddied ones. A ring
+        // keeps the binding visible and keeps the identity readable — and it is still the exact
+        // `automationColorToken` chain, so the setting slots in unchanged when it ships.
+        ctx.save();
+        ctx.strokeStyle = tokens.resolveToken(colorToken);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + r * 0.55, r * 1.05, r * 0.6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        ctx.imageSmoothingEnabled = false;
+        const size = CHAR_PX * CHAR_DRAW_SCALE;
+        const bob = activeBobPx(emoteKind !== null, pulseOn);
+        ctx.drawImage(sprite, cx - size / 2, cy - size * 0.6 - bob, size, size);
+      } else {
+        drawAutomation(ctx, cx, cy, r, tokens.resolveToken(colorToken), tokens.ink);
+      }
       break;
     }
     case "external":

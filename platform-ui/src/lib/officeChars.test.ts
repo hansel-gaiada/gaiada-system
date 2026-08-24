@@ -1,0 +1,68 @@
+import { describe, it, expect } from "vitest";
+import { hashId } from "./office";
+import {
+  AGENT_SPRITES, AUTOMATION_SPRITES, CHAR_PX, CHAR_DRAW_SCALE,
+  agentSpritePath, automationSpritePath, activeBobPx,
+} from "./officeChars";
+
+describe("officeChars — sprite selection is deterministic, or an avatar changes identity on reload", () => {
+  it("returns the SAME sprite for the same id, every time", () => {
+    for (const id of ["agent-supervisor", "wf-42", "a", ""]) {
+      expect(agentSpritePath(id, hashId)).toBe(agentSpritePath(id, hashId));
+      expect(automationSpritePath(id, hashId)).toBe(automationSpritePath(id, hashId));
+    }
+  });
+
+  it("only ever returns a path from its own list — never a cross-kind sprite", () => {
+    // An automation rendered as an android (or vice versa) would misreport what kind of principal
+    // is at that desk, which is the one thing the avatar exists to communicate.
+    for (let i = 0; i < 200; i++) {
+      expect(AGENT_SPRITES).toContain(agentSpritePath(`agent-${i}`, hashId));
+      expect(AUTOMATION_SPRITES).toContain(automationSpritePath(`wf-${i}`, hashId));
+    }
+  });
+
+  it("spreads across the whole list rather than collapsing onto one sprite", () => {
+    // Guards the failure where a hash keeps landing on index 0 and every automation in the office
+    // is the same cat — which reads as a rendering bug, not as twelve automations.
+    const seen = new Set(Array.from({ length: 300 }, (_, i) => automationSpritePath(`wf-${i}`, hashId)));
+    expect(seen.size).toBe(AUTOMATION_SPRITES.length);
+    const agents = new Set(Array.from({ length: 200 }, (_, i) => agentSpritePath(`agent-${i}`, hashId)));
+    expect(agents.size).toBe(AGENT_SPRITES.length);
+  });
+
+  it("every declared path points into the committed pack, with no duplicates", () => {
+    const all = [...AGENT_SPRITES, ...AUTOMATION_SPRITES];
+    expect(new Set(all).size).toBe(all.length);
+    for (const p of AGENT_SPRITES) expect(p.startsWith("/office-chars/agents/")).toBe(true);
+    for (const p of AUTOMATION_SPRITES) expect(p.startsWith("/office-chars/automations/")).toBe(true);
+    for (const p of all) expect(p.endsWith(".png")).toBe(true);
+  });
+
+  it("pools cats and dogs — the split is a folder convention, not twelve of one animal", () => {
+    const cats = AUTOMATION_SPRITES.filter((p) => p.includes("/cats/"));
+    const dogs = AUTOMATION_SPRITES.filter((p) => p.includes("/dogs/"));
+    expect(cats.length).toBe(6);
+    expect(dogs.length).toBe(6);
+  });
+});
+
+describe("activeBobPx — the two-frame animation, and the claim it makes", () => {
+  it("is ZERO whenever the principal is not active, on either pulse beat", () => {
+    // Stillness is the default and the only state we can always support. A desk must never bob
+    // while claiming to be idle.
+    expect(activeBobPx(false, false)).toBe(0);
+    expect(activeBobPx(false, true)).toBe(0);
+  });
+
+  it("lifts by exactly one SPRITE pixel when active, alternating with the pulse", () => {
+    expect(activeBobPx(true, false)).toBe(0);
+    expect(activeBobPx(true, true)).toBe(CHAR_DRAW_SCALE);
+  });
+
+  it("moves in whole sprite pixels, so the pixel grid survives the animation", () => {
+    expect(activeBobPx(true, true) % CHAR_DRAW_SCALE).toBe(0);
+    expect(Number.isInteger(CHAR_DRAW_SCALE)).toBe(true);
+    expect(CHAR_PX * CHAR_DRAW_SCALE).toBe(64); // two tiles, matching the LPC humans beside them
+  });
+});

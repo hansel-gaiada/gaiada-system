@@ -46,4 +46,4 @@ export function middleware(req: NextRequest) {
 // rides along — so nothing looked broken; the cost was 135 files running the edge middleware on
 // every request and a redirect standing in front of something that should simply be cacheable.
 // The comment above already said this. Adding assets means adding them here.
-export const config = { matcher: ["/((?!_next|fonts|office-sprites|office-env|favicon.ico).*)"] };
+export const config = { matcher: ["/((?!_next|fonts|office-sprites|office-env|office-chars|favicon.ico).*)"] };
