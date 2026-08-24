@@ -31,6 +31,8 @@ import { registerModule, validateModulePermissions } from "./modules/registry";
 import { agencyModule } from "./modules/agency";
 import { pmModule } from "./modules/pm";
 import { itModule } from "./modules/it";
+import { financeModule } from "./modules/finance";
+import { FinanceErrorFilter } from "./modules/finance/finance-error.filter";
 import { monitoringModule } from "./modules/monitoring";
 import { registerDriver } from "./modules/monitoring/drivers/registry";
 import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
@@ -185,6 +187,10 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new ProviderDispatchErrorFilter(),
     new GatewayNotConfiguredErrorFilter(),
     new GoogleOAuthErrorFilter(),
+    // FINANCE-APP: the FINANCE_* refusal family arrives as pg DatabaseError (a plain Error), so
+    // HttpErrorFilter never saw it and every accounting refusal surfaced as a body-less 500.
+    // Same class of bug as the four this file already carries. See the filter's own header.
+    new FinanceErrorFilter(),
     new ClientAccessErrorFilter(),
     new SocialPublisherErrorFilter(),
     // SMM-38 phase 38c — `linkedin-oauth.controller.ts` is the first caller to surface
@@ -396,6 +402,7 @@ async function bootstrap(): Promise<void> {
   registerModule(agencyModule);
   registerModule(pmModule);
   registerModule(itModule);
+  registerModule(financeModule);
   registerModule(monitoringModule);
   // Registering the MODULE does not register DRIVERS. Kept explicit rather than folded into the
   // module contract: a kind with no driver reports available:false and refuses at dispatch, so the

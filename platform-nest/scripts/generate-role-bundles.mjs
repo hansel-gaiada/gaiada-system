@@ -117,6 +117,16 @@ const FINANCE_KINDS = new Set([
   "finance_ledger",
   // FINANCE-F3: the derived statement surface.
   "finance_statement",
+  // FINANCE-F4: the receivables subledger.
+  "finance_ar",
+  // FINANCE-F5: the payables subledger.
+  "finance_ap",
+  // FINANCE-F6: bank statements, matching and reconciliation.
+  "finance_bank",
+  // FINANCE-F7: tax codes, returns and the Coretax reconciliation.
+  "finance_tax",
+  // FINANCE-F2: posting rules and the event inbox.
+  "finance_posting_rule",
 ]);
 const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",

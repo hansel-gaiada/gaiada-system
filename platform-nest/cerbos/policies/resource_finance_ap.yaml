@@ -1,0 +1,90 @@
+# Finance F5 — `finance_ap`: the payables subledger.
+#
+# Covers vendors, bills, payments and allocations (202608241021). As with `finance_ar`, the actions
+# map onto SoD DUTIES rather than CRUD — but AP carries TWO seeded blocking conflicts, not one:
+#
+#     vendor_master   + ap_payment_release   —  "invent a vendor, pay yourself"
+#     ap_bill_entry   + ap_payment_approve   —  "approve your own invoice"
+#
+# Both are in the six seeded by 202608241013, and AP is where the money actually leaves the
+# building. So the action split here is finer than AR's:
+#
+#   read / reconcile   see the subledger; run the subledger-to-GL tie-out
+#   vendor_master      create and edit VENDORS, including their bank details
+#   bill_entry         enter and edit DRAFT bills
+#   approve            approve a bill — it posts, and the company owes the vendor and owes DJP
+#   payment_release    move the money
+#
+# `vendor_master` is separated from everything else specifically because of the first pair. Editing
+# a vendor's BANK ACCOUNT is the single highest-leverage fraud in accounts payable — it needs no
+# fake invoice at all, just a redirected payment on a genuine one. Bundling it into a general
+# "manage" action, as AR does for customers, would be wrong here: an AR customer's bank details do
+# not move company money, and a vendor's do.
+#
+# ⚠ THE ROLE-BUNDLE CAVEAT, ONCE MORE: `finance_manager` holds several of these. Role bundles grant
+# CAPABILITY; segregation of duties binds per company, per PERSON, through `finance_duty_assignments`
+# + `finance_sod_check()`. Splitting the actions is what gives the duty matrix something to bind to.
+#
+# ── payment_release IS THE HIGHEST BAR HERE ─────────────────────────────────────────────────────
+# It is the moment money irreversibly leaves. D4 high assurance, and NOT held by `finance_staff` —
+# an AP clerk enters bills; releasing funds is a separate hand. `company_admin` does not hold it
+# either: an administrative role should not be able to move cash.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `delete` on an approved bill. Voided by reversal; the ledger entry is immutable.
+#   * `client` — nothing. Vendor payment data is not client-facing under any reading.
+#   * A `perm_*` mirror arm. Role-arm only.
+#   * `owner` — permission-native; company scope comes from the ownership graph (D-F8).
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_ap", tenantId, module:"finance", billId?}.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_ap
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    - actions: ["read", "reconcile"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Entering draft bills is the AP clerk's day job. Nothing has reached the books.
+    - actions: ["bill_entry"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Vendor master, including bank details — the highest-leverage AP fraud. Manager tier and above,
+    # at high assurance, and deliberately NOT the same hand as bill entry.
+    - actions: ["vendor_master"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Approving a bill commits the company to pay.
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Releasing payment — money leaves. The narrowest grant in the finance module.
+    - actions: ["payment_release"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

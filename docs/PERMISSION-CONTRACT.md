@@ -1212,3 +1212,183 @@ what lets a real conflict be waived deliberately, with a named compensating cont
 it, instead of being either impossible (so people work around it) or invisible (so nobody knows).
 If a future change tries to enforce SoD by withholding a role key, re-read this paragraph first.
 
+---
+
+## 19. Finance F3 — the statement kind (2026-08-24)
+
+Landed by `202608241018_iam_finance_f3_statement_permissions.sql` alongside the reporting functions
+in `202608241017`. One kind, `finance_statement`, 2 keys. Extends §17–§18.
+
+| Action | Holders | Assurance |
+|---|---|---|
+| `read` | `finance_staff`, `finance_manager`, `company_admin` | `notLow` |
+| `export` | `finance_manager`, `company_admin` | **D4 `high`** |
+
+**There is no write action.** A statement is derived from the ledger — if a figure is wrong, the
+ledger is wrong and is corrected there by reversal. A `finance.statement.update` would imply a
+statement can be adjusted independently of the entries behind it, which is the practice double-entry
+bookkeeping exists to prevent.
+
+**`export` is separated from `read` deliberately.** Reading a P&L on screen and producing a signed
+file for a bank are different acts: the export outlives the session, carries no access control once
+it exists, and is what a lender decides on. §10.4 of the blueprint has banks and the tax office
+receiving a sealed package rather than a login — this is the action that produces it.
+
+**Statement `read` is wider than ledger `read`.** A statement is an aggregate; someone who should
+see departmental cost totals does not thereby need every journal line behind them. Both sit with
+`finance_staff` today, but the ordering is deliberate and should not be tidied into one tier.
+
+---
+
+## 20. Finance F4 — the receivables subledger (2026-08-24)
+
+`202608241020_iam_finance_f4_ar_permissions.sql` alongside the AR schema in `202608241019`.
+One kind, `finance_ar`, 6 keys. The actions map onto **SoD duties, not CRUD**.
+
+| Action | `finance_staff` | `finance_manager` | `company_admin` | Assurance |
+|---|:--:|:--:|:--:|---|
+| `read` · `reconcile` | ✅ | ✅ | ✅ | `notLow` |
+| `manage` (customers, drafts) | ✅ | ✅ | ✅ | `notLow` |
+| `issue` · `receipt` | ✅ | ✅ | — | `notLow` |
+| `write_off` | **—** | ✅ | ✅ | **D4 `high`** |
+
+**Why `receipt` and `write_off` are separate rights.** `202608241013` seeds
+`ar_receipt_posting` + `ar_writeoff_approve` as a BLOCKING conflict — *"pocket the cash, then write
+off the debt"*, the classic receivables fraud. It is only preventable if the two can be granted
+apart, so `finance_staff` gets `receipt` and never `write_off`.
+
+⚠ **Same caveat as §18, stated up front:** `finance_manager` holds both. That is not the control.
+Role bundles grant **capability**; SoD binds per company, per **person**, via
+`finance_duty_assignments` + `finance_sod_check()`. Splitting the actions is what gives the duty
+matrix something to bind to.
+
+**`company_admin` gets `write_off` but not `issue`/`receipt`.** Running the receivables desk is
+bookkeeping; authorising the forgiveness of a debt is governance. The split follows that line.
+
+**No `delete`.** An issued invoice is voided by reversing its journal — the ledger entry is
+immutable, so removing the subledger row would break the subledger-to-GL tie.
+
+---
+
+## 21. Finance F5 — the payables subledger (2026-08-24)
+
+`202608241022_iam_finance_f5_ap_permissions.sql` alongside the AP schema in `202608241021`.
+One kind, `finance_ap`, 6 keys — **a finer split than `finance_ar`**, because AP carries two seeded
+blocking conflicts and is where money actually leaves.
+
+| Action | `finance_staff` | `finance_manager` | `company_admin` | Assurance |
+|---|:--:|:--:|:--:|---|
+| `read` / `reconcile` | yes | yes | yes | `notLow` |
+| `bill_entry` | yes | yes | no | `notLow` |
+| `vendor_master` | no | yes | yes | **D4 `high`** |
+| `approve` | no | yes | yes | **D4 `high`** |
+| `payment_release` | no | yes | **no** | **D4 `high`** |
+
+**Two seeded conflicts drive the split** (blueprint 2.2, seeded by `202608241013`):
+`vendor_master` + `ap_payment_release` (invent a vendor, pay yourself), and
+`ap_bill_entry` + `ap_payment_approve` (approve your own invoice).
+
+**Why `vendor_master` is its own right, when the AR customer equivalent is not.** Editing a vendor's
+**bank details** is the highest-leverage fraud in payables: it needs no fake invoice at all, only a
+redirected payment on a genuine one. An AR customer's bank details move no company money; a
+vendor's do. The asymmetry between the two kinds is deliberate, not an inconsistency.
+
+**`payment_release` is the narrowest grant in the finance module** - `finance_manager` only, high
+assurance, and explicitly **not** `company_admin`. An administrative role may authorise a commitment
+(`approve`); it should not be able to move cash.
+
+---
+
+## 22. Finance F6 — bank reconciliation (2026-08-24)
+
+`202608241024_iam_finance_f6_bank_permissions.sql` alongside `202608241023`.
+One kind, `finance_bank`, 4 keys: `read` · `reconcile` · `import` · `match`.
+
+| Action | `finance_staff` | `finance_manager` | `company_admin` |
+|---|:--:|:--:|:--:|
+| `read` / `reconcile` | yes | yes | yes |
+| `import` / `match` | yes | yes | **no** |
+
+**The SoD pair is satisfied STRUCTURALLY here — a first for this module.** `202608241013` seeds
+`bank_reconcile` + `cash_custody` as blocking: whoever can move money must not be the one who
+declares the bank agrees. Across the tiers that now falls out by construction —
+
+- `finance_staff` reconciles the bank and **cannot** release payments (§21 keeps
+  `finance.ap.payment_release` at `finance_manager`, high assurance);
+- `finance_manager` can do both, and needs a duty-matrix waiver if actually assigned both.
+
+So the default staffing — an AR/AP officer who reconciles, a controller who releases — satisfies the
+seeded pair with nobody configuring anything. Every earlier finance kind relied on the duty matrix
+to *catch* the overlap; this one is arranged so it does not arise at the staff tier.
+
+**Two actions deliberately do not exist.** There is no action that **edits a statement line** — the
+statement is the bank's version of events, and if the bank is wrong the answer is a dispute plus a
+correcting entry, never an edit that makes the two agree. And there is no **adjustment** action: an
+unexplained difference *is* the finding, and a plug turns a real problem into a rounding line.
+
+---
+
+## 23. Finance F7 — tax and statutory (2026-08-24)
+
+`202608241026_iam_finance_f7_tax_permissions.sql` alongside `202608241025`.
+One kind, `finance_tax`, 4 keys.
+
+| Action | `finance_staff` | `finance_manager` | `company_admin` | Assurance |
+|---|:--:|:--:|:--:|---|
+| `read` | yes | yes | yes | `notLow` |
+| `prepare` | yes | yes | no | `notLow` |
+| `configure` | no | yes | **no** | **D4 `high`** |
+| `file` | no | yes | yes | **D4 `high`** |
+
+**`file` is the highest bar in the module, alongside `finance.ap.payment_release`.** Everything else
+in finance is a statement to ourselves, our auditor or our bank. `file` is a statement to the
+**state**, and a wrong one is a legal exposure rather than an accounting error — an understated
+return means an assessment plus penalties and interest; an overstated one is money that is very hard
+to recover.
+
+⚠ **`file` does not transmit anything.** Transmission goes through a licensed ASP/PJAP (§6 of the
+blueprint, and owner ruling D-F2's explicit carve-out). The action records that a return *was*
+lodged, with its reference, and snapshots the figures as filed — so what we told the tax office stays
+distinguishable from what the data says today.
+
+**`configure` is separated from `prepare`, and is the one action `company_admin` does not get.** A
+tax *code* decides the tax on every future document; editing a rate or a base multiplier changes the
+company's tax position across every unfiled document at once. That is a different order of authority
+from preparing this month's return.
+
+**No `unfile`, and no action edits a Coretax extract.** A filed return is a historical fact — a
+correction is an *amended* return, a new filing on the same row, never an erasure. The extract is
+DJP's record of events, the same posture as a bank statement in §22.
+
+---
+
+## 24. Finance F2 — posting rules (2026-08-24)
+
+`202608241028_iam_finance_f2_posting_rule_permissions.sql` alongside `202608241027`.
+One kind, `finance_posting_rule`, 4 keys.
+
+| Action | `finance_staff` | `finance_manager` | `company_admin` | Assurance |
+|---|:--:|:--:|:--:|---|
+| `read` | yes | yes | yes | `notLow` |
+| `process` | yes | yes | **no** | `notLow` |
+| `author` | no | yes | **no** | `notLow` |
+| `activate` | no | yes | **no** | **D4 `high`** |
+
+**Authoring a rule is authoring accounting policy.** A posting rule decides which accounts every
+future event of its type lands in — so whoever controls it controls where revenue, cost and tax
+appear in the statements, without ever touching a journal. A single rule edit re-points an entire
+event stream. `activate` is therefore separated from `author` and held at high assurance: drafting a
+mapping for review is ordinary work; making it live is the decision.
+
+**`process` is the agent and automation path, and is deliberately wide.** The agentic-native bar
+requires a capability to work identically under a human, under n8n and under an agent. Processing
+the queue *is* that capability: it applies a mapping somebody else authored and approved, and every
+posting still passes F1's guards — balance, period, account, chain, idempotency. It cannot invent
+accounting; it can only apply it.
+
+⚠ **An automation principal may legitimately hold `process`. It must never hold `author` or
+`activate`** — that is the difference between executing a policy and writing one.
+
+**`company_admin` holds `read` only** — the narrowest it has been in the module. An administrative
+role has no business deciding where revenue lands, and no business running the accounting queue.
+

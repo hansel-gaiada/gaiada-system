@@ -1,0 +1,86 @@
+# Finance F7 — `finance_tax`: tax codes, returns and the Coretax reconciliation.
+#
+# Covers tax codes, tax returns, and the Coretax extract (202608241025).
+#
+#   read       see tax codes, returns, summaries and exception lists
+#   configure  create and amend tax codes — rates, base multipliers, effective dates
+#   prepare    build a draft return, import a Coretax extract, run the reconciliation
+#   file       mark a return FILED — the assertion that it was lodged with the state
+#
+# ── `file` IS THE HIGHEST BAR IN THE MODULE ALONGSIDE payment_release ───────────────────────────
+# Everything else in finance is a statement to ourselves, our auditor, or our bank. `file` is a
+# statement to the STATE, and a wrong one is a legal exposure rather than an accounting error: an
+# understated return is an assessment plus penalties and interest, and an overstated one is money
+# handed over that is very hard to get back.
+#
+# So `file` is D4 high assurance and held narrowly. Note this action does NOT transmit anything —
+# transmission goes through a licensed ASP/PJAP (blueprint §6, and D-F2's explicit carve-out). It
+# records that a return WAS lodged, with its reference, and snapshots the figures as filed.
+#
+# ── `configure` IS SEPARATED FROM `prepare` FOR A SPECIFIC REASON ───────────────────────────────
+# A tax CODE decides how much tax every future document computes. Someone who can edit a rate or a
+# base multiplier can change the company's tax position across every unfiled document at once,
+# silently and retroactively for anything not yet posted. That is a different order of authority
+# from preparing this month's return, and the two are not the same job.
+#
+# Effective dating limits the blast radius — history keeps the rate it was raised under — but the
+# forward exposure is real, which is why `configure` sits with the controller tier at high assurance.
+#
+# ── `prepare` IS DELIBERATELY WIDE ──────────────────────────────────────────────────────────────
+# Building a draft, importing DJP's extract and running the reconciliation are the tax officer's day
+# job, and none of them assert anything to anyone. The exception lists in particular WANT to be
+# widely runnable: `AP_INPUT_VAT_LOST` is money the company is silently absorbing, and the sooner
+# somebody sees it the more likely the vendor still answers the phone.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * Any action that EDITS a Coretax extract. It is DJP's record of events — the same posture as a
+#     bank statement (F6). If it disagrees with us, that IS the finding.
+#   * `unfile`. A filed return is a historical fact; a correction is an AMENDED return, which is a
+#     new status on the same row and a new filing, not an erasure.
+#   * `client`, `member`, `viewer`, `org_unit_lead` — nothing.
+#   * A `perm_*` mirror arm. Role-arm only, as with every finance kind.
+#   * `owner` — permission-native; company scope comes from the ownership graph (ruling D-F8).
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_tax", tenantId, module:"finance", returnId?}.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_tax
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The tax officer's day job — drafts, extracts, reconciliation. Asserts nothing to anyone.
+    - actions: ["prepare"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Editing a rate or a base multiplier changes the company's tax position on every future
+    # document. Controller tier, high assurance.
+    - actions: ["configure"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # A statement to the STATE. Highest bar in the module, alongside finance.ap.payment_release.
+    - actions: ["file"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

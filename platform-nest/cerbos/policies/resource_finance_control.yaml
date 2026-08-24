@@ -1,0 +1,100 @@
+# Finance F0-09 — `finance_control`: THE GOVERNANCE TIER. Who may do what, and who may look.
+#
+# Covers the three objects in 202608241013_finance_sod_and_elevation.sql:
+#   finance_duty_assignments   who holds which of the twelve duties, in which company
+#   finance_access_grants      time-boxed elevation into a company below ("approval from Anthony")
+#   finance_access_log         the append-only record of who LOOKED
+#
+# This is the narrowest finance kind and it is the one that must not leak, because it governs the
+# other two. A principal who can assign duties can assign themselves any duty; a principal who can
+# grant access can grant themselves access. Everything here is therefore held ABOVE the accounting
+# tiers, not alongside them.
+#
+# ── THE ACTIONS, AND WHY THEY ARE NOT CRUD ──────────────────────────────────────────────────────
+#   read            see the duty matrix, live grants, and the access log for a company
+#   assign_duty     grant/revoke one of the twelve duties to a person in a company
+#   waive_conflict  accept a segregation-of-duties conflict under a compensating control
+#   grant_access    APPROVE an elevation request. D14 semantics: approving EXECUTES
+#   revoke_access   cut a live grant short (grants also lapse on their own — see below)
+#
+# `waive_conflict` is separate from `assign_duty` on purpose. Assigning a clean duty is routine
+# administration. Waiving a BLOCKING conflict — deliberately putting one person on two sides of the
+# same transaction — is the decision an auditor will ask about by name, and it should not be
+# reachable by whoever happens to maintain the duty matrix day to day. In a small team the same
+# human will hold both; the point is that the estate can tell them apart when it grows.
+#
+# ── grant_access IS NOT WHAT MAKES THE OWNER'S ACCESS WORK ──────────────────────────────────────
+# Worth stating loudly because getting it backwards inverts owner ruling D-F8 (blueprint §10.3):
+# the OWNER and the holding CFO are NEVER gated by an elevation grant. Their scope is derived from
+# the ownership graph. This kind exists for STAFF reaching outside their staffed scope, and for
+# every write outside it. If a future change finds itself minting grants for the owner, the scope
+# resolver is broken and THIS is not the place to patch it.
+#
+# ── revoke_access IS A CONVENIENCE, NOT THE SAFETY MECHANISM ────────────────────────────────────
+# Grants expire by construction: `ck_finance_access_grants_expiry` refuses an approved grant with no
+# expiry, and `finance_has_elevated_access()` tests `expires_at > now()`. Nothing depends on a human
+# remembering to revoke. `revoke_access` only cuts short a grant that is still live.
+#
+# ── HIGH ASSURANCE ON EVERY WRITE, NOT JUST THE WORST ONE ───────────────────────────────────────
+# Unlike `finance_config` (where `notLow` is the floor for writes), every mutating action here
+# requires D4 `assurance == "high"`. The reasoning: each one widens somebody's reach over money.
+# `notLow` admits an ordinary SSO session with no MFA, and "an ordinary session may grant itself
+# cross-company financial reach" is the sentence this policy exists to make false.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `module_staff` (finance_staff) — entirely. Not even read. A finance assistant seeing the whole
+#     duty matrix and every live elevation grant is a reconnaissance surface with no upside.
+#   * `module_manager` (finance_manager) on the WRITE actions. The controller runs the books; they
+#     do not decide who else may reach them. Read is granted so they can see the matrix that binds
+#     their own team — a controller unable to see their own department's duties cannot plan a close.
+#   * `org_unit_lead`, `client`, `viewer`, `member` — nothing.
+#   * A `perm_*` mirror arm. Role-arm only, and here it is load-bearing rather than merely cautious:
+#     a flat catalog key cannot express "in a company you are staffed to", so a mirror would
+#     collapse `assign_duty` into an unconditional grant over every company in the estate. This is
+#     the same granularity gap resource_hr_case.yaml documents at length.
+#
+# ── THE APPROVER IS A POSITION, NOT A PERSON ────────────────────────────────────────────────────
+# `grant_access` is what Anthony exercises today. It is modelled as a grantable permission held via
+# a role/position, never as a hardcoded user id — a hardcoded approver becomes an outage the first
+# week he is on a plane and cannot survive him changing roles (blueprint §10.3).
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_control", tenantId, module:"finance"}. Same
+# load-bearing `module` contract as resource_finance_config.yaml — see that file's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_control
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # READ — the controller may see the matrix binding their own department; the company's admin may
+    # see who has been let into their books. Note finance_staff is absent (see header).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Routine duty administration.
+    - actions: ["assign_duty"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Accepting a BLOCKING segregation-of-duties conflict, and approving or cutting an elevation.
+    # The three decisions an auditor asks about by name.
+    - actions: ["waive_conflict", "grant_access", "revoke_access"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

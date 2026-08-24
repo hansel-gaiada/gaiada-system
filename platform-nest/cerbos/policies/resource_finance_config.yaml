@@ -1,0 +1,85 @@
+# Finance F0-09 — `finance_config`: THE ACCOUNTING VOCABULARY.
+#
+# Covers the chart of accounts, accounting dimensions and their values, the fiscal calendar's
+# STRUCTURE (years and periods as date ranges), currencies-in-use, exchange rates, and the company's
+# accounting settings (functional/presentation currency, PKP status, NPWP).
+#
+# One kind rather than six because they share exactly one sensitivity posture and one holder set:
+# they are the company's accounting *vocabulary*, they carry no figures, and they are all edited by
+# the same person — the controller/accountant. Six near-identical policies is how six drift.
+#
+# ── WHY THIS IS SEPARATE FROM `finance_period` AND `finance_control` ─────────────────────────────
+# Both splits follow a segregation-of-duties line, not a code-layout preference
+# (docs/blueprints/finance-accounting-foundation.md §2.2):
+#
+#   * `finance_period` — LOCKING a period is the `period_close` duty, control function AUTHORISE.
+#     Editing the chart of accounts is the `record` function. The blueprint's matrix forbids one
+#     person holding `journal_post` + `period_close`; keeping the kinds separate is what makes that
+#     grantable separately at all. Folded together, "may edit the CoA" would silently carry
+#     "may close the books".
+#   * `finance_control` — who holds which duty, and who may elevate into another company. Granting
+#     that alongside CoA editing would let the accountant widen their own reach.
+#
+# ── READ IS DELIBERATELY WIDER THAN WRITE ───────────────────────────────────────────────────────
+# `module_staff` (i.e. `finance_staff`) can READ. That is on purpose and it is not a leak: an
+# account code and name carry no money. Someone coding an expense claim, or a department head
+# reading a cost-centre list, needs the vocabulary; hiding it produces a support ticket, not a
+# posture. The same reasoning resource_hr_policy.yaml applies to a holiday calendar.
+#
+# WRITE is the controller tier (`module_manager` == `finance_manager`) plus the served company's own
+# admin. An account is not a label: re-typing one moves every balance that ever touched it, which is
+# why 202608241011's freeze trigger exists in the database as well as here. Defence in depth —
+# Cerbos decides who may ask, the trigger decides what is possible.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `org_unit_lead` — a department head editing the group's chart of accounts is not a thing.
+#     Reading it is covered by finance_staff where the person actually works in finance.
+#   * `client` — an external client contact has no business in any company's accounting vocabulary.
+#   * A `perm_*` mirror arm. ROLE-ARM ONLY this wave, matching resource_hr_payroll.yaml and
+#     resource_employee.yaml: new kinds get a permission arm only after their handlers exist and
+#     their holders have been audited against a live grant set. The handlers do NOT exist yet — F0
+#     is schema only — so a mirror now would grant reach to a surface nobody can serve.
+#   * `owner`. NOT an omission and NOT an oversight: `owner` is a permission-native role (IAM-04c
+#     §3) with no Cerbos rules anywhere, whose reach is its bundle alone. The holding owner's
+#     all-company visibility comes from the ownership graph resolved in
+#     202608241010_finance_ownership_and_scope.sql, per ruling D-F8 — not from a rule here.
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_config", tenantId, module:"finance", id?}. The
+# `module` value is LOAD-BEARING, not decoration: derived_roles.yaml string-composes the module
+# tiers from it (`module` + `_staff`/`_manager`), so `finance_staff` and `finance_manager` are the
+# only role names Cerbos will ever match here. A handler that omits it matches no module rule and
+# the request is denied — fail-closed, but silently, so pass it.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_config
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # READ — the vocabulary tier. Wide on purpose (see header).
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # WRITE — the controller tier. Creating an account, adding a dimension, cutting a fiscal
+    # calendar, entering an exchange rate.
+    - actions: ["create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # DESTRUCTIVE. Note what this can and cannot reach: an account that has ever been posted to is
+    # frozen by trigger and can only be ARCHIVED (a status update), never deleted or re-coded. So
+    # `delete` here governs the pre-posting window — a mistyped account nobody used — and the
+    # database, not this policy, is what makes that guarantee hold.
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

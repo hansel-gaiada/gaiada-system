@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **108** capabilities across **15** owners
-- **56** writes · 52 reads
+- **114** capabilities across **16** owners
+- **56** writes · 58 reads
 - Writes by impact: **high 11** · medium 16 · low 29
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -45,7 +45,8 @@ unfalsifiable after.
 | billing | `invoices` | 2 |
 | clients | `clients` | 4 |
 | core | `positions` · `role-grants` | 3 |
-| hr | `hr` | 10 |
+| finance | `finance` | 1 |
+| hr | `hr` | 11 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 2 |
@@ -74,6 +75,12 @@ unfalsifiable after.
 | core | `iam.requestOverride` | `POST` | `/api/:tenantId/role-grants/overrides` | write | `low` |
 | core | `iam.revokeRoleGrant` | `DELETE` | `/api/:tenantId/role-grants/:grantId` | write | `medium` |
 | core | `iam.unassignPosition` | `POST` | `/api/:tenantId/positions/:positionId/unassign` | write | `medium` |
+| finance | `finance.apAging` | `GET` | `/api/:tenantId/finance/ap/aging` | read | — |
+| finance | `finance.arAging` | `GET` | `/api/:tenantId/finance/ar/aging` | read | — |
+| finance | `finance.balanceSheet` | `GET` | `/api/:tenantId/finance/balance-sheet` | read | — |
+| finance | `finance.closeReadiness` | `GET` | `/api/:tenantId/finance/periods/:periodId/close-readiness` | read | — |
+| finance | `finance.profitAndLoss` | `GET` | `/api/:tenantId/finance/profit-and-loss` | read | — |
+| finance | `finance.trialBalance` | `GET` | `/api/:tenantId/finance/trial-balance` | read | — |
 | hr | `hr.fileLeave` | `POST` | `/api/:tenantId/modules/hr/leave` | write | `medium` |
 | hr | `hr.getAnalytics` | `GET` | `/api/:tenantId/modules/hr/analytics` | read | — |
 | hr | `hr.getEmployee` | `GET` | `/api/:tenantId/hr/employees/:employeeId` | read | — |

@@ -1,0 +1,77 @@
+# Finance F2 — `finance_posting_rule`: the mapping other departments post through.
+#
+# Covers posting rules, their lines, and the event inbox (202608241027).
+#
+#   read      see rules, the event inbox and the backlog
+#   author    create and edit DRAFT rules
+#   activate  make a rule live — or retire one
+#   process   run an event through its rule, and sweep the pending queue
+#
+# ── AUTHORING A RULE IS AUTHORING ACCOUNTING POLICY ─────────────────────────────────────────────
+# A posting rule decides which accounts every future event of its type lands in. Whoever controls
+# that controls where revenue, cost and tax appear in the financial statements — without ever
+# touching a journal. It is a quieter kind of authority than posting, and a wider one: a single
+# rule edit re-points an entire event stream.
+#
+# So `activate` sits at the controller tier at D4 high assurance, and is separated from `author`.
+# Drafting a mapping for review is ordinary work; making it live is the decision.
+#
+# ── `process` IS THE AGENT AND AUTOMATION PATH, AND IS DELIBERATELY WIDE ────────────────────────
+# The program's agentic-native bar requires a capability to work identically under a human, under
+# n8n and under an agent. Processing the queue is that capability: it applies a mapping somebody
+# else already authored and approved, and every posting still goes through F1's guards — balance,
+# period, account, chain, idempotency. It cannot invent accounting; it can only apply it.
+#
+# That is why `module_staff` holds it and why an automation principal can legitimately be granted
+# it. What such a principal must NOT hold is `author` or `activate` — the difference between
+# executing a policy and writing one.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `delete` on a rule that has ever posted. Retiring is a status change; deleting would orphan
+#     the explanation of why historical journals look the way they do.
+#   * Any action that EDITS a ledger event's payload. A wrong payload is the emitter's bug, fixed
+#     at the source and re-emitted — editing it here would forge the business record.
+#   * `client`, `viewer`, `org_unit_lead` — nothing.
+#   * A `perm_*` mirror arm. Role-arm only, as with every finance kind.
+#   * `owner` — permission-native; company scope comes from the ownership graph (ruling D-F8).
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_posting_rule", tenantId, module:"finance", ruleId?}.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_posting_rule
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Applying an approved mapping. The agent/automation path — it cannot invent accounting, and
+    # every posting still passes F1's guards.
+    - actions: ["process"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Drafting a mapping for review.
+    - actions: ["author"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Making it live. This is the decision — a single activation re-points an entire event stream.
+    - actions: ["activate"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

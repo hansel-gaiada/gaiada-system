@@ -1,0 +1,91 @@
+# Finance F1 — `finance_ledger`: THE BOOK OF RECORD.
+#
+# Governs journal entries and their lines (202608241015). The actions are the ledger's real verbs,
+# not CRUD — there is no `update` and no `delete` here, because there is no such operation on a
+# posted journal. Their absence is the policy statement.
+#
+#   read     see journals and lines
+#   post     create a journal (finance_post_journal)
+#   reverse  correct one by posting its mirror (finance_reverse_journal)
+#   verify   run finance_verify_ledger_chain — the integrity/audit check
+#
+# ── `post` IS NOT HELD BY company_admin — AND THE REASON IS NOT WHAT IT FIRST LOOKS LIKE ────────
+# An earlier draft of this header justified the exclusion on segregation of duties: `company_admin`
+# already holds `finance.period.close`, and `journal_post` + `period_close` is one of the six
+# BLOCKING pairs seeded by 202608241013. That argument does not survive contact with the generated
+# bundle: `finance_manager` — the controller — holds BOTH, because closing the books is the
+# controller's actual job. An argument that excludes one role and not the other, on a rule that
+# applies to both, is not the real reason. Recording the corrected reasoning:
+#
+#   1. **Roles grant CAPABILITY. Duties record who actually does the work.** The SoD matrix binds
+#      per company, per PERSON, through `finance_duty_assignments` + `finance_sod_check()` — not
+#      through role bundles. A controller who is assigned both `journal_post` and `period_close`
+#      shows up as a conflict there and needs a recorded waiver naming a compensating control. That
+#      is where the rule lives, and it is why it can be waived deliberately instead of being either
+#      impossible or invisible.
+#   2. **company_admin is excluded because it is an ADMINISTRATIVE role, not an accounting one** —
+#      the same ground on which it is excluded from `finance.period.reopen`. Creating entries in the
+#      book of record is accounting work. A company admin who genuinely needs to post holds a
+#      finance position, and then the duty matrix can see them.
+#
+# So the exclusion stands, on reason 2. Reason 1 is the honest answer to "then why does the
+# controller have both", and it is enforced somewhere better than a role bundle.
+#
+# ── `verify` IS DELIBERATELY WIDE ───────────────────────────────────────────────────────────────
+# Chain verification is read-only, returns problems rather than data, and its whole value is that
+# anyone can run it. An integrity check only the person who could have broken the chain may run is
+# not an integrity check. `finance_staff` and `company_admin` both hold it.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `update` / `delete` as actions at all — see above. The database refuses them regardless
+#     (FINANCE_LEDGER_IMMUTABLE), so naming them here would advertise an operation that cannot
+#     succeed and invite a handler to try.
+#   * `member`, `viewer`, `org_unit_lead`, `client` — nothing. There is no "your own" journal.
+#   * A `perm_*` mirror arm. Role-arm only, same posture as the other finance kinds: F1 is still
+#     schema plus functions, with no HTTP surface, so a mirror would grant reach to something
+#     nobody can serve.
+#   * `owner`. Permission-native (IAM-04c §3); reach is its bundle. WHICH companies the owner sees
+#     comes from the ownership graph (ruling D-F8), never from a rule here.
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_ledger", tenantId, module:"finance", entryId?}. The
+# `module` value is load-bearing — derived_roles.yaml string-composes the module tiers from it, so
+# `finance_staff` / `finance_manager` are the only role names Cerbos will match here.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_ledger
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # READ — anyone doing finance work in the company.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # VERIFY — read-only integrity check, deliberately wide (see header).
+    - actions: ["verify"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # POST — the controller tier ONLY. company_admin is excluded as an ADMINISTRATIVE role, not
+    # on SoD grounds (see the header — that distinction matters and was corrected once already).
+    - actions: ["post"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # REVERSE — a correction is a posting, held at the same tier. It is not more privileged than
+    # posting: a reversal is fully visible, leaves the original intact, and is the SANCTIONED way to
+    # fix a mistake. Making it harder than posting would push people toward not correcting at all.
+    - actions: ["reverse"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

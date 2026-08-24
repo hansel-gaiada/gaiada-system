@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.9.0` - FA Application Layer (2026-08-24) - PROTOTYPED
+
+The surface a person can actually reach. Until this, the whole program was schema + SQL + policy.
+
+**Added**
+- `src/modules/finance/index.ts` - the module contract, registered in `main.ts` and `app.module.ts`.
+  21 declared permissions; 6 MCP tools, all READ-ONLY.
+- `src/modules/finance/finance.controller.ts` - 19 endpoints under `/api/:tenantId/finance/*`.
+- `src/modules/finance/finance-error.filter.ts` - maps the `FINANCE_*` refusal family onto HTTP.
+- `src/modules/finance/finance.test.ts` - 19 tests against live Postgres + RLS + Cerbos.
+- `docs/modules/CAPABILITY-INVENTORY.md` regenerated (generated artifact).
+
+**Notes**
+- **The controller computes no accounting.** Every figure comes from a SQL function; it authorizes,
+  scopes and shapes JSON. The invariants stay next to the data where a script cannot walk past them.
+- **`withFinance()` is the only database path.** Every finance table is module-walled, so a plain
+  `withTenants()` returns zero rows with a 200 and looks like it worked. The first API test exists
+  to fail if that helper ever loses its module scope.
+- ★ **The fifth body-less 500 in this estate.** An unbalanced journal returned
+  `500 {"error":"internal error"}` - the database had computed `debits (100) <> credits (90)` and
+  the transport discarded it, because plpgsql errors arrive as pg `DatabaseError` and
+  `HttpErrorFilter` only catches `HttpException`. Fixed with a typed filter scoped to
+  `@Catch(DatabaseError)` - NOT a bare `@Catch()`, which broke the controller's own 400s because
+  re-throwing from inside a filter does not reach the next filter. Unrecognised `FINANCE_*` codes
+  default to 409 with their own message, so future refusals map by construction.
+- **MCP is read-only this wave.** An agent may inspect the trial balance, the aging and the close
+  blockers. No tool posts a journal: under D14 that must be a proposal a human approves, and the
+  finance approval surface does not exist yet.
+- **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
+  money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
+
 ### lms `0.1.0` — L1 Learning foundation (2026-08-24) — PROTOTYPED
 
 The LMS the owner asked for: **all departments, all levels**, operational and management alike.
@@ -58,6 +89,275 @@ them. Design: `docs/blueprints/lms-foundation.md`.
 company**. No content exists — the mandatory general track is L2, HOD authoring L3, the Web Dev
 curriculum L4.
 
+### finance `0.8.0` - F2 Posting Rules (2026-08-24) - PROTOTYPED
+
+The seam other departments post through. **Business modules emit events in their own vocabulary;
+finance owns the mapping to accounts.**
+
+**Added**
+- `202608241027_finance_posting_rules.sql` - `finance_posting_rules` + rule lines,
+  `finance_ledger_events` (the inbox), `finance_process_event()`,
+  `finance_process_pending_events()`, `finance_event_backlog()`.
+- `202608241028_iam_finance_f2_posting_rule_permissions.sql` +
+  `resource_finance_posting_rule.yaml` - 4 keys. See `docs/PERMISSION-CONTRACT.md` section 24.
+- `src/db/finance-f2-posting-rules.test.ts` - 16 tests.
+
+**Notes**
+- **There is no expression language, and that is the most important decision here.** A rule line
+  takes an amount from a NAMED PATH in the payload times an optional fixed multiplier. Nothing else.
+  The moment a rule can compute, the chart of accounts becomes a programming language with no
+  debugger, no tests and no review - and "why did this post there?" stops having a short answer. If
+  a mapping needs logic, the emitting module computes the number and puts it in the payload, where
+  it is ordinary code with ordinary tests.
+- **Adds no second way into the ledger.** `finance_process_event()` builds a line array and hands it
+  to `finance_post_journal()`, so balance validation, period guards, account guards, the hash chain
+  and idempotency all apply unchanged. Pinned by tests: an unbalanced rule and a locked period both
+  fail through F1's own errors.
+- **Accounts are named BY CODE, resolved at post time.** A stored account id would keep posting
+  silently after an accountant re-codes an account; a code breaks loudly, which is the correct
+  failure. Pinned by test.
+- **A failed event stays VISIBLE with its reason.** Unposted revenue is the thing nobody notices -
+  the books simply look smaller and everything still reconciles. Each event is swept in its own
+  subtransaction so one bad event cannot roll back the batch AND so its failure record survives.
+- `RULE_NOT_EFFECTIVE` is distinguished from `NO_ACTIVE_RULE`. The first draft reported both as "no
+  active rule", which the test suite hit immediately: a rule created today cannot post an event
+  dated in February, and the message named a rule that was sitting there plainly active.
+
+### finance `0.7.0` - F7 Tax and Statutory (2026-08-24) - PROTOTYPED
+
+F4 and F5 already recorded the tax. F7 turns it into returns.
+
+**Added**
+- `202608241025_finance_tax_and_returns.sql` - `finance_tax_codes` (rate + base multiplier,
+  effective-dated), `finance_tax_returns` (filing record with as-filed snapshots),
+  `finance_coretax_extracts`; `finance_tax_compute()`, `finance_tax_ppn_summary()`,
+  `finance_tax_pph_summary()`, `finance_tax_efaktur_exceptions()`,
+  `finance_tax_coretax_reconcile()`.
+- `202608241026_iam_finance_f7_tax_permissions.sql` + `resource_finance_tax.yaml` - 4 keys.
+  See `docs/PERMISSION-CONTRACT.md` section 23.
+- `src/db/finance-f7-tax.test.ts` - 14 tests.
+
+**Notes**
+- **Input VAT with no e-Faktur is NOT creditable** - the rule with a direct money consequence. It is
+  EXCLUDED from the claim and reported separately rather than silently netted: the company pays it
+  and cannot reclaim it, so the amount lost has to be visible while somebody can still chase the
+  vendor for the faktur.
+- **A single `rate` column cannot express Indonesian PPN.** Since 2025-01-01 the statutory rate is
+  12% applied to ELEVEN TWELFTHS of the base - an effective 11%. Storing "11%" loses what the tax
+  office cares about; storing "12%" alone overstates by ~9%. Codes carry `rate` AND
+  `base_multiplier`, and are effective-dated so a 2024 supply keeps its full-base 11%.
+- **`finance_tax_efaktur_exceptions()` reports two kinds, deliberately not merged.**
+  `AR_MISSING_EFAKTUR` is a compliance failure (the customer cannot credit it either);
+  `AP_INPUT_VAT_LOST` is a money loss. Same symptom, opposite consequence, different person to
+  chase.
+- **A return snapshots its figures AS FILED.** A late invoice booked after filing moves the live
+  figure; the filed figure must not move, because an auditor asks about exactly that gap. Pinned by
+  test.
+- **Transmission to Coretax is NOT built and must not be** (blueprint section 6, D-F2 carve-out) -
+  that goes through a licensed ASP/PJAP. What F7 owns is the harder half: correct tax data, and the
+  monthly reconciliation between our ledger and DJP's pre-populated extract.
+
+### finance `0.6.0` - F6 Bank Reconciliation and the Close (2026-08-24) - PROTOTYPED
+
+**Added**
+- `202608241023_finance_bank_and_close.sql` - bank statements, transaction lines, statement/ledger
+  matches; `finance_bank_automatch()`, `finance_bank_reconcile()`, and
+  **`finance_period_close_readiness()`** - the capstone that aggregates F1 ledger integrity, F3
+  statement balance, F4/F5 subledger tie-outs, F6 bank reconciliation and the D-F5 sign-off into one
+  answer.
+- `202608241024_iam_finance_f6_bank_permissions.sql` + `resource_finance_bank.yaml` - 4 keys.
+  See `docs/PERMISSION-CONTRACT.md` section 22.
+- `src/db/finance-f6-bank-close.test.ts` - 13 tests.
+
+**Notes**
+- **The auto-matcher is deliberately conservative.** It matches only on an exact amount + direction
+  + near-date triple, and REFUSES to match where two ledger lines are equally plausible. An
+  aggressive matcher clears the queue and produces a reconciliation that looks complete while
+  pairing the wrong payment with the wrong invoice - surfacing months later as a customer chasing
+  money we recorded against someone else. An unmatched item costs a minute; a wrong match costs a
+  relationship and an audit finding.
+- **There is no plug.** `finance_bank_reconcile()` reports a position - GL balance, statement
+  balance, each class of item in flight, and the unexplained residue. No adjustment field exists,
+  because a difference nobody can explain is the finding.
+- **The statement is never edited to match the ledger.** No function updates a transaction row. The
+  test proves the right way to clear an unrecorded bank charge is to POST it.
+- `finance_period_close_readiness()` does NOT close anything. It says whether you should; F0's state
+  machine still governs who may, and still refuses OPEN -> HARD_LOCK and an unsigned hard lock.
+- **Bank feed / API import is not included.** Lines arrive as data; the source (CSV, OFX, API) is an
+  integration concern with its own credentials and changes none of the reconciliation logic.
+
+### finance `0.5.0` - F5 Accounts Payable (2026-08-24) - PROTOTYPED
+
+The mirror of F4, plus Indonesian withholding tax.
+
+**Added**
+- `202608241021_finance_ap_subledger.sql` - vendors, bills + lines (input VAT per line, withholding
+  at bill level), payments, allocations; `finance_ap_approve_bill()`, `finance_ap_record_payment()`,
+  `finance_ap_allocate()`, `finance_ap_aging()`, `finance_ap_position()`, `finance_ap_reconcile()`.
+- `202608241022_iam_finance_f5_ap_permissions.sql` + `resource_finance_ap.yaml` - 6 keys.
+  See `docs/PERMISSION-CONTRACT.md` section 21.
+- `src/db/finance-f5-ap.test.ts` - 14 tests.
+
+**Notes**
+- **Withholding is the thing AP has that AR does not.** On a 100m services bill with PPh 23 at 2%:
+  the expense is 100m, the VENDOR is owed 98m, and DJP is owed 2m. Two real liabilities, different
+  creditors, different due dates. Booked at BILL APPROVAL, not at payment - the liability to DJP
+  arises when the expense is recognised, and it keeps `amount_payable` equal to what the vendor is
+  actually owed, which is what the aging must show. An aging listing gross bills overstates the cash
+  that will leave.
+- Allocation is capped at `amount_payable`, never `total`: the withheld tax was never the vendor's
+  to be paid, and allocating against the gross would let a payment "overpay" by the withholding.
+- **The reconciliation identity was reused from F4, second term and all** - open bills minus
+  payments on account = control balance. F4's suite had to discover that; this one pinned it from
+  the start, and the AP tests exercise a genuine vendor prepayment to prove it.
+- `npwp` on a vendor is load-bearing, not decorative: its absence changes the withholding rate under
+  Indonesian rules.
+- **3-way matching (PO / goods receipt / bill) is NOT included.** It needs a purchase order and a
+  goods-receipt document and there is no procurement module - a "match" against documents that do
+  not exist would be theatre. Recorded as a dependency.
+
+### finance `0.4.0` — F4 Accounts Receivable (2026-08-24) · PROTOTYPED
+
+The first subledger. Schema + functions only.
+
+**Added**
+- `202608241019_finance_ar_subledger.sql` — customers, invoices + lines (tax as data per line),
+  receipts, allocations; `finance_ar_issue_invoice()` (DR AR control / CR revenue / CR PPN
+  Keluaran), `finance_ar_record_receipt()`, `finance_ar_allocate()`, `finance_ar_aging()`,
+  `finance_ar_position()`, and `finance_ar_reconcile()` — the subledger-to-GL tie-out.
+- `202608241020_iam_finance_f4_ar_permissions.sql` + `resource_finance_ar.yaml` — 6 keys, actions
+  mapped onto SoD duties. See `docs/PERMISSION-CONTRACT.md` §20.
+- `src/db/finance-f4-ar.test.ts` — 16 tests, reconciliation asserted empty after every state change.
+
+**Changed**
+- `202608241015` — `finance_post_journal()` gains `p_subledger`. Control accounts stay barred to
+  manual journals, but the subledger that OWNS one may post to it. Deliberately narrow: it unlocks
+  only control accounts whose `control_subledger` matches, so an AR posting is still refused on the
+  AP control account.
+
+**Notes**
+- ⚠ **The reconciliation identity is NOT "open invoices == control account".** The test suite caught
+  that on its first run. A receipt credits AR the moment the money lands, before allocation, so a
+  customer who prepays leaves a credit inside the control account. The identity is
+  **open invoices − payments on account = control balance**, exposed by `finance_ar_position()` so
+  no caller re-derives it differently. The naive version reports a mismatch on every prepayment,
+  which teaches people to ignore the reconciliation — the exact failure it exists to prevent.
+- **Aging buckets by DAYS OVERDUE, not invoice age.** An invoice on 60-day terms issued 45 days ago
+  is current; ageing by issue date makes a healthy book look distressed.
+- **Allocation posts no journal.** The money moved when the receipt was recorded; allocation only
+  says which debt it settles. Asserted by counting journal entries before and after.
+- **Credit limits, dunning and credit memos are NOT included** — policy layers on top of a working
+  subledger. `credit_limit` is stored but deliberately unread; a silently unchecked limit is worse
+  than an absent one.
+
+### finance `0.3.0` — F3 Statements (2026-08-24) · PROTOTYPED
+
+**The phase project-hug never reached.** Its `FINANCE_PHASE_ROADMAP.md` §8 is entirely unchecked,
+including its own "Total Assets must equal Liabilities + Equity" checkpoint — so this was walked
+from first principles and verified by test.
+
+**Added**
+- `202608241017_finance_statements.sql` — `finance_account_movement()` (the shared engine, so no two
+  statements can disagree about what a balance is), `finance_trial_balance()`,
+  `finance_general_ledger()` with a continuous running balance and correct opening balance,
+  `finance_profit_and_loss()`, `finance_net_profit()`, `finance_balance_sheet()`, and
+  `finance_verify_statements()` (one row per problem; empty = pass).
+- `202608241018_iam_finance_f3_statement_permissions.sql` + `resource_finance_statement.yaml` — the
+  `finance_statement` kind, `read` + `export`. See `docs/PERMISSION-CONTRACT.md` §19.
+- `src/db/finance-f3-statements.test.ts` — 13 tests, including A = L + E surviving a reversal.
+
+**Notes**
+- **A = L + E only holds because current-period profit is carried into equity.** Revenue and expense
+  are temporary accounts that close into retained earnings at year end; before that close their net
+  is still equity, just unmoved. Omit it and the sheet is out by exactly the year-to-date profit.
+  `p_fy_start` is therefore a required argument, not a defaulted one — "profit so far" is meaningless
+  without knowing when the year began, and not every company's year starts in January.
+- **Contra accounts derive their sign from `normal_balance`, never from a hardcoded code list.**
+  Both directions are pinned: a sales return (revenue/debit-normal) nets negative against revenue,
+  and accumulated amortisation (asset/credit-normal) presents negative under assets.
+- **Reversed entries are NOT excluded from statements.** A reversed entry and its reversal both
+  appear and net to zero — the auditable answer. Filtering them would disagree with the trial
+  balance and hide a correction.
+- **Implemented as functions over the ledger, not materialised projections.** A projection can drift
+  from the ledger (a whole failure class project-hug needed an integrity service to manage); an
+  aggregation cannot, because it IS the ledger. The signatures are what must stay stable — the
+  projection can land behind them when measurement calls for it, and these tests become the oracle
+  proving it agrees.
+- **Cash Flow is deliberately NOT included.** The indirect method needs each account classified as
+  operating/investing/financing — CoA metadata that does not exist yet. Inventing it inside a query
+  would hide a modelling decision; it gets its own ticket.
+
+### finance `0.2.0` — F1 Ledger Core (2026-08-24) · PROTOTYPED
+
+The book of record. Schema + functions only — still no HTTP surface, no statements (F3), no
+subledgers (F4/F5).
+
+**Added**
+- `202608241015_finance_ledger_core.sql` — `finance_journal_entries` / `_lines` /
+  `_line_dimensions`, immutable by trigger; `finance_post_journal()` (the one way in — idempotent on
+  `source_event_id`, totals computed FROM the lines, per-company advisory lock so the sequence and
+  hash chain cannot fork); `finance_reverse_journal()` (correction is a mirrored entry, never an
+  edit); `finance_verify_ledger_chain()` (returns one row per PROBLEM — an empty result is the pass
+  condition); SHA-256 chain with one canonical serialisation shared by writer and verifier.
+- `202608241016_iam_finance_f1_ledger_permissions.sql` + `resource_finance_ledger.yaml` — 4 keys on
+  the new `finance_ledger` kind, role-arm only. See `docs/PERMISSION-CONTRACT.md` §18.
+- `src/db/finance-f1-ledger.test.ts` — 25 tests through the NOBYPASSRLS app role.
+
+**Changed**
+- `202608241011` CoA seed: **bank, cash and tax accounts are no longer flagged as control
+  accounts.** Control means "reconciled against a subledger that POSTS INTO IT" (AR, AP, inventory,
+  fixed assets), not "reconciled" in general — bank and cash reconcile against a *statement*.
+  Driving the first real posting rejected a rent payment from `1120 Bank`, which was the correct
+  behaviour for the flag and the wrong flag for the account. 16 control accounts → 5.
+
+**Notes**
+- The reversal link points FORWARD ONLY (`reversal_of_id` on the reversing entry). A `reversed_by_id`
+  on the original would require updating a posted journal — the exact thing the table forbids — so
+  status is derived via `finance_journal_entry_status()`. `finance_reverse_journal()` performs zero
+  updates on the ledger.
+- The immutability trigger's entries-only column check had to be NESTED, not a flat AND-chain:
+  plpgsql resolves `OLD` against the triggering table, so `OLD.entry_hash` raised
+  `record "old" has no field "entry_hash"` when firing on lines. Still fail-closed, but surfacing as
+  an internal error instead of the ledger's own message. Pinned by a regression test.
+
+### finance `0.1.0` — F0 Foundations (2026-08-24) · PROTOTYPED
+
+First code for the Finance & Accounting department. **Schema and authz only — nothing posts yet.**
+Design: `docs/blueprints/finance-accounting-foundation.md`. Tracker:
+`docs/plans/2026-08-24-finance-PROGRESS.md`.
+
+**Added**
+- `202608241010_finance_ownership_and_scope.sql` — `company_ownership` graph + the scope resolver
+  (`finance_owner_company_ids`, cycle-guarded `finance_company_descendants`) implementing owner
+  ruling D-F8: a holding owner reaches every descendant, a company shareholder reaches only their
+  own company. Establishes the `finance` third wall.
+- `202608241011_finance_coa_and_dimensions.sql` — chart of accounts as **editable data** (ruling
+  D-F5) with a 69-line PSAK-aligned Indonesian template incl. PPN Masukan/Keluaran and PPh
+  21/23/4(2); accounting dimensions with per-account `required/optional/forbidden` rules; a freeze
+  trigger making an account's code/type/normal-balance immutable once posted.
+- `202608241012_finance_fiscal_calendar_and_currency.sql` — fiscal calendar with the
+  `OPEN → SOFT_LOCK → HARD_LOCK` state machine (HARD_LOCK terminal; refuses without a named
+  accountant sign-off), currencies, exchange rates carrying their `basis` (spot/closing/average),
+  and `finance_period_accepts_posting()`.
+- `202608241013_finance_sod_and_elevation.sql` — 12 finance duties and the 6 blocking
+  segregation-of-duties pairs; elevation grants that cannot be approved without an expiry and lapse
+  on their own; append-only finance access log.
+- `202608241014_iam_finance_f0_permissions.sql` — 13 grantable permissions across 3 new Cerbos kinds
+  (`finance_config` / `finance_period` / `finance_control`), the `finance_staff` / `finance_manager`
+  roles, and 48 generated bundle rows. Role-arm only, no `perm_*` mirror. See
+  `docs/PERMISSION-CONTRACT.md` §17.
+- `cerbos/policies/resource_finance_{config,period,control}.yaml`.
+- `src/db/finance-f0-foundations.test.ts` — 35 tests through the NOBYPASSRLS app role.
+
+**Notes**
+- The scope resolvers are `SECURITY DEFINER` **by necessity**: they read tenant-walled tables in
+  order to COMPUTE the tenant set, so as INVOKER they returned the empty set for everyone —
+  including the holding owner — silently. Caught by the test suite on its first run.
+- Four new authoring groups in `permission-groups.json`; pinned tallies updated in
+  `cerbos-catalog-alignment`, `permission-groups-catalog-parity`, `iam-215-boundary-pin` and
+  `ui-grantable-catalog` (320/81 → 333/84 pairs/kinds, 305 → 318 grantable).
+- **No handlers, endpoints or UI.** F1 (ledger core) is the next phase; the IAM arm is deliberately
+  role-arm only until those handlers exist and their holders are audited.
 
 ### hr `0.4.0` + platform-nest `0.38.0` + platform-ui `0.49.0` — 2026-08-24 — HR-FULL: the department, waves A–D
 

@@ -53,6 +53,7 @@ versions below; the running build reports it at `GET /health`.
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
 | lms | `0.1.0` | PROTOTYPED | Cross-cutting | 2026-08-24 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
+| finance | `0.9.0` | PROTOTYPED | Finance & Accounting | 2026-08-24 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.2` | PROTOTYPED | Cross-cutting | 2026-08-23 |

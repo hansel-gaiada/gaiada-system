@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (330 grantable permissions, LMS-L1 2026-08-24)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 122,
-      "grantablePermissionsInCatalog": 336,
-      "permissionsCoveredByGroups": 314,
+      "groups": 140,
+      "grantablePermissionsInCatalog": 360,
+      "permissionsCoveredByGroups": 338,
       "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 78
+      "sensitiveGroups": 96
     }
   },
   "groups": [
@@ -1427,6 +1427,192 @@
       "description": "Produce financial statements as a file that leaves the ERP — the pack a bank, auditor or board actually reads. A separate right from viewing because the artefact outlives the session and carries no access control once it exists. Requires step-up verification.",
       "permissions": [
         "finance.statement.export"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ar_view",
+      "name": "View Receivables & Aging",
+      "domain": "finance",
+      "description": "Read AR customers, invoices, receipts and the aging schedule, and run the subledger-to-ledger reconciliation check. Reconciliation is deliberately wide — a tie-out only the person who could have broken it may run is not a check.",
+      "permissions": [
+        "finance.ar.read",
+        "finance.ar.reconcile"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ar_operate",
+      "name": "Run the Receivables Desk",
+      "domain": "finance",
+      "description": "The AR officer's day job: maintain customers and draft invoices, issue invoices to the ledger, and record and allocate customer receipts. Does NOT include writing off a debt — that is the other half of the classic receivables fraud pair and is granted separately.",
+      "permissions": [
+        "finance.ar.manage",
+        "finance.ar.issue",
+        "finance.ar.receipt"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ar_write_off",
+      "name": "Write Off Receivables",
+      "domain": "finance",
+      "description": "Void an issued invoice or forgive a receivable — the action that makes money owed to the company disappear. Held apart from receipt posting because holding both is a blocking segregation-of-duties conflict (pocket the cash, then write off the debt). Requires step-up verification.",
+      "permissions": [
+        "finance.ar.write_off"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_view",
+      "name": "View Payables & Aging",
+      "domain": "finance",
+      "description": "Read AP vendors, bills, payments and the aging schedule, and run the subledger-to-ledger reconciliation check.",
+      "permissions": [
+        "finance.ap.read",
+        "finance.ap.reconcile"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_bill_entry",
+      "name": "Enter Vendor Bills",
+      "domain": "finance",
+      "description": "Enter and edit draft vendor bills. Nothing reaches the books until a bill is approved, which is a separate right — entering and approving your own bill is a blocking segregation-of-duties conflict.",
+      "permissions": [
+        "finance.ap.bill_entry"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_vendor_master",
+      "name": "Maintain Vendors & Bank Details",
+      "domain": "finance",
+      "description": "Create and edit vendors, including the bank accounts payments are sent to. Held apart from payment release because holding both is a blocking conflict — invent a vendor, pay yourself — and because redirecting the bank details on a genuine invoice needs no fake bill at all. Requires step-up verification.",
+      "permissions": [
+        "finance.ap.vendor_master"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_approve",
+      "name": "Approve Vendor Bills",
+      "domain": "finance",
+      "description": "Approve a bill so it posts to the ledger, committing the company to pay the vendor and to remit any withheld tax. Requires step-up verification.",
+      "permissions": [
+        "finance.ap.approve"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_pay",
+      "name": "Release Vendor Payments",
+      "domain": "finance",
+      "description": "Release payment to a vendor — the moment money irreversibly leaves the company. The narrowest grant in the finance module: not held by AP clerks who enter bills, and not by company administrators. Requires step-up verification.",
+      "permissions": [
+        "finance.ap.payment_release"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_bank_view",
+      "name": "View Bank Reconciliation",
+      "domain": "finance",
+      "description": "Read bank statements and match state, run the bank reconciliation, and run the period close-readiness check that aggregates every integrity test in the finance module.",
+      "permissions": [
+        "finance.bank.read",
+        "finance.bank.reconcile"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_bank_operate",
+      "name": "Run Bank Reconciliation",
+      "domain": "finance",
+      "description": "Import bank statements and match their lines to the ledger. Held by finance staff deliberately: staff cannot release payments, so a staff member reconciling satisfies the segregation-of-duties rule that whoever moves money must not be the one declaring the bank agrees.",
+      "permissions": [
+        "finance.bank.import",
+        "finance.bank.match"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_tax_view",
+      "name": "View Tax Position",
+      "domain": "finance",
+      "description": "Read tax codes, returns, the PPN and PPh summaries, and the e-Faktur exception lists — including input VAT the company is losing because a vendor has not issued a faktur.",
+      "permissions": [
+        "finance.tax.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_tax_prepare",
+      "name": "Prepare Tax Returns",
+      "domain": "finance",
+      "description": "Build draft returns, import the Coretax extract, and run the reconciliation between our ledger and the tax office-s pre-populated data. Asserts nothing to anyone — filing is a separate right.",
+      "permissions": [
+        "finance.tax.prepare"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_tax_configure",
+      "name": "Configure Tax Codes",
+      "domain": "finance",
+      "description": "Create and amend tax codes: rates, base multipliers and effective dates. This changes the tax computed on every future document, so it sits with the controller tier and requires step-up verification.",
+      "permissions": [
+        "finance.tax.configure"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_tax_file",
+      "name": "File Tax Returns",
+      "domain": "finance",
+      "description": "Mark a return as filed with the tax office and record its reference. A statement to the state: an understated return means an assessment plus penalties, and an overstated one is money that is hard to recover. Requires step-up verification.",
+      "permissions": [
+        "finance.tax.file"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_posting_rules_view",
+      "name": "View Posting Rules & Event Queue",
+      "domain": "finance",
+      "description": "Read the mappings from business events to accounts, the finance event inbox, and the backlog of events that have not posted — including failures and why.",
+      "permissions": [
+        "finance.posting_rule.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_posting_rules_process",
+      "name": "Process Finance Events",
+      "domain": "finance",
+      "description": "Run business events through their posting rules and sweep the pending queue. Applies a mapping somebody else authored and approved; every posting still passes the ledger-s own guards. This is the grant an automation or agent principal may legitimately hold.",
+      "permissions": [
+        "finance.posting_rule.process"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_posting_rules_author",
+      "name": "Author Posting Rules",
+      "domain": "finance",
+      "description": "Draft and edit the mappings from business events to accounts. Drafting is ordinary work; making a rule live is a separate right, because a single activation re-points an entire event stream.",
+      "permissions": [
+        "finance.posting_rule.author"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_posting_rules_activate",
+      "name": "Activate Posting Rules",
+      "domain": "finance",
+      "description": "Make a posting rule live, or retire one. This decides where revenue, cost and tax appear in the financial statements for every future event of that type. Requires step-up verification.",
+      "permissions": [
+        "finance.posting_rule.activate"
       ],
       "sensitive": true
     }

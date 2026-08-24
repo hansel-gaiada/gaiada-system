@@ -67,6 +67,7 @@ import { IntelligenceController } from "./admin/intelligence.controller";
 import { AgencyController } from "./modules/agency/agency.controller";
 import { PmController } from "./modules/pm/pm.controller";
 import { ItController } from "./modules/it/it.controller";
+import { FinanceController } from "./modules/finance/finance.controller";
 import { ClientsController } from "./modules/clients/clients.controller";
 import { HrController } from "./modules/hr/hr.controller";
 import { SocialController } from "./modules/social/social.controller";
@@ -134,7 +135,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, ClientsController, HrController, LoansController,
+    AgencyController, PmController, ItController, FinanceController, ClientsController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
     LmsCatalogueController, LmsLearnController,
     AssistantController, SearchController,

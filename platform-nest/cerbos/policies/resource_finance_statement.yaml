@@ -1,0 +1,67 @@
+# Finance F3 — `finance_statement`: the reporting surface.
+#
+# Governs the derived statements in 202608241017 — trial balance, general ledger, profit and loss,
+# balance sheet, and the A = L + E verification. Two actions:
+#
+#   read    view a statement inside the ERP
+#   export  produce a file that LEAVES the ERP — the bank pack, the auditor pack, the board pack
+#
+# ── WHY read AND export ARE DIFFERENT RIGHTS ────────────────────────────────────────────────────
+# Reading a P&L on screen and emailing a signed PDF of it to a bank are not the same act. The second
+# creates an artefact that outlives the session, carries no access control once it exists, and is
+# the thing a lender makes a decision on. Blueprint §10.4 says banks and the tax office get a sealed
+# package rather than a login — `export` is the action that produces it.
+#
+# So `export` sits at the D4 HIGH-ASSURANCE tier, matching `hr_record.export` and
+# `finance.period.close`. `notLow` admits any ordinary SSO session without MFA, and "an ordinary
+# session may generate the company's financial statements as a file" is the sentence this policy
+# exists to make false.
+#
+# ── READ IS THE WIDEST FINANCE READ, DELIBERATELY ───────────────────────────────────────────────
+# Wider than `finance_ledger.read`, and that ordering is intentional: a statement is an AGGREGATE.
+# Someone who should see the department's cost totals does not thereby need every journal line
+# behind them, and the statement layer is the right place to draw that line. `finance_staff` holds
+# both here; the distinction matters for roles added later.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * Any write action. A statement is DERIVED — there is nothing to create, edit or delete. If a
+#     figure is wrong, the ledger is wrong, and it is corrected there by reversal.
+#   * `member`, `viewer`, `org_unit_lead`. A department head reading their own cost centre is a real
+#     requirement and a real design question (which dimension, whose scope) that this kind cannot
+#     express yet — absent is the honest state, and a broad grant "for now" is the wrong default to
+#     have to walk back.
+#   * `client`. An external client contact has no route to a company's financial statements. The
+#     shareholder and auditor surfaces (blueprint §10.3b/§10.4) are a SEPARATE scoped interface, not
+#     a grant on this kind.
+#   * A `perm_*` mirror arm — role-arm only, same posture as every other finance kind.
+#   * `owner`. Permission-native; WHICH companies the owner sees comes from the ownership graph
+#     (ruling D-F8), never from a rule here.
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_statement", tenantId, module:"finance", statement?}.
+# The `module` value is load-bearing — derived_roles.yaml string-composes the module tiers from it.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_statement
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # EXPORT — produces an artefact that leaves the ERP. High assurance only.
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

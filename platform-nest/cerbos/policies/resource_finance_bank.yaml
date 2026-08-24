@@ -1,0 +1,75 @@
+# Finance F6 — `finance_bank`: statements, matching and reconciliation.
+#
+# Covers bank statements, their transaction lines, and matches to ledger lines (202608241023).
+#
+#   read       see statements, lines and match state
+#   import     bring a statement's lines into the system
+#   match      assert that a bank line and a ledger line are the same event (and unmatch)
+#   reconcile  run finance_bank_reconcile() / finance_period_close_readiness()
+#
+# ── THE SoD PAIR IS SATISFIED STRUCTURALLY AT THE STAFF TIER, AND THAT IS NOT AN ACCIDENT ───────
+# 202608241013 seeds `bank_reconcile` + `cash_custody` as a BLOCKING conflict — "hide the theft
+# inside the reconciliation". The person who can move money must not be the person who declares
+# that the bank agrees.
+#
+# Look at how the finance tiers actually fall out across the module:
+#
+#     finance_staff    reconciles the bank   ·  CANNOT release payments (F5 keeps
+#                                               finance.ap.payment_release at module_manager,
+#                                               high assurance)
+#     finance_manager  can do both           ·  and therefore needs a duty-matrix waiver if
+#                                               actually assigned both duties
+#
+# So the DEFAULT staffing — an AR/AP officer who reconciles, a controller who releases — satisfies
+# the seeded pair with nobody configuring anything. That is worth stating because it is the first
+# place in this module where the role tiers and the SoD matrix agree BY CONSTRUCTION rather than
+# through a compensating control.
+#
+# ⚠ The usual caveat still holds for `finance_manager`: role bundles grant CAPABILITY; the matrix
+# binds per company, per PERSON, via finance_duty_assignments + finance_sod_check().
+#
+# ── `import` IS SEPARATE FROM `match` ───────────────────────────────────────────────────────────
+# Importing is clerical — it brings the bank's version of events in. Matching is a JUDGEMENT that
+# two records are the same real-world event, and a wrong match is how a reconciliation looks
+# complete while pairing the wrong payment with the wrong invoice. Different acts, and they are
+# recorded differently (`finance_bank_matches.matched_by_rule`).
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * Any action that EDITS a statement line. The statement is the BANK's version of events; if the
+#     bank is wrong the answer is a dispute and a correcting entry, never a quiet edit that makes
+#     the two agree. No function in 202608241023 updates a transaction row.
+#   * An "adjustment" or "write off the difference" action. There is no such field, by design — an
+#     unexplained difference IS the finding, and a plug turns a real problem into a rounding line.
+#   * `client`, `member`, `viewer`, `org_unit_lead` — nothing.
+#   * A `perm_*` mirror arm. Role-arm only, as with every finance kind.
+#   * `owner` — permission-native; company scope comes from the ownership graph (ruling D-F8).
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_bank", tenantId, module:"finance", statementId?}.
+# The `module` value is load-bearing — derived_roles.yaml string-composes the module tiers from it.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_bank
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Reading and running the checks — wide, for the same reason `finance_ledger.verify` is wide:
+    # a check only the person who could have broken it may run is not a check.
+    - actions: ["read", "reconcile"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The reconciliation desk's day job. Held by staff DELIBERATELY — see the header: staff cannot
+    # release payments, so staff reconciling satisfies the seeded bank_reconcile/cash_custody pair
+    # by construction.
+    - actions: ["import", "match"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

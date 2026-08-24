@@ -53,13 +53,14 @@ import { searchModule } from "./search";
 import { reportsModule } from "./reports";
 import { webdevModule } from "./webdev";
 import { socialModule } from "./social";
+import { financeModule } from "./finance";
 
 const ARTIFACT = join(__dirname, "..", "..", "..", "docs", "modules", "CAPABILITY-INVENTORY.md");
 
 const ALL_MODULES = [
   agencyModule, pmModule, itModule, monitoringModule, billingModule, clientsModule,
   knowledgeModule, automationConsoleModule, hrModule, assistantModule, searchModule,
-  reportsModule, webdevModule, socialModule,
+  reportsModule, webdevModule, socialModule, financeModule,
 ];
 
 interface GoldenRow { owner: string; families: string[]; drivers: number }

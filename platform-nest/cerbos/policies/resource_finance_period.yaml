@@ -1,0 +1,86 @@
+# Finance F0-09 — `finance_period`: THE CLOSE LIFECYCLE.
+#
+# Governs the fiscal period state machine only — `OPEN -> SOFT_LOCK -> HARD_LOCK` — not the
+# period's dates or existence, which are `finance_config` (structure) and are edited by a different
+# duty. The actions are not CRUD and are deliberately not named as CRUD:
+#
+#   read     see a period and its state / close checklist
+#   lock     OPEN -> SOFT_LOCK. Close the period to ordinary posting while recs and accruals finish.
+#   reopen   SOFT_LOCK -> OPEN. The close found something.
+#   close    SOFT_LOCK -> HARD_LOCK. **Assert that these figures are final.** Terminal.
+#
+# ── WHY THIS IS ITS OWN KIND: SEGREGATION OF DUTIES ─────────────────────────────────────────────
+# `period_close` is one of the twelve duties in 202608241013, control function AUTHORISE, and the
+# blueprint's matrix (§2.2) forbids one person holding `journal_post` + `period_close` — "post an
+# adjustment nobody reviews". That separation is only expressible if closing a period is a
+# separately grantable thing. Folded into `finance_config`, every accountant who can add an account
+# could also declare the year final.
+#
+# ── `close` SITS ABOVE `lock`, AND THAT ASYMMETRY IS THE POINT ──────────────────────────────────
+# `lock` is reversible and routine — it happens monthly and `reopen` undoes it. `close` is
+# irreversible: 202608241013's trigger makes HARD_LOCK terminal in every direction, for everyone,
+# including a platform admin acting through psql. A wrong figure in a filed period is fixed by a
+# correcting entry in an open period, never by reopening.
+#
+# So `close` is held at the D4 HIGH-ASSURANCE tier, not merely `notLow`. `notLow` admits any
+# ordinary SSO session — `assuranceFor()` mints those as "linked" — and this is the action that
+# tells a bank and an auditor the numbers are final. Same tier `hr_payroll.approve` and
+# `hr_record.export` sit at, for the same reason.
+#
+# ── THE SIGN-OFF GATE IS NOT ENFORCED HERE, ON PURPOSE ──────────────────────────────────────────
+# Owner ruling D-F5 requires a NAMED ACCOUNTANT's sign-off before any HARD_LOCK. That is enforced by
+# trigger in 202608241012 (`FINANCE_PERIOD_UNSIGNED`), not by this policy — because it is a data
+# invariant, not an authorization question. Cerbos answers "may this principal attempt to close";
+# the database answers "is this period in a state that may be closed". Both must pass. Putting the
+# sign-off check here as well would duplicate an invariant in a place that can drift from it.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `module_staff` (finance_staff) on anything but `read`. A finance assistant does not close
+#     periods; that is the whole SoD point above.
+#   * `reopen` for `company_admin`. Deliberate and worth stating: a company admin is a
+#     platform-administrative role, not an accounting one, and reopening a period the accountant
+#     soft-locked is an accounting judgement. Reading is fine; reversing the accountant is not.
+#   * A `perm_*` mirror arm — role-arm only this wave, see resource_finance_config.yaml's header.
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_period", tenantId, module:"finance", periodId?}.
+# Same load-bearing `module` contract as resource_finance_config.yaml — see that file's header.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_period
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # READ — anyone doing finance work in the company needs to know what is open.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # SOFT LOCK and its reversal — the routine, reversible half of the close.
+    - actions: ["lock", "reopen"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Soft-locking is administratively reasonable for a company admin (it stops posting; it destroys
+    # nothing). Reopening is not — see the header.
+    - actions: ["lock"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # HARD LOCK — irreversible. High-assurance only.
+    - actions: ["close"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
