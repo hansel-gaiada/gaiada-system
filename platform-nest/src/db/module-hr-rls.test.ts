@@ -50,16 +50,35 @@ describe.skipIf(!TEST_URL)("HR module RLS — served-tenant + third-wall (0028)"
   });
   afterAll(teardownTestDb);
 
-  // ── (c) rls.test.ts invariant: every hr_* table has tenant_id AND FORCE RLS ──────────────────────
-  // Wave E (0081) added the three hr_loan_* tables, so this list is nine. Kept as an EXPLICIT list
-  // rather than a `LIKE 'hr\_%'` sweep on purpose: naming each table is what makes "a new hr_* table
-  // was added and nobody gave it the third wall" a failure here instead of a silent pass.
+  // ── (c) rls.test.ts invariant: every hr_* table has tenant_id AND FORCE RLS ──────────────────
+  // ⚠ THIS EXPLICIT LIST *IS* THE TEST. It is deliberately not a sweep: naming every table is what
+  // turns "a new hr_* table arrived and nobody gave it the third wall" into a failure here rather
+  // than a silent pass. The assertion below IS a sweep, so the two together catch both directions.
+  //
+  // Grown 9 -> 42 on 2026-08-24 by the HR wave (migrations 202608240140..0143: time and lifecycle,
+  // recruitment, compensation/benefits, payroll).
+  //
+  // ⚠ Those migrations create the policies DYNAMICALLY —
+  //     EXECUTE format('CREATE POLICY tenant_isolation ON %I FOR ALL ...')
+  // inside a DO loop over the table names. So grepping migrations/ for
+  // "CREATE POLICY tenant_isolation ON hr_" finds ZERO and looks like 42 unprotected tables. It is
+  // not: grep cannot see dynamic SQL. The assertions below read pg_class and pg_policies instead,
+  // which is the only way to answer this question honestly.
   const HR_TABLES = [
-    "hr_attendance", "hr_cases", "hr_checklist_templates", "hr_leave_balances", "hr_leave_requests",
-    "hr_loan_installments", "hr_loan_repayments", "hr_loan_requests", "hr_records",
+    "hr_allowance_types", "hr_application_events", "hr_applications", "hr_attendance",
+    "hr_benefit_enrollments", "hr_benefit_plans", "hr_candidates", "hr_case_events",
+    "hr_cases", "hr_checklist_templates", "hr_compensation", "hr_employee_allowances",
+    "hr_holiday_calendars", "hr_holidays", "hr_interview_panelists", "hr_interviews",
+    "hr_job_events", "hr_leave_accruals", "hr_leave_balances", "hr_leave_policies",
+    "hr_leave_policy_assignments", "hr_leave_requests", "hr_loan_installments", "hr_loan_repayments",
+    "hr_loan_requests", "hr_offers", "hr_pay_grades", "hr_payroll_inputs",
+    "hr_payroll_runs", "hr_payslip_lines", "hr_payslips", "hr_pipeline_stages",
+    "hr_record_reminders", "hr_records", "hr_requisitions", "hr_review_cycles",
+    "hr_review_participants", "hr_scorecards", "hr_separations", "hr_statutory_parameter_sets",
+    "hr_statutory_parameters", "hr_tax_profiles",
   ];
 
-  it("all nine hr_* tables FORCE RLS (rls.test.ts sweep invariant)", async () => {
+  it("all 42 hr_* tables FORCE RLS (rls.test.ts sweep invariant)", async () => {
     const { rows } = await withGlobal((c) =>
       c.query<{ relname: string; relforcerowsecurity: boolean }>(
         `SELECT relname, relforcerowsecurity FROM pg_class
