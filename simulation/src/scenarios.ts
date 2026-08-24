@@ -268,6 +268,13 @@ const READ_AGENTS = ["status-reporter", "pm-reporter", "approvals-chaser"] as co
 export async function agentWork(ctx: ScenarioContext): Promise<ScenarioResult> {
   const requester = pick(staffIn("GM").length ? staffIn("GM") : staffIn("Web Dev"), ctx.tick);
   if (!requester) return { name: "agent:goal", ran: false, note: "no requester available" };
+  // `staff` is already filtered to people with a verified link, so this holds today — but it is
+  // checked rather than asserted, because an envelope that cannot resolve does not fail loudly: it
+  // silently becomes the anonymous principal and every tool call is denied, which reads like a
+  // policy problem rather than a missing row. That misdiagnosis is exactly what this guard prevents.
+  if (!requester.whatsapp) {
+    return { name: "agent:goal", ran: false, note: `${requester.email} has no verified link — the agent would run as anonymous` };
+  }
 
   const agent = READ_AGENTS[ctx.tick % READ_AGENTS.length]!;
   const goals = [
@@ -286,9 +293,25 @@ export async function agentWork(ctx: ScenarioContext): Promise<ScenarioResult> {
       tenantId: T,
       goal: `${pick(goals, ctx.tick)} (${config.marker} run ${config.runId})`,
       agent,
-      // The envelope names the channel this request arrived on. "simulation" is honest: pretending
-      // it was whatsapp would corrupt the runner's own provenance record.
-      envelope: { provider: "simulation", externalId: `${config.runId}-t${ctx.tick}` },
+      // ⚠ THE ENVELOPE MUST RESOLVE TO A REAL PERSON, and getting this wrong cost a whole run.
+      //
+      // This used to send `{provider: "simulation", externalId: "<runId>-t<tick>"}` on the reasoning
+      // that "simulation" was the honest name for the channel. That reasoning was wrong twice over:
+      //
+      //   1. It is not more honest. The envelope's job is to name the HUMAN this work is done for —
+      //      the runner passes it verbatim to every tool call, and the platform resolves it through
+      //      `identity_links` to decide what the agent may see. A real person genuinely did request
+      //      this goal. Their envelope IS the truthful answer; the channel is what `requestedBy` and
+      //      the goal text are for.
+      //   2. There is no `identity_links` row for provider "simulation", so the platform resolved it
+      //      to the ANONYMOUS principal and Cerbos denied every tool call. Once the tenant bug (F9)
+      //      was fixed, this became the next wall: 73 of 74 goals failed with "cerbos denied read on
+      //      pm_task" instead of the earlier uuid 500s.
+      //
+      // So the agent now acts on behalf of the requesting employee, with that employee's reach —
+      // which is also the correct security model: an agent should never see more than the person who
+      // asked it. `x-obo-agent` still records the agent as co-author, so provenance is not lost.
+      envelope: { provider: "whatsapp", externalId: requester.whatsapp },
       requestedBy: requester.userId,
     },
     actor: { ...actor, path: "agent" },

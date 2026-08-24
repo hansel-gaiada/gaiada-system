@@ -100,6 +100,23 @@ export const config = {
   /** Port the fake external boundary listens on, inside the container. */
   fakeExternalsPort: intEnv("SIM_FAKE_EXTERNALS_PORT", 4599),
 
+  /** Submit an agent goal only every Nth tick.
+   *
+   *  ⚠ THIS EXISTS BECAUSE THE SIMULATION EXHAUSTED A REAL BUDGET. The AI Gateway enforces a
+   *  per-tenant DAILY cap on model calls (1000 for this estate). Submitting one goal per tick, with
+   *  each goal making several model calls, burned through it in roughly three hours — after which
+   *  every agent goal failed with an opaque `gateway 429` and the agent strand measured nothing
+   *  except the cap.
+   *
+   *  Two costs, and the second is the one that matters: the measurement window closes, AND the calls
+   *  before it were real spend against a real provider. A harness that quietly consumes a day's
+   *  budget is not a harness anyone can leave running.
+   *
+   *  Default 6: at the live pace (20s ticks) that is one goal every two minutes, ~30/hour, which
+   *  leaves the cap intact across a full working day while still keeping the office animated — the
+   *  agent desks only need SOME run in flight, not a continuous stream. */
+  agentEveryNTicks: intEnv("SIM_AGENT_EVERY_N_TICKS", 6),
+
   /** The bot's webhook shared secret, inherited from the estate's env. The webhook is FAIL-CLOSED
    *  without it — every event is rejected 401. Optional here so the harness still starts when it is
    *  absent; the inbound scenario then reports why it skipped rather than 401-ing in a loop. */

@@ -130,8 +130,16 @@ async function main(): Promise<void> {
     }
 
     // ── Strand B: keep agents genuinely in flight. This is what animates the office.
-    const a = await guard("agent:goal", () => agentWork(ctx));
-    (a.ran ? ran : skipped).push(a.name + (a.note ? " (" + a.note + ")" : ""));
+    //
+    // THROTTLED, and the reason is a scar: one goal per tick exhausted the Gateway's per-tenant
+    // DAILY model-call cap (1000) in about three hours. After that every goal returned `gateway 429`
+    // and the strand measured the cap rather than the estate — while the calls that got there first
+    // were real provider spend. `followAgentRuns` still runs EVERY tick, because watching in-flight
+    // runs costs nothing and is what the office animation actually reads.
+    if (tick % config.agentEveryNTicks === 1 || config.agentEveryNTicks === 1) {
+      const a = await guard("agent:goal", () => agentWork(ctx));
+      (a.ran ? ran : skipped).push(a.name + (a.note ? " (" + a.note + ")" : ""));
+    }
     const f = await guard("agent:follow", () => followAgentRuns(ctx));
     (f.ran ? ran : skipped).push(f.name + (f.note ? " (" + f.note + ")" : ""));
 
