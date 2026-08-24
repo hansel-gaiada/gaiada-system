@@ -111,6 +111,39 @@ The surface a person can actually reach. Until this, the whole program was schem
 - **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
   money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
 
+### lab-runner `0.1.0` — L5a The lab execution sidecar (2026-08-25) — PROTOTYPED
+
+A new standalone service. Executes a learner's submission in a capped, unprivileged,
+network-less container and returns a graded result. `lab-runner/README.md` is its own guide.
+
+**Added**
+- `lab-runner/` — `config.ts` (every default chosen against SumoPod as measured), `sandbox.ts`
+  (the docker argument list — the security boundary), `queue.ts` (hard concurrency cap, bounded
+  backlog, refusal rather than an unbounded wait), `grade.ts` (four check kinds, server-side),
+  `runner.ts`, `server.ts` (three routes, no framework).
+- 25 unit tests: `sandbox.test.ts` pins every isolation flag; `grade.test.ts` pins the grader.
+
+**Fixed during the end-to-end drive — neither was visible to the unit tests**
+- A plain `--tmpfs /work` is created ROOT-OWNED, so `--user 65534` could not write a byte to it.
+  Every run failed with `cp: can't create '/work/...': Permission denied`.
+- A docker VOLUME chowned by a prep container looked like the fix and is not portable: Docker
+  Desktop masks volume ownership per container, so the chown appears to take and the next
+  container still sees `root`. `chmod 0777` behaves the same way. Verified directly.
+  Fix: `--tmpfs /work:rw,nosuid,size=128m,mode=1777,uid=65534,gid=65534`.
+
+**Notes**
+- **NO KVM on the target host.** Containers are the only boundary, on a box sharing a kernel with
+  19 containers of the owner's private production.
+- **`image` is a KEY into an allow-list**, never a reference. Honouring a caller-supplied image
+  there would turn the endpoint into "run anything as that image's entrypoint".
+- **`fileExists` is forgeable and says so.** The artefact listing comes from inside the learner's
+  own container; pair it with a `stdoutMatches` on the real tool's output for anything that
+  matters. No artefact report can be non-forgeable while the learner controls the producer.
+- Limits are CLAMPED, never honoured. A spec with no checks scores zero, never 100.
+
+**Not yet true:** not deployed. No platform-side dispatch (L5b), no labs (L5c), and nothing on
+SumoPod has been touched.
+
 ### lms `0.4.0` — L4 The Web Dev curriculum (2026-08-25) — PROTOTYPED
 
 Six disciplines, ordered, foundation through lead. Structure and theory; the hands-on labs are L5.

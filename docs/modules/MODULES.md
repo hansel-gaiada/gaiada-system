@@ -52,6 +52,7 @@ versions below; the running build reports it at `GET /health`.
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
 | lms | `0.4.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
+| lab-runner | `0.1.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | finance | `0.10.0` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
@@ -1288,6 +1289,37 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
   append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
   two flags to execute.
+
+### L5a (2026-08-25) — the lab runner exists, and is DRIVEN but NOT DEPLOYED
+
+`lab-runner/` — a standalone Node sidecar that executes a submission in a capped, unprivileged,
+network-less container and returns a graded result. Own project, own README, four runtime
+dependencies' worth of restraint (one: `dotenv`).
+
+**No ERP network path, no identity, no database.** It never learns who a learner is and never
+reaches Postgres — that is what keeps a compromise there from being a compromise of the ERP.
+
+**The host has NO KVM** (owner-confirmed 2026-08-25), so the `docker run` argument list in
+`src/sandbox.ts` IS the isolation rather than a layer beneath a microVM — on a box sharing a
+kernel with 19 containers of the owner's private production. Non-root uid, all capabilities
+dropped, `no-new-privileges`, read-only rootfs, `/tmp` noexec, submission mounted READ-ONLY, swap
+disabled, pids capped, and NO NETWORK by default.
+
+Driven end-to-end against real Docker — a correct submission scores 100; a buggy one scores 0 and
+quotes the failing line; DNS is blocked; a `../../../../etc/cron.d/pwn` file path is refused; an
+off-allow-list image is refused; `while(true){}` is killed on the wall clock; 400 background
+processes hit `can't fork`; `/etc` and `/lab` are both read-only. Zero leaked containers, volumes
+or networks afterwards.
+
+**Two bugs the drive found that 25 green unit tests could not:** a plain `--tmpfs /work` is
+root-owned so the non-root uid could not write to it at all, and a volume chowned by a prep
+container is not portable — Docker Desktop masks volume ownership per container, so the chown
+appears to take and the next container still sees `root`. The fix is a tmpfs with an explicit
+`uid=65534`, which is pinned.
+
+**Not deployed.** The platform-side dispatch (L5b) and the FE/BE/QA labs (L5c) are not built, and
+nothing on SumoPod has been touched — that box runs the owner's production and deploying to it is
+a separate, explicitly-confirmed step.
 
 ### What L4 added (2026-08-25) — the Web Dev curriculum
 
