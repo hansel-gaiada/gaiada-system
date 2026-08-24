@@ -325,6 +325,50 @@ describe("buildReplaySteps / totalReplayMs", () => {
     for (const s of steps) expect(s.endMs).toBeLessThanOrEqual(total);
     expect(totalReplayMs([])).toBe(0);
   });
+
+  // ── Concurrency across avatars (2026-08-24) ──────────────────────────────────────────────────
+  // Every test above uses ONE avatar, so all of them passed both before and after the scheduler
+  // changed. These are the ones that would fail if it ever went back to a single global queue.
+  const manyPeople: OfficeMoveEvent[] = Array.from({ length: 8 }, (_, i) => ({
+    id: `m${i}`, avatarId: `person-${i}`, fromRoomKey: "dept-1", toRoomKey: "dept-2",
+    at: `2026-08-23T09:0${i}:00Z`, reason: `handoff ${i}`,
+  }));
+
+  it("plays DIFFERENT avatars concurrently — eight people walk at once, not in a queue", () => {
+    const steps = buildReplaySteps(manyPeople);
+    // A global queue would put the last person at 7 * 1600 = 11200ms. Concurrent lanes put every
+    // one of them inside a single step window.
+    const last = Math.max(...steps.map((s) => s.startMs));
+    expect(last).toBeLessThan(1600);
+    expect(totalReplayMs(steps)).toBeLessThan(8 * 1600);
+  });
+
+  it("staggers the lanes so eight figures do not move as one block", () => {
+    const starts = buildReplaySteps(manyPeople).map((s) => s.startMs);
+    expect(new Set(starts).size).toBe(starts.length);
+  });
+
+  it("never overlaps one avatar with ITSELF — a person cannot walk two routes at once", () => {
+    const sameAvatar: OfficeMoveEvent[] = Array.from({ length: 4 }, (_, i) => ({
+      id: `s${i}`, avatarId: "a1", fromRoomKey: "dept-1", toRoomKey: "dept-2",
+      at: `2026-08-23T09:0${i}:00Z`, reason: `step ${i}`,
+    }));
+    const steps = buildReplaySteps(sameAvatar).sort((a, b) => a.startMs - b.startMs);
+    for (let i = 1; i < steps.length; i++) {
+      expect(steps[i].startMs).toBeGreaterThanOrEqual(steps[i - 1].endMs);
+    }
+  });
+
+  it("mixes both: two events for one person queue behind each other while others run alongside", () => {
+    const mixed: OfficeMoveEvent[] = [
+      { id: "x1", avatarId: "a1", fromRoomKey: "dept-1", toRoomKey: "dept-2", at: "2026-08-23T09:00:00Z", reason: "a1 first" },
+      { id: "x2", avatarId: "a2", fromRoomKey: "dept-2", toRoomKey: "dept-3", at: "2026-08-23T09:01:00Z", reason: "a2 only" },
+      { id: "x3", avatarId: "a1", fromRoomKey: "dept-2", toRoomKey: "dept-3", at: "2026-08-23T09:02:00Z", reason: "a1 second" },
+    ];
+    const by = new Map(buildReplaySteps(mixed).map((s) => [s.id, s]));
+    expect(by.get("x3")!.startMs).toBeGreaterThanOrEqual(by.get("x1")!.endMs);
+    expect(by.get("x2")!.startMs).toBeLessThan(by.get("x3")!.startMs);
+  });
 });
 
 describe("hashId / catToken — deterministic, art-free identity", () => {

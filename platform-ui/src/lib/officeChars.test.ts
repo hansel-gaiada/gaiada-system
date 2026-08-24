@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { hashId } from "./office";
 import {
   AGENT_SPRITES, AUTOMATION_SPRITES, CHAR_PX, CHAR_DRAW_SCALE,
-  agentSpritePath, automationSpritePath, activeBobPx,
+  agentSpritePath, automationSpritePath, activeBobPx, walkBobPx,
 } from "./officeChars";
 
 describe("officeChars — sprite selection is deterministic, or an avatar changes identity on reload", () => {
@@ -64,5 +64,38 @@ describe("activeBobPx — the two-frame animation, and the claim it makes", () =
     expect(activeBobPx(true, true) % CHAR_DRAW_SCALE).toBe(0);
     expect(Number.isInteger(CHAR_DRAW_SCALE)).toBe(true);
     expect(CHAR_PX * CHAR_DRAW_SCALE).toBe(64); // two tiles, matching the LPC humans beside them
+  });
+});
+
+describe("walkBobPx — a walk cycle for a sprite with no walk frames", () => {
+  it("is ZERO when not in transit, wherever the sprite is standing", () => {
+    for (const x of [0, 7, 123, 4096]) expect(walkBobPx(false, x)).toBe(0);
+  });
+
+  it("alternates with DISTANCE, so a longer route takes more steps than a shorter one", () => {
+    // The property that matters: the bob is a function of position, not of time. Count the
+    // transitions across a long crossing and a short one — the long one must have more.
+    const count = (from: number, to: number) => {
+      let flips = 0, prev = walkBobPx(true, from);
+      for (let x = from; x <= to; x++) {
+        const v = walkBobPx(true, x);
+        if (v !== prev) flips++;
+        prev = v;
+      }
+      return flips;
+    };
+    expect(count(0, 400)).toBeGreaterThan(count(0, 40));
+  });
+
+  it("returns only whole sprite pixels, never a subpixel that would blur the art", () => {
+    for (let x = 0; x < 200; x++) {
+      const v = walkBobPx(true, x);
+      expect(v === 0 || v === CHAR_DRAW_SCALE).toBe(true);
+    }
+  });
+
+  it("is stable for a stationary sprite — the same x always gives the same offset", () => {
+    // Guards against ever reintroducing a time term: a figure standing still must not twitch.
+    expect(walkBobPx(true, 55)).toBe(walkBobPx(true, 55));
   });
 });

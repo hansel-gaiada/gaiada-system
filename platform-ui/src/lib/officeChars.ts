@@ -76,3 +76,22 @@ export function automationSpritePath(id: string, hash: (s: string) => number): s
 export function activeBobPx(isActive: boolean, pulseOn: boolean): number {
   return isActive && pulseOn ? CHAR_DRAW_SCALE : 0;
 }
+
+/** The walk cycle for a sprite that has no walk frames.
+ *
+ *  Agents move now (office-data.ts derives agent handoffs), and their pack ships ONE frame — so a
+ *  walking android would otherwise glide across the floor like a chess piece. This bobs it.
+ *
+ *  Driven by the sprite's x POSITION, not by elapsed time, and that is the whole trick: a real walk
+ *  cycle advances per step taken, so tying the bob to distance covered makes a figure crossing a
+ *  long corridor take more steps than one shuffling to the next desk, automatically, with no speed
+ *  parameter to keep in sync. A time-based bob would have a sprite paddling on the spot whenever
+ *  the path was short.
+ *
+ *  `STRIDE_PX` is in device pixels: one bob per stride of travel. */
+const STRIDE_PX = 10;
+
+export function walkBobPx(inTransit: boolean, xPx: number): number {
+  if (!inTransit) return 0;
+  return Math.floor(Math.abs(xPx) / STRIDE_PX) % 2 === 0 ? 0 : CHAR_DRAW_SCALE;
+}

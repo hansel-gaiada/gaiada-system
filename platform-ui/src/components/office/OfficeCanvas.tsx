@@ -23,7 +23,7 @@ import {
   type SpriteGender, type SpritePose,
 } from "@/lib/office-sprites";
 import {
-  CHAR_PX, CHAR_DRAW_SCALE, agentSpritePath, automationSpritePath, activeBobPx,
+  CHAR_PX, CHAR_DRAW_SCALE, agentSpritePath, automationSpritePath, activeBobPx, walkBobPx,
 } from "@/lib/officeChars";
 import "./office.css";
 
@@ -906,7 +906,9 @@ function drawAvatar(
       if (sprite) {
         ctx.imageSmoothingEnabled = false;
         const size = CHAR_PX * CHAR_DRAW_SCALE;
-        const bob = activeBobPx(emoteKind !== null, pulseOn);
+        // In transit the bob comes from DISTANCE (walkBobPx) so the android steps instead of
+        // gliding; at a desk it comes from the working pulse. Never both.
+        const bob = pos.inTransit ? walkBobPx(true, cx) : activeBobPx(emoteKind !== null, pulseOn);
         ctx.drawImage(sprite, cx - size / 2, cy - size * 0.6 - bob, size, size);
       } else {
         drawHumanoid(ctx, cx, cy, r, tokens.steel, tokens.ink, true);

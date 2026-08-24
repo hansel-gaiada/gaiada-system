@@ -650,20 +650,48 @@ export interface ReplayStep extends OfficeMoveEvent {
 
 const REPLAY_STEP_MS = 1600;
 const REPLAY_TRAVEL_FRACTION = 0.7;
+/** Stagger between two DIFFERENT avatars' first steps. Small enough that the floor reads as one
+ *  busy moment rather than a queue, large enough that eight figures do not start on the same
+ *  frame and move as a single block, which reads as a scripted parade rather than as an office. */
+const REPLAY_LANE_STAGGER_MS = 220;
 
-/** Orders real events chronologically and assigns a fixed-cadence playback schedule. Reduced
- *  motion collapses every step's duration to 0 — an instant cut, never a skipped fact. */
+/** Orders real events chronologically and assigns playback times — CONCURRENTLY across avatars.
+ *
+ *  This used to be `startMs = i * REPLAY_STEP_MS` for every event in one global queue, which meant
+ *  N events always took N * 1.6s no matter who they involved: twelve handoffs between eight
+ *  different people played as nineteen seconds of one-person-at-a-time walking, with the floor
+ *  otherwise still. That is also why the derivation upstream capped itself at four events — the
+ *  cap was compensating for the scheduler, not for the data.
+ *
+ *  The real constraint is per-AVATAR, not global: one person cannot be walking two routes at once,
+ *  but eight people absolutely can be walking at the same time, and an office where they do is the
+ *  point. So each avatar gets its own lane, sequential within itself, staggered against the others.
+ *
+ *  Reduced motion collapses every step's duration to 0 — an instant cut, never a skipped fact. */
 export function buildReplaySteps(events: OfficeMoveEvent[], reducedMotion = false): ReplayStep[] {
   const sorted = [...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  return sorted.map((e, i) => {
-    const startMs = i * REPLAY_STEP_MS;
-    const travel = reducedMotion ? 0 : REPLAY_STEP_MS * REPLAY_TRAVEL_FRACTION;
+  const nextFreeByAvatar = new Map<string, number>();
+  const laneIndexByAvatar = new Map<string, number>();
+  const travel = reducedMotion ? 0 : REPLAY_STEP_MS * REPLAY_TRAVEL_FRACTION;
+
+  return sorted.map((e) => {
+    let lane = laneIndexByAvatar.get(e.avatarId);
+    if (lane === undefined) {
+      lane = laneIndexByAvatar.size;
+      laneIndexByAvatar.set(e.avatarId, lane);
+    }
+    // First step in a lane starts at its stagger offset; later steps for the SAME avatar queue
+    // behind that avatar's own previous step, never behind an unrelated person's.
+    const startMs = nextFreeByAvatar.get(e.avatarId) ?? lane * REPLAY_LANE_STAGGER_MS;
+    nextFreeByAvatar.set(e.avatarId, startMs + REPLAY_STEP_MS);
     return { ...e, startMs, endMs: startMs + travel };
   });
 }
 
 export function totalReplayMs(steps: ReplayStep[]): number {
   if (steps.length === 0) return 0;
+  // Max over START times, not over lane counts: with concurrent lanes the last step to BEGIN is
+  // what decides when the whole thing is over, and it may well be in the first lane.
   return Math.max(...steps.map((s) => s.startMs)) + REPLAY_STEP_MS;
 }
 

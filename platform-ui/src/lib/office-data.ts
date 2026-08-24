@@ -323,12 +323,25 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
   // visualisation of a recorded handoff, and the event's own `reason` says which two records it was
   // derived from so the detail panel can never imply more than the data supports.
   //
-  // Bounded to a handful: the replay animates each event in turn, and a floor replaying forty walks
-  // reads as noise rather than as an office.
+  // Bounded — but far less tightly than it was (2026-08-24). The old bound was 4, and its stated
+  // reason was that "the replay animates each event IN TURN". That is no longer true: the scheduler
+  // in lib/office.ts now gives each avatar its own lane and plays different people concurrently, so
+  // twelve handoffs between eight people is one busy moment rather than nineteen seconds of queue.
+  // The cap was compensating for the scheduler, not for the data. What still needs bounding is the
+  // number of DISTINCT figures crossing the floor at once, which is a legibility limit, not a
+  // playback-length one.
   const events: OfficeMoveEvent[] = [];
+  // Humans AND agents (2026-08-24). Agents were excluded when this only drew human handoffs, and
+  // that silently discarded the delegation the office was originally built to show: an agent
+  // picking work up in Operations and carrying it to the department that owns it. An agent has a
+  // real seat and a real room, so it can be walked from one to the other on exactly the same
+  // evidence as a person — two actors on one record. Automations stay OUT: they are bound to a
+  // desk, they own no decisions, and a robot that walks work to a department would imply it chose
+  // to, which is a claim the row underneath does not make.
   const homeRoomByUser = new Map<string, { avatarId: string; roomKey: string; name: string }>();
   for (const a of avatars) {
-    if (a.kind === "human" && a.recordKind === "person") {
+    const eligible = (a.kind === "human" && a.recordKind === "person") || a.kind === "agent";
+    if (eligible) {
       homeRoomByUser.set(a.recordId, { avatarId: a.id, roomKey: a.homeRoomKey, name: a.name });
     }
   }
@@ -344,7 +357,7 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     else byEntity.set(key, [r]);
   }
 
-  const MAX_DERIVED_EVENTS = 4;
+  const MAX_DERIVED_EVENTS = 14;
   for (const [, rows] of byEntity) {
     if (events.length >= MAX_DERIVED_EVENTS) break;
     if (rows.length < 2) continue;
