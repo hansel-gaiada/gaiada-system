@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { navFor, canManageIT, cappedGroupItems, DEPARTMENTS_CAP, DEPARTMENTS_OVERFLOW_HREF } from "./nav";
+import { navFor, canManageIT } from "./nav";
 import type { Me } from "@/lib/platform";
 
 const base: Me = {
@@ -59,6 +59,46 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "SEO", "HR", "IT"]);
     expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/departments/dept-2", "/hr", "/it"]);
   });
+  // GM-01/OQ-4: GM is the ROOT of the department spine (platform-nest `seed/roster.ts`:
+  // `DEPT_PARENT["d-gm"] = null`, every other department parents to it), so it must not sort
+  // among its own children.
+  it("hoists GM to the top of the Departments group whatever order it arrives in", () => {
+    const groups = navFor(
+      { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
+      "c1",
+      [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }, { id: "dept-5", name: "GM" }],
+    );
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items.map((i) => i.label)).toEqual(["GM", "Web Dev", "SEO", "HR", "IT"]);
+    // Ordering only — the href is untouched, so every existing deep link still resolves.
+    expect(depts.items[0].href).toBe("/departments/dept-5");
+  });
+
+  it("keeps the GM row for a plain member — the row is ungated, the CONSOLE gates its content", () => {
+    // A UI gate here would hide a department from the org tree, which would lie about the chart.
+    // `lib/gm.ts` refuses the CONTENT instead, so a member who clicks gets an explanation.
+    const groups = navFor(
+      { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
+      "c1",
+      [{ id: "dept-5", name: "GM" }],
+    );
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items.map((i) => i.label)).toContain("GM");
+  });
+
+  it("keeps GM inside the Departments visual cap by hoisting it", () => {
+    // GM arrives LAST from the org structure, so without the hoist it sorts to the bottom of a
+    // wide estate's list instead of sitting with its children.
+    const many = [
+      { id: "d1", name: "Web Dev" }, { id: "d2", name: "SEO" }, { id: "d3", name: "Creatives" },
+      { id: "d4", name: "Social Media" }, { id: "d5", name: "Legal" }, { id: "d6", name: "Finance" },
+      { id: "d7", name: "GM" },
+    ];
+    const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1", many);
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items.map((i) => i.label)).toContain("GM");
+  });
+
   it("still lists HR and IT in the Departments group when no business departments are passed", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1");
     const depts = groups.find((g) => g.label === "Departments")!;
@@ -89,35 +129,6 @@ describe("navFor (RBAC-gated visibility)", () => {
     // Distinct glyphs: the same shape twice in a 12-icon column is unreadable.
     const glyphs = needsGlyph.map((g) => g.icon!);
     expect(new Set(glyphs).size).toBe(glyphs.length);
-  });
-});
-
-// UI redesign §3.1 — the Departments visual cap is a RENDER-time concern (see nav.ts's own
-// comment): navFor() itself must keep returning every department uncapped (a capability check
-// must never be truncated), and this is a separate pure helper the render layer calls.
-describe("cappedGroupItems (Sidebar §3.1 Departments overflow)", () => {
-  const wideDepts = Array.from({ length: 9 }, (_, i) => ({ label: `Dept ${i}`, href: `/departments/d${i}`, icon: "hr" as const }));
-  const wideGroup = { label: "Departments", icon: "hr" as const, items: wideDepts };
-
-  it("leaves a group at or under the cap untouched", () => {
-    const short = { label: "Departments", icon: "hr" as const, items: wideDepts.slice(0, 3) };
-    expect(cappedGroupItems(short)).toEqual({ items: short.items, overflowCount: 0 });
-  });
-
-  it("truncates a wide Departments group and reports the overflow count", () => {
-    const result = cappedGroupItems(wideGroup);
-    expect(result.items).toHaveLength(DEPARTMENTS_CAP);
-    expect(result.items).toEqual(wideDepts.slice(0, DEPARTMENTS_CAP));
-    expect(result.overflowCount).toBe(wideDepts.length - DEPARTMENTS_CAP);
-  });
-
-  it("never caps a group that isn't Departments, however wide", () => {
-    const business = { label: "Business", icon: "briefcase" as const, items: wideDepts };
-    expect(cappedGroupItems(business).overflowCount).toBe(0);
-  });
-
-  it("points the overflow link at Organization, not a dead end", () => {
-    expect(DEPARTMENTS_OVERFLOW_HREF).toBe("/organization");
   });
 });
 

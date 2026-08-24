@@ -65,6 +65,43 @@ Rail glyph budget for an elevated user: 3 flat (Workspace) + 1 (Organization) + 
 
 ## 3. Change log — one entry per push that touches `nav.ts`
 
+### 2026-08-24 — GM-01: **GM hoisted to the top of Departments** (no route moved)
+
+The GM department gains a bespoke console (`docs/blueprints/gm-console-foundation.md`), and with it
+one nav change: for every principal, **GM sorts FIRST inside the `Departments` group** instead of
+alphabetically among its own children.
+
+**Why.** `d-gm` is the ROOT of the department spine — platform-nest `seed/roster.ts` has
+`DEPT_PARENT["d-gm"] = null` and every other department parents to it. Sorting it between Creatives
+and SEO files the parent inside the list of its children. Implemented in `nav.ts` as an ordering pass
+over the `departments` argument (`deptSlug(name) === "gm"` first), not as a new group.
+
+**Why the hoist matters.** GM arrives LAST from the org structure (its node is appended, because
+`defaultStructure`'s ids are positional and inserting would renumber Web Dev off `dept-1` and SEO
+off `dept-3`), so on a wide estate an unhoisted GM sorts to the bottom of the list instead of sitting
+with its children. Pinned by `nav.test.ts`.
+
+**No visual cap.** The Departments group used to truncate at 6 rows and offer an "All departments
+(N more)" link to `/organization`. Removed: that link duplicated Organization > Overview, and hiding
+real departments behind a truncation cost more than the six saved rows. Every RBAC-visible
+department paints.
+
+**Deliberately NOT gated.** No capability in the Gate column, and `nav.test.ts` pins the row for a
+plain `member`. These rows come from the active company's org structure; hiding a department from the
+tree to hide its console would lie about the org chart. The **console** gates its content instead
+(`lib/gm.ts` → `reports.company.view`, with the `/rollups` 403-page precedent), so a member who
+clicks GM gets an explanation, not a 404 and not an empty grid.
+
+**What did NOT move — the important half.** `Business` and `Reports` keep every row and every URL.
+The GM console COMPOSES `/reports/company`, `/reports/department`, `/rollups`, `/approvals`,
+`/clients` and the per-department consoles and drills INTO them; it is a second door, never a
+relocation. The foundation doc §0 records the owner's "can the whole business move under GM?"
+question and why the answer is no: `Business` is not GM-grain (a junior needs Timesheets), `Reports`
+is already organised by GRAIN rather than ownership (only the company grain is GM's), and moving
+routes breaks deep links, the palette's tier-3 search, MCP hrefs and the agentic-native bar.
+
+**No new glyph.** The row keeps the `hr` group glyph every department row uses.
+
 ### 2026-08-13 — MON: **Monitoring** added to Business
 
 Plane B (client property/service monitoring) gets one row: **Monitoring** `/monitoring`, icon

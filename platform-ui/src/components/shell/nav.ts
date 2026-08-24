@@ -1,6 +1,7 @@
 import type { Me } from "@/lib/platform";
 import { can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
 import { PM_TERMS } from "@/lib/pmVocabulary";
+import { deptSlug } from "@/lib/deptToolkits";
 import type { IconName } from "./icons";
 
 // Access helpers live in lib/rbac (the RBAC source of truth); re-exported here
@@ -59,8 +60,25 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   // header with a flat list of rows): the business departments (from the org
   // structure) plus the always-present functional departments HR and IT. Each
   // row opens that department's console.
+  //
+  // GM-01/OQ-4: **GM sorts FIRST, not alphabetically among its own children.** `d-gm` is the root of
+  // the department spine (platform-nest `seed/roster.ts`: `DEPT_PARENT["d-gm"] = null`, every other
+  // department parents to it), so filing it between Creatives and SEO puts the parent inside the
+  // list of its children. The row is otherwise unchanged — same href, same glyph, and deliberately
+  // NOT capability-gated: these rows come from the active company's org structure, and hiding a
+  // department from the tree to hide its console would lie about the org chart. The GM console gates
+  // its own CONTENT (`lib/gm.ts`), so a non-exec who clicks here gets an explanation, not a 404.
+  //
+  // Ordering only — no new group. A pinned single-row group above Departments was the alternative
+  // (OQ-4) and was not taken: it spends a rail glyph and a group header on one row that already has
+  // a natural home.
+  const isGmRow = (name: string) => deptSlug(name) === "gm";
+  const orderedDepartments = [
+    ...departments.filter((d) => isGmRow(d.name)),
+    ...departments.filter((d) => !isGmRow(d.name)),
+  ];
   const deptItems: NavItem[] = [
-    ...departments.map((d) => ({ label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName })),
+    ...orderedDepartments.map((d) => ({ label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName })),
     { label: "HR", href: "/hr", icon: "hr" },
     { label: "IT", href: "/it", icon: "pulse" },
   ];
@@ -171,24 +189,3 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   return groups;
 }
 
-// UI redesign §3.1 — "cap Departments at a visible max ... with an inline 'All departments →' link".
-// Deliberately a RENDER-time concern, not navFor()'s: the full RBAC-computed list above is still
-// what navFor() returns (a company with 12 departments still gets all 12 in the data), so nothing
-// here can silently hide a destination from a capability check — it only decides how many rows the
-// sidebar actually paints before an overflow link takes over. Keeping this in nav.ts (not inlined in
-// Sidebar.tsx/NavGroupSection.tsx/RailCategory.tsx) means the one cap number and the one target
-// route are defined once for every render path (expanded list, collapsed-rail flyout) instead of
-// three times.
-export const DEPARTMENTS_CAP = 6;
-export const DEPARTMENTS_OVERFLOW_HREF = "/organization";
-
-export interface CappedGroup {
-  items: NavItem[];
-  /** How many additional items were truncated, or 0 when nothing was cut. */
-  overflowCount: number;
-}
-
-export function cappedGroupItems(group: NavGroup, cap: number = DEPARTMENTS_CAP): CappedGroup {
-  if (group.label !== "Departments" || group.items.length <= cap) return { items: group.items, overflowCount: 0 };
-  return { items: group.items.slice(0, cap), overflowCount: group.items.length - cap };
-}
