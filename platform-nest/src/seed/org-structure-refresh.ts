@@ -23,8 +23,15 @@
 // Detecting "hand-edited" by shape rather than by a flag is deliberate: there is no column recording
 // who last wrote the blob, and `updated_at` moves for both cases.
 import { withGlobal, withTenants, closePool } from "../db";
-import { config } from "../config";
 import { STAFF, AGENCY_DEPTS } from "./roster";
+// ⚠ USE THE PRODUCTION WRITE PATH, NOT A HAND-ROLLED UPSERT. My first version wrote only the blob,
+// which would have left TWO derived structures stale: `org_unit_memberships` (swept from the tree,
+// and what unit-narrowing in reports resolves scope from) and `org_unit_closure` (IAM-09's subtree
+// index). `applyOrgStructure` does the blob + both derivations + the `org_structure.updated` event
+// in ONE transaction, "so neither can disagree with the tree it describes" — its own words. Writing
+// the blob alone would have fixed what the org page renders while leaving authorization-relevant
+// scope pointing at the invented roster, which is a worse failure than the one being fixed.
+import { applyOrgStructure } from "../admin/org-structure.service";
 
 const AGENCY_NAME = "Gaia Digital Agency";
 
@@ -69,7 +76,6 @@ export interface OrgRefreshResult {
 }
 
 export async function refreshOrgStructure(opts: { force: boolean }): Promise<OrgRefreshResult> {
-  const site = config.originSite;
   const t = await withGlobal((c) =>
     c.query<{ id: string }>(`SELECT id FROM companies WHERE name = $1 AND deleted_at IS NULL`, [AGENCY_NAME]),
   );
@@ -164,16 +170,11 @@ export async function refreshOrgStructure(opts: { force: boolean }): Promise<Org
     if (n.kind === "person") peopleAfter.push(n.name);
   });
 
-  // ⚠ UPSERT, not insert-if-absent. That is the whole difference from `seed:agency`, and the reason
-  // this is a separate, deliberately-invoked script rather than part of it.
-  await withTenants([tenantId], (c) =>
-    c.query(
-      `INSERT INTO company_org_structure (tenant_id, structure, origin_site)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (tenant_id) DO UPDATE SET structure = EXCLUDED.structure, updated_at = now()`,
-      [tenantId, JSON.stringify(structure), site],
-    ),
-  );
+  // UPSERT (via applyOrgStructure), not insert-if-absent. That is the whole difference from
+  // `seed:agency`, and the reason this is a separate, deliberately-invoked script rather than part of
+  // it. Going through the service also means the membership sweep and the closure rebuild happen,
+  // which is what makes this a real refresh rather than a cosmetic one.
+  await withTenants([tenantId], (c) => applyOrgStructure(c, tenantId, structure as never));
 
   return { tenantId, hadBlob, looksHandEdited, unknownNodes, peopleBefore, peopleAfter, written: true };
 }

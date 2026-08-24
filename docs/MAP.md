@@ -27,7 +27,7 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:employee-files`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:departments`, `seed:employee-files`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
@@ -158,11 +158,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202608230612_rename_sanur_resort_to_viceroy_bali.sql`
+- Head: `202608230730_iam14c_integration_connection_manage.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 140 (121 legacy `NNNN_`, 19 timestamped)
+- Applied files on disk: 141 (121 legacy `NNNN_`, 20 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -281,7 +281,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/billing/new`
 - `/calendar`
 - `/clients`
-- `/clients/[clientId]`
+- `/clients/[clientId]/details`
 - `/clients/new`
 - `/companies`
 - `/companies/[companyId]`
