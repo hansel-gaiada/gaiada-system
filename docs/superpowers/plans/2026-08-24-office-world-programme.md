@@ -139,6 +139,41 @@ frontend task with a backend attached.
 
 ---
 
+## 5a. Decisions taken 2026-08-24 (supersede the questions below where they overlap)
+
+1. **Bubbles show THAT, not WHAT** (§2 accepted). Creative draws a *talking indicator*, not a text
+   balloon. Jokes remain the exception — public by authorship, non-human, no private content.
+2. **Employee↔employee chat is deferred to a new chat interface** the owner is building separately.
+   The world becomes a LAUNCHER: it opens that surface and owns no message storage, no retention
+   policy and no notification path of its own. This removes the presence-rule-2 conflict entirely —
+   presence stays ephemeral, messages live in a system built for messages.
+3. **Build for hundreds, not for the estate we have.** Owner override of the recommendation. W4's
+   transport becomes WebSocket + a replica-safe state layer, which needs: a new nginx `location`
+   with upgrade headers (the only upgrade-aware block today points at `platform-ui`, not
+   `platform-nest`, which is not even published in prod), a raised `proxy_read_timeout`, and a
+   presence bus that is not the current in-process `EventEmitter`. This is weeks of infrastructure
+   ahead of measured demand at 7 possible concurrent logins — recorded as a deliberate choice, not
+   an oversight.
+4. **Automations get a department colour, settable in the UI.** This consciously overrides the
+   earlier "an automation owns no decisions so carries no department tone" reasoning. Both readings
+   are defensible; the override is deliberate and should not be silently re-reverted later.
+5. **Smaller characters, bigger world.** Character frames drop **64×64 → 32×32**, tiles stay 16×16,
+   so a figure is ~1 tile wide and ~1.5 tall — the GBA overworld proportion. At zoom 1 that is
+   roughly 90 tiles and ~12 rooms across a 1440px viewport, against ~4.5 rooms today. Consequence
+   accepted: **the 24 LPC sprites become interim placeholders**, since downscaling art drawn for
+   64px loses what it was drawn for. Creative draws at 32×32 from the start rather than matching
+   the current set — and when in-house art lands, the OGA-BY attribution obligation retires with it.
+6. **Layouts must not be one corridor with two sides.** The current double-loaded corridor plan is a
+   deterministic allocator, which was right for generated layouts and is wrong as a permanent
+   constraint. The floor builder and room builder are **drag-and-drop canvases**, so layout becomes
+   authored data rather than an algorithm's output. The allocator stays as the default for a floor
+   nobody has arranged yet — never as the only shape available.
+7. **Sequencing, owner directive:** ship what exists and get the automation animation running so the
+   world reads as busy now. The real office-work simulation is being built in a separate session;
+   this one focuses on the animation surface.
+
+---
+
 ## 6. Open questions for the owner
 
 1. **§2 — bubbles show that-not-what.** Accept? It is the difference between a fun feature and an
