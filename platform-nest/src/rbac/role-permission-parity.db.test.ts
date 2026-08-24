@@ -104,6 +104,17 @@ const SOCIAL_KINDS = new Set([
 // established, named place to land pending its own role-seeding ticket.
 const NO_ROLE_SEEDED_KINDS = new Set<string>([]);
 
+// FINANCE-F0: the three finance kinds. Seeded roles land in
+// 202608241014_iam_finance_f0_permissions.sql, so these resolve concretely rather than through
+// NO_ROLE_SEEDED_KINDS above.
+const FINANCE_KINDS = new Set<string>([
+  "finance_config", "finance_period", "finance_control",
+  // FINANCE-F1: the ledger itself.
+  "finance_ledger",
+  // FINANCE-F3: the derived statement surface.
+  "finance_statement",
+]);
+
 const DIRECT: Record<string, RealRole[]> = {
   platform_admin: ["platform_admin"],
   company_admin: ["company_admin"],
@@ -135,7 +146,15 @@ const MONITORING_KINDS = new Set([
 function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] {
   // HR-FULL (2026-08-24): hr_policy joins the HR module tier. Kept byte-aligned with the
   // generator's own moduleStaffTargets() — the two are deliberate independent copies.
+  // LMS-L1 (2026-08-24): kept byte-aligned with generate-role-bundles.mjs::moduleStaffTargets —
+  // the two are deliberate independent copies, and a kind taught to one and not the other makes
+  // this guard fail LOUD (IAM-02f) rather than silently skip, which is the whole point of it.
+  if (kind === "lms_course" || kind === "lms_enrollment") return ["lms_staff"];
   if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_staff"];
+  // FINANCE-F0 (2026-08-24): the finance module tier. finance_control carries no module_staff rule
+  // (a finance assistant may not see the duty matrix at all) but is listed for completeness —
+  // an unlisted kind throws here by design rather than resolving to an empty set.
+  if (FINANCE_KINDS.has(kind)) return ["finance_staff"];
   if (SEARCH_KINDS.has(kind)) return ["search_staff"];
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
   if (MONITORING_KINDS.has(kind)) return ["monitoring_staff"];
@@ -157,8 +176,10 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
 }
 
 function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[] {
+  if (kind === "lms_course" || kind === "lms_enrollment") return ["lms_manager"];
   if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_manager"];
   if (kind === "automation_approval") return ["hr_manager"]; // rule condition hardcodes attr.module == "hr"
+  if (FINANCE_KINDS.has(kind)) return ["finance_manager"];
   if (SEARCH_KINDS.has(kind)) return ["search_manager"];
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];
   if (MONITORING_KINDS.has(kind)) return ["monitoring_manager"];

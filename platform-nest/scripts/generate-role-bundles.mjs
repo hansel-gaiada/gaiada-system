@@ -87,6 +87,18 @@ const REAL_ROLES = [
   // constraint as the social pair above — `monitoring` + `_staff`/`_manager` are the only names
   // Cerbos will ever look for.
   "monitoring_staff", "monitoring_manager",
+  // FINANCE-F0 (2026-08-24): the finance department's module tiers, seeded by
+  // 202608241014_iam_finance_f0_permissions.sql. Same string-composition constraint as the social
+  // and monitoring pairs above — `module_staff`/`module_manager` compose
+  // `resource.attr.module + "_staff"|"_manager"` at request time and the module key is `finance`,
+  // so these two names are the only ones Cerbos will ever look for.
+  "finance_staff", "finance_manager",
+  // LMS-L1 (2026-08-24): the learning module's own tiers. Same string-composition constraint as
+  // the social pair above — `module_staff`/`module_manager` compose `resource.attr.module + "_staff"`
+  // at request time and the module key is `lms`, so these are the only two names Cerbos will ever
+  // look for. Seeded by 202608241340; without those rows service-reconciler.ts::moduleRoleId returns
+  // NULL and materializes nothing, which is the silent half of the unreachable-tier defect.
+  "lms_staff", "lms_manager",
 ];
 
 /** Roles with NO Cerbos rules, whose reach is their bundle alone (IAM-04c §3). `owner` is the first.
@@ -95,6 +107,17 @@ const REAL_ROLES = [
  *  reach (see iam-04-reg1-mirror-reach-invariant.test.ts's exemption and why it stays narrow). */
 const PERMISSION_NATIVE_ROLES = ["owner"];
 
+// FINANCE-F0: the three finance kinds. `finance_control` never reaches the module_* resolvers —
+// its rules name company_admin/module_manager directly and DIRECT already maps module_manager —
+// but it is listed for the same reason the webdev empty-set note below exists: a future reader
+// should find all three in one place rather than infer the omission.
+const FINANCE_KINDS = new Set([
+  "finance_config", "finance_period", "finance_control",
+  // FINANCE-F1: the ledger itself.
+  "finance_ledger",
+  // FINANCE-F3: the derived statement surface.
+  "finance_statement",
+]);
 const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",
   "resource_search_keyword", "resource_search_ledger", "resource_search_audit",
@@ -150,11 +173,17 @@ const DIRECT = {
   it_managers: ["it_admin", "it_manager"],
 };
 
+const LMS_KINDS = new Set(["lms_course", "lms_enrollment"]);
+
 function moduleStaffTargets(kind, cond) {
+  // LMS-L1: the LMS is its own module, so module_staff/module_manager on its kinds resolve to the
+  // lms_* role pair. `lms_course` names module_staff only for the wide catalogue READ.
+  if (LMS_KINDS.has(kind)) return ["lms_staff"];
   // HR-FULL (2026-08-24): hr_policy joins hr_case/hr_record on the HR module tier. The other two
   // new HR kinds (hr_recruitment, hr_payroll) never reach this resolver — they are written
   // against hr_people_reader/hr_people_ops, which DIRECT already maps.
   if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_staff"];
+  if (FINANCE_KINDS.has(kind)) return ["finance_staff"];
   if (SEARCH_KINDS.has(kind)) return ["search_staff"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')
@@ -179,8 +208,10 @@ function moduleStaffTargets(kind, cond) {
 }
 
 function moduleManagerTargets(kind, cond) {
+  if (LMS_KINDS.has(kind)) return ["lms_manager"];
   if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_manager"];
   if (kind === "automation_approval") return ["hr_manager"]; // rule condition hardcodes attr.module == "hr"
+  if (FINANCE_KINDS.has(kind)) return ["finance_manager"];
   if (SEARCH_KINDS.has(kind)) return ["search_manager"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')

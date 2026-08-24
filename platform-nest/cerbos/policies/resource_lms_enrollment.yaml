@@ -1,0 +1,110 @@
+# LMS L1 — `lms_enrollment`: assignment, progress, attempts, grading, completion.
+#
+# The counterpart to `lms_course`, and its READ posture is the OPPOSITE. The catalogue is the
+# company's own material and is browsable by everyone; a learner's progress, scores and failed
+# attempts are PERSONAL DATA about a named person, and a failed attempt is more sensitive than a
+# passed one.
+#
+# ── Three tiers, and the middle one is the interesting one ─────────────────────────────────────
+#   1. THE LEARNER      reads their OWN enrolment and progress, and records their own attempts.
+#                       This is rbac.ts §11 principle 2 — "nothing about you that you cannot read".
+#   2. THE DEPARTMENT   `org_unit_lead` sees and grades THEIR OWN unit's learners. This is what
+#      HEAD             makes "each HOD runs their department's training" work, and it is scoped by
+#                       the same unitAncestors containment `lms_course` uses for authoring.
+#   3. HR / ADMIN       company-wide, for compliance reporting — who has passed the mandatory track.
+#
+# ⚠ THE GRADING RULE IS NOT `update`. A reviewer marking a submission and a learner recording their
+#   own progress are both "writes to this kind", and collapsing them would let a learner grade
+#   themselves. `grade` is its own action, held only by the lead/admin tier.
+#
+# ⚠ AND `waive` IS NOT `grade`. Waiving excuses somebody from mandatory training entirely — a
+#   compliance decision, not an assessment one — so it sits with the admin tier alone.
+#
+# ── ROLE-ARM ONLY. No perm_* mirror. ───────────────────────────────────────────────────────────
+# Every non-admin rule here is attribute-gated (`subjectUserId` self, or `unitAncestors`
+# containment). A flat mirror cannot express either and would collapse "your own progress" into
+# "everybody's progress" — precisely the granularity gap resource_hr_case.yaml documents at length.
+#
+# ── MODULE BINDING (IAM-02f) ───────────────────────────────────────────────────────────────────
+# This kind belongs to the LMS module: every handler authorizes it with module: "lms", and every
+# lms_* table composes `app_module_allowed('lms')`. Stated as a literal here because the
+# role-catalog drift guard (role-catalog-drift.db.test.ts) resolves `module_staff`/`module_manager`
+# to a real role by finding that literal — in the rule, in this file, or at a production call site —
+# and FAILS LOUD rather than silently skipping when it cannot. It is also simply the fact a reader
+# needs: `module_manager` on this kind means `lms_manager`, not some other module's tier.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: lms_enrollment
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ── 1 · The learner, over their own record ────────────────────────────────────────────────
+    # `has()` guarded so a handler that forgets subjectUserId is DENIED rather than served — the
+    # fail-closed convention every self-service rule in this repo follows.
+    - actions: ["read", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+
+    # Self-enrolment, for a path the author marked optional. The handler enforces optionality; this
+    # rule only establishes that enrolling YOURSELF is a member-tier act.
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id
+
+    # ── 2 · The department head, over their own unit's learners ───────────────────────────────
+    # Assign, follow progress, and GRADE the reviewed activities (UI/UX, management scenarios).
+    # Scoped by the same unitAncestors containment that scopes authoring.
+    - actions: ["read", "create", "update", "grade"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ── 3 · HR + company admin, company-wide ──────────────────────────────────────────────────
+    # Compliance reporting: who has and has not passed the mandatory track. `hr_people_reader` is
+    # (hr_staff OR hr_manager) — this is genuinely hr_staff-shaped work, unlike payroll.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_reader", "module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    - actions: ["create", "update", "grade"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # WAIVE excuses somebody from mandatory training — a compliance decision, not an assessment.
+    # Admin tier only; deliberately NOT reachable by a department head, who would otherwise be able
+    # to excuse their whole team from the company's mandatory track.
+    - actions: ["waive"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Bulk export of the training register (who passed what, when, with what score). Personal data
+    # about every employee at once, so the D4 high-assurance tier — the same bar hr_record.export
+    # and hr_payroll.export sit at.
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

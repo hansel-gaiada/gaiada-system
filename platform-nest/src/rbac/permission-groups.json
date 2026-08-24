@@ -3,15 +3,15 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (305 grantable permissions, HR-FULL 2026-08-24)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (330 grantable permissions, LMS-L1 2026-08-24)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 105,
-      "grantablePermissionsInCatalog": 305,
-      "permissionsCoveredByGroups": 283,
+      "groups": 122,
+      "grantablePermissionsInCatalog": 336,
+      "permissionsCoveredByGroups": 314,
       "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 64
+      "sensitiveGroups": 78
     }
   },
   "groups": [
@@ -1243,6 +1243,190 @@
       "description": "Export the payroll register or bank file. Requires step-up verification.",
       "permissions": [
         "hr.payroll.export"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_config_view",
+      "name": "View Chart of Accounts & Calendar",
+      "domain": "finance",
+      "description": "Read the accounting vocabulary — chart of accounts, dimensions and cost centres, the fiscal period calendar, currencies and exchange rates. Carries no figures: an account code and name are not money. Needed by anyone coding an expense or a document to the right account.",
+      "permissions": [
+        "finance.config.read",
+        "finance.period.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "finance_config_manage",
+      "name": "Manage Chart of Accounts & Calendar",
+      "domain": "finance",
+      "description": "Own the accounting vocabulary: create, edit and delete accounts, dimensions and dimension values, cut fiscal years and periods, enter exchange rates, and set the company's functional and presentation currency. The controller/accountant tier. An account that has ever been posted to is additionally frozen in the database — it can be renamed and archived, never re-typed or re-coded.",
+      "permissions": [
+        "finance.config.create",
+        "finance.config.update",
+        "finance.config.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_period_close",
+      "name": "Lock & Close Fiscal Periods",
+      "domain": "finance",
+      "description": "Run the period close: soft-lock a period to stop ordinary posting, reopen it if the close finds something, and hard-close it to assert the figures are final. Hard-closing is IRREVERSIBLE and requires step-up verification plus a named accountant's sign-off — a wrong figure in a closed period is fixed by a correcting entry in an open one, never by reopening. Deliberately separate from managing the chart of accounts: one person holding both could post an adjustment and then close the books over it.",
+      "permissions": [
+        "finance.period.lock",
+        "finance.period.reopen",
+        "finance.period.close"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_control_govern",
+      "name": "Govern Finance Duties & Access",
+      "domain": "finance",
+      "description": "The governance tier: assign finance duties, waive a segregation-of-duties conflict under a compensating control, approve or revoke cross-company finance elevation, and read the finance access log. Held ABOVE the accounting tiers because it governs them — whoever can assign duties can assign themselves any duty. Every action requires step-up verification. Note this does NOT decide which companies an owner may see: that comes from the ownership graph.",
+      "permissions": [
+        "finance.control.read",
+        "finance.control.assign_duty",
+        "finance.control.waive_conflict",
+        "finance.control.grant_access",
+        "finance.control.revoke_access"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_catalogue_view",
+      "name": "Browse the Learning Catalogue",
+      "domain": "lms",
+      "description": "See courses, learning paths and what has been assigned. Deliberately broad — training you cannot see is a support ticket, not a security posture. Progress and scores are a SEPARATE group.",
+      "permissions": [
+        "lms.course.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "lms_authoring",
+      "name": "Author Training",
+      "domain": "lms",
+      "description": "Create, edit and retire courses and learning paths. A department head is scoped to their OWN department by the org chart; the LMS manager tier and company admins author company-wide. Does NOT include publishing.",
+      "permissions": [
+        "lms.course.create",
+        "lms.course.update",
+        "lms.course.retire"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "lms_publish",
+      "name": "Publish Training",
+      "domain": "lms",
+      "description": "Publish a course version, making it assignable and freezing the content people will be certified against. Kept separate from authoring because saving a draft and declaring it fit to certify against are different acts.",
+      "permissions": [
+        "lms.course.publish"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_catalogue_admin",
+      "name": "Delete Training Content",
+      "domain": "lms",
+      "description": "Hard-delete a course. Rarely correct — a course with completions against it should be RETIRED, so the certificates people hold remain readable.",
+      "permissions": [
+        "lms.course.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_progress_view",
+      "name": "View Training Progress",
+      "domain": "lms",
+      "description": "Read enrolments, progress and scores for others. A learner reads their OWN without this group; a department head sees their unit; HR sees company-wide for compliance. Includes failed attempts, which are more sensitive than passes.",
+      "permissions": [
+        "lms.enrollment.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_assign",
+      "name": "Assign Training",
+      "domain": "lms",
+      "description": "Assign learning paths to people and record progress on their behalf. The mandatory general track is auto-assigned and needs no one to hold this.",
+      "permissions": [
+        "lms.enrollment.create",
+        "lms.enrollment.update"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_grade",
+      "name": "Grade Submissions",
+      "domain": "lms",
+      "description": "Grade a submitted attempt for a reviewed activity — UI/UX work and management scenarios, where a rubric beats an assertion. Separate from assigning so a learner can never grade themselves.",
+      "permissions": [
+        "lms.enrollment.grade"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_waive",
+      "name": "Waive Mandatory Training",
+      "domain": "lms",
+      "description": "Excuse somebody from training they are required to complete. A compliance decision rather than an assessment one — and deliberately NOT held by department heads, who would otherwise be able to excuse their own team from the company's mandatory track.",
+      "permissions": [
+        "lms.enrollment.waive"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "lms_export",
+      "name": "Export the Training Register",
+      "domain": "lms",
+      "description": "Bulk-export who passed what, when, and with what score. Personal data about every employee at once; requires step-up verification.",
+      "permissions": [
+        "lms.enrollment.export"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ledger_view",
+      "name": "View & Verify the Ledger",
+      "domain": "finance",
+      "description": "Read journal entries and their lines, and run the ledger integrity check (hash chain, sequence gaps, balance). Verification is deliberately wide: an integrity check that only the person who could have broken the chain may run is not an integrity check.",
+      "permissions": [
+        "finance.ledger.read",
+        "finance.ledger.verify"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ledger_post",
+      "name": "Post & Reverse Journals",
+      "domain": "finance",
+      "description": "Post journal entries to the book of record, and correct them by reversal — the only sanctioned correction, since a posted journal can never be edited or deleted. Reversal sits at the same tier as posting on purpose: making corrections harder than postings pushes people toward not correcting at all. Deliberately NOT granted alongside period-close rights: journal posting plus period closing is a blocking segregation-of-duties conflict.",
+      "permissions": [
+        "finance.ledger.post",
+        "finance.ledger.reverse"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_statements_view",
+      "name": "View Financial Statements",
+      "domain": "finance",
+      "description": "Read the trial balance, general ledger, profit and loss and balance sheet for the company. Deliberately wider than reading the ledger itself: a statement is an aggregate, and someone who should see departmental cost totals does not thereby need every journal line behind them.",
+      "permissions": [
+        "finance.statement.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_statements_export",
+      "name": "Export Financial Statements",
+      "domain": "finance",
+      "description": "Produce financial statements as a file that leaves the ERP — the pack a bank, auditor or board actually reads. A separate right from viewing because the artefact outlives the session and carries no access control once it exists. Requires step-up verification.",
+      "permissions": [
+        "finance.statement.export"
       ],
       "sensitive": true
     }

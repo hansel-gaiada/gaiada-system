@@ -380,6 +380,14 @@ function deriveModuleRoleRequirements(): {
 // adopts the module_staff/module_manager/module_approver convention — update this set in the SAME
 // change that adds the new module's policy rule, after confirming the new derivation output.
 const EXPECTED_MODULE_ROLE_NAMES = new Set([
+  // FINANCE-F0, 2026-08-24 — the finance module's tiers. Derived, not chosen: module_staff/
+  // module_manager string-compose `resource.attr.module + "_staff"|"_manager"` and the module key is
+  // `finance`. The resolver picks it up from the THE HANDLER CONTRACT block in each
+  // resource_finance_*.yaml header (`module:"finance"`), the same stage resource_monitor.yaml uses,
+  // because the finance handlers do not exist yet — F0 is schema only. Seeded by
+  // 202608241014_iam_finance_f0_permissions.sql.
+  "finance_staff",
+  "finance_manager",
   "hr_staff",
   "hr_manager",
   "reports_staff",
@@ -399,6 +407,16 @@ const EXPECTED_MODULE_ROLE_NAMES = new Set([
   // this derivation reads.
   "monitoring_staff",
   "monitoring_manager",
+  // LMS-L1, 2026-08-24 - the learning module's tiers, derived the same way (module key `lms`, so
+  // `lms_staff`/`lms_manager` are the only two names Cerbos composes). Seeded by migration
+  // 202608241340; resource_lms_course.yaml and resource_lms_enrollment.yaml carry the
+  // module_staff/module_manager rules this derivation reads, and both declare `module: "lms"` in
+  // their header so the resolver can bind them before any handler exists.
+  //
+  // Confirmed a GENUINE new module before adding, per this test's own instruction: the LMS is its
+  // own module by owner decision (docs/blueprints/lms-foundation.md), not an HR sub-feature.
+  "lms_staff",
+  "lms_manager",
   "agency_approver",
 ]);
 

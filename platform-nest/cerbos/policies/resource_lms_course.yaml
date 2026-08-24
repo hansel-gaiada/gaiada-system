@@ -1,0 +1,90 @@
+# LMS L1 — `lms_course`: the authored catalogue (courses, modules, activities, paths).
+#
+# ── READ IS DELIBERATELY WIDE, and this is the one place that is correct ────────────────────────
+# Every member of staff can browse the catalogue. Training assigned to you that you cannot see is a
+# support ticket, not a security posture — the same reasoning `resource_hr_policy.yaml` records for
+# holiday calendars. A course is the company's own material; there is no person on the other side of
+# it. What is NOT wide is the LEARNER's own progress and scores, which live on `lms_enrollment`.
+#
+# ── AUTHORING IS SCOPED TO THE DEPARTMENT HEAD, via the role that already exists ────────────────
+# The owner ask: "each HOD should make more". That needs NO new role. `org_unit_lead` (derived_roles
+# .yaml) already matches when the principal holds an `org_unit_lead` grant whose scopeId is in the
+# resource's `unitAncestors` — i.e. "you lead this department, or one above it". The handler resolves
+# the course's `unit_node_id` ancestry server-side and passes it, exactly as
+# `resource_report_document.yaml` and `resource_appraisal.yaml` already do.
+#
+# ⚠ THE TRAP THAT KIND CARRIES, restated because it applies verbatim here: an `org_unit_lead` grant
+#   mis-recorded at company or global scope would satisfy a rule guarded only on `inTenant`. The
+#   derived role itself pins `scopeType == "org_unit"`, so the containment test is the guard — do
+#   NOT add an `org_unit_lead` rule here conditioned on `inTenant` alone.
+#
+# ── ROLE-ARM ONLY. No perm_* mirror. ───────────────────────────────────────────────────────────
+# Same posture as HR-FULL's three kinds and resource_employee.yaml (P2-02). The authoring rules are
+# ATTRIBUTE-DEPENDENT (unitAncestors containment), and the flat permission catalog cannot express
+# "…but only for your own department" — a mirror would collapse it into authoring rights over every
+# department's curriculum. Wire one only after a holder audit, and only as a scoped mirror.
+#
+# ── MODULE BINDING (IAM-02f) ───────────────────────────────────────────────────────────────────
+# This kind belongs to the LMS module: every handler authorizes it with module: "lms", and every
+# lms_* table composes `app_module_allowed('lms')`. Stated as a literal here because the
+# role-catalog drift guard (role-catalog-drift.db.test.ts) resolves `module_staff`/`module_manager`
+# to a real role by finding that literal — in the rule, in this file, or at a production call site —
+# and FAILS LOUD rather than silently skipping when it cannot. It is also simply the fact a reader
+# needs: `module_manager` on this kind means `lms_manager`, not some other module's tier.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: lms_course
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Browse the catalogue. Everyone in the tenant — see the header.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "module_staff", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Author for YOUR OWN department. The containment test in the derived role IS the scope — a lead
+    # of `d-web` reaches `d-web` courses and nothing else.
+    - actions: ["create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The LMS ACTING tier (`lms_manager`) authors company-wide — the training function itself, the
+    # peer of hr_manager. Named explicitly rather than left implicit: a module_manager tier that
+    # cannot do the module's own work is the "unreachable tier written into a contract" defect
+    # derived_roles.yaml warns about, just wearing a different hat.
+    - actions: ["create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # The company admin authors anywhere, including the GENERAL track — which by construction has no
+    # `unit_node_id`, so no org_unit_lead can ever reach it. That is intentional: the mandatory track
+    # every employee must pass is not one department's to edit.
+    - actions: ["create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # PUBLISH is its own action, not part of `update`. Publishing makes a course ASSIGNABLE and
+    # freezes a version people will be certified against; an author saving a draft and an author
+    # declaring it fit to certify against are different acts. A department head publishes their own.
+    - actions: ["publish"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Retiring withdraws a course from assignment. Deliberately NOT `delete`: existing completions
+    # reference the version (lms_completions freezes course_key/version), and a hard delete would
+    # orphan a certificate somebody holds.
+    - actions: ["retire"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["org_unit_lead", "module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
