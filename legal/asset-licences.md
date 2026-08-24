@@ -156,3 +156,43 @@ ships a purple box behind every automation.
 Record: asset, source URL, author, licence (exact name and version), whether commercial use is
 permitted, whether attribution is owed, whether share-alike applies, date assessed, and who
 assessed it. If any field is "unclear", the asset does not get committed until it is clear.
+
+---
+
+## Decided: "Waha" in-house pack — AI-generated, Office subset only
+
+| Field | Value |
+|---|---|
+| **Asset** | `Waha` character + office pixel pack, delivered by the Creative team 2026-08-24 (2,052 PNG) |
+| **Source** | **Generated with ChatGPT by the Gaiada Creative team.** Not downloaded, not licensed from a third party — confirmed by the owner 2026-08-24 |
+| **Licence** | **None, and none is needed.** Purely AI-generated images have no human author, so no third-party copyright subsists to license. OpenAI's Terms of Use additionally assign output rights to the generating account and permit commercial use |
+| **Commercial use** | Permitted |
+| **Attribution** | Not required (no third-party author). The `/office/credits` surface stays for the LPC sprites above |
+| **Share-alike** | None. This is the practical reason to prefer this pack over LPC where it is usable |
+| **Date assessed** | 2026-08-24 |
+| **Adopted** | **`Office/` subset only** — 135 files: floors, walls, doors/windows, furniture, equipment, props, plants, lighting, signage, paintings |
+| **Excluded** | The entire `Character/` tree — 1,917 files. See the two reasons below |
+
+### The consequence nobody should discover later
+
+Because there is no human authorship, **we hold no copyright in this art either.** Anyone may copy
+the office environment out of our product and we have no claim against them. For interior fixtures
+in an internal ERP that is an acceptable trade; it would not be acceptable for anything that is part
+of the product's identity, so **this pack must never be the source of a logo, an icon set, or
+brand art.** Those need a human author precisely so that they can be owned.
+
+### Why `Character/` is excluded
+
+1. **Similarity risk in the 30 "Special Uniform" sets.** The v2 delivery renames them to generic
+   archetypes (`01_Ninja`, `05_Magical_Sailor`, `11_Samurai`), which was the right instinct. But the
+   v1 contact sheet labelled the same 30 sets *Naruto, Sasuke, Kakashi, Itachi, Sailor Moon, Goku,
+   Vegeta, Luffy, Zoro, Tanjiro, Nezuko, Gojo* — i.e. the prompts were the character names. A folder
+   rename does not change what the model drew, and "no copyright in the output" is not a defence
+   against the output resembling someone else's protected character. We need none of the 30 for an
+   office, so excluding the category removes the question entirely rather than answering it.
+2. **They are technically unusable regardless** — see the defect list in
+   `docs/superpowers/plans/2026-08-24-office-world-programme.md` §7.
+
+An AI-generated asset is not automatically safe. The generator's output carries no licence, but it
+can still carry someone else's character design, and that is a separate question this row answers
+separately.

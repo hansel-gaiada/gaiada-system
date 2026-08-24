@@ -174,6 +174,25 @@ const WALL_TILES = 0.4;
 /** Tiled floor: a base fill plus a checkerboard wash at low alpha — reads as a real floor surface
  *  instead of one flat rectangle with gridlines. Clipped to the wall-inset interior so the wash
  *  never bleeds under the walls drawn over it. */
+/** Authored floor textures (Waha pack, 2026-08-24 — see legal/asset-licences.md). One per room
+ *  kind, tiled at TILE_PX so the material grid and the engine grid are the SAME grid; a texture
+ *  drawn at any other size makes furniture stop agreeing with the floor it stands on. */
+const FLOOR_TEXTURE: Record<OfficeRoomKind, string> = {
+  lobby: "/office-env/floors/floor_light_wood.png",
+  agents: "/office-env/floors/floor_tile.png",
+  department: "/office-env/floors/floor_carpet_blue.png",
+  utility: "/office-env/floors/floor_carpet_gray.png",
+  unassigned: "/office-env/floors/floor_tile.png",
+};
+
+/** How much of the authored texture is allowed through, over the themed base fill.
+ *  NOT 1.0, and this is the whole reason the base fill below survives. The textures are authored
+ *  at fixed colours and know nothing about our palette, so painting them opaque would hand the
+ *  office a cream floor in dark mode and glare straight through the theme the rest of the ERP
+ *  respects. Compositing them OVER the token fill keeps `--surface-*` driving the tone — the
+ *  texture contributes material and grain, the theme still contributes the colour. */
+const FLOOR_TEXTURE_ALPHA = 0.5;
+
 function drawFloor(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, tokens: TokenSet, kind: OfficeRoomKind) {
   const wall = tilesToPx(WALL_TILES);
   const x = tilesToPx(rect.x) + wall, y = tilesToPx(rect.y) + wall;
@@ -182,18 +201,33 @@ function drawFloor(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; 
   // shared spaces, distinct from a department's own card-tone floor.
   ctx.fillStyle = kind === "lobby" || kind === "agents" ? tokens.raised : kind === "department" ? tokens.card : tokens.sunken;
   ctx.fillRect(x, y, w, h);
+
   const tile = tilesToPx(1);
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();
-  ctx.fillStyle = tokens.hairlineSoft;
-  ctx.globalAlpha = 0.4;
-  const cols = Math.ceil(w / tile) + 1, rows = Math.ceil(h / tile) + 1;
-  for (let ty = 0; ty < rows; ty++) {
-    for (let tx = 0; tx < cols; tx++) {
-      if ((tx + ty) % 2 === 0) continue;
-      ctx.fillRect(x + tx * tile, y + ty * tile, tile, tile);
+
+  const tex = getRawImage(FLOOR_TEXTURE[kind]);
+  if (tex) {
+    ctx.globalAlpha = FLOOR_TEXTURE_ALPHA;
+    ctx.imageSmoothingEnabled = false;
+    const cols = Math.ceil(w / tile), rows = Math.ceil(h / tile);
+    for (let ty = 0; ty < rows; ty++) {
+      for (let tx = 0; tx < cols; tx++) ctx.drawImage(tex, x + tx * tile, y + ty * tile, tile, tile);
+    }
+  } else {
+    // The procedural checkerboard stays as the fallback, exactly as it rendered before the
+    // textures existed — a floor that has not finished decoding must still read as a floor, not
+    // as a flat void that pops into a room a moment later.
+    ctx.fillStyle = tokens.hairlineSoft;
+    ctx.globalAlpha = 0.4;
+    const cols = Math.ceil(w / tile) + 1, rows = Math.ceil(h / tile) + 1;
+    for (let ty = 0; ty < rows; ty++) {
+      for (let tx = 0; tx < cols; tx++) {
+        if ((tx + ty) % 2 === 0) continue;
+        ctx.fillRect(x + tx * tile, y + ty * tile, tile, tile);
+      }
     }
   }
   ctx.restore();
