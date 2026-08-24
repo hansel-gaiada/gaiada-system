@@ -21,6 +21,7 @@
     "seed:hr-config": "node dist/seed/hr-config.js",
     "seed:finance-config": "node dist/seed/finance-config.js",
     "seed:lms-general-track": "node dist/seed/lms-general-track.js",
+    "seed:lms-webdev-curriculum": "node dist/seed/lms-webdev-curriculum.js",
     "lms:assign-mandatory": "node dist/seed/lms-assign-mandatory.js",
     "lms:reset-training": "node dist/seed/lms-reset-training.js",
     "seed:social-content-brief-automation": "node dist/seed/social-content-brief-automation.js",

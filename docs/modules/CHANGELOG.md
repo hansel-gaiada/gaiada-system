@@ -75,6 +75,29 @@ The surface a person can actually reach. Until this, the whole program was schem
 - **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
   money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
 
+### lms `0.4.0` — L4 The Web Dev curriculum (2026-08-25) — PROTOTYPED
+
+Six disciplines, ordered, foundation through lead. Structure and theory; the hands-on labs are L5.
+
+**Added**
+- `src/seed/lms-webdev-curriculum.ts` + `seed:lms-webdev-curriculum` — 8 paths, 14 courses,
+  42 activities, 14 graded quizzes. FE · BE · UI/UX · DevOps · Cyber Security · QA, plus a shared
+  foundation path and a lead path.
+- `src/seed/lms-webdev-curriculum.db.test.ts` — 7 tests.
+
+**Notes**
+- **No `lab` is authored, deliberately.** The runner arrives at L5; a required activity nothing
+  can grade makes its whole path permanently uncompletable. The seed refuses to finish if it finds
+  one and the test asserts zero.
+- **`requires_previous` throughout** — "steps so difficulties are in order", enforced in data.
+- **Mixed grading by discipline**: UI/UX and the lead track use reviewed `scenario` activities
+  with a rubric; the objective disciplines auto-grade.
+- Answers are option INDEXES, not text: an author fixing a typo in an option must not silently
+  invalidate every correct answer already recorded against it.
+
+**Not yet true:** nobody is enrolled — these are department paths the head assigns, not mandatory
+ones. No labs, no runner.
+
 ### lms `0.3.0` — L3 The HOD authoring surface (2026-08-25) — PROTOTYPED
 
 "Later each HOD should make more" — the surface that makes it true. NO new backend: L1b already

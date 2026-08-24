@@ -51,7 +51,7 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
-| lms | `0.3.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
+| lms | `0.4.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | finance | `0.10.0` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
@@ -1232,7 +1232,7 @@ rather than quietly deleted.
 
 ---
 
-## lms — Learning · Certification · `0.3.0` · PROTOTYPED
+## lms — Learning · Certification · `0.4.0` · PROTOTYPED
 
 **Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
 
@@ -1288,6 +1288,31 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
   append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
   two flags to execute.
+
+### What L4 added (2026-08-25) — the Web Dev curriculum
+
+`seed:lms-webdev-curriculum`: **8 paths, 14 courses, 42 activities** across the six disciplines
+the owner named — FE · BE · UI/UX · DevOps · Cyber Security · QA — plus a shared foundation every
+member of the department takes first and a **lead** path for the management tier.
+
+- **Order is enforced, not suggested.** Every `lms_path_courses` row sets `requires_previous`, and
+  the test pins positions as 1..n with no gaps.
+- **Grading is mixed BY DISCIPLINE**, per the owner decision: FE/BE/DevOps/Cyber/QA quizzes are
+  `auto`; UI/UX and the lead track are `review`. An auto-gradeable proxy for "is this good design"
+  or "was that the right call with a client" mostly is not one, and grading them automatically
+  teaches people to satisfy the grader.
+- **The content is this estate's own.** The DevOps course teaches the four deploy traps that have
+  each cost a real ticket here (a `.env` var with no `environment:` block, `up -d` rolling back on
+  a stale tag, `--remove-orphans` deleting off-profile containers, a green deploy hiding a crash
+  loop). QA teaches checking the skip count and reading `Test Files` as well as `Tests`. Backend
+  teaches that a missing field reads exactly like a null and that an empty list is a claim.
+
+**NO `lab` activity is authored, and that is a correctness requirement rather than scoping.** A
+`lab` is graded by a runner that does not exist until L5. A required activity nothing can ever
+pass makes its whole path permanently uncompletable — fourteen paths nobody could finish, and the
+symptom would read as "the training is too hard" rather than as a missing service. The seed
+REFUSES to finish if it finds one, and the test asserts zero. L5 attaches labs to these same
+course keys.
 
 ### What L3 added (2026-08-25) — the HOD authoring surface
 
