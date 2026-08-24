@@ -837,13 +837,20 @@ function emoteKindFor(
  *  `emoteKindFor` reads, translated into the coarser `DeskActivity` the desk drawing understands.
  *  An automation `executing` OR `awaiting_approval` both read as "working" (the accent glow) —
  *  matching how an agent's own `approval_wait` already glows too, with the LOUD distinction carried
- *  by the bubble on top, not the desk tint underneath. `idle`/`unknown` draw nothing extra. */
+ *  by the bubble on top, not the desk tint underneath. `just_ran` takes the static "quiet" tint.
+ *  `idle`/`unknown` draw nothing extra. */
 function deskActivityFor(avatar: OfficeAvatar, workingIds: Set<string>, nowMs: number): DeskActivity {
   if (avatar.activeRunId) return workingIds.has(avatar.id) ? "working" : "quiet";
   if (avatar.kind === "automation" && avatar.automationSignal) {
     const state: AutomationActivityState = resolveAutomationState(avatar.automationSignal, nowMs);
     if (state === "executing" || state === "awaiting_approval") return "working";
     if (state === "failed") return "failed";
+    // `just_ran` lands on the EXISTING "quiet" tint, which was written for precisely this shape of
+    // fact: "a visible state, not a looping animation implying live contact". A finished run gets
+    // a steady tint and never joins the pulse set below — the pulse is reserved for things that
+    // are actually happening, and a settled desk that blinks would undo the distinction the
+    // `just_ran` state exists to draw.
+    if (state === "just_ran") return "quiet";
   }
   return "none";
 }

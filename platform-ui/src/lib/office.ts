@@ -680,6 +680,20 @@ export function catToken(id: string): string {
 // non-animated state from this one.
 export const WORKING_RECENCY_MS = 45_000;
 
+// ── The same question, a DIFFERENT signal shape (2026-08-24) ───────────────────────────────────
+// `WORKING_RECENCY_MS` above is correct for an AGENT RUN, and only for an agent run, because a run
+// emits a continuous stream of events: 45s of silence genuinely means it stopped. An AUTOMATION
+// emits nothing of the kind. Its `executed_at` is a POINT EVENT — one instant, recorded once, when
+// the thing ran. Asking "was that instant inside 45 seconds" gives the desk an animation that
+// exists for 45 seconds out of the automation's entire life, which is why the office looked dead:
+// not a missing animation, a window measured against the wrong kind of signal.
+//
+// Ten minutes is chosen to mean "recently", not "now" — see `just_ran` below, which is the state
+// that keeps this honest. Widening `executing` itself to ten minutes was the obvious fix and is
+// the wrong one: it would have the desk claim "Executing now" for ten minutes after the run
+// finished, trading a dead office for a lying one.
+export const AUTOMATION_RECENCY_MS = 10 * 60_000;
+
 /** Pure decision: given the latest known event timestamp for a run (ms epoch, or null if nothing
  *  has arrived yet) and the current instant, is this genuinely working right now? Kept as its own
  *  function so the 45s window is defined once and the component never re-derives it inline. */
@@ -724,7 +738,7 @@ export interface AutomationSignal {
  *  live"), and a second constant would just be two competing opinions about the same fact with no
  *  reason either value should differ. If a real difference is ever needed, extract a SECOND named
  *  constant with a comment saying why — don't let call sites drift by re-using the number inline. */
-export type AutomationActivityState = "executing" | "awaiting_approval" | "failed" | "idle" | "unknown";
+export type AutomationActivityState = "executing" | "just_ran" | "awaiting_approval" | "failed" | "idle" | "unknown";
 
 /** Pure: signal in, state out — priority order matters. A pending approval is the LOUDEST fact
  *  regardless of any stale execution history (an automation blocked on a human is exactly what
@@ -738,17 +752,24 @@ export type AutomationActivityState = "executing" | "awaiting_approval" | "faile
 export function resolveAutomationState(signal: AutomationSignal, nowMs: number): AutomationActivityState {
   if (!signal.checked) return "unknown";
   if (signal.pendingApproval) return "awaiting_approval";
-  const fresh = signal.asOfMs != null && nowMs - signal.asOfMs <= WORKING_RECENCY_MS;
+  const fresh = signal.asOfMs != null && nowMs - signal.asOfMs <= AUTOMATION_RECENCY_MS;
   if (signal.executionStatus === "failed") return fresh ? "failed" : "idle";
+  // `executing` is a LIVE claim and takes no freshness check, because the status itself already
+  // asserts in-flight. It is the only state that may animate as "happening now".
   if (signal.executionStatus === "executing") return "executing";
-  return fresh ? "executing" : "idle";
+  // A finished run inside the window. Previously this returned `executing` — the desk asserting a
+  // run was in flight when the row it read said the run had already completed. Separating the two
+  // is what lets the window widen: `just_ran` can be generous precisely because it claims only
+  // that something happened recently, which is exactly what the timestamp supports.
+  return fresh ? "just_ran" : "idle";
 }
 
 /** Detail-panel copy for each state (req: unknown must "say so ... rather than rendering a
  *  confident idle") — parallel to `EMOTE_LABEL` above, kept as its own map because these are full
  *  sentences for the panel, not bubble-glyph labels. */
 export const AUTOMATION_STATE_LABEL: Record<AutomationActivityState, string> = {
-  executing: "Executing now — a real, recent run behind this desk.",
+  executing: "Executing now — a run is in flight behind this desk.",
+  just_ran: "Ran in the last few minutes — finished, not running now.",
   awaiting_approval: "Waiting on a human approval right now.",
   failed: "Failed on its last real execution attempt.",
   idle: "Idle — nothing recent.",

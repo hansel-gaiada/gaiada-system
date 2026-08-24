@@ -5,7 +5,7 @@ import {
   buildWalkableGrid, findPath, nearestWalkable, roomToRoomPath, pathLength, pointAlongPath,
   restingRoomKey, buildReplaySteps, totalReplayMs, hashId, catToken, lerp, clamp01,
   isGenuinelyWorking, WORKING_RECENCY_MS,
-  resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN,
+  resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_RECENCY_MS,
   CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES, DESK_TOP_TILES,
   ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor, type Camera,
@@ -553,18 +553,43 @@ describe("resolveAutomationState — pure signal-in, state-out (the resolver 'mo
     expect(resolveAutomationState(s, now)).toBe("executing");
   });
 
-  it("a recently executed row (any non-failed status) reads as EXECUTING within the shared freshness window", () => {
+  it("a FINISHED run inside the window is JUST_RAN, never executing — the desk must not claim a run is in flight after it completed", () => {
+    // The behaviour change of 2026-08-24, and the reason the window could be widened at all. This
+    // row says the run is DONE (`executed`), so the only honest claim left is that it happened
+    // recently. Returning "executing" here — as this resolver used to — had the desk asserting an
+    // in-flight run against a row that recorded a completed one.
     const now = 1_000_000;
-    const s = signal({ executionStatus: "executed", asOfMs: now - WORKING_RECENCY_MS });
-    expect(resolveAutomationState(s, now)).toBe("executing");
-    expect(resolveAutomationState({ ...s, asOfMs: now - WORKING_RECENCY_MS - 1 }, now)).toBe("idle");
+    const s = signal({ executionStatus: "executed", asOfMs: now - AUTOMATION_RECENCY_MS });
+    expect(resolveAutomationState(s, now)).toBe("just_ran");
+    expect(resolveAutomationState({ ...s, asOfMs: now - AUTOMATION_RECENCY_MS - 1 }, now)).toBe("idle");
+  });
+
+  it("uses the AUTOMATION window, not the agent-run one — the two measure different kinds of signal", () => {
+    // Guards the actual defect: an automation's `executed_at` is a POINT event, not a heartbeat, so
+    // measuring it against the agent-run silence window gave every automation a 45-second animated
+    // life. A run finished 5 minutes ago is still recent for an automation and long dead for an
+    // agent run; if these two constants are ever collapsed back into one, this fails.
+    const now = 1_000_000;
+    const fiveMinutesAgo = now - 5 * 60_000;
+    expect(fiveMinutesAgo).toBeLessThan(now - WORKING_RECENCY_MS); // stale by the AGENT window
+    expect(resolveAutomationState(signal({ executionStatus: "executed", asOfMs: fiveMinutesAgo }), now)).toBe("just_ran");
+    expect(AUTOMATION_RECENCY_MS).toBeGreaterThan(WORKING_RECENCY_MS);
+  });
+
+  it("an in-flight status still outranks the window — executing is a live claim, just_ran is a recent one", () => {
+    const now = 1_000_000;
+    // Same timestamp, different status: the row that says it is still running reads as executing.
+    const running = signal({ executionStatus: "executing", asOfMs: now - 5 * 60_000 });
+    const finished = signal({ executionStatus: "executed", asOfMs: now - 5 * 60_000 });
+    expect(resolveAutomationState(running, now)).toBe("executing");
+    expect(resolveAutomationState(finished, now)).toBe("just_ran");
   });
 
   it("a failed execution is FAILED only within the freshness window, then fades to idle — never alarming forever", () => {
     const now = 1_000_000;
-    const fresh = signal({ executionStatus: "failed", asOfMs: now - WORKING_RECENCY_MS, executionError: "boom" });
+    const fresh = signal({ executionStatus: "failed", asOfMs: now - AUTOMATION_RECENCY_MS, executionError: "boom" });
     expect(resolveAutomationState(fresh, now)).toBe("failed");
-    const stale = signal({ executionStatus: "failed", asOfMs: now - WORKING_RECENCY_MS - 1, executionError: "boom" });
+    const stale = signal({ executionStatus: "failed", asOfMs: now - AUTOMATION_RECENCY_MS - 1, executionError: "boom" });
     expect(resolveAutomationState(stale, now)).toBe("idle");
   });
 
