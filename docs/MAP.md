@@ -148,9 +148,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `automation-console` | `automation-console` | yes |
 | `billing` | `billing` | yes |
 | `clients` | `clients` | yes |
+| `finance` | `finance` | yes |
 | `hr` | `hr` | yes |
 | `it` | `it` | yes |
 | `knowledge` | `knowledge` | yes |
+| `lms` | `lms` | yes |
 | `monitoring` | `monitoring` | yes |
 | `pm` | `pm` | yes |
 | `reports` | `reports` | yes |
@@ -164,7 +166,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 152 (121 legacy `NNNN_`, 31 timestamped)
+- Applied files on disk: 171 (121 legacy `NNNN_`, 50 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -216,6 +218,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/modules/assistant/assistant.controller.ts` |
 | `/api` | `platform-nest/src/modules/billing/billing.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
+| `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
 | `/api` | `platform-nest/src/modules/it/it.controller.ts` |
 | `/api` | `platform-nest/src/modules/module-catalog.controller.ts` |
 | `/api` | `platform-nest/src/modules/monitoring/monitoring.controller.ts` |
@@ -229,6 +232,8 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/loans.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/payroll.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/recruitment.controller.ts` |
+| `/api/:tenantId/modules/lms` | `platform-nest/src/modules/lms/lms-catalogue.controller.ts` |
+| `/api/:tenantId/modules/lms` | `platform-nest/src/modules/lms/lms-learn.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
@@ -356,9 +361,14 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/it/topology`
 - `/it/workflows`
 - `/knowledge`
+- `/learning`
+- `/learning/catalogue`
+- `/learning/compliance`
+- `/learning/courses/[id]`
 - `/login`
 - `/me`
 - `/me/inbox`
+- `/me/learning`
 - `/me/leave`
 - `/me/loans`
 - `/me/loans/[loanId]`
