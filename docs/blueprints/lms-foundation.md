@@ -93,10 +93,10 @@ Mandatory for all 23 employees, zero sandbox, and therefore the first thing that
   needs a human, and why an agent's answer is a claim rather than a fact.
 - **Fundamentals** — security basics, data handling, the client-confidentiality line.
 
-⚠ **The ERP can be its own lab for ERP training, and this needs a deliberate decision.** "File a
-leave request" is verifiable against real rows — which is elegant and which must NOT run against the
-live tenant, or training generates real approvals for real managers. If this is built, it runs
-against a dedicated demo tenant with the `hr` module enabled and no real people in it.
+**The ERP IS its own lab for ERP training** — owner decision, §8.4. "File a leave request" is
+verified against real rows rather than self-declared, using the real system. It must NEVER run
+against the live tenant, or training generates real approvals landing on real managers; the isolation
+and disposal mechanism is §8.4 and §9.
 
 ## 5 · The lab runner — design against SumoPod as measured
 
@@ -197,20 +197,63 @@ Ordered so that the widest reach lands first and the riskiest component gates no
 L1–L4 covers every employee and every department with no execution risk at all. L5 is where the new
 service appears.
 
-## 8 · Open questions — decide before L1, not during
+## 8 · Decisions taken (owner, 2026-08-24)
 
-1. **Module key: `hr` or a new `lms`?** The LMS serves all eight departments, so filing it under HR
-   is arguably a category error — but the certification artefact IS an HR record, and a second module
-   key means a second enablement path per company. Leaning `lms` as its own module that WRITES to
-   HR's records, but this needs a decision.
-2. **Content store: reuse `knowledge` (D9) or own one?** §2.3. Two stores is the wrong answer; which
-   single one is right is not yet settled.
-3. **Cohorts: extend `hr_review_cycles` or a new table?** §2.2.
-4. **Is the ERP its own lab for ERP training?** §4 — elegant, and needs a demo tenant.
-5. **Machine-graded vs reviewed** per discipline — UI/UX especially.
-6. **KVM on SumoPod** — worth one email; unlocks the genuinely privileged DevOps/Cyber tier.
+**1 · Its own `lms` module, writing HR records.** Not filed under `hr`. The LMS is a company-wide
+capability serving all eight departments, and filing it under one department would make Creatives'
+or SEO's training silently depend on `hr` being served to them. Certification crosses a ONE-WAY seam:
+the LMS writes an `hr_record` on path completion and reads nothing back. Cost accepted: a second
+module key and a second per-company enablement path.
 
-## 9 · Cross-references
+**2 · The LMS owns authoring; publishes INTO knowledge.** One store per purpose, one direction of
+flow. Authored content has a lifecycle the knowledge store does not model — drafts, versions, module
+ordering, HOD review — so the LMS owns that. On publish, the course registers as a knowledge source
+so the assistant can cite it, which is what makes the Claude-usage track coherent: an employee can
+ask Claude about training they have been assigned.
+
+**3 · Grading is MIXED by discipline.** Machine-graded where the answer is objective (FE/BE/QA
+assertions, DevOps build/lint/plan output, Cyber capture-the-flag); HOD or peer review for UI/UX and
+for management scenarios. Stated because the alternative is worse in a specific way: an auto-gradeable
+proxy for "is this good design" mostly is not one, and it teaches people to satisfy the grader.
+
+**4 · ERP training runs in the REAL system, isolated, and is disposed of afterwards.**
+Owner: *"need to isolate the training. so it really use the live version, but delete when finish."*
+
+Three requirements — isolate · really the live version · delete when finished — and the safe shape is
+NOT a hard delete. Measured 2026-08-24: **186 tables carry `tenant_id`**, and there is **no
+hard-delete path for a company** in the estate today (companies are soft-deleted). A cascade across
+186 FK-linked tables on the production database, written new, is the highest-risk operation this
+programme could contain, and it would run against the box holding the business.
+
+The disposal mechanism is the one open item (§9). Whatever is chosen, two invariants hold:
+
+- **Real code, real walls.** Training uses the actual ERP — the same image, the same migrations, the
+  same three isolation walls (Cerbos + `withTenants` + module-sliced RLS). No mock, or it teaches
+  people a surface that does not exist.
+- **A trainee's grants in the training scope are revoked on disposal.** ORG-6's no-orphaned-grant
+  invariant applies: a half-disposed training environment that leaves live role grants behind is a
+  worse outcome than not disposing at all.
+
+## 9 · Open — the disposal mechanism, and one action
+
+**Disposal (§8.4)** — see the owner question raised 2026-08-24. The three candidates are a separate
+physical training DATABASE dropped after use (the pattern `testing/setup.ts` already proves), a
+long-lived training TENANT whose data is reset between cohorts, or a genuine per-trainee tenant
+hard-delete. They differ by an order of magnitude in risk and in cost.
+
+**Action, not a decision: ask SumoPod whether nested virtualization (KVM) can be enabled.** It is
+often a provider toggle. It unlocks the genuinely privileged DevOps/Cyber tier (real multi-node k8s,
+kernel work) later without changing anything designed above it. Do not let it gate L1–L6.
+
+## 10 · Previously open, now settled
+
+Recorded so the reasoning is not lost:
+
+- **Cohorts** — a NEW table, not an extension of `hr_review_cycles`. A review cycle carries an
+  outcome and an appraisal link that a training cohort does not, and overloading it makes both
+  harder to read. (Engineering call, 2026-08-24.)
+
+## 11 · Cross-references
 
 - HR department: [`hr-department-foundation.md`](./hr-department-foundation.md) — §3.3 records this
   as owner-committed and deliberately sequenced last
