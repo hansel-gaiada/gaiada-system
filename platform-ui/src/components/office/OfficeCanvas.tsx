@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { formatDateTime } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/timeFormat";
 import { nextCursor, type AgentRunEvent, type AgentRunEventKind } from "@/lib/agentEvents";
@@ -1023,6 +1024,15 @@ function drawAvatar(
 }
 
 const WORKING_POLL_MS = 8000;
+
+/** How often the whole SCENE is re-fetched from the server (2026-08-24, for the simulation).
+ *  The 8s poll above refreshes agent run events ONLY. Everything else the floor draws — automation
+ *  execution state, busy desks, and the derived handoff movement events — is assembled server-side
+ *  in office-data.ts and, before this, was fetched exactly once when the page loaded. With a
+ *  simulator driving real work into the estate, that meant the office quietly showed a snapshot
+ *  from whenever the tab was opened and looked frozen while the floor was genuinely busy.
+ *  Longer than the run poll because this re-runs a whole server component, not one endpoint. */
+const SCENE_REFRESH_MS = 15_000;
 const PULSE_TICK_MS = 450;
 
 export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initialZoom: OfficeZoom }) {
@@ -1030,6 +1040,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const router = useRouter();
   const [replaying, setReplaying] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [selectedFloorIndex, setSelectedFloorIndex] = useState(0);
@@ -1482,6 +1493,37 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
+  // ── Keep the scene current while the tab is watched ───────────────────────────────────────────
+  // `router.refresh()` re-runs the server component and hands back a fresh scene; React keeps this
+  // component's own state (camera, zoom, selection) across it, so the view does not jump.
+  // Skipped while hidden — a background tab re-rendering the floor every 15s is pure waste — and
+  // skipped mid-replay, where swapping the event list under a running animation would stutter it.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (replayRef.current && replayRef.current.pausedAtPerf == null && replaying) return;
+      router.refresh();
+    }, SCENE_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [router, replaying]);
+
+  // ── Play movement when it ARRIVES, instead of waiting for a click ─────────────────────────────
+  // The replay button stays (it is how you re-watch), but a floor whose movement only ever plays on
+  // demand cannot show a live simulation: the events would land, sit still, and be replaced by the
+  // next refresh without anyone seeing them.
+  //
+  // Keyed on the SET of event ids, so this fires when the movement genuinely changes and never on
+  // a refresh that returned the same handoffs. A floor with no new events never auto-plays, which
+  // is what keeps this from becoming ambient motion the data does not support.
+  const lastEventKey = useRef<string | null>(null);
+  useEffect(() => {
+    const key = scene.events.map((e) => e.id).sort().join("|");
+    if (lastEventKey.current === key) return;
+    lastEventKey.current = key;
+    if (key === "" || replaying) return;
+    startReplay();
+  }, [scene.events, replaying, startReplay]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || typeof IntersectionObserver === "undefined") return;
@@ -1597,7 +1639,8 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
         <span className="office__demo-badge" role="status">DEMO — not live</span>
         <p className="office__hint">
           One connected floor — real departments open onto real corridors. Who is shown and any
-          movement is fixture data; there is no live presence feed yet. Nothing here is tracked or stored.
+          movement is DERIVED from real recorded handoffs — two people acting on one record — never from
+          location tracking. Nobody is tracked and no position is stored.
         </p>
         <div className="office__zoom" role="group" aria-label="Camera zoom">
           <button type="button" className="office__zoom-btn" onClick={() => stepZoom(-1)} disabled={scale === ZOOM_LEVELS[0]} aria-label="Zoom out">−</button>
