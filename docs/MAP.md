@@ -28,7 +28,7 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:hr-config`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:hr-config`, `seed:lms-general-track`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
@@ -339,6 +339,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
+- `/finance`
 - `/hr`
 - `/hr/analytics`
 - `/hr/attendance`
