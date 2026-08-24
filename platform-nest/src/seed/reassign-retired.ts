@@ -171,6 +171,17 @@ export interface ReassignResult {
   unmapped: string[];
 }
 
+/** Collapse per-company rows into one entry per label, preserving first-seen order. */
+function sumByLabel<T extends { where: string; rows: number }>(rows: T[]): T[] {
+  const byLabel = new Map<string, T>();
+  for (const r of rows) {
+    const seen = byLabel.get(r.where);
+    if (seen) seen.rows += r.rows;
+    else byLabel.set(r.where, { ...r });
+  }
+  return [...byLabel.values()];
+}
+
 export async function reassignRetired(opts: { dryRun: boolean }): Promise<ReassignResult> {
   const out: ReassignResult = {
     dryRun: opts.dryRun, moved: [], deleted: [], skippedCollisions: [], immutableHistory: [],
@@ -209,119 +220,139 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
       ORDER BY 1, 2`),
   );
 
-  await withTenants(
-    companies,
-    async (c) => {
-      for (const { tbl, col } of fks.rows) {
-        const where = `${tbl}.${col}`;
-        if (NEVER_MOVE.has(where)) continue;
+  // ⚠ ONE TENANT PER `withTenants` CALL, NOT THE WHOLE LIST. `lint:withtenants` rejects a
+  // multi-tenant argument outside the reconciler, and it is right to: a single call that opens RLS
+  // to every company is exactly the shape that cannot be reviewed for scope creep. Passing the list
+  // was how this was first written, and CI caught it.
+  //
+  // The cost is that atomicity is now PER COMPANY rather than across the estate. That is acceptable
+  // and arguably better: this script is idempotent and reports what it did, so a failure in one
+  // company no longer discards the completed work of the others — which is precisely what happened
+  // twice while getting this right. Counts are summed across companies before returning, so the
+  // report still reads as one run.
+  for (const tenantId of companies) {
+    await withTenants(
+      [tenantId],
+      async (c) => {
+        for (const { tbl, col } of fks.rows) {
+          const where = `${tbl}.${col}`;
+          if (NEVER_MOVE.has(where)) continue;
 
-        if (HANDLED_ELSEWHERE[where]) {
-          const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
-          const n = await c.query<{ n: string }>(
-            `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
-            [ids],
-          );
-          const rows = Number(n.rows[0].n);
-          if (rows > 0) out.handledElsewhere.push({ where, rows, by: HANDLED_ELSEWHERE[where] });
-          continue;
-        }
-
-        if (IMMUTABLE_HISTORY.has(where)) {
-          // Counted, not moved. A bare `continue` here would make the ledger rows vanish from the
-          // report, and a run that leaves work behind while printing only successes is exactly the
-          // failure mode this script is supposed to avoid.
-          const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
-          const n = await c.query<{ n: string }>(
-            `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
-            [ids],
-          );
-          const rows = Number(n.rows[0].n);
-          if (rows > 0) out.immutableHistory.push({ where, rows });
-          continue;
-        }
-
-        if (DELETE_INSTEAD.has(where)) {
-          const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
-          const n = await c.query<{ n: string }>(
-            `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
-            [ids],
-          );
-          const rows = Number(n.rows[0].n);
-          if (rows === 0) continue;
-          if (!opts.dryRun) await c.query(`DELETE FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`, [ids]);
-          out.deleted.push({ where, rows });
-          continue;
-        }
-
-        for (const [from, to] of Object.entries(REASSIGN)) {
-          const fromId = idOf.get(from);
-          const toId = idOf.get(to);
-          if (!fromId || !toId) continue;
-
-          const cnt = await c.query<{ n: string }>(
-            `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = $1`,
-            [fromId],
-          );
-          const rows = Number(cnt.rows[0].n);
-          if (rows === 0) continue;
-
-          if (opts.dryRun) {
-            out.moved.push({ where: `${where}  ${from} -> ${to}`, rows });
+          if (HANDLED_ELSEWHERE[where]) {
+            const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
+            const n = await c.query<{ n: string }>(
+              `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
+              [ids],
+            );
+            const rows = Number(n.rows[0].n);
+            if (rows > 0) out.handledElsewhere.push({ where, rows, by: HANDLED_ELSEWHERE[where] });
             continue;
           }
 
-          // ⚠ A BULK UPDATE CAN COLLIDE. Several of these tables carry a UNIQUE on (tenant, user,
-          // date) or similar — one check-in per person per day, one leave balance per policy. Moving
-          // a retired person's row onto someone who already has that day's row violates it. So the
-          // bulk update runs inside a SAVEPOINT; on a unique violation it falls back to row-by-row
-          // and reports how many could not move, rather than aborting the whole reassignment or
-          // silently dropping them.
-          //
-          // ⚠ ONLY a unique violation is recoverable, and the narrowness is deliberate. A CHECK
-          // violation means this column MIRRORS a user id somewhere else in the row (see MIRRORED)
-          // and the mirror is not being moved with it. Falling back to row-by-row would "handle"
-          // that by skipping every single row and reporting them as un-movable collisions — a
-          // cleanup that reports partial success while leaving the work with a person who does not
-          // exist. It must abort loudly instead, so the mirror gets added to the map.
-          const setList = MIRRORED[where] ? `${col} = $2, ${MIRRORED[where]}` : `${col} = $2`;
-          await c.query("SAVEPOINT reassign_bulk");
-          try {
-            const r = await c.query(`UPDATE ${tbl} SET ${setList} WHERE ${col} = $1`, [fromId, toId]);
-            await c.query("RELEASE SAVEPOINT reassign_bulk");
-            out.moved.push({ where: `${where}  ${from} -> ${to}`, rows: r.rowCount ?? 0 });
-          } catch (err) {
-            await c.query("ROLLBACK TO SAVEPOINT reassign_bulk");
-            const msg = err instanceof Error ? err.message : String(err);
-            if (!/duplicate key|unique constraint/i.test(msg)) throw err;
+          if (IMMUTABLE_HISTORY.has(where)) {
+            // Counted, not moved. A bare `continue` here would make the ledger rows vanish from the
+            // report, and a run that leaves work behind while printing only successes is exactly the
+            // failure mode this script is supposed to avoid.
+            const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
+            const n = await c.query<{ n: string }>(
+              `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
+              [ids],
+            );
+            const rows = Number(n.rows[0].n);
+            if (rows > 0) out.immutableHistory.push({ where, rows });
+            continue;
+          }
 
-            const idsRes = await c.query<{ id: string }>(`SELECT id FROM ${tbl} WHERE ${col} = $1`, [fromId]);
-            let ok = 0;
-            let clash = 0;
-            for (const row of idsRes.rows) {
-              await c.query("SAVEPOINT reassign_one");
-              try {
-                await c.query(`UPDATE ${tbl} SET ${setList} WHERE id = $1`, [row.id, toId]);
-                await c.query("RELEASE SAVEPOINT reassign_one");
-                ok++;
-              } catch {
-                await c.query("ROLLBACK TO SAVEPOINT reassign_one");
-                clash++;
-              }
+          if (DELETE_INSTEAD.has(where)) {
+            const ids = [...idOf.entries()].filter(([e]) => e in REASSIGN).map(([, id]) => id);
+            const n = await c.query<{ n: string }>(
+              `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`,
+              [ids],
+            );
+            const rows = Number(n.rows[0].n);
+            if (rows === 0) continue;
+            if (!opts.dryRun) await c.query(`DELETE FROM ${tbl} WHERE ${col} = ANY($1::uuid[])`, [ids]);
+            out.deleted.push({ where, rows });
+            continue;
+          }
+
+          for (const [from, to] of Object.entries(REASSIGN)) {
+            const fromId = idOf.get(from);
+            const toId = idOf.get(to);
+            if (!fromId || !toId) continue;
+
+            const cnt = await c.query<{ n: string }>(
+              `SELECT count(*)::text AS n FROM ${tbl} WHERE ${col} = $1`,
+              [fromId],
+            );
+            const rows = Number(cnt.rows[0].n);
+            if (rows === 0) continue;
+
+            if (opts.dryRun) {
+              out.moved.push({ where: `${where}  ${from} -> ${to}`, rows });
+              continue;
             }
-            if (ok) out.moved.push({ where: `${where}  ${from} -> ${to}`, rows: ok });
-            if (clash) out.skippedCollisions.push({ where: `${where}  ${from} -> ${to}`, rows: clash });
+
+            // ⚠ A BULK UPDATE CAN COLLIDE. Several of these tables carry a UNIQUE on (tenant, user,
+            // date) or similar — one check-in per person per day, one leave balance per policy. Moving
+            // a retired person's row onto someone who already has that day's row violates it. So the
+            // bulk update runs inside a SAVEPOINT; on a unique violation it falls back to row-by-row
+            // and reports how many could not move, rather than aborting the whole reassignment or
+            // silently dropping them.
+            //
+            // ⚠ ONLY a unique violation is recoverable, and the narrowness is deliberate. A CHECK
+            // violation means this column MIRRORS a user id somewhere else in the row (see MIRRORED)
+            // and the mirror is not being moved with it. Falling back to row-by-row would "handle"
+            // that by skipping every single row and reporting them as un-movable collisions — a
+            // cleanup that reports partial success while leaving the work with a person who does not
+            // exist. It must abort loudly instead, so the mirror gets added to the map.
+            const setList = MIRRORED[where] ? `${col} = $2, ${MIRRORED[where]}` : `${col} = $2`;
+            await c.query("SAVEPOINT reassign_bulk");
+            try {
+              const r = await c.query(`UPDATE ${tbl} SET ${setList} WHERE ${col} = $1`, [fromId, toId]);
+              await c.query("RELEASE SAVEPOINT reassign_bulk");
+              out.moved.push({ where: `${where}  ${from} -> ${to}`, rows: r.rowCount ?? 0 });
+            } catch (err) {
+              await c.query("ROLLBACK TO SAVEPOINT reassign_bulk");
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!/duplicate key|unique constraint/i.test(msg)) throw err;
+
+              const idsRes = await c.query<{ id: string }>(`SELECT id FROM ${tbl} WHERE ${col} = $1`, [fromId]);
+              let ok = 0;
+              let clash = 0;
+              for (const row of idsRes.rows) {
+                await c.query("SAVEPOINT reassign_one");
+                try {
+                  await c.query(`UPDATE ${tbl} SET ${setList} WHERE id = $1`, [row.id, toId]);
+                  await c.query("RELEASE SAVEPOINT reassign_one");
+                  ok++;
+                } catch {
+                  await c.query("ROLLBACK TO SAVEPOINT reassign_one");
+                  clash++;
+                }
+              }
+              if (ok) out.moved.push({ where: `${where}  ${from} -> ${to}`, rows: ok });
+              if (clash) out.skippedCollisions.push({ where: `${where}  ${from} -> ${to}`, rows: clash });
+            }
           }
         }
-      }
-    },
-    // ⚠ NO `crossRoot` HERE, DELIBERATELY. I had passed it "just in case" while writing this. The
-    // estate has THREE companies and ONE distinct `root_company_id` (checked, not assumed), so
-    // MON-00b's wall would never fire anyway — and a bypass flag that is unnecessary today is a
-    // bypass flag nobody notices becoming load-bearing tomorrow. If a second root ever appears, this
-    // script SHOULD fail loudly rather than quietly rewrite across a customer boundary.
-    { modules: MODULES },
-  );
+      },
+      // ⚠ NO `crossRoot` HERE, DELIBERATELY. I had passed it "just in case" while writing this. A
+      // bypass flag that is unnecessary today is a bypass flag nobody notices becoming load-bearing
+      // tomorrow. With one tenant per call it is doubly unnecessary. If this ever needs to cross a
+      // root, it SHOULD fail loudly rather than quietly rewrite across a customer boundary.
+      { modules: MODULES },
+    );
+  }
+
+  // Same (table.column, mapping) label can now appear once per company. Summed so the report reads
+  // as one run rather than as N partial ones.
+  out.moved = sumByLabel(out.moved);
+  out.deleted = sumByLabel(out.deleted);
+  out.skippedCollisions = sumByLabel(out.skippedCollisions);
+  out.immutableHistory = sumByLabel(out.immutableHistory);
+  out.handledElsewhere = sumByLabel(out.handledElsewhere.map((h) => ({ where: h.where, rows: h.rows })))
+    .map((h) => ({ ...h, by: HANDLED_ELSEWHERE[h.where] ?? "" }));
 
   return out;
 }
