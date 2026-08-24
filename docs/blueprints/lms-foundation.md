@@ -1,6 +1,7 @@
 # LMS — learning foundation blueprint
 
-**Status:** `PLANNED` — design only, no code written. · **Scoped:** 2026-08-24
+**Status:** `PLANNED` — design settled, no code written. All owner decisions taken 2026-08-24 (§8, §9).
+**Scoped:** 2026-08-24
 **Owner ask (2026-08-24):** an LMS for **all departments and all levels** — operational *and*
 management — so the whole company can be upgraded. Seed trainings per department, then each HOD
 authors more. A **general track every employee must pass** (ERP usage, Claude usage, fundamentals).
@@ -225,7 +226,7 @@ hard-delete path for a company** in the estate today (companies are soft-deleted
 186 FK-linked tables on the production database, written new, is the highest-risk operation this
 programme could contain, and it would run against the box holding the business.
 
-The disposal mechanism is the one open item (§9). Whatever is chosen, two invariants hold:
+The disposal mechanism is **reset, not delete** — §9. Two invariants hold regardless:
 
 - **Real code, real walls.** Training uses the actual ERP — the same image, the same migrations, the
   same three isolation walls (Cerbos + `withTenants` + module-sliced RLS). No mock, or it teaches
@@ -234,16 +235,41 @@ The disposal mechanism is the one open item (§9). Whatever is chosen, two invar
   invariant applies: a half-disposed training environment that leaves live role grants behind is a
   worse outcome than not disposing at all.
 
-## 9 · Open — the disposal mechanism, and one action
+## 9 · The training tenant — disposal by RESET, not by delete
 
-**Disposal (§8.4)** — see the owner question raised 2026-08-24. The three candidates are a separate
-physical training DATABASE dropped after use (the pattern `testing/setup.ts` already proves), a
-long-lived training TENANT whose data is reset between cohorts, or a genuine per-trainee tenant
-hard-delete. They differ by an order of magnitude in risk and in cost.
+Owner decision, 2026-08-24. A **real company inside the live ERP**, with fake staff, used as the lab
+for ERP-usage training. Real image, real migrations, real Cerbos + `withTenants` + module-sliced RLS
+— so it teaches the surface that actually exists. "Delete when finish" is satisfied by **deleting the
+trainee's work and re-seeding the tenant to a known baseline**, not by deleting the company.
 
-**Action, not a decision: ask SumoPod whether nested virtualization (KVM) can be enabled.** It is
-often a provider toggle. It unlocks the genuinely privileged DevOps/Cyber tier (real multi-node k8s,
-kernel work) later without changing anything designed above it. Do not let it gate L1–L6.
+**Why reset rather than delete, stated once so it is not relitigated:** 186 tables carry `tenant_id`
+and the estate has no hard-delete path for a company. A cascade across 186 FK-linked tables, written
+new and run against the production database, is the single highest-risk operation this programme
+could contain — and the learning outcome is identical either way. Reset touches only the bounded set
+of tables the exercises actually write.
+
+### 9.1 · Rules the reset must hold
+
+1. **Bounded by construction, not by hope.** The reset deletes from an EXPLICIT allow-list of tables
+   the exercises write (leave requests, cases, timesheets, attendance, notifications…). It must never
+   be "delete everything with this tenant_id" — that is the 186-table cascade wearing a different
+   hat, and one new module later it silently grows teeth.
+2. **Scoped to the training tenant, and it must be impossible to point elsewhere.** The tenant id is
+   resolved from a `companies.is_training` flag, never passed in. A reset that can take an arbitrary
+   tenant id is one typo from clearing a real company.
+3. **Grants revoked (ORG-6).** A trainee holds real roles in the training tenant. Disposal revokes
+   them; a half-disposed environment leaving live grants behind is worse than not disposing at all.
+4. **Re-seeded to a KNOWN baseline**, so every trainee starts from the same state and an exercise
+   that depends on prior data behaves the same on the hundredth run as the first.
+5. **Never reachable from a real company's scope.** The training tenant must not appear in anyone's
+   company switcher except while they are enrolled, and must be excluded from every rollup — or its
+   fake headcount lands in a real report.
+
+### 9.2 · Action, not a decision
+
+Ask SumoPod whether **nested virtualization (KVM)** can be enabled. It is often a provider toggle. It
+unlocks the genuinely privileged DevOps/Cyber tier (real multi-node k8s, kernel work) later without
+changing anything designed above it. Do not let it gate L1–L6.
 
 ## 10 · Previously open, now settled
 
