@@ -72,6 +72,34 @@ function urlWithDb(baseUrl: string, database: string): string {
   return u.toString();
 }
 
+/** The shared-role setup, factored out so `initTestDb` can retry it on a catalog race. See the
+ *  call site for why that race exists and why only one error class is retryable. */
+async function runRoleSetup(localAdmin: Pool): Promise<void> {
+  await localAdmin.query(`
+      DO $$ BEGIN
+        CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+      -- SELF-HEAL the shared role's password, and do it UNCONDITIONALLY.
+      --
+      -- The CREATE above swallows duplicate_object, which means a role that already exists is left
+      -- exactly as it is — including with the WRONG password. ${APP_ROLE} is shared across every
+      -- suite and every concurrent session, so anything that ever ALTERs it (a stray repair, a
+      -- provisioning experiment, another agent's cleanup) silently breaks EVERY test file at once
+      -- with "password authentication failed" — 165 files in one observed run, which reads like a
+      -- catastrophic code regression rather than one bad role attribute. It has happened twice.
+      --
+      -- ALTER ROLE is idempotent and cheap, so re-asserting the intended attributes on every
+      -- initTestDb makes the harness self-healing: the next test run repairs the role instead of a
+      -- human diagnosing 165 red files. NOSUPERUSER/NOBYPASSRLS are re-asserted too, deliberately —
+      -- they are the properties the RLS suites depend on being TRUE, and a role quietly granted
+      -- BYPASSRLS would make every tenant-isolation test pass for the wrong reason, which is far
+      -- worse than a loud auth failure.
+      ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
+      GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
+    `);
+}
+
 export async function initTestDb(): Promise<void> {
   if (!TEST_URL) throw new Error("DATABASE_URL_TEST not set");
   const dbName = perFileDbName();
@@ -103,29 +131,31 @@ export async function initTestDb(): Promise<void> {
     await migrate();
     await closePool();
 
-    await localAdmin.query(`
-      DO $$ BEGIN
-        CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
-      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-      -- SELF-HEAL the shared role's password, and do it UNCONDITIONALLY.
-      --
-      -- The CREATE above swallows duplicate_object, which means a role that already exists is left
-      -- exactly as it is — including with the WRONG password. ${APP_ROLE} is shared across every
-      -- suite and every concurrent session, so anything that ever ALTERs it (a stray repair, a
-      -- provisioning experiment, another agent's cleanup) silently breaks EVERY test file at once
-      -- with "password authentication failed" — 165 files in one observed run, which reads like a
-      -- catastrophic code regression rather than one bad role attribute. It has happened twice.
-      --
-      -- ALTER ROLE is idempotent and cheap, so re-asserting the intended attributes on every
-      -- initTestDb makes the harness self-healing: the next test run repairs the role instead of a
-      -- human diagnosing 165 red files. NOSUPERUSER/NOBYPASSRLS are re-asserted too, deliberately —
-      -- they are the properties the RLS suites depend on being TRUE, and a role quietly granted
-      -- BYPASSRLS would make every tenant-isolation test pass for the wrong reason, which is far
-      -- worse than a loud auth failure.
-      ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
-      GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
-      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
-    `);
+    // ⚠ RETRIED, because this statement RACES ACROSS CONCURRENT SESSIONS. `${APP_ROLE}` is a single
+    // shared role in the cluster's global catalog, and `CREATE ROLE`/`ALTER ROLE` on the SAME role
+    // from two sessions at once makes Postgres raise `tuple concurrently updated` — a catalog-level
+    // conflict, NOT `duplicate_object`, so the DO block's EXCEPTION clause below does not catch it.
+    //
+    // Observed for real: a full-suite run lost 3 unrelated files to it (mail/tap,
+    // reports.controller.export, role-bundle-completeness) with ZERO failed assertions — the suites
+    // died in `beforeAll` and then reported `Cannot read properties of undefined (reading 'close')`
+    // in `afterAll`, which reads like a code regression rather than a harness race. This checkout is
+    // shared by concurrent agent sessions, so the race is structural, not hypothetical.
+    //
+    // Bounded and small: the losing session only needs the winner to finish one catalog write.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await runRoleSetup(localAdmin);
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Only this one error is retryable. Anything else (bad password, permission denied, a
+        // genuinely broken cluster) must fail loudly on the first attempt rather than being masked
+        // by three more tries.
+        if (!/tuple concurrently updated/i.test(msg) || attempt >= 5) throw err;
+        await new Promise((r) => setTimeout(r, 50 * attempt));
+      }
+    }
 
     const app = new URL(dbUrl);
     app.username = APP_ROLE;
