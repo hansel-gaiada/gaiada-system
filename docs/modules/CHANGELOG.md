@@ -126,9 +126,36 @@ art. 79, the 9-stage funnel, 7 pay grades, 6 allowance types, all five BPJS prog
 plans, and an UNRATIFIED statutory parameter set. Idempotent (proven to a third run) and asserted to
 write **zero personal data** — which is what lets it run pre-Gate-1.
 
+#### DEPLOYED — `alpha-01.071.0150a`, 2026-08-24 10:05 UTC
+
+Live on `erp.gaiada.online`. Evidence from the deploy job's own log, not from the green tick:
+
+- **6 database backups taken BEFORE any migration** (gaiada_platform, knowledge, keycloak, n8n, bot,
+  waha-sessions).
+- **All five migrations applied to the live database:** `202608240140_hr_time_and_lifecycle`,
+  `…0141_hr_recruitment`, `…0142_hr_compensation_benefits`, `…0143_hr_payroll`,
+  `…0144_iam_hr_full_permissions`.
+- **Cerbos went `Restarting` and came back healthy** — it recompiles its whole policy repo at
+  startup, so that transition IS the three new resource policies loading on the live PDP. The health
+  gate now uses `ps -a`, so the crash loop this program hid once before would have been caught.
+- `all services healthy` after the wait.
+
+⚠ **`seed:hr-config` was NOT run on live** — owner chose deploy-without-seed. Until it is, the HR
+console renders empty states (no holiday calendar, no leave policy, no funnel, no statutory set), and
+every one of those states explains what is missing rather than inventing a default. One command when
+wanted: `npm run seed:hr-config`.
+
+⚠ **A concurrent session's release commit swept this work in.** `c4f6198` is titled for that
+session's agent/bot changes but contains all 59 HR-FULL files. The tag `alpha-01.071.0150a` is
+therefore accurate about the code and misleading about the subject — worth knowing when reading the
+history. `docs-map` went red on it (MAP.md is filesystem-derived and was not regenerated); fixed in
+`c22ea0e`.
+
 #### Flagged, not resolved
 
-1. **Not deployed, not committed.** Proven on a disposable harness, not the live estate.
+1. **The statutory set is UNRATIFIED on live.** Payroll calculates but refuses to finalize without a
+   recorded override. Finance/counsel ratifies in-app from `/hr/settings` (company admin, high
+   assurance) once the PPh 21 / BPJS / PTKP figures are confirmed.
 3. **The statutory figures are UNRATIFIED.** They express the structure of PP 58/2023 and PP 35/2021
    and are not legal advice. The engine hard-codes nothing, every run records the set it used, and
    finalizing against an unratified set demands a permanently-recorded override — that is the
@@ -211,6 +238,52 @@ for the filter (incl. the fail-open contract) · **10 real-DB tests** for the fa
 math, run against a live test Postgres · platform-ui **172 files / 2795 tests** green ·
 `DEMO_MODE=1 next build` green with all three hub routes · Playwright drove the hub in a browser.
 No migration in this slice.
+
+### platform-ui `0.48.0` — 2026-08-24 — GM console: the four remaining tabs + an e2e suite (GM-05..08, GM-10)
+
+**Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build; not against live platform-nest.
+Tracking doc: [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md).
+
+- **Business Review** (GM-05) renders the company-grain `ReportDocument` through the EXACT stack
+  `/reports/company` uses — `ReportPageClient` + `CompanyCharts`. No adapter and no bespoke exec
+  layout, so a figure read here and a figure read there cannot diverge. Defaults to the WEEK (OQ-2)
+  where the reports page defaults to the month. `periodKind` (the viewer's own selector key) wins over
+  the console's `?period=` shorthand — backwards, and every selector change would be overwritten by
+  the shorthand still in the query string.
+- **Decisions** (GM-06) widens the existing `getMyWorkQueue` projection rather than fetching approvals
+  again — `projectQueueForCompany` is a pure filter, so two projections cannot disagree. Adds wait-age
+  bands (5d / 14d) and surfaces BOTH envelope incompleteness signals: `included: false` ("you saw none
+  of this company") and `partialSources` ("you saw some of it and a named source failed" — the quieter
+  and more dangerous one on a queue). Deliberately links out instead of wiring decide buttons: a third
+  write path onto the same records is three surfaces to keep in step.
+- **People** (GM-07) reads seats + compliance + appraisal cycles. New BFF surface:
+  `getCheckinCompliance` + `CheckinCompliance`/`CheckinComplianceRow` + the pure `rollUpCompliance`.
+- **Clients & Money** (GM-08) ships the portfolio half real (a clients × live-projects join) and the
+  money half honestly absent behind a `BackendPending` banner naming SM-17/SM-22.
+- **GM-10** — `e2e/gm-console.spec.ts`, 18 tests, own `gm` Playwright project, all passing. The
+  negative controls are the point: a plain member must be refused on the cockpit AND all five tabs,
+  the refusal must not look like an empty business, and the GM row must STAY in that member's sidebar.
+  Those paths leave every vitest green if they break — only a browser catches them.
+- New DEMO_MODE fixtures for `/checkins/compliance` and `/positions` (the latter did not exist at all,
+  so the seats card rendered its failed-read branch).
+
+**Four findings worth carrying forward**
+
+1. **A calendar-week compliance figure is structurally useless on a Monday.** Measured: the first
+   render returned an empty grid because the week had barely started — true and useless. Compliance now
+   reads a TRAILING window (7/30 days ending today), and `GmProvenance` grew an explicit `label`
+   because calling a trailing 7 days "This week" would misstate which days were counted.
+2. **`listPositions` swallows its own errors** and returns `{positions: [], scope: null}`, so a refused
+   read is indistinguishable from a company with no seats. `scope === null` is the only failure signal;
+   keying the empty branch on `positions.length` would have made the console claim something it cannot
+   know.
+3. **`GET /checkins/compliance` does not 403 a plain member** — it degrades to a one-row self grid. So
+   `rows.length === 1` is not an error, and a consumer must not present a self-only grid as a team
+   view. Recorded in the BFF contract alongside the `unit`-echo and `complianceRate: null ≠ 0%` rules.
+4. **A pre-existing duplicate-React-key warning lives in the app shell**, firing on `/timesheets` and
+   Web Dev's console home — pages this work never touched. Chased far enough to exonerate the nav
+   change (`navFor` has no duplicate hrefs within a group and no duplicate group labels). Left unfixed,
+   recorded so nobody re-chases it from here.
 
 ### platform-ui `0.47.0` — 2026-08-24 — GM console: the cockpit, the gate, the Departments tab (GM-01..04)
 

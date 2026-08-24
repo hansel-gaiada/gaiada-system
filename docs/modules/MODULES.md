@@ -1218,8 +1218,10 @@ rather than quietly deleted.
 3. **No seed** for holiday calendars, leave policies, pipeline stages or a statutory parameter set.
    Every affected surface renders an empty state that explains what is missing rather than
    pretending a default.
-4. **Not deployed and not committed.** Everything above was proven on a disposable harness, not on
-   the live estate. `docs/MAP.md` must be regenerated from a clean tree at commit time.
+4. **DEPLOYED `alpha-01.071.0150a` (2026-08-24).** Five migrations applied to the live database
+   after a verified backup; Cerbos restarted and reloaded the three new policies; all services
+   healthy. **`seed:hr-config` has NOT been run on live** — the console renders empty states until
+   it is, and each one says what is missing. The statutory set will be UNRATIFIED when seeded.
 
 ---
 
