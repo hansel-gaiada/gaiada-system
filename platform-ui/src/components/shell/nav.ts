@@ -185,6 +185,9 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Learning", icon: "learning", items: [
       { label: "Overview", href: "/learning", icon: "home" },
       { label: "Catalogue", href: "/learning/catalogue", icon: "box" },
+      // L3: the HOD authoring surface. Gated on `lms.authoring` — a plain member has no draft to
+      // write, and the page would open only to tell them so.
+      ...(can(me, "lms.authoring", tenantId) ? [{ label: "Authoring", href: "/learning/authoring", icon: "projects" } as NavItem] : []),
       ...(can(me, "lms.progress.view", tenantId) ? [{ label: "Compliance", href: "/learning/compliance", icon: "check" } as NavItem] : []),
     ] },
     // ASST-07: owner-private end to end (no admin/company_admin/group_executive bypass — see

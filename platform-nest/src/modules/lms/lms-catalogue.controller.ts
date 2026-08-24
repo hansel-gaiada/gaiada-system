@@ -22,6 +22,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { loadUnitAncestors } from "../../core/org-unit-closure";
+import { redactSpec, kindCanCarryAnswers } from "./spec-redaction";
 import type { Principal } from "../../rbac/principal";
 
 const TRACKS = new Set(["general", "department"]);
@@ -103,9 +104,32 @@ export class LmsCatalogueController {
     return rows.rows;
   }
 
+  /**
+   * A course with its modules and activities.
+   *
+   * ⚠ THE GRADING KEY IS REDACTED unless the caller asks for it AND is authorized to author the
+   *   course. `spec` is one jsonb column holding whatever the kind needs — including a quiz's
+   *   ANSWERS — and resource_lms_course.yaml names `member` in its read rule on purpose. Returning
+   *   the column verbatim handed every employee the answer key to their own mandatory assessment,
+   *   and nothing about the result would have looked wrong: high scores on a general track is
+   *   what success looks like. See spec-redaction.ts.
+   *
+   *   `?includeAnswers=1` runs a SECOND authorization — `update` on this course, i.e. the
+   *   authoring right — because an author editing a quiz must see what it grades against. The
+   *   privileged read is explicit and separately audited rather than implied by the read right.
+   */
   @Get("courses/:id")
-  async getCourse(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+  async getCourse(
+    @Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string,
+    @Query("includeAnswers") includeAnswers?: string,
+  ) {
     await authorize(req.principal, { kind: "lms_course", id, tenantId, module: "lms" }, "read");
+    const wantsAnswers = includeAnswers === "1" || includeAnswers === "true";
+    if (wantsAnswers) {
+      const scope = await withTenants([tenantId], (c) => loadCourseScope(c, id), { modules: ["lms"] });
+      if (!scope) throw new NotFoundException("course not found");
+      await authorizeCourse(req.principal, tenantId, "update", { id, unitNodeId: scope.unit_node_id });
+    }
     const out = await withTenants(
       [tenantId],
       async (c) => {
@@ -131,11 +155,19 @@ export class LmsCatalogueController {
            WHERE m.course_id = $1 ORDER BY m.sort_order, a.sort_order`,
           [id],
         );
+        // Redact HERE rather than in the SELECT: the answer key has to be strippable at any depth
+        // (a quiz nests it inside `questions[]`, a lab will nest it inside test cases), and a
+        // shape-aware SQL projection silently passes anything it was not taught about.
+        const shaped = activities.rows.map((a: { kind: string; spec: unknown; moduleId: string }) => {
+          if (wantsAnswers) return { ...a, specRedacted: false };
+          const { spec, redacted } = redactSpec(a.spec);
+          return { ...a, spec, specRedacted: redacted || kindCanCarryAnswers(a.kind) };
+        });
         return {
           ...course.rows[0],
           modules: modules.rows.map((m: { id: string }) => ({
             ...m,
-            activities: activities.rows.filter((a: { moduleId: string }) => a.moduleId === m.id),
+            activities: shaped.filter((a: { moduleId: string }) => a.moduleId === m.id),
           })),
         };
       },

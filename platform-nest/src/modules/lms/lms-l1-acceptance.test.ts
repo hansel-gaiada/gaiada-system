@@ -209,6 +209,52 @@ describe.skipIf(!RUN)("LMS L1 — the learning catalogue, driven end-to-end over
     publishedCourseId = courseId;
   });
 
+  // ══════════════════════════════════════════════════ 1b · THE ANSWER KEY ═════════════════════
+  it("1b · a learner reading a course does NOT get the quiz answers; an author asking for them does", async () => {
+    // The defect: `spec` is one jsonb column holding whatever the kind needs — including a quiz's
+    // ANSWERS — and resource_lms_course.yaml names `member` in its read rule on purpose. Returning
+    // it verbatim handed every employee the key to their own mandatory assessment, and the result
+    // (high scores on the general track) is indistinguishable from the training working.
+    const asLearner = await call("GET", `${base()}/courses/${publishedCourseId}`, learner);
+    expect(asLearner.statusCode).toBe(200);
+    const quizAct = asLearner.json().modules[0].activities.find(
+      (a: { kind: string }) => a.kind === "quiz",
+    );
+    expect(quizAct.specRedacted).toBe(true);
+    for (const q of quizAct.spec.questions) {
+      expect(q).not.toHaveProperty("answer");
+      // The prompt survives — a redaction that also removed the question would be safe and useless.
+      expect(q.prompt).toBeTruthy();
+    }
+    // Belt and braces against a future field slipping through: the literal answer string must not
+    // appear anywhere in the learner's payload, at any depth.
+    expect(JSON.stringify(asLearner.json())).not.toContain("document object model");
+
+    // ?includeAnswers runs a SECOND authorization — `update`, the authoring right.
+    const asAuthor = await call(
+      "GET", `${base()}/courses/${publishedCourseId}?includeAnswers=1`, webLead,
+    );
+    expect(asAuthor.statusCode).toBe(200);
+    const authorQuiz = asAuthor.json().modules[0].activities.find(
+      (a: { kind: string }) => a.kind === "quiz",
+    );
+    expect(authorQuiz.spec.questions[0].answer).toBe("document object model");
+    expect(authorQuiz.specRedacted).toBe(false);
+
+    // A learner asking for them is REFUSED, not quietly redacted. Silently ignoring the flag would
+    // make the endpoint look like it honoured a request it denied.
+    const learnerAsking = await call(
+      "GET", `${base()}/courses/${publishedCourseId}?includeAnswers=1`, learner,
+    );
+    expect(learnerAsking.statusCode).toBe(403);
+
+    // And another department's head cannot use the authoring right to read Web Dev's key.
+    const otherLead = await call(
+      "GET", `${base()}/courses/${publishedCourseId}?includeAnswers=1`, seoLead,
+    );
+    expect(otherLead.statusCode).toBe(403);
+  });
+
   // ══════════════════════════════════════════════════════════ 2 · VERSION ═════════════════════
   it("2 · editing a PUBLISHED course FORKS a new draft version rather than mutating it", async () => {
     // The discipline the whole schema rests on. Without it, a learner mid-course gets assessed on

@@ -75,6 +75,36 @@ The surface a person can actually reach. Until this, the whole program was schem
 - **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
   money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
 
+### lms `0.3.0` — L3 The HOD authoring surface (2026-08-25) — PROTOTYPED
+
+"Later each HOD should make more" — the surface that makes it true. NO new backend: L1b already
+had every endpoint, so this is the write layer and the pages.
+
+**Added**
+- `platform-ui/src/lib/lmsActions.ts` — createCourse / updateCourse / publish / retire, modules,
+  activities, paths. The `ctx()` + `send()` shape every other actions file uses.
+- `/learning/authoring` and `/learning/authoring/[courseId]`; `components/lms/CourseForm.tsx`,
+  `AuthoringForms.tsx`, `LmsActionButton.tsx`; an Authoring nav row gated on `lms.authoring`.
+- `getCourse(..., { includeAnswers: true })` — the authoring read, re-authorized for `update`.
+- `e2e/lms-authoring.spec.ts` — 5 assertions driven against the rendered app, including the
+  negative control (a plain member is refused and pointed at the catalogue).
+- `lib/demoLms.ts` is now STATEFUL for authoring and implements fork-on-publish.
+
+**Notes**
+- **The authoring bound is not in this layer.** `resource_lms_course.yaml`'s `org_unit_lead` arm
+  matches on server-resolved `unitAncestors`; the department select is a convenience. `can(me,
+  "lms.authoring")` answers "may ask", never "may touch this course".
+- **Every mutating action surfaces `versioned`.** Editing a published course forks a new draft,
+  and an author who does not see that sentence believes they fixed live training and did not.
+- **Publish and retire are `lms.publish`, not `lms.authoring`.** Publishing freezes what people
+  will be certified against; retiring withdraws material somebody may be part-way through.
+- **e2e locators are name-based, not `getByLabel`.** getByLabel substring-matches the accessible
+  name, and "Title" collided with the course-key hint ("...it survives title changes..."). A
+  locator that breaks when someone edits help text is a locator that will break.
+
+**Not yet true:** attempt submission has no demo fixture and the lab runner does not exist (L5).
+Path authoring has server actions but no page yet — paths are listed, not built, in the UI.
+
 ### lms `0.2.0` — L2 The general track and the training tenant (2026-08-25) — PROTOTYPED
 
 The wave with the widest reach and no execution risk: content every employee takes, and the

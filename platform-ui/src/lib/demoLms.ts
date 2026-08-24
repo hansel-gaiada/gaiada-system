@@ -1,9 +1,17 @@
 import "server-only";
 // LMS L1c — DEMO_MODE fixtures for `/api/:t/modules/lms/*`.
 //
-// READ-ONLY on purpose, unlike demoAppraisals.ts's stateful store: everything L1c ships is a read
-// surface (catalogue, course, my learning, compliance). Authoring and attempt submission are L3/L5,
-// and a fixture that accepted a write it could not model would let a page look like it worked.
+// STATEFUL for authoring (L3), refusing for everything else — and the split is the point.
+//
+// L1c shipped only reads, so this store began read-only: a fixture that accepts a write it cannot
+// model lets a page look like it worked. L3 adds the authoring surface, and the ONE rule that
+// surface exists to teach — editing a PUBLISHED course forks a new version rather than changing it
+// — cannot be exercised at all unless the fixture remembers what it was told. So courses, modules
+// and activities are a real in-memory store with the versioning rule implemented.
+//
+// ATTEMPT SUBMISSION IS STILL REFUSED. Grading a lab is L5's runner and this fixture cannot mark
+// one; a demo that returned a cheerful pass would be exactly the confident wrong answer about
+// somebody's training that this file exists to prevent.
 //
 // Why it exists at all: `next build` runs with DEMO_MODE=1 and the smoke Playwright project drives
 // the built app, so an LMS route with no fixture is a route nobody can open in CI. Without this the
@@ -13,10 +21,15 @@ import "server-only";
 // The numbers below are deliberately NOT all-green: one required path is overdue for the demo user
 // and mandatory coverage sits under 100%. A demo estate where every compliance figure is perfect
 // cannot exercise the warning banner, which is the part of this surface most worth seeing.
-import type { Course, CourseDetail, LearningPath, MyLearning, ComplianceRow } from "./lms";
+import type { Activity, Course, CourseDetail, LearningPath, MyLearning, ComplianceRow } from "./lms";
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
+
+// Monotonic, NOT Date.now(): an id that changes between two renders of the same page makes a
+// Playwright assertion flaky for a reason nobody would guess from the failure text.
+let idSeq = 100;
+const nextId = () => String(idSeq++);
 
 const COURSES: Course[] = [
   {
@@ -149,7 +162,9 @@ const COMPLIANCE: ComplianceRow[] = [
 ];
 
 /** Returns null when the path is not an LMS route, so the caller falls through. */
-export function lmsDemo(method: string, p: string, qs: URLSearchParams): DemoResult | null {
+export function lmsDemo(
+  method: string, p: string, qs: URLSearchParams, body?: string,
+): DemoResult | null {
   const base = p.match(/^\/api\/[^/]+\/modules\/lms\/(.*)$/);
   if (!base) return null;
   const rest = base[1];
@@ -193,8 +208,129 @@ export function lmsDemo(method: string, p: string, qs: URLSearchParams): DemoRes
   if (m === "GET" && rest === "compliance") return ok(COMPLIANCE);
   if (m === "GET" && rest === "enrollments") return ok([]);
 
-  // Anything else is a write or an unbuilt read. 404 rather than a cheerful {ok:true}: a page that
-  // "succeeded" against a fixture which stored nothing is the frontend-first drift this repo keeps
-  // getting bitten by.
+  // ───────────────────────────────────────────────────────────── authoring (L3) ───────────────
+  const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+
+  if (m === "POST" && rest === "courses") {
+    const id = `demo-lms-c${nextId()}`;
+    const course: Course = {
+      id, courseKey: String(parsed.courseKey ?? id), version: 1,
+      title: String(parsed.title ?? "Untitled"), summary: (parsed.summary as string) ?? null,
+      track: (parsed.track as Course["track"]) ?? "department",
+      unitNodeId: (parsed.unitNodeId as string) ?? null,
+      discipline: (parsed.discipline as string) ?? null,
+      level: (parsed.level as Course["level"]) ?? "foundation",
+      // A new course is a DRAFT. The catalogue hides it, and that invisibility is exactly what
+      // makes a draft safe to work in — a fixture that created it published would hide the
+      // single most important property of the authoring surface.
+      status: "draft", estimatedMinutes: (parsed.estimatedMinutes as number) ?? null,
+      publishedAt: null, createdAt: "2026-08-25",
+    };
+    COURSES.push(course);
+    DETAIL[id] = { ...course, knowledgeSourceId: null, authoredBy: "demo-hansel", modules: [] };
+    return { status: 201, json: { id } };
+  }
+
+  const patchCourse = rest.match(/^courses\/([^/]+)$/);
+  if (m === "PATCH" && patchCourse) {
+    const id = patchCourse[1];
+    const idx = COURSES.findIndex((c) => c.id === id);
+    if (idx < 0) return { status: 404, json: { error: "course not found" } };
+    const current = COURSES[idx];
+    if (current.status !== "published") {
+      COURSES[idx] = {
+        ...current,
+        ...(parsed.title ? { title: String(parsed.title) } : {}),
+        ...(parsed.summary !== undefined ? { summary: (parsed.summary as string) || null } : {}),
+      };
+      DETAIL[id] = { ...DETAIL[id], ...COURSES[idx] };
+      return ok({ id, versioned: false });
+    }
+    // THE VERSIONING RULE, modelled rather than faked. A published edit forks a new draft
+    // carrying the structure across; the published row goes on saying what it said.
+    const forkId = `demo-lms-c${nextId()}`;
+    const version = current.version + 1;
+    const fork: Course = {
+      ...current, id: forkId, version, status: "draft", publishedAt: null,
+      ...(parsed.title ? { title: String(parsed.title) } : {}),
+    };
+    COURSES.push(fork);
+    DETAIL[forkId] = {
+      ...fork, knowledgeSourceId: null, authoredBy: "demo-hansel",
+      modules: (DETAIL[id]?.modules ?? []).map((mod) => ({
+        ...mod, id: `${mod.id}-v${version}`,
+        activities: mod.activities.map((a) => ({ ...a, id: `${a.id}-v${version}` })),
+      })),
+    };
+    return ok({
+      id: forkId, versioned: true, version, status: "draft",
+      note: `That course was published, so your edit opened version ${version} as a new DRAFT.`,
+    });
+  }
+
+  const lifecycle = rest.match(/^courses\/([^/]+)\/(publish|retire)$/);
+  if (m === "POST" && lifecycle) {
+    const [, id, verb] = lifecycle;
+    const idx = COURSES.findIndex((c) => c.id === id);
+    if (idx < 0) return { status: 404, json: { error: "course not found" } };
+    COURSES[idx] = {
+      ...COURSES[idx],
+      status: verb === "publish" ? "published" : "retired",
+      publishedAt: verb === "publish" ? "2026-08-25" : COURSES[idx].publishedAt,
+    };
+    DETAIL[id] = { ...DETAIL[id], ...COURSES[idx] };
+    const n = (DETAIL[id]?.modules ?? []).flatMap((x) => x.activities).length;
+    return ok({ ok: true, activities: n });
+  }
+
+  const newModule = rest.match(/^courses\/([^/]+)\/modules$/);
+  if (m === "POST" && newModule) {
+    const detail = DETAIL[newModule[1]];
+    if (!detail) return { status: 404, json: { error: "course not found" } };
+    const id = `demo-lms-m${nextId()}`;
+    detail.modules.push({
+      id, sortOrder: (parsed.sortOrder as number) ?? (detail.modules.length + 1) * 10,
+      title: String(parsed.title ?? "Untitled module"),
+      summary: (parsed.summary as string) ?? null, activities: [],
+    });
+    detail.modules.sort((x, y) => x.sortOrder - y.sortOrder);
+    return { status: 201, json: { id } };
+  }
+
+  const newActivity = rest.match(/^modules\/([^/]+)\/activities$/);
+  if (m === "POST" && newActivity) {
+    const moduleId = newActivity[1];
+    const detail = Object.values(DETAIL).find((d) => d.modules.some((x) => x.id === moduleId));
+    const mod = detail?.modules.find((x) => x.id === moduleId);
+    if (!mod) return { status: 404, json: { error: "module not found" } };
+    const id = `demo-lms-a${nextId()}`;
+    mod.activities.push({
+      id, moduleId, sortOrder: (parsed.sortOrder as number) ?? (mod.activities.length + 1) * 10,
+      kind: (parsed.kind as Activity["kind"]) ?? "read", title: String(parsed.title ?? "Untitled"),
+      spec: (parsed.spec as Record<string, unknown>) ?? {},
+      isRequired: parsed.isRequired !== false,
+      passThreshold: parsed.passThreshold ? String(parsed.passThreshold) : null,
+      grading: (parsed.grading as Activity["grading"]) ?? "none",
+      maxAttempts: (parsed.maxAttempts as number) ?? null,
+      estimatedMinutes: (parsed.estimatedMinutes as number) ?? null,
+    });
+    mod.activities.sort((x, y) => x.sortOrder - y.sortOrder);
+    return { status: 201, json: { id } };
+  }
+
+  const dropActivity = rest.match(/^activities\/([^/]+)$/);
+  if (m === "DELETE" && dropActivity) {
+    for (const detail of Object.values(DETAIL)) {
+      for (const mod of detail.modules) {
+        const i = mod.activities.findIndex((a) => a.id === dropActivity[1]);
+        if (i >= 0) { mod.activities.splice(i, 1); return ok({ ok: true }); }
+      }
+    }
+    return { status: 404, json: { error: "activity not found" } };
+  }
+
+  // Anything else is a write this fixture cannot model, or an unbuilt read. 404 rather than a
+  // cheerful {ok:true}: a page that "succeeded" against a fixture which stored nothing is the
+  // frontend-first drift this repo keeps getting bitten by.
   return { status: 404, json: { error: `no LMS demo fixture for ${m} ${p}` } };
 }

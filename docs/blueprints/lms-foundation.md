@@ -248,6 +248,25 @@ new and run against the production database, is the single highest-risk operatio
 could contain — and the learning outcome is identical either way. Reset touches only the bounded set
 of tables the exercises actually write.
 
+### 9.0 · IMPLEMENTED at L2 (2026-08-25) — where each rule below actually lives
+
+| Rule | Where it is enforced |
+|---|---|
+| Bounded by an allow-list | `lms_training_reset_tables`, seeded by `202608241550`. Read at run time; the runner never touches `information_schema`. |
+| Impossible to point elsewhere | `resolveTrainingTenant()` reads `companies.is_training`; `ux_companies_one_training` permits one row. No tenant parameter exists. |
+| Grants revoked (ORG-6) | `revokeCohortAccess()` — roles via the `grant-write.service` choke point, memberships under `withTenants` (see below). |
+| Re-seeded to a baseline | The baseline is what the allow-list OMITS: fake staff, the org chart, course material and every `hr_record` survive. |
+| Never in a real switcher | The training tenant is reachable only through a `company_memberships` row, and disposal removes it. |
+
+**Two things the implementation learned that the design did not know:**
+
+1. **`company_memberships` carries FORCE RLS and `user_roles` does not.** The first revocation
+   deleted both under `withGlobal`; the membership half matched zero rows and reported success,
+   leaving the training tenant in the trainee's company switcher after a "complete" disposal.
+   Two tables, one function, opposite requirements — and no error either way.
+2. **The reset must revoke BEFORE it clears.** A trainee still holding a grant can write new rows
+   into the tenant while the tables are being emptied, and the run then reports a clean tenant
+   that is not clean.
 ### 9.1 · Rules the reset must hold
 
 1. **Bounded by construction, not by hope.** The reset deletes from an EXPLICIT allow-list of tables

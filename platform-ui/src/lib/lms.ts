@@ -73,6 +73,16 @@ export interface Activity {
   id: string; moduleId: string; sortOrder: number; kind: ActivityKind; title: string;
   spec: Record<string, unknown>; isRequired: boolean; passThreshold: string | null;
   grading: Grading; maxAttempts: number | null; estimatedMinutes: number | null;
+  /**
+   * TRUE when the backend stripped the grading key out of `spec` before sending it.
+   *
+   * The default for everybody who is not authoring the course. `spec` is one jsonb column
+   * carrying whatever the kind needs — a quiz's ANSWERS included — and every member may read a
+   * published course, so returning it verbatim handed learners the key to their own assessment.
+   * Never render `spec` for a quiz on the assumption it is safe; render it because this flag
+   * says what you were given. `?includeAnswers=1` is the authoring read, and it re-authorizes.
+   */
+  specRedacted?: boolean;
 }
 export interface CourseDetail extends Course {
   knowledgeSourceId: string | null; authoredBy: string | null;
@@ -110,9 +120,18 @@ export const listCourses = (
   return soft(() => platformFetch<Course[]>(`${base(t)}/courses${qs ? `?${qs}` : ""}`, u), []);
 };
 
-/** Rethrows — an empty course is indistinguishable from an unreadable one. See the header. */
-export const getCourse = (u: string, t: string, id: string) =>
-  strict(() => platformFetch<CourseDetail>(`${base(t)}/courses/${id}`, u));
+/**
+ * Rethrows — an empty course is indistinguishable from an unreadable one. See the header.
+ *
+ * `includeAnswers` is the AUTHORING read (L3). The backend re-authorizes it for `update` on this
+ * course, so a learner passing it is REFUSED rather than quietly handed a redacted body — the
+ * honest outcome, because silently ignoring the flag would make the endpoint look like it
+ * honoured a request it had denied.
+ */
+export const getCourse = (u: string, t: string, id: string, opts: { includeAnswers?: boolean } = {}) =>
+  strict(() => platformFetch<CourseDetail>(
+    `${base(t)}/courses/${id}${opts.includeAnswers ? "?includeAnswers=1" : ""}`, u,
+  ));
 
 export const listPaths = (u: string, t: string, q: { track?: Track; mandatory?: boolean } = {}) => {
   const qs = new URLSearchParams();

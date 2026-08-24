@@ -55,6 +55,8 @@ export const lmsModule: ModuleContract = {
   migrations: [
     "202608241322_module_lms_l1.sql",        // 9 tables behind the lms third wall
     "202608241340_iam_lms_l1_permissions.sql", // 2 roles, 12 permissions, bundles
+    // L2: companies.is_training + cohorts + the reset allow-list and its append-only ledger.
+    "202608241550_lms_l2_general_track_and_training_tenant.sql",
   ],
   permissions: [
     { key: "lms.course.read", description: "Browse the learning catalogue" },

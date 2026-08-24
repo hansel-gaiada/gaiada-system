@@ -51,7 +51,7 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
-| lms | `0.2.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
+| lms | `0.3.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | finance | `0.10.0` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
@@ -1232,7 +1232,7 @@ rather than quietly deleted.
 
 ---
 
-## lms — Learning · Certification · `0.2.0` · PROTOTYPED
+## lms — Learning · Certification · `0.3.0` · PROTOTYPED
 
 **Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
 
@@ -1288,6 +1288,32 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
   append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
   two flags to execute.
+
+### What L3 added (2026-08-25) — the HOD authoring surface
+
+The owner's "later each HOD should make more", built. No new backend: L1b already had every
+endpoint, so L3 is `lib/lmsActions.ts` plus three pages and the forms.
+
+- `/learning/authoring` — drafts, published and retired courses side by side, plus paths. Lists
+  OTHER departments' material deliberately: a head who cannot see what Creative already teaches
+  will write it again, and the catalogue is open to `member` anyway.
+- `/learning/authoring/[courseId]` — modules, activities, publish and retire. Reads with
+  `?includeAnswers=1`, which the backend re-authorizes for `update`.
+- `lib/demoLms.ts` became STATEFUL for authoring, and models the fork-on-publish rule rather than
+  faking a success — the one rule the surface exists to teach cannot be exercised otherwise.
+  Attempt submission still refuses: grading is L5's runner and a demo pass would be a confident
+  wrong answer about somebody's training.
+
+**Where the authoring bound actually lives:** `resource_lms_course.yaml`'s `org_unit_lead` arm
+matches on the course's own `unitAncestors`, resolved server-side from its `unit_node_id`. The
+department select in the form is a CONVENIENCE — `can(me, "lms.authoring")` answers "may ask",
+never "may touch this course". A general-track course has no unit at all, so no `org_unit_lead`
+can ever reach one: the mandatory track is not any department's to edit.
+
+**The validation that earns its place** is the kind that turns a constraint name into a sentence:
+an auto-graded quiz with no `questions` is refused (it would grade everybody wrong, and present
+to a learner as "the training is too hard"), a lab must be auto-graded, and only a general-track
+path may be mandatory for everyone.
 
 ### Two defects L2 fixed, both silent
 
