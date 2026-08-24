@@ -73,6 +73,26 @@ export const REASSIGN: Record<string, string> = {
   "gm@sanur-resort.test": "edward@gaiada.com",
 };
 
+/** Columns that reference `users.id` but declare NO foreign key, so the `pg_constraint` census below
+ *  cannot see them.
+ *
+ *  ⚠ THIS IS THE BLIND SPOT THAT UNDID THE CLEANUP ONCE, and the failure is worth stating precisely
+ *  because the reasoning that caused it looked like good practice. This file argues — correctly —
+ *  that deriving the column list from `pg_constraint` beats a hand list, because a hand list silently
+ *  misses the column a new migration adds. What it missed is that an FK-derived list has a blind spot
+ *  of exactly the same shape: a column with no declared FK is invisible to it.
+ *
+ *  `activities.actor_id` is such a column — `activities` declares a FK on `tenant_id` and nothing
+ *  else. Thirty-two rows there still named the retired personas after a run that reported success,
+ *  and `runWorkActivityBackfill()` reads that table on EVERY BOOT and re-derives `work_activity` from
+ *  it. So the 13 ghost rows I had verified as gone reappeared the next time the container was
+ *  recreated. A cleanup that a restart undoes is not a cleanup, and nothing in the previous run's
+ *  output hinted at it.
+ *
+ *  `detectUndeclaredUserRefs()` below now hunts for the next one instead of waiting for a
+ *  resurrection to reveal it. */
+const UNDECLARED_USER_REFS: { tbl: string; col: string }[] = [{ tbl: "activities", col: "actor_id" }];
+
 /** Identity/authorization columns. Never reassigned — see category 3 in the header. */
 const NEVER_MOVE = new Set([
   "identity_links.user_id",
@@ -177,6 +197,42 @@ export interface ReassignResult {
   /** Skipped because another seed owns the disposal — see HANDLED_ELSEWHERE. */
   handledElsewhere: { where: string; rows: number; by: string }[];
   unmapped: string[];
+  /** uuid columns that LOOK like user references but declare no FK, minus the ones already handled.
+   *  Reported so the next `activities.actor_id` is found by this script rather than by a resurrection
+   *  after a restart. */
+  undeclaredCandidates: string[];
+}
+
+/** Find uuid columns that look like a user reference but declare no FK to `users`.
+ *
+ *  A NAME-BASED heuristic, deliberately, and it is the right tool here precisely because it is a
+ *  different kind of evidence from the FK census it supplements. The FK census is authoritative about
+ *  declared references and blind to undeclared ones; a name test is weak evidence about a lot of
+ *  columns. Nothing is acted on from this — it only REPORTS, so a false positive costs a line of
+ *  output while a false negative costs a cleanup that a restart undoes.
+ *
+ *  Excludes columns already covered, and excludes tables with no rows for the personas anyway, so the
+ *  output stays short enough to actually be read. */
+async function detectUndeclaredUserRefs(): Promise<string[]> {
+  const known = new Set(UNDECLARED_USER_REFS.map((r) => `${r.tbl}.${r.col}`));
+  const rows = await withGlobal((c) =>
+    c.query<{ tbl: string; col: string }>(`
+      SELECT c.relname AS tbl, a.attname AS col
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+      JOIN pg_type t ON t.oid = a.atttypid
+      WHERE c.relkind = 'r' AND n.nspname = 'public' AND t.typname = 'uuid'
+        AND (a.attname LIKE '%user_id' OR a.attname = 'actor_id' OR a.attname LIKE '%_by')
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint con
+          JOIN pg_class tgt ON tgt.oid = con.confrelid
+          WHERE con.contype = 'f' AND con.conrelid = c.oid
+            AND tgt.relname = 'users' AND a.attnum = ANY(con.conkey)
+        )
+      ORDER BY 1, 2`),
+  );
+  return rows.rows.map((r) => `${r.tbl}.${r.col}`).filter((w) => !known.has(w));
 }
 
 /** Collapse per-company rows into one entry per label, preserving first-seen order. */
@@ -193,7 +249,7 @@ function sumByLabel<T extends { where: string; rows: number }>(rows: T[]): T[] {
 export async function reassignRetired(opts: { dryRun: boolean }): Promise<ReassignResult> {
   const out: ReassignResult = {
     dryRun: opts.dryRun, moved: [], deleted: [], skippedCollisions: [], immutableHistory: [],
-    handledElsewhere: [], unmapped: [],
+    handledElsewhere: [], unmapped: [], undeclaredCandidates: [],
   };
 
   const emails = [...Object.keys(REASSIGN), ...new Set(Object.values(REASSIGN))];
@@ -228,6 +284,11 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
       ORDER BY 1, 2`),
   );
 
+  // The FK census cannot see a user reference that declares no FK, so undeclared ones are added
+  // explicitly — and any NEW one is reported rather than silently skipped. See UNDECLARED_USER_REFS.
+  const columns = [...fks.rows, ...UNDECLARED_USER_REFS];
+  out.undeclaredCandidates = await detectUndeclaredUserRefs();
+
   // ⚠ ONE TENANT PER `withTenants` CALL, NOT THE WHOLE LIST. `lint:withtenants` rejects a
   // multi-tenant argument outside the reconciler, and it is right to: a single call that opens RLS
   // to every company is exactly the shape that cannot be reviewed for scope creep. Passing the list
@@ -242,7 +303,7 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
     await withTenants(
       [tenantId],
       async (c) => {
-        for (const { tbl, col } of fks.rows) {
+        for (const { tbl, col } of columns) {
           const where = `${tbl}.${col}`;
           if (NEVER_MOVE.has(where)) continue;
 
@@ -387,6 +448,16 @@ async function main(): Promise<void> {
   }
   for (const h of r.handledElsewhere) {
     console.log(`SKIPPED — ${h.by}: ${h.rows} row(s)  ${h.where}`);
+  }
+  if (r.undeclaredCandidates.length) {
+    console.log(
+      `
+⚠ ${r.undeclaredCandidates.length} uuid column(s) LOOK like user references but declare no FK, ` +
+        `so the FK census cannot see them. Not touched. Check whether any holds persona rows — this is ` +
+        `how activities.actor_id survived a run that reported success and then resurrected ghosts on the ` +
+        `next boot:`,
+    );
+    for (const w of r.undeclaredCandidates) console.log(`    ${w}`);
   }
   if (r.unmapped.length) console.log(`NOTE: ${r.unmapped.join("; ")}`);
   if (dryRun) {
