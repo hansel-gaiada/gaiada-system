@@ -28,7 +28,7 @@ Node scripts per component:
 - `capture-helper` — `check`, `devices`, `drive-token`, `start`
 - `hermes-gateway` — `start`, `test`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:hr-config`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
@@ -164,7 +164,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 144 (121 legacy `NNNN_`, 23 timestamped)
+- Applied files on disk: 149 (121 legacy `NNNN_`, 28 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -223,8 +223,12 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/appraisals` | `platform-nest/src/modules/reports/appraisals.controller.ts` |
 | `/api/:tenantId/checkins` | `platform-nest/src/modules/reports/checkins.controller.ts` |
 | `/api/:tenantId/modules/agency` | `platform-nest/src/modules/agency/agency.controller.ts` |
+| `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/hr-lifecycle.controller.ts` |
+| `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/hr-policy.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/hr.controller.ts` |
 | `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/loans.controller.ts` |
+| `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/payroll.controller.ts` |
+| `/api/:tenantId/modules/hr` | `platform-nest/src/modules/hr/recruitment.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-google-ads.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search-reports.controller.ts` |
 | `/api/:tenantId/modules/search` | `platform-nest/src/modules/search/search.controller.ts` |
@@ -331,12 +335,19 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
 - `/hr`
+- `/hr/analytics`
 - `/hr/attendance`
 - `/hr/cases`
 - `/hr/cases/[caseId]`
+- `/hr/compensation`
+- `/hr/compliance`
 - `/hr/leave`
 - `/hr/onboarding`
+- `/hr/payroll`
 - `/hr/people`
+- `/hr/recruitment`
+- `/hr/reviews`
+- `/hr/settings`
 - `/invite/[token]`
 - `/it`
 - `/it/accounts`
@@ -351,6 +362,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/me/leave`
 - `/me/loans`
 - `/me/loans/[loanId]`
+- `/me/pay`
 - `/meetings`
 - `/meetings/[id]`
 - `/monitoring`
