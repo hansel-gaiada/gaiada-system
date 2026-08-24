@@ -194,7 +194,12 @@ export async function reassignRetired(opts: { dryRun: boolean }): Promise<Reassi
         }
       }
     },
-    { modules: MODULES, crossRoot: { reason: "reassigning retired-persona data across the holding's companies" } },
+    // ⚠ NO `crossRoot` HERE, DELIBERATELY. I had passed it "just in case" while writing this. The
+    // estate has THREE companies and ONE distinct `root_company_id` (checked, not assumed), so
+    // MON-00b's wall would never fire anyway — and a bypass flag that is unnecessary today is a
+    // bypass flag nobody notices becoming load-bearing tomorrow. If a second root ever appears, this
+    // script SHOULD fail loudly rather than quietly rewrite across a customer boundary.
+    { modules: MODULES },
   );
 
   return out;
