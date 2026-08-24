@@ -11,6 +11,27 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.36.5` — 2026-08-24 — retire the seeded personas, and make the client logins work
+
+**Added**
+- **`seed:reassign-retired`** — moves the 17 retired identities' ~1,100 rows onto the real staff doing
+  those jobs, mapped by function. Columns derived from `pg_constraint` so a future FK cannot be
+  missed. Bulk UPDATE inside a SAVEPOINT with a row-by-row fallback, because several targets carry a
+  UNIQUE on (tenant, user, date) — collisions are REPORTED, never swallowed.
+  ⚠ Personal history (attendance, check-ins, work facts, time entries) moves too, by explicit owner
+  decision. Real staff therefore show records transferred from seeded personas. Stated in the file
+  header so a later audit of anyone's attendance knows those rows are not evidence.
+  ⚠ Identity does NOT move: `user_roles`, `identity_links`, `org_unit_memberships`,
+  `position_assignments`. Reassigning a role grant would hand a real person a ghost's ACCESS.
+- **`seed:client-logins`** — the four seeded client contacts already had Keycloak accounts with
+  UNKNOWABLE passwords (`seed:portal-clients` mints `Portal-<random>` per run and prints it once).
+  Re-sets them to a known value, adds the contact Bali Beach Resort never had, and revokes the two
+  `@example.invalid` artifacts (revocation is the modelled lifecycle; deletion would erase the invite
+  audit trail). Passwords PERMANENT here, unlike staff — `keycloak-admin` documents why for external
+  clients.
+- **`seed:retire-placeholder-hr`** — deletes the 17 invented HR files. Refuses on an empty read,
+  because for a cleanup script "0 candidates" is indistinguishable from success.
+
 ### platform-nest `0.36.4` — 2026-08-24 — IAM-14c, the org-tree refresh, and two test-infra fixes
 
 **Added**
@@ -1802,6 +1823,36 @@ it to a commit-range diff.
 **Verification:** roster-access 6/6 and employee-files 6/6, each including a negative control — the
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
+
+### `Alpha 01.071.0147a` - 2026-08-24 - the seeded personas retire, the clients get logins
+
+Manifest (counter +1, 0146 -> 0147): `platform-nest 0.36.4 -> 0.36.5`.
+
+Three owner decisions land together, and they must run in THIS ORDER: reassign, then retire the HR
+files, then the client logins. Retiring first would orphan the work the reassignment is meant to move.
+
+Nothing here changes schema or policy — three opt-in seed scripts, each dry-run by default. Shipping
+them is not running them.
+
+**Full module manifest** (rule 2):
+
+| Module | Ver | Module | Ver | Module | Ver |
+|---|---|---|---|---|---|
+| **platform-nest** | **`0.36.5`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.2` |
+| platform-ui | `0.41.0` | ai-agents | `0.8.0` | social-media | `0.5.26` |
+| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
+| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
+| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.2` |
+| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
+| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
+| monitoring | `0.2.0` | | | | |
+
+⚠ The platform-ui/social-media figures above are this cut's own baseline; a concurrent session's
+CC-01 wave (platform-ui 0.48.0, platform-nest 0.37.0+) had uncommitted MODULES/CHANGELOG entries at
+cut time and is NOT represented here. Its manifest lands with its own cut.
+
+**Verification:** reassign-retired 6/6 (dry run inert, ownership moves, role grants do NOT, idempotent,
+refuses on a missing target); retire-placeholder-hr 4/4; org-structure-refresh 6/6; tsc clean.
 
 ### `Alpha 01.070.0146a` - 2026-08-24 - the ERP finally shows the real people
 
