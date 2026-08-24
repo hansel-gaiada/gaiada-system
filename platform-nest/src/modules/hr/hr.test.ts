@@ -124,15 +124,33 @@ describe.skipIf(!TEST_URL || !REDIS_TEST_URL)("HR module (WSD-4)", () => {
     // deliberately, in the same change that adds a tool, and never by loosening the assertion.
     // The JML WRITE tools are absent by design until their D14 executors exist; `hr-employee-tools.ts`
     // holds that invariant and explains why.
+    //
+    // HR-FULL (2026-08-24) appended eight READ tools for waves A–D. Reads only, deliberately: the
+    // same D14 reasoning that keeps the JML writes off this list applies with more force to a
+    // payroll run or an offer conversion, where "suspends for a human and then silently does
+    // nothing" would be a person paid or hired on paper and not in fact.
     expect(hrModule.mcpTools.map((t) => t.name)).toEqual([
       "hr.listEmployees", "hr.getEmployee",
       "hr.hireEmployee", "hr.transferEmployee", "hr.terminateEmployee",
       "hr.listCases", "hr.listLeave", "hr.fileLeave", "hr.listLoans", "hr.requestLoan",
+      "hr.getAnalytics", "hr.listRequisitions", "hr.getRecruitmentFunnel",
+      "hr.listExpiringDocuments", "hr.getLeaveLedger", "hr.getWorkingDays",
+      "hr.listPayslips", "hr.previewSeverance",
     ]);
+    // Every HR-FULL tool is a read: no `write`, therefore no D14 executor to be missing.
+    for (const name of ["hr.getAnalytics", "hr.listRequisitions", "hr.getRecruitmentFunnel",
+                        "hr.listExpiringDocuments", "hr.getLeaveLedger", "hr.getWorkingDays",
+                        "hr.listPayslips", "hr.previewSeverance"]) {
+      const tool = hrModule.mcpTools.find((t) => t.name === name);
+      expect(tool?.write, `${name} must stay read-only until it has a D14 executor`).toBeUndefined();
+      expect(tool?.minAssurance, `${name} touches PD behind the module wall`).toBe("verified");
+    }
     // P2-07's write half: terminate is the one whose blast radius does not shrink on a repeat.
     expect(hrModule.mcpTools.find((t) => t.name === "hr.terminateEmployee")?.impact).toBe("high");
     expect(hrModule.mcpTools.find((t) => t.name === "hr.requestLoan")?.impact).toBe("high");
-    expect(hrModule.customFieldTargets).toEqual(["hr_case", "hr_record"]);
+    // HR-FULL added the two recruitment targets — a requisition and a candidate are both things
+    // a company legitimately wants its own fields on.
+    expect(hrModule.customFieldTargets).toEqual(["hr_case", "hr_record", "hr_requisition", "hr_candidate"]);
     // Still exactly TWO keys after wave E: `automation_approval.decided` is keyed by EVENT TYPE, so
     // hr gets one handler for it, and hr now files two kinds of approval (leave, loans). The contract
     // therefore registers a dispatcher that runs both appliers; adding a third key here would mean

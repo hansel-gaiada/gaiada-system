@@ -151,7 +151,10 @@ const DIRECT = {
 };
 
 function moduleStaffTargets(kind, cond) {
-  if (kind === "hr_case" || kind === "hr_record") return ["hr_staff"];
+  // HR-FULL (2026-08-24): hr_policy joins hr_case/hr_record on the HR module tier. The other two
+  // new HR kinds (hr_recruitment, hr_payroll) never reach this resolver — they are written
+  // against hr_people_reader/hr_people_ops, which DIRECT already maps.
+  if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_staff"];
   if (SEARCH_KINDS.has(kind)) return ["search_staff"];
   if (kind === "report_document") {
     return cond?.includes('attr.module == "reports"')
@@ -176,7 +179,7 @@ function moduleStaffTargets(kind, cond) {
 }
 
 function moduleManagerTargets(kind, cond) {
-  if (kind === "hr_case" || kind === "hr_record") return ["hr_manager"];
+  if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_manager"];
   if (kind === "automation_approval") return ["hr_manager"]; // rule condition hardcodes attr.module == "hr"
   if (SEARCH_KINDS.has(kind)) return ["search_manager"];
   if (kind === "report_document") {
@@ -247,6 +250,16 @@ function loadCatalog() {
 function isSelfScopedCondition(conditionExpr) {
   if (!conditionExpr) return false;
   if (/request\.resource\.attr\.\w+\s*==\s*request\.principal\.id/.test(conditionExpr)) return true;
+  // HR-FULL (2026-08-24): MEMBERSHIP in an attached-users list is the same CATEGORY of narrow,
+  // instance-scoped authority as the equality form above — "you are on this interview panel"
+  // confers nothing over anyone you are not attached to. Without it, the three keys
+  // resource_hr_recruitment.yaml's panel arm grants `member` classified as tenant-wide HR
+  // authority, and routeFor() sent a NON-HR override request to hr_manager instead of
+  // company_admin (caught by override-request-decide.test.ts).
+  //
+  // Blast radius, measured before adding it: this form appears in exactly ONE resource policy —
+  // the one that introduced it. No pre-existing role's classification changes.
+  if (/request\.principal\.id\s+in\s+request\.resource\.attr\.\w+/.test(conditionExpr)) return true;
   return /variables\.owns\b/.test(conditionExpr);
 }
 

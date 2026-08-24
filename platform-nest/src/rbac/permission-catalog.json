@@ -12,16 +12,16 @@
     },
     "sensitive": "assessed 2026-08-10 for step-up auth + D-10 approval routing; touches HR/people data, finance, client commitments, deploys/provisioning, credentials/identity, or cross-company access. Owner review pending — tighten additively, loosen only by owner decision.",
     "counts": {
-      "cerbosKinds": 78,
-      "concretePairs": 302,
-      "grantable": 287,
+      "cerbosKinds": 81,
+      "concretePairs": 320,
+      "grantable": 305,
       "relationship": 15,
-      "sensitive": 109
+      "sensitive": 126
     },
-    "countsNote": "DERIVED from `permissions` below — re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently — the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 — two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged — no new Cerbos kind, no new relationship-class permission. P2-02 (2026-08-13): +18 grantable (4 new Cerbos kinds — role_grant/position/employee/it_account, design §6.2; role_grant/position are role-arm ONLY, permanently-unwired perm mirror per IAM-04c §9 option C; employee/it_account are role-arm only THIS wave, deferred pending their handlers). Kind count 68 -> 72 (+4). Relationship count (15) unchanged — none of the 18 new keys are relationship-class. MON-10b (2026-08-19): +14 grantable across 5 new Cerbos kinds (monitor/monitor_incident/monitor_maintenance/monitor_channel/status_page), 72 -> 77. SM-76 (2026-08-23, docs/plans/2026-08-23-seo-audit-capability.md §6): +3 grantable (search.finding.triage, search.finding.accept_risk [sensitive], search.property.attest [sensitive]) — 1 new Cerbos kind (`resource_search_finding`), 77 -> 78; `search.property.attest` is a new action on the EXISTING `resource_search_property` kind, so the kind count moves by only +1 though 2 of the 3 new keys are on the new kind. Sensitive count 106 -> 108 (+2: accept_risk and attest are both the CONCEALING/accountability direction, design §6).",
+    "countsNote": "DERIVED from `permissions` below — re-derive rather than hand-edit. HIER-5 (2026-08-11) found this block stale after HIER-3 retired the `team` kind: it still read 61/230/215 while the array held 60/226/211. Nothing enforced it, so it drifted silently — the same hand-maintained-number rot this program has hit repeatedly. `role-permission-bundles.db.test.ts` pins the BUNDLE artifact's own counts; this block had no equivalent guard. IAM-GAP-01 (2026-08-13): 262/247/91 -> 264/249/93 — two new grantable, both sensitive: `billing.invoice.approve` (new literal action on the existing `invoice` kind) and `hr.leave.decide` (new literal action `decide_leave` on the existing `automation_approval` kind). Kind count (68) and relationship count (15) are unchanged — no new Cerbos kind, no new relationship-class permission. P2-02 (2026-08-13): +18 grantable (4 new Cerbos kinds — role_grant/position/employee/it_account, design §6.2; role_grant/position are role-arm ONLY, permanently-unwired perm mirror per IAM-04c §9 option C; employee/it_account are role-arm only THIS wave, deferred pending their handlers). Kind count 68 -> 72 (+4). Relationship count (15) unchanged — none of the 18 new keys are relationship-class. MON-10b (2026-08-19): +14 grantable across 5 new Cerbos kinds (monitor/monitor_incident/monitor_maintenance/monitor_channel/status_page), 72 -> 77. SM-76 (2026-08-23, docs/plans/2026-08-23-seo-audit-capability.md §6): +3 grantable (search.finding.triage, search.finding.accept_risk [sensitive], search.property.attest [sensitive]) — 1 new Cerbos kind (`resource_search_finding`), 77 -> 78; `search.property.attest` is a new action on the EXISTING `resource_search_property` kind, so the kind count moves by only +1 though 2 of the 3 new keys are on the new kind. Sensitive count 106 -> 108 (+2: accept_risk and attest are both the CONCEALING/accountability direction, design §6). HR-FULL (2026-08-24, docs/blueprints/hr-department-foundation.md waves A-D): +18 grantable across 3 new Cerbos kinds (hr_policy / hr_recruitment / hr_payroll), 78 -> 81. All three are ROLE-ARM ONLY -- no perm_* mirror -- matching resource_employee.yaml's P2-02 posture: hr_recruitment's panel rules are attribute-dependent (isPanelist/isHiringManager) and a flat catalog mirror would collapse 'only for an interview you are on' into an unconditional grant over every candidate in the tenant. hr_policy's read rule COULD carry a safe mirror; it is omitted so one follow-up IAM ticket audits and wires all three together. Sensitive 108 -> 126 (+18: every new key except hr.policy.read, which reads the company's own published rules -- holiday calendar, leave entitlement -- and is deliberately broad). Counts in this block are RE-DERIVED by the loader script, not hand-edited.",
     "uiGrantable": {
       "note": "P2-03 (2026-08-13): `uiGrantable` is now a REQUIRED field on every entry (design §7). true/false counts below are informational, re-derivable from the array; the load-bearing invariants (portal.* and class=relationship must be false) are pinned by src/rbac/ui-grantable-catalog.test.ts, not by this block. SM-76 (2026-08-23): re-derived to 279/22 while landing — this pair was already stale before this change (260+22=282 against a then-298-entry array), consistent with the note's own warning that nothing enforces it; corrected as a courtesy, not a requirement of this ticket.",
-      "true": 279,
+      "true": 298,
       "false": 22
     }
   },
@@ -569,54 +569,6 @@
       "uiGrantable": true
     },
     {
-      "key": "core.client.create",
-      "domain": "core",
-      "resource": "client",
-      "action": "create",
-      "description": "Create client records.",
-      "cerbosKind": "client",
-      "cerbosAction": "create",
-      "class": "grantable",
-      "sensitive": false,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.client.delete",
-      "domain": "core",
-      "resource": "client",
-      "action": "delete",
-      "description": "Delete client records.",
-      "cerbosKind": "client",
-      "cerbosAction": "delete",
-      "class": "grantable",
-      "sensitive": true,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.client.read",
-      "domain": "core",
-      "resource": "client",
-      "action": "read",
-      "description": "View client records.",
-      "cerbosKind": "client",
-      "cerbosAction": "read",
-      "class": "grantable",
-      "sensitive": false,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.client.update",
-      "domain": "core",
-      "resource": "client",
-      "action": "update",
-      "description": "Edit client records.",
-      "cerbosKind": "client",
-      "cerbosAction": "update",
-      "class": "grantable",
-      "sensitive": false,
-      "uiGrantable": true
-    },
-    {
       "key": "core.client_contact.create",
       "domain": "core",
       "resource": "client_contact",
@@ -662,6 +614,54 @@
       "cerbosAction": "update",
       "class": "grantable",
       "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client.create",
+      "domain": "core",
+      "resource": "client",
+      "action": "create",
+      "description": "Create client records.",
+      "cerbosKind": "client",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client.delete",
+      "domain": "core",
+      "resource": "client",
+      "action": "delete",
+      "description": "Delete client records.",
+      "cerbosKind": "client",
+      "cerbosAction": "delete",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client.read",
+      "domain": "core",
+      "resource": "client",
+      "action": "read",
+      "description": "View client records.",
+      "cerbosKind": "client",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.client.update",
+      "domain": "core",
+      "resource": "client",
+      "action": "update",
+      "description": "Edit client records.",
+      "cerbosKind": "client",
+      "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": false,
       "uiGrantable": true
     },
     {
@@ -1001,6 +1001,18 @@
       "uiGrantable": true
     },
     {
+      "key": "core.integration_connection.manage",
+      "domain": "core",
+      "resource": "integration_connection",
+      "action": "manage",
+      "description": "Administer ANY of the company's integration connections — company-owned rows and other users' rows. Distinct from the four per-row actions, which are self-scoped for member/viewer.",
+      "cerbosKind": "integration_connection",
+      "cerbosAction": "manage",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
       "key": "core.integration_connection.read",
       "domain": "core",
       "resource": "integration_connection",
@@ -1020,18 +1032,6 @@
       "description": "Edit third-party integration connections (OAuth/API).",
       "cerbosKind": "integration_connection",
       "cerbosAction": "update",
-      "class": "grantable",
-      "sensitive": true,
-      "uiGrantable": true
-    },
-    {
-      "key": "core.integration_connection.manage",
-      "domain": "core",
-      "resource": "integration_connection",
-      "action": "manage",
-      "description": "Administer ANY of the company's integration connections — company-owned rows and other users' rows. Distinct from the four per-row actions, which are self-scoped for member/viewer.",
-      "cerbosKind": "integration_connection",
-      "cerbosAction": "manage",
       "class": "grantable",
       "sensitive": true,
       "uiGrantable": true
@@ -1482,18 +1482,6 @@
       "uiGrantable": true
     },
     {
-      "key": "core.rollup.read",
-      "domain": "core",
-      "resource": "rollup",
-      "action": "read",
-      "description": "Read cross-company metric rollups (the only cross-company read path, D12).",
-      "cerbosKind": "rollup",
-      "cerbosAction": "read",
-      "class": "grantable",
-      "sensitive": false,
-      "uiGrantable": true
-    },
-    {
       "key": "core.rollup_recompute.create",
       "domain": "core",
       "resource": "rollup_recompute",
@@ -1501,6 +1489,18 @@
       "description": "Trigger a rollup recompute for the tenant.",
       "cerbosKind": "rollup_recompute",
       "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "core.rollup.read",
+      "domain": "core",
+      "resource": "rollup",
+      "action": "read",
+      "description": "Read cross-company metric rollups (the only cross-company read path, D12).",
+      "cerbosKind": "rollup",
+      "cerbosAction": "read",
       "class": "grantable",
       "sensitive": false,
       "uiGrantable": true
@@ -1926,6 +1926,138 @@
       "uiGrantable": true
     },
     {
+      "key": "hr.payroll.approve",
+      "domain": "hr",
+      "resource": "payroll",
+      "action": "approve",
+      "description": "Approve a payroll run, a compensation change or a separation payout. Commits money; high-assurance only.",
+      "cerbosKind": "hr_payroll",
+      "cerbosAction": "approve",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.payroll.create",
+      "domain": "hr",
+      "resource": "payroll",
+      "action": "create",
+      "description": "Create compensation records, allowances, benefit enrolments, payroll runs and separations.",
+      "cerbosKind": "hr_payroll",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.payroll.delete",
+      "domain": "hr",
+      "resource": "payroll",
+      "action": "delete",
+      "description": "Delete or void payroll and compensation records.",
+      "cerbosKind": "hr_payroll",
+      "cerbosAction": "delete",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.payroll.export",
+      "domain": "hr",
+      "resource": "payroll",
+      "action": "export",
+      "description": "Export the payroll register or bank file. High-assurance only.",
+      "cerbosKind": "hr_payroll",
+      "cerbosAction": "export",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.payroll.read",
+      "domain": "hr",
+      "resource": "payroll",
+      "action": "read",
+      "description": "Read compensation records, allowances, benefit enrolments, tax profiles, payroll runs, payslips and separations.",
+      "cerbosKind": "hr_payroll",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.payroll.update",
+      "domain": "hr",
+      "resource": "payroll",
+      "action": "update",
+      "description": "Amend compensation, recalculate a payroll run, edit a separation.",
+      "cerbosKind": "hr_payroll",
+      "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.policy.create",
+      "domain": "hr",
+      "resource": "policy",
+      "action": "create",
+      "description": "Create HR configuration objects (leave policy, holiday calendar, review cycle, pay grade, statutory parameter set).",
+      "cerbosKind": "hr_policy",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.policy.delete",
+      "domain": "hr",
+      "resource": "policy",
+      "action": "delete",
+      "description": "Remove an HR configuration object.",
+      "cerbosKind": "hr_policy",
+      "cerbosAction": "delete",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.policy.ratify",
+      "domain": "hr",
+      "resource": "policy",
+      "action": "ratify",
+      "description": "Sign off a statutory parameter set as legally verified, unblocking payroll finalization against it.",
+      "cerbosKind": "hr_policy",
+      "cerbosAction": "ratify",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.policy.read",
+      "domain": "hr",
+      "resource": "policy",
+      "action": "read",
+      "description": "Read HR configuration: holiday calendars, leave policies, review cycles, pay-grade structure, statutory parameter sets.",
+      "cerbosKind": "hr_policy",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": false,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.policy.update",
+      "domain": "hr",
+      "resource": "policy",
+      "action": "update",
+      "description": "Amend HR configuration objects.",
+      "cerbosKind": "hr_policy",
+      "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
       "key": "hr.record.create",
       "domain": "hr",
       "resource": "record",
@@ -1980,6 +2112,90 @@
       "action": "update",
       "description": "Edit HR records (contracts, documents, notes).",
       "cerbosKind": "hr_record",
+      "cerbosAction": "update",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.approve",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "approve",
+      "description": "Approve a requisition or an offer. Commits headcount and money; high-assurance only.",
+      "cerbosKind": "hr_recruitment",
+      "cerbosAction": "approve",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.convert",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "convert",
+      "description": "Convert an accepted offer into an employee record. The moment an outsider becomes staff; high-assurance only.",
+      "cerbosKind": "hr_recruitment",
+      "cerbosAction": "convert",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.create",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "create",
+      "description": "Create requisitions, candidates, applications, interviews, scorecards and offers.",
+      "cerbosKind": "hr_recruitment",
+      "cerbosAction": "create",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.delete",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "delete",
+      "description": "Delete recruitment records, including purging a candidate on an erasure request.",
+      "cerbosKind": "hr_recruitment",
+      "cerbosAction": "delete",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.export",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "export",
+      "description": "Bulk-export the candidate pool. Outsider personal data; high-assurance only.",
+      "cerbosKind": "hr_recruitment",
+      "cerbosAction": "export",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.read",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "read",
+      "description": "Read requisitions, candidates, applications, interviews and scorecards.",
+      "cerbosKind": "hr_recruitment",
+      "cerbosAction": "read",
+      "class": "grantable",
+      "sensitive": true,
+      "uiGrantable": true
+    },
+    {
+      "key": "hr.recruitment.update",
+      "domain": "hr",
+      "resource": "recruitment",
+      "action": "update",
+      "description": "Advance an application, edit a requisition, reschedule an interview.",
+      "cerbosKind": "hr_recruitment",
       "cerbosAction": "update",
       "class": "grantable",
       "sensitive": true,

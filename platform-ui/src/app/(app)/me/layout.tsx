@@ -31,6 +31,11 @@ export default async function MeLayout({ children }: { children: React.ReactNode
     { key: "inbox", label: "Inbox", href: "/me/inbox", icon: "check" },
     { key: "leave", label: "Leave", href: "/me/leave", icon: "clock" },
     { key: "loans", label: "Loans", href: "/me/loans", icon: "wallet" },
+    // HR-FULL (2026-08-24). Ungated on purpose: the page asks the backend for "mine" and passes no
+    // subject, and resource_hr_payroll.yaml's member arm answers with this person's own PUBLISHED
+    // payslips or nothing. An employee with no payslips sees an empty state explaining why, which is
+    // a better answer than a missing tab that looks like the feature does not exist.
+    { key: "pay", label: "Pay", href: "/me/pay", icon: "finance" },
   ];
 
   return (

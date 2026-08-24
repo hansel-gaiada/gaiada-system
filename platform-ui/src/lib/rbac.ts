@@ -174,6 +174,21 @@ export const CAPABILITIES = [
   "knowledge.review",   // review/quarantine knowledge sources
   "hr.view",            // read hr_cases/hr_records/leave/attendance for a company
   "hr.manage",          // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
+  // ── HR-FULL (2026-08-24) — mirrors of the three new Cerbos kinds. This file is a MIRROR of the
+  //    policy, never the source: resource_hr_policy.yaml / resource_hr_recruitment.yaml /
+  //    resource_hr_payroll.yaml decide, and these exist so a page can hide a control the server
+  //    would refuse anyway. Getting one of them WIDER than its policy is a cosmetic bug (a button
+  //    that 403s); getting one NARROWER hides a capability somebody actually holds — so when in
+  //    doubt the mirror is written narrow and the server is the one that says no.
+  "hr.policy.view",     // read holiday calendars, leave policies, review cycles, pay grades, statutory params
+  "hr.policy.manage",   // create/amend HR configuration (NOT ratify)
+  "hr.policy.ratify",   // sign off a statutory parameter set — company_admin only, high assurance
+  "hr.recruitment.view",    // read requisitions, candidates, applications, interviews, scorecards
+  "hr.recruitment.manage",  // run the pipeline: create/advance/schedule/score/draft offers
+  "hr.recruitment.approve", // approve a requisition or offer, and convert an offer into an employee
+  "hr.payroll.view",    // read compensation, benefits, payroll runs, payslips, separations (company-wide)
+  "hr.payroll.manage",  // set compensation, capture inputs, create + calculate runs, draft separations
+  "hr.payroll.approve", // approve a run / compensation change / separation, mark a run paid
   "search.view",        // read search-marketing properties/engagements/keywords/audits/campaigns/reports/ledger for a company
   "search.manage",      // create/edit properties/engagements/keywords/audits/campaign drafts+proposals/report drafts (draft-only working set — mirrors search_staff/search_manager's baseline Cerbos grant)
   "search.scope.write", // set an engagement's tool-scope config + provider budget cap (D-11; Cerbos action `set_scope`, elevated-only)
@@ -272,7 +287,22 @@ const ALL: Capability[] = [...CAPABILITIES];
 //   HR_OPS            — the ACTING HR tier (hr_manager). See finding ② below.
 const REPORT_READS: Capability[] = ["reports.person.view", "reports.project.view", "reports.department.view"];
 const EXEC_ONLY_REPORTS: Capability[] = ["reports.company.view", "reports.period.seal", "reports.facts.admin"];
-const HR_OPS: Capability[] = ["checkin.excuse", "appraisal.cycle.admin"];
+const HR_OPS: Capability[] = [
+  "checkin.excuse", "appraisal.cycle.admin",
+  // HR-FULL: the three new kinds' WRITE + APPROVE tiers are `hr_people_ops`, which derived_roles.yaml
+  // defines as hr_manager ONLY (not hr_staff). Adding them to HR_OPS rather than to hr_manager's
+  // literal list keeps that "acting tier" grouping intact — it is the same set TR-25 established.
+  //
+  // `hr.policy.ratify` is NOT here, deliberately: resource_hr_policy.yaml grants ratify to
+  // company_admin alone. Ratification declares the statutory numbers verified and unblocks paying
+  // people against them; it is an accountability act, not an HR-operations one.
+  "hr.policy.manage",
+  "hr.recruitment.manage", "hr.recruitment.approve",
+  "hr.payroll.view", "hr.payroll.manage", "hr.payroll.approve",
+];
+
+/** The READ tier both HR roles hold: configuration and the recruitment pipeline, never payroll. */
+const HR_BASELINE_READS: Capability[] = ["hr.policy.view", "hr.recruitment.view"];
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   company_admin: [
@@ -284,6 +314,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // over-broad `approvals.decide` mapping; this just keeps them held under the correctly-split name.
     "pipeline.write", "pipeline.manage", "webdev.provision",
     "hr.view", "hr.manage",
+    // HR-FULL: company_admin is named in every rule of all three new policies, ratify included.
+    "hr.policy.view", "hr.policy.manage", "hr.policy.ratify",
+    "hr.recruitment.view", "hr.recruitment.manage", "hr.recruitment.approve",
+    "hr.payroll.view", "hr.payroll.manage", "hr.payroll.approve",
     "search.view", "search.manage", "search.scope.write", "search.campaign.launch", "search.report.approve", "search.ledger.admin",
     // company_admin holds the FULL social manager-tier bundle (role-permission-bundles.json: every
     // permission social_manager holds, company_admin holds identically — same Cerbos rule lists
@@ -435,8 +469,11 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // exactly what a cited policy says, never by inference from a sibling role. All three roles have
   // 0 live holders today (IAM-02a-0's census), so this closes the mirror gap before HR/search/
   // reports staffing exists, rather than after — same precedent as DR-2a (`member`/`viewer`).
-  hr_staff: ["hr.view", ...REPORT_READS, "checkin.read", "people.directory"],
-  hr_manager: ["hr.view", "hr.manage", ...REPORT_READS, "checkin.read", "appraisal.read", ...HR_OPS],
+  // HR-FULL: hr_staff gains the two BASELINE reads and nothing else — notably NOT hr.payroll.view.
+  // That is the whole point of the hr_payroll/hr_record split: an HR assistant who files leave and
+  // uploads contracts has no business reading the company's salary book.
+  hr_staff: ["hr.view", ...HR_BASELINE_READS, ...REPORT_READS, "checkin.read", "people.directory"],
+  hr_manager: ["hr.view", "hr.manage", ...HR_BASELINE_READS, ...REPORT_READS, "checkin.read", "appraisal.read", ...HR_OPS],
   // search_staff = Cerbos module_staff (draft-only baseline: read/create/update, propose_change,
   // research/run — never launch/set_scope/approve/admin). search_manager = module_manager (adds
   // the elevated actions). Mirrors hr_staff/hr_manager's split exactly (SM-03).

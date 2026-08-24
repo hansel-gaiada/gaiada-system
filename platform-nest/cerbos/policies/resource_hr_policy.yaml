@@ -1,0 +1,68 @@
+# HR wave A — `hr_policy`: the CONFIGURATION tier of the HR module.
+#
+# Covers holiday calendars, leave policies and their assignments, checklist-template governance,
+# review-cycle definitions, pipeline stage sets, pay-grade structures and the statutory parameter
+# sets. Everything whose subject is THE COMPANY'S RULES rather than a specific person.
+#
+# ── Why the read side is deliberately WIDE ──────────────────────────────────────────────────────
+# This is the one HR kind where broad read is correct, and it is worth saying why rather than
+# leaving it looking like an oversight. Every member of staff has a legitimate need to know:
+#
+#   * which days are public holidays (before booking anything)
+#   * how much annual leave they accrue and when it expires (before planning anything)
+#   * when the review window opens
+#
+# Hiding the leave policy from the people it governs is not a security posture, it is a support
+# ticket. The company's OWN RULES are not per-subject data — there is no person on the other side
+# of a holiday calendar — so the sensitivity argument that gates hr_record and hr_payroll simply
+# does not apply here.
+#
+# ── The one exception, and it is a real one ─────────────────────────────────────────────────────
+# `hr_statutory_parameter_sets` / `hr_statutory_parameters` are reachable through this kind too, and
+# they are NOT interesting to read (a tax bracket is public law) but they ARE dangerous to write: the
+# payroll engine computes from them, so an edit silently changes everybody's next payslip. That is
+# why `ratify` exists as its own action at the D4 tier rather than being folded into `update` —
+# see the migration's own header on why ratification is data rather than ceremony.
+#
+# ── ROLE-ARM ONLY this wave, no perm_* mirror ───────────────────────────────────────────────────
+# Consistent with resource_hr_payroll.yaml and resource_hr_recruitment.yaml, landed in the same
+# change. The read rule here is a plain global-or-company shape and COULD carry a mirror safely;
+# it is omitted anyway so the three new HR kinds have one posture between them, and so a single
+# follow-up IAM ticket can audit and wire all three together rather than leaving one odd one out.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: hr_policy
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Read: anyone in the tenant. See the header — these are the company's own rules, and the people
+    # they govern are the people who need them.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member", "module_staff", "module_manager", "hr_people_reader", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Write: the acting HR tier and the company admin. Note `module_staff` is NOT here — an HR
+    # assistant reading the leave policy is right; an HR assistant rewriting it is not.
+    - actions: ["create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # RATIFY — signing off a statutory parameter set. Its own action at the D4 high-assurance tier
+    # because it is the gate the payroll engine checks before it will finalize a run against those
+    # numbers. Folding it into `update` would let the same routine edit that fixes a typo in a
+    # calendar name also declare the tax brackets legally verified.
+    - actions: ["ratify"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

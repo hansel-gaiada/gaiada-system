@@ -17,8 +17,8 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **100** capabilities across **15** owners
-- **56** writes · 44 reads
+- **108** capabilities across **15** owners
+- **56** writes · 52 reads
 - Writes by impact: **high 11** · medium 16 · low 29
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
@@ -75,12 +75,20 @@ unfalsifiable after.
 | core | `iam.revokeRoleGrant` | `DELETE` | `/api/:tenantId/role-grants/:grantId` | write | `medium` |
 | core | `iam.unassignPosition` | `POST` | `/api/:tenantId/positions/:positionId/unassign` | write | `medium` |
 | hr | `hr.fileLeave` | `POST` | `/api/:tenantId/modules/hr/leave` | write | `medium` |
+| hr | `hr.getAnalytics` | `GET` | `/api/:tenantId/modules/hr/analytics` | read | — |
 | hr | `hr.getEmployee` | `GET` | `/api/:tenantId/hr/employees/:employeeId` | read | — |
+| hr | `hr.getLeaveLedger` | `GET` | `/api/:tenantId/modules/hr/leave/ledger` | read | — |
+| hr | `hr.getRecruitmentFunnel` | `GET` | `/api/:tenantId/modules/hr/recruitment/funnel` | read | — |
+| hr | `hr.getWorkingDays` | `GET` | `/api/:tenantId/modules/hr/working-days` | read | — |
 | hr | `hr.hireEmployee` | `POST` | `/api/:tenantId/hr/employees` | write | `medium` |
 | hr | `hr.listCases` | `GET` | `/api/:tenantId/modules/hr/cases` | read | — |
 | hr | `hr.listEmployees` | `GET` | `/api/:tenantId/hr/employees` | read | — |
+| hr | `hr.listExpiringDocuments` | `GET` | `/api/:tenantId/modules/hr/compliance/expiring` | read | — |
 | hr | `hr.listLeave` | `GET` | `/api/:tenantId/modules/hr/leave` | read | — |
 | hr | `hr.listLoans` | `GET` | `/api/:tenantId/modules/hr/loans` | read | — |
+| hr | `hr.listPayslips` | `GET` | `/api/:tenantId/modules/hr/payslips` | read | — |
+| hr | `hr.listRequisitions` | `GET` | `/api/:tenantId/modules/hr/requisitions` | read | — |
+| hr | `hr.previewSeverance` | `GET` | `/api/:tenantId/modules/hr/separations/preview` | read | — |
 | hr | `hr.requestLoan` | `POST` | `/api/:tenantId/modules/hr/loans` | write | `high` |
 | hr | `hr.terminateEmployee` | `POST` | `/api/:tenantId/hr/employees/:employeeId/terminate` | write | `high` |
 | hr | `hr.transferEmployee` | `POST` | `/api/:tenantId/hr/employees/:employeeId/transfer` | write | `medium` |

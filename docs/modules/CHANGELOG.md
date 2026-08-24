@@ -11,54 +11,255 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.36.5` — 2026-08-24 — retire the seeded personas, and make the client logins work
+### hr `0.4.0` + platform-nest `0.38.0` + platform-ui `0.49.0` — 2026-08-24 — HR-FULL: the department, waves A–D
 
-**Added**
-- **`seed:reassign-retired`** — moves the 17 retired identities' ~1,100 rows onto the real staff doing
-  those jobs, mapped by function. Columns derived from `pg_constraint` so a future FK cannot be
-  missed. Bulk UPDATE inside a SAVEPOINT with a row-by-row fallback, because several targets carry a
-  UNIQUE on (tenant, user, date) — collisions are REPORTED, never swallowed.
-  ⚠ Personal history (attendance, check-ins, work facts, time entries) moves too, by explicit owner
-  decision. Real staff therefore show records transferred from seeded personas. Stated in the file
-  header so a later audit of anyone's attendance knows those rows are not evidence.
-  ⚠ Identity does NOT move: `user_roles`, `identity_links`, `org_unit_memberships`,
-  `position_assignments`. Reassigning a role grant would hand a real person a ghost's ACCESS.
-- **`seed:client-logins`** — the four seeded client contacts already had Keycloak accounts with
-  UNKNOWABLE passwords (`seed:portal-clients` mints `Portal-<random>` per run and prints it once).
-  Re-sets them to a known value, adds the contact Bali Beach Resort never had, and revokes the two
-  `@example.invalid` artifacts (revocation is the modelled lifecycle; deletion would erase the invite
-  audit trail). Passwords PERMANENT here, unlike staff — `keycloak-admin` documents why for external
-  clients.
-- **`seed:retire-placeholder-hr`** — deletes the 17 invented HR files. Refuses on an empty read,
-  because for a cleanup script "0 candidates" is indistinguishable from success.
+**Status: MIXED, and the mix is the point.** Schema/RLS and the pure engines are **DEV-VERIFIED**;
+handlers and UI are **PROTOTYPED**. See the per-layer table in
+[`MODULES.md`](./MODULES.md#hr--people--hiring--pay--040--in-progress) — nothing here was driven
+end-to-end against a running stack, and "the unit suite is green" is not that.
 
-### platform-nest `0.36.4` — 2026-08-24 — IAM-14c, the org-tree refresh, and two test-infra fixes
+Owner ask (2026-08-24): finish the HR department — research the best HR ERPs, find what was not yet
+planned, and build it. Scope confirmed as all four waves **including payroll**, and PII posture
+confirmed as label-only per 0109's precedent.
 
-**Added**
-- **IAM-14c — `core.integration_connection.manage`.** The company tier of the credential-vault kind
-  gets its own key, so `owner` (permission-native, zero Cerbos rules) can administer a company's
-  integrations instead of only its own. `member`/`viewer` gain nothing — they do not hold it, which is
-  the entire reason a NEW key was minted rather than the existing four mirrored more widely.
-  Additive: the four per-row rules are byte-identical and both controller suites pass unchanged.
-- **`seed:org-structure-refresh`.** The org tree is one JSON blob in `company_org_structure`, and
-  `seed:agency` writes it `ON CONFLICT DO NOTHING` ("never overwrite edits made in the org builder").
-  Correct, but it makes a stale tree STICKY — the ERP kept rendering the invented roster after the
-  real one landed, and no amount of re-seeding would have changed it. This upserts, refuses when the
-  tree does not look seed-shaped (org-builder work is unreconstructible), and refuses when a roster
-  member has no `users` row.
+**What the audit found.** `docs/blueprints/hr-department-foundation.md` §3 listed seven candidate
+capabilities. Measured against the standard HCM capability map, **five more gaps existed that the
+blueprint did not name at all** — and they were the load-bearing ones:
 
-**Fixed**
-- **The test harness raced across concurrent sessions.** `platform_app_test` is one role in the
-  cluster's global catalog; two sessions running `CREATE/ALTER ROLE` on it collide with
-  `tuple concurrently updated`, which is NOT `duplicate_object` and so escaped the existing handler.
-  It cost three unrelated files in one run with zero failed assertions. Now retried, narrowly.
-- **The HR third-wall list was 9 tables; the wave made it 42.** `module-hr-rls.test.ts` now verifies
-  FORCE RLS and a `tenant_isolation FOR ALL` policy on all 42, including payroll and compensation.
-  ⚠ Those policies are built with `EXECUTE format(...)` in a DO loop, so grepping migrations for
-  `CREATE POLICY tenant_isolation ON hr_` finds ZERO and looks like 42 unprotected tables. It is not
-  — grep cannot see dynamic SQL. Ask `pg_policies`.
-- The capability-inventory guard named `npm run gen:capability-inventory`, which has never existed;
-  the suite IS the generator (`UPDATE_INVENTORY=1`).
+- `hr_leave_balances.allocated_minutes` had **nothing that computed it**. It was a number somebody
+  typed, and nothing in the system could restate how it was reached.
+- **There was no holiday calendar.** A five-calendar-day leave request spanning a weekend was charged
+  as five days.
+- `employees` held CURRENT state only, so every promotion, transfer and status change **OVERWROTE the
+  previous fact**. Tenure, turnover and any statutory severance calculation were unanswerable from
+  the database.
+- `hr_records` had no validity. **An expired work permit and a current one were byte-identical to
+  every query in the system.**
+- Nothing modelled what anyone is paid.
+
+#### Added
+
+- **33 tables across four migrations** (`202608240140`–`0143`), every one behind the byte-identical
+  0028 third-wall predicate, applied through the same DO-loop shape so it cannot drift per table.
+  - **A** — holiday calendars (with Indonesian *cuti bersama*, which is not worked but IS charged —
+    two facts that needed two counters), leave policies + assignments + an append-only accrual ledger,
+    `hr_job_events` (the effective-dated worker history), document expiry + a reminder ledger, review
+    cycles + participants, and an append-only case timeline.
+  - **B** — the ATS. `hr_candidates` is a population **deliberately separate from `employees`**:
+    different legal basis, its own retention clock, and nothing that provisions access may reach it.
+    Hiring is an explicit CONVERSION, and `ck_hr_offer_conversion` makes "converted ⟺ has an
+    employee_id" a database invariant rather than a convention.
+  - **C** — pay grades, effective-dated compensation, allowances, BPJS enrolment, PPh 21 tax profiles.
+  - **D** — statutory parameter sets, payroll runs, frozen payslips + itemized lines, per-period
+    inputs, separations.
+- **Four pure engines**, no database and no clock: `working-days.ts`, `leave-accrual.ts`,
+  `payroll-calc.ts` (PPh 21 TER + progressive reconciliation + BPJS + THR), `severance.ts`
+  (PP 35/2021's three components). **109 unit tests.**
+- **Three Cerbos kinds** — `hr_policy` (read deliberately WIDE), `hr_recruitment` (wider than
+  `hr_case` on read, narrower on write, with an attribute-gated panel arm), `hr_payroll` (a step
+  ABOVE `hr_record`) — plus 18 catalog permissions, 11 authoring groups, role bundles, and migration
+  `202608240144`.
+- **Four controllers**, eight read-only MCP tools, five new rollup metrics, seven console pages and
+  `/me/pay`.
+
+#### Fixed / corrected
+
+- **`app_module_allowed()` returns NULL, not `false`, on an unset GUC.** 0028's header says "false".
+  Verified against a live Postgres. The wall is unaffected (RLS admits only TRUE), but anything
+  OUTSIDE a policy is affected — `IF NOT app_module_allowed(...)` never fires on NULL. Corrected in
+  `202608240140`'s header and pinned by the test as NOT-TRUE rather than as false.
+- **Four Cerbos resource attributes were silently dropped.** `resourcePayload()` in `cerbos.ts` is an
+  explicit allow-list, and `published` / `panelistUserIds` / `hiringManagerUserId` /
+  `recruiterUserId` were not in it. Two of them arrive through an object spread, where TypeScript's
+  excess-property check does not fire — so the type alone would not have caught it, and every
+  panelist would have been denied for no visible reason.
+- **Seeding `member` was tried as an exclusion and reverted.** Omitting `member`'s self/panel-scoped
+  bundle rows broke `role-permission-parity.db.test.ts`, correctly: Cerbos genuinely grants them. The
+  safety argument is the ABSENT `perm_*` mirror, not an absent row — which is exactly what 0094
+  already established for `hr_case`.
+
+#### Caught by the FULL suite, after the touched-file suites were already green
+
+Recorded because it is the argument for the whole gate. Three failures, none in an HR suite:
+
+- **Cerbos had not reloaded** the three new policy files, so the live PDP denied all 18 new keys
+  (`authz-permissions.controller.test.ts`). Restarted, then **probed with real decisions** rather
+  than trusting health: own PUBLISHED payslip ALLOW / own DRAFT DENY / another's DENY; panelist
+  read+create ALLOW but update+delete DENY; non-panelist all DENY; hiring manager read+update ALLOW
+  but approve DENY; member on `hr_policy` read ALLOW but update+ratify DENY.
+- **A real routing regression** (`override-request-decide.test.ts`). `routeFor()` counts a role's
+  sensitive, non-self-scoped HR permissions to pick an override approver; `member`'s three
+  panel-gated `hr_recruitment` keys were unmarked, so a NON-HR override began routing to hr_manager
+  instead of company_admin. Two causes: the panel conditions had been factored into
+  `variables.local`, making them opaque to the self-scope classifier, and the classifier had no
+  vocabulary for membership (`principal.id in attr.X`) regardless. Fixed by inlining the conditions
+  and teaching both twin predicates the membership form — blast radius measured first: that form
+  appears in exactly ONE resource policy, so no pre-existing role's classification moved.
+- **`CAPABILITY-INVENTORY.md` drifted** once 8 MCP tools were added. Regenerated.
+
+⚠ An earlier draft of this entry called the marker gap "not exploitable — the ceiling governs
+granting, not acting." **That was wrong** — the marker also feeds override routing. Corrected rather
+than deleted, because the wrong reasoning is the useful part.
+
+#### The acceptance drive (added after the first pass, and it found two things)
+
+`src/modules/hr/hr-full-acceptance.test.ts` — the whole department over REAL HTTP (`buildApp()` +
+`app.inject()`, live Postgres + live Cerbos), following one employee end to end: configure →
+requisition → candidate → interview → scorecard → offer → convert → payroll
+calculate/ratify/approve/publish/pay → the subject reads their OWN published payslip → accrue leave →
+separate → analytics. **19 assertions, 0 skips.** Handlers move PROTOTYPED → DEV-VERIFIED.
+
+Two findings, both in the TEST rather than the code, and both worth recording because a green run
+would have hidden them:
+
+- **The fixture conflated the panelist with the hiring manager.** One user held both roles, so the
+  hiring-manager rule granted `update` and the assertion "a panelist cannot reject a candidate"
+  passed against the wrong rule — proving nothing. Split into two users; the panel arm and the
+  hiring-manager arm are now proven separately.
+- **The test's own arithmetic was wrong** on service years (asserted 1.75 for a 2026-10-01 →
+  2027-06-30 span, which is nine months). The engine said 0.746 and the engine was right.
+
+#### Seeding — `npm run seed:hr-config`
+
+Holiday calendar (Indonesian 2026 incl. *cuti bersama*), three leave policies encoding UU 13/2003
+art. 79, the 9-stage funnel, 7 pay grades, 6 allowance types, all five BPJS programs as SEPARATE
+plans, and an UNRATIFIED statutory parameter set. Idempotent (proven to a third run) and asserted to
+write **zero personal data** — which is what lets it run pre-Gate-1.
+
+#### Flagged, not resolved
+
+1. **Not deployed, not committed.** Proven on a disposable harness, not the live estate.
+3. **The statutory figures are UNRATIFIED.** They express the structure of PP 58/2023 and PP 35/2021
+   and are not legal advice. The engine hard-codes nothing, every run records the set it used, and
+   finalizing against an unratified set demands a permanently-recorded override — that is the
+   employee-portal §6 gate, re-expressed as data so the engine could be built without waiting on it.
+4. **Payroll sequencing overrides a written plan.** `employee-portal-foundation.md` §6 assigned the
+   engine elsewhere. Owner-directed, recorded in the migration header rather than left for a future
+   reader to discover as a contradiction.
+5. **No seeds** for calendars, policies, pipeline stages or a parameter set. Every affected surface
+   renders an empty state that says what is missing instead of inventing a default.
+6. **The `HR` nav entry remains ungated**, predating this work. The two money tabs are
+   capability-gated inside the console, so this does not widen it.
+
+### platform-nest `0.37.0` + platform-ui `0.48.0` — 2026-08-24 — client-centric ERP, slice 1: the client hub + the `clientId` facet (CC-01..03)
+
+**Status: DEV-VERIFIED** (browser-driven against a DEMO_MODE build; the SQL additionally validated
+against the LIVE estate before deploy). Design: `docs/plans/2026-08-24-client-centric-erp-design.md`.
+Contract: `docs/FRONTEND-BFF-CONTRACT.md` §22.
+
+Owner ask: read the ERP client-first — tasks, projects and everything else shown and filtered to the
+client. The measurement that shaped the design: **`client_id` is already on 12 tables, so no new
+columns were needed** — what was missing was the read surface. And **26 of 71 tasks / 9 of 20 projects
+have no client at all**, so "everything starts with a client" needed an explicit answer for the
+clientless third of the estate rather than a filter that quietly loses it.
+
+**The finding worth keeping:** the client portal has always shown a client everything they own on one
+surface, while `/clients/[id]` on the staff side showed contacts and a calendar and none of the
+client's work — **staff had a worse client-centric view than the client did.** This slice is the staff
+mirror of `/portal`.
+
+#### Added
+- **`core/client-filter.ts`** — the `?clientId=` facet: absent / `<uuid>` / `internal`. `internal`
+  resolves to `client_id IS NULL`, **not** `is_internal = true`: the two disagree on the live estate
+  (9 clientless projects, 7 flagged) and keying on the flag would leave 2 projects reachable from no
+  scope at all.
+- **Facet on `GET /projects`, `GET /pm/tasks`, `GET /invoices`** — all additive; omitting the
+  parameter is unchanged behaviour. The task facet joins through `projects` (no `pm_tasks.client_id`,
+  by decision) and turned out cheaper than designed: that CTE already joins `projects`.
+- **`GET /:t/clients/:clientId/overview`** — the hub aggregate, one round trip, mirroring
+  `/portal/overview`. Carries **`needsUs`** alongside `needsClient`.
+- **`/clients/[id]` hub** — Overview + Work tabs, tab strip, `clientHub.css`. The former client page
+  moved verbatim to `/clients/[id]/details`; nothing was deleted.
+
+#### Fixed
+- The client page fetched **every project in the tenant** and narrowed in the browser — which stops
+  being a filter past one page of rows. Now server-side.
+
+#### Notes / non-obvious
+- **The facet is a CONVENIENCE FILTER, not a boundary, and both files now say so pointing at each
+  other.** `portal-scope.ts` fails CLOSED (an external client must not reach another's rows); this
+  fails OPEN (a bad value shows everything), because a filter that fails closed hides real work and
+  looks exactly like "there is nothing here". Merging them into one "client scope" abstraction is how
+  a filter silently becomes load-bearing for isolation — pinned by a unit test that says so.
+- **`needsUs` is the reason the aggregate exists.** Nothing in the ERP rendered it before, which is
+  precisely how a client-recorded payment sat `pending` with no screen saying anyone had to confirm
+  it. Verified on the live estate: Nusa Coffee Co has **2** items waiting on us (an IDR 10,000,000
+  payment awaiting confirmation, one untriaged change request) against 7 waiting on the client.
+- The aggregate runs with `{ modules: ["social"] }`: the post-review join carries the `social` third
+  wall and without the scope that SELECT returns **zero rows and raises nothing** — the hub would have
+  reported "no post reviews outstanding" for a client with ten.
+- Unlike the portal layout, the hub layout lets a fetch failure **throw**. A hub rendering zeroes tells
+  a manager their client has no work, nothing owed and nobody waiting; this is the screen people act
+  on, so an empty state must mean "empty", never "we could not ask".
+- Demo fixtures mirror the facet, `internal` included. A fixture that ignored `?clientId=` would make
+  every client-scoped surface look right in DEMO_MODE while showing the whole tenant — and would have
+  lit up the Work tab's data-integrity card with other clients' tasks.
+
+#### Known gaps (tracked, not implicit)
+- The **six endpoints that already had `clientId`** (`deliverables`, `contracts`, `pipeline/runs`,
+  `meetings/recordings`, `webdev/change-requests`, `social/*`) accept a uuid only — `internal` matches
+  nothing there. Slice 2.
+- **No facet yet** on `invoice-payments` or `time-entries`; **no `/approvals` list endpoint exists**.
+- **Still no staff write UI** for contracts or payment confirmation (§16e). This slice makes both
+  VISIBLE in `needsUs`; the Commercial tab that calls `send`/`countersign`/`decide` is slice 2.
+- Slices 3-5 (Delivery / Requests / People tabs, the staff timeline, `<ClientPicker>` on the
+  object-first lists) are PLANNED.
+
+#### Gates
+`tsc --noEmit` clean in both projects · `lint:withtenants` + `lint:migration-rls` OK · 9 unit tests
+for the filter (incl. the fail-open contract) · **10 real-DB tests** for the facet and the money
+math, run against a live test Postgres · platform-ui **172 files / 2795 tests** green ·
+`DEMO_MODE=1 next build` green with all three hub routes · Playwright drove the hub in a browser.
+No migration in this slice.
+
+### platform-ui `0.47.0` — 2026-08-24 — GM console: the cockpit, the gate, the Departments tab (GM-01..04)
+
+**Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build (cockpit, all five GM tabs,
+both themes, the member-refusal path and the wrong-department path); not driven against live
+platform-nest, and no e2e spec added yet.
+
+Design: [`../blueprints/gm-console-foundation.md`](../blueprints/gm-console-foundation.md).
+
+**What landed**
+
+- `lib/deptToolkits.ts` — a `gm` toolkit: `Home · Project Management · Command · Oversight ·
+  Connections`. Two craft groups rather than one (SEO's D-10 precedent) because five tabs under one
+  group is a flat list with extra steps. No GitHub/Figma/VS Code launchers — the GM does not produce.
+- `lib/gm.ts` — the gate, the period vocabulary, the Tier-1 cap, keyed on the department NAME slug so
+  every company in the holding resolves its own GM node.
+- `components/departments/gm/` — `GmCockpit` (Tier 1 company KPIs + Tier 2 department strip),
+  `GmDeptStrip`, `GmProvenance`, `GmAccessDenied`, `gmTab` (the shared two-check guard).
+- Five routes under `app/(app)/departments/[deptId]/`: `depts` is real (GM-04); `review`,
+  `decisions`, `money`, `people` are honest stubs naming GM-05..08. Routes exist so the toolkit
+  cannot point at a 404 — the registry's own standing rule.
+- `components/shell/nav.ts` — GM hoisted to the top of `Departments` (see
+  `../sidebar-nav-map.md`). **No route moved.**
+- `lib/org.ts` — a GM department in the seeded/default agency structure, appended so the positional
+  `dept-N` ids stay stable.
+
+**Two findings worth carrying forward**
+
+1. **`rollups.view` is held by NO role bundle except `platform_admin`'s wholesale `ALL`.** The design
+   doc's first draft said reuse it for the GM gate (it gates `/rollups` and, in `nav.ts`, the Company
+   Report row). Measured against `ROLE_CAPS`, that would have refused `company_admin` — the tenant's
+   own administrator, who holds the whole `EXEC_ONLY_REPORTS` tier — while the backend served the
+   same figures at `/reports/company`: a UI gate hiding a page the server would serve. The gate is
+   `reports.company.view`, the capability that names the actual §8 boundary, and it is company-scoped
+   so a `company_admin` cannot read another tenant's cockpit by editing the URL.
+2. **The cockpit hardcodes no metric keys.** Tier 1 and Tier 2 both render whatever
+   `reports/overview` returns for the grain, capped for cognitive load, with columns derived from the
+   union across scopes. The design sketched six named north stars; implementing that literally would
+   have hardcoded keys against a registry this console does not own — the frontend-first drift class.
+   `KpiTiles` is reused as-is, so formatting, denominators, point-in-time labels and delta chips
+   cannot drift from the reports surface.
+
+**Deliberately honest gaps** — the money tier has no backend at all (no tenant-level MTD spend or
+margin endpoint; only per-engagement `ledger`, owned by SM-17/SM-22), so `money` carries a
+`BackendPending` banner and never a zero; and one department's provider spend must not be summed into
+a group figure. OQ-1's narrowed department-head view is tracked as **GM-02b**, blocked on the UI
+having any way to identify a unit lead (`Me` carries no position/lead signal and P2-05 is unbuilt) —
+guessing would ship a leak, so a dept head currently gets the same refusal a member does.
+
 
 ### social-media `0.5.31` — 2026-08-23 — correcting how SMM-35's agent gate actually works
 
@@ -1823,58 +2024,6 @@ it to a commit-range diff.
 **Verification:** roster-access 6/6 and employee-files 6/6, each including a negative control — the
 business-data tables stay empty, and the HR module wall is proven real by reading `employees` twice
 and asserting the reads disagree. tsc and `lint:withtenants` clean.
-
-### `Alpha 01.071.0147a` - 2026-08-24 - the seeded personas retire, the clients get logins
-
-Manifest (counter +1, 0146 -> 0147): `platform-nest 0.36.4 -> 0.36.5`.
-
-Three owner decisions land together, and they must run in THIS ORDER: reassign, then retire the HR
-files, then the client logins. Retiring first would orphan the work the reassignment is meant to move.
-
-Nothing here changes schema or policy — three opt-in seed scripts, each dry-run by default. Shipping
-them is not running them.
-
-**Full module manifest** (rule 2):
-
-| Module | Ver | Module | Ver | Module | Ver |
-|---|---|---|---|---|---|
-| **platform-nest** | **`0.36.5`** | wa-chat-bot | `0.9.2` | search-marketing | `0.5.2` |
-| platform-ui | `0.41.0` | ai-agents | `0.8.0` | social-media | `0.5.26` |
-| ai-gateway-go | `0.13.2` | hermes-gateway | `0.2.0` | creative | `0.1.0` |
-| mcp-hub | `0.11.0` | capture-helper | `0.2.0` | render-gateway-go | `0.0.0` |
-| sync-engine-go | `0.7.0` | webdev | `0.13.0` | reports | `0.3.2` |
-| automation (n8n) | `0.4.1` | webdesk | `0.0.0` | report-renderer | `0.1.0` |
-| observability | `0.6.1` | infra | `0.8.6` | mail | `0.0.19` |
-| monitoring | `0.2.0` | | | | |
-
-⚠ The platform-ui/social-media figures above are this cut's own baseline; a concurrent session's
-CC-01 wave (platform-ui 0.48.0, platform-nest 0.37.0+) had uncommitted MODULES/CHANGELOG entries at
-cut time and is NOT represented here. Its manifest lands with its own cut.
-
-**Verification:** reassign-retired 6/6 (dry run inert, ownership moves, role grants do NOT, idempotent,
-refuses on a missing target); retire-placeholder-hr 4/4; org-structure-refresh 6/6; tsc clean.
-
-### `Alpha 01.070.0146a` - 2026-08-24 - the ERP finally shows the real people
-
-Manifest (counter +1, 0145 -> 0146): `platform-nest 0.36.3 -> 0.36.4`.
-
-⚠ CUT SPECIFICALLY TO SHIP THE ORG-TREE REFRESH. The roster landed three releases ago and the ERP
-still rendered "Gede Pratama" and "Komang Adi", because the org tree is a single JSON blob that
-`seed:agency` writes `ON CONFLICT DO NOTHING` — so it was stale AND unfixable by re-seeding. Every
-table was correct; the surface people actually look at was not. `seed:org-structure-refresh` ships
-here and is run against the estate immediately after.
-
-Also carries IAM-14c (`integration_connection.manage` — the company tier as its own key, so `owner`
-can administer a company's integrations), the shared-role harness retry, and the HR third-wall list
-grown 9 -> 42 tables.
-
-⚠ `platform-nest 0.37.0` is deliberately NOT used here: a concurrent session had already claimed it
-for the CC-01..03 client-hub wave whose entries were still uncommitted at cut time. This is 0.36.4 to
-avoid colliding with work that had not landed yet.
-
-**Verification:** full backend suite 5904 passed / 1 failed at gate time, and that one failure (the
-HR list) is fixed in this cut; iam-14c 9/9 vs live Cerbos; org-structure-refresh 6/6; both
-integration controller suites 27/27 UNCHANGED, which is the evidence IAM-14c is additive.
 
 ### `Alpha 01.069.0145a` - 2026-08-23 - a camera, and agents that say what they are doing
 

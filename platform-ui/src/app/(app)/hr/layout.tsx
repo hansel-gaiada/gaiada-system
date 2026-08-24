@@ -5,6 +5,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { PageHeader } from "@/components/PageHeader";
 import { SectionTabs, type SectionTab } from "@/components/shell/SectionTabs";
 import { isModuleOnForActiveCompany } from "@/lib/modules";
+import { can } from "@/lib/rbac";
 import { ModuleDisabled } from "@/components/ModuleDisabled";
 
 // HR is a functional department, same console pattern as Web Dev / IT. Its tools:
@@ -16,6 +17,18 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
 
+  // HR-FULL (2026-08-24) widened this console from six tabs to twelve. Two of them are GATED rather
+  // than always-on, and the gating is not cosmetic:
+  //
+  //   Compensation / Payroll — `hr.payroll.view`, which hr_staff deliberately does NOT hold. Showing
+  //   an HR assistant a Payroll tab that 403s teaches them the console is broken; omitting it tells
+  //   them the truth, which is that the salary book is a tier above their own.
+  //
+  // Everything else is ungated because its backend read is genuinely open to the HR reader tier.
+  // Note the pre-existing ⚠ recorded in the blueprint: the HR NAV ENTRY itself is still ungated in
+  // `components/shell/nav.ts`, so every staff member can open this console. That predates this
+  // change and remains a product call, not fixed here — but the two money tabs below do not widen it.
+  const canPayroll = can(me, "hr.payroll.view", tenant);
   const tabs: SectionTab[] = [
     { key: "overview", label: "Overview", href: "/hr", icon: "home" },
     { key: "people", label: "People", href: "/hr/people", icon: "hr" },
@@ -23,6 +36,17 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
     { key: "attendance", label: "Attendance", href: "/hr/attendance", icon: "check" },
     { key: "onboarding", label: "Onboarding", href: "/hr/onboarding", icon: "box" },
     { key: "cases", label: "Cases", href: "/hr/cases", icon: "inventory" },
+    { key: "recruitment", label: "Recruitment", href: "/hr/recruitment", icon: "hr" },
+    { key: "reviews", label: "Reviews", href: "/hr/reviews", icon: "check" },
+    ...(canPayroll
+      ? [
+          { key: "compensation", label: "Compensation", href: "/hr/compensation", icon: "wallet" as const },
+          { key: "payroll", label: "Payroll", href: "/hr/payroll", icon: "finance" as const },
+        ]
+      : []),
+    { key: "compliance", label: "Compliance", href: "/hr/compliance", icon: "inventory" },
+    { key: "analytics", label: "Analytics", href: "/hr/analytics", icon: "pulse" },
+    { key: "settings", label: "Settings", href: "/hr/settings", icon: "box" },
     // Org structure is edited on the company org builder; HR is its main consumer.
     ...(tenant ? [{ key: "org", label: "Org structure", href: `/companies/${tenant}/org`, icon: "inventory" as const }] : []),
   ];
@@ -36,7 +60,7 @@ export default async function HRConsoleLayout({ children }: { children: React.Re
       <PageHeader
         eyebrow="Department workspace"
         title="HR"
-        subtitle="People, roles and the company org structure."
+        subtitle="People, hiring, pay, compliance and the company org structure."
         breadcrumbs={[{ label: "Organization", href: "/organization" }, { label: "Departments", href: "/departments" }, { label: "HR" }]}
       />
       {moduleOn ? (

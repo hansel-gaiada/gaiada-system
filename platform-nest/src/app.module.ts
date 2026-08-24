@@ -85,6 +85,13 @@ import { LinkedInOAuthController, LinkedInOAuthCallbackController } from "./modu
 // header and `youtube-oauth.controller.ts`'s own header for why two controllers).
 import { YouTubeOAuthController, YouTubeOAuthCallbackController } from "./modules/social/youtube-oauth.controller";
 import { LoansController } from "./modules/hr/loans.controller";
+// HR-FULL (waves A-D): the HR department's configuration, recruitment, payroll and lifecycle
+// surfaces. All four mount under the SAME `api/:tenantId/modules/hr` prefix as HrController and
+// carry the same AuthGuard + ModuleEnabledGuard("hr"); the split is by capability, not by route.
+import { HrPolicyController } from "./modules/hr/hr-policy.controller";
+import { RecruitmentController } from "./modules/hr/recruitment.controller";
+import { PayrollController } from "./modules/hr/payroll.controller";
+import { HrLifecycleController } from "./modules/hr/hr-lifecycle.controller";
 import { AssistantController } from "./modules/assistant/assistant.controller";
 import { SearchController } from "./modules/search/search.controller";
 import { SearchGoogleOauthCallbackController } from "./modules/search/search-google-oauth.controller";
@@ -124,7 +131,9 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, BillingController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
-    AgencyController, PmController, ItController, ClientsController, HrController, LoansController, AssistantController, SearchController,
+    AgencyController, PmController, ItController, ClientsController, HrController, LoansController,
+    HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
+    AssistantController, SearchController,
     SocialController,
     // SMM-23: report review/approve/preview/deliver lifecycle, on its OWN controller class — same
     // reason as SearchReportsController below (three other seats hold social.controller.ts's edit

@@ -15,12 +15,12 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 24,
-      "totalPairs": 1321,
+      "totalPairs": 1322,
       "perRole": {
         "platform_admin": 287,
         "company_admin": 268,
         "manager": 152,
-        "member": 72,
+        "member": 73,
         "viewer": 29,
         "org_unit_lead": 8,
         "client": 7,
@@ -823,6 +823,7 @@
       "hr.case.read",
       "it.device.read",
       "pm.project.read",
+      "pm.task.create",
       "pm.task.read",
       "pm.task.update",
       "reports.appraisal.ack",

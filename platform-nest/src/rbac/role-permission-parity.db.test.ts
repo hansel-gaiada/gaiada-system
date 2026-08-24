@@ -133,7 +133,9 @@ const MONITORING_KINDS = new Set([
 ]);
 
 function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] {
-  if (kind === "hr_case" || kind === "hr_record") return ["hr_staff"];
+  // HR-FULL (2026-08-24): hr_policy joins the HR module tier. Kept byte-aligned with the
+  // generator's own moduleStaffTargets() — the two are deliberate independent copies.
+  if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_staff"];
   if (SEARCH_KINDS.has(kind)) return ["search_staff"];
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
   if (MONITORING_KINDS.has(kind)) return ["monitoring_staff"];
@@ -155,7 +157,7 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
 }
 
 function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[] {
-  if (kind === "hr_case" || kind === "hr_record") return ["hr_manager"];
+  if (kind === "hr_case" || kind === "hr_record" || kind === "hr_policy") return ["hr_manager"];
   if (kind === "automation_approval") return ["hr_manager"]; // rule condition hardcodes attr.module == "hr"
   if (SEARCH_KINDS.has(kind)) return ["search_manager"];
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];

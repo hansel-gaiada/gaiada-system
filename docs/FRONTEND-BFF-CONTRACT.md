@@ -741,6 +741,166 @@ notification feed. `/me/inbox` (wave F) unifies `GET /api/:t/notifications` with
 mean a second unread model; a notification row is therefore the unit. `/me/leave` and `/me/loans`
 carry their own `ModuleDisabled` note because `hr` is dark for every company except the agency.
 
+### 10c. HR department waves A–D (HR-FULL, 2026-08-24) — `modules/hr/{hr-policy,recruitment,payroll,hr-lifecycle}.controller.ts` — **BACKEND: SCHEMA DEV-VERIFIED, HANDLERS PROTOTYPED · UI: PROTOTYPED (`lib/hr-full.ts`)**
+
+Closes the capability gaps `docs/blueprints/hr-department-foundation.md` §3 listed as candidates,
+plus five the blueprint did not name at all (leave accrual, effective-dated job history, document
+expiry, compensation, statutory payroll). Four new controllers, all mounted on the SAME
+`/api/:tenantId/modules/hr` prefix behind `AuthGuard + ModuleEnabledGuard("hr")` as §10, and all
+behind the same `app_module_allowed('hr')` third wall.
+
+**Status vocabulary, precisely.** The 33 new tables and their RLS are **DEV-VERIFIED** — the
+migrations were applied to a real Postgres and `src/db/hr-full-rls.test.ts` proved FORCE RLS, a
+byte-identical policy predicate, and zero-rows-without-module-scope on every one of them, plus seven
+schema invariants (20 assertions, zero skips). The pure engines are DEV-VERIFIED by 109 unit tests.
+The **handlers are PROTOTYPED**: they typecheck, they follow the established `withTenants(...,
+{modules:["hr"]})` + `authorize()` shape, and their authorization is pinned by the IAM alignment
+suites — but no one has driven the HTTP surface end-to-end against a running stack. Do not read
+"BUILT" into any row below.
+
+#### Three new Cerbos kinds
+
+| Kind | Covers | Read tier | Write tier | High-assurance actions |
+|---|---|---|---|---|
+| `hr_policy` | holiday calendars, leave policies + assignments, review cycles, pay grades, statutory parameter sets | **everyone in the tenant** (see note) | `hr_people_ops` + `company_admin` | `ratify` (company_admin only) |
+| `hr_recruitment` | requisitions, candidates, applications, interviews, scorecards, offers | `hr_people_reader` + `company_admin`; **plus** hiring manager / recruiter / panelist by attribute | `hr_people_ops` + `company_admin`; panelists may `create` a scorecard | `approve`, `convert`, `export` |
+| `hr_payroll` | compensation, allowances, benefits, tax profiles, payroll runs, payslips, separations | `hr_people_ops` + `company_admin`; **plus** the subject's own PUBLISHED payslip | `hr_people_ops` + `company_admin` | `approve`, `export` |
+
+> **`hr_policy` read is deliberately wide.** There is no person on the other side of a holiday
+> calendar, and hiding the leave policy from the people it governs is a support ticket, not a
+> posture. `hr_payroll` is deliberately a step ABOVE `hr_record`: an HR assistant who files leave and
+> uploads contracts must not reach the salary book, which is why `hr_staff` holds neither
+> `hr.payroll.view` nor any payroll write.
+
+**All three are ROLE-ARM ONLY — no `perm_*` mirror.** Same posture `resource_employee.yaml` took
+under P2-02, and here it is load-bearing: the recruitment panel rules are attribute-gated and a flat
+permission mirror would collapse "only for an interview you are on" into an unconditional grant over
+every candidate. See migration `202608240144_iam_hr_full_permissions.sql`'s header for the full
+argument, including why `member` IS seeded (it is the `hr_case` precedent) and the one flagged gap in
+0114's self-scoped marker.
+
+#### Configuration — `hr-policy.controller.ts` (authorizes `hr_policy`)
+
+| Method | Path (under `/api/:t/modules/hr`) | Returns |
+|---|---|---|
+| GET / POST | `/calendars` | `HolidayCalendar[]` / `{id}` |
+| GET / POST | `/calendars/:id/holidays[?year]` | `Holiday[]` / `{upserted}` |
+| DELETE | `/holidays/:id` | `{ok}` |
+| GET | `/working-days?from&to[&calendarId]` | `WorkingDayBreakdown` |
+| GET / POST | `/leave-policies` | `LeavePolicy[]` / `{id}` |
+| PATCH | `/leave-policies/:id` | `{ok}` |
+| GET / POST | `/leave-policies/:id/assignments` | `LeavePolicyAssignment[]` / `{id}` |
+| GET / POST | `/review-cycles[?status]` | `ReviewCycle[]` / `{id}` |
+| PATCH | `/review-cycles/:id` | `{ok}` |
+| GET / POST | `/review-cycles/:id/participants` | `ReviewParticipant[]` / `{added}` |
+| PATCH | `/review-participants/:id` | `{ok}` |
+| GET / POST | `/pay-grades` | `PayGrade[]` / `{id}` |
+| GET / POST | `/statutory-parameters` | `ParameterSet[]` / `{id}` |
+| GET | `/statutory-parameters/:id` | `ParameterSetDetail` |
+| POST | `/statutory-parameters/:id/ratify` | `{ok, ratifiedAt}` |
+
+#### Recruitment — `recruitment.controller.ts` (authorizes `hr_recruitment`)
+
+| Method | Path | Returns |
+|---|---|---|
+| GET / POST | `/requisitions[?status]` | `Requisition[]` / `{id}` |
+| PATCH | `/requisitions/:id` | `{ok}` |
+| POST | `/requisitions/:id/submit` | `{approvalId, status}` |
+| GET / POST | `/candidates[?q]` | `Candidate[]` / `{id}` |
+| POST | `/candidates/:id/erasure-request` | `{ok}` |
+| GET / POST | `/applications[?requisitionId&stageKey&status]` | `Application[]` / `{id}` |
+| GET | `/applications/:id` | `ApplicationDetail` (events, interviews, scorecards, offer) |
+| POST | `/applications/:id/stage` | `{from, to, status}` |
+| POST | `/applications/:id/interviews` | `{id}` |
+| PATCH | `/interviews/:id` | `{ok}` |
+| POST | `/applications/:id/scorecards` | `{id, applicationRating}` |
+| POST | `/applications/:id/offers` | `{id}` |
+| POST | `/offers/:id/status` | `{ok, applicationId}` |
+| POST | `/offers/:id/convert` | `{employeeId, hireDate}` |
+| GET / POST | `/pipeline-stages` | `PipelineStage[]` / `{upserted}` |
+| GET | `/recruitment/funnel[?requisitionId]` | `FunnelStage[]` |
+
+#### Compensation + payroll — `payroll.controller.ts` (authorizes `hr_payroll`)
+
+| Method | Path | Returns |
+|---|---|---|
+| GET / POST | `/compensation[?employeeId&current]` | `Compensation[]` / `{id, supersededRows}` |
+| GET / POST | `/allowance-types` | `AllowanceType[]` / `{id}` |
+| POST | `/employees/:id/allowances` | `{id}` |
+| GET / POST | `/benefit-plans` | `BenefitPlan[]` / `{id}` |
+| POST | `/employees/:id/benefits` | `{id}` |
+| POST | `/employees/:id/tax-profile` | `{id}` |
+| GET / POST | `/payroll-runs[?status]` | `PayrollRun[]` / `{id}` |
+| GET | `/payroll-runs/:id` | `PayrollRunDetail` |
+| POST | `/payroll-runs/:id/calculate` | `CalculateResult` (see below) |
+| POST | `/payroll-runs/:id/approve` | `{ok, overrodeUnratified}` |
+| POST | `/payroll-runs/:id/publish` | `{published}` |
+| POST | `/payroll-runs/:id/paid` | `{ok}` |
+| GET | `/payslips[?runId&employeeId]` | `PayslipSummary[]` |
+| GET | `/payslips/:id` | `PayslipDetail` (itemized lines) |
+| POST | `/payroll-inputs` | `{id}` |
+| GET / POST | `/separations` | `Separation[]` / `{id, ...components}` |
+| GET | `/separations/preview?employeeId&ground&effectiveOn` | `SeverancePreview` |
+| POST | `/separations/:id/approve` | `{ok}` |
+
+#### Lifecycle, compliance, analytics — `hr-lifecycle.controller.ts`
+
+| Method | Path | Authorizes as | Returns |
+|---|---|---|---|
+| GET / POST | `/employees/:id/history` | `employee` | `JobEvent[]` / `{id, headMoved}` |
+| GET / POST | `/cases/:id/events` | `hr_case` | `CaseEvent[]` / `{id}` |
+| GET | `/compliance/expiring[?days]` | `hr_record` | `{windowDays, documents}` |
+| POST | `/compliance/sweep` | `hr_record` | `{remindersCreated, notified}` |
+| POST | `/leave/accrue` | `hr_policy` | `AccrualRunResult` |
+| GET | `/leave/ledger[?subjectUserId&year]` | `hr_case` (staff-or-self) | `{subjectUserId, year, entries}` |
+| GET | `/analytics[?from&to]` | `employee` | `HrAnalytics` |
+
+---
+
+### ⚠ Six behaviours a consumer must render, not assume
+
+These are the places where rendering the obvious thing produces a confident wrong answer.
+
+1. **`turnoverRatePct` is `null`, not `0`, when average headcount is zero.** "No meaningful rate" and
+   "nobody left" are different answers. Render `null` as `—`.
+
+2. **A payroll `calculate` response carries `statutoryRatified` and `statutoryWarning`, and they are
+   the most important fields in it.** The engine will happily compute against unratified numbers; the
+   caller has to say so BEFORE showing a total, not after. `approve` then REFUSES against an
+   unratified set unless `overrideUnratified: true` and an `overrideReason` are supplied, and the
+   override is written to the run permanently.
+
+3. **`calculate` returns a `skipped[]` array and it is never empty by accident.** An employee with no
+   compensation record in force is SKIPPED and REPORTED, never paid zero — a zero payslip looks like a
+   computed answer, a skip is visibly a gap. Show the count.
+
+4. **A payslip is only visible to its subject once PUBLISHED.** `approve` and `publish` are separate
+   calls on purpose: a run can be approved days before anyone should see their slip. `GET /payslips`
+   under a member principal returns only `published_at IS NOT NULL` rows.
+
+5. **A recruitment list under a non-HR principal is ALREADY NARROWED to what that person is attached
+   to.** The controller applies the same relationship filter the policy's panel arm evaluates. Do not
+   re-derive the narrowing client-side; render what you are given.
+
+6. **`hr_case_events` with `visibility: 'hr_only'` are filtered OUT for a subject reading their own
+   case.** A consumer must not "helpfully" merge a staff read and a self read into one cache — the two
+   return different rows for the same case, by design.
+
+### Statutory posture (read before wiring anything payroll-shaped)
+
+`docs/blueprints/employee-portal-foundation.md` §6 assigned the payroll ENGINE to the employee-portal
+program and gated it on "statutory facts". The owner directed on 2026-08-24 that payroll be built as
+part of the HR department instead. That gate is honoured differently rather than dropped: **every**
+regulated number lives in `hr_statutory_parameters`, effective-dated, with a `ratified_by` column
+that is NULL until signed off; the engine hard-codes nothing; each run records which parameter set it
+used; and finalizing against an unratified set requires a recorded override. The seeded Indonesian
+figures (`DEFAULT_PARAMS_UNRATIFIED` in `payroll-calc.ts`, `DEFAULT_SEVERANCE_UNRATIFIED` in
+`severance.ts`) are a TEST FIXTURE expressing the STRUCTURE of PP 58/2023 and PP 35/2021 — they are
+not legally verified and must not be presented as such.
+
+**Non-resident withholding (PPh 26) is NOT implemented.** `computePayslip` throws rather than
+producing a plausible wrong figure, and `calculate` skips such employees with a reason.
+
 ## 11. Work-activity / evidence model (P1-04, Web-Dev Phase 1) — `src/core/work-activity.controller.ts` — **BACKEND ✅ BUILT, UI ✅ WIRED (`platform-ui/src/lib/activity.ts` — reconciled 2026-07-30, WD-20)**
 
 **Corrected 2026-07-30 (WD-20 QA gate):** this section previously said "no UI consumer yet" — that
@@ -1500,9 +1660,14 @@ a client-recorded payment can never leave `pending`.
 | ✅ | GET | `/api/:t/invoice-payments` | `?status` — finance's confirmation queue. Authz: `invoice` read. |
 | ✅ | POST | `/api/:t/invoice-payments/:paymentId/decide` | `{decision:'confirm'\|'reject', reason?}`. `reason` required to reject. **Refuses self-confirmation** (recorder ≠ confirmer). On confirm, derives `invoices.status='paid'` by comparing the CONFIRMED ledger against the total (±1 tolerance), only from `sent`. Notifies the client either way. Authz: `invoice` update. |
 
-**⚠ NO STAFF UI EXISTS FOR §16e.** Contracts must be created and payments confirmed via API until
-`/clients/[id]/contracts` and a finance queue page are built. Whoever owns finance needs to know the
-decide endpoint exists, or client payments accumulate as `pending` with nobody looking.
+**⚠ STILL NO STAFF UI FOR §16e's WRITES.** Contracts must be created/sent and payments confirmed via
+API. Whoever owns finance needs to know the decide endpoint exists, or client payments accumulate as
+`pending` with nobody looking.
+
+**Partly addressed 2026-08-24 (CC-2, §22b):** the pending payment and the unsent draft contract are now
+SURFACED — the client hub's `needsUs` list names them per client, with an age, so they stop
+accumulating invisibly. That is visibility, not the write UI: the Commercial tab that actually calls
+`send`/`countersign`/`decide` is slice 2 of the CC-* program and is **not built**.
 
 ### 16f. Change Requests (maintenance intake) — `src/core/webdev-change-requests{,-portal}.controller.ts` — **STATUS: DEV-VERIFIED (MI-01..05)**
 
@@ -3736,3 +3901,91 @@ already exist and are already RBAC-narrowed by the backend calls those readers m
   entity ranking, pagination beyond what a client-side aggregator can do), this route becomes a
   one-file swap — `CommandPalette.tsx` and the `/search` page both already consume a stable
   `SearchGroup[]` shape and neither needs to change.
+
+## 22. Client-centric ERP — the client hub + the `clientId` list facet (CC-* program, 2026-08-24) — `platform-ui/src/lib/clientHub.ts`, `core/client-filter.ts` — **STATUS: DEV-VERIFIED (CC-1/CC-2/CC-3, slice 1 only)**
+
+Design: `docs/plans/2026-08-24-client-centric-erp-design.md`. Owner ask: everything shown and filtered
+to the client, so the ERP can be read client-first. Slice 1 only — Overview + Work tabs. Slices 2-5
+(Commercial, Requests, Delivery, People, the staff timeline, and the `<ClientPicker>` on the
+object-first lists) are **PLANNED, not built**.
+
+### 22a. The `clientId` list facet (CC-1)
+
+One parameter, one vocabulary, on every staff list that can be narrowed to a client:
+
+| Value | Means |
+|---|---|
+| absent | every row — **unchanged behaviour, no existing caller is affected** |
+| `<uuid>` | that client's rows |
+| `internal` | rows belonging to NO client (own-brand, IT, HR, platform work) |
+
+⚠ **This is a CONVENIENCE FILTER, NOT an authorization boundary.** `core/client-filter.ts`; the
+distinction from `core/portal-scope.ts` (which IS a boundary) is spelled out in both files' headers.
+Consequences that are deliberate and must not be "hardened": a malformed value resolves to **every
+row**, never to deny — a filter that fails closed silently hides work and is indistinguishable from
+"there is nothing here"; and passing another client's id is not an escalation and must not 403, since
+the same caller could already read the list unfiltered. Staff isolation stays RLS (tenant) + Cerbos
+(action). Ids compare **as text**, so a hand-edited query string misses rather than 500ing.
+
+`internal` resolves to `client_id IS NULL`, **not** `is_internal = true`. The two disagree on the live
+estate (9 clientless projects, only 7 flagged), and keying on the flag would leave the other 2
+reachable from no scope at all. `is_internal` stays a data-quality signal, not the predicate.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ NEW | GET | `/api/:t/projects?clientId=` | `core/core.controller.ts`. Was unfiltered; the client page used to fetch the tenant and narrow in the browser. |
+| ✅ NEW | GET | `/api/:t/pm/tasks?clientId=` | `modules/pm/pm.controller.ts`. Joins through `projects` — there is no `pm_tasks.client_id`, by decision (one source of truth, no backfill, no sync trigger). Cheap: the task CTE already joins `projects`. **`pm_tasks.project_id` is `NOT NULL`, so no clientless-task branch is needed and adding one would be dead code.** |
+| ✅ NEW | GET | `/api/:t/invoices?clientId=` | `modules/billing/billing.controller.ts`. This list previously accepted no query parameters at all. |
+| ✅ PRE-EXISTING | GET | `/api/:t/{deliverables,contracts,pipeline/runs,meetings/recordings,webdev/change-requests,social/*}?clientId=` | Already had the parameter. **`internal` is NOT yet honoured on these six** — see the gap below. |
+
+⛔ **KNOWN GAP (slice 2).** The six endpoints that already had `clientId` accept a uuid only; passing
+`internal` to them matches nothing rather than selecting clientless rows. A sentinel honoured on some
+client-filterable lists and silently empty on others is worse than not having one, so this is tracked,
+not left implicit. Still PENDING: `invoice-payments`, `time-entries`, and an `/approvals` list
+endpoint (none exists).
+
+### 22b. The hub aggregate (CC-2)
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ NEW | GET | `/api/:t/clients/:clientId/overview` | The staff mirror of `/portal/overview` (§16b). Authz: `client` read. 404 for a client outside the tenant. Runs with `{ modules: ["social"] }` — the post-review join carries the `social` third wall, and without the scope that SELECT returns **zero rows and raises nothing**, so the hub would report "no post reviews outstanding" for a client with ten. |
+
+Response: `{ client, projects{total,active,done,percent}, tasks{total,open,overdue,blocked},
+deliverables{total,delivered,overdue}, nextMilestone, money{byCurrency[],primary}, needsUs[],
+needsClient[] }`.
+
+**`needsUs` is the point of the endpoint.** `needsClient` is what §16b already tells the client (sign
+this, decide that); `needsUs` is its mirror and **nothing in the ERP rendered it before CC-2** — which
+is exactly how a client-recorded payment sat `pending` with no screen ever saying someone had to
+confirm it. Both lists answer one question: who is holding the ball. `needsUs` sources: a `pending`
+`invoice_payments` row · a `changes_requested` post review · a `new` change request · a `draft`
+contract never sent. Items carry `{kind,id,label,context,href,since}`; `since` is rendered as an AGE,
+and our side marks anything ≥7 days stale (one finance cycle).
+
+`money` mirrors `portal-workspace.controller.ts:finance` — **per currency, never summed across them** —
+with one deliberate difference: `draft` invoices are included as their own `drafted` figure. The portal
+hides drafts (a client must not see a number the agency has not committed to); staff are precisely the
+people who need to know one is sitting unsent. `outstanding` counts **confirmed** payments only, so an
+unverified client claim does not move the balance.
+
+### 22c. UI (CC-3)
+
+`/clients/[clientId]` is now a tabbed hub — `layout.tsx` fetches the aggregate ONCE (Next dedupes it
+for the Overview tab, so tab badges cost nothing extra) and owns the header, breadcrumbs and the
+client-level Delete action. Tabs are ROUTES, not client state, so a tab is linkable.
+
+| Route | Tab | Reads |
+|---|---|---|
+| `/clients/[id]` | Overview | the aggregate — both ball lists first, tiles second |
+| `/clients/[id]/work` | Work | `projects?clientId=` + `pm/tasks?clientId=`, tasks grouped under their project |
+| `/clients/[id]/details` | Details | **the former `/clients/[id]` page, moved verbatim** — contacts, portal access, deliverables, meetings. Nothing was deleted; slice 3 splits it into People/Delivery. |
+
+Unlike the portal layout (which `.catch(() => null)`s so an external client always gets chrome), this
+layout lets a failure **throw** to the error boundary: a hub rendering zeroes tells a manager their
+client has no work, nothing outstanding and no money owed, and this is the screen people act on.
+
+The Work tab renders a "tasks outside this client's projects" card that **should always be empty** —
+both reads apply the same server-side predicate, so a row there means the two filters disagree.
+Surfaced rather than dropped, because a dropped row is invisible. Demo fixtures mirror the facet
+(including `internal`) for the same reason: a fixture that ignored `?clientId=` would make every
+client-scoped surface look correct in DEMO_MODE while showing the whole tenant.

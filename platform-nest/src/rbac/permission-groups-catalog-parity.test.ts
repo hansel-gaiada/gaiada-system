@@ -81,7 +81,7 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
   // module adds no relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where
   // it was. If a future social ticket moves this number, that is the change to justify, not the
   // grantable one. Prior movement: HIER-3, 2026-08-11 — core.team.* retired (215 -> 211).
-  it("sanity: 267 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM Phase 2 P2-02, 2026-08-13: 249 -> 267 [+18 across role_grant/position/employee/it_account], relationship set untouched; prior: IAM-GAP-01, 2026-08-13: 247 -> 249; SMM-30, 2026-08-12: 211 -> 247)", () => {
+  it("sanity: 267 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM Phase 2 P2-02, 2026-08-13: 249 -> 267 [+18 across role_grant/position/employee/it_account], relationship set untouched; prior: IAM-GAP-01, 2026-08-13: 247 -> 249; SMM-30, 2026-08-12: 211 -> 247; HR-FULL, 2026-08-24: 287 -> 305 [+18 across hr_policy/hr_recruitment/hr_payroll], relationship set untouched, +11 authoring groups)", () => {
         // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
     // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
@@ -91,7 +91,7 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // +3 grantable, 283 -> 286.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(grantable.length).toBe(287);
+    expect(grantable.length).toBe(305);
     expect(relationshipKeys.size).toBe(15);
   });
 

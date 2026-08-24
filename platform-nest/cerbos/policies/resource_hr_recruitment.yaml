@@ -1,0 +1,131 @@
+# HR wave B — `hr_recruitment`: requisitions, candidates, applications, interviews, scorecards, offers.
+#
+# ── Why recruitment is its own kind ─────────────────────────────────────────────────────────────
+# Two reasons, and they point in opposite directions, which is exactly why neither existing kind
+# fits:
+#
+#   1. WIDER than hr_case on read. Hiring is not an HR-only activity — the hiring manager and the
+#      interview panel are ordinary staff from the delivering department, and they must be able to
+#      see the candidate they are about to interview and file a scorecard. Putting recruitment on
+#      `hr_record` (HR-only) would make the panel unable to do the thing they were invited to.
+#   2. NARROWER than hr_case on write. A candidate's data is outsider PD held under consent, with a
+#      retention clock and an erasure obligation. `hr_case`'s `member` self-service rule would be
+#      actively wrong here: a "subject" of a candidate row is not a platform principal at all.
+#
+# So: HR + company admin operate it, and PANEL MEMBERSHIP is an attribute-gated read/write for
+# everyone else. The panel rule is the interesting one and it is deliberately narrow — see below.
+#
+# ── ROLE-ARM ONLY this wave, no perm_* mirror ───────────────────────────────────────────────────
+# Same posture and same reason as resource_employee.yaml (P2-02) and resource_hr_payroll.yaml. The
+# panel rules below are ATTRIBUTE-DEPENDENT (`isPanelist`, `isHiringManager`), and the flat
+# permission catalog has no way to express "…but only for an interview you are on" — a mirror would
+# collapse that into an unconditional grant over every candidate in the tenant. That is the
+# `perm mirrors can't express attr gates` failure mode, and this file does not repeat it.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: hr_recruitment
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+    # WARNING - THE PANEL CONDITIONS BELOW ARE DELIBERATELY INLINED, NOT FACTORED INTO A `local:`
+    # VARIABLE BLOCK. They were factored first, and that broke something real.
+    #
+    # `computeSelfScoped` (scripts/generate-role-bundles.mjs) and its twin `selfScopeField`
+    # (permission-arm-hazard-scan.test.ts) classify a grant as NARROW by pattern-matching the rule's
+    # CONDITION TEXT. A rule whose condition reads as a bare local-variable reference is opaque to
+    # them - the self-scope shape sits in the variable's definition, which they never look at.
+    #
+    # The consequence was not cosmetic. An unmarked key counts as tenant-wide HR authority in
+    # `routeFor()` (src/admin/role-grants.controller.ts), which routed an IAM override request for a
+    # NON-HR role to hr_manager instead of company_admin the moment `member` appeared to hold one.
+    # Caught by override-request-decide.test.ts's "a non-hr role routes to company_admin".
+    #
+    # Keep them inline. Being legible to the tooling that decides what these grants MEAN is worth
+    # more than the readability of a factored variable.
+    #
+    # has() on every attribute: an older build, or a handler that forgets to resolve the panel, must
+    # DENY rather than raise a CEL error. The handler is what reads hr_interview_panelists and
+    # hr_requisitions.hiring_manager_user_id - the policy never trusts a client-supplied value.
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # The HR reader tier sees the pipeline; the acting tier runs it. `hr_people_reader` is
+    # (hr_staff OR hr_manager) — recruitment coordination is genuinely hr_staff-shaped work, unlike
+    # payroll.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_reader", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    - actions: ["create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Approving a requisition or an offer commits headcount and money. Same D4 tier as
+    # hr_payroll:approve, for the same reason.
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # CONVERSION — accepted offer becomes an `employees` row. Separated from `approve` because it is
+    # the moment an outsider becomes staff and starts being reachable by the position reconciler;
+    # that transition deserves its own auditable action rather than hiding inside an update.
+    - actions: ["convert"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Bulk export of the candidate pool. D4 tier: this is an outsider-PD extract.
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # ══════════════ The panel arm: ordinary staff, gated on being ON this thing ══════════════════
+    # A hiring manager sees and runs their own requisition's pipeline. Note this grants `update` —
+    # advancing a stage, adding a note — but NOT approve/convert/delete/export, which stay HR's.
+    - actions: ["read", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            ((has(request.resource.attr.hiringManagerUserId) &&
+              request.resource.attr.hiringManagerUserId == request.principal.id) ||
+             (has(request.resource.attr.recruiterUserId) &&
+              request.resource.attr.recruiterUserId == request.principal.id))
+
+    # A panelist sees the candidate they are interviewing and files a scorecard. READ and CREATE
+    # only — a panelist must not be able to edit the application, reject the candidate, or amend
+    # somebody else's scorecard. `create` covers filing their own; the handler pins
+    # reviewer_user_id to the principal so "create a scorecard" cannot become "create one as
+    # somebody else".
+    - actions: ["read", "create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.panelistUserIds) &&
+            request.principal.id in request.resource.attr.panelistUserIds

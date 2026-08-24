@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.36.5` | IN PROGRESS | WS1 | 2026-08-24 |
-| platform-ui | `0.46.0` | IN PROGRESS | WS5 | 2026-08-23 |
+| platform-nest | `0.38.0` | IN PROGRESS | WS1 | 2026-08-24 |
+| platform-ui | `0.49.0` | IN PROGRESS | WS5 | 2026-08-24 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.11.1` | PROTOTYPED | WS2 | 2026-08-20 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -50,6 +50,7 @@ versions below; the running build reports it at `GET /health`.
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
+| hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -152,7 +153,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.46.0` Â· IN PROGRESS
+## platform-ui â€” ERP Suite Â· `0.48.0` Â· IN PROGRESS
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the
@@ -1121,6 +1122,106 @@ vars are now in `infra/compose/docker-compose.vps.yml`'s `platform` service `env
 caught in-session this time). Brevo inbound also hands out attachment `DownloadToken`s rather
 than bytes, so the token→bytes fetch is staging work behind the existing `NormalizedAttachment`
 seam — carried as a named step in design §15 R3 (v4).
+
+## hr â€” People Â· Hiring Â· Pay Â· `0.4.0` Â· IN PROGRESS
+
+The HR department module. `0028` (WSD-3/4) gave it cases, records, leave, attendance and checklist
+templates; `0081` added employee loans; IAM Phase 2 (`0109`) added the `employees` people file and
+positions. **HR-FULL (2026-08-24)** added the four waves below, taking the module from an operations
+console to something with the shape of an HRIS.
+
+**Status, stated precisely rather than generously.**
+
+| Layer | Status | Evidence |
+|---|---|---|
+| Schema + RLS (33 new tables) | **DEV-VERIFIED** | migrations applied to a real Postgres; `src/db/hr-full-rls.test.ts` proves FORCE RLS, a byte-identical third-wall predicate and zero-rows-without-scope on all 33, plus 7 schema invariants â€” 20 assertions, **0 skips** |
+| Pure engines (working days, accrual, payroll, severance) | **DEV-VERIFIED** | 109 unit tests |
+| Authorization (3 Cerbos kinds, 18 permissions, 11 groups) | **DEV-VERIFIED** | Cerbos restarted and probed with real decisions: own PUBLISHED payslip ALLOW / own DRAFT DENY / another's DENY; panelist read+create ALLOW, update+delete DENY; non-panelist all DENY; hiring manager read+update ALLOW, approve DENY; member hr_policy read ALLOW, update+ratify DENY |
+| HTTP handlers (4 controllers) | **DEV-VERIFIED** | `hr-full-acceptance.test.ts` drives the whole department over REAL HTTP (`buildApp()` + `app.inject()`, live Postgres + live Cerbos): configure -> requisition -> candidate -> interview -> scorecard -> offer -> convert -> payroll calculate/ratify/approve/publish/pay -> subject self-reads their own published payslip -> accrue leave -> separate. **19 assertions, 0 skips** |
+| Console UI (7 pages + `/me/pay`) | **PROTOTYPED** | 2,954 UI tests green; **not driven in a browser** |
+
+### The four waves
+
+- **A Â· time and lifecycle** â€” holiday calendars (incl. Indonesian *cuti bersama*, which is not
+  worked but IS charged), leave policies + an accrual ledger, the effective-dated `hr_job_events`
+  worker history, document-expiry compliance, review/probation cycles, and an append-only case
+  timeline. Before this, a leave balance was a number somebody typed and a promotion OVERWROTE the
+  previous fact.
+- **B Â· recruitment (ATS)** â€” requisitions, a candidate pool kept deliberately SEPARATE from
+  `employees`, applications with an append-only funnel, interviews, scorecards, and offers. Hiring is
+  an explicit CONVERSION, enforced by a database CHECK, not a status edit.
+- **C Â· compensation and benefits** â€” pay grades, effective-dated compensation (a GiST exclusion
+  constraint makes two simultaneous open rows impossible), allowances with independent `taxable` /
+  `bpjs_base` flags, BPJS enrolment, and PPh 21 tax profiles.
+- **D Â· payroll and separation** â€” statutory parameter sets, payroll runs, frozen payslips with
+  itemized lines, per-period inputs, and separations computing the three Indonesian statutory
+  components separately.
+
+### âš  The statutory gate, and why payroll exists here at all
+
+`employee-portal-foundation.md` Â§6 assigned the payroll ENGINE elsewhere and gated it on "statutory
+facts". The owner directed on 2026-08-24 that it be built as part of HR. The gate is honoured
+differently rather than dropped: **no rate, cap, bracket or multiplier is hard-coded anywhere.** They
+live in `hr_statutory_parameters`, effective-dated, with a `ratified_by` signature that is NULL until
+an owner signs off; every run records the parameter set it used; and finalizing against an unratified
+set requires an override with a reason, written permanently to the run.
+
+**The seeded Indonesian figures are a TEST FIXTURE and are NOT legally verified.** They express the
+STRUCTURE of PP 58/2023 (TER) and PP 35/2021 (severance). Ratify a real set before paying anyone.
+
+**Non-resident withholding (PPh 26) is not implemented** â€” the engine throws rather than producing a
+plausible wrong number, and a run skips such employees with a stated reason.
+
+### Seeding
+
+`npm run seed:hr-config` lands the department's RULES — holiday calendar (Indonesian 2026 incl.
+*cuti bersama*), three leave policies, the 9-stage funnel, 7 pay grades, 6 allowance types, all five
+BPJS plans as SEPARATE plans, and a statutory parameter set.
+
+**It writes ZERO rows of personal data, and that boundary is asserted by a test.** No employees, no
+candidates, no compensation, no payslips. That is what lets it run against the live estate while
+`legal/ropa.md` still records the programme as "Pre-Gate-1; not yet in production with real data".
+
+It is idempotent (proven by a third consecutive run changing nothing) and it seeds the statutory set
+**UNRATIFIED** — payroll will calculate against those numbers but refuse to finalize a run without a
+permanently-recorded override. A seed must never close that gate for itself.
+
+### What the FULL suite caught that no HR test did
+
+Worth recording, because it is the argument for running the whole suite rather than the touched
+files. Three failures, none of them in an HR suite:
+
+1. **`authz-permissions.controller.test.ts`** - all 18 new keys denied by the live PDP. Cause: the
+   Cerbos container had not reloaded the three new policy files. Fixed by restarting and re-probing.
+2. **`override-request-decide.test.ts` - "a non-hr role routes to company_admin"** - a real
+   behavioural regression. `routeFor()` (src/admin/role-grants.controller.ts) counts a role's
+   *sensitive, non-self-scoped* HR permissions to decide who approves an IAM override. `member`'s
+   three panel-gated `hr_recruitment` keys were unmarked, so a NON-HR override began routing to
+   hr_manager. Root cause was twofold: the panel conditions were factored into `variables.local`,
+   which made them opaque to the self-scope classifier, and the classifier could not express
+   membership (`principal.id in attr.X`) in any case. Fixed by inlining the conditions and teaching
+   both twin predicates the membership form - measured first: that form appears in exactly ONE
+   resource policy, so no pre-existing role's classification moved.
+3. **`capability-inventory.test.ts`** - the committed inventory stopped matching the registry once 8
+   MCP tools were added. Regenerated (that suite is its own generator).
+
+An earlier draft of this section claimed the marker gap was "not exploitable - the ceiling governs
+granting, not acting". That was **wrong**: the marker also feeds override routing. Corrected here
+rather than quietly deleted.
+
+### Known gaps, flagged not hidden
+
+1. **No `perm_*` mirror on any of the three new kinds** - deliberate (see migration
+   `202608240144`'s header), pending an IAM holder audit.
+2. **The `HR` nav entry is still ungated** (`components/shell/nav.ts`), predating this work. The two
+   money tabs are capability-gated inside the console, so this change does not widen it.
+3. **No seed** for holiday calendars, leave policies, pipeline stages or a statutory parameter set.
+   Every affected surface renders an empty state that explains what is missing rather than
+   pretending a default.
+4. **Not deployed and not committed.** Everything above was proven on a disposable harness, not on
+   the live estate. `docs/MAP.md` must be regenerated from a clean tree at commit time.
+
+---
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.2` Â· DEV-VERIFIED (schema/RLS/Cerbos layer; the site-audit capability itself is PLANNED)
 

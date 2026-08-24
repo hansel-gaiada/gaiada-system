@@ -1,6 +1,9 @@
 # HR department — expansion blueprint
 
-**Status:** `PLANNED` — design only, no code written. · **Scoped:** 2026-08-04
+**Status:** `IN PROGRESS` — §3's candidate list was BUILT on 2026-08-24 (HR-FULL, waves A–D), plus
+five gaps this document did not name. Schema/RLS and the pure engines are DEV-VERIFIED; the handlers
+and console are PROTOTYPED. Per-layer evidence: [`docs/modules/MODULES.md`](../modules/MODULES.md)
+§hr. Surface: [`FRONTEND-BFF-CONTRACT.md`](../FRONTEND-BFF-CONTRACT.md) §10c. · **Scoped:** 2026-08-04
 **Renamed + narrowed 2026-08-04:** this file was briefly
 `hr-employee-self-service-foundation.md`, which framed the employee's personal hub as an HR feature.
 **That framing was wrong** and the owner corrected it: employee self-service is a peer of the client
@@ -54,10 +57,91 @@ app_module_allowed('hr')`. Every handler must pass `{ modules: ["hr"] }` to `wit
 reads and writes **zero rows** with an otherwise-correct tenant set — fail-closed, and invisible when
 forgotten.
 
-## 3 · Candidate scope for the expansion (not yet decided)
+## 3 · Candidate scope — DECIDED AND BUILT 2026-08-24 (HR-FULL)
 
-Listed so the next planning pass starts from options rather than a blank page. **None of these is
-committed**, and each should be checked against "does HR actually need this, or is it the employee's?":
+The owner scoped all four waves on 2026-08-24, payroll included. What follows is the original
+candidate list with what actually happened to each. **Read §3.1 first** — it records the five gaps
+this list MISSED, which turned out to be the load-bearing ones.
+
+| §3 candidate | Outcome |
+|---|---|
+| Recruitment / ATS | **BUILT** (wave B) — requisitions, a separate candidate pool, applications with an append-only funnel, interviews, scorecards, offers, and an explicit conversion into `employees` |
+| Org & headcount planning | **PARTIAL** — requisitions link to a `positions` seat so headcount and the org chart cannot drift; a dedicated planning surface is still absent |
+| Probation & review cycles | **BUILT** (wave A) as a CYCLE (cohort + window + completion), linking OUT to the reports program's appraisal rather than duplicating it — the overlap this document warned about was checked and honoured |
+| Discipline & grievance | **BUILT** (wave A) — an append-only `hr_case_events` timeline with `hr_only` / `participants` visibility, because a grievance file whose history can be edited is not evidence of anything |
+| Compliance & documents | **BUILT** (wave A) — `issued_on`/`expires_on`/`reference` on `hr_records` plus an idempotent reminder ledger |
+| Payroll operations | **BUILT** (wave D) — see §3.2 on the sequencing override |
+| HR analytics | **BUILT** (wave A) — derived from the lifecycle log, not from `employees`, because turnover is a question about a WINDOW and the employee row only knows the present |
+
+### 3.1 · What this list MISSED, and why it mattered more
+
+Audited 2026-08-24 against the standard HCM capability map. Five gaps existed that §3 did not name,
+and four of them were silently producing wrong answers rather than merely being absent:
+
+1. **Nothing computed a leave balance.** `hr_leave_balances.allocated_minutes` was a number somebody
+   typed; nothing could restate how it was reached. → leave policies + an append-only accrual ledger.
+2. **There was no holiday calendar.** A five-calendar-day request spanning a weekend was charged as
+   five days. → calendars, weekend patterns, and *cuti bersama* as its own kind (not worked, but
+   charged — two facts needing two counters).
+3. **`employees` held CURRENT state only**, so every promotion, transfer and status change OVERWROTE
+   the previous fact. Tenure, turnover and statutory severance were unanswerable from the database.
+   → `hr_job_events`, an append-only effective-dated worker history with `employees` as its head.
+4. **`hr_records` had no validity.** An expired work permit and a current one were byte-identical to
+   every query. → expiry columns + a reminder ledger.
+5. **Nothing modelled what anyone is paid.** → wave C.
+
+### 3.2 · One sequencing override, recorded
+
+§1 of this document and `employee-portal-foundation.md` §6 both place PAYROLL outside HR: the artefact
+is the employee's payslip, and the engine was assigned to the employee-portal program, gated on
+statutory facts. **The owner directed on 2026-08-24 that payroll be built as part of the HR
+department.** That is honoured, and the gate it was protecting is honoured differently rather than
+dropped: every regulated number lives in `hr_statutory_parameters`, effective-dated, carrying a
+`ratified_by` signature that is NULL until sign-off; the engine hard-codes nothing; each run records
+the parameter set it used; and finalizing against an unratified set requires an override with a
+reason, written permanently to the run.
+
+The seeded Indonesian figures are a TEST FIXTURE expressing the structure of PP 58/2023 (TER) and
+PP 35/2021 (severance). **They are not legally verified.** Non-resident withholding (PPh 26) is not
+implemented — the engine refuses rather than producing a plausible wrong figure.
+
+### 3.3 · Still open after HR-FULL
+
+- **LMS / learning — COMMITTED, DEFERRED (owner, 2026-08-24).** The owner asked for a learning
+  management surface inside HR: teach employees, and refresh existing staff with newer knowledge.
+  **Deliberately sequenced LAST**, after the rest of the HR work is closed out — recorded here so it
+  is a scheduled commitment rather than a remembered intention.
+
+  Not designed yet, but three seams already exist and the design should start from them rather than
+  from a blank page:
+
+  1. **Certification expiry is already solved.** `hr_records` + `expires_on` + the reminder sweep
+     (wave A) tracks a credential's validity today. An LMS should WRITE that record on completion,
+     not invent a parallel expiry model — otherwise a certificate has two expiry dates.
+  2. **Review cycles are the natural assignment trigger.** `hr_review_cycles` already models a
+     cohort plus a window plus completion tracking. "Everyone in this cohort must complete this
+     course by this date" is the same shape; check whether it can be reused before adding a second
+     cohort engine.
+  3. **The knowledge module already stores and retrieves content** (D9 RAG store). Course material
+     is content; whether the LMS owns its own store or reads that one is the first real design
+     decision, and it has an obvious wrong answer (two stores, two ingestion paths).
+
+  Constraints it inherits unchanged: the module third wall (§4.1), the served-company split (§4.2),
+  and — because completion records are performance-adjacent — a deliberate decision about whether
+  they sit at the `hr_case` tier or the more sensitive `hr_record` tier. Note also §5's warning: the
+  reports program owns appraisals, and "did they complete the training" must not quietly become a
+  second performance-scoring surface.
+- **Shifts, rosters and overtime rules** — payroll accepts an overtime INPUT, but nothing models a
+  shift pattern or computes an overtime multiplier from one.
+- **Headcount planning** as a surface of its own (see the table above).
+- **Payroll bank-file export** — the register is exportable; a bank-format file is not.
+
+---
+
+## 3-original · The candidate list as written 2026-08-04
+
+Preserved because §3.1 is only legible against it. **None of these was committed at the time**, and
+each was to be checked against "does HR actually need this, or is it the employee's?":
 
 - **Recruitment / ATS** — pipeline, candidates, interview scheduling. Entirely absent today.
 - **Org & headcount planning** — positions vs filled seats, on top of the existing org structure and
@@ -81,7 +165,12 @@ committed**, and each should be checked against "does HR actually need this, or 
 3. **`hr_record` is the sensitive tier.** `group_executive` is explicitly denied; bulk `export` requires
    the D4 high-assurance tier. Do not widen either casually.
 4. **Legal gate.** Do not ingest real employee personal data before the Gate-1 (legal) and day-one
-   (technical) reviews are both green — `legal/` holds the DPIA/LIA drafts.
+   (technical) reviews are both green — `legal/` holds the DPIA/LIA drafts. **HR-FULL did not move
+   this gate.** It defines WHERE that data will live (with per-column PD labels, matching 0109's
+   owner decision of 2026-08-13 — label-only, no encryption or scrubbing this wave) and adds one new
+   population the gate must now cover: `hr_candidates` holds OUTSIDER personal data under consent,
+   with its own `retention_until` clock and an `erasure_requested_at` marker, which is a different
+   legal basis from an employee under contract.
 5. **Appraisals are already owned elsewhere** (the TR-* reports program, with its own roles and sealing
    rules). An HR review cycle must integrate with it, not duplicate it.
 

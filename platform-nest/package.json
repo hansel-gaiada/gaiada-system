@@ -18,6 +18,7 @@
     "provision:roster": "node dist/seed/provision-roster.js",
     "seed:roster-access": "node dist/seed/roster-access.js",
     "seed:employee-files": "node dist/seed/employee-files.js",
+    "seed:hr-config": "node dist/seed/hr-config.js",
     "seed:social-content-brief-automation": "node dist/seed/social-content-brief-automation.js",
     "seed:owner-grant": "node dist/seed/owner-grant.js",
     "seed:org-structure-refresh": "node dist/seed/org-structure-refresh.js",

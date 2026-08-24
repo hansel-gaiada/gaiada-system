@@ -347,6 +347,77 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ─────────────────────────── HR-FULL (2026-08-24) — the three new kinds ───────────────────────
+  // Each capability maps 1:1 onto the catalog keys its Cerbos policy grants, and the split between
+  // view / manage / approve is the SAME split the policies themselves draw — not a UI convenience.
+  // Where a policy holds an action at the D4 high-assurance tier (approve, convert, export, ratify),
+  // the mirror can only say "this role could hold it"; assurance is a session property the server
+  // checks, and no client-side mirror can or should try to.
+
+  "hr.policy.view": {
+    permissions: ["hr.policy.read"],
+    semantics: "all",
+  },
+
+  // Create/amend HR configuration. `hr.policy.ratify` is deliberately NOT in this set — see below.
+  "hr.policy.manage": {
+    permissions: ["hr.policy.create", "hr.policy.update", "hr.policy.delete"],
+    semantics: "all",
+  },
+
+  // Its own capability rather than part of `hr.policy.manage`, mirroring the policy exactly:
+  // resource_hr_policy.yaml grants `ratify` to company_admin ALONE, at high assurance, while
+  // create/update/delete reach hr_people_ops too. Folding them together would show an HR manager a
+  // "Ratify" button the server refuses — and, worse, would suggest the two are the same authority.
+  "hr.policy.ratify": {
+    permissions: ["hr.policy.ratify"],
+    semantics: "all",
+  },
+
+  "hr.recruitment.view": {
+    permissions: ["hr.recruitment.read"],
+    semantics: "all",
+  },
+
+  "hr.recruitment.manage": {
+    permissions: ["hr.recruitment.create", "hr.recruitment.update", "hr.recruitment.delete"],
+    semantics: "all",
+  },
+
+  // approve + convert together: both are the high-assurance tier on the same policy, and both are
+  // held by exactly the same roles. `convert` is a separate ACTION (it turns an outsider into an
+  // employee the access reconciler can reach) but not a separate authority.
+  //
+  // ⚠ `hr.recruitment.export` has NO capability naming it, and that is the same orphan shape this
+  //    file already flags for hr.case.export / hr.record.export immediately above. Left consistent
+  //    with that finding rather than resolved differently here: the UI has no step-up-gated export
+  //    control to mirror yet, and inventing a capability for a control that does not exist would
+  //    make the mirror claim coverage it does not have.
+  "hr.recruitment.approve": {
+    permissions: ["hr.recruitment.approve", "hr.recruitment.convert"],
+    semantics: "all",
+  },
+
+  // The money tier. Note this is a READ capability that hr_staff deliberately does NOT hold — the
+  // whole reason hr_payroll exists as a kind separate from hr_record.
+  "hr.payroll.view": {
+    permissions: ["hr.payroll.read"],
+    semantics: "all",
+  },
+
+  "hr.payroll.manage": {
+    permissions: ["hr.payroll.create", "hr.payroll.update", "hr.payroll.delete"],
+    semantics: "all",
+  },
+
+  // The action that commits money. High assurance in the policy; see the section header on why the
+  // mirror cannot express that half.
+  // ⚠ `hr.payroll.export` is likewise unmirrored — same orphan finding as the two exports above.
+  "hr.payroll.approve": {
+    permissions: ["hr.payroll.approve"],
+    semantics: "all",
+  },
+
   // ───────────────────────────────────── search-marketing ───────────────────────────────────────
 
   // "read search-marketing properties/engagements/keywords/audits/campaigns/reports/ledger for a

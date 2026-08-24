@@ -1,0 +1,97 @@
+# HR wave C/D — `hr_payroll`: THE MONEY TIER of the HR module.
+#
+# Covers compensation records, pay grades, allowances, benefit enrolments, tax profiles, payroll
+# runs, payslips and separations. One kind rather than eight because they share exactly one
+# sensitivity posture and one holder set, and eight near-identical policies is how the eight drift.
+#
+# ── Why this is a NEW kind and not a reuse of hr_record ─────────────────────────────────────────
+# `hr_record` is already the sensitive tier (contracts, documents, notes) and its read is held by
+# the baseline `module_staff` HR reader. Compensation is a step above that: an HR assistant who
+# legitimately files leave requests and uploads contracts has no business reading the whole
+# company's salary book. Folding payroll into `hr_record` would have granted exactly that, silently,
+# to every existing hr_staff holder the moment the tables landed.
+#
+# ── The holder set, and what is DELIBERATELY absent ─────────────────────────────────────────────
+#   hr_people_ops  (== hr_manager only, see derived_roles.yaml)  — read + write
+#   company_admin                                                — read + write
+#   platform_admin                                               — everything
+#
+# NOT here, each on purpose:
+#   * `module_staff` / `hr_people_reader` — the whole point of the split above.
+#   * `org_unit_lead` — a department head reaching their team's salaries is a real product question
+#     with a real answer (usually "only their own reports, only base, only at review time"), and
+#     none of that is expressible without an attribute this policy is not yet given. Absent is the
+#     honest state; a broad grant "for now" would be the wrong default to have to walk back.
+#   * A perm_* mirror arm. ROLE-ARM ONLY this wave, exactly the posture resource_employee.yaml took
+#     for the same reason (P2-02: "new kinds get an arm only after their handlers exist and their
+#     holders are audited"). The handlers land in this same change but the holders have not been
+#     audited against a live grant set, and the flat catalog cannot express the self-scoped payslip
+#     rule below (see the `perm mirrors can't express attr gates` finding). Wiring a mirror now
+#     would over-grant. Follow-up: an IAM ticket after a holder audit.
+#
+# ── The one self-service rule ───────────────────────────────────────────────────────────────────
+# An employee may read their OWN published payslip and their OWN compensation. That is the
+# employee-portal blueprint's own principle ("nothing about you that you cannot read") and it is
+# guarded with has() so a handler that forgets to pass subjectUserId fails CLOSED rather than
+# exposing the company's payroll. The `published` attribute is a SECOND gate on the same rule: a
+# draft payslip mid-run is not the employee's to see, and a run being recalculated would otherwise
+# leak half-computed figures.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: hr_payroll
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # Read + write: the ACTING HR tier and the served company's own admin.
+    - actions: ["read", "create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Destructive.
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Finalizing a payroll run, approving a compensation change, approving a separation. Held at
+    # the D4 high-assurance tier: this is the action that commits money, and `notLow` admits any
+    # ordinary SSO session without MFA (`assuranceFor()` mints those as "linked"). The same tier
+    # hr_record.export sits at, and for the same reason — see resource_hr_record.yaml's REG3 note.
+    - actions: ["approve"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Bulk export of the payroll register / bank file. Same D4 tier as approve.
+    - actions: ["export"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["hr_people_ops", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Subject self-read: your own PUBLISHED payslip, your own compensation record. Both gates are
+    # load-bearing — has() so a handler omitting subjectUserId is denied rather than served, and
+    # `published` so a draft mid-run is never visible to the person it is about.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.subjectUserId) &&
+            request.resource.attr.subjectUserId == request.principal.id &&
+            has(request.resource.attr.published) &&
+            request.resource.attr.published == true

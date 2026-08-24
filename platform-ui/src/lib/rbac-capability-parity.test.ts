@@ -163,6 +163,33 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
       "member's bundle carries reports.appraisal.read only via the subject's own `owns`-conditioned read/ack path (reports.appraisal.ack); not the 'read packs beyond one's own' capability.",
     decisionRef: "IAM-02a drift register §3; rbac.ts header §11 principle 2",
   },
+  // ── HR-FULL (2026-08-24): the same self/relationship-scoped conflation on the three new HR kinds.
+  // Three entries, and they split into TWO distinct causes worth naming separately, because only
+  // one of them is the well-trodden `owns` case above.
+  {
+    role: "member",
+    capability: "hr.payroll.view",
+    direction: "under-claim",
+    reason:
+      "member's bundle carries hr.payroll.read ONLY via resource_hr_payroll.yaml's self-scoped rule — the subject reading their OWN PUBLISHED payslip, gated on BOTH `subjectUserId == principal.id` AND `published == true`. The `hr.payroll.view` capability means reading the whole company's salary book, which is precisely the reach hr_staff is denied. Widening the mirror to satisfy the biconditional would show every employee a company-wide compensation surface the server refuses — the exact over-claim direction this guard exists to prevent, arriving through the under-claim door. NOTE this pair is also the ONE new HR key the 0114 self-scoped marker DOES mark, so the DB agrees it is self-scoped even though the bundler credits it as flat reach.",
+    decisionRef: "resource_hr_payroll.yaml (member arm); migration 202608240144 header; rbac.ts §11 principle 2",
+  },
+  {
+    role: "member",
+    capability: "hr.recruitment.view",
+    direction: "under-claim",
+    reason:
+      "A DIFFERENT cause from the `owns`/self entries above, and worth distinguishing: member's hr.recruitment.read comes from resource_hr_recruitment.yaml's PANEL rules, gated on `panelistUserIds`/`hiringManagerUserId` — a RELATIONSHIP gate, not a self gate. Being on one interview panel is not the `hr.recruitment.view` capability (seeing the tenant's whole pipeline), and the controller narrows the SQL to the same relationship, so the mirror denying it matches what a member actually gets. NOTE the DB marker DOES now agree this grant is narrow: 0114's self-scope classifier learned the membership form (`principal.id in attr.X`) on 2026-08-24, after an unmarked key was found mis-routing IAM overrides to hr_manager. Marking affects the grant CEILING and override routing, not bundle membership — member still HOLDS the key — so this remains a real, correctly-directed mismatch for this guard's purposes.",
+    decisionRef: "resource_hr_recruitment.yaml (panel arm); migration 202608240144 header; override-request-decide.test.ts",
+  },
+  {
+    role: "member",
+    capability: "hr.policy.view",
+    direction: "under-claim",
+    reason:
+      "The odd one out, and NOT a conflation at all: resource_hr_policy.yaml genuinely DOES grant every member `read` unconditionally — holiday calendars and leave entitlements govern everyone and hiding them is a support ticket, not a posture. The mirror still withholds the capability because `hr.policy.view` gates the HR CONSOLE's settings surface (/hr/settings), which is an HR-operations page; an employee reads the same underlying facts through /me and the leave form, not through the department console. This is a UI-navigation decision, not an authorization one, and it is the one entry here that could be reversed without touching any policy — a future /hr/settings read-only view for all staff would simply add `hr.policy.view` to more roles and drop this entry.",
+    decisionRef: "resource_hr_policy.yaml (member in the read rule); HR-FULL console scoping decision 2026-08-24",
+  },
   // ── same self-service conflation, different resource: resource_integration_connection.yaml
   // (read verbatim, lines 44-49) grants member/viewer/team_lead full CRUD on integration_
   // connection ONLY under `variables.owns` ("a member (or higher, incl. viewer) fully manages

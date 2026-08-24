@@ -299,13 +299,24 @@ interface PatternBHit {
 
 /** A rule's condition is "self-scoped" if it compares a resource attribute to the caller's own
  *  id — either inline (`resource.attr.X == principal.id`, the hr_case/appraisal/checkin shape)
- *  or through the shared `variables.owns` CEL variable (`_variables.yaml`: `has(attr.ownerId) &&
+  if (/variables\.owns\b/.test(conditionExpr)) return "ownerId (variables.owns)";
  *  attr.ownerId == principal.id` — the integration_connection/time_entry/project/report_document
  *  shape). Both are the SAME hazard: the distinguishing fact lives in a resource attribute
  *  `perms` (`{key, scopeType, scopeId}`) has no room to carry. */
 function selfScopeField(conditionExpr: string): string | null {
   const inline = /request\.resource\.attr\.(\w+)\s*==\s*request\.principal\.id/.exec(conditionExpr);
   if (inline) return inline[1];
+  // HR-FULL (2026-08-24) — the MEMBERSHIP form. Kept byte-identical in behaviour to
+  // generate-role-bundles.mjs::isSelfScopedCondition, which is the point of the two existing at
+  // all: the hazard scan asks "can a flat `perms` mirror express this?" and the ceiling asks "is
+  // this authority over OTHER people?", and both must answer the same way about the same rule.
+  //
+  // `principal.id in attr.X` ("you are on this interview panel") is the same category of narrow,
+  // instance-scoped authority as the equality form: it confers nothing over anyone you are not
+  // attached to. Appears in exactly ONE resource policy (resource_hr_recruitment.yaml), so no
+  // pre-existing classification moves.
+  const member = /request\.principal\.id\s+in\s+request\.resource\.attr\.(\w+)/.exec(conditionExpr);
+  if (member) return `${member[1]} (membership)`;
   if (/variables\.owns\b/.test(conditionExpr)) return "ownerId (variables.owns)";
   return null;
 }

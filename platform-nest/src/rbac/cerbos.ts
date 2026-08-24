@@ -58,6 +58,19 @@ export interface Resource {
    *  Omitted -> "" -> the rules' `has() && != ""` guard makes the DENY vacuously false, the same
    *  fail-open-for-DENY/fail-closed-for-ALLOW convention every other optional attr here follows. */
   targetUserId?: string;
+  /** HR-FULL — `hr_payroll`'s member arm requires BOTH `subjectUserId == principal.id` AND this.
+   *  A draft payslip mid-run is not the subject's to see, and a run being recalculated would
+   *  otherwise leak half-computed figures. Omitted -> `false` -> the rule's `== true` check fails
+   *  closed, so a handler that forgets it denies rather than exposing an unpublished slip. */
+  published?: boolean;
+  /** HR-FULL — `hr_recruitment`'s panel arm. The users attached to the application being acted on,
+   *  resolved BY THE HANDLER from hr_interview_panelists / hr_requisitions (never client-supplied:
+   *  the handler is what knows who is on the panel). Omitted -> `[]` / `""` -> the panel rules
+   *  cannot match, so an unfed resource confers nothing — the same fail-closed convention as
+   *  `unitAncestors` and `subjectUserId` above. */
+  panelistUserIds?: string[];
+  hiringManagerUserId?: string | null;
+  recruiterUserId?: string | null;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -107,6 +120,16 @@ function resourcePayload(r: Resource) {
       creatorId: r.creatorId ?? "",
       subKind: r.subKind ?? "",
       targetUserId: r.targetUserId ?? "",
+      // HR-FULL. These four MUST be listed here to reach the policy at all: this function is an
+      // explicit allow-list, and a caller passing an attribute it does not name has that attribute
+      // silently dropped. Two of them arrive through an object spread in recruitment.controller.ts,
+      // where TypeScript's excess-property check does not fire — so the type alone would not have
+      // caught the omission, and the panel rules would have denied every panelist for no visible
+      // reason. Adding a Resource field without adding it here is a no-op with no error.
+      published: r.published ?? false,
+      panelistUserIds: r.panelistUserIds ?? [],
+      hiringManagerUserId: r.hiringManagerUserId ?? "",
+      recruiterUserId: r.recruiterUserId ?? "",
     },
   };
 }

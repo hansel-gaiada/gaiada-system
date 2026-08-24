@@ -3,15 +3,15 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (286 grantable permissions, SM-76 2026-08-23)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (305 grantable permissions, HR-FULL 2026-08-24)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 94,
-      "grantablePermissionsInCatalog": 287,
-      "permissionsCoveredByGroups": 265,
+      "groups": 105,
+      "grantablePermissionsInCatalog": 305,
+      "permissionsCoveredByGroups": 283,
       "permissionsAdvancedOnly": 22,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 54
+      "sensitiveGroups": 64
     }
   },
   "groups": [
@@ -1126,6 +1126,123 @@
       "permissions": [
         "monitoring.status_page.update",
         "monitoring.status_page.publish"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_policy_view",
+      "name": "View HR Policies & Calendars",
+      "domain": "hr",
+      "description": "Read the company's own HR rules — public-holiday calendars, leave policies and entitlements, review-cycle windows, the pay-grade structure, and the statutory parameter sets. Deliberately broad: these govern everyone, and hiding a holiday calendar from the people it applies to is a support ticket, not a security posture.",
+      "permissions": [
+        "hr.policy.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "hr_policy_manage",
+      "name": "Manage HR Policies & Calendars",
+      "domain": "hr",
+      "description": "Create and amend HR configuration: holiday calendars, leave policies and their assignments, review cycles, pay grades, and statutory parameter sets. Does NOT include ratifying those parameters — that is its own group.",
+      "permissions": [
+        "hr.policy.create",
+        "hr.policy.update",
+        "hr.policy.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_statutory_ratify",
+      "name": "Ratify Statutory Parameters",
+      "domain": "hr",
+      "description": "Sign off a set of statutory payroll numbers (tax brackets, BPJS rates and caps, severance multipliers) as verified, which is what unblocks finalizing a payroll run against them. Kept separate from Manage HR Policies on purpose: the routine edit that fixes a typo in a calendar name must not also be able to declare the tax tables legally correct. Requires step-up verification.",
+      "permissions": [
+        "hr.policy.ratify"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_recruitment_view",
+      "name": "View Recruitment",
+      "domain": "hr",
+      "description": "Read requisitions, candidates, applications, interviews and scorecards. A hiring manager or interview panelist reaches their OWN pipeline without this group, through the application's own participants.",
+      "permissions": [
+        "hr.recruitment.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_recruitment_manage",
+      "name": "Manage Recruitment",
+      "domain": "hr",
+      "description": "Run the hiring pipeline: create requisitions and candidates, advance applications, schedule interviews, file scorecards, and draft offers. Does not include approving a requisition or an offer, nor turning an accepted offer into an employee.",
+      "permissions": [
+        "hr.recruitment.create",
+        "hr.recruitment.update",
+        "hr.recruitment.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_recruitment_approve",
+      "name": "Approve Hiring & Convert Offers",
+      "domain": "hr",
+      "description": "Approve a requisition or an offer, and convert an accepted offer into an employee record. Separate from Manage Recruitment because these three commit headcount, commit money, and turn an outsider into someone the access reconciler can reach. Requires step-up verification.",
+      "permissions": [
+        "hr.recruitment.approve",
+        "hr.recruitment.convert"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_recruitment_export",
+      "name": "Export Candidate Data",
+      "domain": "hr",
+      "description": "Bulk-export the candidate pool. Kept separate because candidates are outsiders whose data is held under consent with a retention clock, not employees under contract. Requires step-up verification.",
+      "permissions": [
+        "hr.recruitment.export"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_payroll_view",
+      "name": "View Compensation & Payroll",
+      "domain": "hr",
+      "description": "Read salary records, allowances, benefit enrolments, tax profiles, payroll runs, payslips and separations — for the whole company. A deliberate step above View HR Cases & Records: an HR assistant who files leave and uploads contracts should not hold this. An employee reads their OWN published payslip without any group.",
+      "permissions": [
+        "hr.payroll.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_payroll_manage",
+      "name": "Manage Compensation & Payroll",
+      "domain": "hr",
+      "description": "Set compensation, assign allowances and benefits, capture payroll inputs, create and calculate payroll runs, and draft separations. Calculating a run does not pay anybody — approving it does, and that is a separate group.",
+      "permissions": [
+        "hr.payroll.create",
+        "hr.payroll.update",
+        "hr.payroll.delete"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_payroll_approve",
+      "name": "Approve Payroll & Separations",
+      "domain": "hr",
+      "description": "Approve a payroll run, a compensation change, or a separation payout, and mark a run paid. This is the action that commits money. Requires step-up verification.",
+      "permissions": [
+        "hr.payroll.approve"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "hr_payroll_export",
+      "name": "Export Payroll Register",
+      "domain": "hr",
+      "description": "Export the payroll register or bank file. Requires step-up verification.",
+      "permissions": [
+        "hr.payroll.export"
       ],
       "sensitive": true
     }

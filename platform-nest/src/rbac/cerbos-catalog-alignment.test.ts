@@ -95,7 +95,7 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
   // (the client half of the post sign-off seam, addendum D-16), which is why the pair count grows by
   // 36 while the kind count grows by only 8. Prior movement: HIER-3, 2026-08-11 — team_lead/team
   // retired, resource_team.yaml deleted, core.team.* dropped (230/61 -> 226/60).
-  it("sanity: catalog headline numbers this suite depends on (282 pairs / 72 kinds — IAM Phase 2 P2-02, 2026-08-13: +18 grantable pairs across 4 NEW kinds [role_grant/position/employee/it_account], design §6.2; prior: IAM-GAP-01, 2026-08-13: +2 literal actions [invoice.approve, automation_approval.decide_leave] on EXISTING kinds, 264 pairs / 68 kinds; before that: SMM-30, 2026-08-12, the social module's 8 kinds + portal.approve_post)", () => {
+  it("sanity: catalog headline numbers this suite depends on (282 pairs / 72 kinds — IAM Phase 2 P2-02, 2026-08-13: +18 grantable pairs across 4 NEW kinds [role_grant/position/employee/it_account], design §6.2; prior: IAM-GAP-01, 2026-08-13: +2 literal actions [invoice.approve, automation_approval.decide_leave] on EXISTING kinds, 264 pairs / 68 kinds; before that: SMM-30, 2026-08-12, the social module's 8 kinds + portal.approve_post; HR-FULL (2026-08-24): +18 grantable across 3 new HR kinds [hr_policy/hr_recruitment/hr_payroll], role-arm only, 302 -> 320 pairs / 78 -> 81 kinds)", () => {
         // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
     // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
@@ -107,8 +107,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // `resource_search_property` kind), 298/77 -> 301/78.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(catalog.length).toBe(302);
-    expect(catalogKindSet.size).toBe(78);
+    expect(catalog.length).toBe(320);
+    expect(catalogKindSet.size).toBe(81);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {
