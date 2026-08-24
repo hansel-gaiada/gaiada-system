@@ -36,6 +36,10 @@ export default async function MeLayout({ children }: { children: React.ReactNode
     // payslips or nothing. An employee with no payslips sees an empty state explaining why, which is
     // a better answer than a missing tab that looks like the feature does not exist.
     { key: "pay", label: "Pay", href: "/me/pay", icon: "finance" },
+    // LMS L1c (2026-08-24). Same reasoning as Pay, one step stronger: this tab tells an employee
+    // what mandatory training they still owe, and a hidden tab reads as "nothing is required of
+    // me". The `lms` module being dark shows as an explicit note on the page, never as an absence.
+    { key: "learning", label: "Learning", href: "/me/learning", icon: "learning" },
   ];
 
   return (

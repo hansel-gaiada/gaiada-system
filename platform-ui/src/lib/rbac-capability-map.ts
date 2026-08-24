@@ -347,6 +347,65 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // ──────────────────────────── LMS-L1 (2026-08-24) — its own module ────────────────────────────
+  // Mirrors resource_lms_course.yaml / resource_lms_enrollment.yaml. The split between browsing,
+  // authoring, publishing and grading is the SAME split the policies draw, not a UI convenience.
+
+  // The one genuinely WIDE capability in the LMS. Every member holds it because a course is the
+  // company's own material and training you cannot see is a support ticket.
+  "lms.catalogue.view": {
+    permissions: ["lms.course.read"],
+    semantics: "all",
+  },
+
+  // Authoring. For a department head this is bounded to their own unit by the org chart — a bound
+  // no client-side mirror can express, so the mirror says "could author" and the server says where.
+  "lms.authoring": {
+    permissions: ["lms.course.create", "lms.course.update", "lms.course.retire"],
+    semantics: "all",
+  },
+
+  // Its own capability, not folded into authoring: publishing makes a version ASSIGNABLE and
+  // freezes what people will be CERTIFIED against. Saving a draft and declaring it fit to certify
+  // against are different acts, and the policy draws that line too.
+  //
+  // ⚠ `lms.course.delete` has NO capability naming it — the same orphan shape this file already
+  //    flags for hr.case.export and hr.record.export. Deliberate here rather than accidental: the
+  //    UI offers RETIRE, never delete, because a course with completions against it must stay
+  //    readable. A capability for a control that does not exist would claim coverage it lacks.
+  "lms.publish": {
+    permissions: ["lms.course.publish"],
+    semantics: "all",
+  },
+
+  // Reading OTHERS' progress and scores — including failed attempts, which are more sensitive than
+  // passes. A learner reads their own without this capability at all.
+  "lms.progress.view": {
+    permissions: ["lms.enrollment.read"],
+    semantics: "all",
+  },
+
+  "lms.assign": {
+    permissions: ["lms.enrollment.create", "lms.enrollment.update"],
+    semantics: "all",
+  },
+
+  // Separate from assigning so that a learner recording their own progress and a reviewer marking
+  // it can never be the same authority.
+  "lms.grade": {
+    permissions: ["lms.enrollment.grade"],
+    semantics: "all",
+  },
+
+  // A compliance decision rather than an assessment one — and NOT held by department heads, who
+  // would otherwise be able to excuse their own team from the company's mandatory track.
+  //
+  // ⚠ `lms.enrollment.export` is likewise unmirrored — same orphan finding as the exports above.
+  "lms.waive": {
+    permissions: ["lms.enrollment.waive"],
+    semantics: "all",
+  },
+
   // ─────────────────────────── HR-FULL (2026-08-24) — the three new kinds ───────────────────────
   // Each capability maps 1:1 onto the catalog keys its Cerbos policy grants, and the split between
   // view / manage / approve is the SAME split the policies themselves draw — not a UI convenience.

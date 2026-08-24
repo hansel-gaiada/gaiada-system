@@ -51,6 +51,7 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
+| lms | `0.1.0` | PROTOTYPED | Cross-cutting | 2026-08-24 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -1229,6 +1230,56 @@ rather than quietly deleted.
    recorded override; finance/counsel ratifies from `/hr/settings`.
 
 ---
+
+## lms — Learning · Certification · `0.1.0` · PROTOTYPED
+
+**Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
+
+**Its OWN module key, not filed under `hr`** (owner decision, 2026-08-24). The LMS serves all eight
+departments and every level from foundation to management; filing a company-wide capability under
+one department would have made Creative's or SEO's training silently depend on `hr` being served to
+them. Certification crosses a **one-way** seam — the LMS writes an `hr_record` on path completion
+and reads nothing back, which is the single place in the module that opens two module scopes at
+once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
+
+### What exists at 0.1.0
+
+- **L1a — schema + authorization.** `202608241322_module_lms_l1.sql`: 9 tables behind the `lms`
+  third wall (`lms_courses` versioned by `(course_key, version)`, `lms_modules`, `lms_activities`
+  polymorphic over `read|watch|quiz|scenario|lab`, `lms_paths`, `lms_path_courses`,
+  `lms_enrollments`, `lms_progress`, `lms_attempts`, `lms_completions`).
+  `resource_lms_course.yaml` + `resource_lms_enrollment.yaml`; `202608241340_iam_lms_l1_permissions.sql`
+  seeds the `lms_staff`/`lms_manager` roles, 12 permissions and 68 bundle rows.
+- **L1b — controllers.** `lms-catalogue.controller.ts` (authoring, publish/retire, paths) and
+  `lms-learn.controller.ts` (enrol, progress, attempts, grading, waivers, certification,
+  compliance). 5 rollup metrics and 3 **read-only** MCP tools. `lms-l1-acceptance.test.ts` drives
+  20 assertions over `buildApp()` + `app.inject()`.
+- **L1c — the read surface (platform-ui).** `/learning`, `/learning/catalogue`,
+  `/learning/courses/[id]`, `/learning/compliance` and a `/me/learning` tab; `lib/lms.ts`,
+  7 mirrored capabilities in `lib/rbac.ts`, `lib/demoLms.ts` fixtures, `e2e/lms-learning.spec.ts`.
+
+### Rules worth not relearning
+
+- **Activities are polymorphic so theory does not wait on the sandbox.** Reading, video, quizzes
+  and scenarios ship now; `lab` is the same row shape pointed at a runner that does not exist yet
+  (L5/L6, on the owner's SumoPod VPS). The catalogue is not blocked on the lab host.
+- **Editing a PUBLISHED course forks a new version** rather than rewriting it. A completion points
+  at the exact material that was assessed — the same freeze discipline as a payslip or a loan
+  schedule.
+- **A waiver is not a completion.** Compliance counts them in separate columns so "covered" is
+  never inflated by the people who were excused rather than the people who passed.
+- **A path with zero required courses reports NULL, not 100%.** Misconfigured and complete are
+  different findings.
+- **Catalogue reads are open to `member`.** Training you cannot see is a support ticket, not a
+  security posture. What is gated is other people's progress (`lms.progress.view`) and the bulk
+  register (`lms.enrollment.export`, high assurance).
+
+### Not yet true
+
+Nothing LMS is deployed, and the `lms` module is **not enabled on any live company** — the four UI
+pages render `ModuleDisabled` everywhere until it is. No content exists: the mandatory general
+track (ERP usage, Claude usage, fundamentals) is L2, the HOD authoring surface is L3, the Web Dev
+curriculum across FE/BE/UI-UX/DevOps/Cyber/QA is L4, and the lab runner is L5–L6.
 
 ## search-marketing â€” SEO Â· SEM Â· GEO Â· `0.5.2` Â· DEV-VERIFIED (schema/RLS/Cerbos layer; the site-audit capability itself is PLANNED)
 

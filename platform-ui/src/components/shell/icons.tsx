@@ -24,6 +24,9 @@ const PATHS = {
   briefcase: "M4 8h16v11H4z M9 8V5h6v3 M4 13h16",
   chart: "M3 20h18 M7 20v-6 M12 20V8 M17 20v-9",
   award: "M12 14a5 5 0 1 0 0-10 5 5 0 0 0 0 10z M9 13l-1 8 4-2 4 2-1-8",
+  // Mortarboard — the LMS. Distinct from `award` (a medal, worn by Appraisals) because the two
+  // sit as sibling rail glyphs and a repeated glyph in the collapsed rail names nothing.
+  learning: "M12 4 2 9l10 5 10-5-10-5z M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5",
   server: "M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01",
   wallet: "M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v3 M3 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1h-5a2 2 0 0 0 0 4h6",
   pulse: "M3 12h4l2 8 4-16 2 8h6",

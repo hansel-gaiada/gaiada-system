@@ -189,6 +189,16 @@ export const CAPABILITIES = [
   "hr.payroll.view",    // read compensation, benefits, payroll runs, payslips, separations (company-wide)
   "hr.payroll.manage",  // set compensation, capture inputs, create + calculate runs, draft separations
   "hr.payroll.approve", // approve a run / compensation change / separation, mark a run paid
+  // ── LMS-L1 (2026-08-24). Its OWN module, serving all eight departments. Mirrors of
+  //    resource_lms_course.yaml / resource_lms_enrollment.yaml; the policy decides, this only
+  //    hides controls the server would refuse anyway.
+  "lms.catalogue.view",   // browse courses and paths — genuinely wide, every member holds it
+  "lms.authoring",        // create/update/retire a course or path (HOD: own department only)
+  "lms.publish",          // publish a version, making it assignable and certifiable
+  "lms.progress.view",    // read OTHERS' enrolments, progress and scores
+  "lms.assign",           // assign a path to somebody and record progress on their behalf
+  "lms.grade",            // grade a reviewed submission (UI/UX, management scenarios)
+  "lms.waive",            // excuse somebody from mandatory training — admin tier only
   "search.view",        // read search-marketing properties/engagements/keywords/audits/campaigns/reports/ledger for a company
   "search.manage",      // create/edit properties/engagements/keywords/audits/campaign drafts+proposals/report drafts (draft-only working set — mirrors search_staff/search_manager's baseline Cerbos grant)
   "search.scope.write", // set an engagement's tool-scope config + provider budget cap (D-11; Cerbos action `set_scope`, elevated-only)
@@ -315,6 +325,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "pipeline.write", "pipeline.manage", "webdev.provision",
     "hr.view", "hr.manage",
     // HR-FULL: company_admin is named in every rule of all three new policies, ratify included.
+    // LMS: company_admin is named in every rule of both LMS policies.
+    "lms.catalogue.view", "lms.authoring", "lms.publish",
+    "lms.progress.view", "lms.assign", "lms.grade", "lms.waive",
     "hr.policy.view", "hr.policy.manage", "hr.policy.ratify",
     "hr.recruitment.view", "hr.recruitment.manage", "hr.recruitment.approve",
     "hr.payroll.view", "hr.payroll.manage", "hr.payroll.approve",
@@ -424,7 +437,11 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // `member` (see those two capabilities' comments above); a plain member may open a gate, advance a
   // run, or add a stage, but may not edit a signed artifact, sign the agency's scope commitment, or
   // provision infrastructure.
-  member: ["pm.contribute", "people.directory", "pipeline.write"],
+  // LMS-L1: `member` genuinely holds the catalogue read UNCONDITIONALLY —
+  // resource_lms_course.yaml names `member` in its read rule, because training you cannot see
+  // is a support ticket. Unlike the enrolment keys (which member holds only self-scoped), this
+  // one is real unconditional reach and therefore belongs in the mirror.
+  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view"],
   // Gap 3 find — see the `Role` union's `viewer` comment for the full evidence trail. Matches
   // `member`'s ORIGINAL two capabilities exactly: `pm.contribute` + `people.directory` (DR-2a above).
   // Deliberately does NOT also pick up `member`'s IAM-02a-FIX-2 `pipeline.write` grant: `viewer` is
@@ -472,8 +489,14 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // HR-FULL: hr_staff gains the two BASELINE reads and nothing else — notably NOT hr.payroll.view.
   // That is the whole point of the hr_payroll/hr_record split: an HR assistant who files leave and
   // uploads contracts has no business reading the company's salary book.
-  hr_staff: ["hr.view", ...HR_BASELINE_READS, ...REPORT_READS, "checkin.read", "people.directory"],
-  hr_manager: ["hr.view", "hr.manage", ...HR_BASELINE_READS, ...REPORT_READS, "checkin.read", "appraisal.read", ...HR_OPS],
+  // LMS-L1: the HR tiers hold LMS keys BY DESIGN — resource_lms_enrollment.yaml names
+  // `hr_people_reader` on read and `hr_people_ops` on the write/grade/waive rules, because HR
+  // owns company-wide training compliance ("has everyone passed the mandatory track"). Missing
+  // these was a mirror omission caught by rbac-capability-parity.test.ts, not a design change.
+  hr_staff: ["hr.view", "lms.progress.view", ...HR_BASELINE_READS, ...REPORT_READS, "checkin.read", "people.directory"],
+  hr_manager: ["hr.view", "hr.manage",
+               "lms.progress.view", "lms.assign", "lms.grade", "lms.waive",
+               ...HR_BASELINE_READS, ...REPORT_READS, "checkin.read", "appraisal.read", ...HR_OPS],
   // search_staff = Cerbos module_staff (draft-only baseline: read/create/update, propose_change,
   // research/run — never launch/set_scope/approve/admin). search_manager = module_manager (adds
   // the elevated actions). Mirrors hr_staff/hr_manager's split exactly (SM-03).
@@ -528,7 +551,14 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   reports_manager: ["reports.department.view", "reports.project.view"],
   // HIER-2 — exactly its two bundled permissions, no more. See the `Role` union comment above for
   // why the rest of the reports family is deliberately excluded.
-  org_unit_lead: ["reports.department.view", "appraisal.read"],
+  // LMS-L1: the department head authors, publishes and grades for their OWN unit — this is how
+  // the owner's "each HOD makes more" requirement is expressed, and it needed no new role.
+  // `lms.waive` is deliberately ABSENT: a lead must not be able to excuse their own team from
+  // the company's mandatory training. `lms.catalogue.view` is absent too, for a subtler reason
+  // — a lead browses the catalogue through their MEMBER grant at COMPANY scope, not through
+  // org_unit_lead at unit scope (see principal-scope-constrained-perms.db.test.ts).
+  org_unit_lead: ["reports.department.view", "appraisal.read",
+                  "lms.authoring", "lms.publish", "lms.progress.view", "lms.assign", "lms.grade"],
   // IAM-02a-FIX / DR-2b — see the `Role` union's `agency_approver` comment for the full trail. Its
   // ENTIRE verified Cerbos reach is `agency_approval:approve` (via `module_approver`, module always
   // `"agency"`) — nothing else, not even `agency_approval:read` (that baseline rule names

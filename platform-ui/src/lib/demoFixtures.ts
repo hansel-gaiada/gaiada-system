@@ -16,6 +16,7 @@ import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
 import { checkinsDemo } from "./demoCheckins";
 import { appraisalsDemo } from "./demoAppraisals";
+import { lmsDemo } from "./demoLms";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
 
@@ -1943,6 +1944,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const pm = pmDemo(method, p, url.searchParams, body);
   if (pm) return applyDemoTaskClientFilter(pm, p, url);
 
+  // LMS reads (L1c) — read-only fixture store (lib/demoLms.ts). Placed high so no later
+  // `/api/:t/modules/*` catch-all can answer an LMS path with a generic {ok:true}.
+  const lms = lmsDemo(method, p, url.searchParams);
+  if (lms) return lms;
+
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
   const meetings = meetingsDemo(method, p, url.searchParams, body);
   if (meetings) return meetings;
@@ -2260,12 +2266,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // concern (see lib/modules.ts).
   if (p.match(/^\/api\/[^/]+\/modules-enabled$/)) {
     return ok({
-      enabled: ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports"],
+      enabled: ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"],
     });
   }
   if (p === "/api/module-catalog") {
     return ok(
-      ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports"].map(
+      ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"].map(
         (key) => ({ key, label: key, paths: [] }),
       ),
     );

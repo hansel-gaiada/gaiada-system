@@ -163,6 +163,29 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
       "member's bundle carries reports.appraisal.read only via the subject's own `owns`-conditioned read/ack path (reports.appraisal.ack); not the 'read packs beyond one's own' capability.",
     decisionRef: "IAM-02a drift register §3; rbac.ts header §11 principle 2",
   },
+  // ── LMS-L1 (2026-08-24): `member`'s enrolment keys are SELF-SCOPED. Two entries, same cause as
+  // the hr.payroll.read entry below — the bundler credits a resource-instance condition as reach.
+  //
+  // Worth distinguishing from the FIVE other under-claims the same run surfaced (hr_staff and
+  // hr_manager against the lms.* capabilities): those were a genuine MIRROR OMISSION and were fixed
+  // in rbac.ts, not registered here. The guard telling those two cases apart is precisely its value
+  // — "register it" and "fix it" look identical until you check which side is wrong.
+  {
+    role: "member",
+    capability: "lms.progress.view",
+    direction: "under-claim",
+    reason:
+      "member's bundle carries lms.enrollment.read ONLY via resource_lms_enrollment.yaml's self-scoped rule (subjectUserId == principal.id). The `lms.progress.view` capability means reading OTHERS' progress, scores and failed attempts — which is what /learning/compliance gates on. A learner reading their own /me/learning holds no capability at all, which is rbac.ts §11 principle 2 working as intended.",
+    decisionRef: "resource_lms_enrollment.yaml (member arm); migration 202608241340 header; rbac.ts §11 principle 2",
+  },
+  {
+    role: "member",
+    capability: "lms.assign",
+    direction: "under-claim",
+    reason:
+      "Same self-scoped rule: member holds lms.enrollment.create/update only for their OWN row — self-enrolling in an OPTIONAL path, and recording their own attempts. `lms.assign` means assigning training to somebody else and recording progress on their behalf, which the member arm cannot reach. The controller additionally refuses member self-enrolment into MANDATORY paths, so the two cannot be confused in practice either.",
+    decisionRef: "resource_lms_enrollment.yaml (member create/update arm); lms-learn.controller.ts::enrol",
+  },
   // ── HR-FULL (2026-08-24): the same self/relationship-scoped conflation on the three new HR kinds.
   // Three entries, and they split into TWO distinct causes worth naming separately, because only
   // one of them is the well-trodden `owns` case above.

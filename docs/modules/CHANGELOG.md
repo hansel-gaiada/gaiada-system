@@ -11,6 +11,54 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### lms `0.1.0` — L1 Learning foundation (2026-08-24) — PROTOTYPED
+
+The LMS the owner asked for: **all departments, all levels**, operational and management alike.
+Its **own module key**, not filed under `hr` — filing a company-wide capability under one
+department would have made Creative's or SEO's training silently depend on `hr` being served to
+them. Design: `docs/blueprints/lms-foundation.md`.
+
+**Added**
+- `202608241322_module_lms_l1.sql` — 9 tables behind the `lms` third wall: `lms_courses`
+  (versioned by `(course_key, version)`), `lms_modules`, `lms_activities` (polymorphic
+  `read|watch|quiz|scenario|lab`), `lms_paths`, `lms_path_courses`, `lms_enrollments`,
+  `lms_progress`, `lms_attempts`, `lms_completions`.
+- `cerbos/policies/resource_lms_course.yaml` + `resource_lms_enrollment.yaml`;
+  `202608241340_iam_lms_l1_permissions.sql` — `lms_staff`/`lms_manager` roles, 12 permissions,
+  68 bundle rows. See `docs/PERMISSION-CONTRACT.md`.
+- `src/modules/lms/` — catalogue + learn controllers, 5 rollup metrics, 3 read-only MCP tools,
+  `lms-l1-acceptance.test.ts` (20 assertions over `buildApp()` + `app.inject()`).
+- **platform-ui (L1c):** `/learning`, `/learning/catalogue`, `/learning/courses/[id]`,
+  `/learning/compliance`, a `/me/learning` tab, `lib/lms.ts`, 7 mirrored capabilities in
+  `lib/rbac.ts`, a `learning` mortarboard icon, `lib/demoLms.ts` fixtures,
+  `src/lib/lms-readers.test.ts` and `e2e/lms-learning.spec.ts` (6/6 driven against the rendered
+  app under DEMO_MODE).
+
+**Fixed**
+- **`lib/lms.ts` called `platformFetch(userId, path)` — arguments swapped — in every reader.**
+  Both parameters are `string`, so `tsc` and 3,110 vitest assertions all passed while the LMS
+  paths were never requested: the demo catch-all answered `[]` and the catalogue rendered
+  "nothing published yet". A confident wrong answer with nothing thrown — the frontend-first
+  drift class this repo keeps getting bitten by. Caught only by driving the rendered page;
+  `lms-readers.test.ts` now runs each reader against the fixture store and asserts CONTENT, so
+  a wrong path fails instead of degrading.
+- `gradeAttempt` never passed `unitAncestors` to Cerbos, so every department head 403'd on
+  grading — the derived role could not resolve.
+
+**Notes**
+- **Editing a PUBLISHED course forks a new version** rather than rewriting it. A completion points
+  at the exact material that was assessed — the same freeze discipline as a payslip.
+- **A waiver is not a completion**, and a path with zero required courses reports NULL, not 100%.
+- **One dual-scope call in the whole module** (`{ modules: ["lms", "hr"] }`), for the certification
+  write onto the employee's HR file. Every other query declares `["lms"]` alone.
+- `lab` activities share the row shape but have no runner yet (L5/L6, the owner's SumoPod VPS).
+  Theory does not wait on the sandbox.
+
+**Not yet true:** nothing LMS is deployed, and the `lms` module is **not enabled on any live
+company**. No content exists — the mandatory general track is L2, HOD authoring L3, the Web Dev
+curriculum L4.
+
+
 ### hr `0.4.0` + platform-nest `0.38.0` + platform-ui `0.49.0` — 2026-08-24 — HR-FULL: the department, waves A–D
 
 **Status: MIXED, and the mix is the point.** Schema/RLS and the pure engines are **DEV-VERIFIED**;

@@ -3392,6 +3392,47 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 
 ---
 
+## 23. LMS module — Learning · Certification (LMS L1, 2026-08-24) — `src/modules/lms/`, `platform-ui/src/lib/lms.ts` — **STATUS: BACKEND PROTOTYPED, UI READ SURFACE PROTOTYPED (writes not wired)**
+
+Design: `docs/blueprints/lms-foundation.md`. Its own module key (`lms`), so every route below 404s
+unless the company has `lms` enabled or served — **which no live company does yet**. All routes are
+mounted under `/api/:tenantId/modules/lms`.
+
+⚠ **`platformFetch(path, userId)` — that order.** `lib/lms.ts` had it swapped in every reader when
+first written; both are `string`, so nothing failed and the pages rendered empty against a backend
+that was never asked. `src/lib/lms-readers.test.ts` pins the paths.
+
+| Method | Path | UI consumer | Status |
+|---|---|---|---|
+| GET | `/courses?track&unitNodeId&discipline&level&status` | `listCourses` — `/learning`, `/learning/catalogue` | ✅ BUILT · ✅ WIRED |
+| POST | `/courses` | — (L3 authoring) | ✅ BUILT · ⬜ no UI consumer |
+| GET | `/courses/:id` | `getCourse` — `/learning/courses/[id]` | ✅ BUILT · ✅ WIRED |
+| PATCH | `/courses/:id` → `{id, versioned, version}` | — (L3) | ✅ BUILT · ⬜ no UI consumer |
+| POST | `/courses/:id/publish` · `/retire` | — (L3) | ✅ BUILT · ⬜ no UI consumer |
+| POST | `/courses/:id/modules` · `/modules/:id/activities` · DELETE `/activities/:id` | — (L3) | ✅ BUILT · ⬜ no UI consumer |
+| GET | `/paths?track&mandatory` | `listPaths` | ✅ BUILT · ✅ WIRED |
+| POST | `/paths` · `/paths/:id/courses` · `/paths/:id/publish` | — (L3) | ✅ BUILT · ⬜ no UI consumer |
+| GET | `/me` → `{enrolments[], certifications[]}` | `getMyLearning` — `/me/learning` | ✅ BUILT · ✅ WIRED |
+| GET | `/enrollments?subjectUserId&status` | `listEnrollments` | ✅ BUILT · ⬜ no page yet |
+| POST | `/enrollments` · `/enrollments/:id/waive` | — (L3) | ✅ BUILT · ⬜ no UI consumer |
+| POST | `/activities/:id/attempts` · `/attempts/:id/grade` | — (L5, needs the lab runner) | ✅ BUILT · ⬜ no UI consumer |
+| GET | `/compliance` → `ComplianceRow[]` | `getCompliance` — `/learning/compliance` | ✅ BUILT · ✅ WIRED |
+
+**Contract notes that have already mattered:**
+
+- `PATCH /courses/:id` on a **published** course does not edit it — it forks a new draft version
+  carrying the modules and activities across, and answers `{versioned: true, version, note}`. A UI
+  that assumes an in-place edit will show the caller stale content.
+- `/compliance` is aggregate **by path**, never a per-person score dump; the per-person register is
+  `lms.enrollment.export` at the high-assurance tier. `waived` is its own count and must never be
+  added to `completed`.
+- `/me` takes **no subject**. The backend decides what "mine" means, which is the only arrangement
+  in which the page and `resource_lms_enrollment.yaml`'s member arm cannot disagree.
+- A path with zero required courses is misconfigured, not complete — `completionPct` returns
+  `null`, and the UI renders a dash rather than 100%.
+
+---
+
 ## IAM Phase 2 — employees + joiner/mover/leaver (P2-06, 2026-08-18)
 
 **Status:** PROTOTYPED / DEV-VERIFIED against `gaiada-test-pg` + a restarted test Cerbos

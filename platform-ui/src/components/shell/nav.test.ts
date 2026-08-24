@@ -11,12 +11,17 @@ describe("navFor (RBAC-gated visibility)", () => {
   it("member sees Workspace/Organization/Departments/Business/Reports/Intelligence/Systems but no Settings, no Rollups", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] });
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Me", "Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Intelligence", "Systems"]);
+    expect(labels).toEqual(["Me", "Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Learning", "Intelligence", "Systems"]);
     // Employee-portal wave A: "Me" is FIRST and ungated — every principal with a staff surface has a
     // personal hub, and there is no capability to hold. Gating it would gate someone out of their own
     // leave, loans and inbox.
     const meGroup = groups.find((g) => g.label === "Me")!;
-    expect(meGroup.items.map((i) => i.label)).toEqual(["Overview", "Inbox", "Leave", "Loans"]);
+    expect(meGroup.items.map((i) => i.label)).toEqual(["Overview", "Inbox", "Leave", "Loans", "Learning"]);
+    // LMS L1c: a plain member sees Learning's Overview + Catalogue but NOT Compliance — the
+    // catalogue is everybody's (training you cannot see is a support ticket, not a security
+    // posture), while Compliance reads other people's progress and is gated on lms.progress.view.
+    const learning = groups.find((g) => g.label === "Learning")!;
+    expect(learning.items.map((i) => i.label)).toEqual(["Overview", "Catalogue"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
     // 2026-08-10 owner directive: Business collapses to ONE "Project Management" entry — Projects

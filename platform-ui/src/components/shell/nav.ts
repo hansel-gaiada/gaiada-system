@@ -101,6 +101,9 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       { label: "Inbox", href: "/me/inbox", icon: "check" },
       { label: "Leave", href: "/me/leave", icon: "clock" },
       { label: "Loans", href: "/me/loans", icon: "wallet" },
+      // Ungated, like every other Me row: mandatory training is an obligation the employee is
+      // told to meet, so the one page that tells them what they owe can never be behind a grant.
+      { label: "Learning", href: "/me/learning", icon: "learning" },
     ] },
     // Daily destinations: always reachable in one click, in either mode.
     { label: "Workspace", pinned: true, items: [
@@ -151,6 +154,18 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       { label: "My Appraisals", href: "/appraisals/mine", icon: "check" },
       ...(can(me, "appraisal.score", tenantId) || can(me, "appraisal.read", tenantId) ? [{ label: "Team Appraisals", href: "/appraisals", icon: "check" } as NavItem] : []),
       ...(can(me, "appraisal.cycle.admin", tenantId) ? [{ label: "Appraisal Cycles", href: "/appraisals/cycles", icon: "check" } as NavItem] : []),
+    ] },
+    // The LMS is its OWN module serving all eight departments, so it is a top-level group rather
+    // than a row under Departments > HR — filing it there would have implied Creative's or SEO's
+    // training depends on `hr` being served to them, which it does not.
+    //
+    // Catalogue is ungated on purpose (`member` holds `lms.catalogue.view`): training you cannot
+    // see is a support ticket, not a security posture. Compliance is where the gate belongs — that
+    // page reads other people's progress.
+    { label: "Learning", icon: "learning", items: [
+      { label: "Overview", href: "/learning", icon: "home" },
+      { label: "Catalogue", href: "/learning/catalogue", icon: "box" },
+      ...(can(me, "lms.progress.view", tenantId) ? [{ label: "Compliance", href: "/learning/compliance", icon: "check" } as NavItem] : []),
     ] },
     // ASST-07: owner-private end to end (no admin/company_admin/group_executive bypass — see
     // resource_assistant_thread.yaml), so this needs no `can()` gate: every signed-in staff user
