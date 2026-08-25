@@ -20,6 +20,7 @@
     "seed:employee-files": "node dist/seed/employee-files.js",
     "seed:hr-config": "node dist/seed/hr-config.js",
     "seed:finance-config": "node dist/seed/finance-config.js",
+    "seed:finance-live-defaults": "node dist/seed/finance-live-defaults.js",
     "seed:lms-general-track": "node dist/seed/lms-general-track.js",
     "seed:lms-webdev-curriculum": "node dist/seed/lms-webdev-curriculum.js",
     "lms:assign-mandatory": "node dist/seed/lms-assign-mandatory.js",

@@ -23,7 +23,8 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 | F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **55** | **52** | **0** | **0** | **3** |
+| UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
+| **Total** | **63** | **60** | **0** | **0** | **3** |
 
 ---
 
@@ -132,8 +133,8 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | S-01 | Confirm entity scope (A1) | **DEV-VERIFIED** | Owner: all three entities get books. Legal PT names still to confirm for invoices/e-Faktur — does not block the ledger |
 | S-02 | Cut fiscal calendar per entity (A2) | **DEV-VERIFIED** | FY2026 Jan–Dec, **12 monthly periods, all OPEN**, on all three. Verified by direct query, not by the seed's own output |
 | S-03 | Instantiate CoA per entity (A5) | **DEV-VERIFIED** | Our `id_psak_general_v1` template (no prior books to mirror). **69 accounts, 5 control accounts**, IDR, fyStart=1, on all three |
-| S-04 | Seat accountant + finance manager from real IAM positions (A6) | **BLOCKED — needs A6** | Seeded with `--no-seats`: no fictional principals in production IAM. **Nobody can keep these books until real people are seated** |
-| S-05 | Load `company_ownership` rows (A7) | PLANNED | blocked; also unblocks F9 control determination |
+| S-04 | Seat accountant + finance manager (A6) | **PLANNED — stand-in decided** | Owner: point at `hansel@gaiada.com` for now. Registered in **`docs/PLACEHOLDER-PRINCIPALS.md`** (P-01/P-02). ⚠ Both roles are the SAME account, so **SoD is not in force** — fine while the books are empty, not once entries are posted |
+| S-05 | Load `company_ownership` rows (A7) | **PLANNED — default decided** | Owner: **Anthony 100%**. `anthony@gaiada.com` is a REAL active account, not a stand-in. **ONE row, not three**: a `holding` edge confers the company + all descendants, so a single edge on D & A Syrowatka reaches both operating companies. Three shareholder rows would resolve the same but assert a false cap table |
 | S-06 | Drive `/finance` authenticated against live data ⇒ DEV-VERIFIED | PLANNED | Needs S-04 (a real principal) and the `/api/me` 401. Until then finance is deployed + seeded, **not** DEV-VERIFIED end to end |
 
 ### F8 · Fixed assets + depreciation
@@ -239,3 +240,45 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
     `NO_ACCOUNTANT_SIGNOFF`.
   - **Seeded with `--no-seats`.** S-04 is the real remaining blocker: without a named accountant and
     finance manager, nobody can keep these books.
+
+---
+
+## Owner answers, 2026-08-25 (second round)
+
+| # | Answer | What it changes |
+|---|---|---|
+| **A3** | **PKP** — "should be PKP because its a company". Must be **settable in UI** | `finance_company_settings.is_pkp` already exists. Seeded true as a DEFAULT; needs a UI editor (UI-02) |
+| **A6** | Point every blocked person-assignment at **`hansel@gaiada.com`**, and **document the usage** so it can be moved to the real person later | `docs/PLACEHOLDER-PRINCIPALS.md` created. Register entry is now part of making the grant, not an afterthought |
+| **A7** | Ownership must be **CRUD-able in UI** — person, percentage, which company. Default **Anthony 100%** | UI-01. Anthony is a real account; the default is one `holding` edge, not three shareholder rows |
+| **B2** | **Yes — there ARE intercompany dealings** | ⭐ **Eliminations are now mandatory, not optional.** F9-04..07 are in scope. A naive sum across the three companies would double-count real transactions, so the group console must NOT label one "consolidated" until eliminations exist |
+| **B3** | Build **all** of it; the user adds or removes instruments from the book as needed | F11 keeps its full scope (loans, bonds, leases). Instruments are user-managed data, not a fixed list. **PSAK 73 leases are IN**, so the right-of-use asset wires F11 into F8 |
+
+### What B2 costs, stated plainly
+
+Intercompany dealings mean the holding, the agency and the resort transact with each other. Three
+consequences that are not optional any more:
+
+1. **Journals need counterparty tagging** (F9-04) at posting time. Retrofitting it means going back
+   through history that is append-only — much cheaper to have it from the first entry, which is
+   *now*, while the books are empty.
+2. **Eliminations must live in a separate consolidation ledger** (F9-03). An entity's own books
+   must stay standalone-auditable; an elimination entry must never appear in them.
+3. **The group console must not say "consolidated"** until F9-05..07 exist. A naive sum is a
+   legitimate figure to show — mislabelling it is not.
+
+---
+
+## UI · Configuration surfaces
+
+Owner: ownership and PKP must both be editable by a person, not only by a seed.
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| UI-01a | `company_ownership` read + write endpoints (list/create/update/end-date) | PLANNED | An ownership edge is **effective-dated**: "remove" = set `effective_to`, never DELETE. Last year's statements were true under last year's cap table |
+| UI-01b | Cerbos kind for ownership writes | PLANNED | Touches the five coupled artifacts. Who may edit a cap table is not the same as who may read finance |
+| UI-01c | Ownership CRUD UI: holder (person or company), %, which company, dates | PLANNED | Must support BOTH holder kinds — the schema's `num_nonnulls(holder_user_id, holder_company_id) = 1` |
+| UI-01d | Stake validation surface: warn when live stakes for a company exceed 100% | PLANNED | The DB caps a single row at 100 but does not sum them. A cap table totalling 140% must be visible, not silently accepted |
+| UI-02a | `finance_company_settings` read + write endpoints | PLANNED | is_pkp, npwp, currencies, fiscal_year_start_month |
+| UI-02b | Settings UI editor | PLANNED | ⚠ `fiscal_year_start_month` must NOT be freely editable once periods exist — it would invalidate every cut period and every balance sheet's fyStart |
+| UI-02c | NPWP handling: PII-scrubbed, encrypted at rest | PLANNED | Program rule: scrub national-ID-shaped values before persist. An NPWP is exactly that shape |
+| UI-02d | Guard: turning PKP **off** with posted PPN is refused | PLANNED | Same reasoning as a locked period — it would orphan tax already charged |

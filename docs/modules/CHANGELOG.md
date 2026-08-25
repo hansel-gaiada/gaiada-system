@@ -11,6 +11,35 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.12.0` - live defaults: PKP, a finance seat, and the ownership edge (2026-08-25) - PROTOTYPED
+
+**Added**
+- `seed:finance-live-defaults` - PKP status, a finance seat, and the default ownership edge.
+- `docs/PLACEHOLDER-PRINCIPALS.md` - the register of stand-in principals in the LIVE estate.
+
+**Notes**
+- ★ **Anthony gets ONE ownership row, not three.** The obvious reading of "Anthony 100%" is one
+  row per company, and it is wrong in a way that quietly misstates the cap table. `kind='holding'`
+  confers the company **plus every descendant** through `finance_owner_company_ids()`, and both
+  operating companies are children of the holding - so a single edge already reaches all three.
+  Three `shareholder` rows would resolve to the same set while asserting he holds the operating
+  companies directly rather than through the holding vehicle, and `shareholder` deliberately
+  carries no group reach. One edge says what is actually true.
+- **`anthony@gaiada.com` is a real active account**, so ownership is NOT a placeholder.
+- **The finance seat IS a stand-in** and is registered as P-01/P-02. A grant made without that
+  register entry is a defect: a stand-in grant is invisible once made - `hansel@gaiada.com` already
+  holds platform-wide access, so a finance grant on top produces no warning and looks identical to
+  a correct assignment.
+- ⚠ **SoD is not in force in the live estate.** The accountant and the finance manager are the same
+  account. Acceptable while the books are empty; not once real transactions are posted - the ledger
+  is append-only, so entries posted under a stand-in stay attributed to that person permanently and
+  reassigning the role later does not re-attribute history.
+- **Every value here is a DEFAULT and never overwrites one already set.** PKP is guarded on
+  `is_pkp IS DISTINCT FROM true`, so a company an accountant deliberately marked non-PKP is not
+  silently flipped back by a re-run.
+- The seed refuses to CREATE users. Inventing a principal in a live estate is how a fictional
+  employee ends up holding a finance grant.
+
 ### finance `0.11.0` - the seed can configure a LIVE estate (2026-08-25) - PROTOTYPED
 
 **Added**
