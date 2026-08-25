@@ -123,6 +123,30 @@ these people access" use `seed:roster-access`, and for HR records `seed:employee
 production is clean (it is not), but because access, employment and business data are separable
 changes and should stay that way.
 
+## Generated artifacts read the FILESYSTEM, not the index
+
+`docs/MAP.md` is the well-known case (see the root guide), but it is not the only one:
+`npm run gen:role-bundles` derives `src/rbac/role-permission-bundles.json` from
+**`cerbos/policies/` on disk**, and `UPDATE_INVENTORY=1` regenerates
+`docs/modules/CAPABILITY-INVENTORY.md` from the live registry the same way.
+
+In this shared checkout that is a live hazard rather than a theoretical one. On 2026-08-24 the tree
+carried three UNTRACKED Cerbos policies (`resource_finance_*.yaml`) from an unreleased Finance wave;
+regenerating the bundle in place would have baked unreleased Finance permissions into a committed IAM
+artifact, and the diff would have looked like an ordinary regeneration. Generate from
+`git worktree add --detach <tmp> HEAD`, copy the file back, exactly as for MAP.
+
+The failure this prevents has already happened in the other direction: `role-permission-bundles.json`
+went stale when the HR-FULL wave added ~18 permission keys without regenerating, and it took SEVEN
+suites red with it — `owner-role.db.test.ts`, `principal-permissions`, `authz-permissions`,
+`iam-04-reg1`, `hr-full-acceptance`, the bundle's own REGEN-NO-DIFF check, and platform-ui's
+`rbac-capability-parity` (which reads as mirror over-claims from the UI side, so the symptom points
+at the wrong file). If those suites go red together, suspect the artifact before the policy.
+
+⚠ **A new `company_admin` key does NOT propagate to `owner`.** IAM-14 built the `owner` bundle with a
+one-time `INSERT .. SELECT`, so every later key must mirror onto `owner` explicitly or
+`owner-role.db.test.ts` goes red. This is the most-repeated cause of that suite failing.
+
 ## Migrations
 
 `migrations/NNNN_*.sql`, applied in order by `src/db/migrate.ts` (and on every boot).
