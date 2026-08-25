@@ -8,12 +8,14 @@ import "server-only";
 // "already submitted" on the SAME server, which a stateless fixture can't exercise. One-way
 // dependency: this file must NOT import demoFixtures.ts.
 //
-// Only `/checkins/today`, `POST /checkins`, and `GET /checkins` (history) are modelled — the
-// lead/exec/HR-only `/checkins/compliance` grid and the manager `/checkins/:id/excuse` action are
-// deliberately NOT wired here: TR-10/TR-38 are a self-service My Work card and a person-grain
-// calendar, neither of which calls those two endpoints (see lib/checkins.ts's header comment on why
-// self can never call /compliance). A future manager-facing compliance surface is a separate
-// ticket's job to seed.
+// `/checkins/today`, `POST /checkins`, `GET /checkins` (history) and — since GM-07 — the
+// lead/exec/HR `/checkins/compliance` grid are modelled. The manager `/checkins/:id/excuse` action
+// is still deliberately NOT wired: nothing in the UI calls it yet.
+//
+// GM-07 is the "future manager-facing compliance surface" this header used to defer to: the GM
+// console's People tab reads the grid company-wide. The fixture below derives the grid from the SAME
+// per-person store the history endpoint reads, so a submit made in the browser moves the compliance
+// number on the next page load — the whole reason this file is stateful rather than static.
 import { formatMinutes, type CheckinHistoryEntry, type CheckinPrefill, type CheckinToday, type CheckinSubmitResult } from "./checkins";
 
 interface DemoResult { status: number; json: unknown }
@@ -164,6 +166,9 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
   }
 
   const collectionMatch = p.match(/^\/api\/([^/]+)\/checkins$/);
+  // Ordered BEFORE any `/checkins/:id`-shaped route would be, and anchored, so "compliance" can
+  // never be read as a check-in id.
+  const complianceMatch = p.match(/^\/api\/([^/]+)\/checkins\/compliance$/);
   if (collectionMatch && method === "POST") {
     const tenantId = collectionMatch[1];
     seedIfNeeded(tenantId, userId);
@@ -213,5 +218,71 @@ export function checkinsDemo(method: string, p: string, params: URLSearchParams,
     return ok({ userId: subjectUserId, from, to, checkins });
   }
 
+  // ── GM-07: the compliance grid ────────────────────────────────────────────────────────────────
+  // Derived from the store, never invented. Two rules the real controller enforces that this fixture
+  // must NOT get wrong, because the UI's honesty depends on them:
+  //   1. A day with NO row is not expected (weekend/holiday/leave) and contributes nothing —
+  //      the same rule the history handler above applies. Fabricating misses for untracked days
+  //      would make every demo look non-compliant.
+  //   2. `complianceRate` is `null`, never 0, when nothing was expected. "Nobody was due" is not
+  //      "nobody complied", and the UI renders the two differently.
+  if (complianceMatch && method === "GET") {
+    const tenantId = complianceMatch[1];
+    const periodKind = params.get("periodKind") ?? "day";
+    const start = params.get("start");
+    if (!start) return err(400, "start must be a YYYY-MM-DD date");
+    const end = params.get("end");
+    if (periodKind === "custom" && !end) return err(400, "end is required when periodKind=custom");
+    const { from, to } = resolveDemoPeriod(periodKind, start, end);
+    if (to < from) return err(400, "to must be on or after from");
+
+    // Seed the demo cohort so the grid has more than the caller in it — a one-row "team" view would
+    // exercise none of the ranking or roll-up the tab exists for.
+    for (const u of DEMO_COHORT) seedIfNeeded(tenantId, u);
+
+    const rows = DEMO_COHORT.map((subjectUserId) => {
+      let expectedDays = 0, submittedDays = 0, missedDays = 0, excusedDays = 0;
+      for (let d = from; d <= to; d = addDaysIso(d, 1)) {
+        const row = store.get(key(tenantId, subjectUserId, d));
+        if (!row) continue; // rule 1
+        expectedDays += 1;
+        if (row.status === "submitted") submittedDays += 1;
+        else if (row.status === "excused") excusedDays += 1;
+        else missedDays += 1;
+      }
+      return {
+        userId: subjectUserId, expectedDays, submittedDays, missedDays, excusedDays,
+        complianceRate: expectedDays > 0 ? submittedDays / expectedDays : null, // rule 2
+      };
+    }).filter((r) => r.expectedDays > 0)
+      .sort((a, b) => a.userId.localeCompare(b.userId));
+
+    return ok({ from, to, unit: params.get("unit") ?? null, rows });
+  }
+
   return null;
+}
+
+/** The demo people the compliance grid tallies. Deliberately the identities `demoFixtures.ts`
+ *  already uses for members/assignees, so names resolve through the same `listMembers` read the
+ *  console uses rather than showing raw ids. */
+const DEMO_COHORT = ["demo-hansel", "gede-ic", "u-dev", "u-pm", "seo-staff"];
+
+/** `periodKind` -> an inclusive [from, to]. Plain ISO-week / calendar-month arithmetic, mirroring
+ *  `resolveCheckinPeriod` in checkins.controller.ts — deliberately not the full report-period
+ *  machinery, which is a different (sealed-period) concern. */
+function resolveDemoPeriod(kind: string, start: string, end: string | null): { from: string; to: string } {
+  if (kind === "custom") return { from: start, to: end ?? start };
+  if (kind === "day") return { from: start, to: start };
+  if (kind === "week") {
+    // ISO week: Monday-start. `getUTCDay()` is 0 for Sunday, so map it to 7 before subtracting.
+    const dow = new Date(`${start}T00:00:00Z`).getUTCDay() || 7;
+    const from = addDaysIso(start, 1 - dow);
+    return { from, to: addDaysIso(from, 6) };
+  }
+  // month
+  const d = new Date(`${start}T00:00:00Z`);
+  const from = `${start.slice(0, 7)}-01`;
+  const to = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+  return { from, to };
 }

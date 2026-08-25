@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildCalendarDays, summarizeSelfCompliance, formatMinutes, addDaysIso,
-  type CheckinHistoryEntry, type CheckinDayStatus,
-} from "./checkins";
+  type CheckinHistoryEntry, type CheckinDayStatus, rollUpCompliance } from "./checkins";
 import type { CheckinDayStatus as ChartCheckinDayStatus } from "@/components/reports/charts/CalendarHeatmap";
 
 function entry(date: string, status: CheckinHistoryEntry["status"]): CheckinHistoryEntry {
@@ -141,5 +140,49 @@ describe("checkins — pure helpers (TR-10/TR-38)", () => {
       expect(divergencePercentagePoints).toBeGreaterThan(8); // ~8.33 points in this realistic case
       expect(divergencePercentagePoints).toBeLessThan(9);
     });
+  });
+});
+
+describe("rollUpCompliance (GM-07)", () => {
+  const row = (userId: string, expected: number, submitted: number, excused = 0) => ({
+    userId, expectedDays: expected, submittedDays: submitted,
+    missedDays: expected - submitted - excused, excusedDays: excused,
+    complianceRate: expected > 0 ? submitted / expected : null,
+  });
+
+  it("sums numerators and denominators rather than averaging per-person rates", () => {
+    // THE regression this pins. One person expected 20 days at 50%, one expected 1 day at 100%.
+    // Averaging the RATES gives 75% — which would tell a GM the team is fine. The true figure is
+    // 11/21 ≈ 52%. A headline number that disagrees with the grid under it is worse than no number.
+    const roll = rollUpCompliance([row("a", 20, 10), row("b", 1, 1)]);
+    expect(roll.expected).toBe(21);
+    expect(roll.submitted).toBe(11);
+    expect(roll.rate).toBeCloseTo(11 / 21, 10);
+    expect(roll.rate).not.toBeCloseTo(0.75, 2);
+  });
+
+  it("returns a null rate — never 0 — when nothing was expected", () => {
+    // Propagates the controller's own never-divide-by-zero rule. "Nobody was due to check in"
+    // (a holiday week, everyone on leave) is not "nobody complied", and the UI renders the two
+    // differently: a dash, not 0%.
+    const roll = rollUpCompliance([row("a", 0, 0)]);
+    expect(roll.rate).toBeNull();
+    expect(roll.expected).toBe(0);
+  });
+
+  it("is empty-safe and counts people, not rows of work", () => {
+    const empty = rollUpCompliance([]);
+    expect(empty).toEqual({ people: 0, expected: 0, submitted: 0, missed: 0, excused: 0, rate: null });
+    expect(rollUpCompliance([row("a", 5, 5), row("b", 5, 4)]).people).toBe(2);
+  });
+
+  it("keeps excused days out of the submitted numerator", () => {
+    // An excused day is neither a submission nor a miss. Folding it into `submitted` would let a
+    // manager raise the compliance number by excusing days, which is the gaming path §5.2 guards.
+    const roll = rollUpCompliance([row("a", 10, 6, 2)]);
+    expect(roll.submitted).toBe(6);
+    expect(roll.excused).toBe(2);
+    expect(roll.missed).toBe(2);
+    expect(roll.rate).toBeCloseTo(0.6, 10);
   });
 });

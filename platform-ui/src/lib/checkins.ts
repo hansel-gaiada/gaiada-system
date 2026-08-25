@@ -85,6 +85,56 @@ export interface CheckinHistory {
   checkins: CheckinHistoryEntry[];
 }
 
+/** One person's tally in the compliance grid — mirrors `checkins.controller.ts`'s exported
+ *  `ComplianceRow` field-for-field.
+ *
+ *  ⚠ `complianceRate` is `null`, never 0, when `expectedDays === 0` — the controller never divides
+ *  by zero, and "nobody was expected to check in" is not "nobody complied". A consumer that renders
+ *  `null` as 0% invents a failure. */
+export interface CheckinComplianceRow {
+  userId: string;
+  expectedDays: number;
+  submittedDays: number;
+  missedDays: number;
+  excusedDays: number;
+  complianceRate: number | null;
+}
+
+/** `GET /checkins/compliance`'s envelope. `unit` ECHOES what the server actually scoped to, which is
+ *  NOT always what the caller asked for: for a unit-scoped (dept-lead) principal the controller
+ *  replaces the requested unit with the led subtree, and for a self-only principal it returns
+ *  `unit: null` with a single row. Read the echo, never assume the request. */
+export interface CheckinCompliance {
+  from: string;
+  to: string;
+  unit: string | null;
+  rows: CheckinComplianceRow[];
+}
+
+/** Roll a grid up to one headline figure.
+ *
+ *  Sums the NUMERATORS and DENOMINATORS rather than averaging the per-person rates — averaging rates
+ *  weights a person expected once the same as a person expected twenty times, which is the classic
+ *  way a compliance number ends up disagreeing with the grid underneath it. `rate` is `null` when
+ *  nothing was expected at all, propagating the controller's own never-divide-by-zero rule. */
+export function rollUpCompliance(rows: CheckinComplianceRow[]): {
+  people: number;
+  expected: number;
+  submitted: number;
+  missed: number;
+  excused: number;
+  rate: number | null;
+} {
+  const t = { people: rows.length, expected: 0, submitted: 0, missed: 0, excused: 0 };
+  for (const r of rows) {
+    t.expected += r.expectedDays;
+    t.submitted += r.submittedDays;
+    t.missed += r.missedDays;
+    t.excused += r.excusedDays;
+  }
+  return { ...t, rate: t.expected > 0 ? t.submitted / t.expected : null };
+}
+
 // Mirrors `POST /checkins`'s 200 response exactly.
 export interface CheckinSubmitResult {
   id: string;

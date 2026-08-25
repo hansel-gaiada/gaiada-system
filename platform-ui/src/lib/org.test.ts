@@ -5,8 +5,20 @@ describe("defaultStructure", () => {
   it("seeds the five departments for the agency", () => {
     const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency" });
     expect(s.root.kind).toBe("company");
-    expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media"]);
+    // GM is LAST here on purpose: these ids are positional (`dept-${i + 1}`), so inserting it at the
+    // front would renumber Web Dev off `dept-1` and SEO off `dept-3` — the latter is hard-wired into
+    // the demo login mapping. The sidebar hoists GM for reading (`shell/nav.ts`); identity stays put.
+    expect(s.root.children.map((c) => c.name)).toEqual(["Web Dev", "Creatives", "SEO", "Social Media", "GM"]);
     expect(s.root.children.every((c) => c.kind === "department")).toBe(true);
+  });
+
+  it("gives GM its own department node with no divisions", () => {
+    // Mirrors platform-nest `seed/roster.ts`: `{ id: "d-gm", name: "GM", divisions: [] }` — people
+    // sit directly under the department, same as Social Media.
+    const s = defaultStructure({ id: "co-agency", name: "Gaia Digital Agency", type: "agency" });
+    const gm = s.root.children.find((c) => c.name === "GM")!;
+    expect(gm.id).toBe("dept-5");
+    expect(gm.children.every((c) => c.kind === "person")).toBe(true);
   });
 
   it("seeds the canonical depth department → division → role → person for the agency", () => {

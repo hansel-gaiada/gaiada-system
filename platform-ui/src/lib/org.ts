@@ -65,6 +65,17 @@ const AGENCY_DEPARTMENTS: { name: string; divisions: { name: string; roles?: Org
   ] },
   // Social Media has no divisions — people sit directly under the department.
   { name: "Social Media", divisions: [], people: [person("d4-p1", "Dewi Santoso", "u-pm")] },
+  // GM (GM-01). Like Social Media it has no divisions — the General Manager sits directly under the
+  // department, which mirrors platform-nest's real roster (`seed/roster.ts`: `{ id: "d-gm", name:
+  // "GM", divisions: [] }`, with Edward as its lead).
+  //
+  // ⚠ APPENDED, NEVER INSERTED. These ids are POSITIONAL (`dept-${i + 1}`), so putting GM first
+  // would renumber every other department: Web Dev would stop being `dept-1`, and `dept-3` is
+  // hard-wired into the demo login mapping (the `seo-staff` tier is meant to land on SEO) and into
+  // `demoReports.ts`'s own department catalog. The sidebar hoists GM to the top for READING
+  // (`shell/nav.ts`) — ordering there is presentation, ids here are identity, and the two must not
+  // be conflated.
+  { name: "GM", divisions: [], people: [person("d5-p1", "Edward", "u-gm")] },
 ];
 
 export function defaultStructure(company: { id: string; name: string; type: string | null }): OrgStructure {

@@ -26,7 +26,7 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"], storageState: ".auth/user.json" },
       dependencies: ["setup"],
-      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/],
+      testIgnore: [/auth\.spec\.ts/, /smoke\.spec\.ts/, /portal\.spec\.ts/, /iam-personas-fixture\.spec\.ts/, /pm-unified-interface\.spec\.ts/, /social-console\.spec\.ts/, /gm-console\.spec\.ts/],
     },
     {
       // CP-17 client portal. Its OWN project with NO stored session, because every test here signs in as
@@ -71,6 +71,17 @@ export default defineConfig({
       name: "social",
       use: { ...devices["Desktop Chrome"] },
       testMatch: /social-console\.spec\.ts/,
+    },
+    {
+      // GM-10 — the GM console suite. Self-contained (each test signs in as either the
+      // platform_admin demo identity or a plain member), no dependency on the "chromium" project's
+      // stored staff session — same reasoning as the "portal"/"personas"/"pm-unified"/"social"
+      // projects above, and it matters more here than anywhere else: the negative controls in that
+      // file are the only browser-level proof that a plain member cannot read company-grain figures
+      // through the GM console, and a stale staff session would turn them all green vacuously.
+      name: "gm",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /gm-console\.spec\.ts/,
     },
     {
       // P3-12 CI build-gate smoke check. Self-contained (does its own login),

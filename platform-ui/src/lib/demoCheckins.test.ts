@@ -17,7 +17,50 @@ function call(method: string, path: string, query: Record<string, string> = {}, 
 describe("demoCheckins — checkinsDemo (DEMO_MODE fixtures, TR-10/TR-38)", () => {
   it("returns null for a path it doesn't own, so the dispatch chain can fall through", () => {
     expect(call("GET", "/api/co-agency/pm/tasks")).toBeNull();
-    expect(call("GET", "/api/co-agency/checkins/compliance")).toBeNull(); // deliberately unmodeled
+    // `/checkins/compliance` USED to be asserted null here as "deliberately unmodeled". GM-07 models
+    // it (the GM console's People tab reads the grid), so the assertion moved to the block below
+    // rather than being deleted — the change is intentional, not a regression.
+    expect(call("GET", "/api/co-agency/checkins/excuse-something")).toBeNull();
+  });
+
+  describe("GET /checkins/compliance (GM-07)", () => {
+    it("validates before it answers", () => {
+      expect(call("GET", "/api/co-agency/checkins/compliance")?.status).toBe(400);
+      expect(call("GET", "/api/co-agency/checkins/compliance", { periodKind: "custom", start: todayIso() })?.status).toBe(400);
+    });
+
+    it("derives the grid from the SAME store the history endpoint reads", () => {
+      const to = addDaysIso(todayIso(), -1);
+      const from = addDaysIso(todayIso(), -7);
+      const res = call("GET", "/api/co-agency/checkins/compliance", { periodKind: "custom", start: from, end: to });
+      expect(res?.status).toBe(200);
+      const grid = res!.json as { from: string; to: string; unit: string | null; rows: { userId: string; expectedDays: number; submittedDays: number; complianceRate: number | null }[] };
+      expect(grid.from).toBe(from);
+      expect(grid.to).toBe(to);
+      expect(grid.rows.length).toBeGreaterThan(1); // a cohort, not just the caller
+      // Every row is real: a person only appears once they have an expected day in the window.
+      for (const r of grid.rows) expect(r.expectedDays).toBeGreaterThan(0);
+      // And the seeded cohort is not uniformly perfect — the fixture carries a miss and an excuse,
+      // so a consumer's "worst first" ordering and its missed/excused split have something to bite on.
+      expect(grid.rows.some((r) => (r.complianceRate ?? 1) < 1)).toBe(true);
+    });
+
+    it("never fabricates a day nobody was expected, and never a 0% rate for one", () => {
+      // A window entirely in the FUTURE has no seeded rows at all. The honest answer is an empty
+      // grid — not a roster of people at 0%, which would read as a company-wide compliance failure.
+      const from = addDaysIso(todayIso(), 30);
+      const to = addDaysIso(todayIso(), 36);
+      const res = call("GET", "/api/co-agency/checkins/compliance", { periodKind: "custom", start: from, end: to });
+      expect(res?.status).toBe(200);
+      expect((res!.json as { rows: unknown[] }).rows).toEqual([]);
+    });
+
+    it("echoes the requested unit rather than inventing one", () => {
+      const res = call("GET", "/api/co-agency/checkins/compliance", { periodKind: "week", start: todayIso(), unit: "dept-1" });
+      expect((res!.json as { unit: string | null }).unit).toBe("dept-1");
+      const none = call("GET", "/api/co-agency/checkins/compliance", { periodKind: "week", start: todayIso() });
+      expect((none!.json as { unit: string | null }).unit).toBeNull();
+    });
   });
 
   it("GET /checkins/today returns a live draft, not-yet-submitted, for a fresh user", () => {

@@ -9,6 +9,9 @@ import { listPmTasks, listMilestones, listProjectStatuses } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
+import { canReadGmConsole, isGmDept, parseGmPeriodKind } from "@/lib/gm";
+import { GmCockpit } from "@/components/departments/gm/GmCockpit";
+import { GmAccessDenied } from "@/components/departments/gm/GmAccessDenied";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ServicedBlock } from "@/components/departments/ServicedBlock";
@@ -21,7 +24,7 @@ import { TeachState } from "@/components/departments/TeachState";
 import "@/components/departments/departments.css";
 
 type Params = Promise<{ deptId: string }>;
-type SearchParams = Promise<{ sscope?: string }>;
+type SearchParams = Promise<{ sscope?: string; period?: string }>;
 
 const ACTIVITY_PREVIEW_LIMIT = 8;
 
@@ -46,6 +49,29 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
 
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
+
+  // ── GM: the cockpit replaces the template Home (GM-03) ──────────────────────────────────────────
+  // Branched HERE, before the template's own reads, because none of them answer the GM's question.
+  // The template Home assembles THIS department's owned projects; the cockpit asks
+  // `reports/overview` at company + department grain. Running both would mean five wasted PM fetches
+  // per render for a department whose people own oversight projects, not delivery.
+  //
+  // This is also the only department Home that needs a gate — it shows the whole business, and
+  // `Departments` sidebar rows are ungated by design. See `lib/gm.ts` for why the capability is
+  // `reports.company.view` and why a refusal renders a page rather than a 404.
+  if (isGmDept(dept.name)) {
+    const { period } = await searchParams;
+    if (!canReadGmConsole(me, tenant)) return <GmAccessDenied />;
+    return (
+      <GmCockpit
+        userId={userId}
+        tenantId={tenant}
+        deptId={deptId}
+        periodKind={parseGmPeriodKind(period)}
+        anchorDate={new Date().toISOString().slice(0, 10)}
+      />
+    );
+  }
 
   const { sscope } = await searchParams;
   const servicedScope = sscope ?? "all";

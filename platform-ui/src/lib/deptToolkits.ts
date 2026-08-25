@@ -298,7 +298,64 @@ const SOCIAL_MEDIA: DeptToolkit = {
   ],
 };
 
-const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES, SEO, SOCIAL_MEDIA];
+// ── GM — the Office of the GM (GM-01, design `blueprints/gm-console-foundation.md`) ──────────────
+// `d-gm` is the ROOT of the department spine (`DEPT_PARENT["d-gm"] = null` in platform-nest's
+// `seed/roster.ts`) and is seeded with OVERSIGHT projects rather than client delivery — "which is
+// what its people actually own" (`seed/departments.ts`). So GM's craft is reading and deciding, not
+// producing: the two craft groups below are `Command` ("what needs me") and `Oversight` ("how are we
+// doing"), and there is no Build/Studio/Publish equivalent because the GM ships nothing.
+//
+// Two craft groups rather than one follows the SEO precedent (D-10): five tabs in one group puts a
+// five-wide secondary strip under a two-wide primary, which reads as a flat list with extra steps.
+//
+// ⚠ THIS IS THE ONLY TOOLKIT WHOSE HOME IS NOT SAFE FOR EVERY MEMBER. Every other department Home
+// shows that department's own projects; GM's shows the whole company, and Departments rows are
+// ungated on purpose (they come from the org structure). The gate lives in `lib/gm.ts` +
+// `GmAccessDenied` and is applied by each tab page — see that file for why the capability is the
+// existing `reports.company.view` rather than a new `gm.view` (and why it is NOT `rollups.view`,
+// which no role bundle holds except `platform_admin`'s wholesale `ALL`).
+//
+// The GM console COMPOSES existing surfaces and drills INTO them; it never relocates a route
+// (foundation doc §0). `/rollups`, `/reports/company` and the per-department consoles keep their
+// URLs and their sidebar rows — this is a second door, not a move.
+const GM: DeptToolkit = {
+  slug: "gm",
+  label: "GM",
+  mission: "Office of the GM — the whole business, one altitude up.",
+  groups: [
+    HOME_GROUP,
+    WORK_GROUP,
+    {
+      key: "command",
+      label: "Command",
+      icon: "chart",
+      tabs: [
+        { key: "review", label: "Business Review", path: "review", icon: "chart", blurb: "The recurring review: inputs, then outputs, then money — same shape every period." },
+        { key: "decisions", label: "Decisions", path: "decisions", icon: "check", blurb: "What is waiting on the GM, and what has been waiting too long." },
+      ],
+    },
+    {
+      key: "oversight",
+      label: "Oversight",
+      icon: "sitemap",
+      tabs: [
+        { key: "depts", label: "Departments", path: "depts", icon: "hr", blurb: "Every department's headline figures, side by side." },
+        { key: "money", label: "Clients & Money", path: "money", icon: "wallet", blurb: "Client portfolio and what the work costs to serve." },
+        { key: "people", label: "People", path: "people", icon: "user", blurb: "Headcount against seats, appraisal cycles, and check-in compliance." },
+      ],
+    },
+    CONNECTIONS_GROUP,
+  ],
+  // No GitHub, no Figma, no VS Code: the GM does not produce. Claude drafts the narrative that goes
+  // around the numbers, Drive holds the artifacts, Looker is where a client-facing cut gets built.
+  launchers: [
+    { key: "claude", label: "Claude", desc: "Draft the narrative around the numbers.", url: "https://claude.ai/new", glyph: "✳", icon: "claude" },
+    { key: "drive", label: "Shared Drive", desc: "Board packs, contracts, and signed documents.", url: "https://drive.google.com", glyph: "▲" },
+    { key: "looker", label: "Looker Studio", desc: "Build a shareable cut of a report.", url: "https://lookerstudio.google.com", glyph: "▤" },
+  ],
+};
+
+const TOOLKITS: DeptToolkit[] = [WEB_DEV, CREATIVES, SEO, SOCIAL_MEDIA, GM];
 
 // The generic toolkit for departments without a bespoke build-out yet. Renders
 // the exact same Home shell as a bespoke department's Home group — just without
