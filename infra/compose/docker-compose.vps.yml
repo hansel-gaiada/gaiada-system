@@ -886,7 +886,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-      start_period: 10s
+      # 10s -> 300s, for the same reason as `platform` above and BEFORE it bites rather than after.
+      # This is a Playwright image: it is large, and its boot has no reason to stay under 110s
+      # forever. When platform's boot crossed that line on 2026-08-24 compose aborted `up -d` and
+      # left every dependent in the CREATED state, which is what served 502 to the public — the
+      # failure was not a slow container, it was a budget that could be exceeded at all.
+      # Failures inside start_period do not count toward `retries`, so this costs nothing when the
+      # container is quick: it is marked healthy on the first successful probe either way.
+      start_period: 300s
     depends_on:
       platform-ui:
         condition: service_started

@@ -372,3 +372,57 @@ service-credential message, NOT `unknown or inactive user`), meaning it fell thr
 `principalFromToken()` threw something other than an auth error, most likely the issuer being
 unreachable from inside the container. **A live authenticated drive needs the IdP-subject → user
 mapping resolved, and that is its own ticket.**
+
+---
+
+## Gap closure + THREE CORRECTIONS (2026-08-25, end of session)
+
+### ✅ S-06 is DEV-VERIFIED against the LIVE estate — it was never blocked
+
+I reported that a live authenticated drive was impossible because `AUTH_MODE=oidc` and the IdP
+subject mapping was broken, and called it "its own ticket". **That was wrong.**
+
+`GET /api/me` returns **200** with a valid token. The earlier 401 was an **EXPIRED TOKEN** —
+Keycloak access tokens are short-lived and I had reused one generated much earlier in the session.
+The `unauthorized` message (rather than `unknown or inactive user`) misled me into diagnosing a
+mapping failure; it was simply the token failing verification and falling through to the
+service-credential branch.
+
+Driven live against Gaia Digital Agency, authenticated as a real user through the real flow:
+
+| Endpoint | Result |
+|---|---|
+| `finance/periods` | 12 periods, Jan 2026 first |
+| `finance/accounts` | the live chart |
+| `finance/trial-balance?asOf=2026-08-31` | `balanced: true` |
+| `finance/ledger/verify` | `clean: true` |
+| `finance/ar/reconcile` | `problems: []` |
+| `finance/ap/reconcile` | `problems: []` |
+| `finance/settings` | IDR, fyStart 1, isPkp true |
+
+**Lesson worth keeping: a stale bearer token fails as `unauthorized`, which reads exactly like an
+authorization design problem.** Re-mint before diagnosing.
+
+### ❌ CORRECTION: `deploy.yml` DOES ship the compose files
+
+I said twice that it does not, and called it a standing deploy gap. It does —
+`scp infra/compose/*.yml vps:...` at line 145. I had grepped only for `rsync`. The follow-on claim
+that the LMS session must have hand-copied their change was also wrong: the deploy did it.
+
+### ✅ report-renderer's healthcheck budget raised BEFORE it bit
+
+`start_period: 10s` → `300s`, the same latent shape that took the site down on 2026-08-24. No
+`start_period: 10s` remains anywhere in the compose file.
+
+### ✅ F9-07 / F9-10 / F9-11 now have a real recording path
+
+`finance_record_consolidation_adjustment()` + `finance_consolidation_completeness()`, 8 tests.
+Still deliberately NOT computed — goodwill needs fair value at acquisition and unrealised profit
+needs an inventory count, and a figure derived from data that cannot support it is a wrong number
+with a function signature. What IS enforced:
+
+- an adjustment must **balance on its own**, so two wrong entries cannot cancel into a right total;
+- a **computed** kind cannot be hand-entered beside the generated one (that removes the same balance
+  twice);
+- the run **reports what it has not addressed** — "considered and not applicable" and "never
+  considered" look identical in a working paper, and only one is a finished job.
