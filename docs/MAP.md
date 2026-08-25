@@ -368,6 +368,10 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/it/accounts`
 - `/it/devices`
 - `/it/devices/[deviceId]`
+- `/it/network`
+- `/it/network/presence`
+- `/it/network/rules`
+- `/it/network/threats`
 - `/it/topology`
 - `/it/workflows`
 - `/knowledge`
