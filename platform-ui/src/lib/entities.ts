@@ -147,7 +147,11 @@ export const updateApprovalRetryCount = (u: string, companyId: string, autoRetry
   });
 
 // ---- Projects (list + detail endpoints both exist) ----
-export const listProjects = (u: string, t: string) => platformFetch<Project[]>(`/api/${t}/projects`, u);
+// CC-1: `clientId` may be a uuid or the reserved `"internal"` (projects with no client). Omitted is
+// unchanged — every project. Filtering server-side matters beyond tidiness: the client page used to
+// fetch every project in the tenant and narrow in the browser, which stops being a filter at volume.
+export const listProjects = (u: string, t: string, clientId?: string) =>
+  platformFetch<Project[]>(`/api/${t}/projects${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`, u);
 export const getProject = (u: string, t: string, id: string) => platformFetch<ProjectDetail>(`/api/${t}/projects/${id}`, u);
 
 // ---- Tasks (list endpoints exist; detail endpoint may not, derive as fallback) ----

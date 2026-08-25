@@ -2,16 +2,13 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { can } from "@/lib/rbac";
 import { getClient, listDeliverables, listProjects } from "@/lib/entities";
-import { deleteClientForm } from "@/lib/clientWorkActions";
 import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { RecordControls } from "@/components/meetings/RecordControls";
 import { ClientContactsPanel } from "@/components/clients/ClientContactsPanel";
 import { ScheduleMeetingPanel } from "@/components/meetings/ScheduleMeetingPanel";
 import { listClientContacts } from "@/lib/clientContacts";
-import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { DescriptionList } from "@/components/DescriptionList";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -48,20 +45,16 @@ export default async function ClientDetailPage({ params }: { params: Params }) {
   const upcomingResult = await listRecordings(userId, tenant, { clientId, scheduled: "upcoming" });
   const upcoming = upcomingResult.kind === "ok" ? upcomingResult.data : [];
   const upcomingRefusal = upcomingResult.kind === "ok" ? null : upcomingResult;
-  const clientProjects = (await listProjects(userId, tenant).catch(() => []))
-    .filter((p) => p.client_id === clientId)
+  // CC-1: filtered SERVER-side now that `/projects` takes `clientId`. This used to fetch every
+  // project in the tenant and narrow in the browser, which stops being a filter past a page of rows.
+  const clientProjects = (await listProjects(userId, tenant, clientId).catch(() => []))
     .map((p) => ({ id: p.id, name: p.name }));
-  const canManage = can(me, "pm.manage", tenant);
-  const del = deleteClientForm.bind(null, clientId);
 
   return (
     <>
-      <PageHeader
-        eyebrow="Client"
-        title={client.name}
-        breadcrumbs={[{ label: "Clients", href: "/clients" }, { label: client.name }]}
-        actions={canManage ? <form action={del}><button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button></form> : undefined}
-      />
+      {/* CC-3: the hub LAYOUT now renders the client name, breadcrumbs and tab strip, so this tab
+          renders only its own cards. The Delete action moved with the header — it is a destructive
+          client-level action and belongs beside the client's identity, not inside one tab. */}
       <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
         <Card title="Details">
           <DescriptionList items={[

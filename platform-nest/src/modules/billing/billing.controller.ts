@@ -2,7 +2,7 @@
 // a client over a period at an hourly rate; line items are computed at creation from billable
 // time_entries on that client's projects and frozen onto the invoice. Finance = company.manage.
 // WSA-2: moved from src/core to the billing MODULE; gated by ModuleEnabledGuard("billing").
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
 import { config } from "../../config";
@@ -11,6 +11,7 @@ import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { recordInvoiceRevision, snapshotInvoice } from "./invoice-revisions";
+import { clientFilterSql, parseClientFilter } from "../../core/client-filter";
 
 // IAM-GAP-01: `approved` is a real status (migration 0107 widened the CHECK) but is DELIBERATELY
 // NOT in this set — the only way INTO 'approved' is the dedicated /approve endpoint below, which
@@ -36,10 +37,19 @@ const INVOICE_SELECT = `
 @Controller("api")
 @UseGuards(AuthGuard, ModuleEnabledGuard("billing"))
 export class BillingController {
+  // CC-1: `?clientId=<uuid>` / `?clientId=internal`. This list previously took NO query parameters at
+  // all, so there is no prior behaviour to preserve beyond "omitted returns everything".
   @Get(":tenantId/invoices")
-  async list(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async list(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("clientId") clientId?: string,
+  ) {
     await authorize(req.principal, { kind: "invoice", tenantId }, "read");
-    const rows = await withTenants([tenantId], (c) => c.query(`${INVOICE_SELECT} ORDER BY i.created_at DESC`));
+    const filter = clientFilterSql(parseClientFilter(clientId), "i.client_id", 1);
+    const rows = await withTenants([tenantId], (c) =>
+      c.query(`${INVOICE_SELECT} AND ${filter.sql} ORDER BY i.created_at DESC`, filter.params),
+    );
     return rows.rows;
   }
 

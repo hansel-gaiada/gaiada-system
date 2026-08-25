@@ -32,8 +32,9 @@ async function skip<T>(p: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
-export const listInvoices = (u: string, t: string) =>
-  skip(platformFetch<Invoice[]>(`/api/${t}/invoices`, u), [] as Invoice[]);
+// CC-1: optional `clientId` (uuid, or `"internal"` for invoices with no client). Omitted is unchanged.
+export const listInvoices = (u: string, t: string, clientId?: string) =>
+  skip(platformFetch<Invoice[]>(`/api/${t}/invoices${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`, u), [] as Invoice[]);
 export const getInvoice = (u: string, t: string, id: string) =>
   skip(platformFetch<Invoice | null>(`/api/${t}/invoices/${id}`, u), null);
 export const createInvoice = (u: string, t: string, body: { clientId: string; periodStart: string; periodEnd: string; rate: number; currency: string }) =>

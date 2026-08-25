@@ -559,6 +559,9 @@ export interface PmTaskFilters {
   status?: string[]; tag?: string[]; priority?: string[]; responsible?: string[]; ball?: string[];
   milestone?: string[]; dueFrom?: string; dueTo?: string; q?: string; overdueOnly?: boolean;
   dueSoon?: boolean; dueSoonDays?: number; includeClosed?: boolean;
+  /** CC-1 — a client uuid, or the reserved `"internal"` for work belonging to no client. Sent
+   *  through to the backend facet; omitted means every client, unchanged. */
+  clientId?: string;
 }
 export const listAllPmTasksPaged = async (u: string, t: string, filters: PmTaskFilters = {}): Promise<PmTask[]> => {
   const { includeClosed = true, ...rest } = filters;
@@ -579,6 +582,7 @@ export const listAllPmTasksPaged = async (u: string, t: string, filters: PmTaskF
     if (rest.dueFrom) qs.set("dueFrom", rest.dueFrom);
     if (rest.dueTo) qs.set("dueTo", rest.dueTo);
     if (rest.q) qs.set("q", rest.q);
+    if (rest.clientId) qs.set("clientId", rest.clientId);
     if (rest.overdueOnly) qs.set("overdueOnly", "1");
     if (rest.dueSoon) qs.set("dueSoon", "1");
     if (rest.dueSoonDays !== undefined) qs.set("dueSoonDays", String(rest.dueSoonDays));

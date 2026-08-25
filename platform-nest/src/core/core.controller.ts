@@ -9,6 +9,7 @@ import { newId, withTenants, withGlobal } from "../db";
 import { config } from "../config";
 import { authorize, writeActivity, notify } from "./http";
 import { validateCustomFields } from "./custom-fields";
+import { clientFilterSql, parseClientFilter } from "./client-filter";
 import { recomputeRollups } from "../rollups/engine";
 import { AuthGuard } from "../auth/guards";
 import { getServiceScopes } from "./service-scopes";
@@ -94,16 +95,26 @@ export class CoreController {
     return rows.rows;
   }
 
+  // CC-1: `?clientId=<uuid>` narrows to one client, `?clientId=internal` to projects with no client.
+  // Omitted is unchanged behaviour — every project — so no existing caller is affected.
   @Get(":tenantId/projects")
-  async projects(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+  async projects(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("clientId") clientId?: string,
+  ) {
     await authorize(req.principal, { kind: "project", tenantId }, "read");
+    const filter = clientFilterSql(parseClientFilter(clientId), "client_id", 1);
     const rows = await withTenants([tenantId], (c) =>
       // P4-H2: `start_date` was selected ONLY by the single-project detail read, so every LIST
       // consumer could show a project's target but never the start of its authored range — and the
       // authored-vs-derived slippage signal (decision 12) needs both ends. One extra column on a
       // query that already reads the row.
-      c.query(`SELECT id, name, status, client_id, is_internal, owner_id, start_date, due_date, custom_fields, department_id, short_code AS "shortCode"
-               FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC`),
+      c.query(
+        `SELECT id, name, status, client_id, is_internal, owner_id, start_date, due_date, custom_fields, department_id, short_code AS "shortCode"
+               FROM projects WHERE deleted_at IS NULL AND ${filter.sql} ORDER BY created_at DESC`,
+        filter.params,
+      ),
     );
     return rows.rows;
   }

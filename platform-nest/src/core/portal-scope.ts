@@ -16,6 +16,12 @@
 // Layer 3 is the one that stops client A reading client B's contract INSIDE the same tenant, which is
 // the portal's whole reason for existing. RLS cannot express it (both clients are the same tenant) and
 // Cerbos does not know the row. So: never write a portal query without a scope predicate from here.
+//
+// ⚠ NOT THE SAME THING AS `core/client-filter.ts` (CC-1), which parses the STAFF `?clientId=` list
+// facet. That file narrows what a staff caller is SHOWN and fails OPEN (a bad value means "show
+// everything"); this file decides what an external caller may REACH and fails CLOSED. Same noun,
+// opposite failure mode. Keep them separate: collapsing them into one "client scope" abstraction is how
+// a convenience filter silently becomes load-bearing for isolation.
 import { ForbiddenException } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
