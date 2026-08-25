@@ -18,13 +18,13 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
-| S · Seed live finance | 6 | 2 | 0 | 0 | **4** |
+| S · Seed live finance | 6 | 0 | 0 | 0 | **6** |
 | F8 · Fixed assets + depreciation | 14 | 1 | 0 | **13** | 0 |
 | F9 · Consolidation | 12 | 7 | 0 | **5** | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
-| **Total** | **63** | **41** | **0** | **18** | **4** |
+| **Total** | **63** | **39** | **0** | **18** | **6** |
 
 ---
 
@@ -133,9 +133,9 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | S-01 | Confirm entity scope (A1) | **DEV-VERIFIED** | Owner: all three entities get books. Legal PT names still to confirm for invoices/e-Faktur — does not block the ledger |
 | S-02 | Cut fiscal calendar per entity (A2) | **DEV-VERIFIED** | FY2026 Jan–Dec, **12 monthly periods, all OPEN**, on all three. Verified by direct query, not by the seed's own output |
 | S-03 | Instantiate CoA per entity (A5) | **DEV-VERIFIED** | Our `id_psak_general_v1` template (no prior books to mirror). **69 accounts, 5 control accounts**, IDR, fyStart=1, on all three |
-| S-04 | Seat accountant + finance manager (A6) | **PLANNED — stand-in decided** | Owner: point at `hansel@gaiada.com` for now. Registered in **`docs/PLACEHOLDER-PRINCIPALS.md`** (P-01/P-02). ⚠ Both roles are the SAME account, so **SoD is not in force** — fine while the books are empty, not once entries are posted |
+| S-04 | Seat accountant + finance manager (A6) | **DEV-VERIFIED** | Owner ruling 2026-08-25: *“i can be the subtitute to prroof our work in this dev stage”*. `hansel@gaiada.com` holds `finance_manager` on all three, live. Registered as P-01/P-02 in `docs/PLACEHOLDER-PRINCIPALS.md`. ⚠ **SoD is still NOT in force** — one account posts and approves. Accepted for dev; must be retired before real transactions |
 | S-05 | Load `company_ownership` rows (A7) | **DEV-VERIFIED (default only)** | Anthony 100% `holding` on D & A Syrowatka, live. Verified: `finance_owner_company_ids(anthony)` resolves to **all 3 companies**. ONE row, not three — a holding edge confers the company + all descendants; three shareholder rows would resolve the same while asserting a false cap table. **Any further shareholders await owner data + UI-01** |
-| S-06 | Drive `/finance` authenticated against live data ⇒ DEV-VERIFIED | PLANNED | Needs S-04 (a real principal) and the `/api/me` 401. Until then finance is deployed + seeded, **not** DEV-VERIFIED end to end |
+| S-06 | Prove the finance surface end to end | **DEV-VERIFIED (by simulation)** | Owner ruling: *“s-06 can use simulation to proof it”*. `finance-cycle-simulation.test.ts` — 12 assertions driving the REAL HTTP surface through the REAL guards and a LIVE Cerbos: a whole month of agency books from an empty ledger to a close verdict. ⚠ Proves the SYSTEM, not the live estate's data |
 
 ### F8 · Fixed assets + depreciation
 
@@ -351,3 +351,24 @@ Owner: ownership and PKP must both be editable by a person, not only by a seed.
   - A test pins the RLS zero-row trap in the one place it would be misread as a real accounting
     difference: reading the pair with ONE tenant in scope makes every balance look mismatched by its
     full amount.
+
+---
+
+## Owner rulings, 2026-08-25 (third round) — EVERYTHING IS NOW UNBLOCKED
+
+| # | Ruling | Effect |
+|---|---|---|
+| **S-04** | *“i can be the subtitute to prroof our work in this dev stage”* | The stand-in is ACCEPTED, not merely tolerated. ⚠ SoD remains off until a second real person exists |
+| **S-06** | *“s-06 can use simulation to proof it”* | Proved by `finance-cycle-simulation.test.ts`, 12 assertions through the real API |
+| **Q3** | *“all companies has to be bank ready. but start with Gaia digital agency first”* | F9–F11 are in scope for all three entities; **Gaia Digital Agency is the reference implementation** |
+| Scope | *“proceed with finishing F9, F10, F11, UI, F8-11”* | 39 items, no remaining owner blockers |
+
+### Why the live estate could not be driven, recorded so it is not re-investigated
+
+`AUTH_MODE=oidc` on the box. The `x-user-id` service path is accepted **only** under `dev`/`hybrid`
+(`src/auth/guards.ts`) — deliberately, so a service token can never impersonate a user in
+production. A valid IdP token from `scripts/sso-login.sh` returns `unauthorized` (the
+service-credential message, NOT `unknown or inactive user`), meaning it fell through the JWT branch:
+`principalFromToken()` threw something other than an auth error, most likely the issuer being
+unreachable from inside the container. **A live authenticated drive needs the IdP-subject → user
+mapping resolved, and that is its own ticket.**
