@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.52.0` - a finance WORKSPACE, not a dashboard (2026-08-25) - PROTOTYPED
+
+**Added**
+- `(app)/finance/layout.tsx` + `FinanceTabs` - the workspace shell.
+- `/finance/journals` + `/journals/[entryId]` - post, list, open, reverse.
+- `/finance/ledger` - one account's movements with a running balance.
+- `/finance/reports` - trial balance, P&L, balance sheet.
+- `/finance/[...unbuilt]` - an honest surface for a tab whose page is not built.
+
+**Why**
+- The owner's assessment: */finance* was *"a mash of info put into a page"*. One scrolling console
+  carried KPIs, three verdicts, two agings, the close gate, the calendar and a config card.
+  Everything was on screen and nothing was findable - the cap-table links sat below three tables
+  nobody scrolls to. More importantly **there was no way to POST anything**: the engine has had a
+  hash-chained double-entry ledger since F1 and nothing could reach it.
+
+**Notes**
+- ★ **The journal form's running totals are an AID, NOT A GATE.** It shows the difference but does
+  not block on its own arithmetic: if it did, any rounding difference between JS floats and Postgres
+  numeric would make a valid entry permanently unsubmittable. The database decides what balances.
+- **The badge reads `status`, not `kind`.** "reversed" (this entry WAS undone) and "reversal" (this
+  entry UNDOES another) are different facts; collapsing them renders a cancelled entry identically
+  to its canceller.
+- **The general ledger's running balance comes from the SERVER.** Accumulating it in the component
+  is trivial and is exactly the temptation to refuse - `finance_account_movement()` uses the
+  account's own `normal_balance` for direction, so credit-normal accounts (accumulated depreciation,
+  payables) run the right way without the page knowing anything about contra accounts.
+- **Each statement says whether it balances ABOVE the figures.** A trial balance whose debits do not
+  equal its credits is not a report with a small problem.
+- **An unbuilt tab states what already works behind it.** A 404 reads as "the app is broken".
+
 ### platform-ui `0.51.0` - the cap table and accounting settings become editable (2026-08-25) - PROTOTYPED
 
 **Added**
@@ -1055,6 +1086,53 @@ for the filter (incl. the fail-open contract) · **10 real-DB tests** for the fa
 math, run against a live test Postgres · platform-ui **172 files / 2795 tests** green ·
 `DEMO_MODE=1 next build` green with all three hub routes · Playwright drove the hub in a browser.
 No migration in this slice.
+
+### platform-ui `0.52.0` — 2026-08-25 — GM console: the narrowed department-lead view (GM-02b)
+
+**Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build; not against live platform-nest.
+Tracking doc: [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md).
+
+**The headline is a corrected assumption, not a feature.** GM-02b was parked as blocked: "the UI cannot
+identify a department lead" — `Me` carries no position or leadership signal and the P2-05 reconciler is
+unbuilt. All true, and all irrelevant. `reports.department.view`'s own declaration in `CAPABILITIES`
+reads *"department-grain (Cerbos `read_department`) — **SERVER narrows to the led unit subtree**"*. The
+console asks for department grain and Cerbos decides which units come back; determining leadership in
+the browser would have been precisely the "second opinion" the mirror rule forbids. **The blocker was
+created by reaching for the wrong mechanism.** Worth generalising: when a UI blocker is "we cannot
+determine X about the principal", check whether the server already determines X and narrows for you.
+
+- `lib/gm.ts` — `gmAccessFor` returns `full` / `narrowed` / `none`. Company tier checked FIRST, so a
+  principal holding both capabilities is not narrowed by the more specific-sounding check. Still
+  company-scoped, so a `manager` of one tenant cannot read another's departments by editing the URL.
+- `GmCockpit` — a narrowed lead gets **no company read at all** (not requested, not
+  requested-and-discarded: firing it would log a guaranteed 403 per page view and invite a future
+  refactor to render whatever came back), a banner stating the absence, provenance sourced from
+  whichever read answered, and the period toggle **relocated** onto the Departments card — it normally
+  rides the company card, so without the move a narrowed reader would have no route to a month view
+  except hand-editing the URL.
+- `gmTab.tsx` — `companyGrainOnly` opt-in and a third refusal state. The Business Review uses it and
+  refuses with its own wording; "limited to group executives" alone would imply the reader does not
+  belong in the console at all when every other tab is theirs.
+- New **manager-tier demo identity** (`manager@gaiada.com` -> `dept-manager`, exactly one `manager`
+  grant) + a `manager` row in `e2e/personas.ts`. An authorization tier that cannot be driven is a tier
+  nobody verifies — neither `demo-hansel` (full) nor `gede-ic` (refused) exercises this one.
+- `demoReports.ts` — **the fixture denied department grain to every non-superadmin** (`elevated =
+  userId === "demo-hansel"`), contradicting §8. Fixed *including the narrowing*: a `LED_UNITS` map means
+  the manager sees one department where the GM sees five. All-or-nothing would have let the narrowed
+  console look correct while never exercising the behaviour it is built on.
+- e2e 18 -> **25 tests**, all green.
+
+**Two deliberate expectation flips**, both recorded in their test bodies so neither reads as a
+regression to "fix" back: `gm.test.ts`'s "refuses a department manager" became "admits a department
+manager — narrowed", and the e2e `REFUSAL` regex tightened from `/limited to group executives/i` to the
+denial's distinctive opening clause — the loose pattern matched the narrowed banner and the
+company-only refusal too, since that phrase is the true boundary in all three cases. Three states need
+three distinguishable strings.
+
+**GM-09 (the money tier) is deliberately still blocked.** The only cost data in the estate is
+per-engagement search-marketing spend, so a "group spend" endpoint built on it would produce exactly
+the misleading figure OQ-3 ruled out. That is a **data** gap needing an owner ruling, not an
+endpoint-writing chore; writing it first would move the ambiguity into the backend.
 
 ### platform-ui `0.48.0` — 2026-08-24 — GM console: the four remaining tabs + an e2e suite (GM-05..08, GM-10)
 
