@@ -51,8 +51,8 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
-| lms | `0.4.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
-| lab-runner | `0.1.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
+| lms | `0.5.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
+| lab-runner | `0.1.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | finance | `0.13.0` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
@@ -1233,7 +1233,7 @@ rather than quietly deleted.
 
 ---
 
-## lms — Learning · Certification · `0.4.0` · PROTOTYPED
+## lms — Learning · Certification · `0.5.0` · PROTOTYPED
 
 **Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
 
@@ -1289,6 +1289,34 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
   append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
   two flags to execute.
+
+### L5 COMPLETE (2026-08-25) — labs run, on a real host, under gVisor
+
+**L5a** the runner · **the SumoPod deploy** · **L5b** the platform dispatch · **L5c** the first
+three labs. A learner can now submit code and be graded on what it actually does.
+
+- **Deployed.** `gaiada-lms-lab-runner` on SumoPod, bound to 127.0.0.1:4310, running under
+  **gVisor** (`runsc`) — installed there as a non-default runtime and applied with a daemon
+  RELOAD, not a restart, so none of the ~50 containers across seven other projects were bounced.
+  On the way: `docker builder prune -af` reclaimed **123GB** on a disk that was at 93%.
+- **L5b** — `lms_lab_runs` records the dispatch. A dispatch is NOT an attempt: a run that never
+  produced a gradeable result writes no attempt row, so a broken deploy never looks like a cohort
+  that could not code. Rate-limited per learner, counting errored runs too.
+- **L5c** — three labs, one each for FE, BE and QA, attached to the L4 course keys:
+  an accessible keyboard-operable disclosure; an endpoint that survives being called twice; and
+  *write the tests that catch a real bug* — where the implementation is given, is broken, and the
+  learner is graded on whether their tests fail against it and pass against a correct one.
+
+**Both halves of every lab were driven against the DEPLOYED runner**: each reference solution
+scores 100, and each untouched starter scores 0 (the QA one 14.29). A lab whose reference does not
+pass teaches people that correct work fails; a lab whose starter passes teaches nothing at all.
+`lms-webdev-labs.db.test.ts` then pins everything that would make either stop holding — the graded
+test file is a FIXTURE and never a starter (a learner file cannot displace it, and overwriting the
+test is the obvious full-marks exploit), and no lab is graded on `fileExists` alone.
+
+**Still true:** DevOps and Cyber remain L6 — artefact-graded and disposable-target respectively,
+and both need the runner to do something it does not do yet. No lab is authored for them, because
+a required activity nothing can pass makes its whole path permanently uncompletable.
 
 ### L5a (2026-08-25) — the lab runner exists, and is DRIVEN but NOT DEPLOYED
 

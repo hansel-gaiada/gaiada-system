@@ -186,6 +186,26 @@ The surface a person can actually reach. Until this, the whole program was schem
 - **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
   money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
 
+### lms `0.5.0` + lab-runner `0.1.1` — L5 complete: labs run on a real host (2026-08-25) — DEV-VERIFIED
+
+**Added**
+- `202608250950_lms_l5_lab_runs.sql` — the dispatch record and its rate-limit index; plus the
+  `ux_lms_attempts_id_tenant` that every other lms_* table already had.
+- `src/modules/lms/lab-dispatch.ts` + the lab branch of `submitAttempt`.
+- `src/seed/lms-webdev-labs.ts` + `seed:lms-webdev-labs` — FE, BE and QA labs.
+- Tests: `lab-dispatch.test.ts` (7), `lms-webdev-labs.db.test.ts` (9).
+
+**Verified on the deployed runner, both directions**
+- Every REFERENCE solution scores 100 under gVisor on SumoPod.
+- Every untouched STARTER scores 0 (QA: 14.29). A lab whose starter passes teaches nothing.
+
+**Notes**
+- The graded test file is a challenge FIXTURE, never a starter. A learner file cannot displace a
+  fixture — overwriting test.js with `process.exit(0)` is the obvious full-marks exploit.
+- The QA lab inverts the usual exercise: the implementation is given and broken, and the learner
+  is graded on whether their tests FAIL against it and PASS against a correct one — the only
+  definition of a useful test.
+- No DevOps or Cyber lab is authored. Both need runner capability that does not exist until L6.
 ### lab-runner `0.1.0` — L5a The lab execution sidecar (2026-08-25) — PROTOTYPED
 
 A new standalone service. Executes a learner's submission in a capped, unprivileged,
