@@ -18,12 +18,12 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
-| S · Seed live finance | 6 | 6 | 0 | 0 | 0 |
+| S · Seed live finance | 6 | 3 | 0 | 0 | **3** |
 | F8 · Fixed assets + depreciation | 14 | 14 | 0 | 0 | 0 |
 | F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **55** | **55** | **0** | **0** | **0** |
+| **Total** | **55** | **52** | **0** | **0** | **3** |
 
 ---
 
@@ -129,12 +129,12 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 
 | ID | Task | Status | Notes |
 |---|---|---|---|
-| S-01 | Confirm entity scope + legal names (A1) | PLANNED | blocked |
-| S-02 | Cut fiscal calendar per entity (A2) | PLANNED | blocked |
-| S-03 | Instantiate CoA per entity (A5) | PLANNED | blocked |
-| S-04 | Seat accountant + finance manager from real IAM positions (A6) | PLANNED | blocked |
+| S-01 | Confirm entity scope (A1) | **DEV-VERIFIED** | Owner: all three entities get books. Legal PT names still to confirm for invoices/e-Faktur — does not block the ledger |
+| S-02 | Cut fiscal calendar per entity (A2) | **DEV-VERIFIED** | FY2026 Jan–Dec, **12 monthly periods, all OPEN**, on all three. Verified by direct query, not by the seed's own output |
+| S-03 | Instantiate CoA per entity (A5) | **DEV-VERIFIED** | Our `id_psak_general_v1` template (no prior books to mirror). **69 accounts, 5 control accounts**, IDR, fyStart=1, on all three |
+| S-04 | Seat accountant + finance manager from real IAM positions (A6) | **BLOCKED — needs A6** | Seeded with `--no-seats`: no fictional principals in production IAM. **Nobody can keep these books until real people are seated** |
 | S-05 | Load `company_ownership` rows (A7) | PLANNED | blocked; also unblocks F9 control determination |
-| S-06 | Drive `/finance` authenticated against live data ⇒ DEV-VERIFIED | PLANNED | also needs the `/api/me` 401 resolved |
+| S-06 | Drive `/finance` authenticated against live data ⇒ DEV-VERIFIED | PLANNED | Needs S-04 (a real principal) and the `/api/me` 401. Until then finance is deployed + seeded, **not** DEV-VERIFIED end to end |
 
 ### F8 · Fixed assets + depreciation
 
@@ -225,3 +225,17 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 - **2026-08-25** — Plan opened. 55 tasks across S/F8/F9/F10/F11, all PLANNED. Seeding blocked on
   §A; F8/F9/F11 shape gated on §B. Live estate confirmed as 3 companies (holding + agency + resort;
   the agency already has the finance module enabled).
+
+- **2026-08-25** — **Live finance SEEDED** at `alpha-01.071.0157a`, all three entities. 69 accounts /
+  5 control / 12 OPEN monthly periods / IDR / fyStart=1 each. `finance_trial_balance` runs and
+  balances (0=0 on empty books, which is the correct answer, not a missing one) and
+  `finance_balance_sheet` returns. Verified by direct query against the live DB rather than from the
+  seed's own output.
+  - Owner answers folded in: **no existing books** (so our CoA template, and F10's opening shrinks
+    to capital only) · **book + tax depreciation with deferred tax** (F8 is the full engine) · **all
+    three entities** · **Jan–Dec**.
+  - Judgment call made rather than asked: calendar cut from **2026-01-01** so FY2026 exists in full;
+    Jan–Aug are OPEN for the accountant to close. 7 ended periods correctly report
+    `NO_ACCOUNTANT_SIGNOFF`.
+  - **Seeded with `--no-seats`.** S-04 is the real remaining blocker: without a named accountant and
+    finance manager, nobody can keep these books.
