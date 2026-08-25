@@ -11,6 +11,22 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.11.0` - the seed can configure a LIVE estate (2026-08-25) - PROTOTYPED
+
+**Added**
+- `seed:finance-config` takes `--company=` (repeatable), `--year=` and **`--no-seats`**.
+
+**Notes**
+- ★ **`--no-seats` is the point.** The two `.local` seats exist so dev is not blocked on a hire.
+  Seeding them into a live estate would put two fictional employees into production IAM holding
+  real finance grants - in the one module where a principal has money attached. Config (chart,
+  calendar, settings) is safe to seed anywhere; principals are not.
+- Defaults are unchanged (`Gaia Digital Agency`, seats ON, current year) so the documented dev
+  invocation and `finance-config.db.test.ts` behave exactly as before. Verified: 4/4 green.
+- The live estate is seeded through this script rather than hand-rolled SQL deliberately. Every
+  `finance_*` table composes `app_module_allowed('finance')`, so a statement run without the module
+  scope set writes **zero rows and reports success**. The seed sets it; a psql session would not.
+
 ### platform-nest `0.38.1` - platform boots in seconds, not minutes (2026-08-25) - IN PROGRESS
 
 **Fixed**

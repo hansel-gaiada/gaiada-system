@@ -42,6 +42,20 @@ import { withTenants, withGlobal, closePool, newId } from "../db";
 
 const COMPANY_NAME = "Gaia Digital Agency";
 
+// ── WHY THE SEATS ARE OPTIONAL ──────────────────────────────────────────────────────────────────
+// The two `.local` seats below exist so DEV is not blocked on a hire. Seeding them into a LIVE
+// estate would put two fictional employees into production IAM, holding real finance grants, in the
+// one module where a principal has money attached. `--no-seats` exists for that run: the chart, the
+// calendar and the settings are configuration and are safe to seed anywhere; the seats are not.
+// Live seats come from real IAM positions held by real people.
+export interface SeedFinanceOptions {
+  /** Seat the two dev personas. TRUE by default so existing dev/test callers are unchanged;
+   *  pass FALSE for any live estate. */
+  seats?: boolean;
+  /** Company to configure, by name. Defaults to the agency (the dev estate's finance company). */
+  companyName?: string;
+}
+
 /** The two dev seats. Clearly labelled as seats, not people — when the real finance manager gets an
  *  account, they get their own user and these can be retired. */
 const SEATS = [
@@ -59,18 +73,23 @@ export interface FinanceConfigResult {
   signOffOutstanding: number;
 }
 
-export async function seedFinanceConfig(fiscalYear = new Date().getUTCFullYear()): Promise<FinanceConfigResult> {
+export async function seedFinanceConfig(
+  fiscalYear = new Date().getUTCFullYear(),
+  options: SeedFinanceOptions = {},
+): Promise<FinanceConfigResult> {
+  const companyName = options.companyName ?? COMPANY_NAME;
+  const wantSeats = options.seats ?? true;
   // ── The company ───────────────────────────────────────────────────────────────────────────────
   const company = await withGlobal(async (c) => {
     const r = await c.query<{ id: string; enabled_modules: string[] }>(
       `SELECT id, enabled_modules FROM companies WHERE name = $1 AND deleted_at IS NULL LIMIT 1`,
-      [COMPANY_NAME],
+      [companyName],
     );
     return r.rows[0] ?? null;
   });
   if (!company) {
     throw new Error(
-      `seed:finance-config — no company named "${COMPANY_NAME}". Run seed:agency first; this seed ` +
+      `seed:finance-config — no company named "${companyName}". Run seed:agency first; this seed ` +
         `deliberately does not create companies, because a second company with the same intent is ` +
         `how an estate ends up with two of everything (see the rename trap in platform-nest/CLAUDE.md).`,
     );
@@ -162,7 +181,7 @@ export async function seedFinanceConfig(fiscalYear = new Date().getUTCFullYear()
 
   // ── The two seats ─────────────────────────────────────────────────────────────────────────────
   const seats: FinanceConfigResult["seats"] = [];
-  for (const seat of SEATS) {
+  for (const seat of wantSeats ? SEATS : []) {
     const result = await withGlobal(async (c) => {
       // Resolve by email (globally unique), create only if absent.
       const found = await c.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [seat.email]);
@@ -230,10 +249,29 @@ export async function seedFinanceConfig(fiscalYear = new Date().getUTCFullYear()
   };
 }
 
+// CLI:
+//   npm run seed:finance-config                                  # dev: the agency, with seats
+//   npm run seed:finance-config -- --year=2026 --no-seats //     --company="Gaia Digital Agency" --company="Viceroy Bali"    # live: config only, many companies
+//
+// The bare positional year is still accepted so the documented dev invocation keeps working.
 async function main() {
-  const year = Number(process.argv[2]) || new Date().getUTCFullYear();
-  const r = await seedFinanceConfig(year);
-  console.log(`finance config seeded for ${COMPANY_NAME} (${r.tenantId})`);
+  const argv = process.argv.slice(2);
+  const flag = (name: string) => argv.filter((a) => a.startsWith(`--${name}=`)).map((a) => a.slice(name.length + 3));
+  const positionalYear = Number(argv.find((a) => /^\d{4}$/.test(a)));
+  const year = Number(flag("year")[0]) || positionalYear || new Date().getUTCFullYear();
+  const seats = !argv.includes("--no-seats");
+  const companies = flag("company");
+  const targets = companies.length > 0 ? companies : [COMPANY_NAME];
+
+  for (const companyName of targets) {
+    const r = await seedFinanceConfig(year, { seats, companyName });
+    printResult(companyName, r, seats);
+  }
+  await closePool();
+}
+
+function printResult(companyName: string, r: FinanceConfigResult, seats: boolean) {
+  console.log(`finance config seeded for ${companyName} (${r.tenantId})`);
   console.log(`  module enabled:   ${r.moduleEnabled.created ? "added" : "already on"}`);
   console.log(`  settings:         ${r.settings.created ? "created" : "already present"} (IDR)`);
   console.log(`  chart of accounts: ${r.chartOfAccounts.created} created, ${r.chartOfAccounts.existing} already present`);
@@ -244,8 +282,16 @@ async function main() {
         `grant ${s.grantCreated ? "created" : "existing"}`,
     );
   }
+  if (!seats) {
+    console.log("  seats:            SKIPPED (--no-seats) — no fictional principals in this estate");
+  }
   console.log("");
-  console.log("The department is now operable: the chart, the calendar and both role tiers exist.");
+  console.log(
+    seats
+      ? "The department is now operable: the chart, the calendar and both role tiers exist."
+      : "Chart, calendar and settings are in place. NO role seats were created — seat the real " +
+          "accountant and finance manager from their IAM positions.",
+  );
   if (r.signOffOutstanding > 0) {
     console.log(
       `⚠ ${r.signOffOutstanding} ended period(s) have no accountant sign-off, so ` +
@@ -260,7 +306,7 @@ async function main() {
     );
     console.log("  account, they sign off — a named human, which is the artefact an auditor asks for.");
   }
-  await closePool();
+  console.log("");
 }
 
 if (require.main === module) {
