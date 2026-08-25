@@ -113,15 +113,15 @@ export interface WorkingDayBreakdown {
 }
 
 export const listCalendars = (u: string, t: string) =>
-  soft(() => platformFetch<HolidayCalendar[]>(u, `${base(t)}/calendars`), []);
+  soft(() => platformFetch<HolidayCalendar[]>(`${base(t)}/calendars`, u), []);
 
 export const listHolidays = (u: string, t: string, calendarId: string, year?: number) =>
-  soft(() => platformFetch<Holiday[]>(u, `${base(t)}/calendars/${calendarId}/holidays${year ? `?year=${year}` : ""}`), []);
+  soft(() => platformFetch<Holiday[]>(`${base(t)}/calendars/${calendarId}/holidays${year ? `?year=${year}` : ""}`, u), []);
 
 export const getWorkingDays = (u: string, t: string, from: string, to: string, calendarId?: string) =>
   soft(
     () => platformFetch<WorkingDayBreakdown>(
-      u, `${base(t)}/working-days?from=${from}&to=${to}${calendarId ? `&calendarId=${calendarId}` : ""}`,
+      `${base(t)}/working-days?from=${from}&to=${to}${calendarId ? `&calendarId=${calendarId}` : ""}`, u,
     ),
     null as WorkingDayBreakdown | null,
   );
@@ -140,9 +140,9 @@ export interface LeavePolicyAssignment {
 }
 
 export const listLeavePolicies = (u: string, t: string) =>
-  soft(() => platformFetch<LeavePolicy[]>(u, `${base(t)}/leave-policies`), []);
+  soft(() => platformFetch<LeavePolicy[]>(`${base(t)}/leave-policies`, u), []);
 export const listPolicyAssignments = (u: string, t: string, policyId: string) =>
-  soft(() => platformFetch<LeavePolicyAssignment[]>(u, `${base(t)}/leave-policies/${policyId}/assignments`), []);
+  soft(() => platformFetch<LeavePolicyAssignment[]>(`${base(t)}/leave-policies/${policyId}/assignments`, u), []);
 
 export interface ReviewCycle {
   id: string; name: string; kind: "probation" | "periodic" | "project";
@@ -158,9 +158,9 @@ export interface ReviewParticipant {
 }
 
 export const listReviewCycles = (u: string, t: string, status?: string) =>
-  soft(() => platformFetch<ReviewCycle[]>(u, `${base(t)}/review-cycles${status ? `?status=${status}` : ""}`), []);
+  soft(() => platformFetch<ReviewCycle[]>(`${base(t)}/review-cycles${status ? `?status=${status}` : ""}`, u), []);
 export const listReviewParticipants = (u: string, t: string, cycleId: string) =>
-  soft(() => platformFetch<ReviewParticipant[]>(u, `${base(t)}/review-cycles/${cycleId}/participants`), []);
+  soft(() => platformFetch<ReviewParticipant[]>(`${base(t)}/review-cycles/${cycleId}/participants`, u), []);
 
 export interface PayGrade {
   id: string; code: string; name: string;
@@ -169,7 +169,7 @@ export interface PayGrade {
   currency: string; payPeriod: string; isActive: boolean;
 }
 export const listPayGrades = (u: string, t: string) =>
-  soft(() => platformFetch<PayGrade[]>(u, `${base(t)}/pay-grades`), []);
+  soft(() => platformFetch<PayGrade[]>(`${base(t)}/pay-grades`, u), []);
 
 export interface ParameterSet {
   id: string; name: string; countryCode: string; effectiveFrom: string; effectiveTo: string | null;
@@ -180,9 +180,9 @@ export interface ParameterSetDetail extends ParameterSet {
   parameters: { key: string; valueNum: string | null; valueJson: unknown; unit: string | null; note: string | null }[];
 }
 export const listParameterSets = (u: string, t: string) =>
-  soft(() => platformFetch<ParameterSet[]>(u, `${base(t)}/statutory-parameters`), []);
+  soft(() => platformFetch<ParameterSet[]>(`${base(t)}/statutory-parameters`, u), []);
 export const getParameterSet = (u: string, t: string, id: string) =>
-  strict(() => platformFetch<ParameterSetDetail>(u, `${base(t)}/statutory-parameters/${id}`));
+  strict(() => platformFetch<ParameterSetDetail>(`${base(t)}/statutory-parameters/${id}`, u));
 
 // ════════════════════════════════════════════════════════════════════ RECRUITMENT ═════════════
 
@@ -222,20 +222,20 @@ export interface PipelineStage {
 export interface FunnelStage { stageKey: string; label: string; sortOrder: number; count: number; medianDaysInStage: string }
 
 export const listRequisitions = (u: string, t: string, status?: string) =>
-  soft(() => platformFetch<Requisition[]>(u, `${base(t)}/requisitions${status ? `?status=${status}` : ""}`), []);
+  soft(() => platformFetch<Requisition[]>(`${base(t)}/requisitions${status ? `?status=${status}` : ""}`, u), []);
 export const listCandidates = (u: string, t: string, q?: string) =>
-  soft(() => platformFetch<Candidate[]>(u, `${base(t)}/candidates${q ? `?q=${encodeURIComponent(q)}` : ""}`), []);
+  soft(() => platformFetch<Candidate[]>(`${base(t)}/candidates${q ? `?q=${encodeURIComponent(q)}` : ""}`, u), []);
 export const listApplications = (u: string, t: string, params: { requisitionId?: string; stageKey?: string; status?: string } = {}) => {
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
-  return soft(() => platformFetch<Application[]>(u, `${base(t)}/applications${qs ? `?${qs}` : ""}`), []);
+  return soft(() => platformFetch<Application[]>(`${base(t)}/applications${qs ? `?${qs}` : ""}`, u), []);
 };
 /** A single application must never render as "empty" — see the header's `strict` note. */
 export const getApplication = (u: string, t: string, id: string) =>
-  strict(() => platformFetch<ApplicationDetail>(u, `${base(t)}/applications/${id}`));
+  strict(() => platformFetch<ApplicationDetail>(`${base(t)}/applications/${id}`, u));
 export const listPipelineStages = (u: string, t: string) =>
-  soft(() => platformFetch<PipelineStage[]>(u, `${base(t)}/pipeline-stages`), []);
+  soft(() => platformFetch<PipelineStage[]>(`${base(t)}/pipeline-stages`, u), []);
 export const getFunnel = (u: string, t: string, requisitionId?: string) =>
-  soft(() => platformFetch<FunnelStage[]>(u, `${base(t)}/recruitment/funnel${requisitionId ? `?requisitionId=${requisitionId}` : ""}`), []);
+  soft(() => platformFetch<FunnelStage[]>(`${base(t)}/recruitment/funnel${requisitionId ? `?requisitionId=${requisitionId}` : ""}`, u), []);
 
 // ════════════════════════════════════════════════════ COMPENSATION AND PAYROLL ════════════════
 
@@ -298,31 +298,31 @@ export const listCompensation = (u: string, t: string, params: { employeeId?: st
   const qs = new URLSearchParams();
   if (params.employeeId) qs.set("employeeId", params.employeeId);
   if (params.current) qs.set("current", "true");
-  return soft(() => platformFetch<Compensation[]>(u, `${base(t)}/compensation${qs.toString() ? `?${qs}` : ""}`), []);
+  return soft(() => platformFetch<Compensation[]>(`${base(t)}/compensation${qs.toString() ? `?${qs}` : ""}`, u), []);
 };
 export const listAllowanceTypes = (u: string, t: string) =>
-  soft(() => platformFetch<AllowanceType[]>(u, `${base(t)}/allowance-types`), []);
+  soft(() => platformFetch<AllowanceType[]>(`${base(t)}/allowance-types`, u), []);
 export const listBenefitPlans = (u: string, t: string) =>
-  soft(() => platformFetch<BenefitPlan[]>(u, `${base(t)}/benefit-plans`), []);
+  soft(() => platformFetch<BenefitPlan[]>(`${base(t)}/benefit-plans`, u), []);
 export const listPayrollRuns = (u: string, t: string, status?: string) =>
-  soft(() => platformFetch<PayrollRun[]>(u, `${base(t)}/payroll-runs${status ? `?status=${status}` : ""}`), []);
+  soft(() => platformFetch<PayrollRun[]>(`${base(t)}/payroll-runs${status ? `?status=${status}` : ""}`, u), []);
 
 /** A payroll run with no payslips is indistinguishable from an unreadable one — so this rethrows. */
 export const getPayrollRun = (u: string, t: string, id: string) =>
-  strict(() => platformFetch<PayrollRunDetail>(u, `${base(t)}/payroll-runs/${id}`));
+  strict(() => platformFetch<PayrollRunDetail>(`${base(t)}/payroll-runs/${id}`, u));
 
 export const listPayslips = (u: string, t: string, params: { runId?: string; employeeId?: string } = {}) => {
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
-  return soft(() => platformFetch<PayslipSummary[]>(u, `${base(t)}/payslips${qs ? `?${qs}` : ""}`), []);
+  return soft(() => platformFetch<PayslipSummary[]>(`${base(t)}/payslips${qs ? `?${qs}` : ""}`, u), []);
 };
 export const getPayslip = (u: string, t: string, id: string) =>
-  strict(() => platformFetch<PayslipDetail>(u, `${base(t)}/payslips/${id}`));
+  strict(() => platformFetch<PayslipDetail>(`${base(t)}/payslips/${id}`, u));
 export const listSeparations = (u: string, t: string) =>
-  soft(() => platformFetch<Separation[]>(u, `${base(t)}/separations`), []);
+  soft(() => platformFetch<Separation[]>(`${base(t)}/separations`, u), []);
 /** A severance estimate of zero is a real answer AND a failure mode. Never degrade it. */
 export const previewSeverance = (u: string, t: string, employeeId: string, ground: string, effectiveOn: string) =>
   strict(() => platformFetch<SeverancePreview>(
-    u, `${base(t)}/separations/preview?employeeId=${employeeId}&ground=${ground}&effectiveOn=${effectiveOn}`,
+    `${base(t)}/separations/preview?employeeId=${employeeId}&ground=${ground}&effectiveOn=${effectiveOn}`, u,
   ));
 
 // ════════════════════════════════════════════ LIFECYCLE, COMPLIANCE, ANALYTICS ════════════════
@@ -364,12 +364,12 @@ export interface HrAnalytics {
 }
 
 export const listJobEvents = (u: string, t: string, employeeId: string) =>
-  soft(() => platformFetch<JobEvent[]>(u, `${base(t)}/employees/${employeeId}/history`), []);
+  soft(() => platformFetch<JobEvent[]>(`${base(t)}/employees/${employeeId}/history`, u), []);
 export const listCaseEvents = (u: string, t: string, caseId: string) =>
-  soft(() => platformFetch<CaseEvent[]>(u, `${base(t)}/cases/${caseId}/events`), []);
+  soft(() => platformFetch<CaseEvent[]>(`${base(t)}/cases/${caseId}/events`, u), []);
 export const listExpiringDocuments = (u: string, t: string, days = 90) =>
   soft(
-    () => platformFetch<{ windowDays: number; documents: ExpiringDocument[] }>(u, `${base(t)}/compliance/expiring?days=${days}`),
+    () => platformFetch<{ windowDays: number; documents: ExpiringDocument[] }>(`${base(t)}/compliance/expiring?days=${days}`, u),
     { windowDays: days, documents: [] as ExpiringDocument[] },
   );
 export const getLeaveLedger = (u: string, t: string, subjectUserId?: string, year?: number) => {
@@ -378,7 +378,7 @@ export const getLeaveLedger = (u: string, t: string, subjectUserId?: string, yea
   if (year) qs.set("year", String(year));
   return soft(
     () => platformFetch<{ subjectUserId: string; year: number; entries: LeaveLedgerEntry[] }>(
-      u, `${base(t)}/leave/ledger${qs.toString() ? `?${qs}` : ""}`,
+      `${base(t)}/leave/ledger${qs.toString() ? `?${qs}` : ""}`, u,
     ),
     null as { subjectUserId: string; year: number; entries: LeaveLedgerEntry[] } | null,
   );
@@ -387,7 +387,7 @@ export const getAnalytics = (u: string, t: string, from?: string, to?: string) =
   const qs = new URLSearchParams();
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
-  return soft(() => platformFetch<HrAnalytics>(u, `${base(t)}/analytics${qs.toString() ? `?${qs}` : ""}`), null as HrAnalytics | null);
+  return soft(() => platformFetch<HrAnalytics>(`${base(t)}/analytics${qs.toString() ? `?${qs}` : ""}`, u), null as HrAnalytics | null);
 };
 
 // ════════════════════════════════════════════════════════════════════ FORMATTING ══════════════

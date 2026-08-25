@@ -43,7 +43,10 @@ export default async function HrCasesPage({ searchParams }: { searchParams: Sear
     envelopeCompanies = envelope.companies;
     rows = envelope.items.map((c) => ({ id: c.id, kind: c.kind, title: c.title, subjectName: c.subjectName, subjectUserId: c.subjectUserId, status: c.status, company: scope === "all" ? c.tenantName : undefined, companyId: c.tenantId, createdAt: c.createdAt }));
   }
-  rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Guarded: a case row can arrive without createdAt (the backend omits it on some kinds), and a
+  // bare `.localeCompare` on undefined threw a TypeError that took the whole page down — the
+  // "missing field reads as undefined" class. Undated rows sort last, newest first otherwise.
+  rows.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 
   const subjectOptions = canFileForOthers
     ? (await listMembers(userId, tenant).catch(() => [])).map((m) => ({ value: m.user_id, label: m.name }))
