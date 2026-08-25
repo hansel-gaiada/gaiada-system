@@ -294,7 +294,9 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/billing/new`
 - `/calendar`
 - `/clients`
+- `/clients/[clientId]`
 - `/clients/[clientId]/details`
+- `/clients/[clientId]/work`
 - `/clients/new`
 - `/companies`
 - `/companies/[companyId]`
@@ -319,14 +321,18 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/composer`
 - `/departments/[deptId]/composer/[postId]`
 - `/departments/[deptId]/connections`
+- `/departments/[deptId]/decisions`
 - `/departments/[deptId]/deliverables`
+- `/departments/[deptId]/depts`
 - `/departments/[deptId]/engagements`
 - `/departments/[deptId]/engagements/[engagementId]`
 - `/departments/[deptId]/gsc-ga4`
 - `/departments/[deptId]/inbox`
 - `/departments/[deptId]/keywords`
 - `/departments/[deptId]/ledger`
+- `/departments/[deptId]/money`
 - `/departments/[deptId]/pacing`
+- `/departments/[deptId]/people`
 - `/departments/[deptId]/planner`
 - `/departments/[deptId]/planner/[campaignId]`
 - `/departments/[deptId]/prd`
@@ -337,6 +343,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/reports`
 - `/departments/[deptId]/repositories`
 - `/departments/[deptId]/requests`
+- `/departments/[deptId]/review`
 - `/departments/[deptId]/search-terms`
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`

@@ -11,6 +11,47 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.51.0` - network security console: traffic, threats, isolation, occupancy (2026-08-25) - PROTOTYPED
+
+**Added**
+- `src/lib/network.ts` - data layer + the BFF contract for `GET /api/:t/it/network/{traffic,threats,rules,presence}`
+  and `POST .../isolate`, plus pure helpers (`topTalkers`, `egressByCountry`, `summarizeThreats`,
+  `isFeedStale`, `describeExpiry`, `canProposeIsolation`). 25 tests in `network.test.ts`.
+- `src/lib/demoNetwork.ts` - labelled fixture fallback, seeded from the 2026-08-25 office survey.
+- `/it/network` (Traffic), `/it/network/threats`, `/it/network/rules` (Isolation),
+  `/it/network/presence` (Occupancy), under a new `Network` tab in the IT console.
+- `components/it/network.css`, `components/it/NetworkBanners.tsx`.
+- Explicit `demoFixtures.ts` routes for the four endpoints.
+- Design: `docs/superpowers/specs/2026-08-25-network-security-console-design.md`.
+
+**Notes**
+- ★ **The fourth plane.** `/it/topology` answers "what exists on the network" and
+  `/systems/observability` answers "what are we running". Neither can answer "what moves, and can we
+  stop it" - device inventory says nothing about who a device talks to. That needs flow + IDS data,
+  a different source with different volume and a different retention policy.
+- ★ **A fixture must never pass for live data.** Every response carries a `source` discriminator and
+  every page renders a loud banner on `"fixture"`. This is the direct countermeasure to the 8
+  invented devices at a nonexistent "Bali Office" that sat in the live tenant for months reading as
+  a topology bug. **In production these pages render fixtures + banner until the Phase 3 backend
+  exists** - deliberate, so the surface can be reviewed, but see the design doc if that trade should
+  be reversed to an empty state.
+- **No staff-identifying data in a committed fixture.** ~25 of the 40 client hosts have hostnames
+  naming the employee holding the phone. Corporate asset names are real; every personal device is
+  collapsed into an unnamed aggregate - which is also how the shipped product must treat them.
+- **`demoFixtures.ts` routes are explicit, not incidental.** That file's final GET catch-all answers
+  unmatched paths with `ok([])` - an empty ARRAY - and these readers expect an OBJECT, so falling
+  through would hand the pages `rollups: undefined` and crash the render instead of degrading.
+- **Occupancy is a facilities tool, worded as one.** Zones, occupancy, sensors - never "detection",
+  never "intruder", never a name. `PresenceZone` has nowhere to put a person; the wording is the
+  reminder, the shape is the guarantee.
+- **Enforcement renders read-only.** Isolation will ride D14 (`approval-executables.ts`), be
+  quarantine-scoped only, refuse four protected targets server-side including the approver's own
+  host, and auto-expire. None of it is built, so the page states that rather than offering a button
+  that would 404.
+- `HairlineTable`'s grid has no column gap: a right-aligned header renders flush against the next
+  left-aligned one and the two read as a single word. Found only by driving the page in a browser,
+  after four green builds. Every right-aligned column now sits at the end of the table.
+
 ### finance `0.13.0` - F8 fixed assets: book AND tax depreciation (2026-08-25) - PROTOTYPED
 
 **Added**

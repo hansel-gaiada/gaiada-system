@@ -20,6 +20,7 @@ import { lmsDemo } from "./demoLms";
 import { financeDemo } from "./demoFinance";
 import { loansDemo } from "./demoLoans";
 import { assistantDemo } from "./demoAssistant";
+import { NETWORK_FIXTURES } from "./demoNetwork";
 
 export interface DemoResult {
   status: number;
@@ -2657,6 +2658,21 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (devListMatch) {
     if (m === "POST") return { status: 201, json: { id: `dev-new-${Date.now()}` } };
     return ok(DEVICES[devListMatch[1]] ?? []);
+  }
+  // ---- IT: network security console (lib/network.ts) ----
+  // These MUST be explicit. The file's final GET catch-all answers every unmatched path with
+  // `ok([])` — an empty ARRAY — and each of these readers expects an OBJECT, so falling through
+  // would hand the pages `rollups: undefined` and crash the render rather than degrade.
+  // The payloads carry `source: "fixture"`, so the pages' provenance banner still fires in demo
+  // mode: demo data must announce itself here exactly as it would against a real backend.
+  const netMatch = p.match(/^\/api\/([^/]+)\/it\/network\/([^/?]+)$/);
+  if (netMatch) {
+    if (netMatch[2] === "traffic") return ok(NETWORK_FIXTURES.traffic);
+    if (netMatch[2] === "threats") return ok(NETWORK_FIXTURES.threats);
+    if (netMatch[2] === "rules") return ok(NETWORK_FIXTURES.isolations);
+    if (netMatch[2] === "presence") return ok(NETWORK_FIXTURES.presence);
+    // `isolate` (the Phase 4 write) is deliberately NOT handled: it must 404 so the UI keeps
+    // showing "not built" rather than demo-faking a successful quarantine.
   }
   const devEventsMatch = p.match(/^\/api\/([^/]+)\/it\/events$/);
   if (devEventsMatch) {
