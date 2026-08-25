@@ -51,6 +51,22 @@ interface PostJournalBody {
   lines?: Array<{ accountCode?: string; side?: string; amount?: number | string; memo?: string }>;
 }
 
+interface OwnershipBody {
+  holderUserId?: string | null;
+  holderCompanyId?: string | null;
+  kind?: string;
+  stakePct?: number | string | null;
+  effectiveFrom?: string;
+  notes?: string;
+}
+
+interface SettingsBody {
+  isPkp?: boolean;
+  npwp?: string | null;
+  functionalCurrency?: string;
+  presentationCurrency?: string;
+}
+
 @Controller("api")
 @UseGuards(AuthGuard, ModuleEnabledGuard("finance"))
 export class FinanceController {
@@ -458,5 +474,179 @@ export class FinanceController {
       ]),
     );
     return r.rows[0];
+  }
+
+  // ── UI-02a — accounting settings ──────────────────────────────────────────────────────────────
+  // `finance_config` covers this: its catalog entry says "accounting settings" in so many words.
+  // Ownership below deliberately does NOT reuse it — see that handler's note.
+  @Get(":tenantId/finance/settings")
+  async getSettings(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_config", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT functional_currency, presentation_currency, fiscal_year_start_month, is_pkp, npwp,
+                coa_template_key
+           FROM finance_company_settings WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      if (r.rowCount === 0) throw new NotFoundException("this company has no accounting settings yet");
+      const s = r.rows[0];
+      return {
+        functionalCurrency: s.functional_currency,
+        presentationCurrency: s.presentation_currency,
+        fiscalYearStartMonth: s.fiscal_year_start_month,
+        isPkp: s.is_pkp,
+        // Stored bare; the dots are decoration applied client-side. The value is the fact.
+        npwp: s.npwp,
+        coaTemplateKey: s.coa_template_key,
+      };
+    });
+  }
+
+  @Post(":tenantId/finance/settings")
+  async updateSettings(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: SettingsBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_config", tenantId, module: "finance" }, "update");
+
+    // fiscalYearStartMonth is deliberately NOT accepted. The database refuses to move it once a
+    // calendar exists, and offering a field that will be rejected is worse than omitting it: the
+    // form implies it is editable and the refusal arrives after the user has committed to the idea.
+    //
+    // is_pkp and npwp are likewise validated in the database (posted-VAT guard, 15/16-digit check).
+    // Not re-checked here — a second implementation of a rule is a second thing to drift.
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `UPDATE finance_company_settings
+            SET is_pkp = COALESCE($2, is_pkp),
+                npwp = CASE WHEN $3::text IS NULL THEN npwp ELSE $3 END,
+                functional_currency = COALESCE($4, functional_currency),
+                presentation_currency = COALESCE($5, presentation_currency),
+                updated_at = now()
+          WHERE tenant_id = $1
+        RETURNING tenant_id`,
+        [
+          tenantId,
+          typeof body?.isPkp === "boolean" ? body.isPkp : null,
+          body?.npwp === undefined ? null : (body.npwp ?? ""),
+          body?.functionalCurrency ?? null,
+          body?.presentationCurrency ?? null,
+        ],
+      );
+      if (r.rowCount === 0) throw new NotFoundException("this company has no accounting settings yet");
+      return { ok: true };
+    });
+  }
+
+  // ── UI-01a — the cap table ────────────────────────────────────────────────────────────────────
+  // ★ `finance_ownership`, NOT `finance_config`. An ownership edge is an AUTHORIZATION fact:
+  // finance_owner_company_ids() resolves a person's visibility from this table, and a holding edge
+  // reaches every descendant company. Reusing the config kind would let anyone who may rename an
+  // account grant themselves sight of the whole group.
+  @Get(":tenantId/finance/ownership")
+  async listOwnership(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("asOf") asOf?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ownership", tenantId, module: "finance" }, "read");
+    const at = asOf ? requiredIsoDate(asOf, "asOf") : null;
+    return withFinance(tenantId, async (c) => {
+      const rows = await c.query(
+        `SELECT o.id, o.holder_user_id, o.holder_company_id, o.kind, o.stake_pct,
+                o.effective_from, o.effective_to, o.notes,
+                u.name AS holder_user_name, co.name AS holder_company_name
+           FROM company_ownership o
+           LEFT JOIN users u ON u.id = o.holder_user_id
+           LEFT JOIN companies co ON co.id = o.holder_company_id
+          WHERE o.tenant_id = $1 AND o.deleted_at IS NULL
+            AND ($2::date IS NULL
+                 OR (o.effective_from <= $2 AND (o.effective_to IS NULL OR o.effective_to > $2)))
+          ORDER BY o.effective_from DESC, o.stake_pct DESC NULLS LAST`,
+        [tenantId, at],
+      );
+      const problems = await c.query(
+        `SELECT problem, detail FROM finance_ownership_problems($1, $2::date)`,
+        [tenantId, at],
+      );
+      return {
+        edges: rows.rows.map((o) => ({
+          id: o.id,
+          holderUserId: o.holder_user_id,
+          holderCompanyId: o.holder_company_id,
+          holderName: o.holder_user_name ?? o.holder_company_name ?? null,
+          holderKind: o.holder_user_id ? "person" : "company",
+          kind: o.kind,
+          stakePct: o.stake_pct,
+          effectiveFrom: o.effective_from,
+          effectiveTo: o.effective_to,
+          notes: o.notes,
+        })),
+        // Carried WITH the list rather than behind a second call: a cap table totalling 140% has to
+        // be visible on the surface that renders it, not discoverable by asking another question.
+        problems: problems.rows.map((pr) => ({ problem: pr.problem, detail: pr.detail })),
+      };
+    });
+  }
+
+  @Post(":tenantId/finance/ownership")
+  async createOwnership(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: OwnershipBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ownership", tenantId, module: "finance" }, "create");
+
+    const kind = body?.kind?.trim();
+    if (kind !== "holding" && kind !== "shareholder") {
+      throw new BadRequestException('kind must be "holding" or "shareholder"');
+    }
+    const holderUserId = body?.holderUserId?.trim() || null;
+    const holderCompanyId = body?.holderCompanyId?.trim() || null;
+    if ((holderUserId ? 1 : 0) + (holderCompanyId ? 1 : 0) !== 1) {
+      throw new BadRequestException("exactly one of holderUserId or holderCompanyId is required");
+    }
+    const effectiveFrom = requiredIsoDate(body?.effectiveFrom, "effectiveFrom");
+
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `INSERT INTO company_ownership
+           (tenant_id, holder_user_id, holder_company_id, kind, stake_pct, effective_from, notes)
+         VALUES ($1,$2,$3,$4,$5,$6::date,$7)
+         RETURNING id`,
+        [
+          tenantId, holderUserId, holderCompanyId, kind,
+          body?.stakePct === null || body?.stakePct === undefined ? null : body.stakePct,
+          effectiveFrom, body?.notes ?? null,
+        ],
+      );
+      return { id: r.rows[0].id };
+    });
+  }
+
+  // END-DATE, never delete. There is no delete action in the policy and none here: last year's
+  // statements were true under last year's cap table, and removing the row would make them
+  // unexplainable.
+  @Post(":tenantId/finance/ownership/:edgeId/end")
+  async endOwnership(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("edgeId") edgeId: string,
+    @Body() body: { effectiveTo?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_ownership", tenantId, module: "finance" }, "update");
+    const effectiveTo = requiredIsoDate(body?.effectiveTo, "effectiveTo");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `UPDATE company_ownership SET effective_to = $3::date, updated_at = now()
+          WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND effective_to IS NULL
+        RETURNING id`,
+        [edgeId, tenantId, effectiveTo],
+      );
+      if (r.rowCount === 0) throw new NotFoundException("no live ownership edge with that id");
+      return { ok: true };
+    });
   }
 }

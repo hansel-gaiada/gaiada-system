@@ -4078,3 +4078,28 @@ client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
 a control account). Unrecognised `FINANCE_*` codes default to 409 with their own message, so a
 refusal added by a later migration is mapped by construction.
 
+### Finance — cap table and settings (UI-01a / UI-02a)
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| GET | `/finance/settings` | `{ functionalCurrency, presentationCurrency, fiscalYearStartMonth, isPkp, npwp, coaTemplateKey }` | `finance_config:read` |
+| POST | `/finance/settings` | `{ ok }` | `finance_config:update` |
+| GET | `/finance/ownership?asOf=` | `{ edges[], problems[] }` | **`finance_ownership:read`** |
+| POST | `/finance/ownership` | `{ id }` | **`finance_ownership:create`** |
+| POST | `/finance/ownership/:edgeId/end` | `{ ok }` | **`finance_ownership:update`** |
+
+Three contract rules a consumer must not simplify:
+
+1. **`finance_ownership` is NOT `finance_config`.** An ownership edge is an authorization fact —
+   `finance_owner_company_ids()` resolves a person's visibility from it, and a `holding` edge
+   reaches every descendant company. `finance_manager` may READ the cap table and may **not** write
+   it; `finance_staff` may not read it at all. Proved against the live PDP.
+2. **`problems[]` travels WITH the edges.** A cap table totalling 140% (or 60%) must be visible on
+   the surface that renders it, not discoverable by asking a second question. Rendering `edges`
+   without `problems` shows a register that looks authoritative and is not.
+3. **There is no DELETE.** Removing a holder is `POST /ownership/:id/end` with an `effectiveTo` —
+   ownership is effective-dated and last year's statements were true under last year's cap table.
+   Ending an already-ended edge is a **404**, never a silent success.
+
+`fiscalYearStartMonth` is returned but **not accepted** on write: the database refuses to move it
+once a calendar exists, and offering a field that will be rejected implies it is editable.

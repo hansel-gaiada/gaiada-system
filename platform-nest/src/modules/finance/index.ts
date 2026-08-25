@@ -69,6 +69,9 @@ export const financeModule: ModuleContract = {
     { key: "finance.tax.read", description: "View tax summaries and e-Faktur exceptions" },
     { key: "finance.posting_rule.read", description: "View posting rules and the finance event queue" },
     { key: "finance.posting_rule.process", description: "Process queued finance events" },
+    { key: "finance.ownership.read", description: "View the cap table: who holds what stake in which company" },
+    { key: "finance.ownership.create", description: "Record an ownership edge (confers authorization scope)" },
+    { key: "finance.ownership.update", description: "Amend or end-date an ownership edge" },
   ],
 
   customFieldTargets: [],
