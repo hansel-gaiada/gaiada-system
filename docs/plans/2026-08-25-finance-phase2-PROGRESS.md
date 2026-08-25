@@ -1,0 +1,227 @@
+# Finance Phase 2 — assets, consolidation, cutover, treasury · PROGRESS
+
+**Session opened 2026-08-25.** Continues `2026-08-24-finance-PROGRESS.md` (F0–F7 + FA, 80 items,
+0 outstanding, deployed at `alpha-01.071.0156a`). Design:
+`docs/blueprints/finance-accounting-foundation.md`.
+
+Owner asked for four things plus the live seed:
+
+1. **Seed live finance** — blocked on answers (§A below).
+2. **A depreciation engine — "real and proper".**
+3. **Consolidation.**
+4. **Opening + closing balances and cutover.**
+5. **Everything money-shaped: loans, bonds, etc.**
+
+Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothing here is production.
+
+## Roll-up
+
+| Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
+|---|---|---|---|---|---|
+| S · Seed live finance | 6 | 6 | 0 | 0 | 0 |
+| F8 · Fixed assets + depreciation | 14 | 14 | 0 | 0 | 0 |
+| F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
+| F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
+| F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
+| **Total** | **55** | **55** | **0** | **0** | **0** |
+
+---
+
+## §A — BLOCKING QUESTIONS (the seed cannot start without these)
+
+The live estate is **3 companies**: `D & A Syrowatka` (holding, root) · `Gaia Digital Agency`
+(finance module already ON) · `Viceroy Bali`.
+
+Seeding writes a chart of accounts and cuts a fiscal calendar **into the books of record**. Under
+D-F1 a wrong figure is corrected by reversal, never by editing — so a wrong fiscal-year start is
+not a quick fix later. Hence: ask, do not guess.
+
+### A1. Scope — which entities get live books now?
+- Are all three ERP companies **separate legal entities (PT)**, or are some brands/divisions inside
+  one PT? *(This decides whether they get separate books at all — a brand does not get its own
+  ledger, a PT must.)*
+- Full legal name per PT.
+- Which get books **now**, which later?
+
+### A2. Fiscal calendar (per entity)
+- Fiscal year **start month** — Jan–Dec, or something else?
+- **Period granularity** — monthly assumed. Confirm.
+- **First open period** — the cutover date; books start here.
+
+### A3. Tax identity (per entity)
+- **NPWP** — does one exist per entity? Do **not** paste it in chat; say whether it exists and I
+  will wire the field for the accountant to enter.
+- **PKP status** — PKP or non-PKP? *(non-PKP ⇒ no PPN output at all; this changes the CoA and the
+  F7 surface.)*
+- Which withholdings actually occur: **PPh 21** (payroll) · **PPh 23** (services) · **PPh 4(2)**
+  (final — rent, construction)?
+
+### A4. Existing books — the cutover question
+- Is there **any** existing bookkeeping? (Accurate · Mekari/Jurnal · Xero · Zahir · spreadsheets ·
+  none)
+- If yes: as-at date of the last closed period, and can we get a **trial balance** + open AR/AP
+  lists + bank balances + fixed asset register at that date?
+- If none: books start clean at the cutover date and there are no opening balances beyond capital.
+
+### A5. Chart of accounts
+- Adopt **our template CoA** (4-digit, e.g. `1120 Bank`), or **mirror the existing books' CoA** so
+  history reconciles? *(Mirroring is more work but makes the cutover verifiable against the old
+  system — usually the right call when books already exist.)*
+- Base currency **IDR** for all? Any entity whose functional currency is not IDR?
+
+### A6. People — who gets which seat
+Roles are seated from IAM positions; ownership rows are separate (they gate owner/shareholder
+scope, not staff access).
+- Who is the **accountant** (email) per entity — the ERP account that will actually keep the books?
+- Who is the **finance manager** (email) — approves, signs off periods?
+- Owner said *"approval from Anthony"* for cross-company visibility. Anthony's ERP email, and is he
+  the `finance.cross_company_approver` for all entities?
+
+### A7. Ownership map (Q9 — `company_ownership` is live and EMPTY)
+Until rows exist, owner/shareholder scope resolves to **nothing**, and consolidation (F9) has no
+control determination.
+- For each PT: who holds what **%**, and is the holder a person or another PT?
+- Who is also a **director/commissioner** (separate from shareholding)?
+- Holding owner = sees all. Which people are company-owner/shareholder-scoped, and to which
+  companies?
+
+### A8. Bank accounts (needed for F6 bank rec to be real, not for the seed itself)
+- Which bank accounts per entity, and which bank? Statement format available (CSV/OFX/MT940)?
+
+---
+
+## §B — DESIGN QUESTIONS for the four new streams
+
+These change what gets built, so they are worth answering before the code exists.
+
+### B1. Depreciation — book only, or book **and** tax?
+Indonesian tax depreciation (PMK golongan: Gol 1/2/3/4 + bangunan permanen/non-permanen, garis
+lurus or saldo menurun) frequently **differs** from the useful life used for PSAK book purposes.
+Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46).
+- **Book only** — one schedule. Simpler, but the tax return needs a manual adjustment every year.
+- **Book + tax, with deferred tax** — the "real and proper" answer, and required if an auditor or a
+  bank is going to look at the statements. Materially more engine.
+
+### B2. Consolidation — how far?
+- **Full consolidation** of >50%-held subs with **NCI** (PSAK 65), **equity method** for 20–50%
+  (PSAK 15)? Or is everything wholly-owned, making NCI dead code?
+- Are there **intercompany transactions** to eliminate (management fees, loans between PTs,
+  cross-charges)? If yes, elimination journals are mandatory — a naive sum would double-count.
+- Any **goodwill** from an acquisition? Any **foreign-currency** subsidiary needing translation
+  (PSAK 10)?
+
+### B3. Treasury — which instruments actually exist?
+- **Loans payable** (bank/shareholder)? **Loans receivable**? **Bonds issued**? **Leases**?
+- Are any at a rate that differs from market, or with fees, such that **amortised cost / effective
+  interest** (PSAK 71) matters — or is straight-line interest adequate?
+- **PSAK 73 leases** create a right-of-use asset that depreciates — that ties F11 back into F8, so
+  it matters whether leases are in scope.
+
+### B4. Year-end close
+- Confirm the retained-earnings roll: close P&L to **`3200 Retained earnings`** at fiscal year end?
+- Is there a **dividend** process to model, or is that manual for now?
+
+---
+
+## §C — TASKS
+
+### S · Seed live finance
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| S-01 | Confirm entity scope + legal names (A1) | PLANNED | blocked |
+| S-02 | Cut fiscal calendar per entity (A2) | PLANNED | blocked |
+| S-03 | Instantiate CoA per entity (A5) | PLANNED | blocked |
+| S-04 | Seat accountant + finance manager from real IAM positions (A6) | PLANNED | blocked |
+| S-05 | Load `company_ownership` rows (A7) | PLANNED | blocked; also unblocks F9 control determination |
+| S-06 | Drive `/finance` authenticated against live data ⇒ DEV-VERIFIED | PLANNED | also needs the `/api/me` 401 resolved |
+
+### F8 · Fixed assets + depreciation
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| F8-01 | Asset register schema: asset, class, component, cost, residual, life, in-service date | PLANNED | components matter — PSAK 16 requires separate depreciation of significant parts |
+| F8-02 | Depreciation methods: straight-line, declining balance, units of production | PLANNED | method is DATA on the asset class, never a hardcoded branch |
+| F8-03 | Tax method + PMK golongan on the same asset (B1) | PLANNED | gated on B1 |
+| F8-04 | Depreciation schedule generator (per period, per asset, book + tax) | PLANNED | schedule is derived and reproducible, not stored-only |
+| F8-05 | Monthly depreciation RUN: posts expense / accumulated depreciation | PLANNED | accumulated depreciation is a **contra asset** — sign from `normal_balance`, never a hardcoded list |
+| F8-06 | Idempotent run: re-running a period must not double-post | PLANNED | the ledger is append-only; a second run is a defect, not a no-op |
+| F8-07 | Deferred tax from the book/tax temporary difference (PSAK 46) | PLANNED | gated on B1 |
+| F8-08 | Additions, transfers, revaluation (PSAK 16) | PLANNED | |
+| F8-09 | Disposals: derecognition + gain/loss on sale | PLANNED | must reverse accumulated depreciation, not just credit cost |
+| F8-10 | Impairment (PSAK 48) — at minimum a controlled manual write-down | PLANNED | |
+| F8-11 | CIP / assets under construction → capitalisation on in-service | PLANNED | depreciation must NOT start before the in-service date |
+| F8-12 | Reconcile register ⇄ GL control accounts (like AR/AP tie-out) | PLANNED | same verdict contract: problems found, empty = pass |
+| F8-13 | Close interlock: unrun depreciation is a close BLOCKER | PLANNED | extends `finance_period_close_readiness` |
+| F8-14 | Fixed-asset note / movement schedule for the statements | PLANNED | opening, additions, disposals, depreciation, closing |
+
+### F9 · Consolidation
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| F9-01 | Control determination from `company_ownership` (>50% full · 20–50% equity · else cost) | PLANNED | needs S-05 |
+| F9-02 | Consolidation group + reporting-entity model | PLANNED | a group is not a company; it must not get a posting ledger |
+| F9-03 | **Separate consolidation ledger** — elimination entries never touch entity books | PLANNED | ★ non-negotiable: an entity's own books must stay auditable standalone |
+| F9-04 | Intercompany tagging on journals + counterparty entity | PLANNED | without this, eliminations are guesswork |
+| F9-05 | Intercompany balance elimination (AR↔AP, loans between PTs) | PLANNED | |
+| F9-06 | Intercompany revenue/expense elimination | PLANNED | |
+| F9-07 | Unrealised profit elimination (inventory, fixed assets sold intragroup) | PLANNED | |
+| F9-08 | Non-controlling interest (PSAK 65) | PLANNED | gated on B2 |
+| F9-09 | Equity method for associates (PSAK 15) | PLANNED | gated on B2 |
+| F9-10 | Goodwill on acquisition | PLANNED | gated on B2 |
+| F9-11 | FX translation of a non-IDR sub (PSAK 10) | PLANNED | gated on B2 |
+| F9-12 | Consolidated TB / P&L / BS + the group console showing a REAL consolidated figure | PLANNED | ★ until F9-05..07 exist the console must NOT label a naive sum "consolidated" |
+
+### F10 · Opening balances, cutover, year-end close
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| F10-01 | Opening-balance journal: `source=OPENING`, balanced, one per entity per cutover date | PLANNED | |
+| F10-02 | A silent suspense/equity plug is FORBIDDEN — an unbalanced opening must fail loudly | PLANNED | |
+| F10-03 | Open AR invoice load ⇒ must tie to the AR control account | PLANNED | reuses `finance_ar_reconcile` |
+| F10-04 | Open AP bill load ⇒ must tie to the AP control account | PLANNED | |
+| F10-05 | Bank opening balances ⇒ must tie to the bank control account | PLANNED | |
+| F10-06 | Fixed-asset register opening incl. accumulated depreciation to date | PLANNED | F8 dependency |
+| F10-07 | Cutover gate: opening TB balances AND every subledger ties, else cutover is refused | PLANNED | ★ the whole point of a cutover phase |
+| F10-08 | HARD_LOCK every pre-cutover period | PLANNED | history is not editable |
+| F10-09 | Year-end close: roll P&L to retained earnings (B4) | PLANNED | the balance sheet already carries current-year profit pre-close |
+| F10-10 | Re-open protection: a closed year is terminal; corrections go to an open period | PLANNED | consistent with D-F1 |
+
+### F11 · Treasury — loans, bonds, leases
+
+| ID | Task | Status | Notes |
+|---|---|---|---|
+| F11-01 | Instrument model: principal, rate, dates, counterparty, currency | PLANNED | one model, many instrument kinds |
+| F11-02 | Repayment schedule generator (annuity, straight principal, bullet) | PLANNED | |
+| F11-03 | Interest accrual posting per period | PLANNED | accrual ≠ payment; both must post |
+| F11-04 | Amortised cost / effective interest (PSAK 71) | PLANNED | gated on B3 |
+| F11-05 | Loans receivable (the mirror side) | PLANNED | |
+| F11-06 | Bonds issued: par, coupon, premium/discount amortisation | PLANNED | gated on B3 |
+| F11-07 | Lease liability + right-of-use asset (PSAK 73) | PLANNED | ★ the ROU asset depreciates ⇒ hands off to F8 |
+| F11-08 | Current/non-current split by maturity | PLANNED | a bank reads this off the balance sheet |
+| F11-09 | FX revaluation of foreign-currency debt | PLANNED | |
+| F11-10 | Intercompany loans flagged for F9 elimination | PLANNED | F9-05 dependency |
+| F11-11 | Maturity + covenant schedule for the bank-ready pack | PLANNED | |
+| F11-12 | Reconcile instrument balances ⇄ GL control accounts | PLANNED | same verdict contract |
+| F11-13 | Close interlock: unposted accruals block the close | PLANNED | |
+
+---
+
+## Constraints carried forward from F0–F7 (binding, do not relitigate)
+
+- **Reversal-only correction.** No UPDATE, no DELETE, on anything posted.
+- **Contra sign comes from `normal_balance`**, never a hardcoded account list. Accumulated
+  depreciation (F8) and bond discount (F11) are both contra — this is why that rule exists.
+- **A verdict must never degrade to a pass.** New reconciliations follow `financeVerdict`, not
+  `financeData`.
+- **No computed money in the UI.** Figures come from a SQL function next to the constraint that
+  guarantees them.
+- **Adding a Cerbos kind touches five coupled artifacts** (catalog, bundles, migration, policy,
+  parity suites) — one change or the parity suites break for every other session.
+- **Agentic-native bar**: every capability must work identically under a human, n8n, and an agent.
+
+## Session log
+
+- **2026-08-25** — Plan opened. 55 tasks across S/F8/F9/F10/F11, all PLANNED. Seeding blocked on
+  §A; F8/F9/F11 shape gated on §B. Live estate confirmed as 3 companies (holding + agency + resort;
+  the agency already has the finance module enabled).
