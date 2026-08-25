@@ -18,13 +18,13 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
-| S · Seed live finance | 6 | 3 | 0 | 0 | **3** |
+| S · Seed live finance | 6 | 2 | 0 | 0 | **4** |
 | F8 · Fixed assets + depreciation | 14 | 1 | 0 | **13** | 0 |
-| F9 · Consolidation | 12 | 11 | 0 | **1** | 0 |
+| F9 · Consolidation | 12 | 7 | 0 | **5** | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
-| **Total** | **63** | **46** | **0** | **14** | **3** |
+| **Total** | **63** | **41** | **0** | **18** | **4** |
 
 ---
 
@@ -134,7 +134,7 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | S-02 | Cut fiscal calendar per entity (A2) | **DEV-VERIFIED** | FY2026 Jan–Dec, **12 monthly periods, all OPEN**, on all three. Verified by direct query, not by the seed's own output |
 | S-03 | Instantiate CoA per entity (A5) | **DEV-VERIFIED** | Our `id_psak_general_v1` template (no prior books to mirror). **69 accounts, 5 control accounts**, IDR, fyStart=1, on all three |
 | S-04 | Seat accountant + finance manager (A6) | **PLANNED — stand-in decided** | Owner: point at `hansel@gaiada.com` for now. Registered in **`docs/PLACEHOLDER-PRINCIPALS.md`** (P-01/P-02). ⚠ Both roles are the SAME account, so **SoD is not in force** — fine while the books are empty, not once entries are posted |
-| S-05 | Load `company_ownership` rows (A7) | **PLANNED — default decided** | Owner: **Anthony 100%**. `anthony@gaiada.com` is a REAL active account, not a stand-in. **ONE row, not three**: a `holding` edge confers the company + all descendants, so a single edge on D & A Syrowatka reaches both operating companies. Three shareholder rows would resolve the same but assert a false cap table |
+| S-05 | Load `company_ownership` rows (A7) | **DEV-VERIFIED (default only)** | Anthony 100% `holding` on D & A Syrowatka, live. Verified: `finance_owner_company_ids(anthony)` resolves to **all 3 companies**. ONE row, not three — a holding edge confers the company + all descendants; three shareholder rows would resolve the same while asserting a false cap table. **Any further shareholders await owner data + UI-01** |
 | S-06 | Drive `/finance` authenticated against live data ⇒ DEV-VERIFIED | PLANNED | Needs S-04 (a real principal) and the `/api/me` 401. Until then finance is deployed + seeded, **not** DEV-VERIFIED end to end |
 
 ### F8 · Fixed assets + depreciation
@@ -160,11 +160,11 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 
 | ID | Task | Status | Notes |
 |---|---|---|---|
-| F9-01 | Control determination from `company_ownership` (>50% full · 20–50% equity · else cost) | PLANNED | needs S-05 |
-| F9-02 | Consolidation group + reporting-entity model | PLANNED | a group is not a company; it must not get a posting ledger |
-| F9-03 | **Separate consolidation ledger** — elimination entries never touch entity books | PLANNED | ★ non-negotiable: an entity's own books must stay auditable standalone |
+| F9-01 | Control determination | **PROTOTYPED** | `finance_group_members()` (202608251530). Derived from ownership, never a stored flag. Reports the BASIS used — PSAK 65 control is about power, not arithmetic ⚠ requires the candidate tenants already in scope: an ownership edge lives in the OWNED company's tenant, so the read is circular and is resolved by sequence, not privilege |
+| F9-02 | Consolidation group + reporting entity | **PROTOTYPED** | `finance_consolidation_runs` keyed by (parent, as_of). A run is a SNAPSHOT of a judgement and is never edited — a changed elimination means a new run, so “what did we report in March” stays answerable |
+| F9-03 | **Separate consolidation ledger** | **PROTOTYPED** | `finance_consolidation_entries` — deliberately NOT the journal tables. Pinned by a test asserting the subsidiary's own receivable is UNCHANGED after eliminating |
 | F9-04 | Intercompany tagging | **PROTOTYPED** | `finance_accounts.counterparty_company_id` (202608251430) — on the ACCOUNT, not the journal. The ledger is immutable, so a journal tag could only be set at posting time via a 13th parameter on a 313-line function with 7 callers. An account must be CHOSEN, so a mis-posted related-party balance is visible rather than invisible |
-| F9-05 | Intercompany balance elimination (AR↔AP, loans between PTs) | PLANNED | |
+| F9-05 | Intercompany balance elimination | **PROTOTYPED** | `finance_eliminate_intercompany()`. REFUSES on a disagreeing pair — netting hides a real reconciling item, forcing invents a number. A balance with an entity OUTSIDE the group survives |
 | F9-06 | Intercompany revenue/expense elimination | PLANNED | |
 | F9-07 | Unrealised profit elimination (inventory, fixed assets sold intragroup) | PLANNED | |
 | F9-08 | Non-controlling interest (PSAK 65) | PLANNED | gated on B2 |
