@@ -193,6 +193,18 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
       // Type-scoped filters' order relative to EACH OTHER does not matter (their @Catch types are
       // disjoint), so appending here is safe; what matters is that LastResortExceptionFilter stays
       // FIRST, which the next test pins independently.
+      //
+      // FINANCE-APP: FinanceErrorFilter is the deliberate edit this test exists to force. It is
+      // @Catch(DatabaseError) — the FINANCE_* refusal family raises plpgsql exceptions, which reach
+      // Nest as pg errors rather than HttpExceptions, so HttpErrorFilter never saw them and every
+      // accounting refusal surfaced as a 500 "internal error".
+      //
+      // ⚠ Its @Catch type is NOT disjoint from the rest in the way the others are: it intercepts
+      // EVERY pg DatabaseError in the estate, not only finance's. That is why it DELEGATES a
+      // non-FINANCE_* error to LastResortExceptionFilter rather than answering in its place —
+      // answering looked identical to the client while losing the [unhandled-exception] log line
+      // and the OTel span, which is a silent 500. Pinned by its own suite.
+      "FinanceErrorFilter",
       "ClientAccessErrorFilter",
       // SMM-05: SocialPublisherErrorFilter, appended last and therefore CHECKED first — safe,
       // because @Catch(SocialPublisherError) is disjoint from every other type above.

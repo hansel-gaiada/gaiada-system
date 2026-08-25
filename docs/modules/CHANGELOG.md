@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.14.1` - FinanceErrorFilter no longer swallows other modules' database faults (2026-08-25) - PROTOTYPED
+
+**Fixed**
+- `finance-error.filter.ts` delegates a NON-`FINANCE_*` `DatabaseError` to
+  `LastResortExceptionFilter` instead of answering in its place.
+- `provider-dispatch-error.filter.test.ts` - `FinanceErrorFilter` added to the pinned filter order.
+- `finance-error.filter.test.ts` - 5 tests, one of which is the regression guard.
+
+**Notes**
+- ★ **The bug was invisible by construction.** The filter is `@Catch(DatabaseError)`, so it
+  intercepts EVERY pg error in the estate, not only finance's. It replied 500 with exactly the body
+  `LastResortExceptionFilter` uses - but LastResort ALSO writes `[unhandled-exception]` to stderr
+  and records the fault on the active OTel span. So every non-finance database fault became a
+  SILENT 500: identical response, no log line, no trace. Nothing about the response could reveal it.
+- Delegating keeps ONE implementation of "what do we do with an unhandled fault", so a later change
+  there cannot drift from a copy hiding in the finance module.
+- **The order-pin test was right to fail.** `provider-dispatch-error.filter.test.ts` asserts the
+  EXACT registered filter list precisely so a filter added to `main.ts` cannot ship unreviewed. It
+  caught this one. The fix records the addition and states why this filter's `@Catch` type is NOT
+  disjoint from the others - it is the entry that needed reasoning about, which is what the test is
+  for.
+
 ### finance `0.14.0` - F8 complete + F9 consolidation begins (2026-08-25) - PROTOTYPED
 
 **Added**

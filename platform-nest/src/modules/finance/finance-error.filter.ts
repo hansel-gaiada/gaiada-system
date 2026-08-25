@@ -31,6 +31,7 @@
 import { type ArgumentsHost, Catch, type ExceptionFilter } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { DatabaseError } from "pg";
+import { LastResortExceptionFilter } from "../../last-resort-exception.filter";
 
 /** Codes where the CALLER's input is malformed — the user should change what they sent. */
 const BAD_REQUEST = new Set([
@@ -88,16 +89,28 @@ function parse(err: unknown): { code: string; message: string; hint?: string } |
 // instead of this estate's `{ error }` convention, which the UI and the bot both read.
 //
 // Catching the pg error class specifically means HttpExceptions never reach here at all.
+/** One shared instance: the filter is stateless, and constructing one per fault would be noise. */
+const LAST_RESORT = new LastResortExceptionFilter();
+
 @Catch(DatabaseError)
 export class FinanceErrorFilter implements ExceptionFilter {
   catch(exception: DatabaseError, host: ArgumentsHost) {
     const parsed = parse(exception);
     if (!parsed) {
-      // A non-finance database error. Answer EXACTLY what LastResortExceptionFilter would, so
-      // routing it through this filter changes nothing for the rest of the estate — a database
-      // error is never safe to surface verbatim (it can carry table names, values and SQL).
-      const reply = host.switchToHttp().getResponse<FastifyReply>();
-      void reply.status(500).send({ error: "internal error", code: "internal_error" });
+      // ── A NON-FINANCE DATABASE ERROR: HAND IT BACK, DO NOT ANSWER IT HERE ───────────────────
+      // This filter is `@Catch(DatabaseError)`, so it intercepts EVERY pg error in the estate, not
+      // only finance's. Re-throwing does not work — Nest has already left the filter chain — so
+      // the first version simply replied 500 with the same body LastResortExceptionFilter uses.
+      //
+      // That was wrong in a way that is invisible by construction: LastResort also writes
+      // `[unhandled-exception]` to stderr AND records the fault on the active OTel span. Answering
+      // in its place made every non-finance database fault a SILENT 500 — the response looked
+      // identical while the log line and the trace disappeared.
+      //
+      // Delegating keeps ONE implementation of "what do we do with an unhandled fault", so a later
+      // change there (a new status table, a different log tag) cannot drift from a copy hiding in
+      // the finance module.
+      LAST_RESORT.catch(exception, host);
       return;
     }
 
