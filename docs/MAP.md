@@ -384,6 +384,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/learning/catalogue`
 - `/learning/compliance`
 - `/learning/courses/[id]`
+- `/learning/courses/[id]/activities/[activityId]`
+- `/learning/paths/[pathId]`
 - `/login`
 - `/me`
 - `/me/inbox`
