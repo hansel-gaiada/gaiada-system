@@ -129,6 +129,10 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
                       </span>
                       <span style={{ font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>
                         {formatDuration(a.estimatedMinutes)} · {GRADING_NOTE[a.grading]}
+                        {/* The grading key is stripped server-side for everyone who is not
+                            authoring the course. Said out loud so an author who opens this page
+                            and sees no answers knows why, rather than reporting missing content. */}
+                        {a.specRedacted ? " · answers hidden" : ""}
                         {a.passThreshold ? ` · pass at ${a.passThreshold}` : ""}
                         {/* An attempt cap is a fact the learner needs BEFORE the first attempt,
                             not a surprise on the last one. */}
