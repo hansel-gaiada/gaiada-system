@@ -7,9 +7,9 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 140,
-      "grantablePermissionsInCatalog": 360,
+      "grantablePermissionsInCatalog": 363,
       "permissionsCoveredByGroups": 338,
-      "permissionsAdvancedOnly": 22,
+      "permissionsAdvancedOnly": 25,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 96
     }
@@ -1669,6 +1669,18 @@
     {
       "key": "core.work_activity.read",
       "reason": "Raw tracker event stream — a support/debugging read, not an everyday duty. (core.activity.read, the human-facing activity feed, is already in Company Overview.)"
+    },
+    {
+      "key": "finance.ownership.create",
+      "reason": "UI-01b: writing an ownership edge CONFERS SCOPE — a holding edge reaches every descendant company, so a writer can widen their own reach by inserting one row naming themselves. advancedOnly beside core.role_grant.create for the same reason: it belongs behind an authoring surface with checks in front of it, never in a group anyone can hand out."
+    },
+    {
+      "key": "finance.ownership.read",
+      "reason": "UI-01b: the cap table. advancedOnly until the ownership admin surface (UI-01c) lands — same treatment as core.position.read. It is also not merely a finance read: finance_owner_company_ids() resolves a person's VISIBILITY from this table, so the shareholder register is an authorization fact and does not belong in a friendly group picker beside 'view the chart of accounts'."
+    },
+    {
+      "key": "finance.ownership.update",
+      "reason": "UI-01b: pairs with finance.ownership.create — same reasoning. Note this is also how a holder is REMOVED (by end-dating), because ownership is effective-dated and there is deliberately no delete action."
     },
     {
       "key": "hr.employee.create",

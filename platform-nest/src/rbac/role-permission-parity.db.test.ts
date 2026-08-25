@@ -123,6 +123,10 @@ const FINANCE_KINDS = new Set<string>([
   "finance_tax",
   // FINANCE-F2: posting rules and the event inbox.
   "finance_posting_rule",
+  // UI-01b. The cap table. Read is the controller tier; WRITE is company_admin only —
+  // whoever writes an ownership edge can widen their own scope, because
+  // finance_owner_company_ids() resolves visibility out of this very table.
+  "finance_ownership",
 ]);
 
 const DIRECT: Record<string, RealRole[]> = {

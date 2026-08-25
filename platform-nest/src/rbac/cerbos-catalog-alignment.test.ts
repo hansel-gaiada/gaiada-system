@@ -110,8 +110,8 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // FINANCE-F0 (2026-08-24): +13 pairs / +3 kinds (finance_config, finance_period,
     // finance_control), 320/81 -> 333/84. Deliberate pin update, not a silence.
     // FINANCE-F1 (2026-08-24): +4 pairs / +1 kind (finance_ledger) -> 349/87.
-    expect(catalog.length).toBe(375);
-    expect(catalogKindSet.size).toBe(93);
+    expect(catalog.length).toBe(378);
+    expect(catalogKindSet.size).toBe(94);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

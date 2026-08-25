@@ -1,0 +1,81 @@
+# Finance UI-01b — `finance_ownership`: THE CAP TABLE.
+#
+# Covers `company_ownership`: who holds what percentage of which company, from when, and whether the
+# edge is a `holding` (an entity parent, conferring transitive reach) or a `shareholder` (an
+# economic stake in that company alone).
+#
+# ── WHY THIS IS NOT `finance_config` ────────────────────────────────────────────────────────────
+# It was the obvious place to put it, and it is wrong for one specific reason:
+#
+# ★ AN OWNERSHIP EDGE IS AN AUTHORIZATION FACT, NOT AN ACCOUNTING ONE.
+#
+# `finance_owner_company_ids()` resolves a person's OWNERSHIP SCOPE from this table (ruling D-F8). A
+# `holding` edge confers the company *and every descendant*. So whoever can write here can widen
+# their own visibility across the group — by inserting one row naming themselves.
+#
+# `finance_config` is the accounting vocabulary: account codes, dimensions, the calendar's shape,
+# PKP status. Re-typing an account name moves balances, which is serious, but it grants nobody
+# anything. Folding the cap table in would mean "may edit the chart of accounts" silently carried
+# "may grant myself sight of every company in the group" — the exact escalation
+# resource_finance_config.yaml's own header says it keeps `finance_control` separate to prevent.
+#
+# Same reasoning, one step further: the accountant edits the vocabulary; the cap table is the
+# owner's.
+#
+# ── WHO MAY WRITE ───────────────────────────────────────────────────────────────────────────────
+# `company_admin` only, plus `platform_admin`. NOT `module_manager` — a finance manager keeping the
+# books has no business restating who owns the company, and giving them the write would hand every
+# controller in the group a lever on their own scope.
+#
+# READ is wider than write, as in `finance_config`, but not by much: `module_manager` may read,
+# because consolidation basis (full / equity / investment) is derived from these percentages and a
+# controller preparing group figures needs to see them. `module_staff` may NOT — a clerk coding an
+# expense claim has no reason to know the shareholder register, and a cap table is exactly the kind
+# of thing that is uninteresting until it is very interesting.
+#
+# ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────────────────────────
+#   * `delete`. There is no such action, on purpose. Ownership is EFFECTIVE-DATED: removing a holder
+#     means setting `effective_to`, which is an `update`. Last year's statements were true under
+#     last year's cap table, and a DELETE would make them unexplainable. The database keeps the row;
+#     the policy declines to offer a verb that suggests otherwise.
+#   * `org_unit_lead` — a department head has no relationship to the shareholder register.
+#   * `client` — an external contact, obviously not.
+#   * A `perm_*` mirror arm. ROLE-ARM ONLY, matching every other finance kind this wave: a mirror
+#     arm is added once the handlers exist and the holders have been audited against a live grant
+#     set. The handlers land in the same change as this policy, so the audit has not happened yet.
+#   * `owner`. A permission-native role (IAM-04c §3) with no Cerbos rules anywhere; the holding
+#     owner's all-company reach comes from the ownership graph itself, not from a rule here. Which
+#     is a neat illustration of why this kind is sensitive: `owner` reads its own reach OUT of this
+#     very table.
+#
+# ── THE HANDLER CONTRACT ────────────────────────────────────────────────────────────────────────
+# Handlers pass resource.attr = {kind:"finance_ownership", tenantId, module:"finance", id?}. The
+# `module` value is LOAD-BEARING, not decoration: derived_roles.yaml string-composes the module
+# tiers from it (`module` + `_staff`/`_manager`), so `finance_manager` is the only module role name
+# Cerbos will match here. A handler that omits it matches no module rule and the request is denied —
+# fail-closed, but silently, so pass it.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: finance_ownership
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    # Platform admin: unconditional, as everywhere else in this wave.
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # READ — the controller tier and the company's own admin. Consolidation basis is derived from
+    # these percentages, so a controller preparing group figures needs them.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # WRITE — company_admin ONLY. See the header: whoever writes here can widen their own reach.
+    - actions: ["create", "update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

@@ -127,6 +127,10 @@ const FINANCE_KINDS = new Set([
   "finance_tax",
   // FINANCE-F2: posting rules and the event inbox.
   "finance_posting_rule",
+  // UI-01b. The cap table. Read is the controller tier; WRITE is company_admin only —
+  // whoever writes an ownership edge can widen their own scope, because
+  // finance_owner_company_ids() resolves visibility out of this very table.
+  "finance_ownership",
 ]);
 const SEARCH_KINDS = new Set([
   "resource_search_property", "resource_search_campaign", "resource_search_engagement",
