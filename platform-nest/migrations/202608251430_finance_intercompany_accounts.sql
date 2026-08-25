@@ -85,10 +85,18 @@ BEGIN
     RAISE EXCEPTION 'FINANCE_UNKNOWN_COUNTERPARTY: no company %', p_counterparty;
   END IF;
 
-  -- A short, stable, human-readable suffix derived from the counterparty id. Not the name: a
-  -- company rename would otherwise change an account code, and account codes appear in exported
-  -- statements and in the accountant's own working papers.
-  v_suffix  := upper(substr(replace(p_counterparty::text, '-', ''), 1, 4));
+  -- ★ THE SUFFIX COMES FROM THE END OF THE UUID, NOT THE START.
+  --
+  -- Company ids are uuid v7, whose LEADING hex digits are a millisecond timestamp. Two companies
+  -- created in the same millisecond — which a seed or a test does routinely — derive an identical
+  -- prefix. Combined with ON CONFLICT DO NOTHING below, the second call then silently returned the
+  -- account belonging to the FIRST counterparty, and postings for one entity landed against
+  -- another. Caught by the F9 suite: 2,000,000 owed by Outside PT appeared as owed by Beta PT.
+  --
+  -- The v7 tail is random, so it does not collide by construction. Not the company NAME: a rename
+  -- would change an account code, and codes appear in exported statements and in the accountant's
+  -- own working papers.
+  v_suffix  := upper(right(replace(p_counterparty::text, '-', ''), 6));
   v_ar_code := '1290-' || v_suffix;
   v_ap_code := '2290-' || v_suffix;
 
@@ -96,6 +104,18 @@ BEGIN
    WHERE tenant_id = p_company AND code = '1200' AND deleted_at IS NULL;
   SELECT id INTO v_par_ap FROM finance_accounts
    WHERE tenant_id = p_company AND code = '2200' AND deleted_at IS NULL;
+
+  -- Refuse rather than silently reuse. An existing code that belongs to a DIFFERENT counterparty is
+  -- the collision described above, and returning it would tag one entity's balances with another's
+  -- — invisible in the ledger and fatal to consolidation. Loud is the only safe behaviour.
+  PERFORM 1 FROM finance_accounts
+   WHERE tenant_id = p_company AND code IN (v_ar_code, v_ap_code) AND deleted_at IS NULL
+     AND counterparty_company_id IS DISTINCT FROM p_counterparty;
+  IF FOUND THEN
+    RAISE EXCEPTION
+      'FINANCE_INTERCOMPANY_CODE_COLLISION: account code %/% already exists for a different '
+      'counterparty in this company', v_ar_code, v_ap_code;
+  END IF;
 
   INSERT INTO finance_accounts
     (tenant_id, code, name, parent_id, account_type, normal_balance, is_postable, counterparty_company_id)

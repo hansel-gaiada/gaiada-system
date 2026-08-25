@@ -151,6 +151,20 @@ const TRUSTED_WRITERS: Record<string, string> = {
     "into an empty portal, which reads as success from the outside. Verified on the live estate " +
     "before and after. It re-asserts the grant for EVERY seeded contact, not only newly created " +
     "ones, so a contact that predates the fix is repaired rather than left quietly broken.",
+  "src/seed/finance-config.ts":
+    "seed script, same execution context as the two above. It grants the LITERAL global roles " +
+    "`finance_manager` and `finance_staff` — resolved by name from `roles WHERE company_id IS NULL` " +
+    "— at hardcoded 'company' scope for two `.local` DEV SEATS it creates itself. Nothing " +
+    "caller-chosen reaches the role or the scope. The seats exist so finance development is not " +
+    "blocked on a hire; `--no-seats` suppresses them entirely, which is what a live estate runs.",
+  "src/seed/finance-live-defaults.ts":
+    "seed script for a LIVE estate. Grants the LITERAL global role `finance_manager` at hardcoded " +
+    "'company' scope to an existing user resolved BY EMAIL — it refuses to create users at all, " +
+    "because inventing a principal in a live estate is how a fictional employee ends up holding a " +
+    "finance grant. The role name is a module constant, never a parameter. The grant it makes is a " +
+    "registered STAND-IN (docs/PLACEHOLDER-PRINCIPALS.md P-01/P-02) and must be retired before the " +
+    "books carry real transactions; while it stands, the accountant and the finance manager are " +
+    "one account and segregation of duties is NOT in force.",
   "src/testing/fixtures.ts":
     "test-only `grantRole()` helper — its role/scope arguments come from TEST code, never from a " +
     "live request, and the file is never imported by production code. `src/testing/personas.ts` " +
