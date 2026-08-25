@@ -58,6 +58,22 @@ describe("buildLabRequest — what the learner may and may not decide", () => {
     const req = buildLabRequest({ gradingSpec: { checks: [] } }, [{ path: "a.js", content: "1" }], "act-3");
     expect(req.files).toEqual([{ path: "a.js", content: "1" }]);
   });
+
+  it("forwards a Cyber lab's companion target to the runner verbatim", () => {
+    // Without this, a lab spec authored with `target` (L6c) would silently never reach the runner —
+    // the exact "uncompletable path" this module's whole design exists to avoid, just one hop later.
+    const cyberSpec = { ...SPEC, target: { image: "nettools", alias: "target", readySec: 4 } };
+    const req = buildLabRequest(cyberSpec, [{ path: "exploit.js", content: "// mine" }], "act-4");
+    expect(req.target).toEqual({ image: "nettools", alias: "target", readySec: 4 });
+  });
+
+  it("omits target entirely when the challenge does not carry one", () => {
+    // Every non-Cyber lab. `target` must not appear as `undefined` in the body sent to the runner —
+    // the runner's own parser treats `target !== undefined` as "validate target.image", so a stray
+    // key would turn every ordinary lab into a rejected request.
+    const req = buildLabRequest(SPEC, [{ path: "solution.js", content: "1" }], "act-5");
+    expect("target" in req).toBe(false);
+  });
 });
 
 describe("clampOutput", () => {

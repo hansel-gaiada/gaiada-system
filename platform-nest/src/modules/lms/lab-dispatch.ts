@@ -41,6 +41,12 @@ export interface LabSpec {
   command?: string[];
   limits?: Record<string, unknown>;
   gradingSpec: { checks: unknown[]; passThreshold?: number };
+  /** Present only for a Cyber lab (L6c): the disposable, deliberately vulnerable companion
+   *  container the learner's own container talks to on a per-run, internal-only network. Forwarded
+   *  verbatim to the runner — same "the CHALLENGE owns this, not the learner" rule as `image` and
+   *  `gradingSpec`, because a caller-supplied target image is the same "run a container on this
+   *  host" capability the attacker's `image` already is. */
+  target?: { image: string; alias?: string; readySec?: number; env?: Record<string, string> };
 }
 
 /** Bounded before it reaches Postgres. A runaway `yes` would otherwise put megabytes per attempt
@@ -86,6 +92,7 @@ export function buildLabRequest(
     files: [...fixtures, ...safeLearnerFiles],
     ...(Array.isArray(activitySpec.command) ? { command: activitySpec.command as string[] } : {}),
     ...(activitySpec.limits ? { limits: activitySpec.limits as Record<string, unknown> } : {}),
+    ...(activitySpec.target ? { target: activitySpec.target as LabSpec["target"] } : {}),
     gradingSpec: grading,
   };
 }

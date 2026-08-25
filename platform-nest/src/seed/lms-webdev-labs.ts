@@ -1,23 +1,32 @@
-// THE FIRST HANDS-ON LABS — FE, BE and QA (L5c).
+// THE HANDS-ON LABS — FE, BE, QA (L5c), and DevOps + Cyber (L6b/L6c).
 //
-// Design: docs/blueprints/lms-foundation.md §5.1, "FE / BE / QA → run and assert". These attach to
-// the course keys L4 already published, so the curriculum gains practice without being rebuilt.
+// Design: docs/blueprints/lms-foundation.md §5.1, "FE / BE / QA → run and assert", extended by §5
+// for the two disciplines that needed the runner to do something it did not do yet. All five attach
+// to course keys L4 already published, so the curriculum gains practice without being rebuilt.
 //
-// ── WHY ONLY THREE DISCIPLINES ────────────────────────────────────────────────────────────────
+// ── WHY DEVOPS AND CYBER WAITED FOR L6 ─────────────────────────────────────────────────────────
 // FE, BE and QA are the tractable case: execute, capture stdout and exit code, assert. DevOps is
-// artefact-graded and Cyber needs a disposable target pair — both are L6, and both need the runner
-// to do something it does not do yet. Shipping them here as `lab` activities that nothing can pass
-// would make their paths uncompletable, which is the exact failure L4 refused to ship.
+// artefact-graded — its lab below is graded on a REAL tool's own stderr/exit (`nginx -t`), never on
+// `fileExists` alone, for the same reason as the warning further down: the artefact listing comes
+// from inside the learner's own container and is forgeable. Cyber needs a disposable, deliberately
+// vulnerable companion container (`spec.target`) that the runner did not support until L6a. Shipping
+// either as a `lab` activity nothing could pass would have made its path permanently uncompletable —
+// the exact failure L4 refused to ship — so both waited for the runner capability that makes them
+// gradeable at all.
 //
 // ── THE SHAPE OF A LAB ACTIVITY'S `spec` ──────────────────────────────────────────────────────
-//   { image, files[], gradingSpec: { checks[], passThreshold }, limits? }
+//   { image, files[], gradingSpec: { checks[], passThreshold }, limits?, target? }
 // `files[]` are the CHALLENGE's fixtures — the graded tests. `lab-dispatch.ts` merges them with the
 // learner's submission and a learner file may NEVER displace one, because overwriting the test file
-// is the obvious full-marks exploit.
+// is the obvious full-marks exploit. `target` (Cyber only) is the companion container's image key,
+// alias and boot delay — forwarded to the runner verbatim by `lab-dispatch.ts`, same as `image`.
 //
 // ⚠ FIXTURES ARE THE ANSWER KEY. They live in `lms_activities.spec` and are redacted by
 //   spec-redaction.ts for anyone who is not authoring the course. `assertions` is on that
 //   strip-list, so a learner reading the course does not get the test file handed to them.
+//   `gradingSpec` itself is ALSO on that list — stripped WHOLESALE, not field-by-field — which is
+//   why the Cyber lab's flag can live directly in a `stdoutMatches` pattern below rather than in some
+//   separate, harder-to-audit secret store: the redaction already covers the whole object it lives in.
 //
 // ── GRADING PAIRS AN ASSERTION WITH THE OUTPUT, NEVER `fileExists` ALONE ──────────────────────
 // The artefact listing comes from inside the learner's own container, so `touch dist/app.js`
@@ -38,6 +47,17 @@ export interface LabSpec {
   starter: { path: string; content: string }[];
   checks: Record<string, unknown>[];
   minutes: number;
+  /** Runner image KEY. Defaults to "node22" — the FE/BE/QA labs' JS harness runtime. DevOps needs
+   *  a different one; Cyber's attacker stays on node22 (Node 22's global `fetch`, no dependency). */
+  image?: string;
+  /** Per-lab resource/network overrides, merged over the shared default. Only the Cyber lab sets
+   *  `network: "isolated"` — everything else stays fully network-less, the default posture. */
+  limits?: { timeoutSec?: number; memoryMb?: number; network?: "none" | "isolated" };
+  /** Present only for the Cyber lab (L6c): the disposable, deliberately vulnerable companion
+   *  container the learner's own container talks to on a per-run, internal-only network. See
+   *  `sandbox.ts`'s `buildTargetArgs` for the isolation it gets — same hardening as the attacker,
+   *  no published port, ever. */
+  target?: { image: string; alias?: string; readySec?: number };
 }
 
 /** A tiny assertion harness, shared by every lab so the summary line is uniform and matchable. */
@@ -295,6 +315,132 @@ export const LABS: LabSpec[] = [
       { kind: "stdoutMatches", pattern: "LAB PASSED", describe: "the lab passed" },
     ],
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════════ DEVOPS ════
+  {
+    courseKey: "webdev-devops-practice",
+    moduleTitle: "Hands on",
+    title: "Lab: an nginx config that survives nginx's OWN validator",
+    minutes: 40,
+    image: "nginx",
+    brief:
+      "Fix `default.conf` — a virtual-host snippet `include`d into nginx's `http {}` block, exactly " +
+      "as a real `/etc/nginx/conf.d/default.conf` is — so it passes `nginx -t`, nginx's own " +
+      "configuration test. You are not graded against a checklist: the grader runs the real nginx " +
+      "binary against your file and reads its real stderr, so the only way to pass is to make nginx " +
+      "itself agree the file is correct.\n\n" +
+      "The starter has two separate bugs, and nginx's own parser refuses each for a different, " +
+      "genuine reason. `default.conf` must define two virtual hosts sharing port 8080 — a public " +
+      "one and an internal ops one — but only ONE of them may be nginx's default for that port; " +
+      "nginx refuses a second default with 'a duplicate default server for 0.0.0.0:8080'. And the " +
+      "public host's `/health` location must return a valid HTTP status code — nginx accepts 0 or " +
+      "100–999 and refuses anything else with 'invalid return code'. Both failure messages are " +
+      "nginx's own words, not this course's, and both stop appearing only once both are actually " +
+      "fixed.",
+    fixtures: [
+      {
+        path: "run.sh",
+        content:
+          "# The scaffolding nginx needs to run `-t` at all inside a read-only, non-root container —\n" +
+          "# pid, error log and every temp path pointed at /work, the one writable directory this\n" +
+          "# sandbox has. None of this is what you are graded on; default.conf is.\n" +
+          "mkdir -p /work/tmp\n" +
+          "cat > /work/_main.conf <<'MAINCONF'\n" +
+          "events {}\n" +
+          "http {\n" +
+          "    client_body_temp_path /work/tmp/client;\n" +
+          "    proxy_temp_path       /work/tmp/proxy;\n" +
+          "    fastcgi_temp_path     /work/tmp/fastcgi;\n" +
+          "    uwsgi_temp_path       /work/tmp/uwsgi;\n" +
+          "    scgi_temp_path        /work/tmp/scgi;\n" +
+          "    include /work/default.conf;\n" +
+          "}\n" +
+          "MAINCONF\n" +
+          "nginx -t -c /work/_main.conf -g 'pid /work/nginx.pid; error_log /dev/stderr;' 2>&1\n" +
+          "exit $?\n",
+      },
+    ],
+    starter: [
+      {
+        path: "default.conf",
+        content:
+          "# your code here — this file is included inside nginx's http{} block, exactly like a\n" +
+          "# real /etc/nginx/conf.d/default.conf.\n" +
+          "#\n" +
+          "# Two virtual hosts must share port 8080: the public one below, and an internal ops one.\n" +
+          "# Exactly ONE of them may be nginx's default for that port.\n" +
+          "server {\n" +
+          "    listen 8080 default_server;\n" +
+          "    server_name lab.gaiada.test;\n" +
+          "\n" +
+          "    location /health {\n" +
+          "        return 9999 \"ok\\n\";\n" +
+          "    }\n" +
+          "}\n" +
+          "\n" +
+          "server {\n" +
+          "    listen 8080 default_server;\n" +
+          "    server_name ops.lab.gaiada.test;\n" +
+          "\n" +
+          "    location / {\n" +
+          "        return 200 \"internal\\n\";\n" +
+          "    }\n" +
+          "}\n",
+      },
+    ],
+    checks: [
+      { kind: "exitCode", equals: 0, describe: "nginx -t accepts your config", weight: 3 },
+      { kind: "stdoutMatches", pattern: "test is successful", describe: "nginx's own validator confirms it", weight: 2 },
+      { kind: "stdoutLacks", pattern: "\\[emerg\\]", describe: "no nginx emerg-level configuration error" },
+    ],
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════════════ CYBER ═════
+  {
+    courseKey: "webdev-cyber-practice",
+    moduleTitle: "Hands on",
+    title: "Lab: exploit a command injection and read the flag",
+    minutes: 45,
+    image: "node22",
+    limits: { network: "isolated" },
+    target: { image: "nettools", alias: "target", readySec: 4 },
+    brief:
+      "`target` is a disposable NetTools box, reachable only from your own container on a per-run, " +
+      "internal-only network — nowhere else — and it is destroyed with your run. Its `/ping?host=` " +
+      "endpoint shells out to the system `ping` with your `host` value concatenated straight into " +
+      "the command line: classic command injection, the exact shape this course teaches you to look " +
+      "for, in shells, SQL, LDAP and templates alike.\n\n" +
+      "The flag lives at `/opt/flag.txt` and is never served — hitting `/flag` gets you a 403. " +
+      "Complete `exploit.js` so it makes the target run an EXTRA command alongside the ping, reads " +
+      "the flag, and prints it to stdout. You are graded on the real HTTP response the target " +
+      "actually sent back to your request, nothing else.",
+    fixtures: [
+      { path: "run.sh", content: "node exploit.js\n" },
+    ],
+    starter: [
+      {
+        path: "exploit.js",
+        content:
+          "// your code here\n" +
+          "//\n" +
+          "// `target` resolves to the vulnerable NetTools box (see the brief). Its /ping endpoint\n" +
+          "// runs: execSync(`ping -c 1 ${host} 2>&1`) — your `host` value lands INSIDE a shell\n" +
+          "// command line unescaped. A shell metacharacter (`;`, `&&`, `|`, backticks…) after a\n" +
+          "// throwaway address lets you run a second command in the same breath as the ping.\n" +
+          "//\n" +
+          "// fetch is global in Node 22 — no dependency needed. Print ONLY what the target sends\n" +
+          "// back; the grader reads your real stdout.\n" +
+          "async function main() {\n" +
+          "  // your code here\n" +
+          "}\n" +
+          "main();\n",
+      },
+    ],
+    checks: [
+      { kind: "exitCode", equals: 0, describe: "the exploit script runs to completion", weight: 1 },
+      { kind: "stdoutMatches", pattern: "FLAG\\{54bb8b680292f863ebf6eb8b\\}", describe: "the target discloses its flag", weight: 4 },
+    ],
+  },
 ];
 
 export interface LabSeedResult {
@@ -372,13 +518,17 @@ export async function seedWebdevLabs(companyName = AGENCY_NAME): Promise<LabSeed
            VALUES ($1,$2,$3,$4,'lab',$5,$6,true,$7,'auto',$8,$9)`,
           [newId(), tenantId, moduleId, 10, lab.title,
            JSON.stringify({
-             image: "node22",
+             image: lab.image ?? "node22",
              brief: lab.brief,
              // The learner's starting point — replaceable, and shown in the UI.
              starter: lab.starter,
              // The graded tests. A learner file may never displace one of these.
              files: lab.fixtures,
-             limits: { timeoutSec: 60, memoryMb: 384 },
+             limits: { timeoutSec: 60, memoryMb: 384, ...(lab.limits ?? {}) },
+             // Only the Cyber lab carries this — omitted entirely for everyone else, never sent as
+             // an explicit `null`/`undefined`, because the runner treats `target !== undefined` as
+             // "validate target.image" and would reject every other lab's request otherwise.
+             ...(lab.target ? { target: lab.target } : {}),
              gradingSpec: { checks: lab.checks, passThreshold: 100 },
            }),
            // A lab MUST be auto-graded and MUST carry a threshold (ck_lms_activities_lab_graded and
