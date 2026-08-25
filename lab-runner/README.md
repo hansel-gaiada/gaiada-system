@@ -11,8 +11,8 @@ everything else. That is what keeps a compromise here from being a compromise of
 
 **The target host has no KVM** (owner-confirmed 2026-08-25). There is no hypervisor underneath, so
 the `docker run` argument list in `src/sandbox.ts` *is* the isolation — not a second layer beneath
-a microVM. It also shares a kernel with 19 containers of the owner's private production, including
-Postiz's social OAuth tokens.
+a microVM. It also shares a kernel with ~50 containers across seven other projects on that box,
+including Postiz's social OAuth tokens.
 
 Read `src/sandbox.ts` before changing anything. Every flag states why it is there.
 
@@ -79,15 +79,41 @@ After the matrix: zero leaked containers, volumes or networks; queue back to idl
 The fix is `--tmpfs /work:rw,nosuid,size=128m,mode=1777,uid=65534,gid=65534`: no prep step, no
 cleanup, identical behaviour on Docker Desktop and on Linux. `src/sandbox.test.ts` pins it.
 
-## Deployment notes (SumoPod)
+## Deployed (SumoPod, 2026-08-25)
 
-Not deployed yet. When it is:
+`gaiada-lms-lab-runner`, image `gaiada-lab-runner:0.1.1`, bound to **127.0.0.1:4310**, running with
+`LAB_RUNNER_RUNTIME=runsc`. gVisor is installed on that host as a NON-DEFAULT runtime, so a lab gets
+a user-space kernel (`4.19.0-gvisor`) between it and the host — which is the only meaningful
+hardening available there, because the box has no KVM.
 
-- **Never bind `0.0.0.0`.** Docker's DNAT is evaluated before ufw's, so a `0.0.0.0` publish is
-  internet-reachable on a box whose firewall says otherwise. The default is `127.0.0.1` and the
-  server logs a warning if it is overridden.
-- **Set `LAB_RUNNER_RUNTIME=runsc`** once gVisor is installed. The default is `runc` so the service
-  can be tried at all; `/health` reports `hardenedRuntime` either way.
-- **Pin images by digest** in `LAB_RUNNER_IMAGES`.
+The full matrix was re-driven ON the box after deploy; all eight cases behave as the table above
+describes. Afterwards: zero leaked containers, networks or temp directories, and the container set
+was identical to the pre-session baseline apart from the runner itself.
+
+### A third bug, which only the real host could show
+
+`mkdtemp` creates its directory **0700, owned by the creating process**. The lab container runs as
+uid 65534, so `/lab` mounted fine and then every run died on
+`cp: can't stat '/lab/.': Permission denied`. Docker Desktop's uid-translation layer hides this
+completely — the local drive was fully green. The fix is `chmod 0755` on the submission directory
+and `0644` on its files, which is safe precisely because that mount is read-only.
+
+Two lessons worth keeping: a local Docker drive is not a substitute for the target host, and
+"Permission denied" rather than "No such file" was the clue that the *mount* was right and the
+*mode* was wrong.
+
+### Operating notes
+
+- **Never bind `0.0.0.0`** on the host side. Docker's DNAT is evaluated before ufw's, so a
+  `0.0.0.0` publish is internet-reachable on a box whose firewall says otherwise. The container
+  listens on 0.0.0.0 *inside itself* — which is the only way a published port reaches it — and the
+  publish is pinned to loopback. `-p 127.0.0.1:4310:4310`, never `-p 4310:4310`.
+- It is a bare `docker run`, deliberately not a compose project, so no other project's
+  `--remove-orphans` can delete it.
+- `TMPDIR` and the `-v /var/lib/gaiada-lab/tmp:/var/lib/gaiada-lab/tmp` mount must name the SAME
+  path. The runner bind-mounts submissions into lab containers and the daemon resolves those paths
+  on the host; a path that existed only inside the runner would mount as an empty directory and
+  every submission would silently run against nothing.
+- Pin images by digest in `LAB_RUNNER_IMAGES` when the catalogue grows.
 - Host-safety rules for that box are in `../infra/runbooks/deploy-vps.md` — no unscoped Docker
   command, no `system prune`, no bare `--remove-orphans`.

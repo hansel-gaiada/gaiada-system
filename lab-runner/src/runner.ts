@@ -5,7 +5,7 @@
 // SumoPod holds memory the owner's production needs, and a leaked temp directory fills a disk
 // shared with 19 other containers.
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -179,6 +179,14 @@ export async function runLab(req: RunRequest): Promise<RunResult> {
     }
 
     workdir = await mkdtemp(join(tmpdir(), "lab-src-"));
+    // ⚠ mkdtemp CREATES 0700, owned by this process. The lab container runs as uid 65534 and cannot
+    //   traverse that, so /lab mounts successfully and then every run dies on
+    //   `cp: can't stat '/lab/.': Permission denied`. Found only on the real Linux host — Docker
+    //   Desktop's uid-translation layer hides it completely, so the local drive was green.
+    //
+    //   0755 is safe here precisely because the mount is READ-ONLY: the container may read the
+    //   challenge files and the learner's own submission, and may not alter either.
+    await chmod(workdir, 0o755);
 
     for (const f of req.files) {
       const rel = safeRelativePath(f.path);
@@ -186,8 +194,11 @@ export async function runLab(req: RunRequest): Promise<RunResult> {
         return finish({ status: "error", error: `rejected file path ${JSON.stringify(f.path)} — it escapes the submission directory` });
       }
       const dest = join(workdir, rel);
-      await mkdir(dirname(dest), { recursive: true });
+      await mkdir(dirname(dest), { recursive: true, mode: 0o755 });
       await writeFile(dest, f.content, "utf8");
+      // A 0600 file inside a 0755 directory is exactly as unreadable to uid 65534 as the directory
+      // was. Both halves, or neither works.
+      await chmod(dest, 0o644);
     }
 
     if (limits.network === "isolated") {
