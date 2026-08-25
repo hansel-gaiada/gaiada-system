@@ -386,6 +386,16 @@ BEGIN
            JOIN finance_accounts a ON a.id = l.account_id
           WHERE l.tenant_id = p_company AND a.code = i.liability_account_code);
 
+  -- ★ THE GL SIDE IS KEYED OFF THE INSTRUMENTS' OWN ACCOUNTS, NOT OFF THE 'treasury' TAG.
+  --
+  -- The first version summed control accounts tagged `treasury` (1270 / 2220 / 2230). But an
+  -- instrument's liability account is CONFIGURATION and defaults to `2210 Utang Bank Jangka
+  -- Panjang`, which is deliberately NOT a control account — an ordinary bank loan is drawn by a
+  -- manual journal, and barring that would leave no way to record one.
+  --
+  -- So the common case, a plain bank loan, contributed to the schedule side and to nothing on the
+  -- GL side, and this function reported a permanent mismatch equal to the whole loan. A tie-out
+  -- that is red by construction gets ignored, which is the precise failure it exists to prevent.
   SELECT COALESCE(sum(m.outstanding), 0) INTO v_sched
     FROM finance_instrument_maturity_split(p_company, COALESCE(p_as_of, CURRENT_DATE)) m
    WHERE m.kind IN ('loan_payable','bond_issued','lease');
@@ -393,7 +403,13 @@ BEGIN
   SELECT COALESCE(sum(mv.balance), 0) INTO v_gl
     FROM finance_account_movement(p_company, NULL, p_as_of) mv
     JOIN finance_accounts a ON a.id = mv.account_id
-   WHERE a.is_control AND a.control_subledger = 'treasury' AND a.account_type = 'liability';
+   WHERE a.account_type = 'liability'
+     AND a.code IN (
+       SELECT DISTINCT i.liability_account_code
+         FROM finance_instruments i
+        WHERE i.tenant_id = p_company AND i.deleted_at IS NULL AND i.status = 'active'
+          AND i.kind IN ('loan_payable','bond_issued','lease')
+     );
 
   IF v_sched <> v_gl THEN
     RETURN QUERY SELECT 'TREASURY_BALANCE_MISMATCH'::text,

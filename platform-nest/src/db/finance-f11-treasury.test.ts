@@ -229,6 +229,75 @@ describe.skipIf(!TEST_URL)("Finance F11 — treasury (202608251830)", () => {
     ).rejects.toThrow(/FINANCE_LEASE_ALREADY_RECOGNISED/);
   });
 
+  it("★★ the tie-out counts a plain bank loan — it is keyed off the instrument's OWN account", async () => {
+    // The bug this pins: the GL side used to sum only accounts tagged `treasury`, but an
+    // instrument's liability account defaults to 2210, which is deliberately NOT a control account
+    // (a bank loan is drawn by a manual journal). So the common case contributed to the schedule
+    // side and nothing to the GL side, and the tie-out reported a mismatch equal to the whole loan.
+    const CO2 = await createCompany("Loan Co");
+    let id = "";
+    await fin(CO2, async (c) => {
+      await c.query(
+        `INSERT INTO finance_company_settings (tenant_id,functional_currency,presentation_currency,fiscal_year_start_month)
+         VALUES ($1,'IDR','IDR',1) ON CONFLICT (tenant_id) DO NOTHING`,
+        [CO2],
+      );
+      await c.query(`SELECT finance_instantiate_coa($1,'id_psak_general_v1')`, [CO2]);
+      const fy = await c.query<{ id: string }>(
+        `INSERT INTO finance_fiscal_years (tenant_id,code,start_date,end_date)
+         VALUES ($1,'FY2026','2026-01-01','2027-01-01') RETURNING id`,
+        [CO2],
+      );
+      await c.query(`SELECT finance_generate_periods($1,'monthly')`, [fy.rows[0].id]);
+      id = newId();
+      await c.query(
+        `INSERT INTO finance_instruments
+           (id,tenant_id,code,name,kind,principal,nominal_rate,start_date,maturity_date,
+            payment_months,repayment_method)
+         VALUES ($1,$2,'BANK-1','Bank loan','loan_payable',120000000,12,'2026-01-01','2027-01-01',1,'bullet')`,
+        [id, CO2],
+      );
+      // Draw it: the money arrives and 2210 carries the liability.
+      await c.query(`SELECT finance_post_journal($1,'2026-01-01','draw','loan drawdown',$2::jsonb)`, [
+        CO2,
+        JSON.stringify([
+          { account_code: "1120", side: "debit", amount: 120_000_000, memo: "bank" },
+          { account_code: "2210", side: "credit", amount: 120_000_000, memo: "loan" },
+        ]),
+      ]);
+    });
+
+    const problems = await fin(CO2, async (c) =>
+      (await c.query<{ problem: string; detail: string }>(`SELECT * FROM finance_treasury_reconcile($1,'2026-01-01')`, [CO2]))
+        .rows,
+    );
+    // A bullet loan at day zero: nothing repaid, so schedule outstanding == GL liability == 120m.
+    expect(problems).toEqual([]);
+  });
+
+  it("the tie-out CAN still go red — a reconciliation that cannot fail is not one", async () => {
+    const CO3 = await createCompany("Drift Co");
+    await fin(CO3, async (c) => {
+      await c.query(
+        `INSERT INTO finance_company_settings (tenant_id,functional_currency,presentation_currency,fiscal_year_start_month)
+         VALUES ($1,'IDR','IDR',1) ON CONFLICT (tenant_id) DO NOTHING`,
+        [CO3],
+      );
+      await c.query(`SELECT finance_instantiate_coa($1,'id_psak_general_v1')`, [CO3]);
+      // An instrument that was never drawn: the register says 50m, the GL says nothing.
+      await c.query(
+        `INSERT INTO finance_instruments
+           (tenant_id,code,name,kind,principal,nominal_rate,start_date,maturity_date,repayment_method)
+         VALUES ($1,'UNDRAWN','Undrawn','loan_payable',50000000,10,'2026-01-01','2027-01-01','bullet')`,
+        [CO3],
+      );
+    });
+    const problems = await fin(CO3, async (c) =>
+      (await c.query<{ problem: string }>(`SELECT * FROM finance_treasury_reconcile($1,'2026-06-30')`, [CO3])).rows,
+    );
+    expect(problems.some((p) => p.problem === "INSTRUMENT_NOT_DRAWN")).toBe(true);
+  });
+
   it("★ F11-13: an unaccrued instalment BLOCKS the close", async () => {
     const period = await fin(CO, async (c) =>
       (

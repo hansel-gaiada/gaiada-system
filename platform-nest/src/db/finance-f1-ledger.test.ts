@@ -161,7 +161,17 @@ describe.skipIf(!TEST_URL)("Finance F1 — ledger core (202608241015)", () => {
           )
         ).rows.map((r) => r.code),
       );
-      expect(control).toEqual(["1130", "1150", "1210", "1220", "2110"]);
+      // The pin is the point: a new control account BARS manual journals from it, which is a
+      // change to what an accountant can do. It must be a deliberate edit here, not a surprise.
+      //
+      //   1130 Piutang Usaha / 2110 Utang Usaha   — AR, AP (F0)
+      //   1150 Persediaan                          — inventory (F0, no subledger yet)
+      //   1210 Aset Tetap / 1220 Akumulasi         — fixed assets (F8)
+      //   1270 / 2220 / 2230                       — loans receivable, bonds, lease liability (F11)
+      //
+      // 2210 Utang Bank Jangka Panjang is deliberately NOT here. An ordinary bank loan is drawn by
+      // a manual journal, and barring that would leave no way to record one.
+      expect(control).toEqual(["1130", "1150", "1210", "1220", "1270", "2110", "2220", "2230"]);
       expect(control).not.toContain("1120"); // Bank
       expect(control).not.toContain("1110"); // Cash
     });
