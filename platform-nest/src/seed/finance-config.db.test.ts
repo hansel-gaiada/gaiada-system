@@ -80,4 +80,26 @@ describe.skipIf(!TEST_URL)("seed:finance-config", () => {
     );
     expect(signed).toBe(0);
   });
+  it("★ the chart records WHICH template it came from — provenance, not configuration", async () => {
+    // finance_company_settings.coa_template_key existed since F0 and nothing wrote it, so the
+    // settings page rendered "Chart of accounts: —" for a company whose chart had plainly just been
+    // instantiated. The fix put the write inside finance_instantiate_coa(), and the FIRST draft of
+    // that migration placed it after the function's `RETURN` — unreachable, compiling fine, with
+    // every existing test still green. This assertion is what makes "it ran" and "it worked"
+    // distinguishable.
+    const r = await seedFinanceConfig(2026);
+    const key = await withTenants(
+      [r.tenantId],
+      async (c) =>
+        (
+          await c.query<{ coa_template_key: string | null }>(
+            `SELECT coa_template_key FROM finance_company_settings WHERE tenant_id = $1`,
+            [r.tenantId],
+          )
+        ).rows[0].coa_template_key,
+      { modules: ["finance"] },
+    );
+    expect(key).toBe("id_psak_general_v1");
+  });
+
 });
