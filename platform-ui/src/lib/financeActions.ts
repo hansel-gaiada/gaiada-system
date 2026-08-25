@@ -46,6 +46,8 @@ async function send<T>(path: string, body: unknown): Promise<FinanceActionResult
     });
     revalidatePath("/finance/ownership");
     revalidatePath("/finance/settings");
+    revalidatePath("/finance/journals");
+    revalidatePath("/finance");
     return { ok: true, result };
   } catch (e) {
     if (e instanceof PlatformError) {
@@ -89,4 +91,39 @@ export async function createOwnershipEdge(input: {
  */
 export async function endOwnershipEdge(edgeId: string, effectiveTo: string): Promise<FinanceActionResult> {
   return send(`/finance/ownership/${edgeId}/end`, { effectiveTo });
+}
+
+// ── The ledger ──────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Post a journal entry. THE only write in this estate that creates money movement.
+ *
+ * Nothing here checks that debits equal credits, that the accounts exist, that the period is open,
+ * or that a control account is being touched. All of that is enforced in the database next to the
+ * data, and every refusal arrives as a FINANCE_* message worth showing the user verbatim —
+ * "debits 100 <> credits 90" tells an accountant exactly what to fix, where "Could not save" does
+ * not.
+ *
+ * A form that re-checked the balance would also have to re-implement rounding, control-account
+ * rules and period state, and the copy that drifts is the one the user sees.
+ */
+export async function postJournalEntry(input: {
+  date: string;
+  sourceEventId: string;
+  description: string;
+  lines: Array<{ accountCode: string; side: "debit" | "credit"; amount: string; memo?: string }>;
+}): Promise<FinanceActionResult<{ id: string }>> {
+  return send("/finance/journals", input);
+}
+
+/**
+ * Reverse a posted entry. There is no edit and no delete: the ledger is append-only and a wrong
+ * figure is corrected by an equal and opposite entry that BOTH remain visible.
+ *
+ * The reason is not squeamishness about deletion — it is that an auditor must be able to see that a
+ * correction happened, who made it and why. `reason` is required by the database for the same
+ * reason.
+ */
+export async function reverseJournalEntry(entryId: string, reason: string, date?: string): Promise<FinanceActionResult<{ id: string }>> {
+  return send(`/finance/journals/${entryId}/reverse`, { reason, date });
 }

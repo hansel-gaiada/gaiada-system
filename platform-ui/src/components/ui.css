@@ -167,3 +167,17 @@ a.lux-btn { display: inline-flex; align-items: center; text-decoration: none; }
 .fin-form__actions { display: flex; gap: var(--space-2); margin-block-start: var(--space-2); }
 .fin-form__error { color: var(--status-blocked-fg); margin-block-start: var(--space-2); }
 .fin-links { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
+/* Journal entry lines — a table the user types into, so cells are dense and inputs fill them. */
+.fin-lines { width: 100%; border-collapse: collapse; margin-block: var(--space-3); }
+.fin-lines th, .fin-lines td { border-bottom: 1px solid var(--hairline); padding: var(--space-1) var(--space-2); text-align: left; }
+.fin-lines th { font-size: var(--type-sm); color: var(--text-muted); font-weight: 500; }
+.fin-lines__num { text-align: right; }
+.fin-lines input, .fin-lines select {
+  width: 100%; border: 1px solid var(--hairline); background: var(--surface);
+  color: var(--text); padding: var(--space-1); font: inherit;
+}
+.fin-lines input:focus-visible, .fin-lines select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.fin-lines tfoot th, .fin-lines tfoot td { border-bottom: none; padding-block-start: var(--space-2); }
+/* The chain hash is shown in full and must wrap rather than overflow — it is meant to be compared. */
+.fin-hash { word-break: break-all; font-size: var(--type-sm); }
+.fin-shell { display: flex; flex-direction: column; }

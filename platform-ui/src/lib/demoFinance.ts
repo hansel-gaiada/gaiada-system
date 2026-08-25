@@ -168,6 +168,35 @@ const JOURNALS: JournalSummary[] = [
   { id: "demo-j-1", ledgerSequence: "1", entryDate: `${YEAR}-01-02`, kind: "opening", description: "Opening capital", currency: "IDR", totalDebit: "500000000.0000", sourceEventId: "seed-1", status: "posted" },
 ];
 
+// Journal DETAIL, so /finance/journals/[entryId] is drivable in a browser and in the build gate.
+// demo-j-2 is the REVERSED one on purpose: the "this entry has been reversed" copy and the absence
+// of a reverse button are only reachable through it, and those are the parts most likely to be
+// written wrongly.
+const JOURNAL_DETAIL: Record<string, unknown> = {
+  "demo-j-3": {
+    ...JOURNALS[0],
+    totalCredit: "120000000.0000",
+    reversalOfId: null,
+    reversalReason: null,
+    entryHash: "9f2b7c1d4e6a8035bb1f42c7d0e59a83f6142bd7c8e0a95b3d71fe28460ac5d9",
+    lines: [
+      { lineNo: 1, accountCode: "1130", accountName: "Piutang Usaha", side: "debit", amount: "120000000.0000", memo: "Viceroy — March" },
+      { lineNo: 2, accountCode: "4100", accountName: "Pendapatan Usaha", side: "credit", amount: "120000000.0000", memo: null },
+    ],
+  },
+  "demo-j-2": {
+    ...JOURNALS[1],
+    totalCredit: "12000000.0000",
+    reversalOfId: null,
+    reversalReason: null,
+    entryHash: "1a4d90b3f7c25e8846db03af9c6e1750d283bb41f0a97ce65214b8f3e07c9a2b",
+    lines: [
+      { lineNo: 1, accountCode: "6200", accountName: "Beban Sewa", side: "debit", amount: "12000000.0000", memo: "March rent" },
+      { lineNo: 2, accountCode: "1120", accountName: "Bank", side: "credit", amount: "12000000.0000", memo: null },
+    ],
+  },
+};
+
 const PPN: PpnSummary = {
   outputVat: "36410000.0000",
   inputVatCreditable: "9240000.0000",
@@ -261,6 +290,8 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams)
   if (tail === "trial-balance") return ok(TRIAL_BALANCE);
   if (tail === "balance-sheet") return ok(BALANCE_SHEET);
   if (tail === "journals") return ok(JOURNALS);
+  const jd = /^journals\/([^/]+)$/.exec(tail);
+  if (jd) return ok(JOURNAL_DETAIL[jd[1]] ?? null);
   if (tail === "ledger/verify") return ok(LEDGER_CLEAN);
   if (tail === "ar/aging") return ok(AR_AGING);
   if (tail === "ap/aging") return ok(AP_AGING);
