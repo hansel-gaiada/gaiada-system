@@ -120,7 +120,9 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
                         {KIND_LABEL[a.kind]}
                       </span>
                       <span style={{ font: "400 14px var(--font-body)", flex: 1, minWidth: 200 }}>
-                        {a.title}
+                        <Link href={`/learning/courses/${course.id}/activities/${a.id}`} style={{ color: "var(--erp-accent)" }}>
+                          {a.title}
+                        </Link>
                         {!a.isRequired && (
                           <span style={{ marginLeft: 8, font: "400 12px var(--font-body)", color: "var(--erp-ink-60)" }}>
                             optional

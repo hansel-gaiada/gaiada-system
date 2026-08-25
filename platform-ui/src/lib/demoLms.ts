@@ -9,9 +9,12 @@ import "server-only";
 // — cannot be exercised at all unless the fixture remembers what it was told. So courses, modules
 // and activities are a real in-memory store with the versioning rule implemented.
 //
-// ATTEMPT SUBMISSION IS STILL REFUSED. Grading a lab is L5's runner and this fixture cannot mark
-// one; a demo that returned a cheerful pass would be exactly the confident wrong answer about
-// somebody's training that this file exists to prevent.
+// QUIZ ATTEMPTS ARE REALLY GRADED — auto-grading is deterministic and needs no external service,
+// so it is modelled the same way the real `submitAttempt` grades one: score against the question's
+// (unredacted, server-side-only) `answer`. LAB ATTEMPTS ARE STILL REFUSED, with the same 503 message
+// the real backend gives when no runner is configured — grading a lab is L5's runner, this fixture
+// cannot dispatch to one, and a demo that returned a cheerful pass would be exactly the confident
+// wrong answer about somebody's training that this file exists to prevent.
 //
 // Why it exists at all: `next build` runs with DEMO_MODE=1 and the smoke Playwright project drives
 // the built app, so an LMS route with no fixture is a route nobody can open in CI. Without this the
@@ -78,21 +81,145 @@ const DETAIL: Record<string, CourseDetail> = {
         id: "demo-lms-m1", sortOrder: 1, title: "Finding your way around",
         summary: "The shell, the company switcher and where your own things live.",
         activities: [
-          { id: "demo-lms-a1", moduleId: "demo-lms-m1", sortOrder: 1, kind: "read", title: "The shell and the sidebar", spec: {}, isRequired: true, passThreshold: null, grading: "none", maxAttempts: null, estimatedMinutes: 15 },
-          { id: "demo-lms-a2", moduleId: "demo-lms-m1", sortOrder: 2, kind: "watch", title: "Switching companies without losing context", spec: {}, isRequired: true, passThreshold: null, grading: "none", maxAttempts: null, estimatedMinutes: 10 },
+          {
+            id: "demo-lms-a1", moduleId: "demo-lms-m1", sortOrder: 1, kind: "read",
+            title: "The shell and the sidebar",
+            spec: {
+              body: "The sidebar is grouped by department, not by feature — find your own department first, "
+                + "then the surfaces inside it. The top bar's company switcher changes which company's data "
+                + "every page shows, without losing your place: switch companies from deep inside a report "
+                + "and you land on the same report for the new company, not back at the dashboard.\n\n"
+                + "Your own things — leave, payslips, loans, learning — live under \"Me\" in the sidebar, "
+                + "separate from anything you manage for other people.",
+            },
+            isRequired: true, passThreshold: null, grading: "none", maxAttempts: null, estimatedMinutes: 15,
+          },
+          {
+            id: "demo-lms-a2", moduleId: "demo-lms-m1", sortOrder: 2, kind: "watch",
+            title: "Switching companies without losing context",
+            spec: {
+              url: "https://example.invalid/demo/company-switcher.mp4",
+              body: "Watch for the moment the switcher changes the URL's company id but keeps the rest of the path — that is what \"without losing context\" means in practice.",
+            },
+            isRequired: true, passThreshold: null, grading: "none", maxAttempts: null, estimatedMinutes: 10,
+          },
         ],
       },
       {
         id: "demo-lms-m2", sortOrder: 2, title: "Doing your own admin",
         summary: "Leave, loans, payslips and approvals — the four you will use every month.",
         activities: [
-          { id: "demo-lms-a3", moduleId: "demo-lms-m2", sortOrder: 1, kind: "read", title: "Filing leave and reading your balance", spec: {}, isRequired: true, passThreshold: null, grading: "none", maxAttempts: null, estimatedMinutes: 20 },
-          { id: "demo-lms-a4", moduleId: "demo-lms-m2", sortOrder: 2, kind: "scenario", title: "Approve, reject, or send back?", spec: {}, isRequired: false, passThreshold: null, grading: "review", maxAttempts: null, estimatedMinutes: 15 },
-          { id: "demo-lms-a5", moduleId: "demo-lms-m2", sortOrder: 3, kind: "quiz", title: "ERP basics check", spec: {}, isRequired: true, passThreshold: "0.80", grading: "auto", maxAttempts: 3, estimatedMinutes: 15 },
+          {
+            id: "demo-lms-a3", moduleId: "demo-lms-m2", sortOrder: 1, kind: "read",
+            title: "Filing leave and reading your balance",
+            spec: { body: "Leave is filed from Me → Leave. Your balance is shown before you submit, not after — so a request that would take you negative is refused at the form rather than approved and corrected later." },
+            isRequired: true, passThreshold: null, grading: "none", maxAttempts: null, estimatedMinutes: 20,
+          },
+          {
+            id: "demo-lms-a4", moduleId: "demo-lms-m2", sortOrder: 2, kind: "scenario",
+            title: "Approve, reject, or send back?",
+            spec: { brief: "A leave request lands on your desk with the wrong date range. Decide what you would do and why, in a couple of sentences.", rubric: ["Identifies the actual problem (dates, not entitlement)", "Chooses send-back over an outright rejection"] },
+            isRequired: false, passThreshold: null, grading: "review", maxAttempts: null, estimatedMinutes: 15,
+          },
+          {
+            id: "demo-lms-a5", moduleId: "demo-lms-m2", sortOrder: 3, kind: "quiz",
+            title: "ERP basics check",
+            // `answer` is the GRADING KEY — an option INDEX, matching lms-learn.controller.ts's
+            // `submitAttempt`. It is stripped from every response by `redactSpecForLearner` below,
+            // the same way the real backend's `redactSpec` strips it from `GET courses/:id`. Kept
+            // here, unredacted, ONLY because this module also grades the demo attempt itself — the
+            // same split the real backend has between its DB row (unredacted) and its API response
+            // (redacted).
+            spec: {
+              questions: [
+                {
+                  id: "q1", prompt: "Where do you file your own leave?",
+                  options: ["The HR admin console", "Me → Leave", "A support ticket"], answer: 1,
+                  explanation: "Me → Leave is your own self-service surface — no ticket needed.",
+                },
+                {
+                  id: "q2", prompt: "What does the company switcher preserve when you change companies?",
+                  options: ["Nothing — you land on the dashboard", "The page you were on, for the new company"], answer: 1,
+                  explanation: "It swaps the company id in place, so you land on the same report or record type rather than being reset.",
+                },
+              ],
+            },
+            isRequired: true, passThreshold: "0.80", grading: "auto", maxAttempts: 3, estimatedMinutes: 15,
+          },
+          {
+            id: "demo-lms-a6", moduleId: "demo-lms-m2", sortOrder: 4, kind: "lab",
+            title: "Write a leave-balance check",
+            spec: {
+              brief: "Write a function `daysAvailable(balance, requestedDays)` that returns true when the "
+                + "request would NOT take the balance negative. This activity is graded by the lab runner, "
+                + "which is not configured in this environment — submitting will tell you that plainly rather "
+                + "than pretending to grade it.",
+              starter: [{ path: "solution.js", content: "function daysAvailable(balance, requestedDays) {\n  // your code here\n}\n" }],
+            },
+            isRequired: false, passThreshold: "70", grading: "auto", maxAttempts: null, estimatedMinutes: 30,
+          },
         ],
       },
     ],
   },
+};
+
+/**
+ * Field names that carry a grading key — the demo-mode mirror of the real backend's
+ * `spec-redaction.ts`. Duplicated rather than imported: this file has no dependency on
+ * `platform-nest` (a different deployable), and the list is short enough that a copy is cheaper
+ * than a cross-package import boundary. Kept in sync BY HAND if the real list changes — the
+ * consequence of drift here is a demo-only leak of demo-only content, not a real one.
+ */
+const GRADING_KEY_FIELDS = new Set([
+  "gradingSpec", "answer", "answers", "answerKey", "correct", "correctOption", "correctOptions",
+  "solution", "expected", "expectedOutput", "assertions",
+]);
+
+function redactSpecForLearner(spec: unknown): { spec: unknown; redacted: boolean } {
+  let redacted = false;
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        if (GRADING_KEY_FIELDS.has(k)) { redacted = true; continue; }
+        out[k] = walk(val);
+      }
+      return out;
+    }
+    return v;
+  };
+  return { spec: walk(spec), redacted };
+}
+const KIND_CAN_CARRY_ANSWERS = new Set(["quiz", "lab", "scenario"]);
+
+/** The shape a LEARNER gets back from `GET courses/:id` — never the authoring shape. */
+function courseForLearner(detail: CourseDetail): CourseDetail {
+  return {
+    ...detail,
+    modules: detail.modules.map((m) => ({
+      ...m,
+      activities: m.activities.map((a) => {
+        const { spec, redacted } = redactSpecForLearner(a.spec);
+        return { ...a, spec: spec as Record<string, unknown>, specRedacted: redacted || KIND_CAN_CARRY_ANSWERS.has(a.kind) };
+      }),
+    })),
+  };
+}
+
+/** Path → its ordered courses, mirroring `lms_path_courses` for the ONE relation this fixture
+ *  needs to model: which courses a path carries, in order, and whether a step is optional or
+ *  gated on the one before it. Kept separate from `PATHS`' static `courseCount` (unchanged) so
+ *  the two never have to be reconciled by hand beyond matching lengths here. */
+const PATH_COURSES: Record<string, { courseId: string; requiresPrevious: boolean; isOptional: boolean }[]> = {
+  "demo-lms-p1": [
+    { courseId: "demo-lms-c1", requiresPrevious: false, isOptional: false },
+    { courseId: "demo-lms-c2", requiresPrevious: true, isOptional: false },
+  ],
+  "demo-lms-p2": [{ courseId: "demo-lms-c3", requiresPrevious: false, isOptional: false }],
+  "demo-lms-p3": [{ courseId: "demo-lms-c5", requiresPrevious: false, isOptional: false }],
+  "demo-lms-p4": [{ courseId: "demo-lms-c6", requiresPrevious: false, isOptional: false }],
 };
 
 const PATHS: LearningPath[] = [
@@ -186,8 +313,11 @@ export function lmsDemo(
   const courseDetail = rest.match(/^courses\/([^/]+)$/);
   if (m === "GET" && courseDetail) {
     const id = courseDetail[1];
+    // Mirrors the real controller's `?includeAnswers=1` — the ONE case where the unredacted shape
+    // goes out, and only because the authoring page asks for it explicitly.
+    const wantsAnswers = qs.get("includeAnswers") === "1" || qs.get("includeAnswers") === "true";
     const known = DETAIL[id];
-    if (known) return ok(known);
+    if (known) return ok(wantsAnswers ? known : courseForLearner(known));
     const shallow = COURSES.find((c) => c.id === id);
     // A 404 rather than an empty course: `getCourse` rethrows precisely so an unknown id never
     // renders as "this course has no content".
@@ -204,9 +334,94 @@ export function lmsDemo(
     return ok(out);
   }
 
+  const pathDetail = rest.match(/^paths\/([^/]+)$/);
+  if (m === "GET" && pathDetail) {
+    const path = PATHS.find((x) => x.id === pathDetail[1]);
+    if (!path) return { status: 404, json: { error: "path not found" } };
+    const refs = PATH_COURSES[path.id] ?? [];
+    const courses = refs
+      .map((r, i) => {
+        const c = COURSES.find((x) => x.id === r.courseId);
+        if (!c) return null;
+        return {
+          id: c.id, courseKey: c.courseKey, title: c.title, level: c.level, status: c.status,
+          position: i + 1, requiresPrevious: r.requiresPrevious, isOptional: r.isOptional,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    return ok({ ...path, courseCount: courses.length, courses });
+  }
+
   if (m === "GET" && rest === "me") return ok(MINE);
   if (m === "GET" && rest === "compliance") return ok(COMPLIANCE);
   if (m === "GET" && rest === "enrollments") return ok([]);
+
+  // ─────────────────────────────────────────────────────────── learner attempts (L1) ────────────
+  const submitAttempt = rest.match(/^activities\/([^/]+)\/attempts$/);
+  if (m === "POST" && submitAttempt) {
+    const activityId = submitAttempt[1];
+    let found: Activity | undefined;
+    for (const detail of Object.values(DETAIL)) {
+      for (const mod of detail.modules) {
+        const a = mod.activities.find((x) => x.id === activityId);
+        if (a) { found = a; break; }
+      }
+      if (found) break;
+    }
+    if (!found) return { status: 404, json: { error: "activity not found" } };
+
+    if (found.kind === "lab") {
+      // The exact refusal `submitLabAttempt` gives when no runner is configured — modelled here
+      // rather than faked, because a demo that returned a cheerful pass on a lab would be exactly
+      // the confident wrong answer this file exists to prevent, and the REAL, most common deployment
+      // state (no lab runner) is this one, not a working runner.
+      return {
+        status: 503,
+        json: {
+          error: "the lab runner is not configured for this deployment, so this exercise cannot be "
+            + "graded yet. Your work has NOT been recorded as an attempt — nothing was lost.",
+        },
+      };
+    }
+
+    if (found.kind === "quiz") {
+      const questions = ((found.spec as { questions?: { id?: string; answer?: unknown }[] })?.questions) ?? [];
+      if (!questions.length) {
+        return { status: 400, json: { error: "this quiz has no questions in its spec — it cannot be graded" } };
+      }
+      const attemptBody = body ? (JSON.parse(body) as { submission?: Record<string, unknown> }) : {};
+      const answers = attemptBody.submission ?? {};
+      let correct = 0;
+      const perQuestion: { id: string; correct: boolean }[] = [];
+      questions.forEach((q, i) => {
+        const qid = String(q.id ?? i);
+        const isRight = JSON.stringify(answers[qid]) === JSON.stringify(q.answer);
+        if (isRight) correct += 1;
+        perQuestion.push({ id: qid, correct: isRight });
+      });
+      const score = Number(((correct / questions.length) * 100).toFixed(2));
+      const passed = found.passThreshold === null ? true : score >= Number(found.passThreshold);
+      return {
+        status: 201,
+        json: {
+          attemptId: `demo-lms-attempt-${nextId()}`, attemptNo: 1, score, passed,
+          result: { mode: "quiz", correct, of: questions.length, perQuestion },
+          certification: null,
+        },
+      };
+    }
+
+    // read/watch/scenario: participation or awaiting-review, same shape the real controller uses.
+    return {
+      status: 201,
+      json: {
+        attemptId: `demo-lms-attempt-${nextId()}`, attemptNo: 1, score: null,
+        passed: found.kind === "read" || found.kind === "watch" ? true : null,
+        result: { mode: found.kind === "read" || found.kind === "watch" ? "participation" : "awaiting_review" },
+        certification: null,
+      },
+    };
+  }
 
   // ───────────────────────────────────────────────────────────── authoring (L3) ───────────────
   const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};

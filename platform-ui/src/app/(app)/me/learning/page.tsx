@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getMyLearning, completionPct, dueState, type MyEnrollment } from "@/lib/lms";
+import { getMyLearning, completionPct, dueState, fmtDate, type MyEnrollment } from "@/lib/lms";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ModuleDisabled } from "@/components/ModuleDisabled";
@@ -43,7 +43,7 @@ export default async function MyLearningPage() {
     const due = dueState(e.dueOn, e.status);
     return [
       <span key={`${e.id}-t`}>
-        {e.title}
+        <Link href={`/learning/paths/${e.pathId}`} style={{ color: "var(--erp-accent)" }}>{e.title}</Link>
         {e.isMandatory && (
           <span style={{ marginLeft: 8, font: "500 11px var(--font-body)", color: "var(--status-warning-fg)" }}>
             REQUIRED
@@ -55,7 +55,7 @@ export default async function MyLearningPage() {
       // 100% would tell somebody they had passed training that does not exist.
       pct === null ? "—" : `${e.coursesCompleted}/${e.coursesRequired} · ${pct}%`,
       <span key={`${e.id}-d`} style={{ color: due === "overdue" ? "var(--status-danger-fg)" : undefined }}>
-        {e.dueOn ?? "—"}{due === "overdue" ? " (overdue)" : due === "due-soon" ? " (soon)" : ""}
+        {fmtDate(e.dueOn)}{due === "overdue" ? " (overdue)" : due === "due-soon" ? " (soon)" : ""}
       </span>,
     ];
   };

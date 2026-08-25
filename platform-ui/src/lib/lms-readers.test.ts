@@ -37,6 +37,17 @@ describe("lib/lms readers reach the right endpoint", () => {
     await expect(getCourse(U, T, "no-such-course")).rejects.toThrow();
   });
 
+  it("getPath returns a path's ORDERED courses, and 404s on an unknown id", async () => {
+    const { getPath } = await import("./lms");
+    const path = await getPath(U, T, "demo-lms-p1");
+    expect(path.courses.length).toBeGreaterThan(0);
+    expect(path.courses).toEqual(
+      [...path.courses].sort((a, b) => a.position - b.position),
+    );
+    // Rethrows rather than degrading — same reasoning as getCourse (see above).
+    await expect(getPath(U, T, "no-such-path")).rejects.toThrow();
+  });
+
   it("listPaths returns paths, including at least one mandatory", async () => {
     const { listPaths } = await import("./lms");
     const paths = await listPaths(U, T);

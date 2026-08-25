@@ -94,6 +94,13 @@ export interface LearningPath {
   isMandatory: boolean; appliesTo: string; dueDays: number | null;
   certificationValidMonths: number | null; certificationLabel: string | null; courseCount: number;
 }
+export interface PathCourseRef {
+  id: string; courseKey: string; title: string; level: Level; status: CourseStatus;
+  position: number; requiresPrevious: boolean; isOptional: boolean;
+}
+export interface PathDetail extends LearningPath {
+  courses: PathCourseRef[];
+}
 export interface Enrollment {
   id: string; subjectUserId: string; subjectName: string | null; pathId: string; pathKey: string;
   title: string; isMandatory: boolean; status: "assigned" | "in_progress" | "completed" | "waived" | "expired";
@@ -144,6 +151,17 @@ export const listPaths = (u: string, t: string, q: { track?: Track; mandatory?: 
 export const getMyLearning = (u: string, t: string) =>
   strict(() => platformFetch<MyLearning>(`${base(t)}/me`, u));
 
+/**
+ * A single path with its ordered courses — the read the learner-facing player opens.
+ *
+ * Rethrows, same reasoning as `getCourse`: a path with no courses renders as "this path is empty",
+ * which is indistinguishable from "you may not read this path" — and this is reached from
+ * `/me/learning`, where an assigned path silently rendering empty is exactly the wrong-answer class
+ * the header of this file warns about.
+ */
+export const getPath = (u: string, t: string, id: string) =>
+  strict(() => platformFetch<PathDetail>(`${base(t)}/paths/${id}`, u));
+
 export const listEnrollments = (u: string, t: string, q: { subjectUserId?: string; status?: string } = {}) => {
   const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]).toString();
   return soft(() => platformFetch<Enrollment[]>(`${base(t)}/enrollments${qs ? `?${qs}` : ""}`, u), []);
@@ -172,6 +190,24 @@ export function formatDuration(minutes: number | null | undefined): string {
 export function completionPct(done: number, required: number): number | null {
   if (required <= 0) return null;
   return Math.round((done / required) * 100);
+}
+
+/**
+ * An ISO date (or full timestamp) to a fixed, human display string — never the raw ISO.
+ *
+ * Locale AND timeZone are BOTH pinned, following the house pattern at
+ * `components/reports/charts/chartHover.ts::fmtDate`: an unpinned call renders in whatever zone the
+ * runtime happens to be in, which is the SERVER's zone during the first render and the BROWSER's
+ * zone on hydration — two different strings for the same input is a hydration mismatch, not a
+ * cosmetic one. A bare date (`"2026-09-24"`) is anchored to UTC midnight before formatting so it
+ * reads as the same calendar day everywhere, matching how a date-only column is meant to be read.
+ */
+export function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const withTime = iso.length === 10 ? `${iso}T00:00:00Z` : iso;
+  const d = new Date(withTime);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 /** A due date's urgency, for a badge. `null` when there is no due date at all. */

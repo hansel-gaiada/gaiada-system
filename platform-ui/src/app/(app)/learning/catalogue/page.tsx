@@ -92,7 +92,7 @@ export default async function LearningCataloguePage({
             ]}
             rows={paths.map((p) => [
               <span key={p.id}>
-                {p.title}
+                <Link href={`/learning/paths/${p.id}`} style={{ color: "var(--erp-accent)" }}>{p.title}</Link>
                 {p.isMandatory && (
                   <span className="type-eyebrow" style={{ marginLeft: 8, fontSize: 10 }}>
                     required

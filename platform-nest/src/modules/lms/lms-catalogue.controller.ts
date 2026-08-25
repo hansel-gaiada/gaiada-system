@@ -516,6 +516,54 @@ export class LmsCatalogueController {
     return rows.rows;
   }
 
+  /**
+   * A path with its ORDERED courses — the read the learner-facing player needs to open an assigned
+   * path and follow it in sequence.
+   *
+   * Each course is resolved to its LATEST PUBLISHED version by `course_key`, the same rule
+   * `listCourses` uses for the catalogue: `lms_path_courses` freezes a `course_key`, not a specific
+   * version, so a course revised after the path was published still resolves to what a learner
+   * should take today. A path course whose key has no published version (retired, or never
+   * published) is dropped rather than surfaced as a broken link — the author's job, via
+   * `setPathCourses`, is to keep this consistent; a learner opening their assignment should never
+   * be shown a step that 404s.
+   */
+  @Get("paths/:id")
+  async getPath(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "lms_course", id, tenantId, module: "lms" }, "read");
+    const out = await withTenants(
+      [tenantId],
+      async (c) => {
+        const path = await c.query(
+          `SELECT id, path_key AS "pathKey", title, summary, track, unit_node_id AS "unitNodeId",
+                  discipline, level, status, is_mandatory AS "isMandatory", applies_to AS "appliesTo",
+                  due_days AS "dueDays", certification_valid_months AS "certificationValidMonths",
+                  certification_label AS "certificationLabel"
+           FROM lms_paths WHERE id = $1 AND deleted_at IS NULL`,
+          [id],
+        );
+        if (!path.rows[0]) throw new NotFoundException("path not found");
+        const courses = await c.query(
+          `SELECT co.id, co.course_key AS "courseKey", co.title, co.level, co.status,
+                  pc.position, pc.requires_previous AS "requiresPrevious", pc.is_optional AS "isOptional"
+           FROM lms_path_courses pc
+           JOIN LATERAL (
+             SELECT DISTINCT ON (course_key) id, course_key, title, level, status
+             FROM lms_courses
+             WHERE course_key = pc.course_key AND status = 'published' AND deleted_at IS NULL
+             ORDER BY course_key, version DESC
+           ) co ON true
+           WHERE pc.path_id = $1
+           ORDER BY pc.position`,
+          [id],
+        );
+        return { ...path.rows[0], courseCount: courses.rows.length, courses: courses.rows };
+      },
+      { modules: ["lms"] },
+    );
+    return out;
+  }
+
   @Post("paths")
   @HttpCode(201)
   async createPath(
