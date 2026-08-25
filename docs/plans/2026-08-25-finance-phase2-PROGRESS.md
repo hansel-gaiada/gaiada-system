@@ -19,12 +19,12 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
 | S · Seed live finance | 6 | 3 | 0 | 0 | **3** |
-| F8 · Fixed assets + depreciation | 14 | 2 | 0 | **12** | 0 |
-| F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
+| F8 · Fixed assets + depreciation | 14 | 1 | 0 | **13** | 0 |
+| F9 · Consolidation | 12 | 11 | 0 | **1** | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
-| **Total** | **63** | **48** | **0** | **12** | **3** |
+| **Total** | **63** | **46** | **0** | **14** | **3** |
 
 ---
 
@@ -154,7 +154,7 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | F8-11 | CIP / assets under construction → capitalisation on in-service | PLANNED | depreciation must NOT start before the in-service date |
 | F8-12 | Reconcile register ⇄ GL | **PROTOTYPED** | `finance_fa_reconcile()`. An uncapitalised asset is NAMED, not netted into a total. Pinned by a test that drives the check RED — a tie-out that cannot fail is not a tie-out |
 | F8-13 | Close interlock | **PROTOTYPED** | `finance_fa_close_blockers()`. Unrun depreciation overstates profit and a close is terminal, so it BLOCKS. Not a blocker when there is nothing to depreciate |
-| F8-14 | Fixed-asset note / movement schedule for the statements | PLANNED | opening, additions, disposals, depreciation, closing |
+| F8-14 | Movement schedule | **PROTOTYPED** | `finance_fa_movement()` (202608251330). Derived from the REGISTER, not the GL — a schedule read out of the GL agrees with the balance sheet by construction and could never reveal a drifted register, which is the failure it is printed to rule out |
 
 ### F9 · Consolidation
 
@@ -163,7 +163,7 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | F9-01 | Control determination from `company_ownership` (>50% full · 20–50% equity · else cost) | PLANNED | needs S-05 |
 | F9-02 | Consolidation group + reporting-entity model | PLANNED | a group is not a company; it must not get a posting ledger |
 | F9-03 | **Separate consolidation ledger** — elimination entries never touch entity books | PLANNED | ★ non-negotiable: an entity's own books must stay auditable standalone |
-| F9-04 | Intercompany tagging on journals + counterparty entity | PLANNED | without this, eliminations are guesswork |
+| F9-04 | Intercompany tagging | **PROTOTYPED** | `finance_accounts.counterparty_company_id` (202608251430) — on the ACCOUNT, not the journal. The ledger is immutable, so a journal tag could only be set at posting time via a 13th parameter on a 313-line function with 7 callers. An account must be CHOSEN, so a mis-posted related-party balance is visible rather than invisible |
 | F9-05 | Intercompany balance elimination (AR↔AP, loans between PTs) | PLANNED | |
 | F9-06 | Intercompany revenue/expense elimination | PLANNED | |
 | F9-07 | Unrealised profit elimination (inventory, fixed assets sold intragroup) | PLANNED | |
@@ -329,3 +329,25 @@ Owner: ownership and PKP must both be editable by a person, not only by a seed.
   - Answered the other session: their report of a broken `202608251030` was correct at the time and
     is now stale. Fixed (`SELECT *` returned four columns against three declared), committed, and
     **applied on the live database** — which is stronger evidence than a local run.
+
+- **2026-08-25** — **F8d + F9-04** (migrations `202608251330`, `202608251430`; 6 + 6 tests green).
+  F8 is 13 of 14 — only transfers/revaluation remain.
+  - **The movement schedule is derived from the REGISTER, deliberately.** Read out of the GL it
+    would agree with the balance sheet by construction and could never reveal a register that had
+    drifted — which is the one thing the note is printed to rule out.
+  - ★ **The intercompany counterparty lives on the ACCOUNT, not the journal.** The obvious design is
+    a column on the journal entry; `trg_finance_journal_entries_immutable` forbids UPDATE and DELETE
+    on entries, so it could only be set at posting time — a 13th parameter on a 313-line function
+    with seven callers, threading NULL almost everywhere. On the account it changes nothing about
+    the ledger, it NAMES the counterparty in the chart of accounts, and it cannot be forgotten: a
+    journal parameter defaults to NULL and an untagged posting looks normal, while an account has to
+    be chosen.
+  - ⚠ **Consolidation only works WITHIN a root.** `withTenants` refuses a tenant set spanning two
+    root companies, and reading both sides of an intercompany balance is inherently a two-tenant
+    read. That is correct — two unrelated holdings must never consolidate — but it means the group
+    is bounded by `root_company_id`. The live estate satisfies this: all three companies sit under
+    D & A Syrowatka. My first fixture made two independent roots and every cross-company read was
+    refused; pinned now.
+  - A test pins the RLS zero-row trap in the one place it would be misread as a real accounting
+    difference: reading the pair with ONE tenant in scope makes every balance look mismatched by its
+    full amount.
