@@ -11,6 +11,36 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.13.0` - F8 fixed assets: book AND tax depreciation (2026-08-25) - PROTOTYPED
+
+**Added**
+- `202608251030_finance_fixed_assets.sql` - `finance_asset_classes`, `finance_assets`,
+  `finance_depreciation_runs`/`_lines`, `finance_tax_golongan_params()`,
+  `finance_asset_depreciation_schedule()`.
+- `src/db/finance-f8-fixed-assets.test.ts` - 14 tests.
+- CoA template gains `1260` / `2250` (deferred tax balances), `6750` (impairment), `7400`
+  (disposal result).
+
+**Notes**
+- ★ **Two schedules, deliberately.** Tax depreciation is statutory (golongan fixes life and
+  permitted method); book depreciation is a PSAK 16 management estimate. They routinely disagree,
+  and that difference IS the temporary difference feeding deferred tax - not an inconsistency to
+  reconcile away. Keeping one number would move the other into a spreadsheet outside the ERP.
+- **The final period absorbs rounding.** 10,000,000 over 3 months rounds to 3,333,333.33 x 3 =
+  9,999,999.99. Charging the rounded figure every month strands a cent of book value on a fully
+  depreciated asset forever, and it never reconciles against the GL.
+- **Declining balance terminates.** Saldo menurun approaches zero asymptotically; the final period
+  writes off the remainder. Without it an asset depreciates past its life by amounts small enough
+  that nobody notices for years.
+- **Buildings on saldo menurun are refused by CHECK**, not by the UI - the method is not permitted
+  for them and a wrong tax return is not something anything downstream would catch.
+- **Idempotency is a UNIQUE INDEX**, not a code path: one depreciation run per period, which is the
+  only version that survives a retried job or two concurrent operators.
+- The new CoA accounts are added to the TEMPLATE only. `finance_instantiate_coa()` reads
+  tenant-scoped tables behind `app_module_allowed('finance')` and a migration has no such scope, so
+  a back-instantiate loop there would write ZERO rows and report success. Re-run
+  `seed:finance-config` (idempotent by code) to pick them up.
+
 ### finance `0.12.0` - live defaults: PKP, a finance seat, and the ownership edge (2026-08-25) - PROTOTYPED
 
 **Added**
