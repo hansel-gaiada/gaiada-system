@@ -55,6 +55,35 @@ export async function setup(): Promise<void> {
 
   const template = templateDbName();
 
+  // ⚠ THE ROLE IS CREATED BEFORE migrate(), AND THAT ORDER IS LOAD-BEARING.
+  //
+  // Some migrations grant privileges CONDITIONALLY on the runtime role already existing, because
+  // role names differ between environments — `202608210218_monitoring_partition_roll_forward.sql`
+  // REVOKEs EXECUTE on monitoring_ensure_result_partitions() from PUBLIC and then re-grants it only
+  // `IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'platform_app_test')`; 0051 has the same
+  // shape. Migrate first and that branch is simply skipped, leaving the function executable by
+  // nobody: `permission denied for function monitoring_ensure_result_partitions` (SQLSTATE 42501)
+  // out of every suite that sweeps monitors.
+  //
+  // This bites ONLY on a FRESH cluster, which is exactly why it needs stating rather than leaving to
+  // ordering. The role is cluster-global, so a developer's long-lived local Postgres already has it
+  // from an earlier run, migrate() sees it, and the suite passes locally while failing on CI's clean
+  // Postgres. (The pre-template harness created the role per-file AFTER migrate() and survived by
+  // luck: the FIRST file on a fresh cluster missed the grant too, and merely never happened to be
+  // one that called this function.) Creating the role up front removes the ordering dependency.
+  await withPool(TEST_URL, async (maintenance) => {
+    await maintenance.query(`
+      DO $$ BEGIN
+        CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+      -- Re-asserted unconditionally: the CREATE above swallows duplicate_object, so a pre-existing
+      -- role keeps whatever password (and whatever BYPASSRLS) it was last left with. A role quietly
+      -- granted BYPASSRLS would make every tenant-isolation suite pass for the wrong reason, which
+      -- is far worse than the loud "password authentication failed" a wrong password gives.
+      ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
+    `);
+  });
+
   // Recreate from scratch rather than reusing a leftover. A template left behind by a crashed run
   // may be half-migrated, and reusing it would seed EVERY file in this run with a broken schema —
   // the one failure mode that would be both total and hard to attribute.
@@ -78,14 +107,6 @@ export async function setup(): Promise<void> {
   // TABLES covers every table the full migration history creates.
   await withPool(templateUrl, async (admin) => {
     await admin.query(`
-      DO $$ BEGIN
-        CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
-      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-      -- Re-asserted unconditionally: the CREATE above swallows duplicate_object, so a pre-existing
-      -- role keeps whatever password (and whatever BYPASSRLS) it was last left with. A role quietly
-      -- granted BYPASSRLS would make every tenant-isolation suite pass for the wrong reason, which
-      -- is far worse than the loud "password authentication failed" the wrong password gives.
-      ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
       GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
     `);
