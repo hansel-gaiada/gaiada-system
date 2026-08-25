@@ -511,6 +511,17 @@ services:
       REPORT_RENDERER_URL: ${REPORT_RENDERER_URL:-http://report-renderer:3007}
       RENDERER_TOKEN: ${RENDERER_TOKEN:?}
       PLATFORM_UI_INTERNAL_URL: ${PLATFORM_UI_INTERNAL_URL:-http://platform-ui:3005}
+      # LMS L5 — the lab runner (`lab-runner/`), which executes a learner's submission in a capped,
+      # unprivileged, network-less container. It does NOT run on this box: it lives on SumoPod bound
+      # to 127.0.0.1, and the only path to it is an SSH tunnel with a port-restricted key
+      # (`gaiada-lab-tunnel.service` on this host, listening on the docker gateway). So the URL is
+      # host.docker.internal, not a compose service name — there is no lab-runner container here.
+      #
+      # Both unset -> a lab attempt is REFUSED with an honest message rather than accepted and left
+      # pending forever against a runner that cannot be reached (config.ts states the same rule).
+      # LAB_RUNNER_TOKEN is the SAME shared bearer the sidecar's own env carries.
+      LAB_RUNNER_URL: ${LAB_RUNNER_URL:-}
+      LAB_RUNNER_TOKEN: ${LAB_RUNNER_TOKEN:-}
       # D14-04 — the single-use execution grant the platform mints when a human approves a suspended
       # automation write, and the hub verifies before lifting its impact gate. ONE shared HMAC secret,
       # so this exact value must also appear in the mcp-hub service block below; a mismatch or an
