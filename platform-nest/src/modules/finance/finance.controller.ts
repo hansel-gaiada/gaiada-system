@@ -96,8 +96,13 @@ export class FinanceController {
     await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "read");
     const rows = await withFinance(tenantId, (c) =>
       c.query(
-        `SELECT p.id, p.period_no AS "periodNo", p.name, p.start_date AS "startDate",
-                p.end_date AS "endDate", p.state,
+        `SELECT p.id, p.period_no AS "periodNo", p.name, -- ::text, NOT the bare date column. pg maps a date to a JS Date, which
+                -- JSON.stringify renders as a full ISO DATETIME. The UI reads endDate and passes it
+                -- back as asOf, and this API's own isoDate() rejects it -- a 400 that took the whole
+                -- /finance page down, because financeData() only degrades 403/404. Postgres renders
+                -- date::text as exactly YYYY-MM-DD, which is what the contract says these are.
+                p.start_date::text AS "startDate",
+                p.end_date::text AS "endDate", p.state,
                 (p.signed_off_by IS NOT NULL) AS "signedOff", fy.code AS "fiscalYear"
            FROM finance_fiscal_periods p
            JOIN finance_fiscal_years fy ON fy.id = p.fiscal_year_id
@@ -185,7 +190,7 @@ export class FinanceController {
     await authorize(req.principal, { kind: "finance_statement", tenantId, module: "finance" }, "read");
     const rows = await withFinance(tenantId, (c) =>
       c.query(
-        `SELECT ledger_sequence AS "ledgerSequence", entry_date AS "entryDate", description, memo,
+        `SELECT ledger_sequence AS "ledgerSequence", entry_date::text AS "entryDate", description, memo,
                 side, amount, running_balance AS "runningBalance", entry_kind AS "entryKind"
            FROM finance_general_ledger($1, $2, $3::date, $4::date)`,
         [tenantId, code, isoDate(from, "from"), isoDate(to, "to")],
@@ -205,7 +210,7 @@ export class FinanceController {
     const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const rows = await withFinance(tenantId, (c) =>
       c.query(
-        `SELECT e.id, e.ledger_sequence AS "ledgerSequence", e.entry_date AS "entryDate", e.kind,
+        `SELECT e.id, e.ledger_sequence AS "ledgerSequence", e.entry_date::text AS "entryDate", e.kind,
                 e.description, e.currency_code AS "currency", e.total_debit AS "totalDebit",
                 e.source_event_id AS "sourceEventId",
                 finance_journal_entry_status(e.id) AS status
@@ -224,7 +229,7 @@ export class FinanceController {
     await authorize(req.principal, { kind: "finance_ledger", id: entryId, tenantId, module: "finance" }, "read");
     return withFinance(tenantId, async (c) => {
       const head = await c.query(
-        `SELECT id, ledger_sequence AS "ledgerSequence", entry_date AS "entryDate", kind, description,
+        `SELECT id, ledger_sequence AS "ledgerSequence", entry_date::text AS "entryDate", kind, description,
                 currency_code AS "currency", total_debit AS "totalDebit", total_credit AS "totalCredit",
                 source_event_id AS "sourceEventId", reversal_of_id AS "reversalOfId",
                 reversal_reason AS "reversalReason", entry_hash AS "entryHash",
@@ -556,7 +561,7 @@ export class FinanceController {
     return withFinance(tenantId, async (c) => {
       const rows = await c.query(
         `SELECT o.id, o.holder_user_id, o.holder_company_id, o.kind, o.stake_pct,
-                o.effective_from, o.effective_to, o.notes,
+                o.effective_from::text AS effective_from, o.effective_to::text AS effective_to, o.notes,
                 u.name AS holder_user_name, co.name AS holder_company_name
            FROM company_ownership o
            LEFT JOIN users u ON u.id = o.holder_user_id

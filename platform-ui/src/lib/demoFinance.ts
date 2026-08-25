@@ -1,6 +1,18 @@
 import "server-only";
 // DEMO_MODE fixtures for `/api/:t/finance/*`.
 //
+// ⚠ THESE FIXTURES MUST MATCH THE LIVE RESPONSE SHAPE, NOT A TIDIER VERSION OF IT.
+//
+// On 2026-08-25 /finance crashed in production while DEMO_MODE was green. The BFF returned
+// `endDate: "2026-01-31T00:00:00.000Z"` (pg maps a date column to a JS Date), the page fed that
+// back as ?asOf= and the API rejected the datetime with a 400. These fixtures used plain
+// "2026-01-31", so the build gate, the e2e suite and every local browse exercised a shape the
+// backend never produced.
+//
+// The BFF now casts date columns to ::text so YYYY-MM-DD is the real answer and these fixtures are
+// correct again — but the lesson generalises: a fixture that is neater than reality does not
+// simplify the demo, it hides the bug.
+//
 // READ-ONLY, like demoLms.ts and for the same reason: the /finance surface this wave ships is a
 // read console. A fixture that accepted a journal post it could not model would let the page look
 // like it worked, and this is the one module where "looked like it worked" involves money.

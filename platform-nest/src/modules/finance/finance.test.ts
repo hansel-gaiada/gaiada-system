@@ -274,4 +274,31 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     if (r.statusCode === 200) expect(r.json()).toEqual([]);
     else expect(r.statusCode).toBe(403);
   });
+  // ── DATE SHAPE ────────────────────────────────────────────────────────────────────────────────
+  it("★★ dates come back as YYYY-MM-DD, not ISO datetimes — the page feeds them straight back", async () => {
+    // The bug this pins took /finance down in production. pg maps a `date` column to a JS Date and
+    // JSON.stringify renders it "2026-01-31T00:00:00.000Z". The console reads period.endDate and
+    // passes it back as ?asOf=, this API's own isoDate() rejects the datetime with a 400, and
+    // financeData() only degrades 403/404 — so the 400 propagated and crashed the page.
+    //
+    // DEMO_MODE hid it: the demo fixtures used plain "2026-01-31", so the build gate and every
+    // local browse were green against a shape the live backend never produced.
+    const r = await app.inject({ method: "GET", url: `/api/${tenant}/finance/periods`, headers: asUser(controller) });
+    expect(r.statusCode).toBe(200);
+    const rows = r.json() as Array<{ startDate: string; endDate: string }>;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(row.endDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+
+    // And the round-trip the page actually performs must work.
+    const back = await app.inject({
+      method: "GET",
+      url: `/api/${tenant}/finance/trial-balance?asOf=${rows[0].endDate}`,
+      headers: asUser(controller),
+    });
+    expect(back.statusCode).toBe(200);
+  });
+
 });
