@@ -11,6 +11,39 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.14.0` - F8 complete + F9 consolidation begins (2026-08-25) - PROTOTYPED
+
+**Added**
+- `202608251130` capitalisation, the depreciation run, the register/GL tie-out.
+- `202608251230` disposal, impairment, deferred tax (PSAK 46), the close interlock.
+- `202608251330` the fixed-asset movement schedule.
+- `202608251430` intercompany tagging.
+- `202608251530` control determination, the consolidation group, a SEPARATE consolidation ledger,
+  and the first elimination.
+- 45 tests across five suites.
+
+**Notes**
+- ★ **Tax depreciation is recorded and never posted.** Book depreciation is an entry in the books;
+  tax depreciation is a figure on a computation. Posting both would give statements that look
+  plausible and are wrong in a way no reconciliation could catch - both sides consistently wrong.
+- ★ **Deferred tax ADJUSTS TO A TARGET**, it does not post the computed figure. Posting the figure
+  each period accumulates it: by year three the sheet carries three times the real balance while
+  every individual entry looks correct.
+- ★ **Eliminations never touch an entity's books.** An elimination is true of the GROUP and false of
+  the ENTITY. Posting one into a subsidiary would make its standalone statements and its tax return
+  wrong, and leave an auditor looking at entries with no supporting transaction.
+- **The intercompany counterparty lives on the ACCOUNT, not the journal** - the ledger is immutable,
+  so a journal tag could only be set at posting time via a 13th parameter on a 313-line function
+  with seven callers. An account must be CHOSEN, so a mis-posted related-party balance is visible.
+- **Two real defects the suites caught.** (1) Intercompany account codes took the FIRST 4 hex chars
+  of a uuid v7, whose leading digits are a millisecond timestamp - companies created in the same
+  millisecond collided and `ON CONFLICT DO NOTHING` silently returned another counterparty's
+  account. Now uses the random tail and refuses on collision. (2) Both finance seeds wrote
+  `user_roles` outside the P2-04 choke point without being on the TRUSTED allowlist.
+- **Consolidation is bounded by `root_company_id`** - `withTenants` refuses a tenant set spanning
+  two roots, and reading both sides of an intercompany balance is a two-tenant read. Correct: two
+  unrelated holdings must never consolidate.
+
 ### platform-ui `0.51.0` - network security console: traffic, threats, isolation, occupancy (2026-08-25) - PROTOTYPED
 
 **Added**
