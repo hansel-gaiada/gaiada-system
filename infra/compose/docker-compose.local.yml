@@ -26,13 +26,68 @@ services:
     ports:
       - "127.0.0.1:55434:5432"
   # Disposable Redis for platform-nest's event/HR/search suites (REDIS_URL_TEST). It MUST be
-  # separate from the live `redis` service: n8n-bridge.integration.test.ts calls FLUSHALL, which
-  # would wipe the running event backbone. No volume — state is meant to be thrown away.
+  # separate from the live `redis` service: the suites flush the database they run against, which
+  # against the live instance would wipe the running event backbone. (Until 2026-08-25 the flush in
+  # n8n-bridge.integration.test.ts was a FLUSHALL, i.e. every logical database at once; it is now a
+  # FLUSHDB scoped to the worker's own database — but "test Redis is a separate container" remains
+  # the actual guarantee, not the scope of any one call.) No volume — state is thrown away.
   redis-test:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
       - "127.0.0.1:56380:6379"
+
+  # The disposable Postgres that platform-nest's DB-backed suites run against (DATABASE_URL_TEST).
+  #
+  # DECLARED HERE AS OF 2026-08-25, having existed only as a hand-run container since 2026-08-18
+  # (`gaiada-test-pg-2`, started because the canonical test container collided with another
+  # project's `mimi-postgres` — see docs/superpowers/plans/2026-08-18-iam-session-handoff.md). That
+  # container carries no compose labels, no restart policy and an anonymous volume: nothing in the
+  # repo said it should exist, so nothing could recreate it. That matters more than it sounds,
+  # because losing it is SILENT — suites SKIP rather than fail when the test DB is unreachable, so
+  # the run reports "all green" having tested nothing. That has already happened twice in this
+  # program's history (see docs/plans/smm-tracker.md).
+  #
+  # ⚠ PORT COLLISION DURING CUTOVER. The hand-run container still owns 55435, and compose will name
+  # this one `gaiada-test-pg-1` — a different container competing for the same port. Retire the old
+  # one FIRST (it holds only throwaway databases; 102 abandoned ones as of this writing):
+  #     docker rm -f gaiada-test-pg-2
+  #     docker compose -f docker-compose.vps.yml -f docker-compose.local.yml up -d test-pg
+  #
+  # The password stays OUT of git. It is generated per-container and read back from the container
+  # itself, which is the recipe already documented for sessions and works unchanged here:
+  #     PW=$(docker exec gaiada-test-pg-1 sh -c 'printf %s "$POSTGRES_PASSWORD"')
+  #     DATABASE_URL_TEST="postgresql://postgres:${PW}@localhost:55435/postgres"
+  # Set TEST_PG_PASSWORD in your gitignored .env to pin it; the default below is only ever reachable
+  # on 127.0.0.1 and only ever holds disposable fixtures.
+  test-pg:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:55435:5432"
+    environment:
+      POSTGRES_PASSWORD: ${TEST_PG_PASSWORD:-postgres}
+      POSTGRES_DB: gaiada_platform_test
+    # Durability OFF and the connection ceiling raised — the same flags ci.yml gives its test
+    # Postgres, and safe for the same reason: the only cost of losing this data to a crash is
+    # re-running the suite. Do NOT copy these to anything holding real data.
+    #   * max_connections — the vitest harness runs 4 workers, each holding several pg Pools, plus a
+    #     maintenance connection per test file. The default 100 is uncomfortably close, and
+    #     exhausting it fails dozens of unrelated files in beforeAll at once.
+    #   * fsync/full_page_writes/synchronous_commit — the suite creates one database per test file
+    #     by copying a template, and those copies are fsync-bound.
+    command:
+      - -c
+      - max_connections=200
+      - -c
+      - fsync=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
+    # No volume, deliberately. Test databases are disposable, and a crashed run cannot run its
+    # teardown — so abandoned per-file databases accumulate (2.4 GB across 124 of them on the
+    # hand-run container). Without a volume, `docker rm` is a complete reset.
 
   # TR-19: publish report-renderer on the host for local `POST /render` smoke checks (curl-able
   # from the host during dev/QA). Internal-only in the committed VPS compose by design.

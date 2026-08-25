@@ -500,8 +500,16 @@ async function seedCheckinsAndFacts(tenantId: string, u: Record<string, string>)
 
       // Seed minimal work_activity so the fact job has something to process into work_facts.
       // These become facts when the nightly job (or admin recompute) runs.
+      // ORDER BY is load-bearing, not tidiness. The loop below builds this seed's idempotency key
+      // from the row's POSITION in this result (`pm-task-${taskId}-completed-${i}`, upserted via
+      // ON CONFLICT (tenant_id,source,source_ref)). An unordered LIMIT has no guaranteed row order,
+      // so a second seedAgency() could get the same two tasks in the opposite order, pair them with
+      // the opposite `i`, compute two source_refs that exist in neither row, miss ON CONFLICT
+      // entirely and INSERT duplicates. That is not theoretical: it is exactly the "+2 work_activity
+      // rows" that made src/seed/agency.db.test.ts's idempotency assertion fail (expected 56 to be
+      // 54) once the test suite began running files in parallel and the plan for this query changed.
       const pmTasks = await c.query<{ id: string }>(
-        `SELECT id FROM pm_tasks WHERE tenant_id=$1 LIMIT 2`, [tenantId]);
+        `SELECT id FROM pm_tasks WHERE tenant_id=$1 ORDER BY id LIMIT 2`, [tenantId]);
       if (pmTasks.rows.length > 0) {
         // Create a couple of task-completion activities for the fact grain
         for (let i = 0; i < pmTasks.rows.length; i++) {
