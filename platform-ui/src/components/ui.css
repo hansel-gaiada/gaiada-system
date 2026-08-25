@@ -181,3 +181,7 @@ a.lux-btn { display: inline-flex; align-items: center; text-decoration: none; }
 /* The chain hash is shown in full and must wrap rather than overflow — it is meant to be compared. */
 .fin-hash { word-break: break-all; font-size: var(--type-sm); }
 .fin-shell { display: flex; flex-direction: column; }
+/* The ledger's account picker — a list of links, not a select, so each account is a shareable URL. */
+.fin-accountpicker { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.fin-accountpicker a { display: inline-block; border: 1px solid var(--hairline); padding: var(--space-1) var(--space-2); font-size: var(--type-sm); }
+.fin-accountpicker__on { border-color: var(--text); }

@@ -197,6 +197,14 @@ const JOURNAL_DETAIL: Record<string, unknown> = {
   },
 };
 
+// A short movement history so the running balance and the debit/credit split are both visible.
+const GENERAL_LEDGER = [
+  { ledgerSequence: "1", entryDate: `${YEAR}-01-02`, description: "Opening capital", memo: null,
+    side: "debit", amount: "500000000.0000", runningBalance: "500000000.0000", entryKind: "opening" },
+  { ledgerSequence: "2", entryDate: `${YEAR}-03-10`, description: "Office rent March", memo: "March rent",
+    side: "credit", amount: "12000000.0000", runningBalance: "488000000.0000", entryKind: "standard" },
+];
+
 const PPN: PpnSummary = {
   outputVat: "36410000.0000",
   inputVatCreditable: "9240000.0000",
@@ -284,6 +292,8 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams)
   if (method.toUpperCase() !== "GET") return null;
 
   if (tail === "accounts") return ok(ACCOUNTS);
+  // The general ledger for any account, so /finance/ledger is drivable in the build gate.
+  if (tail.startsWith("general-ledger/")) return ok(GENERAL_LEDGER);
   if (tail === "ownership") return ok(OWNERSHIP);
   if (tail === "settings") return ok(SETTINGS);
   if (tail === "periods") return ok(PERIODS);
