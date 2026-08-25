@@ -84,27 +84,40 @@ const standardChecks = (expectedPassing: number) => ([
   { kind: "stdoutLacks", pattern: "FAIL ", describe: "no assertion failed" },
 ]);
 
+/** A syntactically valid stand-in, used ONLY when no flag is configured. */
+const FLAG_PLACEHOLDER = "000000000000000000000000";
+
 /**
  * The Cyber lab's flag payload, from the environment.
  *
- * REFUSES rather than defaulting. A default would seed a lab whose grading spec cannot match what
- * the target actually holds, and the learner would exploit the box correctly and still score zero —
- * a failure that reads as "my exploit is wrong" and is very hard to argue with.
+ * ⚠ THIS DOES NOT THROW, and the first version did — which broke CI the moment it landed. `LABS` is
+ *   a module-level array literal, so this runs at IMPORT time; a throw here takes down every
+ *   importer, including a test suite that only ever asserts the flag's SHAPE and has no business
+ *   holding the real value. An operational guard belongs at the operation, not at module load.
  *
- * Set `LMS_CYBER_FLAG` to the SAME value the target image was built with:
- *   docker build --build-arg FLAG="FLAG{...}" -t gaiada-lab-target-nettools:1 .
+ * The real refusal is `assertCyberFlagConfigured()`, called by the seed. Seeding live without a
+ * flag still fails loudly; importing this module does not.
  */
 function cyberFlagPayload(): string {
-  const raw = process.env.LMS_CYBER_FLAG ?? "";
-  const m = raw.match(/^FLAG\{([a-f0-9]{8,})\}$/);
-  if (!m) {
+  const m = (process.env.LMS_CYBER_FLAG ?? "").match(/^FLAG\{([a-f0-9]{8,})\}$/);
+  return m ? m[1] : FLAG_PLACEHOLDER;
+}
+
+/**
+ * Refuse to SEED without a real flag.
+ *
+ * A placeholder would seed a grading spec that cannot match what the target image actually holds,
+ * so a learner would exploit the box correctly and still score zero — a failure that reads as "my
+ * exploit is wrong" and is very hard to argue with.
+ */
+function assertCyberFlagConfigured(): void {
+  if (cyberFlagPayload() === FLAG_PLACEHOLDER) {
     throw new Error(
       "LMS_CYBER_FLAG is required to seed the Cyber lab, as FLAG{<hex>} — the same value the " +
       "`gaiada-lab-target-nettools` image was built with. It is deliberately NOT in this repository: " +
       "a flag in the repo is readable by exactly the people taking the lab.",
     );
   }
-  return m[1];
 }
 
 /** Exported so the reference solutions can be driven against the REAL runner. A lab whose own
@@ -480,6 +493,7 @@ export interface LabSeedResult {
 }
 
 export async function seedWebdevLabs(companyName = AGENCY_NAME): Promise<LabSeedResult> {
+  assertCyberFlagConfigured();
   const company = await withGlobal((c) =>
     c.query<{ id: string; enabled_modules: string[] }>(
       `SELECT id, enabled_modules FROM companies WHERE name = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1`,

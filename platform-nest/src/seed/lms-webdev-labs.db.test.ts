@@ -24,6 +24,16 @@ import { seedWebdevLabs, verifyWebdevLabs, LABS } from "./lms-webdev-labs";
 
 const RUN = !!TEST_URL;
 
+// ⚠ NO REAL FLAG HERE, AND NONE IS NEEDED. `cyberFlagPayload()` falls back to a placeholder at
+//   import time, and the hard refusal lives in the SEED (`assertCyberFlagConfigured`). Nothing in
+//   this file asserts the flag's value — only that a flag-shaped pattern reaches `gradingSpec` and
+//   appears in neither the brief nor a fixture. Putting the real value in a CI secret would put the
+//   answer key back within reach of the people taking the lab, which is what the guard prevents.
+//   The value must NOT be the seed's own placeholder — that is the exact string
+//   `assertCyberFlagConfigured()` treats as "unset". A distinct test flag proves the guard
+//   accepts a configured value AND that the seeding path runs.
+process.env.LMS_CYBER_FLAG ??= "FLAG{abcdef0123456789abcdef01}";
+
 describe("LMS L5c/L6b/L6c — the hands-on labs", () => {
   // These are pure and run everywhere, including without a database.
   describe("the lab definitions", () => {
