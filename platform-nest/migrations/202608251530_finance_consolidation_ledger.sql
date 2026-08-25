@@ -184,6 +184,7 @@ DECLARE
   v_n      integer := 0;
   m        record;
   r        record;
+  d        record;
 BEGIN
   SELECT * INTO v_run FROM finance_consolidation_runs WHERE id = p_run;
   IF NOT FOUND THEN
@@ -211,19 +212,25 @@ BEGIN
           m.company_id, r.cp;
       END IF;
 
-      -- Remove the receivable in this company against the payable in the counterparty. One entry
-      -- per side, each naming the company it adjusts, so the working paper reads like a journal.
-      IF r.receivable <> 0 THEN
+      -- Remove each tagged account against its own balance. THE ACCOUNT CODE MATTERS: the balance
+      -- sits on '1290-XXXX', not on the parent '1290', and crediting the parent offsets nothing —
+      -- the group balance sheet would still carry the intercompany receivable. Caught by the F9
+      -- consolidated suite, which asserted the netted pair was zero and found -50,000,000.
+      FOR d IN
+        SELECT * FROM finance_intercompany_accounts_detail(m.company_id, v_run.as_of) dd
+         WHERE dd.counterparty_company_id = r.cp
+      LOOP
         INSERT INTO finance_consolidation_entries
           (tenant_id, run_id, subject_company_id, account_code, side, amount, kind, memo)
-        VALUES (v_run.tenant_id, p_run, m.company_id, '1290', 'credit', abs(r.receivable), 'ic_balance',
-                'Eliminate intercompany receivable');
-        INSERT INTO finance_consolidation_entries
-          (tenant_id, run_id, subject_company_id, account_code, side, amount, kind, memo)
-        VALUES (v_run.tenant_id, p_run, r.cp, '2290', 'debit', abs(r.receivable), 'ic_balance',
-                'Eliminate intercompany payable');
-        v_n := v_n + 2;
-      END IF;
+        VALUES (v_run.tenant_id, p_run, m.company_id, d.account_code,
+                -- Reverse the account's own normal direction: a debit-normal receivable is removed
+                -- by a credit, a credit-normal payable by a debit. Sign from normal_balance, never
+                -- from a list of codes.
+                CASE WHEN d.account_type = 'asset' THEN 'credit' ELSE 'debit' END,
+                abs(d.balance), 'ic_balance',
+                'Eliminate intercompany ' || d.account_type || ' ' || d.account_code);
+        v_n := v_n + 1;
+      END LOOP;
     END LOOP;
   END LOOP;
   RETURN v_n;

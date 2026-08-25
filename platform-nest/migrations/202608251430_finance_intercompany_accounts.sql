@@ -137,6 +137,21 @@ END $$;
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
 -- (3) finance_intercompany_position() — what each side says it is owed
 -- ════════════════════════════════════════════════════════════════════════════════════════════════
+-- Per-ACCOUNT detail. `finance_intercompany_position()` below aggregates by counterparty, which is
+-- the right shape for a report and the WRONG shape for an elimination: an elimination has to credit
+-- the exact account carrying the balance. The first version of finance_eliminate_intercompany()
+-- credited the parent code '1290' while the balance sat on '1290-XXXX', so nothing offset and the
+-- group balance sheet still showed the intercompany receivable. Caught by the F9 consolidated suite.
+CREATE OR REPLACE FUNCTION finance_intercompany_accounts_detail(p_company uuid, p_as_of date DEFAULT NULL)
+  RETURNS TABLE (counterparty_company_id uuid, account_code text, account_type text, balance numeric)
+  LANGUAGE sql STABLE AS $$
+  SELECT a.counterparty_company_id, a.code, a.account_type, m.balance
+    FROM finance_accounts a
+    JOIN finance_account_movement(p_company, NULL, p_as_of) m ON m.account_id = a.id
+   WHERE a.tenant_id = p_company AND a.deleted_at IS NULL
+     AND a.counterparty_company_id IS NOT NULL AND m.balance <> 0;
+$$;
+
 CREATE OR REPLACE FUNCTION finance_intercompany_position(p_company uuid, p_as_of date DEFAULT NULL)
   RETURNS TABLE (counterparty_company_id uuid, receivable numeric, payable numeric, net numeric)
   LANGUAGE sql STABLE AS $$
