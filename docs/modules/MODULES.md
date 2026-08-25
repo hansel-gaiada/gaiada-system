@@ -51,7 +51,7 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
-| lms | `0.5.0` | PROTOTYPED | Cross-cutting | 2026-08-25 |
+| lms | `0.5.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.1.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | finance | `0.14.1` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
@@ -1233,7 +1233,7 @@ rather than quietly deleted.
 
 ---
 
-## lms — Learning · Certification · `0.5.0` · PROTOTYPED
+## lms — Learning · Certification · `0.5.1` · DEV-VERIFIED
 
 **Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
 
@@ -1289,6 +1289,22 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
   append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
   two flags to execute.
+
+### LIVE at `alpha-01.071.0161a` (2026-08-25)
+
+18 courses · 9 paths · 3 labs · **20 employees enrolled** in the mandatory general track, due
+2026-09-24. Seeded with `seed:lms-general-track`, `seed:lms-webdev-curriculum` and
+`seed:lms-webdev-labs`; enrolled with `lms:assign-mandatory --execute`.
+
+**The lab path is wired and driven from live.** The runner stays bound to 127.0.0.1 on SumoPod;
+the ERP reaches it through `gaiada-lab-tunnel.service`, an SSH tunnel whose key is restricted to
+`permitopen=127.0.0.1:4310` with `command=/bin/false` — if it leaks it reaches the runner's port
+and nothing else on a box carrying seven projects. Driven from inside the live platform
+container: a correct submission scores 100, a wrong one 0 with the failing assertion quoted.
+
+**Not closed:** the HTTP auth layer was not re-driven on live (`AUTH_MODE=oidc`, so a real
+attempt needs an interactive login). Cerbos on the lab path is covered by the acceptance suite,
+not by a live drive. No training tenant exists (`is_training` is 0).
 
 ### L5 COMPLETE (2026-08-25) — labs run, on a real host, under gVisor
 
