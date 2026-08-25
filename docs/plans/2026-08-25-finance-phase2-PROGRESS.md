@@ -19,12 +19,12 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
 | S · Seed live finance | 6 | 3 | 0 | 0 | **3** |
-| F8 · Fixed assets + depreciation | 14 | 14 | 0 | 0 | 0 |
+| F8 · Fixed assets + depreciation | 14 | 9 | 0 | **5** | 0 |
 | F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
-| **Total** | **63** | **60** | **0** | **0** | **3** |
+| **Total** | **63** | **55** | **0** | **5** | **3** |
 
 ---
 
@@ -141,12 +141,12 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 
 | ID | Task | Status | Notes |
 |---|---|---|---|
-| F8-01 | Asset register schema: asset, class, component, cost, residual, life, in-service date | PLANNED | components matter — PSAK 16 requires separate depreciation of significant parts |
-| F8-02 | Depreciation methods: straight-line, declining balance, units of production | PLANNED | method is DATA on the asset class, never a hardcoded branch |
-| F8-03 | Tax method + PMK golongan on the same asset (B1) | PLANNED | gated on B1 |
-| F8-04 | Depreciation schedule generator (per period, per asset, book + tax) | PLANNED | schedule is derived and reproducible, not stored-only |
+| F8-01 | Asset register schema | **PROTOTYPED** | `finance_asset_classes` + `finance_assets`, migration 202608251030. Componentisation via `parent_asset_id` — a component is a full asset row, so it gets its own schedule with no special-casing |
+| F8-02 | Depreciation methods | **PROTOTYPED** | straight_line · declining_balance · units_of_production · none, as DATA on the class with per-asset override |
+| F8-03 | Tax golongan on the same asset | **PROTOTYPED** | `finance_tax_golongan_params()` holds UU PPh Ps. 11. Life/rate DERIVED from the golongan, never stored — they are law, and a stored copy invites an accountant to “correct” a statutory rate. Buildings on saldo menurun refused by CHECK |
+| F8-04 | Schedule generator (book + tax) | **PROTOTYPED** | `finance_asset_depreciation_schedule()`. DERIVED, never stored — PSAK 16 requires annual review of life and residual, so revision is the normal case and a stored schedule goes stale silently |
 | F8-05 | Monthly depreciation RUN: posts expense / accumulated depreciation | PLANNED | accumulated depreciation is a **contra asset** — sign from `normal_balance`, never a hardcoded list |
-| F8-06 | Idempotent run: re-running a period must not double-post | PLANNED | the ledger is append-only; a second run is a defect, not a no-op |
+| F8-06 | Idempotent run | **PROTOTYPED** | `ux_finance_dep_runs_period` — one run per period as a UNIQUE INDEX. The only form of idempotency that survives a retried job or two concurrent operators |
 | F8-07 | Deferred tax from the book/tax temporary difference (PSAK 46) | PLANNED | gated on B1 |
 | F8-08 | Additions, transfers, revaluation (PSAK 16) | PLANNED | |
 | F8-09 | Disposals: derecognition + gain/loss on sale | PLANNED | must reverse accumulated depreciation, not just credit cost |
@@ -282,3 +282,17 @@ Owner: ownership and PKP must both be editable by a person, not only by a seed.
 | UI-02b | Settings UI editor | PLANNED | ⚠ `fiscal_year_start_month` must NOT be freely editable once periods exist — it would invalidate every cut period and every balance sheet's fyStart |
 | UI-02c | NPWP handling: PII-scrubbed, encrypted at rest | PLANNED | Program rule: scrub national-ID-shaped values before persist. An NPWP is exactly that shape |
 | UI-02d | Guard: turning PKP **off** with posted PPN is refused | PLANNED | Same reasoning as a locked period — it would orphan tax already charged |
+
+- **2026-08-25** — **F8 core landed** (migration `202608251030`, 14 tests green). Schedule generator
+  produces book and tax side by side; every figure in the suite is checked against a value computed
+  by hand from the statute, not against whatever the function returned.
+  - Three bugs the suite caught, all mine: an untyped `NULL` in a `VALUES` list; `SELECT *` returning
+    four columns against three declared (Postgres reports both as the same opaque *"return type
+    mismatch in function declared to return record"*, naming the function and not the column); and a
+    test-harness collision because `newId()` is **uuid v7**, whose leading hex digits are a
+    millisecond timestamp — two assets built in the same millisecond derived the same code.
+  - ⚠ **A concurrent session has a broken UNTRACKED migration in this shared checkout**
+    (`202608250950_lms_l5_lab_runs.sql` — *no unique constraint matching given keys for referenced
+    table "lms_attempts"*). It is **not in HEAD**, so the live deploy is unaffected, but it blocks
+    every migration-dependent test run from this working tree. F8 was verified in a clean
+    `git worktree` for that reason. Not mine to fix — flagged for its owner.
