@@ -115,10 +115,23 @@ describe("LMS L5c/L6b/L6c — the hands-on labs", () => {
       // can read. Matched on the flag's hex payload rather than the literal `FLAG{` — the pattern
       // field escapes its braces for `new RegExp()`, so `FLAG\{` (escaped) is what actually appears
       // in the serialised checks, not the bare `FLAG{` a learner-visible field would leak.
-      const FLAG_PAYLOAD = "54bb8b680292f863ebf6eb8b";
-      expect(JSON.stringify(cyber!.checks)).toContain(FLAG_PAYLOAD);
-      expect(cyber!.brief).not.toContain(FLAG_PAYLOAD);
-      for (const f of [...cyber!.fixtures, ...cyber!.starter]) expect(f.content).not.toContain(FLAG_PAYLOAD);
+      // The flag is NOT asserted by VALUE — it is not in this repository at all (the seed reads
+      // `LMS_CYBER_FLAG`). What is asserted is the SHAPE and, more importantly, that the flag never
+      // appears anywhere a learner can read: `spec-redaction.ts` strips `gradingSpec` wholesale, so
+      // a flag in `brief` or a fixture would be the one copy that leaks.
+      // Asserted by SHAPE, never by value — the flag is not in this repository (the seed reads
+      // `LMS_CYBER_FLAG`). Booleans rather than raw JSON on purpose: a failing `toMatch` against the
+      // serialised checks would print the flag into the test output, which is the same leak by a
+      // slower route. Learned the hard way.
+      const checksJson = JSON.stringify(cyber!.checks);
+      expect(/FLAG/.test(checksJson), "the Cyber grading spec must assert on a flag").toBe(true);
+      expect(/[a-f0-9]{12,}/.test(checksJson), "the flag pattern must carry a hex payload").toBe(true);
+      // And the flag must appear NOWHERE a learner can read: spec-redaction.ts strips `gradingSpec`
+      // wholesale, so a copy in `brief` or a fixture would be the one that leaks.
+      expect(/FLAG\{[a-f0-9]/.test(cyber!.brief), "the brief must not contain the flag").toBe(false);
+      for (const f of [...cyber!.fixtures, ...cyber!.starter]) {
+        expect(/FLAG\{[a-f0-9]/.test(f.content), `${f.path} must not contain the flag`).toBe(false);
+      }
     });
   });
 

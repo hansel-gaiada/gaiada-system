@@ -84,9 +84,33 @@ const standardChecks = (expectedPassing: number) => ([
   { kind: "stdoutLacks", pattern: "FAIL ", describe: "no assertion failed" },
 ]);
 
+/**
+ * The Cyber lab's flag payload, from the environment.
+ *
+ * REFUSES rather than defaulting. A default would seed a lab whose grading spec cannot match what
+ * the target actually holds, and the learner would exploit the box correctly and still score zero —
+ * a failure that reads as "my exploit is wrong" and is very hard to argue with.
+ *
+ * Set `LMS_CYBER_FLAG` to the SAME value the target image was built with:
+ *   docker build --build-arg FLAG="FLAG{...}" -t gaiada-lab-target-nettools:1 .
+ */
+function cyberFlagPayload(): string {
+  const raw = process.env.LMS_CYBER_FLAG ?? "";
+  const m = raw.match(/^FLAG\{([a-f0-9]{8,})\}$/);
+  if (!m) {
+    throw new Error(
+      "LMS_CYBER_FLAG is required to seed the Cyber lab, as FLAG{<hex>} — the same value the " +
+      "`gaiada-lab-target-nettools` image was built with. It is deliberately NOT in this repository: " +
+      "a flag in the repo is readable by exactly the people taking the lab.",
+    );
+  }
+  return m[1];
+}
+
 /** Exported so the reference solutions can be driven against the REAL runner. A lab whose own
  *  reference solution does not pass is worse than no lab: it teaches people that correct work
- *  fails. `lms-webdev-labs.reference.test.ts` is that check. */
+ *  fails; and a lab whose STARTER passes teaches nothing at all. Both directions are driven
+ *  against the deployed runner, because neither can be checked from here. */
 export const LABS: LabSpec[] = [
   // ═══════════════════════════════════════════════════════════════════════════════════ FE ════
   {
@@ -438,7 +462,12 @@ export const LABS: LabSpec[] = [
     ],
     checks: [
       { kind: "exitCode", equals: 0, describe: "the exploit script runs to completion", weight: 1 },
-      { kind: "stdoutMatches", pattern: "FLAG\\{54bb8b680292f863ebf6eb8b\\}", describe: "the target discloses its flag", weight: 4 },
+      // ⚠ THE FLAG IS NOT IN THIS REPOSITORY, and that is the point. It is read from the
+      // environment at seed time and baked into the target image at build time (see
+      // `lab-runner/targets/webapp-cmdi/Dockerfile`, ARG FLAG). A literal here would be
+      // readable by every Web Dev person with repo access — which is exactly the set of
+      // people taking this lab — and would defeat spec-redaction.ts entirely.
+      { kind: "stdoutMatches", pattern: `FLAG\{${cyberFlagPayload()}\}`, describe: "the target discloses its flag", weight: 4 },
     ],
   },
 ];
