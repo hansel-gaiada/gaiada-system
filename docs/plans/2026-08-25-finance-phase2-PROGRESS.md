@@ -19,12 +19,12 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
 | S · Seed live finance | 6 | 3 | 0 | 0 | **3** |
-| F8 · Fixed assets + depreciation | 14 | 9 | 0 | **5** | 0 |
+| F8 · Fixed assets + depreciation | 14 | 6 | 0 | **8** | 0 |
 | F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
-| **Total** | **63** | **55** | **0** | **5** | **3** |
+| **Total** | **63** | **52** | **0** | **8** | **3** |
 
 ---
 
@@ -145,14 +145,14 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | F8-02 | Depreciation methods | **PROTOTYPED** | straight_line · declining_balance · units_of_production · none, as DATA on the class with per-asset override |
 | F8-03 | Tax golongan on the same asset | **PROTOTYPED** | `finance_tax_golongan_params()` holds UU PPh Ps. 11. Life/rate DERIVED from the golongan, never stored — they are law, and a stored copy invites an accountant to “correct” a statutory rate. Buildings on saldo menurun refused by CHECK |
 | F8-04 | Schedule generator (book + tax) | **PROTOTYPED** | `finance_asset_depreciation_schedule()`. DERIVED, never stored — PSAK 16 requires annual review of life and residual, so revision is the normal case and a stored schedule goes stale silently |
-| F8-05 | Monthly depreciation RUN: posts expense / accumulated depreciation | PLANNED | accumulated depreciation is a **contra asset** — sign from `normal_balance`, never a hardcoded list |
+| F8-05 | Monthly depreciation RUN | **PROTOTYPED** | `finance_run_depreciation()` (202608251130). ONE aggregated journal per period, not one per asset. ★ **Tax is recorded on the line but NEVER posted** — it belongs on a tax computation, not in the statements |
 | F8-06 | Idempotent run | **PROTOTYPED** | `ux_finance_dep_runs_period` — one run per period as a UNIQUE INDEX. The only form of idempotency that survives a retried job or two concurrent operators |
 | F8-07 | Deferred tax from the book/tax temporary difference (PSAK 46) | PLANNED | gated on B1 |
-| F8-08 | Additions, transfers, revaluation (PSAK 16) | PLANNED | |
+| F8-08 | Additions (capitalisation) | **PROTOTYPED** | `finance_capitalise_asset()` posts DR asset / CR funding via `p_subledger := 'fixed_assets'`, the only thing permitted to touch the `1210` control account. Double-capitalisation REFUSED, not silently ignored. Transfers + revaluation still PLANNED |
 | F8-09 | Disposals: derecognition + gain/loss on sale | PLANNED | must reverse accumulated depreciation, not just credit cost |
 | F8-10 | Impairment (PSAK 48) — at minimum a controlled manual write-down | PLANNED | |
 | F8-11 | CIP / assets under construction → capitalisation on in-service | PLANNED | depreciation must NOT start before the in-service date |
-| F8-12 | Reconcile register ⇄ GL control accounts (like AR/AP tie-out) | PLANNED | same verdict contract: problems found, empty = pass |
+| F8-12 | Reconcile register ⇄ GL | **PROTOTYPED** | `finance_fa_reconcile()`. An uncapitalised asset is NAMED, not netted into a total. Pinned by a test that drives the check RED — a tie-out that cannot fail is not a tie-out |
 | F8-13 | Close interlock: unrun depreciation is a close BLOCKER | PLANNED | extends `finance_period_close_readiness` |
 | F8-14 | Fixed-asset note / movement schedule for the statements | PLANNED | opening, additions, disposals, depreciation, closing |
 
@@ -296,3 +296,21 @@ Owner: ownership and PKP must both be editable by a person, not only by a seed.
     table "lms_attempts"*). It is **not in HEAD**, so the live deploy is unaffected, but it blocks
     every migration-dependent test run from this working tree. F8 was verified in a clean
     `git worktree` for that reason. Not mine to fix — flagged for its owner.
+
+- **2026-08-25** — **F8b landed** (migration `202608251130`, 9 tests green first run). The module is
+  now a SUBLEDGER rather than a register: cost reaches the GL through `finance_capitalise_asset()`,
+  depreciation posts through `finance_run_depreciation()`, and `finance_fa_reconcile()` checks the
+  two against each other.
+  - ★ **Tax depreciation is recorded and never posted.** Book depreciation is an entry in the books;
+    tax depreciation is a figure on a computation. Posting both would give statements that look
+    plausible and are wrong in a way no reconciliation here would catch, because both sides would be
+    consistently wrong together. Pinned by a test asserting the line carries 250,000 tax while the
+    GL carries only the book charge.
+  - The run row is inserted **before** any posting, so the one-run-per-period UNIQUE index rejects a
+    concurrent second caller before a journal exists — otherwise the loser leaves an orphan journal.
+  - `docs-map` was red for the whole finance wave and is now green. It was mine: a migration, a seed
+    and a doc added without regenerating MAP, which fails the gate on EVERY commit and blocks every
+    other session. Regenerated from a clean worktree (this checkout carries 26 untracked files from
+    concurrent sessions).
+  - The LMS L5b migration referenced earlier was fixed by its own session before I touched it; the
+    full chain now applies from this checkout.
