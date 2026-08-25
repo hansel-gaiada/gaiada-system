@@ -13,7 +13,7 @@
 | `ai-gateway-go/` | go | `gaiada/ai-gateway-go` | `cmd/gateway` | yes | yes |
 | `capture-helper/` | node | `gaiada-capture-helper` | `start` | — | **missing** |
 | `hermes-gateway/` | node | `hermes-gateway` | `start` | — | **missing** |
-| `lab-runner/` | node | `gaiada-lab-runner` | `dev · start` | — | **missing** |
+| `lab-runner/` | node | `gaiada-lab-runner` | `dev · start` | yes | **missing** |
 | `mcp-hub/` | node | `gaiada-mcp-hub` | `dev · start` | yes | yes |
 | `platform-nest/` | node | `gaiada-platform-nest` | `start` | yes | yes |
 | `platform-ui/` | node | `gaiada-platform-ui` | `dev · start` | yes | yes |
@@ -30,7 +30,7 @@ Node scripts per component:
 - `hermes-gateway` — `start`, `test`
 - `lab-runner` — `dev`, `start`, `test`, `typecheck`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:hr-config`, `seed:lms-general-track`, `seed:lms-webdev-curriculum`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
+- `platform-nest` — `build`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-live-defaults`, `seed:hr-config`, `seed:lms-general-track`, `seed:lms-webdev-curriculum`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
@@ -164,11 +164,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202608241730_register_router_seat.sql`
+- Head: `202608251030_finance_fixed_assets.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 172 (121 legacy `NNNN_`, 51 timestamped)
+- Applied files on disk: 174 (121 legacy `NNNN_`, 53 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -492,7 +492,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 ## Docs, runbooks, guides
 
-Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
+Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
 Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`
 
