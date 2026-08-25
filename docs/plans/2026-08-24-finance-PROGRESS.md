@@ -21,10 +21,10 @@ later query gets retrofitted.
 |---|---|---|---|---|---|
 | Design & specs | 2 | 0 | 0 | 0 | **2** |
 | F0 migrations (DB) | 6 | 0 | 0 | **6** | 0 |
-| F0 authz (IAM + Cerbos) | 4 | 2 | 0 | **2** | 0 |
+| F0 authz (IAM + Cerbos) | 2 | 0 | 0 | **2** | 0 |
 | F0 authz arm (F0-07/09/12) | 7 | 0 | 0 | **6** | **1** |
 | F0 verification | 1 | 0 | 0 | 0 | **1** |
-| F0 docs | 1 | 1 | 0 | 0 | 0 |
+| F0 docs | 0 | 0 | 0 | 0 | 0 |
 | F1 ledger core | 9 | 0 | 0 | **7** | **2** |
 | F3 statements | 8 | 0 | 0 | **6** | **2** |
 | F4 accounts receivable | 10 | 0 | 0 | **8** | **2** |
@@ -33,7 +33,12 @@ later query gets retrofitted.
 | F7 tax & statutory | 8 | 0 | 0 | **6** | **2** |
 | F2 posting rules | 7 | 0 | 0 | **5** | **2** |
 | FA application layer | 5 | 0 | 0 | **3** | **2** |
-| **Total** | **83** | **3** | **0** | **60** | **20** |
+| **Total** | **80** | **0** | **0** | **60** | **20** |
+
+> The three former PLANNED rows (F0-07, F0-09, F0-12) were **superseded**, not dropped: all three
+> shipped inside the “F0 authz arm” section, which counts them. They were double-counted here until
+> 2026-08-25. **Nothing in the F0–F7 + FA scope of this session is outstanding.** What remains is
+> listed under “What is NOT in this session” below.
 
 ---
 
@@ -73,9 +78,9 @@ later query gets retrofitted.
 
 | ID | Task | Status | Notes |
 |---|---|---|---|
-| F0-07 | IAM: 9 finance permissions/roles per blueprint §2.2 + `finance.cross_company_approver` | **PLANNED — deliberately not started** | ⚠ The IAM chain is GENERATED from `src/rbac/permission-catalog.json` + `role-permission-bundles.json`, with three parity suites (`test:iam-chain-alignment`, `role-permission-parity.db.test.ts`) asserting catalog ↔ Cerbos ↔ module agreement. A partial change breaks those for **every other session** in this shared checkout. Needs its own ticket with the generator |
+| F0-07 | IAM: finance permissions/roles per blueprint §2.2 | **SUPERSEDED — delivered as F0-07a..d in “F0 authz arm” below; not counted in the roll-up** | ⚠ The IAM chain is GENERATED from `src/rbac/permission-catalog.json` + `role-permission-bundles.json`, with three parity suites (`test:iam-chain-alignment`, `role-permission-parity.db.test.ts`) asserting catalog ↔ Cerbos ↔ module agreement. A partial change breaks those for **every other session** in this shared checkout. Needs its own ticket with the generator |
 | F0-08 | SoD matrix as data + enforcement primitive, bound **per company-person** | **PROTOTYPED** | `202608241013_finance_sod_and_elevation.sql` — 12 duties × 4 control functions, all 6 blueprint pairs seeded, `finance_sod_check()`. Shared-service case verified: same two duties in *different* companies is not a conflict |
-| F0-09 | Cerbos policies for finance resources | **PLANNED — blocked by F0-07** | A policy naming permissions the catalog does not carry fails `cerbos-catalog-alignment`. Must land with F0-07, not before |
+| F0-09 | Cerbos policies for finance resources | **SUPERSEDED — delivered as F0-09a/b in “F0 authz arm” below; not counted in the roll-up** | A policy naming permissions the catalog does not carry fails `cerbos-catalog-alignment`. Must land with F0-07, not before |
 | F0-10 | Elevation grants: time-boxed, purpose-tagged, auto-expiring + access log | **PROTOTYPED** | `202608241013_finance_sod_and_elevation.sql` — `finance_access_grants` + `finance_has_elevated_access()` + append-only `finance_access_log`. Schema **refuses** an approved grant with no expiry |
 
 ### F0 authz arm — the deferred chunk, now authorised (owner: "proceed", 2026-08-24)
@@ -125,7 +130,7 @@ balanced always · immutable · tamper-evident · gap-free sequence · full audi
 
 | ID | Task | Status | Notes |
 |---|---|---|---|
-| F0-12 | `docs/modules/MODULES.md` registry entry + `PERMISSION-CONTRACT.md` finance section | PLANNED | Deferred with F0-07: the PERMISSION-CONTRACT § should land in the same change as the permissions it documents, not ahead of them |
+| F0-12 | `docs/modules/MODULES.md` registry entry + `PERMISSION-CONTRACT.md` finance section | **SUPERSEDED — delivered as F0-12 in “F0 authz arm” below; not counted in the roll-up** | Deferred with F0-07: the PERMISSION-CONTRACT § should land in the same change as the permissions it documents, not ahead of them |
 
 ---
 
@@ -888,3 +893,44 @@ which companies, and each one's fiscal year start.
 - **`report-renderer` carries the same `start_period: 10s`.** Reaches healthy in ~20s today, so it
   is not biting — but it is the identical latent shape and the same 502 if its boot ever grows.
 - **Compose files reach the box by hand** (above). Worth folding into `deploy.yml`.
+
+---
+
+## What is NOT in this session — the honest remainder (2026-08-25)
+
+Every task **inside** this session's F0–F7 + FA scope is delivered: 80 items, 60 PROTOTYPED,
+20 DEV-VERIFIED, **0 outstanding**. What follows was never in scope, or is newly surfaced.
+
+### 1. Blocked on the owner, not on engineering
+
+| # | Needed | Why it cannot be guessed |
+|---|---|---|
+| Q3 | Which companies must be bank-ready | sets F9 (consolidation) timing and scope |
+| Q4 | Which entities exist + PKP status | decides whether PPN applies per entity at all |
+| Q6 | Existing books (Accurate / Mekari / Xero / spreadsheets) | determines the opening-balance cutover — a phase that does not yet exist |
+| Q7 | e-Faktur ASP/PJAP choice | fixes the F7 integration contract |
+| Q9 | The real ownership map — which PTs, who holds what stake | `company_ownership` is live and **empty**; owner/shareholder scope resolves to nothing until rows exist |
+| — | **Seeding live finance**: which companies + each fiscal year start | writes a chart of accounts and cuts a calendar into the books of record. A wrong fiscal-year start is corrected by reversal, never by editing — by design |
+
+### 2. Phases never in this session's scope
+
+- **F8 fixed assets.** Depreciation is deliberately blocked — there is no depreciation engine, and a
+  posting rule that "just straight-lines it" would put wrong numbers in the ledger silently.
+- **F9 consolidation.** The group console cannot show a real *consolidated* figure yet:
+  eliminations (intercompany balances, unrealised profit) do not exist. It can show per-company and
+  a naive sum, and must not label a naive sum "consolidated".
+- **Opening-balance cutover.** Gated on Q6.
+
+### 3. Surfaced by the deploy, still open
+
+- **No authenticated end-to-end drive of finance.** `scripts/sso-login.sh` yields a token the
+  platform verifies (`verified token for sub=...`), but `GET /api/me` on :3004 401s in ~3ms —
+  rejected before token verification on that route. Until this is resolved and someone drives
+  `/finance` against live data, finance is **PROTOTYPED + deployed, NOT DEV-VERIFIED**.
+- **`deploy.yml` does not ship `docker-compose.vps.yml`.** It rsyncs observability, cerbos and
+  keycloak only, and the box's `~/gaiada` is not a git repo. A compose fix in git is not live until
+  somebody copies it up by hand, and nothing warns you. This bit today.
+- **`report-renderer` carries the same `start_period: 10s`** that caused the outage. Healthy in
+  ~20s today, so not biting — identical latent shape.
+- **A 129s boot was invisible until it caused an outage.** Nothing measures or alerts on boot
+  duration; it was found by reading timestamps after the fact.
