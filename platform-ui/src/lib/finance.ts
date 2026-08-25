@@ -116,6 +116,60 @@ export interface EfakturException {
   documentNo: string; counterparty: string; docDate: string; taxAmount: string; detail: string;
 }
 
+
+// ── Cap table and settings (UI-01a / UI-02a) ────────────────────────────────────────────────────
+export interface OwnershipEdge {
+  id: string;
+  holderUserId: string | null;
+  holderCompanyId: string | null;
+  holderName: string | null;
+  holderKind: "person" | "company";
+  kind: "holding" | "shareholder";
+  stakePct: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  notes: string | null;
+}
+
+export interface OwnershipProblem {
+  problem: string;
+  detail: string;
+}
+
+/** The list and its problems travel TOGETHER — see the reader below for why that matters. */
+export interface OwnershipView {
+  edges: OwnershipEdge[];
+  problems: OwnershipProblem[];
+}
+
+export interface FinanceSettings {
+  functionalCurrency: string;
+  presentationCurrency: string;
+  fiscalYearStartMonth: number;
+  isPkp: boolean;
+  npwp: string | null;
+  coaTemplateKey: string | null;
+}
+
+/** Human labels for the cap-table problems the BFF reports. */
+export const OWNERSHIP_PROBLEM_LABEL: Record<string, string> = {
+  STAKE_EXCEEDS_100: "Stakes total more than 100%",
+  STAKE_INCOMPLETE: "Cap table is incomplete",
+  DUPLICATE_HOLDER: "The same holder appears more than once",
+};
+
+/**
+ * An NPWP is stored bare and formatted for display. 15-digit: 01.234.567.8-901.000.
+ * 16-digit (the NIK transition) has no conventional grouping, so it is shown as-is rather than
+ * forced into a shape that would misrepresent it.
+ */
+export function formatNpwp(npwp: string | null): string {
+  if (!npwp) return "—";
+  const d = npwp.replace(/\D/g, "");
+  if (d.length !== 15) return d;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}.${d.slice(8, 9)}-${d.slice(9, 12)}.${d.slice(12)}`;
+}
+
 // ── The two degradation strategies ──────────────────────────────────────────────────────────────
 
 /** DATA readers: a 403/404 (module off, or backend older than the endpoint) becomes the fallback. */
@@ -297,3 +351,28 @@ export function fiscalYearStart(periods: FiscalPeriod[], asOf: string): string |
   const first = periods.filter((p) => p.fiscalYear === latestYear).sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
   return first?.startDate ?? null;
 }
+
+
+// ── Cap table + settings readers ────────────────────────────────────────────────────────────────
+
+/**
+ * The cap table. `null` on 403, NOT an empty list.
+ *
+ * ★ This is a VERDICT-shaped read even though it looks like data. `finance_ownership:read` is a
+ * narrower grant than the rest of finance — a `finance_staff` clerk is denied outright — so a 403
+ * here is the common case, not an edge case. Folding it to `{ edges: [], problems: [] }` would
+ * render "this company has no recorded owners", which is an active false statement about the cap
+ * table rather than a missing one.
+ */
+export async function listOwnership(u: string, t: string, asOf?: string): Promise<OwnershipView | null> {
+  try {
+    return await platformFetch<OwnershipView>(`/api/${t}/finance/ownership${qs({ asOf })}`, u);
+  } catch (e) {
+    if (e instanceof PlatformError && (e.status === 403 || e.status === 404)) return null;
+    throw e;
+  }
+}
+
+/** Settings. `null` when unreachable — a settings page with invented defaults is worse than none. */
+export const getFinanceSettings = (u: string, t: string) =>
+  financeData(platformFetch<FinanceSettings | null>(`/api/${t}/finance/settings`, u), null);

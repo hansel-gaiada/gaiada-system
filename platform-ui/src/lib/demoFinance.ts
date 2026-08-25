@@ -169,6 +169,66 @@ const EFAKTUR_EXCEPTIONS: EfakturException[] = [
   { kind: "AP_INPUT_VAT_LOST", documentNo: "VINV-0042", counterparty: "PT Sewa Kantor", docDate: `${YEAR}-03-18`, taxAmount: "2200000.0000", detail: "input VAT NOT creditable without a vendor e-Faktur — this amount is a real cost" },
 ];
 
+// ── UI-01c / UI-02b — the cap table and settings ────────────────────────────────────────────────
+// Deliberately NOT a tidy 100%: the demo cap table totals 85, so STAKE_INCOMPLETE renders and the
+// "the rest is unrecorded, which is not the same as unowned" line is reachable in a browser. A
+// demo that adds up perfectly hides the whole reason the validation exists.
+const OWNERSHIP = {
+  edges: [
+    {
+      id: "own-1",
+      holderUserId: "demo-anthony",
+      holderCompanyId: null,
+      holderName: "Anthony Syrowatka",
+      holderKind: "person",
+      kind: "holding",
+      stakePct: "60.000000",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: null,
+      notes: "Founder",
+    },
+    {
+      id: "own-2",
+      holderUserId: null,
+      holderCompanyId: "demo-holding",
+      holderName: "D & A Syrowatka",
+      holderKind: "company",
+      kind: "shareholder",
+      stakePct: "25.000000",
+      effectiveFrom: "2026-01-01",
+      effectiveTo: null,
+      notes: null,
+    },
+    {
+      id: "own-3",
+      holderUserId: "demo-former",
+      holderCompanyId: null,
+      holderName: "Former Shareholder",
+      holderKind: "person",
+      kind: "shareholder",
+      stakePct: "15.000000",
+      effectiveFrom: "2025-01-01",
+      effectiveTo: "2026-01-01",
+      notes: "Bought out",
+    },
+  ],
+  problems: [
+    {
+      problem: "STAKE_INCOMPLETE",
+      detail: "live stakes total 85% — the remaining 15% is not recorded, which is not the same as nobody holding it",
+    },
+  ],
+};
+
+const SETTINGS = {
+  functionalCurrency: "IDR",
+  presentationCurrency: "IDR",
+  fiscalYearStartMonth: 1,
+  isPkp: true,
+  npwp: "012345678901000",
+  coaTemplateKey: "id_psak_general_v1",
+};
+
 /** Matches `/api/:tenantId/finance/...` and returns the tail, or null. */
 function financePath(p: string): string | null {
   const m = /^\/api\/[^/]+\/finance\/(.+)$/.exec(p);
@@ -183,6 +243,8 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams)
   if (method.toUpperCase() !== "GET") return null;
 
   if (tail === "accounts") return ok(ACCOUNTS);
+  if (tail === "ownership") return ok(OWNERSHIP);
+  if (tail === "settings") return ok(SETTINGS);
   if (tail === "periods") return ok(PERIODS);
   if (tail === "trial-balance") return ok(TRIAL_BALANCE);
   if (tail === "balance-sheet") return ok(BALANCE_SHEET);

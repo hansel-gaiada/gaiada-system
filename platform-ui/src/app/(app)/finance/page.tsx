@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -252,6 +253,26 @@ export default async function FinanceOverviewPage() {
             ])}
           />
         )}
+      </Card>
+
+      {/* Configuration lives BEHIND the console rather than in the sidebar. nav.ts renders exactly
+          one Finance row on purpose (an org structure often contains a department of the same name,
+          and two identical labels pointing at different screens is the kind of thing a user learns
+          to distrust). Adding two more top-level rows would fight that; the console is the entry. */}
+      <Card
+        title="Configuration"
+        hint="The cap table decides who can SEE which companies — it is an access record as much as a financial one."
+      >
+        <ul className="fin-links">
+          <li>
+            <Link href="/finance/ownership">Ownership &amp; cap table</Link>
+            <span className="fin-muted"> — who holds this company, and from when</span>
+          </li>
+          <li>
+            <Link href="/finance/settings">Accounting settings</Link>
+            <span className="fin-muted"> — PKP status, NPWP and reporting currency</span>
+          </li>
+        </ul>
       </Card>
 
       <Card

@@ -11,6 +11,34 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.51.0` - the cap table and accounting settings become editable (2026-08-25) - PROTOTYPED
+
+**Added**
+- `/finance/ownership` (UI-01c) and `/finance/settings` (UI-02b), `lib/financeActions.ts`,
+  `components/finance/{OwnershipEditor,SettingsEditor}.tsx`, demo fixtures.
+
+**Notes**
+- ★ **`listOwnership` returns `null` on 403, never an empty list.** `finance_ownership:read` is a
+  narrower grant than the rest of finance - a `finance_staff` clerk is denied outright - so a 403 is
+  the COMMON case here. Folding it to `{edges:[],problems:[]}` would render "this company has no
+  recorded owners", an active false statement about the cap table rather than a missing one.
+- **`problems[]` renders beside the rows, not behind a tab.** A cap table totalling 85% or 140% has
+  to say so where it is read; anywhere else and the common case - glance, believe it - shows a
+  register that looks authoritative and is not.
+- **`STAKE_INCOMPLETE` is a note, `STAKE_EXCEEDS_100` is a problem.** Same shape of data, different
+  treatment: one is ignorance, the other is wrong. A partially-recorded cap table is the normal
+  state of a real one.
+- **Neither form re-validates a server rule.** The 15/16-digit NPWP check and the posted-VAT guard
+  live in the database and their messages surface verbatim. A second copy drifts, and the copy that
+  drifts is the one the user sees.
+- **The settings page shows the fiscal year start read-only WITH the reason.** A field that exists
+  and then fails is worse than one never offered: the field implies permission and the refusal
+  arrives after the user has decided what they want.
+- **Configuration links from the console, not the sidebar.** `nav.ts` renders exactly one Finance
+  row on purpose; two more top-level rows would fight that dedupe.
+- The demo cap table totals **85%**, deliberately, so the incomplete-table copy is reachable in a
+  browser. A demo that adds up perfectly hides the reason the validation exists.
+
 ### finance `0.14.1` - FinanceErrorFilter no longer swallows other modules' database faults (2026-08-25) - PROTOTYPED
 
 **Fixed**

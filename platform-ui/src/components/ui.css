@@ -139,3 +139,31 @@ a.lux-btn { display: inline-flex; align-items: center; text-decoration: none; }
      how a money figure ends up wrapped across two lines and misread. */
   .lux-table { overflow-x: auto; }
 }
+
+/* UI-01c / UI-02b — the finance edit forms. No colour literals: every value is a token, which the
+   tokens.test.ts guard enforces on every component stylesheet in this folder. */
+.fin-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-3);
+  margin-block: var(--space-3);
+}
+.fin-form__field { display: flex; flex-direction: column; gap: var(--space-1); }
+.fin-form__field--wide { grid-column: 1 / -1; }
+.fin-form__field > span {
+  font-size: var(--type-sm);
+  color: var(--text-muted);
+}
+.fin-form__field input,
+.fin-form__field select {
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--text);
+  padding: var(--space-2);
+  font: inherit;
+}
+.fin-form__field input:focus-visible,
+.fin-form__field select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.fin-form__actions { display: flex; gap: var(--space-2); margin-block-start: var(--space-2); }
+.fin-form__error { color: var(--status-blocked-fg); margin-block-start: var(--space-2); }
+.fin-links { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
