@@ -1314,6 +1314,26 @@ const configBase = {
     platformUiInternalUrl: process.env.PLATFORM_UI_INTERNAL_URL ?? "",
     timeoutMs: Number(process.env.REPORT_RENDERER_TIMEOUT_MS ?? 30000),
   },
+  // LMS L5 — the lab runner (`lab-runner/`), the sidecar that executes a learner's submission in a
+  // capped, unprivileged, network-less container and returns a graded result. Same fail-soft shape
+  // as reportRenderer above: url or token unset -> a lab attempt is REFUSED with a clear message
+  // rather than accepted and left pending forever. "Submitted, awaiting the runner" when no runner
+  // exists is how somebody ends up waiting on a service nobody is building, on a path they can
+  // never complete. `token` is the SAME value as the sidecar's own LAB_RUNNER_TOKEN.
+  //
+  // `pollTimeoutMs` must exceed the runner's own wall clock PLUS its queue wait, or the platform
+  // gives up on runs that were about to succeed and reports an error nobody can reproduce.
+  labRunner: {
+    url: process.env.LAB_RUNNER_URL ?? "",
+    token: process.env.LAB_RUNNER_TOKEN ?? "",
+    timeoutMs: Number(process.env.LAB_RUNNER_TIMEOUT_MS ?? 15000),
+    pollIntervalMs: Number(process.env.LAB_RUNNER_POLL_INTERVAL_MS ?? 1500),
+    pollTimeoutMs: Number(process.env.LAB_RUNNER_POLL_TIMEOUT_MS ?? 300000),
+    // An LMS lab endpoint is an obvious way to get free compute on a shared host, so the limit is
+    // per LEARNER and counts errored runs too — a limit that only counted successes is one an
+    // attacker drives by failing.
+    maxRunsPerHour: Number(process.env.LAB_RUNNER_MAX_RUNS_PER_HOUR ?? 30),
+  },
   // Knowledge (D9 RAG) ingestion — the two corpora the store is filled from.
   //
   // PUBLIC tier: our own marketing site, ingested as world-readable chunks so an agent can answer a

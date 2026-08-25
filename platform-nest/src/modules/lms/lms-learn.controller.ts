@@ -9,8 +9,8 @@
 //   two module scopes are declared, and it is called out at the call site so nobody widens the rest
 //   by copy-paste.
 import {
-  BadRequestException, Body, Controller, ConflictException, Get, HttpCode, NotFoundException,
-  Param, Post, Query, Req, UseGuards,
+  BadRequestException, Body, Controller, ConflictException, Get, HttpCode, HttpException,
+  NotFoundException, Param, Post, Query, Req, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -20,6 +20,9 @@ import { authorize, writeActivity } from "../../core/http";
 import { notifyBestEffort } from "../../core/client-notify";
 import { emitEvent } from "../../events/outbox.service";
 import { AuthGuard } from "../../auth/guards";
+import {
+  buildLabRequest, droppedLearnerFiles, labRunnerConfigured, recentLabRunCount, runLab, clampOutput,
+} from "./lab-dispatch";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import { loadUnitAncestors } from "../../core/org-unit-closure";
 import type { Principal } from "../../rbac/principal";
@@ -277,6 +280,162 @@ export class LmsLearnController {
    * submission, and splitting it invites a progress row that says in_progress forever because the
    * client never sent the third call.
    */
+  /**
+   * A lab attempt: dispatch to the runner, wait, record the verdict.
+   *
+   * ⚠ THE GRADE IS THE RUNNER'S, AND THE SPEC IT GRADES AGAINST IS THE CHALLENGE'S. The learner
+   *   supplies files and nothing else. A learner who could supply a `gradingSpec` would pass every
+   *   lab; one who could supply an `image` would be naming a container to run on a host that
+   *   carries other people's production. Both are assembled server-side in lab-dispatch.ts, and
+   *   the runner independently refuses an unknown image key — two locks on the same door.
+   */
+  private async submitLabAttempt(
+    tenantId: string, activityId: string, subjectUserId: string,
+    submission: Record<string, unknown> | undefined,
+  ) {
+    // REFUSE rather than accept-and-await. An attempt left pending against a runner that does not
+    // exist is somebody waiting forever on a path they cannot complete, and it presents as our bug
+    // only much later.
+    if (!labRunnerConfigured()) {
+      throw new ServiceUnavailableException(
+        "the lab runner is not configured for this deployment, so this exercise cannot be graded " +
+        "yet. Your work has NOT been recorded as an attempt — nothing was lost.",
+      );
+    }
+
+    const files = Array.isArray(submission?.files)
+      ? (submission.files as { path: string; content: string }[])
+      : [];
+    if (!files.length || files.some((f) => typeof f?.path !== "string" || typeof f?.content !== "string")) {
+      throw new BadRequestException("submission.files[] is required, as [{ path, content }]");
+    }
+
+    // ── Transaction 1: check, then RESERVE. Short. ──
+    const prep = await withTenants(
+      [tenantId],
+      async (c) => {
+        const a = await c.query<{
+          spec: Record<string, unknown>; max_attempts: number | null; course_id: string;
+        }>(
+          `SELECT a.spec, a.max_attempts, m.course_id
+             FROM lms_activities a JOIN lms_modules m ON m.id = a.module_id WHERE a.id = $1`,
+          [activityId],
+        );
+        const act = a.rows[0];
+        if (!act) throw new NotFoundException("activity not found");
+
+        const prev = await c.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM lms_attempts WHERE subject_user_id = $1 AND activity_id = $2`,
+          [subjectUserId, activityId],
+        );
+        const attemptNo = Number(prev.rows[0].n) + 1;
+        if (act.max_attempts !== null && attemptNo > act.max_attempts) {
+          throw new BadRequestException(`no attempts remaining (limit ${act.max_attempts})`);
+        }
+
+        // The rate limit counts ERRORED runs too: a run that failed still consumed compute on a
+        // shared host, and a limit that counted only successes is one an attacker drives by failing.
+        const recent = await recentLabRunCount(c, subjectUserId, 60);
+        if (recent >= config.labRunner.maxRunsPerHour) {
+          throw new HttpException(
+            `you have run ${recent} labs in the last hour, which is the limit. This exists because ` +
+            `every run executes on a shared machine — wait a little and try again.`,
+            429,
+          );
+        }
+
+        const runId = newId();
+        await c.query(
+          `INSERT INTO lms_lab_runs (id, tenant_id, subject_user_id, activity_id, status)
+           VALUES ($1,$2,$3,$4,'queued')`,
+          [runId, tenantId, subjectUserId, activityId],
+        );
+        return { runId, act, attemptNo };
+      },
+      { modules: ["lms"] },
+    );
+
+    // ── The long call, OUTSIDE any transaction. ──
+    const dropped = droppedLearnerFiles(prep.act.spec, files);
+    const request = buildLabRequest(prep.act.spec, files, activityId);
+    const outcome = await runLab(request);
+
+    // ── Transaction 2: record. Short. ──
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        // An `error` outcome is OURS, not the learner's: the runner was unreachable, its queue was
+        // full, its result expired. NO attempt row is written, so it neither consumes one of a
+        // limited number of attempts nor appears as a failure on their record.
+        if (outcome.status === "error") {
+          await c.query(
+            `UPDATE lms_lab_runs SET status='error', error=$2, finished_at=now(),
+                                     runner_run_id=$3, duration_ms=$4 WHERE id = $1`,
+            [prep.runId, outcome.error ?? "the lab could not be run", outcome.runnerRunId, outcome.durationMs],
+          );
+          throw new ServiceUnavailableException(
+            `${outcome.error ?? "the lab could not be run"}. This is not a mark against your ` +
+            `submission — no attempt was recorded.`,
+          );
+        }
+
+        const passed = outcome.status === "succeeded";
+        const attemptId = newId();
+        // The submission column records file NAMES, not contents: the contents are a learner's work
+        // and can be large, and the platform does not need a second copy of every attempt anybody
+        // has ever made.
+        await c.query(
+          `INSERT INTO lms_attempts (id, tenant_id, subject_user_id, activity_id, attempt_no, score,
+                                     passed, submission, result, submitted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`,
+          [attemptId, tenantId, subjectUserId, activityId, prep.attemptNo, outcome.score, passed,
+           JSON.stringify({ files: files.map((f) => f.path) }),
+           JSON.stringify({
+             mode: "lab", exitCode: outcome.exitCode, timedOut: outcome.timedOut,
+             checks: outcome.checks, artefacts: outcome.artefacts,
+             stdout: clampOutput(outcome.stdout), stderr: clampOutput(outcome.stderr),
+           })],
+        );
+
+        await c.query(
+          `UPDATE lms_lab_runs SET status=$2, score=$3, exit_code=$4, timed_out=$5, stdout=$6,
+                                   stderr=$7, checks=$8, artefacts=$9, attempt_id=$10,
+                                   runner_run_id=$11, duration_ms=$12, finished_at=now()
+            WHERE id = $1`,
+          [prep.runId, outcome.status, outcome.score, outcome.exitCode, outcome.timedOut,
+           outcome.stdout, outcome.stderr, JSON.stringify(outcome.checks),
+           JSON.stringify(outcome.artefacts), attemptId, outcome.runnerRunId, outcome.durationMs],
+        );
+
+        const status = passed ? "passed" : "failed";
+        await c.query(
+          `INSERT INTO lms_progress (id, tenant_id, subject_user_id, course_id, activity_id,
+                                     status, best_score, attempt_count, first_started_at, completed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,1,now(), CASE WHEN $6 = 'passed' THEN now() ELSE NULL END)
+           ON CONFLICT (tenant_id, subject_user_id, activity_id) DO UPDATE SET
+             status = CASE WHEN lms_progress.status = 'passed' THEN 'passed' ELSE EXCLUDED.status END,
+             best_score = GREATEST(COALESCE(lms_progress.best_score, 0), COALESCE(EXCLUDED.best_score, 0)),
+             attempt_count = lms_progress.attempt_count + 1,
+             completed_at = COALESCE(lms_progress.completed_at, EXCLUDED.completed_at),
+             updated_at = now()`,
+          [newId(), tenantId, subjectUserId, prep.act.course_id, activityId, status, outcome.score],
+        );
+
+        return {
+          attemptId, attemptNo: prep.attemptNo, passed, score: outcome.score,
+          exitCode: outcome.exitCode, timedOut: outcome.timedOut,
+          // Per-check verdicts, so a learner is told WHICH assertion failed and what was seen. A
+          // grade with no explanation teaches nothing, which defeats the point of a lab.
+          checks: outcome.checks, artefacts: outcome.artefacts,
+          stdout: outcome.stdout, stderr: outcome.stderr,
+          ...(dropped.length
+            ? { note: `These files are provided by the exercise and were not replaced: ${dropped.join(", ")}` }
+            : {}),
+        };
+      },
+      { modules: ["lms"] },
+    );
+  }
   @Post("activities/:id/attempts")
   @HttpCode(201)
   async submitAttempt(
@@ -291,6 +450,21 @@ export class LmsLearnController {
       { kind: "lms_enrollment", tenantId, module: "lms", ...(isSelf ? { subjectUserId } : {}) },
       "update",
     );
+
+    // ── THE LAB PATH (L5) ────────────────────────────────────────────────────────────────────
+    // Split out BEFORE the transaction below, and that split is the point: dispatching to the
+    // runner is a network call that waits on a queue on another host, and holding a database
+    // transaction open for its duration would tie up a pooled connection for minutes at a time.
+    // Short transactions with the long call BETWEEN them, never one long transaction.
+    const kindRow = await withTenants(
+      [tenantId],
+      (c) => c.query<{ kind: string }>(`SELECT kind FROM lms_activities WHERE id = $1`, [activityId]),
+      { modules: ["lms"] },
+    );
+    if (!kindRow.rows[0]) throw new NotFoundException("activity not found");
+    if (kindRow.rows[0].kind === "lab") {
+      return this.submitLabAttempt(tenantId, activityId, subjectUserId, body?.submission);
+    }
 
     const out = await withTenants(
       [tenantId],

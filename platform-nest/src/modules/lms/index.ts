@@ -57,6 +57,8 @@ export const lmsModule: ModuleContract = {
     "202608241340_iam_lms_l1_permissions.sql", // 2 roles, 12 permissions, bundles
     // L2: companies.is_training + cohorts + the reset allow-list and its append-only ledger.
     "202608241550_lms_l2_general_track_and_training_tenant.sql",
+    // L5b: the platform's record of a dispatch to the lab runner, and the rate-limit index.
+    "202608250950_lms_l5_lab_runs.sql",
   ],
   permissions: [
     { key: "lms.course.read", description: "Browse the learning catalogue" },
