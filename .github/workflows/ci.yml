@@ -104,6 +104,27 @@ jobs:
   # 22.6-minute workflow — see those two files for the measurements.)
   platform-nest:
     runs-on: ubuntu-latest
+    strategy:
+      # fail-fast MUST stay false. The default cancels sibling jobs the moment one fails, which on a
+      # sharded suite means one shard's failure destroys the other three shards' results — the same
+      # "a red step costs you the run's signal" problem the static gates were lifted out for. Every
+      # shard reports independently or the split is a downgrade.
+      fail-fast: false
+      matrix:
+        # SHARDING (2026-08-25). The suite is ~425 files and grows with every feature; this is what
+        # keeps that growth off the wall clock. Each shard runs `vitest --shard=N/4`, so wall clock
+        # is roughly total/4 and the knob to turn as the backend grows is this list, not the tests.
+        #
+        # Vitest assigns files to shards by sorting on a SHA1 of the file path and slicing — so the
+        # split is deterministic (a file always lands in the same shard) but uncorrelated with cost.
+        # That matters here because the suite is heavy-tailed: 72 files carry 65% of the runtime, and
+        # a path-alphabetical split would have stacked whole directories of slow DB suites onto one
+        # runner. Scattering them is what makes four roughly-even shards.
+        #
+        # Each shard is a separate runner with its own Postgres, Cerbos and Redis, so they cannot
+        # contend for a database — no coordination between them is needed or wanted.
+        shard: [1, 2, 3, 4]
+    name: platform-nest (shard ${{ matrix.shard }}/4)
     services:
       # Postgres is NOT a service container — see the "Start Postgres" step below. It needs server
       # command-line flags (`-c max_connections=...`), and `services:` has no way to pass any:
@@ -157,11 +178,19 @@ jobs:
           done
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      # `--` passes the flag through npm to vitest. Only this shard's slice of the suite runs here;
+      # the four shards together cover every file exactly once (asserted by scripts/check-shards.mjs,
+      # which nest-static-gates runs — a silently dropped file would otherwise look like a faster,
+      # greener pipeline).
+      - run: npm test -- --shard=${{ matrix.shard }}/4
         env:
           DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/postgres
           CERBOS_URL: http://localhost:3592
           REDIS_URL: redis://localhost:6379
+          # Per-shard prefix. Redundant while each shard owns its runner and Postgres, but this is
+          # the value that keeps two shards from dropping each other's databases if they are ever
+          # pointed at one shared server (a local repro, or a future consolidation).
+          TEST_DB_PREFIX: shard${{ matrix.shard }}
           # REDIS_URL_TEST is the name every suite in the repo actually reads (18 files:
           # events/relay + consumer, collab, hr, service-assignments, the reports PDF-export
           # and TR-29 suites, ...). REDIS_URL alone is read by nothing under test, so the
@@ -222,6 +251,11 @@ jobs:
       # proprietary platform into the AGPL derivative-work conversation the whole design exists to
       # stay out of. Licensing boundary first, architecture second — not a reviewer's spot-check.
       - run: npm run lint:postiz-deps
+      # Sharding's failure mode is a pipeline that gets FASTER and STAYS GREEN while testing less:
+      # if the `shard:` matrix and the `--shard=N/4` denominator drift apart, part of the suite runs
+      # nowhere and nothing goes red. This is the gate for that. Pure parsing of ci.yml — no vitest,
+      # no database. See scripts/check-shards.mjs for what it can and cannot prove.
+      - run: npm run check:shards
       # IAM-07b — promotes the wave-3 "Cerbos alignment audit" (previously a one-off manual run:
       # `cerbos compile` + a by-hand diff of the policy matrix against permission-catalog.json) into
       # a permanent, named, CI-enforced gate. Both files are STATIC (no DB, no live Cerbos PDP —

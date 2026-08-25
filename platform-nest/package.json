@@ -46,6 +46,7 @@
     "lint:migration-rls": "node scripts/lint-migration-rls.mjs",
     "lint:migration-names": "node scripts/lint-migration-names.mjs",
     "lint:postiz-deps": "node scripts/lint-postiz-deps.mjs",
+  "check:shards": "node scripts/check-shards.mjs",
     "gen:role-bundles": "node scripts/generate-role-bundles.mjs",
     "gen:scope-constrained-roles": "node scripts/generate-scope-constrained-roles.mjs"
   },
