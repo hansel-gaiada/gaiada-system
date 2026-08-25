@@ -177,7 +177,12 @@ jobs:
             curl -fsS http://localhost:3592/_cerbos/health && break || sleep 1
           done
       - run: npm ci
-      - run: npm run typecheck
+      # NOTE: `npm run typecheck` is NOT here — it runs once in nest-static-gates. tsc is static
+      # analysis over the whole project, identical in all four shards, so running it here compiled
+      # the same code four times on four runners and, worse, reported ONE type error as FOUR red
+      # jobs: on 2026-08-25 a single TS2322 in finance-ownership.test.ts failed every shard and
+      # skipped every `npm test`, which reads like the suite broke rather than one line not
+      # compiling.
       # `--` passes the flag through npm to vitest. Only this shard's slice of the suite runs here;
       # the four shards together cover every file exactly once (asserted by scripts/check-shards.mjs,
       # which nest-static-gates runs — a silently dropped file would otherwise look like a faster,
@@ -226,6 +231,10 @@ jobs:
           cache: npm
           cache-dependency-path: platform-nest/package-lock.json
       - run: npm ci
+      # Moved here from the platform-nest job (2026-08-25). It belongs with the static gates: no
+      # database, no Cerbos, and one authoritative result instead of four identical ones. Kept
+      # FIRST because a project that does not compile makes every gate below it noise.
+      - run: npm run typecheck
       # A1: grep/AST-lite guard on the withTenants() tenant-scoping choke-point — fails if any
       # file outside the sanctioned reconciler/allowlist passes a multi-tenant or computed
       # (non-single-element) tenant array. See scripts/lint-withtenants.mjs for the rationale.
