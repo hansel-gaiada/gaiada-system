@@ -153,6 +153,24 @@ describe("buildRunArgs — the flags that are the isolation", () => {
   it("always removes the container", async () => {
     expect(await base()).toContain("--rm");
   });
+
+  it("bakes a companion target's alias into /etc/hosts, never relies on DNS", async () => {
+    const { buildRunArgs, resolveLimits } = await load();
+    const args = buildRunArgs({
+      image: "node:20-alpine", workdir: "/tmp/src", command: ["sh"],
+      limits: resolveLimits({ network: "isolated" }), networkName: "lab-net-x",
+      containerName: "lab-x", addHost: { alias: "target", ip: "172.30.0.2" },
+    });
+    // Found by driving L6a for real: gVisor's runsc does not proxy Docker's embedded DNS resolver
+    // (127.0.0.11) on an --internal bridge network, so the attacker's alias lookup for "target"
+    // must not depend on it. --add-host writes the mapping straight into /etc/hosts.
+    expect(pair(args, "--add-host")).toBe("target:172.30.0.2");
+  });
+
+  it("omits --add-host entirely when there is no companion target", async () => {
+    const args = await base();
+    expect(args).not.toContain("--add-host");
+  });
 });
 
 describe("buildNetworkArgs", () => {
@@ -164,5 +182,53 @@ describe("buildNetworkArgs", () => {
     expect(args).toContain("--internal");
     expect(args).toContain("bridge");
     expect(args).toContain("lab-net-1");
+  });
+});
+
+describe("buildTargetArgs — the Cyber lab's disposable target", () => {
+  const build = async () => {
+    const { buildTargetArgs } = await load();
+    return buildTargetArgs({
+      image: "vuln:1", networkName: "lab-net-x", containerName: "lab-x-target",
+      alias: "target", memoryMb: 256,
+    });
+  };
+  const pair = (args: string[], flag: string) => {
+    const i = args.indexOf(flag);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+
+  it("is as locked down as the attacker — 'meant to be vulnerable' is about its APP, not the host", async () => {
+    const args = await build();
+    // The learner is about to get code execution inside this container. That is the exercise, and
+    // it is exactly why it gets no capabilities and no writable rootfs.
+    expect(pair(args, "--cap-drop")).toBe("ALL");
+    expect(args).toContain("no-new-privileges");
+    expect(args).toContain("--read-only");
+    expect(pair(args, "--memory")).toBe("256m");
+    expect(pair(args, "--memory-swap")).toBe("256m");
+    expect(pair(args, "--pids-limit")).toBe("64");
+  });
+
+  it("NEVER publishes a port", async () => {
+    const args = await build();
+    // A published vulnerable service on a box carrying seven other projects is an actual
+    // vulnerability rather than a lab.
+    expect(args).not.toContain("-p");
+    expect(args).not.toContain("--publish");
+    expect(args.join(" ")).not.toMatch(/\d+:\d+/);
+  });
+
+  it("joins the per-run internal network under a resolvable alias, and nothing else", async () => {
+    const args = await build();
+    expect(pair(args, "--network")).toBe("lab-net-x");
+    expect(pair(args, "--network-alias")).toBe("target");
+    expect(args).not.toContain("host");
+  });
+
+  it("is detached and self-removing", async () => {
+    const args = await build();
+    expect(args).toContain("-d");
+    expect(args).toContain("--rm");
   });
 });

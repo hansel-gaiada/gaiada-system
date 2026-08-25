@@ -10,10 +10,24 @@ import { tmpdir } from "node:os";
 import { join, dirname, normalize } from "node:path";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
-import { buildRunArgs, buildNetworkArgs, resolveImage, resolveLimits, type Limits } from "./sandbox.js";
+import {
+  buildRunArgs, buildNetworkArgs, buildTargetArgs, resolveImage, resolveLimits, type Limits,
+} from "./sandbox.js";
 import { grade, type Grade, type GradingSpec, type RunOutcome } from "./grade.js";
 
 export interface SubmittedFile { path: string; content: string }
+
+/** A companion service the attacker container talks to. Cyber labs only (L6). */
+export interface TargetSpec {
+  /** A KEY into the allow-list, exactly like the attacker's image. Never a reference. */
+  image: string;
+  /** Hostname the attacker resolves it by. Defaults to "target". */
+  alias?: string;
+  /** Seconds to wait for it to come up before running the attacker. */
+  readySec?: number;
+  env?: Record<string, string>;
+  memoryMb?: number;
+}
 
 export interface RunRequest {
   challengeId: string;
@@ -22,6 +36,8 @@ export interface RunRequest {
   command?: string[];
   limits?: Limits;
   gradingSpec: GradingSpec;
+  /** Present only for a Cyber lab. Forces `network: "isolated"` — see runLab. */
+  target?: TargetSpec;
 }
 
 export interface RunResult {
@@ -159,6 +175,9 @@ export async function runLab(req: RunRequest): Promise<RunResult> {
   const containerName = `lab-${runId.slice(0, 12)}`;
   let workdir: string | null = null;
   let network: string | null = null;
+  let targetName: string | null = null;
+  let targetAlias: string | null = null;
+  let targetIp: string | null = null;
 
   const finish = (
     partial: Partial<RunResult> & Pick<RunResult, "status">,
@@ -201,12 +220,75 @@ export async function runLab(req: RunRequest): Promise<RunResult> {
       await chmod(dest, 0o644);
     }
 
-    if (limits.network === "isolated") {
+    // A target IMPLIES an isolated network. A Cyber lab whose attacker had no network would run
+    // against nothing and grade as "you did not get the flag" — a confusing way to report a
+    // misconfigured challenge, so the spec cannot express that combination at all.
+    const wantsNetwork = limits.network === "isolated" || !!req.target;
+    if (wantsNetwork) {
       network = `lab-net-${runId.slice(0, 12)}`;
       const net = await exec("docker", buildNetworkArgs(network), 20_000);
       if (net.code !== 0) {
         network = null;
         return finish({ status: "error", error: `could not create the isolated network: ${net.stderr.trim()}` });
+      }
+      limits.network = "isolated";
+    }
+
+    if (req.target) {
+      // The target's image goes through the SAME allow-list as the attacker's. A caller-supplied
+      // target image would be "run any container on this host" wearing a lab's clothes.
+      const targetImage = resolveImage(req.target.image);
+      targetName = `${containerName}-target`;
+      const alias = /^[a-z0-9][a-z0-9-]*$/.test(req.target.alias ?? "") ? req.target.alias! : "target";
+      targetAlias = alias;
+      const started = await exec("docker", buildTargetArgs({
+        image: targetImage,
+        networkName: network!,
+        containerName: targetName,
+        alias,
+        memoryMb: Math.min(req.target.memoryMb ?? 256, config.maxMemoryMb),
+        env: req.target.env,
+      }), 120_000);
+      if (started.code !== 0) {
+        const err = started.stderr.trim();
+        targetName = null;
+        return finish({ status: "error", error: `could not start the lab target: ${err}` });
+      }
+      // Give it a moment to bind. Crude on purpose: a readiness PROBE would need to reach into the
+      // internal network from here, and the whole point of that network is that nothing outside it
+      // can. A fixed wait the challenge author sets is honest about what we can actually observe.
+      const readyMs = Math.min(Math.max(req.target.readySec ?? 3, 1), 30) * 1000;
+      await new Promise((r) => setTimeout(r, readyMs));
+      // If it died on startup, say so NOW rather than letting the attacker fail against nothing and
+      // reporting that as the learner's result.
+      const alive = await exec("docker", ["inspect", "-f", "{{.State.Running}}", targetName], 15_000);
+      if (alive.stdout.trim() !== "true") {
+        const logs = await exec("docker", ["logs", "--tail", "20", targetName], 15_000);
+        return finish({
+          status: "error",
+          error: `the lab target exited before the exercise started: ${logs.stderr.trim() || logs.stdout.trim() || "no output"}`.slice(0, 500),
+        });
+      }
+      // ⚠ The alias is NOT resolved by DNS at attack time. Driving this end-to-end on SumoPod
+      // (2026-08-25) found that gVisor's `runsc` netstack does not proxy Docker's embedded DNS
+      // resolver (127.0.0.11) on a `--internal` bridge network — `getaddrinfo EAI_AGAIN` from the
+      // attacker container, even though the identical network and target resolve fine under `runc`,
+      // and the target's raw IP is reachable under `runsc` too. So this reads the IP Docker actually
+      // assigned and bakes it into the attacker's own /etc/hosts (see buildRunArgs' `addHost`),
+      // which needs no runtime DNS at all. `{{range .NetworkSettings.Networks}}` rather than
+      // `.NetworkSettings.Networks.<name>` because the network's name contains hyphens, which the Go
+      // template parser (used by `docker inspect -f`) rejects as bare dotted-path syntax.
+      const ipRes = await exec(
+        "docker",
+        ["inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", targetName],
+        15_000,
+      );
+      targetIp = ipRes.stdout.trim();
+      if (ipRes.code !== 0 || !targetIp) {
+        return finish({
+          status: "error",
+          error: `could not resolve the lab target's address: ${ipRes.stderr.trim() || "no address reported"}`,
+        });
       }
     }
 
@@ -216,6 +298,7 @@ export async function runLab(req: RunRequest): Promise<RunResult> {
 
     const args = buildRunArgs({
       image, workdir, command, limits, networkName: network ?? undefined, containerName,
+      addHost: targetAlias && targetIp ? { alias: targetAlias, ip: targetIp } : undefined,
     });
     // +5s so the docker CLI's own teardown is inside our wall clock rather than racing it.
     const res = await exec("docker", args, limits.timeoutSec * 1000 + 5_000);
@@ -242,6 +325,9 @@ export async function runLab(req: RunRequest): Promise<RunResult> {
   } finally {
     // Best-effort, and each step independent: one failure must not skip the others.
     await exec("docker", ["rm", "-f", containerName], 15_000).catch(() => undefined);
+    // The TARGET before the network: a network cannot be removed while a container is attached,
+    // and a leaked vulnerable container on a shared host is the worst possible thing to leave behind.
+    if (targetName) await exec("docker", ["rm", "-f", targetName], 20_000).catch(() => undefined);
     if (network) await exec("docker", ["network", "rm", network], 15_000).catch(() => undefined);
     if (workdir) await rm(workdir, { recursive: true, force: true }).catch(() => undefined);
   }

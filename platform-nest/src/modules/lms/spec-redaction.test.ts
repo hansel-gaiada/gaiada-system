@@ -51,6 +51,22 @@ describe("redactSpec", () => {
     }
   });
 
+  it("strips the WHOLE gradingSpec — a learner must not read the grader", () => {
+    // Once labs exist this is not a nicety. A Cyber lab's pass condition is "did you obtain the
+    // flag", so the flag lives in a stdoutMatches pattern; leaving gradingSpec readable would hand
+    // out the exam with the questions.
+    const spec = {
+      brief: "Break the target and recover the flag.",
+      gradingSpec: { checks: [{ kind: "stdoutMatches", pattern: "FLAG\{[a-f0-9]+\}" }] },
+    };
+    const { spec: out, redacted } = redactSpec(spec);
+    expect(redacted).toBe(true);
+    expect(out).not.toHaveProperty("gradingSpec");
+    expect(JSON.stringify(out)).not.toContain("FLAG");
+    // The brief survives — it is what the learner is supposed to read.
+    expect((out as { brief: string }).brief).toContain("Break the target");
+  });
+
   it("leaves a rubric alone — it tells the learner what good work looks like", () => {
     const spec = { rubric: ["clear hierarchy", "consistent spacing"], answer: "x" };
     const { spec: out } = redactSpec(spec);

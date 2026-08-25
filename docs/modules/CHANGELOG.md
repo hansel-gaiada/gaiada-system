@@ -282,6 +282,36 @@ The surface a person can actually reach. Until this, the whole program was schem
 - **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
   money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
 
+### lms `0.7.0` + lab-runner `0.2.1` — L6 and L7 (2026-08-25) — DEV-VERIFIED
+
+**Added**
+- L6a: companion-target support in the runner (`buildTargetArgs`), plus the deliberately
+  vulnerable `lab-runner/targets/webapp-cmdi` image.
+- L6b: a DevOps lab graded on real `nginx -t` output. L6c: a Cyber lab against the target.
+- L7: `lms-creative-social-curriculum.ts`, `lms-seo-gm-curriculum.ts`, `lms-hr-it-curriculum.ts` —
+  20 courses, 12 paths, 64 activities across six departments.
+
+**Fixed**
+- **gVisor does not proxy Docker's embedded DNS on `--internal` networks**, so an attacker could
+  never resolve its target by alias. Resolved via `--add-host` with the target's real IP.
+- **`buildLabRequest` dropped `target`** — the Cyber lab would have been gradeable in isolation
+  and dead on arrival for a learner.
+- **The Cyber flag was hardcoded in the seed and the test.** Caught before push. Now read from
+  `LMS_CYBER_FLAG`, refused if unset, and asserted by shape rather than value — the first version
+  of that assertion printed the flag on failure, which is the same leak by a slower route.
+- **`spec-redaction.ts` now strips the WHOLE `gradingSpec`**, not just `answer`. A Cyber lab's
+  pass condition is "did you get the flag", so the flag lives in a `stdoutMatches` pattern.
+
+**Notes**
+- The target is as hardened as the attacker and never publishes a port.
+- No DevOps/Cyber lab existed before the runner could grade them: a required activity nothing can
+  pass makes its whole path permanently uncompletable.
+- Suites were re-run SERIALLY. Four agents against one test Postgres produced a `57P01` failure
+  that was contention, not a defect — a green or red number gathered under that load is not
+  evidence either way.
+
+Driven: 95/95 across 9 suites. Runner 31/31.
+
 ### lms `0.5.0` + lab-runner `0.1.1` — L5 complete: labs run on a real host (2026-08-25) — DEV-VERIFIED
 
 **Added**

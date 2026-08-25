@@ -29,6 +29,12 @@
  * be read after an attempt, and hiding it would make a wrong answer un-learnable.
  */
 export const GRADING_KEY_FIELDS = [
+  // The WHOLE grading spec. A learner has no business reading the grader, and once labs exist this
+  // is not a nicety: a Cyber lab's pass condition is "did you obtain the flag", so the flag itself
+  // lives in a `stdoutMatches` pattern. Stripping only `answer` would have left the flag readable
+  // in the course JSON — the exam handed out with the questions, one wave later than the quiz
+  // version of the same mistake.
+  "gradingSpec",
   "answer",
   "answers",
   "answerKey",

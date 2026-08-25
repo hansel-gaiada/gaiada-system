@@ -81,6 +81,16 @@ function parseRunRequest(raw: unknown): RunRequest {
   // A spec with no checks would score zero for everybody (grade.ts refuses to treat "nothing to
   // check" as "passed"), which is correct but useless — so it is refused at the door instead.
   if (spec.checks.length === 0) throw new BadRequest("gradingSpec.checks[] is empty — nothing would be graded");
+  if (b.target !== undefined) {
+    if (!b.target || typeof b.target.image !== "string" || !b.target.image) {
+      throw new BadRequest("target.image is required when a target is given — a KEY into the allow-list");
+    }
+    // Validated here as well as at resolveImage: a target image is the SAME "run a container on
+    // this host" capability as the attacker's, and it should be refused at the door too.
+    if (b.target.alias !== undefined && !/^[a-z0-9][a-z0-9-]*$/.test(b.target.alias)) {
+      throw new BadRequest("target.alias must be a lowercase hostname");
+    }
+  }
   return b as RunRequest;
 }
 

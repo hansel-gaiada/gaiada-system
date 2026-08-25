@@ -51,8 +51,8 @@ versions below; the running build reports it at `GET /health`.
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
-| lms | `0.5.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
-| lab-runner | `0.1.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
+| lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
+| lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
 | finance | `0.14.1` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
@@ -1233,7 +1233,7 @@ rather than quietly deleted.
 
 ---
 
-## lms — Learning · Certification · `0.5.1` · DEV-VERIFIED
+## lms — Learning · Certification · `0.7.0` · DEV-VERIFIED
 
 **Design:** [`../blueprints/lms-foundation.md`](../blueprints/lms-foundation.md).
 
@@ -1289,6 +1289,44 @@ once (`{ modules: ["lms", "hr"] }`, flagged in `src/modules/lms/index.ts`).
   `lms_cohorts` / `lms_cohort_members`, the `lms_training_reset_tables` allow-list and the
   append-only `lms_training_resets` ledger. `lms:reset-training` is dry-run by default and needs
   two flags to execute.
+
+### L6 + L7 (2026-08-25) — every discipline can now be graded, and every department has material
+
+**L6 — the two disciplines that needed new runner capability.**
+
+- **DevOps is ARTEFACT-GRADED.** The learner writes an nginx config; the runner runs the real
+  `nginx -t` and grades its own stderr and exit code. Not a simulation of the tool — the tool.
+- **Cyber attacks a DISPOSABLE TARGET.** A deliberately vulnerable container
+  (`lab-runner/targets/webapp-cmdi`, command injection) on a per-run internal-only bridge with the
+  learner's attacker container, both destroyed after. The target is as locked down as the attacker:
+  non-root, all capabilities dropped, read-only rootfs, **never a published port**. "Meant to be
+  vulnerable" describes its application logic, not its host privileges — the learner is about to
+  get code execution inside it, which is the point.
+- **gVisor does not proxy Docker's embedded DNS on an `--internal` network.** A container could
+  never resolve its target by alias (`getaddrinfo EAI_AGAIN`). The runner now resolves the target's
+  IP and writes it into the attacker's `/etc/hosts`, so no runtime DNS is involved. Found by
+  driving it on the real host; the same setup under `runc` resolves fine, which is what identified
+  it as a gVisor interaction rather than a routing mistake.
+- **`buildLabRequest` never forwarded `target`.** The Cyber lab would have passed every test
+  written against the seed file and been dead on arrival for a real learner.
+
+**L7 — the remaining six departments.** Creatives · Social Media · SEO · GM · HR · IT.
+20 courses, 12 paths, 64 activities, 77 assessed questions, written in parallel and cross-checked
+as one set: across all five seed files (142 questions, four authors) there are zero out-of-range
+answers, zero duplicate question ids, zero `lab` activities and **zero course-key collisions** —
+the last being the one that would have had one department's material silently shadow another's.
+
+**⚠ THE CYBER FLAG IS NOT IN THIS REPOSITORY.** It is read from `LMS_CYBER_FLAG` at seed time and
+baked into the target image at build time; the seed REFUSES if it is unset. It shipped hardcoded
+in a local commit and was caught before push: the Cyber lab is taken by people who have repo
+access, so a flag in the tree is the answer key handed to the candidates, and it defeats
+`spec-redaction.ts` — which strips `gradingSpec` from learner reads for exactly this reason.
+Rotated three times (a commit, then a failing assertion that printed it); the live value was
+generated on SumoPod, is stored there at 0600, and has never left that host.
+
+Verified on the deployed runner: DevOps reference 100 / starter 0 · Cyber reference 100 /
+starter 20. Both directions matter — a lab whose reference fails teaches that correct work fails,
+and a lab whose starter passes teaches nothing.
 
 ### LIVE at `alpha-01.071.0161a` (2026-08-25)
 

@@ -1,6 +1,6 @@
 {
   "name": "gaiada-lab-runner",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Gaiada LMS lab runner (LMS L5) — executes a learner's submission in a capped, unprivileged, network-less container and returns a graded result. No ERP network path, no identity, no database.",
