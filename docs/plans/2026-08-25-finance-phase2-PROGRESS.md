@@ -19,12 +19,12 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
 | S · Seed live finance | 6 | 3 | 0 | 0 | **3** |
-| F8 · Fixed assets + depreciation | 14 | 6 | 0 | **8** | 0 |
+| F8 · Fixed assets + depreciation | 14 | 2 | 0 | **12** | 0 |
 | F9 · Consolidation | 12 | 12 | 0 | 0 | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
-| **Total** | **63** | **52** | **0** | **8** | **3** |
+| **Total** | **63** | **48** | **0** | **12** | **3** |
 
 ---
 
@@ -147,13 +147,13 @@ Two sets of numbers ⇒ a **temporary difference** ⇒ **deferred tax** (PSAK 46
 | F8-04 | Schedule generator (book + tax) | **PROTOTYPED** | `finance_asset_depreciation_schedule()`. DERIVED, never stored — PSAK 16 requires annual review of life and residual, so revision is the normal case and a stored schedule goes stale silently |
 | F8-05 | Monthly depreciation RUN | **PROTOTYPED** | `finance_run_depreciation()` (202608251130). ONE aggregated journal per period, not one per asset. ★ **Tax is recorded on the line but NEVER posted** — it belongs on a tax computation, not in the statements |
 | F8-06 | Idempotent run | **PROTOTYPED** | `ux_finance_dep_runs_period` — one run per period as a UNIQUE INDEX. The only form of idempotency that survives a retried job or two concurrent operators |
-| F8-07 | Deferred tax from the book/tax temporary difference (PSAK 46) | PLANNED | gated on B1 |
+| F8-07 | Deferred tax (PSAK 46) | **PROTOTYPED** | `finance_deferred_tax_position()` + `finance_post_deferred_tax()` (202608251230). ★ The posting **adjusts to a target**, it does not post the computed figure — posting it each period accumulates, and by year three the sheet carries 3x the real balance while every entry looks correct. Rate is a PARAMETER, not a constant |
 | F8-08 | Additions (capitalisation) | **PROTOTYPED** | `finance_capitalise_asset()` posts DR asset / CR funding via `p_subledger := 'fixed_assets'`, the only thing permitted to touch the `1210` control account. Double-capitalisation REFUSED, not silently ignored. Transfers + revaluation still PLANNED |
-| F8-09 | Disposals: derecognition + gain/loss on sale | PLANNED | must reverse accumulated depreciation, not just credit cost |
-| F8-10 | Impairment (PSAK 48) — at minimum a controlled manual write-down | PLANNED | |
+| F8-09 | Disposals | **PROTOTYPED** | `finance_dispose_asset()`. Derecognises **both** cost and accumulated depreciation — crediting cost alone strands accum in `1220` and the sheet eventually shows negative net fixed assets. Gain/loss to `7400`, sign carrying the meaning |
+| F8-10 | Impairment (PSAK 48) | **PROTOTYPED** | `finance_impair_asset()`, booked against accumulated depreciation so original cost stays visible. Refused above carrying amount — that input is wrong, not an asset worth negative money |
 | F8-11 | CIP / assets under construction → capitalisation on in-service | PLANNED | depreciation must NOT start before the in-service date |
 | F8-12 | Reconcile register ⇄ GL | **PROTOTYPED** | `finance_fa_reconcile()`. An uncapitalised asset is NAMED, not netted into a total. Pinned by a test that drives the check RED — a tie-out that cannot fail is not a tie-out |
-| F8-13 | Close interlock: unrun depreciation is a close BLOCKER | PLANNED | extends `finance_period_close_readiness` |
+| F8-13 | Close interlock | **PROTOTYPED** | `finance_fa_close_blockers()`. Unrun depreciation overstates profit and a close is terminal, so it BLOCKS. Not a blocker when there is nothing to depreciate |
 | F8-14 | Fixed-asset note / movement schedule for the statements | PLANNED | opening, additions, disposals, depreciation, closing |
 
 ### F9 · Consolidation
@@ -314,3 +314,18 @@ Owner: ownership and PKP must both be editable by a person, not only by a seed.
     concurrent sessions).
   - The LMS L5b migration referenced earlier was fixed by its own session before I touched it; the
     full chain now applies from this checkout.
+
+- **2026-08-25** — **F8c landed** (migration `202608251230`, 10 tests green). Disposal, impairment,
+  deferred tax and the close interlock. F8 is now 12 of 14; only transfers/revaluation (part of
+  F8-08) and the movement schedule (F8-14) remain.
+  - ★ **The deferred-tax posting adjusts to a TARGET.** Posting the computed figure each period is
+    the obvious implementation and it accumulates — by year three the balance sheet carries three
+    times the real balance while every individual entry looks correct. Pinned by a test that runs
+    two periods and asserts the BALANCE equals the second target, not the sum.
+  - **Book value from what was POSTED, tax value from the SCHEDULE.** The asymmetry is deliberate:
+    an asset depreciates in the books only when a run charged it, while tax depreciation is never
+    posted and the schedule is its only record. Using the schedule for both would report book
+    values for depreciation the GL never received.
+  - Answered the other session: their report of a broken `202608251030` was correct at the time and
+    is now stale. Fixed (`SELECT *` returned four columns against three declared), committed, and
+    **applied on the live database** — which is stronger evidence than a local run.
