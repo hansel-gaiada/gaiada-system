@@ -29,7 +29,9 @@ describe.skipIf(!TEST_URL)("Finance ownership + settings BFF", () => {
   const get = (path: string, who: string) =>
     app.inject({ method: "GET", url: `/api/${tenant}${path}`, headers: asUser(who) });
   const post = (path: string, who: string, payload: unknown) =>
-    app.inject({ method: "POST", url: `/api/${tenant}${path}`, headers: asUser(who), payload });
+    // The spread rather than a bare `payload`: Fastify's InjectPayload does not accept `unknown`,
+    // and this line broke every platform-nest CI shard. Same shape lms-l1-acceptance.test.ts uses.
+    app.inject({ method: "POST", url: `/api/${tenant}${path}`, headers: asUser(who), ...(payload ? { payload } : {}) });
 
   beforeAll(async () => {
     await initTestDb();
