@@ -15,7 +15,13 @@ import { withTenants } from "../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../testing/setup";
 import { createCompany, createUser, addMembership } from "../testing/fixtures";
 import { writeActivity } from "./http";
-import { runWithRequestContext, setRequestVia, currentVia } from "./request-context";
+import {
+  runWithRequestContext,
+  setRequestVia,
+  currentVia,
+  setRequestApproval,
+  currentApproval,
+} from "./request-context";
 
 describe("request context (no DB)", () => {
   it("currentVia is undefined outside a request scope", () => {
@@ -81,8 +87,15 @@ describe.skipIf(!TEST_URL)("writeActivity stamps the co-author", () => {
   const rowsFor = async (verb: string) =>
     (
       await withTenants([T], (c) =>
-        c.query<{ actor_id: string | null; metadata: Record<string, unknown> }>(
-          `SELECT actor_id, metadata FROM activities WHERE tenant_id = $1 AND verb = $2`,
+        c.query<{
+          actor_id: string | null;
+          metadata: Record<string, unknown>;
+          approved_by: string | null;
+          approval_channel: string | null;
+          executed_by: string | null;
+        }>(
+          `SELECT actor_id, metadata, approved_by, approval_channel, executed_by
+             FROM activities WHERE tenant_id = $1 AND verb = $2`,
           [T, verb],
         ),
       )
@@ -102,6 +115,57 @@ describe.skipIf(!TEST_URL)("writeActivity stamps the co-author", () => {
       externalId: "628@c.us",
       agent: "agent:task-filer",
     });
+  });
+
+  // ── APPROVAL ATTRIBUTION (migration 202608261100) ──────────────────────────────────────────────
+  it("an APPROVAL is recorded as a THIRD role, never as the actor", async () => {
+    // The defect this prevents: recording "the boss approved it" by putting the boss in actor_id,
+    // which then claims he PERFORMED the action. Ask "what did he actually DO last month?" and a
+    // delegation-shaped record hands back everything he merely clicked approve on.
+    await runWithRequestContext(async () => {
+      setRequestVia({ provider: "hermes", externalId: "pantheon", agent: "agent:pantheon" });
+      setRequestApproval({ approvedBy: human, channel: "discord", executedBy: "dept-webdev" });
+      await writeActivity(T, null, "attrib.approved", "employee", human);
+    });
+    const rows = await rowsFor("attrib.approved");
+    expect(rows).toHaveLength(1);
+    // The actor is NOT the approver. That separation is the entire point of the migration.
+    expect(rows[0].actor_id).toBeNull();
+    expect(rows[0].approved_by).toBe(human);
+    expect(rows[0].approval_channel).toBe("discord");
+    // And the seat that actually held the tool is a fourth, separate fact.
+    expect(rows[0].executed_by).toBe("dept-webdev");
+  });
+
+  it("no approval required means NULL columns, and that is a real answer", async () => {
+    // NULL here means "none was required" -- the ordinary case -- not "we failed to record one".
+    await runWithRequestContext(async () => {
+      setRequestVia({ provider: "platform", externalId: "kc-1" });
+      await writeActivity(T, human, "attrib.unapproved", "employee", human);
+    });
+    const rows = await rowsFor("attrib.unapproved");
+    expect(rows[0].approved_by).toBeNull();
+    expect(rows[0].approval_channel).toBeNull();
+  });
+
+  it("setRequestApproval outside a scope is a NO-OP, like setRequestVia", () => {
+    // Same fail-silent contract: an attribution mechanism must never be able to break a write.
+    expect(() => setRequestApproval({ approvedBy: "u", channel: "erp" })).not.toThrow();
+    expect(currentApproval()).toBeUndefined();
+  });
+
+  it("the DB refuses a half-recorded approval (an approver with no channel)", async () => {
+    // Enforced in the schema, not here. Without the CHECK, "which approvals arrived via Discord in
+    // the last 30 days?" would have no answer but "all of them" after a channel compromise.
+    await expect(
+      withTenants([T], (c) =>
+        c.query(
+          `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, origin_site, approved_by)
+           VALUES (gen_random_uuid(), $1, NULL, 'attrib.bad', 'employee', 'test', $2)`,
+          [T, human],
+        ),
+      ),
+    ).rejects.toThrow();
   });
 
   it("a HUMAN-driven request records the channel with NO agent key", async () => {

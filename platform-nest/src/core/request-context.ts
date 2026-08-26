@@ -37,8 +37,23 @@ export interface RequestVia {
   agent?: string;
 }
 
+/** Who AUTHORISED this action, and where they did it. Distinct from `via` in kind, not degree:
+ *  `via` says which agent DROVE the call (delegation); this says which human PERMITTED it
+ *  (approval). Recording an approval as a co-author would claim the approver performed the action.
+ *  See migration 202608261100. */
+export interface RequestApproval {
+  /** users.id of the approver. */
+  approvedBy: string;
+  /** erp | discord | wa | telegram | api. Constrained in the DB; a channel invented here is a
+   *  channel no query will find, and the INSERT will be rejected rather than silently stored. */
+  channel: string;
+  /** The seat that actually held the tool, when the actor did not. Pantheon proposes; a seat runs. */
+  executedBy?: string;
+}
+
 interface RequestStore {
   via?: RequestVia;
+  approval?: RequestApproval;
 }
 
 const als = new AsyncLocalStorage<RequestStore>();
@@ -54,6 +69,24 @@ export function runWithRequestContext<T>(fn: () => T, initial: RequestStore = {}
 export function setRequestVia(via: RequestVia): void {
   const store = als.getStore();
   if (store) store.via = via;
+}
+
+/**
+ * Record the APPROVAL behind the current request. Called at the point a suspended action is
+ * resolved and re-driven, not at the point it was requested — the approval is a fact about THIS
+ * execution.
+ *
+ * Same fail-silent contract as `setRequestVia`: no store ⇒ no-op ⇒ the row is written exactly as it
+ * would have been. An attribution mechanism must never be able to break a write.
+ */
+export function setRequestApproval(approval: RequestApproval): void {
+  const store = als.getStore();
+  if (store) store.approval = approval;
+}
+
+/** The approval behind the current request, or undefined when none was required. */
+export function currentApproval(): RequestApproval | undefined {
+  return als.getStore()?.approval;
 }
 
 /** The current request's channel, or undefined. */

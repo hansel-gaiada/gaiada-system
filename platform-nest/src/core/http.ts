@@ -5,7 +5,7 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
-import { currentVia } from "./request-context";
+import { currentVia, currentApproval } from "./request-context";
 import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
@@ -137,11 +137,22 @@ export async function writeActivity(
 ): Promise<void> {
   const via = currentVia();
   const withVia = via && metadata.via === undefined ? { ...metadata, via } : metadata;
+  // The APPROVAL behind this write, if one was required (202608261100). Ambient for the same reason
+  // `via` is: this function has 263 call sites, and threading a parameter through them would make
+  // attribution OPT-IN — whose failure mode is that the site somebody forgets is the site that
+  // mattered, with nothing failing when they forget.
+  //
+  // NULL here is not "we lost it": it means no approval was required, which is the ordinary case.
+  // The DB CHECK enforces the pairing (an approver without a channel is rejected), so a half-recorded
+  // approval cannot be stored at all.
+  const appr = currentApproval();
   await withTenants([tenantId], (c) =>
     c.query(
-      `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [newId(), tenantId, actorId, verb, entityType, entityId, JSON.stringify(withVia), config.originSite],
+      `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site,
+                               approved_by, approval_channel, executed_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [newId(), tenantId, actorId, verb, entityType, entityId, JSON.stringify(withVia), config.originSite,
+       appr?.approvedBy ?? null, appr?.channel ?? null, appr?.executedBy ?? null],
     ),
   );
 }
