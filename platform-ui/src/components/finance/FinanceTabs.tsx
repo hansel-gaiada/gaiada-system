@@ -51,10 +51,17 @@ export function FinanceTabs() {
         // DETAIL route would light nothing.
         const active = t.segment ? pathname.startsWith(href) : pathname === "/finance";
         return (
+          // BOTH the class and the aria attribute, matching SectionTabs/DeptTabs.
+          //
+          // `shell.css` styles `.sec-tab--active` (the accent colour and the underline); it has NO
+          // `[aria-current]` rule. Setting only the attribute — which this did — is invisible: the
+          // strip renders with every tab looking identical and no indication of which page you are
+          // on. `aria-current` stays because it is what a screen reader announces; the class is what
+          // a sighted reader sees. Neither substitutes for the other.
           <Link
             key={t.segment || "overview"}
             href={href}
-            className="sec-tab"
+            className={`sec-tab${active ? " sec-tab--active" : ""}`}
             aria-current={active ? "page" : undefined}
           >
             {t.label}

@@ -13,38 +13,17 @@ import { Card, Eyebrow } from "@/components/ui";
 // missing. That is this codebase's existing rule for an unfurnished capability
 // (components/BackendPending.tsx, systems/EmptyNote.tsx): never a blank table, never a false
 // success, and never a dead end that looks like a fault.
-const PLANNED: Record<string, { title: string; state: string; detail: string }> = {
-  accounts: {
-    title: "Chart of accounts",
-    state: "The data is live; the page is not built.",
-    detail:
-      "Every account is already readable — the journal entry form and the general ledger both list them. What is missing is a page to browse the tree, and the ability to add or rename an account from here rather than through a seed.",
-  },
-  receivables: {
-    title: "Receivables",
-    state: "Aging and the tie-out are live on the Overview; the working surface is not built.",
-    detail:
-      "The subledger behind this is complete: invoices, receipts, allocations, and a reconciliation that proves the aging ties to the balance sheet. What is missing is the surface to raise an invoice and record a receipt.",
-  },
-  payables: {
-    title: "Payables",
-    state: "Aging and the tie-out are live on the Overview; the working surface is not built.",
-    detail:
-      "Bills, payments and Indonesian withholding (PPh 21/23/4(2)) are all implemented and tested — a bill splits correctly between what the vendor is owed and what is owed to the tax office. What is missing is the surface to enter one.",
-  },
-  tax: {
-    title: "Tax",
-    state: "The figures exist; the page is not built.",
-    detail:
-      "PPN output and input tax, the creditable/uncreditable split, and the e-Faktur exception list are all computed. What is missing is the page that shows them and the return-preparation flow.",
-  },
-  close: {
-    title: "Period close",
-    state: "The checklist is live on the Overview; the close ACTION is not built.",
-    detail:
-      "Close readiness already reports every blocker — ledger integrity, both subledger tie-outs, bank reconciliation, unrun depreciation, and the accountant sign-off. What is missing is the surface to sign off and to lock the period, which is deliberately the most cautious thing to build: closing is terminal.",
-  },
-};
+// ── EVERY TAB IN THE STRIP NOW HAS A PAGE ──────────────────────────────────────────────────────
+// This map used to carry five entries — chart of accounts, receivables, payables, tax and period
+// close. All five are built, so their entries are gone: a "not built yet" description sitting
+// beside a page that exists is worse than no description, because it is confidently wrong and the
+// reader has no way to know which of the two to believe.
+//
+// The route stays. It catches a MISTYPED or STALE `/finance/<something>` path and says plainly that
+// there is no such page, rather than 404ing — a 404 reads as "the app is broken" and gives the
+// reader nothing to do next. If a future tab ships in the strip before its page exists, add it back
+// here with what already works behind it and what is missing.
+const PLANNED: Record<string, { title: string; state: string; detail: string }> = {};
 
 export default async function FinanceUnbuiltPage({ params }: { params: Promise<{ unbuilt: string[] }> }) {
   const { unbuilt } = await params;

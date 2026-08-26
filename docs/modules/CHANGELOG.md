@@ -11,6 +11,44 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.54.0` - the five remaining finance tabs are real pages (2026-08-26) - PROTOTYPED
+
+**Added**
+- `/finance/accounts` - the chart of accounts, grouped in statement order. Shows `normal balance`
+  (where SIGN comes from - a contra account is one whose normal balance runs the other way),
+  whether manual posting is allowed, and which subledger owns each control account.
+- `/finance/receivables` and `/finance/payables` - aging by bucket with the control-account tie-out
+  rendered ABOVE the figures, plus the three-part position (open documents / payments on account /
+  net). `components/finance/AgingTable.tsx` is shared by both.
+- `/finance/tax` - the PPN position with UNCREDITABLE input VAT as its own tile rather than netted
+  away, and the e-Faktur exception list with document, counterparty and amount at stake.
+- `/finance/close` - per-period readiness, defaulting to the most recent OPEN period rather than
+  today's, because on the 5th of a month the question is whether LAST month can be locked.
+
+**Fixed**
+- `FinanceTabs` set only `aria-current="page"`, but `shell.css` styles `.sec-tab--active`. The
+  finance strip therefore had NO active-tab indicator - every tab looked identical. Every other tab
+  strip (SectionTabs, DeptTabs) sets both; this now does too.
+- `content-brief-sweep-job.ts` read `config.social.contentBriefSweep.*`; the config block is
+  `config.social.contentBrief.weeklySweep.*`. That single wrong path was a platform-nest typecheck
+  error plus 4 failing tests. ⚠ The file is NOT wired into `main.ts` - `content-brief-job.ts` is
+  still the implementation that runs. Which of the two should be live is an open decision.
+
+**Notes**
+- No backend work: every endpoint already existed (`finance/accounts`, `ar|ap/aging`,
+  `ar|ap/reconcile`, `tax/ppn`, `tax/efaktur-exceptions`, `periods/:id/close-readiness`) with
+  readers already in `lib/finance.ts`. The tabs were never blocked on the platform.
+- WRITE actions remain unbuilt and each page says so specifically rather than generically: raising
+  an invoice / recording a receipt, entering a bill / releasing a payment (separated deliberately -
+  they are a seeded blocking SoD conflict), preparing a return, and signing off + locking a period.
+- The `[...unbuilt]` catch-all's PLANNED map is now EMPTY. A "not built yet" description sitting
+  beside a page that exists is worse than none - it is confidently wrong. The route stays to catch
+  a mistyped path without 404ing.
+- Version 0.54.0 follows 0.53.0 (GM-02b/GM-09), which landed from a concurrent session while this
+  was being written.
+
+---
+
 ### platform-nest `0.39.0` - the `billing` module is now `invoice` (2026-08-26) - PROTOTYPED
 
 **Changed**
