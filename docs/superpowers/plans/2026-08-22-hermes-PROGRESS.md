@@ -57,6 +57,8 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 | B19 | ~~Alerting structurally deaf~~ — **RESOLVED 2026-08-23**: ntfy.sh topic wired AND `default-multi` given a webhook leg (it had none — the ticket path was dead even with a URL set). Proven by 3 delivered messages incl. 2 real alerts | — | **RESOLVED** |
 | B21 | `DiskWillFillIn24h` on `sumopod` — **NOT urgent (corrected)**; 6.7 GB reclaimed 2026-08-23 (build cache only, images untouched), 61 G free: the 36 GB drop was a one-off `mimi-*` rebuild 3–6 h ago; disk FLAT for 3 h, 54 GB free. Stale `predict_linear` projection. 97 GB build cache worth reclaiming as housekeeping | nothing imminent | **OWNER — no unscoped prune on that box** |
 | B23 | `aire-nginx` crash-looping ~3 weeks — **ROOT CAUSE CONFIRMED**: SumoPod copy is leftover dev; `aire_n8n_data` proves n8n was removed, orphaning the nginx upstream. Cleanup command prepared; blocked at the destructive-action guardrail | that project only | **OWNER — run `docker compose -p aire down`** |
+| B26 | **I shipped a label-split in `recordJSON`** — failure paths emitted no `provider` label, creating a second series that latches `SyntheticJourneyFailing` on forever while `avg_over_time` reads 100 %. Same class as the `RemoteWriteStalled` bug fixed the day before. Fixed in source, builds clean | alert trustworthiness | **NEEDS DEPLOY** |
+| B25 | **⚠ ACTIVE 25 % FAILURE RATE** — owner 2026-08-26: no fallback keys available at this stage. Now DOCUMENTED in compose + ALARMED via `GatewayServedByEcho`; exposure itself unchanged. The estate's ENTIRE AI runs on Ollama Cloud alone — `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` are both EMPTY, so `LLM_CHAIN=gemini,claude,openai` is a chain of ONE. Ollama Cloud is borrowed/shared/weekly-rate-limited and the owner's own rules forbid making it a hard prod dependency. Quota 8.9 % used | every AI call; 2026-08-24: latency 10–17 s, 3-of-12 timeouts, and one `provider=echo` response actually served | **OWNER — URGENT: set a real GEMINI/ANTHROPIC key on `ai-gateway`** |
 | B24 | **gaiada's observability host runs 11 compose projects**, several production (incl. zenvix/`bfs`). The disk burst that paged us was `mimi` rebuilding. **An unrelated project can fill the disk and take gaiada's alerting down** | the estate's ability to be told anything | **OWNER — decide deliberately, not during an incident** |
 | B22 | ~~`RemoteWriteStalled` false page~~ — **FIXED 2026-08-23**: `by (host, env)` split sumopod into a live group and a retired `env=""` group that pages forever. Now filtered with `env!=""`; promtool SUCCESS, deployed, page cleared | — | **RESOLVED** |
 | B19-old | (superseded) **⚠ ALERTING IS STRUCTURALLY DEAF.** `GatewayBudgetNearCap` fired ~13 h/day and `SyntheticJourneyFailing` ~14 h/day for 24 h+; Alertmanager's only active alert is the `Watchdog` heartbeat. Receivers are `ops@notify.gaiada.invalid` (RFC-2606 never-resolvable) via `mailpit:1025` (dev sink) | **EVERY alert in the estate.** Until fixed, all other monitoring work is decoration | **PLANNED — HIGHEST PRIORITY** |
@@ -307,6 +309,173 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 — no fallback keys "at this stage" (owner): documented, and the gap ALARMED instead
+
+Owner: Gemini/Anthropic keys are not available yet. So rather than leave a silent single point of
+failure, the exposure is now **documented where it is read** and **alarmed where it bites**.
+
+#### `GatewayServedByEcho` — the only alert that catches a 200 that is a total failure
+
+```yaml
+expr: synthetic_journey_up{provider="echo"} == 1
+severity: page
+```
+
+`echo` is the dev terminator appended to every chain. It is `Available()` unconditionally and returns
+`"[echo — no provider key configured] <prompt>"`. So when every real provider is down, a caller gets a
+well-formed **200 with a body**: `expectStatus: 200` passes, `expectBody: "text"` passes, and
+`synthetic_journey_up` reads **1**. **No other rule in the estate can tell that apart from health.**
+
+Not hypothetical — one `provider=echo` success was served on 2026-08-24 alongside 1,995 real calls.
+
+**This alert could not have been written a week ago.** It only became expressible because the prober
+started recording WHICH provider served (`recordJSON`). That is the concrete payoff of B16: the fix
+was framed as "diagnosis, not detection", and it turned out to enable a detection nothing else could.
+
+`promtool check rules` → SUCCESS, **21 rules**. Deployed to the obs host, reloaded, confirmed loaded.
+
+**Good news found while writing it:** echo's output is PREFIXED `[echo — no provider key configured]`,
+so a human reading a reply sees something visibly wrong rather than subtly wrong. The danger was
+always the machine path — probes and dashboards — and that is what the new rule closes.
+
+#### The chain is left NAMING providers it does not have — deliberately
+
+`LLM_CHAIN=gemini,claude,openai` with both keys empty is, functionally, a chain of one. The obvious
+tidy-up is to trim it to `openai`. **Not done, on purpose:** the chain is **self-healing** — dropping a
+real key into `GEMINI_API_KEY` restores failover with no further edit. Trimming makes the config
+truthful today and adds a forgotten step later, which is the worse failure mode.
+
+The cost of leaving it is one misleading startup log line (`llm: [gemini claude openai]`). That is now
+mitigated twice over: `recordJSON` records what actually served, and `GatewayServedByEcho` pages if
+the chain ever falls through. A long comment block in `docker-compose.vps.yml` states all of this at
+the point of reading, including that `openai` here is **not OpenAI** — it is `https://ollama.com`
+running `deepseek-v4-flash`.
+
+**The exposure is unchanged and still B25.** Documenting a single point of failure is not removing
+one. What changed is that it can no longer fail quietly.
+
+### 2026-08-24 — RECHECK. A defect I SHIPPED, and a real degradation.
+
+#### ⚠ My `recordJSON` change caused a LABEL SPLIT — found, fixed, needs deploy
+
+Two series exist for one journey:
+
+```
+synthetic_journey_up{journey="gateway-complete", provider="openai"} = 1
+synthetic_journey_up{journey="gateway-complete"}                    = 0   ← failures, NO provider label
+```
+
+`runJourney`'s two early returns (request-build error, client timeout) returned `result{up: 0}` with
+**no attrs**, so failures emit a different label set from successes. Consequences, both bad:
+
+1. **`SyntheticJourneyFailing` will latch forever.** Its expr is `synthetic_journey_up == 0`; once the
+   journey recovers, nothing ever writes 1 to the no-label series, so it stays 0 inside the alert's
+   window.
+2. **`avg_over_time` on the labelled series reads 100 %** — a reassuring number while a quarter of runs
+   were failing. That is how I nearly missed this: the metric and the log disagreed, and the metric
+   was the one lying.
+
+**This is the SAME defect I fixed the previous day** in `RemoteWriteStalled`'s `by (host, env)`
+grouping — a label set that varies between runs strands a stale series inside an alert's window. I
+diagnosed that class of bug and then introduced it within a day. **Adding a label to a gauge is a
+commitment to emit it on EVERY path, failures included.**
+
+Fixed with `unknownAttrs(j)` on both error returns (every `recordJSON` key present, valued
+`"unknown"`). `go build` + `go vet` clean. **NOT deployed** — until it ships, the no-label series keeps
+being refreshed at 0 on each failure and the alert will keep flapping.
+
+#### The AI path has degraded materially, and the chain-of-one is now biting
+
+| | 2026-08-23 | 2026-08-24 |
+|---|---|---|
+| `gateway-complete` latency | 5–9 s | **10.4–17.0 s** |
+| Timeouts (30 s) | none | **3 of 12 runs ≈ 25 %** |
+| Serving provider | `openai` | `openai` (always) |
+
+Over 6 h: **1,995** successful `provider=openai` calls (so this is real traffic, not just the probe),
+**14** failures — and **one `provider=echo` success**. That last one is the silent-degradation
+terminator actually firing: every provider failed and a caller received a well-formed nonsense answer.
+Once, but it happened.
+
+**Not rate-limiting.** Ollama Cloud's weekly quota RESET (0.089 → 0.007, new week), so this is raw
+congestion on a shared free tier — arguably worse than a cap, because there is nothing to budget
+around and no date it improves. With `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` still **empty**, nothing
+absorbs it. **B25 has moved from a shape-of-the-design objection to an active 25 % failure rate.**
+
+#### Everything else held
+
+| Check | Result |
+|---|---|
+| `hermes-gateway` | `inactive` + `disabled` — retirement holding |
+| `EMBED_CHAIN` | `ollama`, untouched |
+| `timeoutMs: 30000` + per-journey intervals | **live on the box** (health journeys back at 30 s) |
+| `aire-nginx` | **`Exited (1)`, no longer restarting** — someone stopped it; crash loop over |
+| SumoPod disk | **82 G free** (was 61 G) |
+| Active alerts | `Watchdog` + `SyntheticJourneyFailing` (pending) |
+
+The 9 `aire-*` containers still exist and volumes went 39 → 42, so the full `compose down` was not run —
+only nginx was stopped. That is a fine outcome: the log churn is gone and no data was touched.
+
+### 2026-08-23 ⚠⚠ THE WHOLE ESTATE'S AI RUNS ON ONE BORROWED, RATE-LIMITED ENDPOINT
+
+**Found within minutes of the B16 provider-visibility fix going live** — which is precisely the class
+of thing it was built to expose.
+
+The prober now records the serving provider, and it reads **`provider: "openai"`** — not `gemini`,
+the head of the chain. Investigating why:
+
+| Var | Value |
+|---|---|
+| `GEMINI_API_KEY` | **EMPTY** |
+| `ANTHROPIC_API_KEY` | **EMPTY** |
+| `OPENAI_API_KEY` | set |
+| `OPENAI_BASE_URL` | **`https://ollama.com`** |
+| `OPENAI_MODEL` | `deepseek-v4-flash` |
+| `OPENAI_VISION_MODEL` | `qwen3.5:397b` |
+
+**So `LLM_CHAIN=gemini,claude,openai` is, in reality, a chain of ONE.** The first two providers have no
+credentials, so the gateway's fail-soft `Available()==false` path skips them silently — no error, no
+metric, nothing to notice. `gateway_egress_requests_total` confirms it: `provider=openai ok=true` is
+the only success series; gemini and claude have **no series at all**, because they are never attempted.
+
+**And the sole surviving provider is Ollama Cloud**, which the owner's own global rules describe as:
+
+> *"borrowed + SHARED + weekly-rate-limited (NOT a prepaid token balance). Fine for dev/testing; do
+> NOT make it a hard prod dependency."*
+
+It is now the hard prod dependency for every AI call in the estate. Weekly quota checked by the
+documented method (`/api/usage`): **8.9 % consumed**, so there is headroom today — but the shape is
+wrong regardless, and a SHARED weekly cap is not ours to predict.
+
+**How it got here, stated honestly — my change is part of the chain of events, though not the cause.**
+`hermes` used to sit at the head of `LLM_CHAIN` and served via Hermes' OWN `GEMINI_API_KEY` in
+`/opt/hermes-zen/.env`. So the estate did have a gemini path — routed, wrongly, through an agent
+acting as a model provider (the plane conflation §2 of the runtime plan describes, and the very
+`CLAUDE.md` violation the retirement was meant to close). When Hermes wedged on 2026-08-22 07:17
+everything fell through to Ollama Cloud; retiring `hermes` from the chain then removed the last
+non-Ollama option. **The retirement was still correct — it did not create this exposure, it made an
+already-hidden one visible.**
+
+**The fix is small and belongs to the gateway, not to Hermes:** set a real `GEMINI_API_KEY` (and/or
+`ANTHROPIC_API_KEY`) on `ai-gateway` so `LLM_CHAIN` describes something true. Until then the estate
+has failover on paper only — which is worse than a chain of one honestly declared, because it invites
+everyone to assume redundancy that is not there.
+
+**This also explains the `SyntheticJourneyFailing` flapping** (firing→resolved→firing on the new ntfy
+channel): a single shared rate-limited endpoint answering in 7–9 s, with no fallback to absorb a slow
+or throttled response. Deploying the per-journey `timeoutMs: 30000` helps the symptom; the chain-of-one
+is the cause.
+
+### 2026-08-23 — B16 prober build is LIVE (not deployed by me)
+
+The running prober emits `"provider":"openai"` and the health journeys are back on a 30 s cadence —
+both are my changes. **I did not deploy them**: a concurrent session or a routine deploy shipped the
+image while this session was working. Recorded because a change appearing in production that this
+session did not ship is exactly the drift the program's concurrency rules exist to surface.
+
+Net effect is good — the feature works and earned its keep immediately (see above) — but the
+attribution matters for anyone reading this log later.
 
 ### 2026-08-23 — what SumoPod actually hosts, and why that matters to gaiada
 

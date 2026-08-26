@@ -241,6 +241,30 @@ groups:
           summary: "Synthetic journey '{{ $labels.journey }}' is failing"
           description: "The end-to-end journey {{ $labels.journey }} has not met its expected result for 3m."
 
+      # --- The green-but-nonsense case: a journey SUCCEEDED, served by the echo terminator.
+      #
+      # ⚠ THIS IS THE ONLY ALERT THAT CATCHES A 200 THAT IS A TOTAL FAILURE. `echo` is the dev
+      # terminator appended to every chain; it is Available() unconditionally and returns
+      # "[echo — no provider key configured] <prompt>". So when every real provider is down, callers
+      # receive a well-formed 200 with a body, `expectStatus: 200` passes, `expectBody: "text"` passes,
+      # and `synthetic_journey_up` reads 1. Nothing else in this file can distinguish that from health.
+      #
+      # It is not hypothetical: one `provider=echo` success was served on 2026-08-24, alongside 1,995
+      # real calls. It became visible only because the prober started recording WHICH provider served
+      # (recordJSON) — before that label existed, this alert could not have been written.
+      #
+      # Severity is `page` deliberately. Serving echo means EVERY provider in the chain failed, and the
+      # estate currently runs a chain of one (GEMINI_API_KEY / ANTHROPIC_API_KEY are unset), so the
+      # distance between "primary degraded" and "answering with placeholder text" is a single hop.
+      - alert: GatewayServedByEcho
+        expr: synthetic_journey_up{provider="echo"} == 1
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "AI gateway answered with the ECHO terminator — every real provider failed"
+          description: "Journey {{ $labels.journey }} returned 200 but was served by `echo`, which emits placeholder text rather than model output. Callers are receiving well-formed nonsense. Check provider keys and upstream availability; a green dashboard here means nothing while this fires."
+
       # --- D13 detective: an agent wrote while served by a non-eval-cleared provider.
       - alert: AgentWroteOnUnevaledProvider
         expr: agent_writes_on_unevaled_provider > 0

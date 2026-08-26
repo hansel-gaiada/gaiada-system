@@ -85,6 +85,31 @@ var (
 // injected from env, not stored in the journey spec.
 func expandEnv(s string) string { return os.Expand(s, os.Getenv) }
 
+// unknownAttrs returns the journey's recordJSON keys with every value set to "unknown".
+//
+// ⚠ THIS EXISTS TO PREVENT A LABEL-SPLIT, AND IT IS NOT OPTIONAL.
+// A gauge's label set must be IDENTICAL on every code path. The first version of recordJSON attached
+// attributes only where a response body had been parsed, so the two error returns below emitted an
+// attribute-LESS result. That produced two independent series for one journey:
+//
+//     synthetic_journey_up{journey="gateway-complete", provider="openai"}  = 1
+//     synthetic_journey_up{journey="gateway-complete"}                     = 0   ← failures
+//
+// Both then persist. `SyntheticJourneyFailing` (expr `synthetic_journey_up == 0`) latches onto the
+// second one and fires FOREVER, because nothing ever updates it back to 1 — while
+// `avg_over_time` on the first reads a reassuring 100 %. Observed live 2026-08-24.
+//
+// This is the same defect as the `RemoteWriteStalled` `by (host, env)` split fixed the day before:
+// a label set that changes between runs strands a stale series inside the alert's window. Adding a
+// label to a gauge means committing to emitting it on EVERY path, including the failure paths.
+func unknownAttrs(j Journey) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, len(j.RecordJSON))
+	for _, k := range j.RecordJSON {
+		attrs = append(attrs, attribute.String(k, "unknown"))
+	}
+	return attrs
+}
+
 func runJourney(ctx context.Context, client *http.Client, j Journey) result {
 	start := time.Now()
 	method := j.Method
@@ -100,7 +125,7 @@ func runJourney(ctx context.Context, client *http.Client, j Journey) result {
 	req, err := http.NewRequestWithContext(ctx, method, expandEnv(j.URL), body)
 	if err != nil {
 		log.Error("journey build failed", "journey", j.Name, "err", err.Error())
-		return result{up: 0, durMs: float64(time.Since(start).Milliseconds())}
+		return result{up: 0, durMs: float64(time.Since(start).Milliseconds()), attrs: unknownAttrs(j)}
 	}
 	for k, v := range j.Headers {
 		req.Header.Set(k, expandEnv(v))
@@ -109,7 +134,7 @@ func runJourney(ctx context.Context, client *http.Client, j Journey) result {
 	dur := float64(time.Since(start).Milliseconds())
 	if err != nil {
 		log.Warn("journey request failed", "journey", j.Name, "err", err.Error())
-		return result{up: 0, durMs: dur}
+		return result{up: 0, durMs: dur, attrs: unknownAttrs(j)}
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

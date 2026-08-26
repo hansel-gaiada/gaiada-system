@@ -177,6 +177,26 @@ services:
       # answered via central-forward, so nothing looked broken except a "served by" badge that never
       # named Hermes and a brain picker that was inert for EVERY option. If you are debugging why a
       # picked brain never wins, check TOPOLOGY_MODE before you touch this line.
+      #
+      # ⚠ 2026-08-26 — THE CHAIN NAMES PROVIDERS IT DOES NOT HAVE. Read this before trusting it.
+      # On gda-aicenter the live value is `gemini,claude,openai`, but `GEMINI_API_KEY` and
+      # `ANTHROPIC_API_KEY` are BOTH EMPTY (owner: not available at this stage). A keyless provider
+      # reports `Available() == false` and is skipped SILENTLY — no error, no metric, no log line.
+      # `gateway_egress_requests_total` confirms it: gemini and claude have no series at all, because
+      # they are never attempted.
+      #
+      # So the effective chain is ONE provider: `openai`, which here is NOT OpenAI — it points at
+      # `https://ollama.com` (`OPENAI_BASE_URL`) running `deepseek-v4-flash`. Per the owner's own
+      # standing rule that endpoint is "borrowed + SHARED + weekly-rate-limited ... do NOT make it a
+      # hard prod dependency". It currently is one. Measured 2026-08-24: 10-17s latency, ~25% of probe
+      # runs timing out at 30s, and one response served by the `echo` terminator.
+      #
+      # THE NAMES ARE LEFT IN DELIBERATELY rather than trimmed to `openai`: the chain is SELF-HEALING,
+      # so dropping a real key into `GEMINI_API_KEY` restores failover with no further edit. Trimming
+      # would make the config truthful today and add a forgotten step later. The cost of leaving them
+      # is a misleading startup log line (`llm: [gemini claude openai]`) — mitigated by the prober's
+      # `recordJSON: ["provider"]`, which records WHICH provider actually served, and by the
+      # `GatewayServedByEcho` alert that fires the moment the chain falls through to placeholder text.
       LLM_CHAIN: ${LLM_CHAIN:-openai,ollama,gemini,claude}
       # Media chain: openai vision handles images; audio (and anything non-image) fails over to
       # whisper for transcription, then gemini. openai auto-skips when its key is unset.
