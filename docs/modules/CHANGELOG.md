@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.39.2` - the finance seed counted calls, not writes (2026-08-26) - DEV-VERIFIED
+
+**Fixed**
+- ★ The seed reported **"11 posted"** on a run that created **4** journal entries. `posted` counted
+  CALLS that did not raise, and `finance_post_journal` is idempotent on `source_event_id` - it
+  returns the existing entry instead of raising, so a re-run tallied writes it never made. On a seed
+  that writes to REAL, APPEND-ONLY books that reads as a double-post, and the only way to find out
+  otherwise is to go and count the ledger by hand. Which is what happened: the ledger was correct
+  (12 -> 16 entries, 8 distinct `demo-seed:` ids, no duplicates), the counter was lying.
+- The ledger is now counted before and after, and the measured DELTA leads the output. The call
+  tallies follow, explicitly labelled as steps that ran rather than as rows written.
+
+**Verified on live after the AR/AP run**
+- AR aging lands in TWO different buckets, as the differing payment terms intend: 46,600,000 at
+  1-30 days (66.6m invoice less the 20m allocated, due 12 Mar) and 27,750,000 current (due 3 Apr).
+- AP 38,150,000 = 35,000,000 + 3,850,000 PPN - 700,000 PPh 23, to the rupiah.
+- `finance_ar_reconcile` and `finance_ap_reconcile` BOTH return zero problems - the subledgers tie
+  to the general ledger.
+- AR position: open 74,350,000 / on account 10,000,000 / net 64,350,000 - the unallocated remainder
+  showing up as the three-part position exists to show.
+
+---
+
 ### platform-nest `0.39.1` - the finance demo seed reaches the AR/AP subledgers (2026-08-26) - DEV-VERIFIED
 
 **Fixed**

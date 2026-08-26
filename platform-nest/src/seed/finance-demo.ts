@@ -55,7 +55,9 @@ async function fin<T>(t: string, fn: (c: PoolClient) => Promise<T>): Promise<T> 
   return withTenants([t], fn, { modules: ["finance"] });
 }
 
-export async function seedFinanceDemo(companyName = COMPANY): Promise<{ posted: number; skipped: number }> {
+export async function seedFinanceDemo(
+  companyName = COMPANY,
+): Promise<{ posted: number; skipped: number; entriesCreated: number }> {
   const co = await withGlobal(async (c) => {
     const r = await c.query<{ id: string }>(
       `SELECT id FROM companies WHERE name = $1 AND deleted_at IS NULL LIMIT 1`,
@@ -72,6 +74,25 @@ export async function seedFinanceDemo(companyName = COMPANY): Promise<{ posted: 
 
   let posted = 0;
   let skipped = 0;
+
+  // ★ THE COUNT IS MEASURED, NOT TALLIED.
+  //
+  // `posted` counts CALLS that did not raise, which is not the same as rows written — and on a
+  // second run it said "11 posted" when four entries were actually created, because
+  // `finance_post_journal` is idempotent on `source_event_id` and returns the existing entry rather
+  // than raising. A seed that writes to REAL, APPEND-ONLY books reporting eleven writes it did not
+  // make is worse than one that reports nothing: it reads as a double-post, and the only way to
+  // find out otherwise is to go and count the ledger by hand. (Which is exactly what happened on
+  // 2026-08-26 — the ledger was fine; the counter was lying.)
+  //
+  // So the ledger is counted before and after, and the DELTA is what gets reported.
+  const countEntries = async () =>
+    Number(
+      (await fin(co, (c) =>
+        c.query<{ n: string }>(`SELECT count(*) n FROM finance_journal_entries WHERE tenant_id=$1`, [co]),
+      )).rows[0].n,
+    );
+  const entriesBefore = await countEntries();
 
   const post = async (key: string, date: string, description: string, lines: Line[]) => {
     try {
@@ -367,14 +388,20 @@ export async function seedFinanceDemo(companyName = COMPANY): Promise<{ posted: 
     }
   }
 
-  return { posted, skipped };
+  return { posted, skipped, entriesCreated: (await countEntries()) - entriesBefore };
 }
 
 async function main() {
   const argv = process.argv.slice(2);
   const name = argv.find((a) => a.startsWith("--company="))?.slice(10) ?? COMPANY;
   const r = await seedFinanceDemo(name);
-  console.log(`finance demo data for ${name}: ${r.posted} posted, ${r.skipped} already present`);
+  // The measured delta leads, because it is the only figure that is a fact about the database. The
+  // call tallies follow as context, explicitly labelled as attempts rather than writes.
+  console.log(
+    `finance demo data for ${name}: ${r.entriesCreated} journal entr${r.entriesCreated === 1 ? "y" : "ies"} CREATED`
+    + ` (${r.posted} step(s) ran, ${r.skipped} already present — a step that ran is not necessarily a new entry:`
+    + ` finance_post_journal is idempotent on source_event_id and returns the existing entry).`,
+  );
   console.log("");
   console.log("To find what this seeded, THREE queries are needed — not one. Entries posted through");
   console.log("the fixed-asset subledger carry ITS ids, not this seed's, and are easy to miss:");
