@@ -62,7 +62,9 @@ field-level 400s.
 - A bodyless POST must not declare a JSON content-type — Fastify 400s on it. `platformFetch`
   already handles this; don't re-add the header.
 - `src/app/api/*` route handlers exist **only** where the browser itself must hit a URL:
-  polling (`meetings/[id]/status`), the bot admin console, an OAuth callback
+  polling (`meetings/[id]/status`), a large upload with progress (`meetings/[id]/audio` — streams
+  the multipart body to the platform; Server Actions buffer + cap bodies, 1 MB by default, and give
+  the browser no progress events), the bot admin console, an OAuth callback
   (`search/google/callback`), a file download (`search/change-proposals/[id]/export-file`).
   Pages and server actions call `platformFetch` directly — don't proxy through our own API.
 

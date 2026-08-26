@@ -97,6 +97,19 @@ local stack). None of these mean "production-done".
   and runs are tenant-wide on the backend — the SEO scope call in the demo store no longer appears
   as a Web Dev briefing, and the e2e asserts that.
 
+**Fixed**
+- ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:
+  every upload path went through a Server Action, and Next caps action bodies at 1 MB by default.
+  Two-layer fix. `next.config.ts` raises `serverActions.bodySizeLimit` to 520 MB (the platform's
+  `MEETING_VIDEO_MAX_BYTES` cap plus multipart overhead) for the paths that stay on actions — the
+  in-browser take (`LiveRecorder` → `uploadAudioAction`) and `registerAndUploadAudioAction`. PRD
+  Studio's "Upload a file" leaves actions entirely: the browser POSTs the file itself over
+  XMLHttpRequest (the one API with upload progress) to the new BFF route
+  `POST /api/meetings/[id]/audio`, which streams the multipart body to the platform unchanged
+  (`duplex: "half"`, no buffering, platform's 413/415 passed straight back) — and the card shows
+  `43% · 86 MB of 200 MB` while it goes. `components/prd/uploadWithProgress.ts` (6 tests, XHR
+  injected); DEMO_MODE branch in the route updates the demo store like the action does.
+
 **Known gap (frontend)**
 - Gate chips need `GET /pipeline/runs/:id` per active run (the LIST carries no gates) — capped at 12;
   runs past the cap say "open the run to see its approvals" rather than guessing. A list-with-gates

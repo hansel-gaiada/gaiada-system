@@ -138,6 +138,13 @@
 .prd-panel { border-top: 0.5px solid var(--erp-hairline-soft); padding-top: 12px; display: grid; gap: 10px; }
 .prd-panel input[type="file"] { font: 400 13px var(--font-body); color: var(--text-primary); }
 .prd-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* Upload progress — the native <progress>, recoloured through tokens; text carries the numbers. */
+.prd-progress { display: grid; gap: 6px; max-width: 480px; }
+.prd-progress__bar { width: 100%; height: 6px; appearance: none; border: 0; background: var(--erp-hairline); border-radius: var(--radius-pill); overflow: hidden; }
+.prd-progress__bar::-webkit-progress-bar { background: var(--erp-hairline); }
+.prd-progress__bar::-webkit-progress-value { background: var(--erp-accent); transition: width 0.2s var(--erp-ease); }
+.prd-progress__bar::-moz-progress-bar { background: var(--erp-accent); }
+.prd-progress__text { font: 400 12px var(--font-body); color: var(--ink-subtle); font-variant-numeric: tabular-nums; }
 .prd-mono { font-family: var(--font-data); font-size: 13px; color: var(--text-primary); user-select: all; }
 /* Label + value on one line; the value keeps its case (ids are case-sensitive). */
 .prd-kv { display: inline-flex; align-items: center; gap: 10px; }

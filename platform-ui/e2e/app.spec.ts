@@ -282,6 +282,24 @@ test("PRD Studio reads as one flow: create → record → convert → approve", 
   await expect(page.getByText(/prd approved and signed — the build is unlocked/i)).toBeVisible();
 });
 
+test("PRD Studio: uploading a file streams through the BFF route and flips the briefing to transcribing", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await intake.getByRole("button", { name: "Upload a file" }).click();
+  const uploadBtn = intake.getByRole("button", { name: "Upload & transcribe" });
+  await expect(uploadBtn).toBeDisabled(); // nothing chosen yet
+  await intake.getByLabel(/audio or video file/i).setInputFiles({ name: "intake.m4a", mimeType: "audio/mp4", buffer: Buffer.alloc(64 * 1024, 1) });
+  await expect(intake.getByText(/intake\.m4a · 1 MB/)).toBeVisible();
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/meetings/rec-demo-4/audio") && r.request().method() === "POST"),
+    uploadBtn.click(),
+  ]);
+  expect(res.status()).toBe(202);
+  await expect(intake.getByText("Transcribing")).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Upload a file" })).toHaveCount(0);
+});
+
 test("PRD Studio exists for Web Dev only — another department's /prd is not found", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-3/prd"); // SEO — its toolkit has no `prd` tab

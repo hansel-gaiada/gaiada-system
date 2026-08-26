@@ -6,6 +6,7 @@ import type { MeetingRecording, RecordingStatus } from "@/lib/meetings";
 import type { AudioUploadResult, MeetingResult } from "@/lib/meetingsActions";
 import { briefingPhase } from "@/lib/prdFlow";
 import { LiveRecorder } from "@/components/meetings/LiveRecorder";
+import { formatMb, uploadRecordingFile, type UploadOutcome, type UploadProgress } from "./uploadWithProgress";
 import "./prd-studio.css";
 
 // Steps 2 and 3 for ONE briefing. The card shows one headline (where it is), one next step (what to
@@ -14,8 +15,11 @@ import "./prd-studio.css";
 // props (the page passes the real server actions) so the card is testable with stubs, the same
 // pattern as ChangeRequestsPanel.
 export interface BriefingCardActions {
-  /** `uploadAudioAction` — upload a file (or the in-browser take) into this recording. */
+  /** `uploadAudioAction` — the in-browser take from LiveRecorder goes through this server action. */
   upload: (prev: AudioUploadResult | null, formData: FormData) => Promise<AudioUploadResult>;
+  /** "Upload a file": the browser streams the file itself (XHR, with progress) through the BFF route
+   *  `api/meetings/[id]/audio`. Defaults to `uploadRecordingFile`; injectable for tests. */
+  uploadFile?: (recordingId: string, file: File, onProgress: (p: UploadProgress) => void) => Promise<UploadOutcome>;
   /** `retryAudioAction` — re-run transcription on the already-uploaded audio. */
   retry: (prev: AudioUploadResult | null, formData: FormData) => Promise<AudioUploadResult>;
   /** `ingestAction` — convert the transcript into a PRD pipeline run. */
@@ -40,7 +44,10 @@ export function BriefingCard({
   const router = useRouter();
   const [liveStatus, setLiveStatus] = useState<RecordingStatus>(recording.status);
   const [method, setMethod] = useState<Method | null>(null);
-  const [uploadState, uploadAction, uploading] = useActionState<AudioUploadResult | null, FormData>(actions.upload, null);
+  const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploading = progress !== null;
   const [retryState, retryAction, retrying] = useActionState<AudioUploadResult | null, FormData>(actions.retry, null);
   const [ingestState, ingestAction, ingesting] = useActionState<MeetingResult | null, FormData>(actions.ingest, null);
 
@@ -64,8 +71,24 @@ export function BriefingCard({
   }, [recording.id, router]);
 
   useEffect(() => {
-    if (uploadState?.ok || retryState?.ok) { setLiveStatus("transcribing"); setMethod(null); }
-  }, [uploadState, retryState]);
+    if (retryState?.ok) { setLiveStatus("transcribing"); setMethod(null); }
+  }, [retryState]);
+
+  async function submitFile(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!file || uploading) return;
+    setUploadError(null);
+    setProgress({ fraction: 0, loaded: 0, total: file.size });
+    const outcome = await (actions.uploadFile ?? uploadRecordingFile)(recording.id, file, setProgress);
+    setProgress(null);
+    if (outcome.ok) {
+      setFile(null);
+      setMethod(null);
+      setLiveStatus("transcribing");
+    } else {
+      setUploadError(outcome.error);
+    }
+  }
 
   useEffect(() => {
     if (!PROCESSING.has(liveStatus)) return;
@@ -131,16 +154,31 @@ export function BriefingCard({
       )}
 
       {(view.phase === "capture" || view.phase === "failed") && method === "upload" && (
-        <form action={uploadAction} className="prd-panel">
-          <input type="hidden" name="id" value={recording.id} />
+        <form onSubmit={submitFile} className="prd-panel">
           <label className="prd-field">
             Audio or video file
-            <input type="file" name="file" required accept="audio/*,video/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac,.mov,.mkv,.3gp,.m4v" />
+            <input
+              type="file"
+              name="file"
+              disabled={uploading}
+              accept="audio/*,video/*,.m4a,.mp3,.mp4,.wav,.webm,.ogg,.flac,.aac,.mov,.mkv,.3gp,.m4v"
+              onChange={(e) => { setFile(e.target.files?.[0] ?? null); setUploadError(null); }}
+            />
           </label>
-          <div className="prd-actions">
-            <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm" disabled={uploading}>{uploading ? "Uploading…" : "Upload & transcribe"}</button>
-            {uploadState && !uploadState.ok && uploadState.error && <p className="prd-note prd-note--error">{uploadState.error}</p>}
-          </div>
+          {progress ? (
+            <div className="prd-progress" role="status" aria-live="polite">
+              <progress className="prd-progress__bar" value={progress.loaded} max={progress.total || 1} />
+              <span className="prd-progress__text">
+                {Math.round(progress.fraction * 100)}% · {formatMb(progress.loaded)} of {formatMb(progress.total)}
+              </span>
+            </div>
+          ) : (
+            <div className="prd-actions">
+              <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm" disabled={!file}>Upload & transcribe</button>
+              {file && <span className="prd-hint">{file.name} · {formatMb(file.size)}</span>}
+              {uploadError && <p className="prd-note prd-note--error">{uploadError}</p>}
+            </div>
+          )}
         </form>
       )}
 

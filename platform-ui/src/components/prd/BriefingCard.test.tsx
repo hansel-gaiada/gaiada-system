@@ -16,6 +16,7 @@ function rec(over: Partial<MeetingRecording> = {}): MeetingRecording {
 function actions(over: Partial<BriefingCardActions> = {}): BriefingCardActions {
   return {
     upload: vi.fn(async () => ({ ok: true, id: "rec-1", audioRef: "a" })),
+    uploadFile: vi.fn(async () => ({ ok: true as const })),
     retry: vi.fn(async () => ({ ok: true, id: "rec-1" })),
     ingest: vi.fn(async () => ({ ok: true, id: "rec-1", runId: "run-9" })),
     ...over,
@@ -43,6 +44,40 @@ describe("BriefingCard — waiting for its recording", () => {
     render(<BriefingCard recording={rec()} actions={actions()} />);
     fireEvent.click(screen.getByRole("button", { name: /desktop capture helper/i }));
     expect(screen.getByText("mtg-1")).toBeInTheDocument();
+  });
+});
+
+describe("BriefingCard — uploading a file shows progress, then hands off to transcribing", () => {
+  it("streams the chosen file through uploadFile with progress, then flips to Transcribing", async () => {
+    let report: ((p: { fraction: number; loaded: number; total: number }) => void) | null = null;
+    let finish: ((o: { ok: true }) => void) | null = null;
+    const uploadFile = vi.fn<NonNullable<BriefingCardActions["uploadFile"]>>((_id, _file, onProgress) => {
+      report = onProgress;
+      return new Promise((res) => { finish = res; });
+    });
+    render(<BriefingCard recording={rec()} actions={actions({ uploadFile })} />);
+    fireEvent.click(screen.getByRole("button", { name: /upload a file/i }));
+    const input = screen.getByLabelText(/audio or video file/i) as HTMLInputElement;
+    const file = new File([new Uint8Array(1024)], "kickoff.mp4", { type: "video/mp4" });
+    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: /upload & transcribe/i }));
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledWith("rec-1", file, expect.any(Function)));
+    report!({ fraction: 0.43, loaded: 86 * 1024 * 1024, total: 200 * 1024 * 1024 });
+    await waitFor(() => expect(screen.getByText(/43%/)).toBeInTheDocument());
+    expect(screen.getByText(/86 MB of 200 MB/i)).toBeInTheDocument();
+    finish!({ ok: true });
+    await waitFor(() => expect(screen.getByText("Transcribing")).toBeInTheDocument());
+  });
+
+  it("a rejected upload says why, in the platform's words, and lets you pick another file", async () => {
+    const uploadFile = vi.fn<NonNullable<BriefingCardActions["uploadFile"]>>(async () => ({ ok: false, status: 413, error: "file exceeds MEETING_VIDEO_MAX_BYTES (500 MB)" }));
+    render(<BriefingCard recording={rec()} actions={actions({ uploadFile })} />);
+    fireEvent.click(screen.getByRole("button", { name: /upload a file/i }));
+    fireEvent.change(screen.getByLabelText(/audio or video file/i), { target: { files: [new File(["x"], "huge.mp4")] } });
+    fireEvent.click(screen.getByRole("button", { name: /upload & transcribe/i }));
+    await waitFor(() => expect(screen.getByText(/exceeds MEETING_VIDEO_MAX_BYTES/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /upload & transcribe/i })).toBeInTheDocument();
+    expect(screen.getByText("No recording yet")).toBeInTheDocument();
   });
 });
 
