@@ -5,6 +5,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { listCutovers, getCutoverReadiness, getOpeningBalances, money } from "@/lib/finance";
 import { Card, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { CommitCutoverAction } from "@/components/finance/CutoverActions";
 
 // Cutover — the opening balances a company starts its books with.
 //
@@ -17,7 +18,9 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 // ── THIS IS THE ONE MIGRATION THAT CANNOT BE REDONE ────────────────────────────────────────────
 // Committing a cutover posts the opening journal and locks everything before it. Every figure the
 // company ever reports is measured from that line, so it is worth being slow about — which is why
-// the commit ACTION is deliberately not wired here, only the gate that decides whether it could run.
+// the commit sits behind a TYPED-CONFIRMATION gate: the reader must echo the cutover DATE back
+// before the button arms, and the server re-validates both that string and the readiness gate. A
+// dialog would be dismissed by reflex; typing the date requires having read which line is moving.
 export default async function FinanceCutoverPage({
   searchParams,
 }: {
@@ -149,17 +152,26 @@ export default async function FinanceCutoverPage({
         </>
       ) : null}
 
-      <Card title="Committing, and the year-end close" style={{ marginTop: 22 }}>
+      {selected ? (
+        <Card title="Commit this cutover" style={{ marginTop: 22 }}>
+          <CommitCutoverAction
+            cutoverId={selected.id}
+            cutoverDate={selected.cutoverDate}
+            status={selected.status}
+            ready={readiness?.ready ?? false}
+            blockerCount={readiness?.blockers.length ?? 0}
+            readinessUnknown={readiness == null}
+          />
+        </Card>
+      ) : null}
+
+      <Card title="The year-end close" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Committing a cutover is <strong>not wired here</strong>, deliberately. It posts the opening
-          journal and locks everything before it — every figure the company ever reports is measured
-          from that line, and it cannot be redone. The gate above is live; the button is the cautious
-          part.
-        </p>
-        <p className="fin-muted">
-          The year-end close (rolling the year&rsquo;s result into retained earnings) is implemented
-          in the engine and likewise not exposed. It rolls into a dedicated retained-earnings account
-          rather than into the current-year result account, so the two never merge.
+          Closing a fiscal year rolls the year&rsquo;s result into retained earnings. It is wired
+          (<code>POST /finance/fiscal-years/:id/close</code>, same typed-confirmation gate) but has
+          no picker on this page yet, because a fiscal-year list is not something this surface reads
+          — it reads cutovers. It belongs next to the calendar, and putting it here would attach a
+          terminal action to the wrong noun.
         </p>
       </Card>
     </div>

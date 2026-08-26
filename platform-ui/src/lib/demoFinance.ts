@@ -17,6 +17,14 @@ import "server-only";
 // read console. A fixture that accepted a journal post it could not model would let the page look
 // like it worked, and this is the one module where "looked like it worked" involves money.
 //
+// EXCEPT the five terminal-action writes (owner decision 2026-08-26: typed-confirmation gate —
+// sign-off, close, cutover commit, fiscal-year close, lease recognition). Those forms are useless
+// in DEMO_MODE if the POST falls through to an unhandled-route failure — but faking their success
+// would be the exact sin this file exists to avoid. So `financeWrite()` near the bottom REPRODUCES
+// the live handlers' refusals (bad confirmation string, missing reason, a readiness gate with open
+// blockers, an instrument that isn't a lease) against these same fixtures, rather than answering
+// every POST with a cheerful `{ok:true}`. Every other write still falls through unanswered.
+//
 // Why it exists at all: `next build` runs with DEMO_MODE=1 and the smoke Playwright project drives
 // the built app, so a route with no fixture is a route nobody can open in CI. Without this the
 // finance page would render its "no fiscal calendar" empty state forever — and that copy is a CLAIM
@@ -367,6 +375,25 @@ const INSTRUMENTS = [
     startDate: "2026-02-01", maturityDate: "2028-02-01",
     repaymentMethod: "annuity", paymentMonths: 1,
   },
+  // The ONLY lease-kind instrument, added for `recognise-lease` below. Without it every attempt at
+  // that write would hit "BCA-01 is a loan_payable, not a lease" and the success path — and the
+  // asset-class refusal past it — would be unreachable in a browser.
+  {
+    id: "instr-2", code: "LEASE-01", name: "Sewa gudang — 3 tahun", kind: "lease",
+    counterpartyName: "PT Gudang Sentosa", currencyCode: "IDR", principal: "180000000.00",
+    nominalRate: "9.000000", effectiveRate: "9.000000",
+    startDate: "2026-04-01", maturityDate: "2029-04-01",
+    repaymentMethod: "annuity", paymentMonths: 1,
+  },
+];
+
+// Minimal, and read by `recognise-lease` only — no page reads this list yet (there is no asset-class
+// picker built, same gap the cutover page's own comment notes for the fiscal-year close). Codes
+// mirror the two classes `FIXED_ASSETS` already uses, so a class id chosen here depreciates the way
+// an asset of that class already visibly does elsewhere in the demo.
+const ASSET_CLASSES = [
+  { id: "cls-it", code: "IT", name: "Peralatan IT" },
+  { id: "cls-veh", code: "VEH", name: "Kendaraan" },
 ];
 
 const INSTRUMENT_SCHEDULE = Array.from({ length: 6 }, (_, i) => {
@@ -436,6 +463,12 @@ const CUTOVERS = [
   },
 ];
 
+// Minimal, and read by `closeFiscalYear` below only — no page reads a fiscal-year LIST yet (the
+// cutover page's own copy says why: "a fiscal-year list is not something this surface reads — it
+// reads cutovers"). `code` is what the live handler makes the caller echo back, and it is the same
+// `FY2026` every period in `PERIODS` already carries.
+const FISCAL_YEARS = [{ id: "demo-fy-2026", code: `FY${YEAR}` }];
+
 const CUTOVER_READINESS = {
   ready: false,
   blockers: [
@@ -455,20 +488,28 @@ const OPENING_BALANCES = {
   balanced: false,
 };
 
-export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string): DemoResult | null {
+/**
+ * `body` is a late addition (the five terminal-action writes below need it) and is appended AFTER
+ * `userId` rather than before it, so a call site that has not yet been updated to pass it still
+ * resolves `userId` in the right slot — its 403 check keeps working, and only the new writes see
+ * `body` as `undefined` (which reads as "no confirmation supplied" and refuses, not as a crash).
+ */
+export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string, body?: string): DemoResult | null {
   const tail = financePath(p);
   if (tail == null) return null;
-  // Read-only: a write must fall through to whatever the caller does with an unhandled route,
-  // rather than being answered with a cheerful {ok:true} this store cannot actually model.
-  if (method.toUpperCase() !== "GET") return null;
 
   // 403, not an empty shell. `lib/finance.ts`'s readers deliberately distinguish a refusal from
   // absent data (`listPeriods` returns null on 403 and [] on 404, and its header explains why), so
   // answering a refused caller with empty fixtures would defeat the one distinction that file exists
   // to preserve — and would render a balanced, zeroed set of books for someone entitled to none.
+  // Applies to the five gated writes too — the live handlers authorize each one separately
+  // (`close`/`lock`/`post` against different Cerbos kinds), but this store has always modelled
+  // finance access as one reader set, and a write is not the place to invent a second one.
   if (userId !== undefined && !FINANCE_READERS.has(userId)) {
     return { status: 403, json: { error: "forbidden" } };
   }
+
+  if (method.toUpperCase() !== "GET") return financeWrite(tail, body);
 
   if (tail === "accounts") return ok(ACCOUNTS);
   // The general ledger for any account, so /finance/ledger is drivable in the build gate.
@@ -486,6 +527,9 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   // with EMPTY dropdowns in demo mode and the build gate still passes — the page would look built
   // and be unusable, which is the frontend-first drift this codebase keeps getting bitten by.
   if (tail === "assets") return ok(FIXED_ASSETS);
+  // The picker the lease-recognition action is built from. Without this the select renders
+  // EMPTY in demo mode and the action is unreachable while the page still looks finished.
+  if (tail === "asset-classes") return ok(ASSET_CLASSES);
   if (tail === "assets/reconcile") return ok({ problems: [], clean: true });
   if (/^assets\/[^/]+\/schedule$/.test(tail)) return ok(ASSET_SCHEDULE);
   if (tail === "depreciation-runs") return ok(DEPRECIATION_RUNS);
@@ -518,5 +562,173 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
       { section: "total", code: "NET_PROFIT", name: "Net profit", amount: "199000000.0000" },
     ]);
   }
+  return null;
+}
+
+// ── The five terminal-action writes ─────────────────────────────────────────────────────────────
+// Owner decision 2026-08-26: sign-off, close, cutover commit, fiscal-year close and lease
+// recognition are each gated by a typed confirmation the CALLER supplies and the SERVER re-checks
+// — never the form. Every handler below mirrors `finance.controller.ts`'s own order of checks
+// exactly (which check runs before which), so a demo refusal reads — and is REACHED — the same way
+// the live one is: wrong confirmation text, a missing reason, a readiness gate with open blockers,
+// an instrument that isn't a lease, a retained-earnings account this chart doesn't have.
+//
+// None of this mutates the fixtures above. A second sign-off attempt in a later request sees the
+// same static `PERIODS` row it saw the first time — which is why the interesting refusals here
+// (already-signed-off, already-closed) come from periods the fixture already put in that state
+// (Jan/Feb are HARD_LOCK and signed off; see `PERIODS` above) rather than from a store that
+// remembers what a previous call did.
+
+const badRequest = (message: string): DemoResult => ({ status: 400, json: { error: message } });
+const notFound = (message: string): DemoResult => ({ status: 404, json: { error: message } });
+
+/**
+ * Mirrors `finance.controller.ts::requireConfirmation` verbatim: trimmed, CASE-SENSITIVE, same
+ * message. If this drifts from the live wording the demo would teach a refusal the API doesn't
+ * actually give — the frontend-first drift this file's header warns about, applied to an error
+ * string instead of a data shape.
+ */
+function requireConfirmation(supplied: string | undefined, expected: string, what: string): DemoResult | null {
+  if ((supplied ?? "").trim() !== expected) {
+    return badRequest(
+      `confirmation does not match — type the ${what} exactly as "${expected}" to proceed. `
+      + `This action cannot be undone by an ordinary correction.`,
+    );
+  }
+  return null;
+}
+
+/** The readiness gate a period close re-checks. Computed per-period rather than the single
+ *  `CLOSE_READINESS` GET fixture (which answers every period id with the March blockers — a
+ *  pre-existing simplification of the GET route, left alone since it isn't this write's remit) —
+ *  reusing that fixture verbatim here would tell someone closing, say, Aug 2026 that "period Mar
+ *  2026 has no signed_off_by", which is a wrong sentence about the wrong period. AP_RECONCILIATION
+ *  is genuinely period-independent (the subledger tie-out this demo estate keeps broken on
+ *  purpose), so it applies to every period the same way the live gate would apply it. */
+function periodCloseBlockers(period: FiscalPeriod): Array<{ blocker: string; detail: string }> {
+  const blockers: Array<{ blocker: string; detail: string }> = [];
+  if (!AP_RECONCILE.clean) {
+    for (const p of AP_RECONCILE.problems) blockers.push({ blocker: "AP_RECONCILIATION", detail: p.detail });
+  }
+  if (!period.signedOff) {
+    blockers.push({
+      blocker: "NO_ACCOUNTANT_SIGNOFF",
+      detail: `period ${period.name} has no signed_off_by — a HARD_LOCK will be refused (owner ruling D-F5)`,
+    });
+  }
+  return blockers;
+}
+
+function signOffDemo(periodId: string, b: { confirm?: string }): DemoResult {
+  const period = PERIODS.find((x) => x.id === periodId);
+  if (!period) return notFound("no such fiscal period in this company");
+  const refused = requireConfirmation(b.confirm, period.name, "period");
+  if (refused) return refused;
+  if (period.signedOff) return badRequest(`${period.name} is already signed off`);
+  return { status: 200, json: { ok: true, period: period.name } };
+}
+
+function closePeriodDemo(periodId: string, b: { confirm?: string; reason?: string; hard?: boolean }): DemoResult {
+  const hard = b.hard === true;
+  // Checked before the period even loads, matching the live handler — a close with no reason is
+  // refused regardless of which period was asked for.
+  const reason = b.reason?.trim();
+  if (!reason) return badRequest("reason is required — a locked period needs an explanation that outlives the person who locked it");
+
+  const period = PERIODS.find((x) => x.id === periodId);
+  if (!period) return notFound("no such fiscal period in this company");
+  const refused = requireConfirmation(b.confirm, period.name, "period");
+  if (refused) return refused;
+
+  if (period.state === "HARD_LOCK") return badRequest(`${period.name} is already hard-locked`);
+  if (!hard && period.state === "SOFT_LOCK") return badRequest(`${period.name} is already closed`);
+
+  const blockers = periodCloseBlockers(period);
+  if (blockers.length > 0) {
+    return badRequest(
+      `${period.name} is not ready to close — ${blockers.map((x) => `${x.blocker}: ${x.detail}`).join("; ")}`,
+    );
+  }
+  return { status: 200, json: { ok: true, period: period.name, state: hard ? "HARD_LOCK" : "SOFT_LOCK" } };
+}
+
+function commitCutoverDemo(cutoverId: string, b: { confirm?: string }): DemoResult {
+  const cutover = CUTOVERS.find((x) => x.id === cutoverId);
+  if (!cutover) return notFound("no such cutover in this company");
+  // The DATE, not an id — same reason the live handler picks it: it is the line every figure the
+  // company reports is measured from, and it is the thing worth having read before committing.
+  const refused = requireConfirmation(b.confirm, cutover.cutoverDate, "cutover date");
+  if (refused) return refused;
+
+  // `CUTOVER_READINESS` is deliberately never clean (the opening is 2,000,000 unbalanced, reported
+  // rather than plugged — see the fixture above), so this is the one write of the five with no
+  // reachable success in this demo estate. That is not a gap: it is the live handler's own gate,
+  // faithfully refusing an opening that genuinely does not balance.
+  if (CUTOVER_READINESS.blockers.length > 0) {
+    return badRequest(
+      `cutover ${cutover.cutoverDate} is not ready — `
+      + `${CUTOVER_READINESS.blockers.map((x) => `${x.blocker}: ${x.detail}`).join("; ")}`,
+    );
+  }
+  return { status: 201, json: { ok: true, journalId: `demo-j-cutover-${cutover.id}`, cutoverDate: cutover.cutoverDate } };
+}
+
+function closeFiscalYearDemo(fiscalYearId: string, b: { confirm?: string; retainedAccountCode?: string }): DemoResult {
+  const year = FISCAL_YEARS.find((x) => x.id === fiscalYearId);
+  if (!year) return notFound("no such fiscal year in this company");
+  const refused = requireConfirmation(b.confirm, year.code, "fiscal year");
+  if (refused) return refused;
+
+  // Same default the engine itself uses — 3300 RETAINED earnings, never 3200 (current-year
+  // result). `ACCOUNTS` above has no 3300, so the default call refuses honestly rather than
+  // inventing an account this demo's chart was never given; passing an existing code (e.g. 3100)
+  // reaches the success path.
+  const retained = b.retainedAccountCode?.trim() || "3300";
+  if (!ACCOUNTS.some((a) => a.code === retained)) {
+    return badRequest(`unknown retained-earnings account ${retained}`);
+  }
+  return {
+    status: 201,
+    json: { ok: true, journalId: `demo-j-fy-close-${year.id}`, fiscalYear: year.code, retainedAccountCode: retained },
+  };
+}
+
+function recogniseLeaseDemo(instrumentId: string, b: { confirm?: string; assetClassId?: string }): DemoResult {
+  // Checked before the instrument even loads, matching the live handler.
+  if (!b.assetClassId) return badRequest("assetClassId is required — it sets how the right-of-use asset depreciates");
+
+  const instrument = INSTRUMENTS.find((x) => x.id === instrumentId);
+  if (!instrument) return notFound("no such instrument in this company");
+  if (instrument.kind !== "lease") {
+    return badRequest(`${instrument.code} is a ${instrument.kind}, not a lease — only a lease is recognised under PSAK 73`);
+  }
+  const refused = requireConfirmation(b.confirm, instrument.code, "instrument code");
+  if (refused) return refused;
+
+  if (!ASSET_CLASSES.some((c) => c.id === b.assetClassId)) return badRequest("no such asset class in this company");
+
+  return { status: 201, json: { ok: true, assetId: `demo-asset-${instrument.id}`, instrument: instrument.code } };
+}
+
+/** Dispatches the five gated writes; every other write still falls through unanswered (`null`), for
+ *  exactly the reason the top-of-file comment gives. */
+function financeWrite(tail: string, body: string | undefined): DemoResult | null {
+  const b = body ? JSON.parse(body) : {};
+
+  const signOff = /^periods\/([^/]+)\/sign-off$/.exec(tail);
+  if (signOff) return signOffDemo(signOff[1], b);
+
+  const close = /^periods\/([^/]+)\/close$/.exec(tail);
+  if (close) return closePeriodDemo(close[1], b);
+
+  const commit = /^cutovers\/([^/]+)\/commit$/.exec(tail);
+  if (commit) return commitCutoverDemo(commit[1], b);
+
+  const fyClose = /^fiscal-years\/([^/]+)\/close$/.exec(tail);
+  if (fyClose) return closeFiscalYearDemo(fyClose[1], b);
+
+  const lease = /^instruments\/([^/]+)\/recognise-lease$/.exec(tail);
+  if (lease) return recogniseLeaseDemo(lease[1], b);
+
   return null;
 }

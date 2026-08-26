@@ -192,3 +192,58 @@ export async function runDepreciation(periodId: string): Promise<FinanceActionRe
   }
   return r;
 }
+
+// ── The terminal actions (owner decision 2026-08-26: typed-confirmation gate) ────────────────────
+//
+// Each of these does something an ordinary correction cannot undo. The `confirm` string is echoed
+// back to the server, which re-validates it AND re-runs the relevant readiness gate — this file is
+// not the boundary, it is the caller. Nothing here re-implements a rule; the server's refusal
+// message is what the form shows.
+
+export async function signOffPeriod(
+  periodId: string, input: { confirm: string },
+): Promise<FinanceActionResult<{ period: string }>> {
+  const r = await send<{ ok: boolean; period: string }>(`/finance/periods/${periodId}/sign-off`, input);
+  if (r.ok) { revalidatePath("/finance/close"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ period: string }>;
+}
+
+export async function closePeriod(
+  periodId: string, input: { confirm: string; reason?: string; hard?: boolean },
+): Promise<FinanceActionResult<{ period: string; state: string }>> {
+  const r = await send<{ ok: boolean; period: string; state: string }>(
+    `/finance/periods/${periodId}/close`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/close"); revalidatePath("/finance"); revalidatePath("/finance/journals"); }
+  return r as FinanceActionResult<{ period: string; state: string }>;
+}
+
+export async function commitCutover(
+  cutoverId: string, input: { confirm: string },
+): Promise<FinanceActionResult<{ journalId: string; cutoverDate: string }>> {
+  const r = await send<{ ok: boolean; journalId: string; cutoverDate: string }>(
+    `/finance/cutovers/${cutoverId}/commit`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/cutover"); revalidatePath("/finance"); revalidatePath("/finance/reports"); }
+  return r as FinanceActionResult<{ journalId: string; cutoverDate: string }>;
+}
+
+export async function closeFiscalYear(
+  fiscalYearId: string, input: { confirm: string; retainedAccountCode?: string },
+): Promise<FinanceActionResult<{ journalId: string; fiscalYear: string }>> {
+  const r = await send<{ ok: boolean; journalId: string; fiscalYear: string }>(
+    `/finance/fiscal-years/${fiscalYearId}/close`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/cutover"); revalidatePath("/finance/reports"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ journalId: string; fiscalYear: string }>;
+}
+
+export async function recogniseLease(
+  instrumentId: string, input: { confirm: string; assetClassId: string },
+): Promise<FinanceActionResult<{ assetId: string; instrument: string }>> {
+  const r = await send<{ ok: boolean; assetId: string; instrument: string }>(
+    `/finance/instruments/${instrumentId}/recognise-lease`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/treasury"); revalidatePath("/finance/assets"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ assetId: string; instrument: string }>;
+}

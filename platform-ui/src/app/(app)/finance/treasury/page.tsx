@@ -4,10 +4,11 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import {
   listInstruments, getInstrumentSchedule, getTreasuryMaturity, reconcileTreasury,
-  listPeriods, money, INSTRUMENT_KIND_LABEL,
+  listPeriods, listAssetClasses, money, INSTRUMENT_KIND_LABEL,
 } from "@/lib/finance";
 import { Card, KpiTile, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { RecogniseLeaseAction } from "@/components/finance/RecogniseLeaseAction";
 
 // Treasury — loans, bonds and leases, on one model.
 //
@@ -45,11 +46,17 @@ export default async function FinanceTreasuryPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [instruments, maturity, rec] = await Promise.all([
+  const [instruments, maturity, rec, assetClasses] = await Promise.all([
     listInstruments(userId, tenant),
     getTreasuryMaturity(userId, tenant, asOf),
     reconcileTreasury(userId, tenant, asOf),
+    listAssetClasses(userId, tenant),
   ]);
+
+  // Only a lease can be recognised under PSAK 73. Filtering here rather than offering every
+  // instrument and refusing later keeps the surface honest about what the action applies to — the
+  // server refuses a non-lease anyway, but a control that offers an impossible choice is a bug.
+  const leases = instruments.filter((i) => i.kind === "lease");
 
   const selected = sp.instrument ? instruments.find((i) => i.id === sp.instrument) ?? null : null;
   const schedule = selected ? await getInstrumentSchedule(userId, tenant, selected.id) : [];
@@ -195,16 +202,35 @@ export default async function FinanceTreasuryPage({
         </Card>
       ) : null}
 
+      {leases.length > 0 ? (
+        <Card
+          title="Recognise a lease (PSAK 73)"
+          hint="Creates a right-of-use asset and a lease liability. The balance sheet grows on both sides."
+          style={{ marginTop: 22 }}
+        >
+          {leases.map((l) => (
+            <div key={l.id} style={{ marginBlockEnd: 26 }}>
+              <Eyebrow>{l.code} · {l.name}</Eyebrow>
+              <RecogniseLeaseAction
+                instrumentId={l.id}
+                instrumentCode={l.code}
+                assetClasses={assetClasses.map((c) => ({ id: c.id, code: c.code, name: c.name }))}
+              />
+            </div>
+          ))}
+        </Card>
+      ) : null}
+
       <Card title="What is not built here" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Recording a new instrument, posting an interest accrual, and recognising a lease&rsquo;s
-          right-of-use asset are all implemented in the engine and <strong>not exposed here</strong>.
-          Everything above is live and read from the real instruments.
+          Recording a new instrument and posting an interest accrual are implemented in the engine
+          and <strong>not exposed here</strong>. Everything above is live and read from the real
+          instruments.
         </p>
         <p className="fin-muted">
-          Lease recognition is deliberately the most cautious of those to wire: under PSAK 73 it
-          creates an asset and a liability that did not previously exist on the balance sheet, so it
-          changes the size of the company rather than moving a figure between accounts.
+          {leases.length === 0
+            ? "Lease recognition IS wired, but this company has no instrument of kind `lease`, so the action has nothing to apply to and is not shown."
+            : "Lease recognition is wired above, behind a typed-confirmation gate."}
         </p>
       </Card>
     </div>

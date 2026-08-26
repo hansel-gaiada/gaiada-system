@@ -529,3 +529,11 @@ export const INSTRUMENT_KIND_LABEL: Record<string, string> = {
   bond_issued: "Bond issued",
   lease: "Lease",
 };
+
+export interface AssetClass {
+  id: string; code: string; name: string;
+  bookMethod: string | null; bookLifeMonths: number | null; taxGolongan: string | null;
+}
+
+export const listAssetClasses = (u: string, t: string) =>
+  financeData(platformFetch<AssetClass[]>(`/api/${t}/finance/asset-classes`, u), [] as AssetClass[]);

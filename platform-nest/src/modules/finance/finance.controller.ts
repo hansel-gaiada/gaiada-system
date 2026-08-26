@@ -38,6 +38,23 @@ function isoDate(value: string | undefined, field: string): string | null {
   }
   return value;
 }
+/**
+ * Refuse unless the caller echoed the object's own name back.
+ *
+ * Server-side on purpose. A confirmation implemented only in a form protects nobody calling the API
+ * directly — including an agent, which this program explicitly expects to have. The comparison is
+ * trimmed but CASE-SENSITIVE: "aug 2026" is not proof of having read "Aug 2026", and the whole
+ * point of the gate is that supplying the string requires having looked at it.
+ */
+function requireConfirmation(supplied: string | undefined, expected: string, what: string): void {
+  if ((supplied ?? "").trim() !== expected) {
+    throw new BadRequestException(
+      `confirmation does not match — type the ${what} exactly as "${expected}" to proceed. `
+      + `This action cannot be undone by an ordinary correction.`,
+    );
+  }
+}
+
 function requiredIsoDate(value: string | undefined, field: string): string {
   const d = isoDate(value, field);
   if (d == null) throw new BadRequestException(`${field} is required`);
@@ -951,6 +968,22 @@ export class FinanceController {
     });
   }
 
+  /** The asset classes. Needed wherever a class must be CHOSEN rather than inferred — recognising a
+   *  lease picks the class that sets the right-of-use asset's useful life for the whole term. */
+  @Get(":tenantId/finance/asset-classes")
+  async listAssetClasses(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT id, code, name, book_method AS "bookMethod", book_life_months AS "bookLifeMonths",
+                tax_golongan AS "taxGolongan"
+           FROM finance_asset_classes WHERE tenant_id = $1 ORDER BY code`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
   /** One asset's full schedule — book and tax, period by period. Derived, never stored. */
   @Get(":tenantId/finance/assets/:assetId/schedule")
   async assetSchedule(
@@ -1252,6 +1285,250 @@ export class FinanceController {
         totalCredit: credit.toFixed(2),
         balanced: Math.abs(debit - credit) < 0.005,
       };
+    });
+  }
+
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // THE TERMINAL ACTIONS (owner decision 2026-08-26: typed-confirmation gate, no second approver)
+  //
+  // Four things in this module cannot be undone by an ordinary correction:
+  //   sign off + close a period   the ledger stops accepting entries dated inside it
+  //   commit a cutover            posts the opening journal and locks everything before it
+  //   close a fiscal year         rolls the year's result into retained earnings
+  //   recognise a lease           creates an asset AND a liability that did not exist before
+  //
+  // ── EVERY ONE REQUIRES THE CALLER TO ECHO THE NAME BACK ───────────────────────────────────────
+  // Each handler takes a `confirm` field and refuses unless it matches the object's own name
+  // exactly. That is not decoration and it is not a dialog: a dialog is dismissed by reflex, and a
+  // reflex is precisely what should not close a period. Typing "Aug 2026" requires having read
+  // which period is about to close, which is the one thing a mis-click cannot supply.
+  //
+  // It is enforced SERVER-SIDE, not in the form. A confirmation that lives only in the browser
+  // protects nobody calling the API — including an agent, which this program expects to have.
+  //
+  // ── AND A REASON IS MANDATORY ─────────────────────────────────────────────────────────────────
+  // Same posture as journal reversal. The person who has to explain a locked period six months
+  // later is rarely the person who locked it.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Sign off a period. The accountant's assertion that the books are right — NOT the lock.
+   *
+   * Separate from closing on purpose: `NO_ACCOUNTANT_SIGNOFF` is one of the close-readiness
+   * blockers, so sign-off is an input to the gate rather than a synonym for passing it. Signing off
+   * a period whose subledgers do not tie is a legitimate (if unwise) act; closing one is not.
+   */
+  @Post(":tenantId/finance/periods/:periodId/sign-off")
+  @HttpCode(200)
+  async signOffPeriod(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("periodId") periodId: string,
+    @Body() body: { confirm?: string; note?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "close");
+    return withFinance(tenantId, async (c) => {
+      const p = await c.query<{ name: string; signed_off_at: string | null }>(
+        `SELECT name, signed_off_at FROM finance_fiscal_periods WHERE id = $1 AND tenant_id = $2`,
+        [periodId, tenantId],
+      );
+      const period = p.rows[0];
+      if (!period) throw new NotFoundException("no such fiscal period in this company");
+      requireConfirmation(body?.confirm, period.name, "period");
+      if (period.signed_off_at) throw new BadRequestException(`${period.name} is already signed off`);
+
+      await c.query(
+        `UPDATE finance_fiscal_periods
+            SET signed_off_by = $2, signed_off_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [periodId, req.principal.userId],
+      );
+      return { ok: true, period: period.name };
+    });
+  }
+
+  /**
+   * Close a period: SOFT_LOCK, or HARD_LOCK when `hard` is set.
+   *
+   * ★ THE READINESS GATE IS RE-CHECKED HERE, not trusted from whatever the caller last saw. The UI
+   * shows readiness on page load; a subledger can fall out of balance between that render and this
+   * call, and the render is not the authority. Blockers are returned in the refusal so the caller
+   * learns WHICH check failed rather than being told "not ready".
+   *
+   * SOFT vs HARD is a real distinction, not a severity dial: a soft lock stops ordinary posting and
+   * is reversible by someone holding `reopen`; a hard lock is the audit boundary. Defaulting to
+   * soft means the routine monthly act is the recoverable one.
+   */
+  @Post(":tenantId/finance/periods/:periodId/close")
+  @HttpCode(200)
+  async closePeriod(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("periodId") periodId: string,
+    @Body() body: { confirm?: string; reason?: string; hard?: boolean },
+  ) {
+    const hard = body?.hard === true;
+    await authorize(
+      req.principal,
+      { kind: "finance_period", tenantId, module: "finance" },
+      hard ? "lock" : "close",
+    );
+    const reason = body?.reason?.trim();
+    if (!reason) throw new BadRequestException("reason is required — a locked period needs an explanation that outlives the person who locked it");
+
+    return withFinance(tenantId, async (c) => {
+      const p = await c.query<{ name: string; state: string }>(
+        `SELECT name, state FROM finance_fiscal_periods WHERE id = $1 AND tenant_id = $2`,
+        [periodId, tenantId],
+      );
+      const period = p.rows[0];
+      if (!period) throw new NotFoundException("no such fiscal period in this company");
+      requireConfirmation(body?.confirm, period.name, "period");
+
+      if (period.state === "HARD_LOCK") throw new BadRequestException(`${period.name} is already hard-locked`);
+      if (!hard && period.state === "SOFT_LOCK") throw new BadRequestException(`${period.name} is already closed`);
+
+      const gate = await c.query<{ blocker: string; detail: string }>(
+        `SELECT blocker, detail FROM finance_period_close_readiness($1,$2)`,
+        [tenantId, periodId],
+      );
+      if (gate.rows.length > 0) {
+        throw new BadRequestException(
+          `${period.name} is not ready to close — ${gate.rows.map((b) => `${b.blocker}: ${b.detail}`).join("; ")}`,
+        );
+      }
+
+      await c.query(
+        hard
+          ? `UPDATE finance_fiscal_periods
+                SET state = 'HARD_LOCK', hard_locked_at = now(), hard_locked_by = $2,
+                    close_checklist = COALESCE(close_checklist,'{}'::jsonb) || jsonb_build_object('hardLockReason',$3::text),
+                    updated_at = now()
+              WHERE id = $1`
+          : `UPDATE finance_fiscal_periods
+                SET state = 'SOFT_LOCK', soft_locked_at = now(), soft_locked_by = $2,
+                    close_checklist = COALESCE(close_checklist,'{}'::jsonb) || jsonb_build_object('closeReason',$3::text),
+                    updated_at = now()
+              WHERE id = $1`,
+        [periodId, req.principal.userId, reason],
+      );
+      return { ok: true, period: period.name, state: hard ? "HARD_LOCK" : "SOFT_LOCK" };
+    });
+  }
+
+  /** Commit a cutover: posts the opening journal and locks everything before it. Once only. */
+  @Post(":tenantId/finance/cutovers/:cutoverId/commit")
+  @HttpCode(200)
+  async commitCutover(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("cutoverId") cutoverId: string,
+    @Body() body: { confirm?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "lock");
+    return withFinance(tenantId, async (c) => {
+      const cut = await c.query<{ cutover_date: string; status: string }>(
+        `SELECT cutover_date::text AS cutover_date, status FROM finance_cutovers WHERE id = $1 AND tenant_id = $2`,
+        [cutoverId, tenantId],
+      );
+      const cutover = cut.rows[0];
+      if (!cutover) throw new NotFoundException("no such cutover in this company");
+      // The cutover DATE is what the caller must echo — it is the line every figure the company
+      // ever reports is measured from, and it is the thing worth having read.
+      requireConfirmation(body?.confirm, cutover.cutover_date, "cutover date");
+
+      // The readiness gate lives in SQL and refuses an unbalanced opening rather than plugging it.
+      // Re-checked here for the same reason the period gate is: the page render is not authority.
+      const gate = await c.query<{ blocker: string; detail: string }>(
+        `SELECT blocker, detail FROM finance_cutover_readiness($1)`, [cutoverId],
+      );
+      if (gate.rows.length > 0) {
+        throw new BadRequestException(
+          `cutover ${cutover.cutover_date} is not ready — ${gate.rows.map((b) => `${b.blocker}: ${b.detail}`).join("; ")}`,
+        );
+      }
+
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_commit_cutover($1,$2) AS id`, [cutoverId, req.principal.userId],
+      );
+      return { ok: true, journalId: r.rows[0].id, cutoverDate: cutover.cutover_date };
+    });
+  }
+
+  /** Close a fiscal year: rolls the year's result into retained earnings. */
+  @Post(":tenantId/finance/fiscal-years/:fiscalYearId/close")
+  @HttpCode(200)
+  async closeFiscalYear(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("fiscalYearId") fiscalYearId: string,
+    @Body() body: { confirm?: string; retainedAccountCode?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "lock");
+    return withFinance(tenantId, async (c) => {
+      const fy = await c.query<{ code: string }>(
+        `SELECT code FROM finance_fiscal_years WHERE id = $1 AND tenant_id = $2`, [fiscalYearId, tenantId],
+      );
+      const year = fy.rows[0];
+      if (!year) throw new NotFoundException("no such fiscal year in this company");
+      requireConfirmation(body?.confirm, year.code, "fiscal year");
+
+      // Defaults to 3300 — RETAINED earnings, deliberately NOT 3200 (the current-year result). The
+      // engine's own default; passed explicitly only when a chart uses a different code.
+      const retained = body?.retainedAccountCode?.trim() || "3300";
+      const acct = await c.query(
+        `SELECT 1 FROM finance_accounts WHERE tenant_id = $1 AND code = $2`, [tenantId, retained],
+      );
+      if (acct.rowCount === 0) throw new BadRequestException(`unknown retained-earnings account ${retained}`);
+
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_close_year($1,$2,$3,$4) AS id`,
+        [tenantId, fiscalYearId, req.principal.userId, retained],
+      );
+      return { ok: true, journalId: r.rows[0].id, fiscalYear: year.code, retainedAccountCode: retained };
+    });
+  }
+
+  /**
+   * Recognise a lease under PSAK 73: creates a right-of-use ASSET and a lease LIABILITY.
+   *
+   * The most consequential of the four, because it is the only one that changes the SIZE of the
+   * balance sheet rather than moving a figure between accounts. `assetClassId` decides how the
+   * right-of-use asset depreciates thereafter, so it is required rather than defaulted — a wrong
+   * class silently sets a wrong useful life for the whole lease term.
+   */
+  @Post(":tenantId/finance/instruments/:instrumentId/recognise-lease")
+  @HttpCode(201)
+  async recogniseLease(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("instrumentId") instrumentId: string,
+    @Body() body: { confirm?: string; assetClassId?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "post");
+    if (!body?.assetClassId) throw new BadRequestException("assetClassId is required — it sets how the right-of-use asset depreciates");
+    return withFinance(tenantId, async (c) => {
+      const inst = await c.query<{ code: string; kind: string }>(
+        `SELECT code, kind FROM finance_instruments WHERE id = $1 AND tenant_id = $2`, [instrumentId, tenantId],
+      );
+      const instrument = inst.rows[0];
+      if (!instrument) throw new NotFoundException("no such instrument in this company");
+      if (instrument.kind !== "lease") {
+        throw new BadRequestException(`${instrument.code} is a ${instrument.kind}, not a lease — only a lease is recognised under PSAK 73`);
+      }
+      requireConfirmation(body?.confirm, instrument.code, "instrument code");
+
+      const cls = await c.query(
+        `SELECT 1 FROM finance_asset_classes WHERE id = $1 AND tenant_id = $2`, [body.assetClassId, tenantId],
+      );
+      if (cls.rowCount === 0) throw new BadRequestException("no such asset class in this company");
+
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_lease_recognise($1,$2,$3) AS id`,
+        [instrumentId, body.assetClassId, req.principal.userId],
+      );
+      return { ok: true, assetId: r.rows[0].id, instrument: instrument.code };
     });
   }
 

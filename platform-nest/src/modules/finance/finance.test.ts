@@ -421,6 +421,160 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     });
   });
 
+  // ── The terminal actions (owner decision 2026-08-26: typed-confirmation gate) ────────────────────
+  //
+  // These five endpoints are the only ones in the module that cannot be undone by an ordinary
+  // correction, so each is gated by requireConfirmation() — the caller must echo the object's own
+  // name back, exactly, server-side. A dialog is dismissed by reflex; typing the name back is not.
+  // Proven here against the LIVE PDP and the LIVE readiness gate, not by reading the handler: a
+  // confirmation string that only "looks" enforced in the source is not enforced at all.
+  describe("terminal actions — sign-off and close", () => {
+    let march: { id: string; name: string };
+
+    it("finds March's period, already carrying postings from the tests above", async () => {
+      const periods = (await get(`/api/${tenant}/finance/periods`, clerk)).json() as
+        Array<{ id: string; periodNo: number; name: string }>;
+      const m = periods.find((p) => p.periodNo === 3)!;
+      march = { id: m.id, name: m.name };
+      expect(march.id).toBeTruthy();
+    });
+
+    it("sign-off REFUSES a wrong confirmation string", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/sign-off`,
+        headers: asUser(controller), payload: { confirm: "definitely not the period name" },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("sign-off REFUSES with no confirmation at all", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/sign-off`,
+        headers: asUser(controller), payload: {},
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    // Cerbos, not a UI check — `outsider` holds `member` and no finance role at all, so this must
+    // deny before the confirmation is even inspected.
+    it("a plain member gets 403 on sign-off, not a validation error", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/sign-off`,
+        headers: asUser(outsider), payload: { confirm: march.name },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    // The seeded company has never been signed off, so this blocker must be present BEFORE the
+    // sign-off below — otherwise the next test proves nothing about what sign-off actually changed.
+    it("close-readiness names NO_ACCOUNTANT_SIGNOFF before anyone signs off", async () => {
+      const body = (await get(`/api/${tenant}/finance/periods/${march.id}/close-readiness`, clerk)).json() as
+        { blockers: Array<{ blocker: string }>; ready: boolean };
+      expect(body.blockers.map((b) => b.blocker)).toContain("NO_ACCOUNTANT_SIGNOFF");
+    });
+
+    it("sign-off SUCCEEDS with the exact period name", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/sign-off`,
+        headers: asUser(controller), payload: { confirm: march.name },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ ok: true, period: march.name });
+    });
+
+    it("a second sign-off of the same period is refused", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/sign-off`,
+        headers: asUser(controller), payload: { confirm: march.name },
+      });
+      expect(r.statusCode).toBe(400);
+      expect(r.json()).toMatchObject({ error: expect.stringContaining("already signed off") });
+    });
+
+    // Sign-off is an INPUT to the close gate, not a synonym for passing it — assert only the one
+    // thing sign-off actually changed, and do not assume the gate is now clear.
+    it("close-readiness no longer names NO_ACCOUNTANT_SIGNOFF once signed off", async () => {
+      const body = (await get(`/api/${tenant}/finance/periods/${march.id}/close-readiness`, clerk)).json() as
+        { blockers: Array<{ blocker: string }>; ready: boolean };
+      expect(body.blockers.map((b) => b.blocker)).not.toContain("NO_ACCOUNTANT_SIGNOFF");
+    });
+
+    it("close REFUSES without a reason", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/close`,
+        headers: asUser(controller), payload: { confirm: march.name },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    // "aug 2026" is not proof of having read "Aug 2026" — the comparison is trimmed but
+    // case-sensitive on purpose, and the refusal must still name the period correctly.
+    it("close is CASE-SENSITIVE: the period name in lowercase is refused", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/close`,
+        headers: asUser(controller),
+        payload: { confirm: march.name.toLowerCase(), reason: "month-end close, case-sensitivity probe" },
+      });
+      expect(r.statusCode).toBe(400);
+      expect(r.json()).toMatchObject({ error: expect.stringContaining(march.name) });
+    });
+
+    // The readiness gate is RE-CHECKED inside the handler, not trusted from whatever the caller
+    // last saw — so read current readiness first and let it decide which branch is correct. Do NOT
+    // assume the close succeeds just because sign-off happened above; other blockers (an open AR
+    // subledger, an unreconciled bank account, etc.) may still be there.
+    it("close REFUSES while blockers remain and names one, or else genuinely succeeds", async () => {
+      const readiness = (await get(`/api/${tenant}/finance/periods/${march.id}/close-readiness`, clerk)).json() as
+        { blockers: Array<{ blocker: string }>; ready: boolean };
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/close`,
+        headers: asUser(controller), payload: { confirm: march.name, reason: "month-end close" },
+      });
+      if (readiness.ready) {
+        expect(r.statusCode).toBe(200);
+      } else {
+        expect(r.statusCode).toBe(400);
+        expect(r.json()).toMatchObject({ error: expect.stringContaining(readiness.blockers[0].blocker) });
+      }
+    });
+
+    it("a plain member gets 403 on close, not a validation error", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/periods/${march.id}/close`,
+        headers: asUser(outsider), payload: { confirm: march.name, reason: "should never reach this" },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    describe("recognise-lease", () => {
+      // finance_instruments.kind is a CHECK ('loan_payable','loan_receivable','bond_issued','lease')
+      // — there is no create endpoint yet (F11 is read-only over HTTP so far), so a loan is seeded
+      // directly to prove the handler refuses a non-lease BEFORE it ever asks for confirmation.
+      it("refuses an instrument whose kind is not 'lease', naming the kind", async () => {
+        let loanId = "";
+        await withTenants([tenant], async (c) => {
+          await c.query("SELECT set_config('app.scopes','finance',true)");
+          const r = await c.query<{ id: string }>(
+            `INSERT INTO finance_instruments
+               (tenant_id, code, name, kind, currency_code, principal, start_date, maturity_date, repayment_method)
+             VALUES ($1,'LOAN-900','Bank Loan','loan_payable','IDR',100000000,'2026-01-01','2030-01-01','bullet')
+             RETURNING id`,
+            [tenant],
+          );
+          loanId = r.rows[0].id;
+        }, { modules: ["finance"] });
+
+        const r = await app.inject({
+          method: "POST", url: `/api/${tenant}/finance/instruments/${loanId}/recognise-lease`,
+          headers: asUser(controller),
+          payload: { confirm: "LOAN-900", assetClassId: "00000000-0000-0000-0000-000000000000" },
+        });
+        expect(r.statusCode).toBe(400);
+        expect(r.json()).toMatchObject({ error: expect.stringContaining("loan_payable") });
+      });
+    });
+  });
+
   // ── Cross-company isolation, over HTTP ────────────────────────────────────────────────────────
   it("another company's books are unreachable", async () => {
     const other = await createCompany("Other Co", ["finance"]);

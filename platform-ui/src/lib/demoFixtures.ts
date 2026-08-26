@@ -1991,11 +1991,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const lms = lmsDemo(method, p, url.searchParams, body);
   if (lms) return lms;
 
-  // Finance reads (/api/:t/finance/*) — read-only fixture store (lib/demoFinance.ts). Placed beside
+  // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a
   // finance path with a generic {ok:true}. A cheerful stub on THIS surface would render a balanced
   // trial balance and a clean reconciliation for a company that has neither.
-  const finance = financeDemo(method, p, url.searchParams, userId);
+  // `body` is forwarded, and that is load-bearing: the five terminal-action writes are gated on a
+  // typed confirmation carried in the body. Without it every one of them refuses "no confirmation
+  // supplied" no matter what the form sent — a demo that models the refusal and makes the success
+  // unreachable, which is a worse lie than not modelling the write at all.
+  const finance = financeDemo(method, p, url.searchParams, userId, body);
   if (finance) return finance;
 
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
