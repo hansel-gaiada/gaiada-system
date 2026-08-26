@@ -353,6 +353,19 @@ export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: numbe
   return { x: room.x, y: room.y, w: room.wTiles, h: room.hTiles };
 }
 
+/** Pods, not a spreadsheet (owner feedback 2026-08-26: "identical desks on a perfect grid... reads
+ *  as GENERATED"). The SECOND desk of every column pair (1, 3, 5, ...) nudges a few tenths of a
+ *  tile off its row's own Y — the "facing pair" read a real pod has — while the FIRST desk of every
+ *  pair (0, 2, 4, ... — including column 0 itself, which an existing test pins to exactly
+ *  `DESK_TOP_TILES` off the nameplate wall, see the describe block below) stays on the untouched
+ *  grid line. X spacing is NEVER touched by this, on either desk, so `NAME_SLOT_TILES` (derived
+ *  from `DESK_SPACING_TILES`) still guarantees the exact label gutter it always did — a pod cannot
+ *  make two names collide. Alternating the nudge's SIGN by pair GROUP (pair 0 leans one way, pair 1
+ *  the other) keeps a 4+-column room from reading as one row uniformly shifted down rather than as
+ *  pods. `DESK_ROW_TILES` (4.6) is more than six times `POD_PAIR_OFFSET_TILES`, so a pod can never
+ *  reach the row above or below it. */
+export const POD_PAIR_OFFSET_TILES = 0.35;
+
 /** Centre of the Nth avatar's "desk" inside a room, in TILE units — uses the room's OWN deskCols
  *  (variable per room, from roomSizeTiles), never a fixed constant, so a wide 9-person room's
  *  desks line up with the walls that were actually sized for it.
@@ -366,14 +379,23 @@ export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: numbe
  *  the corridor-facing wall opposite it), so desks start `DESK_TOP_TILES` down from there and grow
  *  toward the door. A "south" room's nameplate is on its FAR edge (`room.y + hTiles`), so desks
  *  start `DESK_TOP_TILES` UP from there and grow toward the door at the top — the mirror image,
- *  not a re-run of the same formula. */
+ *  not a re-run of the same formula.
+ *
+ *  Deterministic per (room, index) exactly like the grid it replaces — the ARRANGEMENT (see
+ *  `POD_PAIR_OFFSET_TILES` above) varies, but the index -> desk mapping never does: `index` is the
+ *  stable per-person slot `steadyPositions` (OfficeCanvas.tsx) assigns, and a room's real headcount
+ *  is bound to specific desks, never merely to a count — so the same index must always land on the
+ *  same seat, pod nudge and all. */
 export function deskSlotTile(room: OfficeRoom, index: number): { x: number; y: number } {
   const cols = Math.max(1, room.deskCols);
   const col = index % cols;
   const row = Math.floor(index / cols);
-  const y = room.side === "north"
+  const yBase = room.side === "north"
     ? room.y + DESK_TOP_TILES + row * DESK_ROW_TILES
     : room.y + room.hTiles - DESK_TOP_TILES - row * DESK_ROW_TILES;
+  const isSecondOfPair = col % 2 === 1;
+  const pairGroup = Math.floor(col / 2);
+  const y = isSecondOfPair ? yBase + (pairGroup % 2 === 0 ? 1 : -1) * POD_PAIR_OFFSET_TILES : yBase;
   return {
     x: room.x + DESK_MARGIN_TILES + col * DESK_SPACING_TILES,
     y,
@@ -1028,6 +1050,77 @@ export function ambientDriftOffset(avatarId: string, nowMs: number): { dx: numbe
   const dx = Math.sin((nowMs / periodX) * Math.PI * 2 + phaseX) * AMBIENT_DRIFT_RADIUS_TILES;
   const dy = Math.sin((nowMs / periodY) * Math.PI * 2 + phaseY) * AMBIENT_DRIFT_RADIUS_TILES;
   return { dx, dy };
+}
+
+// ── Ambient WALKING — discrete short walks with pauses (owner feedback 2026-08-26: "movement can
+// really look like walking" / current motion is "too rigid") ───────────────────────────────────
+// `ambientDriftOffset` above is UNTOUCHED — its own arity/boundedness tests keep pinning it, and
+// nothing here changes its contract or its behaviour. This is a SECOND, alternative decorative-
+// motion function `OfficeCanvas.tsx` now calls INSTEAD, because a continuous lissajous curve makes
+// every avatar glide continuously, which reads as sliding rather than walking — exactly the
+// complaint. It carries the identical (avatarId, nowMs)-ONLY contract non-negotiably: no
+// `activeRunId`, `busyUntil`, `automationSignal` or working state, ever (see `ambientDriftOffset`'s
+// own doc above for why — the reasoning is identical here and is not repeated).
+//
+// A real person at a desk mostly sits still and OCCASIONALLY gets up, takes a few short steps, and
+// sits back down. This reproduces that shape on a per-avatar CYCLE: a long pause at the desk, a
+// short walk to one nearby point, a shorter pause there, and a short walk back — never a third
+// destination, never a route that leaves the desk's own small neighbourhood. Cycle length, target
+// point and leg speed are all seeded from the id hash so 80 avatars never move in lockstep, and the
+// walk target is bounded by the exact same `AMBIENT_DRIFT_RADIUS_TILES` the old function used, for
+// the exact same reason: it is derived to never risk a neighbour's desk regardless of room or slot.
+export interface AmbientWalk {
+  /** Tile-space offset from the avatar's desk — same frame `ambientDriftOffset` already used. */
+  dx: number;
+  dy: number;
+  /** True only during the two short walk legs; false while paused at the desk or at the point. */
+  walking: boolean;
+  /** Direction of the CURRENT walk leg (0,0 while paused) — for choosing a facing LPC row ("face
+   *  the direction of travel"). Not a velocity — never used to move the avatar further than `dx/dy`
+   *  above already places it. */
+  dirX: number;
+  dirY: number;
+}
+
+const AMBIENT_WALK_CYCLE_BASE_MS = 14_000;
+const AMBIENT_WALK_LEG_MS = 1_100;
+const AMBIENT_WALK_POINT_PAUSE_BASE_MS = 1_800;
+
+/** Deterministic discrete-walk state (tile units + a facing direction) for an avatar at a given
+ *  instant. Same `avatarId` + same `nowMs` always returns the same result — no per-avatar state,
+ *  nothing to reset, reproducible in a test exactly like `ambientDriftOffset` already is.
+ *
+ *  The cycle is four phases, in order: pause at desk (the majority of the cycle — a person is
+ *  seated most of the time) -> walk out -> pause at the point -> walk back. `pauseAtDeskEnd` is
+ *  computed as "whatever's left of the period" rather than its own hashed value, so the two walk
+ *  legs and the point-pause can vary per avatar without the four phases ever needing to be kept in
+ *  sync by hand; `Math.max` only guards against a future constant change accidentally shrinking it
+ *  to zero or negative, it is never reached at the ranges below (minimum ~7.2s of 14s). */
+export function ambientWalkState(avatarId: string, nowMs: number): AmbientWalk {
+  const h = hashId(avatarId);
+  const period = AMBIENT_WALK_CYCLE_BASE_MS + (h % 7) * 1_400; // 14.0s .. 22.4s, varied per person
+  const legMs = AMBIENT_WALK_LEG_MS + (h % 5) * 90; // slight per-person walking-speed variance
+  const pointPauseMs = AMBIENT_WALK_POINT_PAUSE_BASE_MS + ((h >>> 8) % 5) * 500;
+  const angle = ((h >>> 4) % 360) * (Math.PI / 180);
+  const radius = AMBIENT_DRIFT_RADIUS_TILES * (0.55 + ((h >>> 12) % 5) / 10); // a real few-step walk
+  const px = Math.cos(angle) * radius;
+  const py = Math.sin(angle) * radius;
+  // Stagger so 80 avatars don't all start their cycle on the same frame — the discrete-cycle
+  // equivalent of ambientDriftOffset's own sine phase.
+  const phaseMs = ((h % 1000) / 1000) * period;
+  const t = ((nowMs + phaseMs) % period + period) % period;
+  const pauseAtDeskEnd = Math.max(200, period - 2 * legMs - pointPauseMs);
+
+  if (t < pauseAtDeskEnd) return { dx: 0, dy: 0, walking: false, dirX: 0, dirY: 0 };
+  if (t < pauseAtDeskEnd + legMs) {
+    const tt = (t - pauseAtDeskEnd) / legMs;
+    return { dx: lerp(0, px, tt), dy: lerp(0, py, tt), walking: true, dirX: px, dirY: py };
+  }
+  if (t < pauseAtDeskEnd + legMs + pointPauseMs) {
+    return { dx: px, dy: py, walking: false, dirX: 0, dirY: 0 };
+  }
+  const tt = (t - (pauseAtDeskEnd + legMs + pointPauseMs)) / legMs;
+  return { dx: lerp(px, 0, tt), dy: lerp(py, 0, tt), walking: true, dirX: -px, dirY: -py };
 }
 
 // ── Ambient speech bubbles — a curated bank, and nothing else (plan §6: "LLM-generated jokes cause

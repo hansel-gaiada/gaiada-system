@@ -120,6 +120,22 @@ export function pickSkinTone(id: string): SkinTone {
   return SKIN_TONE_ORDER[hashId(`${id}:tone`) % SKIN_TONE_ORDER.length];
 }
 
+/** Which `walk` sheet ROW faces a given direction of travel (owner feedback 2026-08-26: "face the
+ *  direction of travel" during ambient walking — see `office.ts`'s `ambientWalkState`). LPC row
+ *  order, per this file's own header: 0 = away, 1 = left, 2 = toward the viewer, 3 = right.
+ *
+ *  The dominant axis wins (a mostly-horizontal walk faces left/right, a mostly-vertical one faces
+ *  away/toward) rather than blending — an LPC sheet has exactly four discrete facings, no
+ *  in-between frame to blend toward. `(0, 0)` (not walking) falls back to `POSE_FRAME.walk`'s own
+ *  row — the same fixed "toward the viewer" frame corridor transit already uses — so a caller that
+ *  forgets to guard on `walking` degrades to the pre-existing transit look rather than to a
+ *  meaningless facing. */
+export function facingRow(dirX: number, dirY: number): 0 | 1 | 2 | 3 {
+  if (dirX === 0 && dirY === 0) return POSE_FRAME.walk.row as 0 | 1 | 2 | 3;
+  if (Math.abs(dirX) >= Math.abs(dirY)) return dirX < 0 ? 1 : 3;
+  return dirY < 0 ? 0 : 2;
+}
+
 export function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
