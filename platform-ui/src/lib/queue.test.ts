@@ -68,14 +68,18 @@ describe("getMyWorkQueue — the shared R-1 spine", () => {
 
     const queue = await getMyWorkQueue(m, "u1", companies);
 
+    // ⚠ These three ids gained a `:${companyId}` segment on 2026-08-26, DELIBERATELY. `agency`,
+    // `automation` and `pipeline` were the only builders not namespaced by company, and since
+    // `getMyWorkQueue` fans out per company, any repeated origin id collided as a React key and
+    // dropped a row. The other three were already namespaced; all six now match.
     expect(queue.items.map((i) => i.id).sort()).toEqual(
-      ["agency:ap-1", "automation:aa-1", "pipeline:gt-1", "task:co-a:t-1", "mention:co-a:n-1"].sort(),
+      ["agency:co-a:ap-1", "automation:co-a:aa-1", "pipeline:co-a:gt-1", "task:co-a:t-1", "mention:co-a:n-1"].sort(),
     );
     // ranked, urgency descending
     for (let i = 1; i < queue.items.length; i++) {
       expect(queue.items[i - 1].urgencyScore).toBeGreaterThanOrEqual(queue.items[i].urgencyScore);
     }
-    const approval = queue.items.find((i) => i.id === "agency:ap-1")!;
+    const approval = queue.items.find((i) => i.id === "agency:co-a:ap-1")!;
     // IAM-02a-FIX-2: this used to assert `true` with the comment "manager grant on co-a ->
     // approvals.decide". That was the OLD, WRONG behaviour DR-1 (2026-08-10) corrected: `decidable`
     // is computed once per company (`can(me, "approvals.decide", c.id)`, queue.ts above) and applied
@@ -105,7 +109,7 @@ describe("getMyWorkQueue — the shared R-1 spine", () => {
       }),
     );
     const queue = await getMyWorkQueue(m, "u1", companies);
-    expect(queue.items.find((i) => i.id === "agency:ap-2")?.decidable).toBe(false);
+    expect(queue.items.find((i) => i.id === "agency:co-c:ap-2")?.decidable).toBe(false);
   });
 
   it("never throws when every source for a company fails outright", async () => {
@@ -114,6 +118,54 @@ describe("getMyWorkQueue — the shared R-1 spine", () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
     const queue = await getMyWorkQueue(m, "u1", companies);
     expect(queue.items).toEqual([]);
+  });
+});
+
+describe("getMyWorkQueue — every id is globally unique across companies", () => {
+  it("does not collide when the SAME origin record id appears under two companies", async () => {
+    // THE regression. `getMyWorkQueue` fans out per company, so an id built from the origin record
+    // alone repeats across them — React then logs "Encountered two children with the same key" and
+    // silently drops one row. MEASURED as `pipeline:gt-2-pmreview` colliding across the three demo
+    // companies, which lost a pending gate from "Waiting on me". A dropped approval is a decision
+    // nobody is told about, so this asserts uniqueness rather than merely counting rows.
+    const companies = [{ id: "co-a", name: "Agency" }, { id: "co-b", name: "Resort" }];
+    const m = me(companies, [
+      { role: "manager", scopeType: "company", scopeId: "co-a" },
+      { role: "manager", scopeType: "company", scopeId: "co-b" },
+    ]);
+
+    // Every source answers with the SAME record id for BOTH companies — the shape a shared fixture
+    // or a tenant-blind endpoint produces, and the shape that used to break the keys.
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200 });
+      if (u.includes("/modules/agency/approvals/pending")) {
+        return json([{ id: "ap-dup", subject: "Hero asset", campaign: null, campaignId: null, created_at: "2026-07-01T00:00:00Z" }]);
+      }
+      if (u.includes("/automation-approvals")) {
+        return json([{
+          id: "aa-dup", workflow_id: "wf", tool_name: "it.devices.disable", tool_args: {}, impact: "medium",
+          reason: "flagged", status: "pending", origin: "automation", agent_name: null,
+          requested_by: "system", decided_by: null, decided_at: null, created_at: "2026-07-02T00:00:00Z",
+        }]);
+      }
+      if (u.includes("/pipeline/gates")) {
+        return json([{ id: "gt-dup", run_id: "run-1", stage_id: null, kind: "pm_review", actor_side: "internal", status: "pending", decision: null, note: null, created_at: "2026-07-03T00:00:00Z" }]);
+      }
+      return json([]);
+    }));
+
+    const q = await getMyWorkQueue(m, "u-1", companies);
+    const ids = q.items.map((i) => i.id);
+    expect(new Set(ids).size, `duplicate ids: ${ids.filter((x, i) => ids.indexOf(x) !== i).join(", ")}`).toBe(ids.length);
+
+    // And both copies actually survive the merge — uniqueness must come from namespacing, never from
+    // one of them being dropped.
+    expect(ids.filter((i) => i.startsWith("pipeline:"))).toHaveLength(2);
+    expect(ids).toContain("pipeline:co-a:gt-dup");
+    expect(ids).toContain("pipeline:co-b:gt-dup");
+    expect(ids).toContain("automation:co-a:aa-dup");
+    expect(ids).toContain("agency:co-a:ap-dup");
   });
 });
 

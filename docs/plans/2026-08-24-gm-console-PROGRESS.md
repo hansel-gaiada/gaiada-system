@@ -403,6 +403,34 @@ It passes in isolation every time and the file is untouched by this work. Not fi
 another team's test budget is their call), but recorded because it will keep firing on a shared machine
 and reads exactly like a real regression.
 
+**F32 — the duplicate React key was a DROPPED APPROVAL, not a console nit.** F8 recorded a
+"pre-existing duplicate-key warning in the app shell" and cleared the nav change of it. Chased
+properly this time by reading React's warning ARGUMENTS rather than its format string
+(`page.on("console")` gives `%s` unexpanded; `msg.args()` has the substitution), the key was
+**`pipeline:gt-2-pmreview`** — a `QueueItem` id.
+
+`QueueItem.id` is documented as "this queue's own composite, globally-unique React key", and
+`getMyWorkQueue` **fans out per company**. Three of the six builders namespaced their id by company
+(`pmtask`, `task`, `mention`); three did not (`agency`, `automation`, `pipeline`). So any origin record
+whose id repeats across companies collided — and React does not merely warn, it **drops one of the
+colliding children**. On a "what needs me" queue that is a pending approval silently vanishing. All six
+are namespaced now, with a regression test that asserts BOTH uniqueness and that both copies survive
+(uniqueness must come from namespacing, never from one row being dropped).
+
+Two existing assertions flipped to the new id format, marked as deliberate in the test body.
+
+**F33 — I used an instrument that could not detect the bug, and nearly reported it clean.** For the
+other half of F8 — `<details>`/`<summary>`/`<ul>` rendered inside `<p>` — I swept 38 routes asking the
+DOM whether any `<p>` contained a block descendant. It returned **0**, and 0 was meaningless: the HTML
+parser CLOSES an open `<p>` when it meets a block element, so the invalid nesting can never appear in
+the resulting DOM. React warns at render time; the DOM is already corrected by the time a query runs.
+
+**Still open, and honestly so.** Those warnings reproduce only against the real backend with a
+member-tier identity (0 occurrences across both identities in DEMO_MODE, 38 routes). Candidates
+eliminated by inspection: `EmptyNote` callers, `StateScreen`/error-boundary bodies, `markdownLite`
+(its `<p>`/`<ul>` are correctly flushed as siblings), `ArtifactMarkdown`. Not converging by reading —
+it needs the real-data path re-stood to capture a component stack.
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -494,3 +522,7 @@ and reads exactly like a real regression.
   isolation) · `DEMO_MODE=1 next build` clean · GM e2e **32/32**.
 - **2026-08-26** — Open after this: nothing in this program. Remaining items are other teams' — F17's
   sibling gaps if any, F31's flaky budget, and the pre-existing shell key/hydration warnings (F8).
+- **2026-08-26** — F8 split and half-fixed. The duplicate-key half was a real defect with a real
+  consequence (a pending approval dropped from the queue) and is FIXED with a regression test (F32).
+  The invalid-`<p>`-nesting half is **still open**: reproducible only against real-backend data, and my
+  DOM-based search for it was invalid by construction (F33).
