@@ -45,6 +45,11 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: ${APP_DATABASE_URL}
+      # Payload reads DATABASE_URI; WSK-06's /v1 read path resolves it too.
+      DATABASE_URI: ${APP_DATABASE_URL}
+      # WSK-06's /v1 auth verifies api_keys hashes: sha256(key + pepper).
+      # MUST match the api service's API_KEY_PEPPER exactly (see WSK-06 coupling note).
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
       PAYLOAD_SECRET: ${PAYLOAD_SECRET}
       PAYLOAD_TELEMETRY_DISABLED: ${PAYLOAD_TELEMETRY_DISABLED:-1}
       TENANT_GUC_NAME: ${TENANT_GUC_NAME}
@@ -73,6 +78,8 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PAYLOAD_INTERNAL_HOST: payload
       PAYLOAD_INTERNAL_PORT: 3000
+      DATABASE_URI: ${APP_DATABASE_URL}
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
       PAYLOAD_PUBLIC_PORT: 3000
     ports:
       - "${WEBDESK_PAYLOAD_PUBLIC_PORT:-8384}:3000"
@@ -87,6 +94,19 @@ services:
       - -c
       - "echo '[webdesk] api stub — control plane lands at WSK-21' && sleep infinity"
     environment:
+      # WSK-11 mail. A var in .env does NOTHING unless it is listed here
+      # (the estate's compose-env-passthrough trap).
+      MAIL_ENABLED: ${MAIL_ENABLED:-true}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Gaiada}
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-mailpit}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-1025}
+      MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
+      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+      MAIL_QUEUE_NAME: ${MAIL_QUEUE_NAME:-webdesk-mail}
+      MAIL_QUEUE_MAX_ATTEMPTS: ${MAIL_QUEUE_MAX_ATTEMPTS:-5}
+      MAIL_QUEUE_BACKOFF_DELAY_MS: ${MAIL_QUEUE_BACKOFF_DELAY_MS:-2000}
       NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: ${APP_DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
@@ -196,6 +216,26 @@ services:
     restart: unless-stopped
 
   # --- ClamAV (media upload scanning, WSK-07) --------------------------------------------------
+  # WSK-07: on-the-fly image transforms. Sits BEHIND the api (never public directly);
+  # the api signs transform URLs, so imgproxy needs no bucket credentials of its own
+  # beyond read access to the public media bucket.
+  imgproxy:
+    image: darthsim/imgproxy:v3
+    profiles: ["dev"]
+    environment:
+      IMGPROXY_KEY: ${IMGPROXY_KEY}
+      IMGPROXY_SALT: ${IMGPROXY_SALT}
+      # Signed URLs only — an unsigned request must be refused.
+      IMGPROXY_ALLOW_UNSAFE_URL: "false"
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-${MINIO_ROOT_USER}}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+    expose:
+      - "8080"
+    depends_on:
+      - minio
+
   clamav:
     image: clamav/clamav:stable
     profiles: ["dev"]
