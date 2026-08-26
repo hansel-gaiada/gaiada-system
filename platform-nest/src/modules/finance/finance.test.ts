@@ -575,6 +575,244 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     });
   });
 
+  // ── The payables WRITE path, driven over HTTP ─────────────────────────────────────────────────
+  //
+  // `finance_ap` is the module with the widest action split in the policy (see
+  // cerbos/policies/resource_finance_ap.yaml): read/reconcile, bill_entry, vendor_master, approve
+  // and payment_release are FIVE separately-grantable actions, not one "manage". The point of this
+  // block is to prove the split is real against the live PDP, not just present in the yaml — and
+  // that the withholding math a vendor bill computes is the actual reason the endpoint exists: a
+  // vendor and DJP are different creditors, and paying the vendor the bill total would simply be
+  // wrong.
+  describe("payables — the write path", () => {
+    let vendorId = "";
+    let billId = "";
+
+    // ── Master data authorization ───────────────────────────────────────────────────────────────
+    // resource_finance_ap.yaml, `vendor_master` rule: derivedRoles ["module_manager","company_admin"]
+    // at assurance == "high". NOT module_staff — editing a vendor (bank details included) is kept off
+    // the clerk's hands deliberately, per the file's own header ("the highest-leverage AP fraud").
+    it("a plain member cannot create a vendor", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendors`, headers: asUser(outsider),
+        payload: { code: "V-NOPE", name: "Should Not Exist" },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("★ finance_staff CANNOT create a vendor — vendor_master is module_manager/company_admin only", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendors`, headers: asUser(clerk),
+        payload: { code: "V-CLERK-NOPE", name: "Clerk Should Not Create This" },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("the controller (finance_manager → module_manager) CAN create a vendor", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendors`, headers: asUser(controller),
+        payload: { code: "V-900", name: "PT Pemasok Uji", npwp: "01.234.567.8-901.000" },
+      });
+      expect(r.statusCode).toBe(201);
+      vendorId = (r.json() as { id: string }).id;
+      expect(vendorId).toBeTruthy();
+    });
+
+    it("REFUSES a duplicate vendor code", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendors`, headers: asUser(controller),
+        payload: { code: "V-900", name: "Same Code, Different Company" },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("REFUSES a duplicate AR customer code too", async () => {
+      // finance_ar `manage` is module_staff-reachable (unlike vendor_master), so this is deliberately
+      // driven as the clerk — the duplicate-code guard is not an authorization question.
+      const first = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/customers`, headers: asUser(clerk),
+        payload: { code: "C-950", name: "PT Pelanggan Uji" },
+      });
+      expect(first.statusCode).toBe(201);
+      const dup = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/customers`, headers: asUser(clerk),
+        payload: { code: "C-950", name: "Same Code Again" },
+      });
+      expect(dup.statusCode).toBe(400);
+    });
+
+    // ── withholdingRate validation ──────────────────────────────────────────────────────────────
+    it("REFUSES withholdingRate expressed as a PERCENTAGE rather than a rate", async () => {
+      // 2 (meaning "2%") would withhold 200% of the subtotal and pay the vendor a negative amount —
+      // the controller rejects anything outside [0,1] for exactly this reason.
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills`, headers: asUser(clerk),
+        payload: {
+          vendorId, billNo: "BILL-BADRATE", billDate: "2026-03-05", dueDate: "2026-04-04",
+          withholdingRate: 2, withholdingAccountCode: "2151",
+          lines: [{ description: "Jasa konsultasi", unitPrice: 1_000_000, expenseAccountCode: "6200" }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("REFUSES a withholding rate with no withholdingAccountCode", async () => {
+      // Tax withheld is a liability TO DJP, not to the vendor — it needs an account of its own.
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills`, headers: asUser(clerk),
+        payload: {
+          vendorId, billNo: "BILL-NOACCT", billDate: "2026-03-05", dueDate: "2026-04-04",
+          withholdingRate: 0.02,
+          lines: [{ description: "Jasa konsultasi", unitPrice: 1_000_000, expenseAccountCode: "6200" }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    // ── bill entry authorization ────────────────────────────────────────────────────────────────
+    // `bill_entry` rule: derivedRoles ["module_staff","module_manager"], condition notLow — the AP
+    // clerk's day job, nothing has reached the books yet.
+    it("a plain member cannot enter a bill", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills`, headers: asUser(outsider),
+        payload: {
+          vendorId, billNo: "BILL-NOPE", billDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "x", unitPrice: 1000, expenseAccountCode: "6200" }],
+        },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    // ── ★ THE WITHHOLDING SPLIT — the whole point of this endpoint ─────────────────────────────
+    it("★ clerk enters a bill as a DRAFT, computing the withholding split correctly", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills`, headers: asUser(clerk),
+        payload: {
+          vendorId, billNo: "BILL-900", billDate: "2026-03-05", dueDate: "2026-04-04",
+          withholdingRate: 0.02, withholdingCode: "PPh23", withholdingAccountCode: "2151",
+          lines: [{
+            description: "Jasa konsultasi", quantity: 1, unitPrice: 35_000_000,
+            expenseAccountCode: "6200", taxCode: "PPN", taxRate: 12,
+          }],
+        },
+      });
+      expect(r.statusCode).toBe(201);
+      const body = r.json() as {
+        id: string; status: string; subtotal: number; taxTotal: number; total: number;
+        withholdingAmount: number; amountPayable: number;
+      };
+      billId = body.id;
+      expect(body.status).toBe("draft");
+      // PPN: 35,000,000 x 11/12 x 12% = 3,850,000 — NOT a flat 12% (4,200,000).
+      expect(body.taxTotal).toBe(3_850_000);
+      expect(body.total).toBe(38_850_000);
+      // Withholding: 35,000,000 x 2% = 700,000, held back from the VENDOR, not from DJP's cut.
+      expect(body.withholdingAmount).toBe(700_000);
+      // The vendor is owed total MINUS withholding — DJP is owed the 700,000 separately.
+      expect(body.amountPayable).toBe(38_150_000);
+    });
+
+    // ── A draft posts NOTHING ───────────────────────────────────────────────────────────────────
+    it("the draft bill does NOT appear in AP aging — nothing has posted yet", async () => {
+      // finance_ap_aging (and open-bills) only count approved/paid bills. A draft is a form on
+      // someone's desk, not a liability the company has admitted to.
+      const aging = (await get(`/api/${tenant}/finance/ap/aging?asOf=2026-04-30`, clerk)).json() as
+        Array<{ vendorName: string }>;
+      expect(aging.some((a) => a.vendorName === "PT Pemasok Uji")).toBe(false);
+
+      const open = (await get(`/api/${tenant}/finance/ap/open-bills`, clerk)).json() as
+        Array<{ billNo: string }>;
+      expect(open.some((b) => b.billNo === "BILL-900")).toBe(false);
+    });
+
+    // ── approve authorization ───────────────────────────────────────────────────────────────────
+    // `approve` rule: derivedRoles ["module_manager","company_admin"] at assurance high. NOT
+    // module_staff — the person who typed the bill in must not be the one who admits it to the books
+    // (ap_bill_entry + ap_payment_approve is a seeded blocking conflict per the policy file's header).
+    it("★ finance_staff CANNOT approve the bill it just entered", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/approve`, headers: asUser(clerk),
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("a plain member cannot approve a bill", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/approve`, headers: asUser(outsider),
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    // ── Approving POSTS — the assertion that matters is the tie-out, not the 200 ──────────────────
+    it("the controller approves the bill, and it posts", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/approve`, headers: asUser(controller),
+      });
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toMatchObject({ ok: true, billNo: "BILL-900" });
+    });
+
+    it("★ the approved bill appears in open-bills, and AP reconcile is STILL clean", async () => {
+      const open = (await get(`/api/${tenant}/finance/ap/open-bills`, clerk)).json() as
+        Array<{ billNo: string; amountPayable: string; withholdingAmount: string }>;
+      const posted = open.find((b) => b.billNo === "BILL-900");
+      expect(posted).toBeTruthy();
+      expect(Number(posted!.amountPayable)).toBe(38_150_000);
+
+      // ★ THE REAL ASSERTION. A 201 with a broken subledger tie-out is worse than a 500 — this is
+      // what proves the withholding split actually posted to two DIFFERENT liability accounts
+      // instead of silently leaving the AP control account short.
+      const rec = (await get(`/api/${tenant}/finance/ap/reconcile?asOf=2026-04-30`, clerk)).json() as
+        { clean: boolean; problems: unknown[] };
+      expect(rec.problems).toEqual([]);
+      expect(rec.clean).toBe(true);
+    });
+
+    // ── payment_release authorization — the narrowest grant in the module ──────────────────────
+    // `payment_release` rule: derivedRoles ["module_manager"] ONLY at assurance high — not even
+    // company_admin. Whoever enters bills must not also release money (a second SoD pair, distinct
+    // from bill_entry/approve).
+    it("★ finance_staff CANNOT release a payment", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/payments`, headers: asUser(clerk),
+        payload: {
+          vendorId, paymentNo: "PAY-NOPE", paymentDate: "2026-03-20",
+          amount: 1000, bankAccountCode: "1120",
+        },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("a plain member cannot release a payment", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/payments`, headers: asUser(outsider),
+        payload: {
+          vendorId, paymentNo: "PAY-NOPE2", paymentDate: "2026-03-20",
+          amount: 1000, bankAccountCode: "1120",
+        },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("the controller (module_manager) CAN release a payment against the approved bill", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/payments`, headers: asUser(controller),
+        payload: {
+          vendorId, paymentNo: "PAY-900", paymentDate: "2026-03-25", amount: 38_150_000,
+          bankAccountCode: "1120", allocations: [{ billId, amount: 38_150_000 }],
+        },
+      });
+      expect(r.statusCode).toBe(201);
+      const body = r.json() as { allocated: number; onAccount: number };
+      expect(body.allocated).toBe(38_150_000);
+      expect(body.onAccount).toBe(0);
+
+      const rec = (await get(`/api/${tenant}/finance/ap/reconcile?asOf=2026-04-30`, clerk)).json() as
+        { clean: boolean };
+      expect(rec.clean).toBe(true);
+    });
+  });
+
   // ── Cross-company isolation, over HTTP ────────────────────────────────────────────────────────
   it("another company's books are unreachable", async () => {
     const other = await createCompany("Other Co", ["finance"]);

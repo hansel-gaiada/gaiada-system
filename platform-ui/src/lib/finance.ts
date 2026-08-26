@@ -537,3 +537,43 @@ export interface AssetClass {
 
 export const listAssetClasses = (u: string, t: string) =>
   financeData(platformFetch<AssetClass[]>(`/api/${t}/finance/asset-classes`, u), [] as AssetClass[]);
+
+// ── Payables, the write side (F5) ───────────────────────────────────────────────────────────────
+// Mirrors the AR readers above. `defaultWithholdingRate` and the money fields on `ApOpenBill` come
+// through as STRINGS — pg numeric, same reasoning as everywhere else in this file: formatted for
+// display, never parsed into arithmetic here.
+export interface ApVendor {
+  id: string; code: string; name: string; npwp: string | null; isPkp: boolean | null;
+  /** A RATE (e.g. "0.02" for PPh 23 at 2%), not a percentage — matches the database column. */
+  defaultWithholdingCode: string | null; defaultWithholdingRate: string | null;
+  paymentTermsDays: number;
+}
+export interface ApOpenBill {
+  id: string; billNo: string; billDate: string; dueDate: string;
+  total: string; amountPayable: string; amountPaid: string; outstanding: string;
+  /** What was withheld from the vendor and is owed to DJP instead — not part of `outstanding`,
+   *  which already nets it out. Carried here so a payment form can show it, not compute it. */
+  withholdingAmount: string;
+  status: string; vendorName: string;
+}
+
+export const listApVendors = (u: string, t: string) =>
+  financeData(platformFetch<ApVendor[]>(`/api/${t}/finance/ap/vendors`, u), [] as ApVendor[]);
+
+export const listApOpenBills = (u: string, t: string, vendorId?: string) =>
+  financeData(
+    platformFetch<ApOpenBill[]>(`/api/${t}/finance/ap/open-bills${qs({ vendorId })}`, u),
+    [] as ApOpenBill[],
+  );
+
+export interface ApBill {
+  id: string; billNo: string; billDate: string; dueDate: string;
+  subtotal: string; taxTotal: string; total: string; withholdingAmount: string;
+  amountPayable: string; amountPaid: string; status: string;
+  vendorCode: string; vendorName: string;
+}
+
+/** Bills by status. `draft` is the approval queue — see the endpoint's own note on why a
+ *  session-scoped list cannot serve the cross-person workflow the duty split exists for. */
+export const listApBills = (u: string, t: string, status?: string) =>
+  financeData(platformFetch<ApBill[]>(`/api/${t}/finance/ap/bills${qs({ status })}`, u), [] as ApBill[]);

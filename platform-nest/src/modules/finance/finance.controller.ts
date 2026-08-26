@@ -92,6 +92,42 @@ interface ArReceiptBody {
   allocations?: Array<{ invoiceId?: string; amount?: number | string }>;
 }
 
+interface ApBillBody {
+  vendorId?: string;
+  billNo?: string;
+  billDate?: string;
+  dueDate?: string;
+  currencyCode?: string;
+  /** A RATE (0.02 for PPh 23 at 2%), matching the column — not a percentage. */
+  withholdingRate?: number | null;
+  withholdingCode?: string;
+  withholdingAccountCode?: string;
+  lines?: Array<{
+    description?: string; quantity?: number | string; unitPrice?: number | string;
+    expenseAccountCode?: string; taxCode?: string; taxRate?: number | string;
+  }>;
+}
+
+interface ApPaymentBody {
+  vendorId?: string;
+  paymentNo?: string;
+  paymentDate?: string;
+  currencyCode?: string;
+  amount?: number | string;
+  bankAccountCode?: string;
+  reference?: string;
+  allocations?: Array<{ billId?: string; amount?: number | string }>;
+}
+
+interface InstrumentBody {
+  code?: string; name?: string; kind?: string; counterpartyName?: string;
+  currencyCode?: string; principal?: number | string;
+  /** A PERCENT (11.5 for 11.5%) — unlike AP withholding, which is a rate. The columns differ. */
+  nominalRate?: number | null; effectiveRate?: number | null;
+  startDate?: string; maturityDate?: string;
+  paymentMonths?: number; repaymentMethod?: string;
+}
+
 interface OwnershipBody {
   holderUserId?: string | null;
   holderCompanyId?: string | null;
@@ -1529,6 +1565,616 @@ export class FinanceController {
         [instrumentId, body.assetClassId, req.principal.userId],
       );
       return { ok: true, assetId: r.rows[0].id, instrument: instrument.code };
+    });
+  }
+
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // PAYABLES — the write side (F5)
+  //
+  // ── BILL ENTRY AND PAYMENT RELEASE ARE SEPARATE ENDPOINTS WITH SEPARATE CERBOS ACTIONS ────────
+  // `ap_bill_entry` + `ap_payment_approve` is a seeded BLOCKING conflict in the duty matrix, and
+  // `vendor_master` + `ap_payment_release` is a second one. The reason is concrete rather than
+  // procedural: whoever can create a bill and also release its payment can pay themselves, and
+  // whoever can edit a vendor's BANK DETAILS can redirect payment on a genuine invoice without
+  // inventing anything. Splitting the endpoints is what makes those separately grantable — a single
+  // "record and pay" call would collapse the distinction the matrix exists to hold.
+  //
+  // `payment_release` is the narrowest grant in the module: module_manager only, not company_admin.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Get(":tenantId/finance/ap/vendors")
+  async listApVendors(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT id, code, name, npwp, is_pkp AS "isPkp",
+                default_withholding_code AS "defaultWithholdingCode",
+                default_withholding_rate AS "defaultWithholdingRate",
+                payment_terms_days AS "paymentTermsDays"
+           FROM finance_ap_vendors
+          WHERE tenant_id = $1 AND status = 'active'
+          ORDER BY code`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
+  /**
+   * Bills, filterable by status. Exists so an APPROVER CAN FIND A DRAFT SOMEBODY ELSE ENTERED.
+   *
+   * ★ Without this the duty-matrix split is theatre. `bill_entry` and `approve` are deliberately
+   * different grants so the person who types a vendor's invoice is not the one who admits it to the
+   * books — but that only works if the approver can discover what is waiting. A list scoped to
+   * whoever created it serves one person testing both halves and nobody doing the real job.
+   *
+   * Authorized as `read`, not `approve`: seeing that a bill is pending is not deciding it, and an
+   * approver who cannot see the queue until they already hold approval cannot triage it.
+   */
+  @Get(":tenantId/finance/ap/bills")
+  async listApBills(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("status") status?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "read");
+    const ALLOWED = ["draft", "approved", "paid", "void"];
+    if (status && !ALLOWED.includes(status)) {
+      throw new BadRequestException(`status must be one of ${ALLOWED.join(", ")}`);
+    }
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT b.id, b.bill_no AS "billNo", b.bill_date::text AS "billDate",
+                b.due_date::text AS "dueDate", b.subtotal, b.tax_total AS "taxTotal", b.total,
+                b.withholding_amount AS "withholdingAmount",
+                b.amount_payable AS "amountPayable", b.amount_paid AS "amountPaid",
+                b.status, v.code AS "vendorCode", v.name AS "vendorName"
+           FROM finance_ap_bills b
+           JOIN finance_ap_vendors v ON v.id = b.vendor_id
+          WHERE b.tenant_id = $1 AND ($2::text IS NULL OR b.status = $2::text)
+          ORDER BY b.bill_date DESC, b.bill_no`,
+        [tenantId, status ?? null],
+      );
+      return r.rows;
+    });
+  }
+
+  /** Bills not yet fully paid — what a payment can be allocated against. */
+  @Get(":tenantId/finance/ap/open-bills")
+  async listApOpenBills(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("vendorId") vendorId?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT b.id, b.bill_no AS "billNo", b.bill_date::text AS "billDate",
+                b.due_date::text AS "dueDate", b.total, b.amount_payable AS "amountPayable",
+                b.amount_paid AS "amountPaid",
+                (b.amount_payable - b.amount_paid) AS outstanding,
+                b.withholding_amount AS "withholdingAmount",
+                b.status, v.name AS "vendorName"
+           FROM finance_ap_bills b
+           JOIN finance_ap_vendors v ON v.id = b.vendor_id
+          WHERE b.tenant_id = $1
+            AND b.status IN ('approved','paid')
+            AND b.amount_payable > b.amount_paid
+            AND ($2::uuid IS NULL OR b.vendor_id = $2::uuid)
+          ORDER BY b.due_date`,
+        [tenantId, vendorId ?? null],
+      );
+      return r.rows;
+    });
+  }
+
+  /**
+   * Enter a vendor bill and APPROVE it.
+   *
+   * ★ WITHHOLDING IS THE POINT OF THIS ENDPOINT. A 35,000,000 service bill with PPh 23 at 2% is not
+   * one liability — the vendor is owed 38,150,000 (net of 700,000 withheld) and DJP is owed the
+   * 700,000, and those are different creditors with different due dates. A single "accounts payable"
+   * figure hides the second one entirely, and the tax office does not forget it. The split is
+   * computed here from the bill's own rate rather than accepted from the caller.
+   */
+  @Post(":tenantId/finance/ap/bills")
+  @HttpCode(201)
+  async createApBill(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: ApBillBody,
+  ) {
+    // `bill_entry`, NOT `manage`. The kind carries a dedicated action for this precisely because
+    // `ap_bill_entry` + `ap_payment_approve` is a seeded blocking conflict; authorizing bill entry
+    // under a broad `manage` would hand it to everyone holding manage and collapse the split.
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "bill_entry");
+
+    const billDate = requiredIsoDate(body?.billDate, "billDate");
+    const dueDate = requiredIsoDate(body?.dueDate, "dueDate");
+    if (dueDate < billDate) throw new BadRequestException("dueDate cannot be before billDate");
+    const billNo = body?.billNo?.trim();
+    if (!billNo) throw new BadRequestException("billNo is required — it is the VENDOR's number, not ours");
+    if (!body?.vendorId) throw new BadRequestException("vendorId is required");
+    if (!Array.isArray(body?.lines) || body.lines.length === 0) {
+      throw new BadRequestException("at least one line is required — a bill with no lines cannot be approved");
+    }
+
+    const lines = body.lines.map((l, i) => {
+      const qty = Number(l?.quantity ?? 1);
+      const unit = Number(l?.unitPrice);
+      if (!l?.description?.trim()) throw new BadRequestException(`line ${i + 1}: description is required`);
+      if (!l?.expenseAccountCode) throw new BadRequestException(`line ${i + 1}: expenseAccountCode is required`);
+      if (!Number.isFinite(qty) || qty <= 0) throw new BadRequestException(`line ${i + 1}: quantity must be greater than zero`);
+      if (!Number.isFinite(unit) || unit < 0) throw new BadRequestException(`line ${i + 1}: unitPrice must be zero or more`);
+      const rate = l?.taxRate === undefined || l.taxRate === null ? null : Number(l.taxRate);
+      if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
+      }
+      const subtotal = qty * unit;
+      // Indonesian PPN: 12% of 11/12 of the base. Same convention as the AR side, computed in one
+      // place per side rather than trusted from the caller.
+      const tax = rate === null ? 0 : Math.round(subtotal * (11 / 12) * (rate / 100));
+      return {
+        description: l.description.trim(), quantity: qty, unitPrice: unit, subtotal,
+        expenseAccountCode: l.expenseAccountCode, taxCode: l?.taxCode ?? null, taxRate: rate, tax,
+      };
+    });
+
+    const subtotal = lines.reduce((t, l) => t + l.subtotal, 0);
+    const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
+    const total = subtotal + taxTotal;
+    if (total <= 0) throw new BadRequestException("bill total must be greater than zero");
+
+    const whtRate = body?.withholdingRate === undefined || body.withholdingRate === null
+      ? null : Number(body.withholdingRate);
+    if (whtRate !== null && (!Number.isFinite(whtRate) || whtRate < 0 || whtRate > 1)) {
+      // A RATE, not a percentage — 0.02 for PPh 23, matching the column. Rejecting 2 here rather
+      // than accepting it is deliberate: a 200% withholding would otherwise pass silently and the
+      // vendor would be paid a negative amount.
+      throw new BadRequestException("withholdingRate is a rate between 0 and 1 (0.02 for PPh 23 at 2%), not a percentage");
+    }
+    const whtAmount = whtRate === null ? 0 : Math.round(subtotal * whtRate);
+    const amountPayable = total - whtAmount;
+    if (amountPayable < 0) throw new BadRequestException("withholding exceeds the bill total");
+
+    return withFinance(tenantId, async (c) => {
+      const whtAccountId = body?.withholdingAccountCode
+        ? (await c.query<{ id: string }>(
+            `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+            [tenantId, body.withholdingAccountCode],
+          )).rows[0]?.id ?? null
+        : null;
+      if (body?.withholdingAccountCode && !whtAccountId) {
+        throw new BadRequestException(`unknown withholding account ${body.withholdingAccountCode}`);
+      }
+      if (whtAmount > 0 && !whtAccountId) {
+        throw new BadRequestException("withholdingAccountCode is required when a withholding rate is given — the tax withheld is a liability to DJP and needs an account of its own");
+      }
+
+      const bill = await c.query<{ id: string }>(
+        `INSERT INTO finance_ap_bills
+           (tenant_id, vendor_id, bill_no, bill_date, due_date, currency_code, subtotal, tax_total,
+            total, withholding_code, withholding_rate, withholding_amount, withholding_account_id,
+            amount_payable, amount_paid, status)
+         VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,$10,$11,$12,$13,$14,0,'draft')
+         RETURNING id`,
+        [tenantId, body.vendorId, billNo, billDate, dueDate, body?.currencyCode ?? "IDR",
+         subtotal, taxTotal, total, body?.withholdingCode ?? null, whtRate, whtAmount,
+         whtAccountId, amountPayable],
+      );
+      const billId = bill.rows[0].id;
+
+      let lineNo = 1;
+      for (const l of lines) {
+        const acct = await c.query<{ id: string }>(
+          `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+          [tenantId, l.expenseAccountCode],
+        );
+        if (!acct.rows[0]) throw new BadRequestException(`unknown expense account ${l.expenseAccountCode}`);
+        await c.query(
+          `INSERT INTO finance_ap_bill_lines
+             (tenant_id, bill_id, line_no, description, quantity, unit_price, line_subtotal,
+              expense_account_id, tax_code, tax_rate, tax_amount)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [tenantId, billId, lineNo++, l.description, l.quantity, l.unitPrice, l.subtotal,
+           acct.rows[0].id, l.taxCode, l.taxRate, l.tax],
+        );
+      }
+
+      // ★ LEFT AS A DRAFT, DELIBERATELY — unlike the AR invoice endpoint, which issues in one call.
+      // The asymmetry is the duty matrix, not inconsistency: an AR invoice has no approval action in
+      // the model, while AP explicitly separates `bill_entry` from `approve`. Approving here would
+      // let whoever entered the bill approve it, which is the thing the two actions exist to
+      // prevent. Approval is its own endpoint below.
+      return {
+        id: billId, status: "draft",
+        subtotal, taxTotal, total, withholdingAmount: whtAmount, amountPayable,
+      };
+    });
+  }
+
+  /**
+   * Approve a bill. Separate from entering it, and separately grantable.
+   *
+   * This is what posts the journal and moves the AP control account — a draft bill affects nothing.
+   * Holding `bill_entry` does not imply `approve`, so the person who typed the vendor's invoice in
+   * cannot be the one who admits it into the books unless somebody deliberately granted them both.
+   */
+  @Post(":tenantId/finance/ap/bills/:billId/approve")
+  @HttpCode(200)
+  async approveApBill(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("billId") billId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "approve");
+    return withFinance(tenantId, async (c) => {
+      const b = await c.query<{ bill_no: string; status: string }>(
+        `SELECT bill_no, status FROM finance_ap_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId],
+      );
+      const bill = b.rows[0];
+      if (!bill) throw new NotFoundException("no such bill in this company");
+      if (bill.status !== "draft") throw new BadRequestException(`bill ${bill.bill_no} is ${bill.status}, not a draft`);
+
+      await c.query(`SELECT finance_ap_approve_bill($1,$2)`, [billId, req.principal.userId]);
+      return { ok: true, billNo: bill.bill_no };
+    });
+  }
+
+  /**
+   * Release a payment to a vendor. The narrowest grant in the module.
+   *
+   * Authorized as `payment_release`, NOT `manage` — this is where money actually leaves. Whoever
+   * holds bill entry must not also hold this, and keeping them on different actions is what lets
+   * the duty matrix enforce that per person per company rather than by convention.
+   */
+  @Post(":tenantId/finance/ap/payments")
+  @HttpCode(201)
+  async createApPayment(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: ApPaymentBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "payment_release");
+
+    const paymentDate = requiredIsoDate(body?.paymentDate, "paymentDate");
+    const paymentNo = body?.paymentNo?.trim();
+    if (!paymentNo) throw new BadRequestException("paymentNo is required");
+    if (!body?.vendorId) throw new BadRequestException("vendorId is required");
+    if (!body?.bankAccountCode) throw new BadRequestException("bankAccountCode is required");
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be greater than zero");
+
+    const allocations = (body?.allocations ?? []).map((a, i) => {
+      const amt = Number(a?.amount);
+      if (!a?.billId) throw new BadRequestException(`allocation ${i + 1}: billId is required`);
+      if (!Number.isFinite(amt) || amt <= 0) throw new BadRequestException(`allocation ${i + 1}: amount must be greater than zero`);
+      return { billId: a.billId, amount: amt };
+    });
+    const allocatedTotal = allocations.reduce((t, a) => t + a.amount, 0);
+    if (allocatedTotal > amount) {
+      throw new BadRequestException(`allocations total ${allocatedTotal} exceeds the payment amount ${amount}`);
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const bank = await c.query<{ id: string }>(
+        `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+        [tenantId, body.bankAccountCode],
+      );
+      if (!bank.rows[0]) throw new BadRequestException(`unknown bank account ${body.bankAccountCode}`);
+
+      const pay = await c.query<{ id: string }>(
+        `INSERT INTO finance_ap_payments
+           (tenant_id, vendor_id, payment_no, payment_date, currency_code, amount, bank_account_id, reference)
+         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8) RETURNING id`,
+        [tenantId, body.vendorId, paymentNo, paymentDate, body?.currencyCode ?? "IDR",
+         amount, bank.rows[0].id, body?.reference ?? null],
+      );
+      const paymentId = pay.rows[0].id;
+
+      await c.query(`SELECT finance_ap_record_payment($1,$2)`, [paymentId, req.principal.userId]);
+      for (const a of allocations) {
+        await c.query(`SELECT finance_ap_allocate($1,$2,$3,$4)`,
+          [paymentId, a.billId, a.amount, req.principal.userId]);
+      }
+      return { id: paymentId, amount, allocated: allocatedTotal, onAccount: amount - allocatedTotal };
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // MASTER DATA — customers, vendors, accounts
+  //
+  // Each was previously seed-only, which meant a company could not invoice anyone it had not been
+  // seeded with. A customer is NOT a CRM client: it carries the NPWP, the PKP flag and the payment
+  // terms that decide how an invoice is taxed and aged, and those are accounting facts.
+  //
+  // ⚠ VENDOR CREATION IS `vendor_master`, NOT `manage`. Editing a vendor's bank details redirects
+  // payment on a genuine invoice without forging anything, which is why the duty matrix seeds
+  // `vendor_master` + `ap_payment_release` as a blocking pair. Creating one belongs on that grant.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Post(":tenantId/finance/ar/customers")
+  @HttpCode(201)
+  async createArCustomer(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { code?: string; name?: string; npwp?: string; isPkp?: boolean; paymentTermsDays?: number },
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "manage");
+    const code = body?.code?.trim();
+    const name = body?.name?.trim();
+    if (!code) throw new BadRequestException("code is required");
+    if (!name) throw new BadRequestException("name is required");
+    const terms = body?.paymentTermsDays ?? 30;
+    if (!Number.isInteger(terms) || terms < 0) throw new BadRequestException("paymentTermsDays must be a whole number of days, zero or more");
+
+    return withFinance(tenantId, async (c) => {
+      const dup = await c.query(`SELECT 1 FROM finance_ar_customers WHERE tenant_id = $1 AND code = $2`, [tenantId, code]);
+      if (dup.rowCount) throw new BadRequestException(`a customer with code ${code} already exists`);
+      const r = await c.query<{ id: string }>(
+        `INSERT INTO finance_ar_customers (tenant_id, code, name, npwp, is_pkp, payment_terms_days)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [tenantId, code, name, body?.npwp?.trim() || null, body?.isPkp ?? null, terms],
+      );
+      return { id: r.rows[0].id, code, name };
+    });
+  }
+
+  @Post(":tenantId/finance/ap/vendors")
+  @HttpCode(201)
+  async createApVendor(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: {
+      code?: string; name?: string; npwp?: string; isPkp?: boolean;
+      defaultWithholdingCode?: string; defaultWithholdingRate?: number; paymentTermsDays?: number;
+    },
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "vendor_master");
+    const code = body?.code?.trim();
+    const name = body?.name?.trim();
+    if (!code) throw new BadRequestException("code is required");
+    if (!name) throw new BadRequestException("name is required");
+    const rate = body?.defaultWithholdingRate === undefined || body.defaultWithholdingRate === null
+      ? null : Number(body.defaultWithholdingRate);
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 1)) {
+      throw new BadRequestException("defaultWithholdingRate is a rate between 0 and 1 (0.02 for PPh 23 at 2%), not a percentage");
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const dup = await c.query(`SELECT 1 FROM finance_ap_vendors WHERE tenant_id = $1 AND code = $2`, [tenantId, code]);
+      if (dup.rowCount) throw new BadRequestException(`a vendor with code ${code} already exists`);
+      const r = await c.query<{ id: string }>(
+        `INSERT INTO finance_ap_vendors
+           (tenant_id, code, name, npwp, is_pkp, default_withholding_code, default_withholding_rate, payment_terms_days)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [tenantId, code, name, body?.npwp?.trim() || null, body?.isPkp ?? null,
+         body?.defaultWithholdingCode?.trim() || null, rate, body?.paymentTermsDays ?? 30],
+      );
+      return { id: r.rows[0].id, code, name };
+    });
+  }
+
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // CONSOLIDATION — the write side (F9)
+  //
+  // A run is a dated working paper. Creating one is cheap; what makes it a CONSOLIDATION rather than
+  // a sum is the elimination entries, which is why `finance_consolidated_trial_balance` refuses a run
+  // that has none. These two endpoints exist so that refusal is escapable by doing the work rather
+  // than by weakening the check.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Post(":tenantId/finance/consolidation/runs")
+  @HttpCode(201)
+  async createConsolidationRun(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { asOf?: string; label?: string },
+  ) {
+    // A consolidation is a STATEMENT, and producing one is `export`-grade rather than a plain read:
+    // it aggregates every member company's books into a single artefact that leaves the ERP.
+    await authorize(req.principal, { kind: "finance_statement", tenantId, module: "finance" }, "export");
+    const asOf = requiredIsoDate(body?.asOf, "asOf");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query<{ id: string }>(
+        `INSERT INTO finance_consolidation_runs (tenant_id, as_of, label, created_by)
+         VALUES ($1,$2::date,$3,$4) RETURNING id`,
+        [tenantId, asOf, body?.label?.trim() || null, req.principal.userId],
+      );
+      return { id: r.rows[0].id, asOf };
+    });
+  }
+
+  /**
+   * Generate the intercompany eliminations for a run.
+   *
+   * Runs BOTH the balance-sheet and the P&L elimination. Doing only the first is the classic
+   * half-consolidation: intercompany receivables and payables cancel, the group looks tidy, and the
+   * revenue each member booked against the other is still counted twice in consolidated turnover —
+   * which is the figure a bank actually reads.
+   */
+  @Post(":tenantId/finance/consolidation/runs/:runId/eliminate")
+  @HttpCode(200)
+  async eliminateIntercompany(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("runId") runId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_statement", tenantId, module: "finance" }, "export");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_consolidation_runs WHERE id = $1 AND tenant_id = $2`, [runId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such consolidation run in this company");
+
+      await c.query(`SELECT finance_eliminate_intercompany($1)`, [runId]);
+      await c.query(`SELECT finance_eliminate_intercompany_pl($1)`, [runId]);
+
+      const n = await c.query<{ n: string }>(
+        `SELECT count(*) n FROM finance_consolidation_entries WHERE run_id = $1`, [runId],
+      );
+      return { ok: true, entryCount: Number(n.rows[0].n) };
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // PERIOD REOPEN (F3)
+  //
+  // The counterpart to closing, and deliberately a DIFFERENT grant: `reopen` is not held by
+  // company_admin. A soft lock is reversible by design — it exists so the routine monthly close is
+  // recoverable — but reversing it is somebody else's decision, not the closer's.
+  //
+  // A HARD lock has no path back at all. That is enforced below rather than left to the policy,
+  // because "the audit boundary" is only a boundary if nothing can cross it.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Post(":tenantId/finance/periods/:periodId/reopen")
+  @HttpCode(200)
+  async reopenPeriod(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("periodId") periodId: string,
+    @Body() body: { confirm?: string; reason?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "reopen");
+    const reason = body?.reason?.trim();
+    if (!reason) throw new BadRequestException("reason is required — reopening a closed period is an exception, and an exception with no recorded reason is indistinguishable from a mistake");
+
+    return withFinance(tenantId, async (c) => {
+      const p = await c.query<{ name: string; state: string }>(
+        `SELECT name, state FROM finance_fiscal_periods WHERE id = $1 AND tenant_id = $2`,
+        [periodId, tenantId],
+      );
+      const period = p.rows[0];
+      if (!period) throw new NotFoundException("no such fiscal period in this company");
+      requireConfirmation(body?.confirm, period.name, "period");
+
+      if (period.state === "OPEN") throw new BadRequestException(`${period.name} is already open`);
+      if (period.state === "HARD_LOCK") {
+        throw new BadRequestException(
+          `${period.name} is HARD-LOCKED and cannot be reopened. That is what a hard lock means — `
+          + `a correction belongs in a later period, as an ordinary entry that shows on the face of the books.`,
+        );
+      }
+
+      await c.query(
+        `UPDATE finance_fiscal_periods
+            SET state = 'OPEN', soft_locked_at = NULL, soft_locked_by = NULL,
+                close_checklist = COALESCE(close_checklist,'{}'::jsonb) || jsonb_build_object('reopenReason',$3::text),
+                updated_at = now()
+          WHERE id = $1`,
+        [periodId, req.principal.userId, reason],
+      );
+      return { ok: true, period: period.name, state: "OPEN" };
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // TREASURY — the write side (F11)
+  //
+  // ★ Recording an instrument here is what eventually lets the treasury tie-out go green. Today the
+  // check sums accounts tagged `treasury`, and a bank loan sits in an UNTAGGED account (2210) because
+  // tagging it would make it a control account and bar the manual journal that is currently the only
+  // way to record a drawdown. Giving the drawdown a subledger path is the first half of that fix; the
+  // tagging migration is the second, and must not land before this does.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Post(":tenantId/finance/instruments")
+  @HttpCode(201)
+  async createInstrument(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: InstrumentBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "post");
+
+    const code = body?.code?.trim();
+    const name = body?.name?.trim();
+    if (!code) throw new BadRequestException("code is required");
+    if (!name) throw new BadRequestException("name is required");
+    const KINDS = ["loan_payable", "loan_receivable", "bond_issued", "lease"];
+    if (!body?.kind || !KINDS.includes(body.kind)) {
+      throw new BadRequestException(`kind must be one of ${KINDS.join(", ")}`);
+    }
+    const startDate = requiredIsoDate(body?.startDate, "startDate");
+    const maturityDate = body?.maturityDate ? requiredIsoDate(body.maturityDate, "maturityDate") : null;
+    if (maturityDate && maturityDate <= startDate) {
+      throw new BadRequestException("maturityDate must be after startDate");
+    }
+    const principal = Number(body?.principal);
+    if (!Number.isFinite(principal) || principal <= 0) throw new BadRequestException("principal must be greater than zero");
+
+    const nominal = body?.nominalRate === undefined || body.nominalRate === null ? null : Number(body.nominalRate);
+    if (nominal !== null && (!Number.isFinite(nominal) || nominal < 0 || nominal > 100)) {
+      // A PERCENT here (11.5 for 11.5%), matching the column — unlike AP withholding, which is a
+      // rate. The two differ because the columns differ; guessing either way silently produces a
+      // schedule that is wrong by a factor of a hundred.
+      throw new BadRequestException("nominalRate is a percent (11.5 for 11.5%), between 0 and 100");
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const dup = await c.query(`SELECT 1 FROM finance_instruments WHERE tenant_id = $1 AND code = $2`, [tenantId, code]);
+      if (dup.rowCount) throw new BadRequestException(`an instrument with code ${code} already exists`);
+      const r = await c.query<{ id: string }>(
+        `INSERT INTO finance_instruments
+           (tenant_id, code, name, kind, counterparty_name, currency_code, principal,
+            nominal_rate, effective_rate, start_date, maturity_date, payment_months, repayment_method)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11::date,$12,$13) RETURNING id`,
+        [tenantId, code, name, body.kind, body?.counterpartyName?.trim() || null,
+         body?.currencyCode ?? "IDR", principal, nominal,
+         body?.effectiveRate === undefined || body.effectiveRate === null ? null : Number(body.effectiveRate),
+         startDate, maturityDate, body?.paymentMonths ?? 1, body?.repaymentMethod ?? "annuity"],
+      );
+      return { id: r.rows[0].id, code, kind: body.kind };
+    });
+  }
+
+  /**
+   * Post the interest accrual for ONE INSTALMENT of an instrument's schedule.
+   *
+   * ⚠ Keyed on the schedule SEQ, not on a fiscal period — `finance_post_instrument_accrual` takes
+   * `(instrument, seq, actor)`. That is the right key and not an accident of the signature: the
+   * schedule is derived at the effective rate, so instalment 7 has a definite interest figure
+   * regardless of which period it lands in, and posting "the accrual for August" would be ambiguous
+   * for any instrument whose payment months do not align with the fiscal calendar.
+   *
+   * Interest accrues whether or not anybody records it — the liability is real from the day the
+   * money is drawn — so a schedule row left unposted understates both the expense and the debt.
+   */
+  @Post(":tenantId/finance/instruments/:instrumentId/accrual")
+  @HttpCode(201)
+  async postInstrumentAccrual(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("instrumentId") instrumentId: string,
+    @Body() body: { seq?: number },
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "post");
+    const seq = Number(body?.seq);
+    if (!Number.isInteger(seq) || seq < 1) {
+      throw new BadRequestException("seq is required — the 1-based instalment number from the instrument's schedule");
+    }
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_instruments WHERE id = $1 AND tenant_id = $2`, [instrumentId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such instrument in this company");
+
+      // Refuse a seq the schedule does not contain, rather than letting the function decide. The
+      // schedule is derived, so its length is knowable here and a 400 naming the range is more use
+      // than whatever a missing row produces downstream.
+      const sched = await c.query<{ n: string }>(
+        `SELECT count(*) n FROM finance_instrument_schedule($1)`, [instrumentId],
+      );
+      const len = Number(sched.rows[0].n);
+      if (seq > len) {
+        throw new BadRequestException(`this instrument's schedule has ${len} instalment(s); seq ${seq} does not exist`);
+      }
+
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_post_instrument_accrual($1,$2,$3) AS id`,
+        [instrumentId, seq, req.principal.userId],
+      );
+      return { journalId: r.rows[0].id, seq };
     });
   }
 

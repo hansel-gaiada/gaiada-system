@@ -247,3 +247,87 @@ export async function recogniseLease(
   if (r.ok) { revalidatePath("/finance/treasury"); revalidatePath("/finance/assets"); revalidatePath("/finance"); }
   return r as FinanceActionResult<{ assetId: string; instrument: string }>;
 }
+
+// ── Payables (F5) ───────────────────────────────────────────────────────────────────────────────
+// Same posture as receivables above: nothing here re-checks a rule the server already enforces —
+// the withholding split, the PPN base, whether an expense account exists, whether an allocation
+// exceeds its payment are all decided server-side and the message shown is the server's own.
+//
+// ── ENTRY AND APPROVAL ARE TWO CALLS TO TWO ENDPOINTS, NEVER ONE ─────────────────────────────────
+// `ap_bill_entry` + `ap_payment_approve` is a seeded blocking conflict in the duty matrix: whoever
+// types a vendor invoice in must not be the one who admits it to the books. `enterApBill` and
+// `approveApBill` below hit separate endpoints under separate Cerbos actions for exactly that
+// reason — a "save and approve" convenience wrapper here would make the split unreachable from the
+// UI no matter how a company's grants are configured.
+
+export interface ApBillLineInput {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  expenseAccountCode: string;
+  taxCode?: string;
+  /** Percent, e.g. 12. Omit for a line that carries no PPN. */
+  taxRate?: number | null;
+}
+
+/** Creates a DRAFT bill. It posts nothing and moves no control account — see `approveApBill`. */
+export async function enterApBill(input: {
+  vendorId: string; billNo: string; billDate: string; dueDate: string;
+  /** A RATE (0.02 for PPh 23 at 2%), not a percentage — matches the database column. */
+  withholdingRate?: number | null;
+  withholdingCode?: string;
+  withholdingAccountCode?: string;
+  lines: ApBillLineInput[];
+}): Promise<FinanceActionResult<{
+  id: string; status: string; subtotal: number; taxTotal: number; total: number;
+  withholdingAmount: number; amountPayable: number;
+}>> {
+  const r = await send<{
+    id: string; status: string; subtotal: number; taxTotal: number; total: number;
+    withholdingAmount: number; amountPayable: number;
+  }>("/finance/ap/bills", input);
+  if (r.ok) {
+    revalidatePath("/finance/payables");
+    revalidatePath("/finance");
+  }
+  return r;
+}
+
+/**
+ * Approve a draft bill. THIS is what posts the journal and moves the AP control account.
+ *
+ * A deliberately separate call from `enterApBill` — see the header note. Holding `bill_entry` does
+ * not imply `approve`, and this function must never be invoked from inside the entry flow.
+ */
+export async function approveApBill(billId: string): Promise<FinanceActionResult<{ billNo: string }>> {
+  const r = await send<{ ok: boolean; billNo: string }>(`/finance/ap/bills/${billId}/approve`, {});
+  if (r.ok) {
+    revalidatePath("/finance/payables");
+    revalidatePath("/finance");
+  }
+  return r as FinanceActionResult<{ billNo: string }>;
+}
+
+/**
+ * Release a payment to a vendor, optionally allocating it against bills in the same call.
+ *
+ * `payment_release` is the narrowest grant in the module (module manager only) and a second
+ * blocking pair with both `bill_entry` and `vendor_master` — releasing money and either writing
+ * the bill or redirecting the vendor's bank details must not sit with the same person. Kept as its
+ * own function calling its own endpoint for the same reason the two above are split.
+ */
+export async function releaseApPayment(input: {
+  vendorId: string; paymentNo: string; paymentDate: string; amount: number;
+  bankAccountCode: string; reference?: string;
+  /** Omit entirely to release the money ON ACCOUNT — the normal case for a bare bank transfer. */
+  allocations?: Array<{ billId: string; amount: number }>;
+}): Promise<FinanceActionResult<{ id: string; allocated: number; onAccount: number }>> {
+  const r = await send<{ id: string; amount: number; allocated: number; onAccount: number }>(
+    "/finance/ap/payments", input,
+  );
+  if (r.ok) {
+    revalidatePath("/finance/payables");
+    revalidatePath("/finance");
+  }
+  return r as FinanceActionResult<{ id: string; allocated: number; onAccount: number }>;
+}

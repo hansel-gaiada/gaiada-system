@@ -494,6 +494,42 @@ const OPENING_BALANCES = {
  * resolves `userId` in the right slot — its 403 check keeps working, and only the new writes see
  * `body` as `undefined` (which reads as "no confirmation supplied" and refuses, not as a crash).
  */
+const AP_VENDORS = [
+  {
+    id: "vend-1", code: "V-001", name: "PT Kreatif Media Nusantara", npwp: "01.234.567.8-901.000",
+    isPkp: true, defaultWithholdingCode: "PPH23", defaultWithholdingRate: "0.020000",
+    paymentTermsDays: 30,
+  },
+  {
+    id: "vend-2", code: "V-002", name: "CV Sinar Percetakan", npwp: null,
+    isPkp: false, defaultWithholdingCode: null, defaultWithholdingRate: null, paymentTermsDays: 14,
+  },
+];
+
+// Carries the withholding split explicitly: 38,850,000 billed, 700,000 withheld for DJP, so the
+// VENDOR is owed 38,150,000. A fixture that showed only `total` would let a payables surface be
+// built that pays the vendor the gross — the exact mistake the split exists to prevent.
+// Drafts awaiting approval. Present so the approval queue is DRIVABLE in demo mode — an empty
+// queue would let the page look finished while the one control it exists to demonstrate (a bill
+// that posts nothing until a different grant admits it) could never be seen.
+const AP_DRAFT_BILLS = [
+  {
+    id: "bill-draft-1", billNo: "BILL-9002", billDate: "2026-08-12", dueDate: "2026-09-11",
+    subtotal: "18000000.0000", taxTotal: "1980000.0000", total: "19980000.0000",
+    withholdingAmount: "360000.0000", amountPayable: "19620000.0000", amountPaid: "0.0000",
+    status: "draft", vendorCode: "V-001", vendorName: "PT Kreatif Media Nusantara",
+  },
+];
+
+const AP_OPEN_BILLS = [
+  {
+    id: "bill-1", billNo: "BILL-8841", billDate: "2026-03-18", dueDate: "2026-04-17",
+    total: "38850000.0000", amountPayable: "38150000.0000", amountPaid: "0.0000",
+    outstanding: "38150000.0000", withholdingAmount: "700000.0000",
+    status: "approved", vendorName: "PT Kreatif Media Nusantara",
+  },
+];
+
 export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string, body?: string): DemoResult | null {
   const tail = financePath(p);
   if (tail == null) return null;
@@ -543,6 +579,9 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   if (tail === "cutovers") return ok(CUTOVERS);
   if (/^cutovers\/[^/]+\/readiness$/.test(tail)) return ok(CUTOVER_READINESS);
   if (/^cutovers\/[^/]+\/opening-balances$/.test(tail)) return ok(OPENING_BALANCES);
+  if (tail === "ap/vendors") return ok(AP_VENDORS);
+  if (tail === "ap/open-bills") return ok(AP_OPEN_BILLS);
+  if (tail === "ap/bills") return ok(_params.get("status") === "draft" ? AP_DRAFT_BILLS : [...AP_DRAFT_BILLS, ...AP_OPEN_BILLS]);
   if (tail === "ar/customers") return ok(AR_CUSTOMERS);
   if (tail === "ar/open-invoices") return ok(AR_OPEN_INVOICES);
   if (tail === "ar/aging") return ok(AR_AGING);

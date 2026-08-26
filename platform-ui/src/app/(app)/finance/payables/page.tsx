@@ -2,10 +2,15 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getApAging, reconcileAp, listPeriods, money, type ApAgingRow } from "@/lib/finance";
+import {
+  getApAging, reconcileAp, listPeriods, listApVendors, listApOpenBills, listApBills, listAccounts,
+  money, type ApAgingRow,
+} from "@/lib/finance";
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
+import { EnterBillForm, ReleasePaymentForm } from "@/components/finance/ApForms";
+import { ApApprovalQueue } from "@/components/finance/ApApprovalQueue";
 
 // Payables — what the company owes vendors, bucketed by age, and whether that ties to the ledger.
 //
@@ -37,10 +42,30 @@ export default async function FinancePayablesPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [rows, rec] = await Promise.all([
+  const [rows, rec, vendors, openBills, accounts, draftBills] = await Promise.all([
     getApAging(userId, tenant, asOf),
     reconcileAp(userId, tenant, asOf),
+    listApVendors(userId, tenant),
+    listApOpenBills(userId, tenant),
+    listAccounts(userId, tenant),
+    listApBills(userId, tenant, "draft"),
   ]);
+
+  // The pickers are built from the REAL chart, not a hardcoded list of codes — same reasoning as
+  // the receivables page. Which codes exist genuinely differs per company, because the chart is
+  // instantiated from a template and then edited.
+  const expenseAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "expense" && a.allowManualPosting && a.status === "active")
+    .map((a) => ({ code: a.code, name: a.name }));
+  const bankAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "asset" && a.allowManualPosting && a.status === "active"
+      && (a.code.startsWith("11") || /bank|kas/i.test(a.name)))
+    .map((a) => ({ code: a.code, name: a.name }));
+  // A withholding payable is a LIABILITY to DJP, not the vendor — offering the expense/bank lists
+  // here would let a bill's withholding land in the wrong account type entirely.
+  const liabilityAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "liability" && a.allowManualPosting && a.status === "active")
+    .map((a) => ({ code: a.code, name: a.name }));
 
   return (
     <div className="fin-page">
@@ -77,19 +102,25 @@ export default async function FinancePayablesPage({
         />
       </Card>
 
-      <Card title="Entering a bill and releasing a payment" style={{ marginTop: 22 }}>
+      <div style={{ marginTop: 22, display: "grid", gap: 22 }}>
+        <ApApprovalQueue drafts={draftBills} />
+        <EnterBillForm vendors={vendors} expenseAccounts={expenseAccounts} liabilityAccounts={liabilityAccounts} />
+        <ReleasePaymentForm vendors={vendors} openBills={openBills} bankAccounts={bankAccounts} />
+      </div>
+
+      <Card title="What is still not built here" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Neither is <strong>built here yet</strong>. The subledger is complete, including Indonesian
-          withholding (PPh 21/23/4(2)) — entering a 20,000,000 contractor bill correctly splits it
-          into 19,600,000 owed to the vendor and 400,000 owed to DJP, which is the thing a single
-          &ldquo;accounts payable&rdquo; line would hide.
+          Credit notes and write-offs are not built — neither has SQL behind it yet, so building a
+          form would mean inventing the accounting rather than exposing it. A write-off is
+          deliberately a separate grant from banking a payment, for the same reason bill entry is
+          separate from approval.
         </p>
         <p className="fin-muted">
-          Payment release is deliberately the most restricted action in the module (module manager
-          only, high assurance) and is separated from bill entry, because entering a bill and
-          releasing its payment is a seeded blocking conflict in the duty matrix. Building the two
-          together as one screen would defeat that, so they need separate surfaces rather than one
-          form with two buttons.
+          Adding a vendor is also not built here; vendor records currently come from the finance
+          seed. Vendor creation is its own Cerbos action (<code>vendor_master</code>) precisely
+          because editing a vendor&rsquo;s bank details can redirect payment on a genuine bill
+          without forging anything — the duty matrix seeds it as a blocking pair with payment
+          release for that reason, the same shape as bill entry and approval above.
         </p>
       </Card>
     </div>
