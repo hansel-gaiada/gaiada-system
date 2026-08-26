@@ -11,6 +11,41 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest - lint:migration-rls now catches the kind that broke a deploy (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- `lint:migration-rls` flags plain `INSERT ... VALUES` into a FORCE-RLS table, not only the
+  silent-no-op shapes (UPDATE / DELETE / INSERT..SELECT).
+
+**Why it was excluded, and why that reasoning was wrong**
+- The lint's own header argued a literal-values INSERT is NOT in the bug class because it "fails
+  LOUDLY... migrate.ts surfaces that as a startup/CI failure". The first half is true; the second is
+  FALSE in this repo. ★ CI runs migrations as a SUPERUSER, which BYPASSES RLS -- so the statement
+  inserts happily in every test and shard, and is loud only on the live estate. That is how
+  `202608261100` passed all four platform-nest shards and then aborted the deploy of
+  `alpha-01.071.0172a`.
+- The failure mode is not "silent zero rows". It is "green everywhere you look, red in the only
+  place that counts", which is strictly harder to catch and so more deserving of an authoring-time
+  gate, not less.
+
+**How it avoids becoming an ignored gate**
+- The new kind carries its OWN, later cutoff (`INSERT_VALUES_CUTOFF`). ~137 already-enforced
+  migrations were written under the previous rule and cannot be edited (README rule 4); enforcing
+  over them would make the lint permanently red, and a permanently red gate is an ignored one. The
+  original silent-no-op checks still apply to those files unchanged.
+
+**Verified, not assumed**
+- A green run proves nothing about a rule that never fires, so the rule was exercised: a throwaway
+  migration with a bare INSERT into `activities` IS flagged, at the right line and under the right
+  kind, and the ledger returns green once removed.
+- The failure message was stale - it described only the silent class and said "touches EXISTING
+  rows", which is wrong for an INSERT and points the reader at the wrong fix. It now separates the
+  two modes, gives the remedy for both (including `app.scopes` for module-owned tables), and warns
+  against the tempting wrong fix: widening an EXCEPTION handler to swallow the RLS error makes the
+  assertion pass while proving nothing, because the row never reaches the CHECK.
+
+---
+
 ### platform-nest - a migration self-test that CI structurally could not fail (2026-08-26) - DEV-VERIFIED
 
 **Fixed**
