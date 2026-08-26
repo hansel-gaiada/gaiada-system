@@ -26,12 +26,12 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 |---|---|---|---|---|---|
 | Platform prerequisites | 22 | 14 | 0 | 4 | **4** |
 | **Hermes runtime (H0–H9)** | 25 | 14 | 0 | **1** | **10** |  *(H3 dropped; H0/H1/H2 split)*
-| Agent seats | 15 | 0 | 0 | **15** | 0 |  *(seeded DISABLED — enablement is per-seat, after evals)*
+| Agent seats | 15 | 0 | 0 | **14** | **1** |  *(seeded LIVE; `dept-pm` enabled, 13 await an eval suite)*
 | Persona packs | 14 | 12 | 0 | **2** | 0 |  *(examples/ blocked on corpus privacy)*
 | Eval suites | 14 | 13 | 0 | **1** | 0 |  *(dept-pm authored; 13 seats still need one before they may be enabled)*
 | New tools | 25 | 25 | 0 | 0 | 0 |
 | RAG for the workforce (R1–R5) | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **120** | **82** | **0** | **23** | **15** |
+| **Total** | **120** | **82** | **0** | **22** | **16** |
 
 **Read this honestly: 14 of 120 are DEV-VERIFIED** (and see the 2026-08-26 correction — B2/B3 were
 already closed by other sessions, so the identity plumbing is further along than these counts imply). The session closed P0's data model and a
@@ -318,6 +318,54 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 ✅ THE WORKFORCE EXISTS IN PRODUCTION — 15 seats seeded, `dept-pm` ENABLED
+
+Owner pushed back on "inert by design", correctly. Separating what was actually gated from what was
+merely unrun:
+
+- **The seed was not blocked, only unrun.** `dist/seed/agent-seats.js` shipped with 0174a. Run:
+  **15 identities created, 15 registry rows written.**
+- **`enabled=false` IS a real gate**, and it held on live data.
+- **`dept-pm` had evidence** — an eval suite that passes — so its gate was satisfied. "Shadow mode
+  first" was MY recommendation, not a constraint, and I had been presenting it as though it were one.
+
+**The seeded roster, verified in production:**
+
+```
+dept-agency/creative/it/seo/smm/webdev  low_write     dept-finance/hr/legal  read
+dept-pm  medium_write  ns=5             router  read  ns=1 (agents only)
+sec-guard  read        pantheon  read   ns=0            edge-wa  read  ns=1
+```
+
+The schema enforced its own rules on real rows: **`pantheon` holds ZERO tool namespaces** (external
+seats propose, never execute) and **`sec-guard` is `read`** — both refused at the CHECK if written
+otherwise.
+
+**`dept-pm` enabled**, with `eval_suite = ai-agents/src/evals/dept-pm.cases.ts`. The gate proved
+itself in the same transaction: `UPDATE ... enabled=true WHERE name='dept-hr'` was **refused** —
+`violates check constraint agent_registry_enabled_requires_evidence`. No agent without evidence, on
+production data, not in a test.
+
+**End-to-end verified live:** `GET /api/agents` → **HTTP 200**, returning exactly one seat —
+`dept-pm impact=medium_write ns=pm,tasks,projects,approvals,deliverables`. The router can discover a
+department seat and nothing else.
+
+#### What "enabled" does and does not mean
+
+Worth stating precisely, because it is the difference between shipping a capability and shipping a
+risk. `dept-pm` being enabled means it can be **routed to** and can **read**. It does NOT mean it acts
+unsupervised:
+
+- Cerbos was probed live earlier this session: a `medium`-impact write by an unattended principal is
+  **EFFECT_DENY**. `dept-pm`'s ceiling is `medium_write`, so **its writes suspend into D14 approval**
+  rather than committing.
+- Its tool view is narrowed to five namespaces by `seat-view.ts`; everything else is invisible to it.
+- `enabled=false` remains a single-row kill switch that takes effect without a deploy.
+
+**Still genuinely gated: 13 seats.** Not arbitrarily — they have no eval suite, and writing one per
+seat is the real remaining work. That is the enablement gate functioning as designed rather than an
+obstacle to route around.
 
 ### 2026-08-26 ✅ SHIPPED — `Alpha 01.071.0174a` is LIVE and verified
 
