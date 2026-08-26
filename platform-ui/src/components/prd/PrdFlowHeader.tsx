@@ -14,7 +14,7 @@ export function PrdFlowHeader({ counts }: { counts: FlowCounts }) {
 
   const beats: Array<{ label: string; live: string | null; quiet: string }> = [
     { label: "Create a briefing", live: c.toCapture > 0 ? `${c.toCapture} waiting for a recording` : null, quiet: "Start below" },
-    { label: "Add the recording", live: step2 || null, quiet: "Record here, use the helper, or upload" },
+    { label: "Add the recording", live: step2 || null, quiet: "Record, use the helper, upload a file — or a transcript" },
     { label: "Convert to a PRD run", live: c.readyToConvert > 0 ? `${c.readyToConvert} ready to convert` : null, quiet: "Unlocks once transcribed" },
     { label: "Get it approved", live: step4 || null, quiet: c.complete > 0 ? `${c.complete} done` : "GM review, then the client signs" },
   ];

@@ -27,7 +27,7 @@ export function briefingPhase(status: RecordingStatus): BriefingPhaseView {
       return {
         phase: "capture",
         headline: "No recording yet",
-        next: "Add the recording — record here, use the desktop helper, or upload a file.",
+        next: "Add the recording — record here, use the desktop helper, upload a file — or upload the transcript if you already have it.",
       };
     case "recorded":
     case "transcribing":

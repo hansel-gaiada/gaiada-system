@@ -10,7 +10,7 @@ import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
 import { getPipelineRun, listPipelineRuns, type PipelineGate, type PipelineRun } from "@/lib/pipeline";
 import { listRecordings, type MeetingRecording } from "@/lib/meetings";
 import { listClients, listProjects } from "@/lib/entities";
-import { ingestAction, retryAudioAction, uploadAudioAction } from "@/lib/meetingsActions";
+import { ingestAction, retryAudioAction, setTranscriptAction, uploadAudioAction } from "@/lib/meetingsActions";
 import { createBriefingAction } from "@/lib/prdActions";
 import { decideGateAction } from "@/lib/pipelineActions";
 import { briefingPhase, flowCounts, scopeToDepartment } from "@/lib/prdFlow";
@@ -157,7 +157,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
                   recording={r}
                   clientName={r.client_id ? clientName.get(r.client_id) ?? null : null}
                   projectName={r.project_id ? projectName.get(r.project_id) ?? null : null}
-                  actions={{ upload: uploadAudioAction, retry: retryAudioAction, ingest: ingestAction }}
+                  actions={{ upload: uploadAudioAction, retry: retryAudioAction, setTranscript: setTranscriptAction, ingest: ingestAction }}
                 />
               ))}
             </div>

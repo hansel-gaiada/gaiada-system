@@ -300,6 +300,24 @@ test("PRD Studio: uploading a file streams through the BFF route and flips the b
   await expect(intake.getByRole("button", { name: "Upload a file" })).toHaveCount(0);
 });
 
+test("PRD Studio: a transcript can be supplied directly — no transcription service involved", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await intake.getByRole("button", { name: "Upload a transcript" }).click();
+  const save = intake.getByRole("button", { name: "Save transcript" });
+  await expect(save).toBeDisabled();
+  await intake.getByLabel(/transcript file/i).setInputFiles({
+    name: "intake.srt", mimeType: "text/plain",
+    buffer: Buffer.from("1\n00:00:01,000 --> 00:00:04,000\nCheckout must drop to two steps.\n\n2\n00:00:04,500 --> 00:00:07,000\nGuest checkout stays.\n"),
+  });
+  await expect(intake.getByLabel(/paste the transcript/i)).toHaveValue("Checkout must drop to two steps.\nGuest checkout stays.");
+  await expect(intake.getByText(/2 lines · 54 characters/)).toBeVisible();
+  await save.click();
+  await expect(intake.getByText("Transcript ready")).toBeVisible();
+  await expect(intake.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
+});
+
 test("PRD Studio exists for Web Dev only — another department's /prd is not found", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-3/prd"); // SEO — its toolkit has no `prd` tab

@@ -7,6 +7,7 @@ import type { AudioUploadResult, MeetingResult } from "@/lib/meetingsActions";
 import { briefingPhase } from "@/lib/prdFlow";
 import { LiveRecorder } from "@/components/meetings/LiveRecorder";
 import { formatMb, uploadRecordingFile, type UploadOutcome, type UploadProgress } from "./uploadWithProgress";
+import { TRANSCRIPT_ACCEPT, describeTranscript, normalizeTranscript, readTextFile } from "./transcriptText";
 import "./prd-studio.css";
 
 // Steps 2 and 3 for ONE briefing. The card shows one headline (where it is), one next step (what to
@@ -22,11 +23,14 @@ export interface BriefingCardActions {
   uploadFile?: (recordingId: string, file: File, onProgress: (p: UploadProgress) => void) => Promise<UploadOutcome>;
   /** `retryAudioAction` — re-run transcription on the already-uploaded audio. */
   retry: (prev: AudioUploadResult | null, formData: FormData) => Promise<AudioUploadResult>;
+  /** `setTranscriptAction` — supply the transcript directly (pasted or from a .txt/.md/.srt/.vtt file);
+   *  no transcription service involved. The row goes straight to `transcribed`. */
+  setTranscript: (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
   /** `ingestAction` — convert the transcript into a PRD pipeline run. */
   ingest: (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
 }
 
-type Method = "browser" | "helper" | "upload";
+type Method = "browser" | "helper" | "upload" | "transcript";
 const POLL_MS = 2500;
 const PROCESSING = new Set<RecordingStatus>(["recorded", "transcribing"]);
 
@@ -49,6 +53,9 @@ export function BriefingCard({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploading = progress !== null;
   const [retryState, retryAction, retrying] = useActionState<AudioUploadResult | null, FormData>(actions.retry, null);
+  const [transcriptState, transcriptAction, savingTranscript] = useActionState<MeetingResult | null, FormData>(actions.setTranscript, null);
+  const [transcriptText, setTranscriptText] = useState("");
+  const [transcriptNote, setTranscriptNote] = useState<string | null>(null);
   const [ingestState, ingestAction, ingesting] = useActionState<MeetingResult | null, FormData>(actions.ingest, null);
 
   // Server data wins whenever the page re-renders with a newer row.
@@ -73,6 +80,23 @@ export function BriefingCard({
   useEffect(() => {
     if (retryState?.ok) { setLiveStatus("transcribing"); setMethod(null); }
   }, [retryState]);
+
+  useEffect(() => {
+    if (transcriptState?.ok) { setLiveStatus("transcribed"); setMethod(null); setTranscriptText(""); }
+  }, [transcriptState]);
+
+  async function pickTranscriptFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setTranscriptNote(null);
+    try {
+      const r = normalizeTranscript(f.name, await readTextFile(f));
+      if (r.ok) setTranscriptText(r.text);
+      else setTranscriptNote(r.error);
+    } catch {
+      setTranscriptNote("Could not read that file.");
+    }
+  }
 
   async function submitFile(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -131,7 +155,36 @@ export function BriefingCard({
           <button type="button" className="prd-method" aria-pressed={method === "browser"} onClick={() => setMethod(method === "browser" ? null : "browser")}>Record here</button>
           <button type="button" className="prd-method" aria-pressed={method === "helper"} onClick={() => setMethod(method === "helper" ? null : "helper")}>Desktop capture helper</button>
           <button type="button" className="prd-method" aria-pressed={method === "upload"} onClick={() => setMethod(method === "upload" ? null : "upload")}>Upload a file</button>
+          <button type="button" className="prd-method" aria-pressed={method === "transcript"} onClick={() => setMethod(method === "transcript" ? null : "transcript")}>Upload a transcript</button>
         </div>
+      )}
+
+      {(view.phase === "capture" || view.phase === "failed") && method === "transcript" && (
+        <form action={transcriptAction} className="prd-panel">
+          <p className="prd-hint">Already have the words? Paste them, or choose the transcript file your call tool exported (.txt, .md, .srt, .vtt). Nothing is transcribed on the server — the text is saved as-is and the briefing is ready to convert.</p>
+          <input type="hidden" name="id" value={recording.id} />
+          <label className="prd-field">
+            Transcript file
+            <input type="file" accept={TRANSCRIPT_ACCEPT} onChange={pickTranscriptFile} />
+          </label>
+          <label className="prd-field">
+            Paste the transcript
+            <textarea
+              name="text"
+              rows={6}
+              className="prd-textarea"
+              value={transcriptText}
+              onChange={(e) => { setTranscriptText(e.target.value); setTranscriptNote(null); }}
+              placeholder="Client wants a two-step checkout…"
+            />
+          </label>
+          <div className="prd-actions">
+            <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm" disabled={savingTranscript || !transcriptText.trim()}>{savingTranscript ? "Saving…" : "Save transcript"}</button>
+            {transcriptText.trim() && <span className="prd-hint">{describeTranscript(transcriptText.trim())}</span>}
+            {transcriptNote && <p className="prd-note prd-note--error">{transcriptNote}</p>}
+            {transcriptState && !transcriptState.ok && transcriptState.error && <p className="prd-note prd-note--error">{transcriptState.error}</p>}
+          </div>
+        </form>
       )}
 
       {view.phase === "capture" && method === "browser" && (
@@ -189,6 +242,7 @@ export function BriefingCard({
             <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm" disabled={retrying}>{retrying ? "Retrying…" : "Retry transcription"}</button>
           </form>
           <button type="button" className="prd-method" aria-pressed={method === "upload"} onClick={() => setMethod(method === "upload" ? null : "upload")}>Upload a different file</button>
+          <button type="button" className="prd-method" aria-pressed={method === "transcript"} onClick={() => setMethod(method === "transcript" ? null : "transcript")}>Upload a transcript instead</button>
           {retryState && !retryState.ok && retryState.error && <p className="prd-note prd-note--error">{retryState.error}</p>}
         </div>
       )}

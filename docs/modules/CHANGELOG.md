@@ -102,6 +102,13 @@ local stack). None of these mean "production-done".
   briefing, and the e2e asserts that. Demo `POST /projects` now adds the project to the list (it
   used to return an id that nothing could see).
 
+- **Fourth capture method — "Upload a transcript".** Whether a transcription service (whisper) is
+  hosted at all is still open, so a briefing can take its transcript directly: pasted, or from the
+  file a call tool exported (`.txt`/`.md` as-is; `.srt`/`.vtt` with cue numbers, timestamps, cue ids
+  and inline tags stripped — `components/prd/transcriptText.ts`, 6 tests). Saves through the existing
+  `POST /:id/transcript` via `setTranscriptAction`; the row goes straight to `transcribed` and the card
+  offers Convert. Also offered as "Upload a transcript instead" when transcription failed.
+
 **Fixed**
 - ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:
   every upload path went through a Server Action, and Next caps action bodies at 1 MB by default.

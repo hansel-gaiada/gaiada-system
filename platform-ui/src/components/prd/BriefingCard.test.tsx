@@ -18,6 +18,7 @@ function actions(over: Partial<BriefingCardActions> = {}): BriefingCardActions {
     upload: vi.fn(async () => ({ ok: true, id: "rec-1", audioRef: "a" })),
     uploadFile: vi.fn(async () => ({ ok: true as const })),
     retry: vi.fn(async () => ({ ok: true, id: "rec-1" })),
+    setTranscript: vi.fn(async () => ({ ok: true, id: "rec-1" })),
     ingest: vi.fn(async () => ({ ok: true, id: "rec-1", runId: "run-9" })),
     ...over,
   };
@@ -30,6 +31,7 @@ describe("BriefingCard — waiting for its recording", () => {
     expect(screen.getByRole("button", { name: /record here/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /desktop capture helper/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /upload a file/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload a transcript/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /convert to prd run/i })).not.toBeInTheDocument();
   });
 
@@ -44,6 +46,37 @@ describe("BriefingCard — waiting for its recording", () => {
     render(<BriefingCard recording={rec()} actions={actions()} />);
     fireEvent.click(screen.getByRole("button", { name: /desktop capture helper/i }));
     expect(screen.getByText("mtg-1")).toBeInTheDocument();
+  });
+});
+
+describe("BriefingCard — a transcript can be supplied directly, no transcription service needed", () => {
+  it("pasting a transcript saves it and the briefing is immediately ready to convert", async () => {
+    const setTranscript = vi.fn<BriefingCardActions["setTranscript"]>(async () => ({ ok: true, id: "rec-1" }));
+    render(<BriefingCard recording={rec()} actions={actions({ setTranscript })} />);
+    fireEvent.click(screen.getByRole("button", { name: /upload a transcript/i }));
+    const box = screen.getByLabelText(/paste the transcript/i);
+    fireEvent.change(box, { target: { value: "Client wants two-step checkout. Guest checkout stays." } });
+    fireEvent.click(screen.getByRole("button", { name: /save transcript/i }));
+    await waitFor(() => expect(setTranscript).toHaveBeenCalledTimes(1));
+    const fd = setTranscript.mock.calls[0][1];
+    expect(fd.get("id")).toBe("rec-1");
+    expect(fd.get("text")).toBe("Client wants two-step checkout. Guest checkout stays.");
+    await waitFor(() => expect(screen.getByText("Transcript ready")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /convert to prd run/i })).toBeInTheDocument();
+  });
+
+  it("a chosen .srt file is read in the browser, cleaned, and shown before saving", async () => {
+    render(<BriefingCard recording={rec()} actions={actions()} />);
+    fireEvent.click(screen.getByRole("button", { name: /upload a transcript/i }));
+    const srt = new File(["1\n00:00:01,000 --> 00:00:04,000\nClient wants two-step checkout.\n"], "call.srt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText(/transcript file/i), { target: { files: [srt] } });
+    await waitFor(() => expect((screen.getByLabelText(/paste the transcript/i) as HTMLTextAreaElement).value).toBe("Client wants two-step checkout."));
+    expect(screen.getByText(/1 line · 31 characters/i)).toBeInTheDocument();
+  });
+
+  it("the transcript option is also offered when transcription failed", () => {
+    render(<BriefingCard recording={rec({ status: "failed" })} actions={actions()} />);
+    expect(screen.getByRole("button", { name: /upload a transcript instead/i })).toBeInTheDocument();
   });
 });
 

@@ -141,6 +141,8 @@
 .prd-method[aria-pressed="true"] { border-color: var(--erp-accent); background: var(--tint-active); }
 .prd-panel { border-top: 0.5px solid var(--erp-hairline-soft); padding-top: 12px; display: grid; gap: 10px; }
 .prd-panel input[type="file"] { font: 400 13px var(--font-body); color: var(--text-primary); }
+.prd-textarea { min-width: 0; width: 100%; border: 0.5px solid var(--line-control); border-radius: var(--radius-sm); background: var(--surface-page); color: var(--text-primary); padding: 10px 12px; font: 400 14px/1.5 var(--font-body); letter-spacing: normal; text-transform: none; resize: vertical; }
+.prd-textarea:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
 .prd-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 /* Upload progress — the native <progress>, recoloured through tokens; text carries the numbers. */
 .prd-progress { display: grid; gap: 6px; max-width: 480px; }
