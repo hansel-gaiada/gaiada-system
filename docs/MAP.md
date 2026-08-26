@@ -250,6 +250,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/admin/bot` | `platform-nest/src/admin/bot-admin.controller.ts` |
 | `/api/admin/mail` | `platform-nest/src/mail/admin-mail.controller.ts` |
 | `/api/admin/observability` | `platform-nest/src/admin/observability.controller.ts` |
+| `/api/agents` | `platform-nest/src/admin/agents.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/inbound.controller.ts` |
 | `/api/mail` | `platform-nest/src/mail/webhook.controller.ts` |
 | `/api/search/google/oauth` | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
@@ -482,6 +483,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/api/admin/bot/session/events`
 - `/api/admin/bot/skills`
 - `/api/assistant/threads/[id]/stream`
+- `/api/meetings/[id]/audio`
 - `/api/meetings/[id]/status`
 - `/api/portal/stream`
 - `/api/search/change-proposals/[id]/export-file`
