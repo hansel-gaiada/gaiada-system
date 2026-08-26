@@ -1,0 +1,221 @@
+# WebDesk (Zone B) — standalone project skeleton (WSK-01).
+#
+# This is its OWN compose PROJECT (name: webdesk), deliberately separate from every Zone A
+# project so the estate's `--remove-orphans` trap (any container in the SAME project whose
+# profile isn't in the current command gets deleted) cannot reach it — same precedent as the
+# n8n project split (see ../docs/blueprints/webdesk-design.md §09).
+#
+# Services here are STUBS per WSK-01's scope: the stack SHAPE is the deliverable (proxy · payload
+# · api · worker · postgres · minio · redis · clamav · otel-collector), not working application
+# code. Payload/api/worker become real at WSK-02/21/07; this file is what those tickets extend,
+# not replace.
+#
+# Everything runs under the `dev` profile — nothing starts on a bare `docker compose up` without
+# explicitly selecting it, mirroring the estate's COMPOSE_PROFILES convention:
+#   docker compose --profile dev up -d
+#
+# ZERO Zone A hostnames or credentials appear anywhere below (WSK-01 hard AC, grep-proven).
+
+name: webdesk
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    profiles: ["dev"]
+    ports:
+      - "${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
+      - "${WEBDESK_PROXY_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+      - payload
+    restart: unless-stopped
+
+  # --- Payload 3 content engine --------------------------------------------------------------
+  # Vendored + rebranded at WSK-02 (PG adapter onto Zone B's own DB, tenancy columns, RLS GUC
+  # plumbing at WSK-04). Placeholder process only — no application code lands in this ticket.
+  payload:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] payload INTERNAL listener — admin + Payload REST. NEVER on the public vhost (WSK-D20/D-5). Real command: npm run start:internal' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${APP_DATABASE_URL}
+      PAYLOAD_SECRET: ${PAYLOAD_SECRET}
+      PAYLOAD_TELEMETRY_DISABLED: ${PAYLOAD_TELEMETRY_DISABLED:-1}
+      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
+    ports:
+      # Bound to LOCALHOST only: the admin panel and Payload's raw REST live here.
+      # Caddy must not forward the public vhost to this service (WSK-D20).
+      - "127.0.0.1:${WEBDESK_PAYLOAD_INTERNAL_PORT:-8381}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- NestJS api (forms · mail · media · control-plane) -------------------------------------
+  # Real command surface lands at WSK-10/11/07/21. Placeholder process only.
+  # WSK-02: the ONLY Payload-side process the public vhost may reach. Hardcoded
+  # denylist (/admin, /api/graphql, /api/*) checked BEFORE any allowlist; this
+  # process never imports payload or next, so it cannot serve them even by mistake.
+  payload-gateway:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] payload PUBLIC gateway — /v1 + /healthz only. Real command: npm run gateway' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PAYLOAD_INTERNAL_HOST: payload
+      PAYLOAD_INTERNAL_PORT: 3000
+      PAYLOAD_PUBLIC_PORT: 3000
+    ports:
+      - "${WEBDESK_PAYLOAD_PUBLIC_PORT:-8384}:3000"
+    depends_on:
+      - payload
+
+  api:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] api stub — control plane lands at WSK-21' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${APP_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      CLAMAV_HOST: ${CLAMAV_HOST}
+      CLAMAV_PORT: ${CLAMAV_PORT}
+      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+      # Control-channel placeholders only — see .env.example's hard rule. Never a Zone A host.
+      CONTROL_CHANNEL_JWKS_ISSUER_URL: ${CONTROL_CHANNEL_JWKS_ISSUER_URL}
+      WEBDESK_EVENT_SECRET: ${WEBDESK_EVENT_SECRET}
+      WEBDESK_APPROVAL_ASSERTION_KEY: ${WEBDESK_APPROVAL_ASSERTION_KEY}
+    ports:
+      - "${WEBDESK_API_PORT:-8382}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- BullMQ worker ---------------------------------------------------------------------------
+  # Mail retry/backoff (WSK-11), media variants, purge sweeps. Placeholder process only.
+  worker:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] worker stub — queue consumers land at WSK-07/11' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${APP_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- Postgres (Zone B's OWN database; own ledger, own role split) --------------------------
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["dev"]
+    environment:
+      # $POSTGRES_USER here is the Postgres-IMAGE's cluster-bootstrap superuser (used ONLY by
+      # docker-entrypoint-initdb.d, incl. postgres/init-roles.sh, to create webdesk_owner /
+      # webdesk_migrator / webdesk_app as ordinary NOSUPERUSER NOBYPASSRLS roles below). No
+      # application or migration ever connects as this identity — see init-roles.sh's header for
+      # why that distinction is the whole point of the role split.
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-changeme_superuser_password}
+      POSTGRES_DB: ${POSTGRES_DB:-webdesk}
+      # Read by postgres/init-roles.sh to create the owner/migrator/app roles. First-boot only —
+      # has no effect on a volume that already has a cluster initialized.
+      POSTGRES_OWNER_USER: ${POSTGRES_OWNER_USER:-webdesk_owner}
+      POSTGRES_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-changeme_owner_password}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-webdesk_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-changeme_migrator_password}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-webdesk_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-changeme_app_password}
+    ports:
+      - "${WEBDESK_POSTGRES_PORT:-8383}:5432"
+    volumes:
+      - webdesk_pgdata:/var/lib/postgresql/data
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-webdesk}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # --- MinIO (self-hosted object storage, WSK-D23) --------------------------------------------
+  minio:
+    image: minio/minio:latest
+    profiles: ["dev"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-webdesk_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_minio_password}
+    ports:
+      - "${WEBDESK_MINIO_API_PORT:-8385}:9000"
+      - "${WEBDESK_MINIO_CONSOLE_PORT:-8386}:9001"
+    volumes:
+      - webdesk_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # --- Redis (BullMQ) --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    profiles: ["dev"]
+    ports:
+      - "${WEBDESK_REDIS_PORT:-8384}:6379"
+    volumes:
+      - webdesk_redisdata:/data
+    restart: unless-stopped
+
+  # --- ClamAV (media upload scanning, WSK-07) --------------------------------------------------
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["dev"]
+    ports:
+      - "${WEBDESK_CLAMAV_PORT:-8387}:3310"
+    restart: unless-stopped
+
+  # --- OTel Collector (fail-soft; local dev sink only — WSK-28 wires the real Zone A listener) -
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["dev"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "${WEBDESK_OTEL_GRPC_PORT:-8388}:4317"
+      - "${WEBDESK_OTEL_HTTP_PORT:-8389}:4318"
+    restart: unless-stopped
+
+volumes:
+  webdesk_pgdata:
+  webdesk_miniodata:
+  webdesk_redisdata:
