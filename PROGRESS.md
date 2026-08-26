@@ -135,3 +135,24 @@ Real shape: **8 rooms, 82 avatars** — 26 humans, **51 agents**, 5 automations.
   (`npm run gen:office-credits`). The LimeZu question in plan §7 Q2 was answered = LPC.
 - munder-difflin licence: MIT source, but its bundled tiles are LimeZu paid art. Irrelevant to us
   now that we're on LPC — patterns only, no code, no assets.
+
+## NEXT: make the floor look authored, not generated (owner feedback 2026-08-26)
+
+The complaint is not art quality, it is that our rooms read as GENERATED — identical desks on a
+perfect grid, identical people, bare walls, one floor material per room — while the reference reads
+as FURNISHED. Three concrete causes, all fixable with assets already committed and unused:
+
+1. **Everyone is the same person.** `public/office-chars/people/uniform/` holds **30 outfits** and
+   `.../skin/` holds **6 tones**. Neither is referenced anywhere in `src/`. Pick deterministically
+   per avatar id (`hashId`) so a person always looks like themselves. Biggest single win.
+2. **The walls are bare.** `public/office-env/paintings/` holds **12** pieces, unused; plus
+   `furniture/storage/bookshelf*`, `office_equipment/clock`, `plants/plant_corner|plant_tall`.
+   Hang them along the room's top wall band, deterministic per room key.
+3. **The desk grid is a spreadsheet.** `deskSlotTile()` lays a strict cols x rows grid. Vary it:
+   pods of 2-4 facing each other, some desks against a wall, a lounge cluster (`seating/sofa` +
+   `common/coffee_table`) where a room has spare floor. Seats must stay DETERMINISTIC per person —
+   the binding to real headcount is the point of the page and must not be lost.
+
+Constraint that must survive: rooms are sized from REAL headcount and each desk is a specific
+person's seat. "Authored-looking" must be achieved by varying ARRANGEMENT and DRESSING, never by
+inventing seats or decoupling desks from people.

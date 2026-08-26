@@ -65,6 +65,64 @@ export function automationSpritePath(id: string, hash: (s: string) => number): s
   return pick(AUTOMATION_SPRITES, id, hash);
 }
 
+// ── A personal item on a HUMAN's own desk (owner feedback 2026-08-26: "identical people... reads
+// as GENERATED, not FURNISHED") ─────────────────────────────────────────────────────────────────
+// The remaining 36 files of the SAME adopted pack (legal/asset-licences.md's "Futuristic AI Pixel
+// Art 32x32" entry — "30 uniform characters" + "6 skin-tone characters", the similarity question
+// closed on the whole pack, same provenance as AGENT_SPRITES/AUTOMATION_SPRITES above) were
+// committed but never referenced anywhere. They are NOT a body layer for a human: `office-sprites
+// .ts`'s `getComposedSprite` deliberately keeps humans on the real LPC `walk`/`sit` sheets (see its
+// own doc — swapping to this pack's single-frame, single-direction art would trade a working walk
+// cycle for nothing, and this feature's own ambient-walking work depends on that walk cycle
+// existing). Used instead as a small, deterministic personal item sitting on a human's own desk —
+// a real "furnished, not generated" detail units of real office life actually have (a desk toy, a
+// mascot, a mug) — picked once per person and stable forever, the same id-hash discipline as the
+// two pools above. Never drawn for an agent/automation/external seat: those already carry their
+// own fixed visual identity from the pools above, and a second unrelated trinket on top of an
+// android would read as clutter, not personalization.
+export const PEOPLE_PROP_SPRITES: readonly string[] = [
+  "/office-chars/people/uniform/01-futuristic-ninja.png",
+  "/office-chars/people/uniform/02-cyber-military.png",
+  "/office-chars/people/uniform/03-space-soldier.png",
+  "/office-chars/people/uniform/04-ai-commander.png",
+  "/office-chars/people/uniform/05-dark-futuristic-detective.png",
+  "/office-chars/people/uniform/06-cyber-mage.png",
+  "/office-chars/people/uniform/07-futuristic-academy.png",
+  "/office-chars/people/uniform/08-robotic-warrior.png",
+  "/office-chars/people/uniform/09-hologram-guardian.png",
+  "/office-chars/people/uniform/10-sci-fi-knight.png",
+  "/office-chars/people/uniform/11-neon-ranger.png",
+  "/office-chars/people/uniform/12-quantum-pilot.png",
+  "/office-chars/people/uniform/13-tech-samurai.png",
+  "/office-chars/people/uniform/14-void-operative.png",
+  "/office-chars/people/uniform/15-starlight-engineer.png",
+  "/office-chars/people/uniform/16-cyber-medic.png",
+  "/office-chars/people/uniform/17-astro-scout.png",
+  "/office-chars/people/uniform/18-mecha-duelist.png",
+  "/office-chars/people/uniform/19-digital-alchemist.png",
+  "/office-chars/people/uniform/20-plasma-guardian.png",
+  "/office-chars/people/uniform/21-orbital-captain.png",
+  "/office-chars/people/uniform/22-chrome-nomad.png",
+  "/office-chars/people/uniform/23-synth-detective.png",
+  "/office-chars/people/uniform/24-ai-diplomat.png",
+  "/office-chars/people/uniform/25-photon-monk.png",
+  "/office-chars/people/uniform/26-cyber-beast-tamer.png",
+  "/office-chars/people/uniform/27-future-courier.png",
+  "/office-chars/people/uniform/28-singularity-knight.png",
+  "/office-chars/people/uniform/29-neon-oracle.png",
+  "/office-chars/people/uniform/30-cosmic-sentinel.png",
+  "/office-chars/people/skin/metallic-android-skin.png",
+  "/office-chars/people/skin/skin-dark.png",
+  "/office-chars/people/skin/skin-light.png",
+  "/office-chars/people/skin/skin-tan.png",
+  "/office-chars/people/skin/skin-warm.png",
+  "/office-chars/people/skin/synthetic-android-skin.png",
+];
+
+export function personPropSpritePath(id: string, hash: (s: string) => number): string {
+  return pick(PEOPLE_PROP_SPRITES, id, hash);
+}
+
 /** The procedural half of "animation" — see docs: Creative's pack has no animation frames, and the
  *  motion that matters here (a figure working at a desk) does not need any. One frame plus a 1px
  *  vertical offset on the existing pulse beat is a two-frame animation, which is how pixel art has
