@@ -125,6 +125,11 @@ local stack). None of these mean "production-done".
   errors stay errors. 5 action tests; demo `rec-demo-6` (meeting id `*-nobridge`) drives it in e2e.
 
 **Fixed**
+- **61 unstyled buttons.** `className="btn"` / `"btn btn-primary"` is used in 27 components (pipeline
+  gates, PM forms, meetings, IT/HR actions…) and no stylesheet ever defined those classes — git has
+  no `.btn` in its history — so they rendered as the browser's default grey button. Defined once in
+  `components/ui.css` as the sentence-case sibling of `.lux-btn` (same hairline, radius token, accent,
+  easing). New work should still use `.lux-btn--*`.
 - ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:
   every upload path went through a Server Action, and Next caps action bodies at 1 MB by default.
   Two-layer fix. `next.config.ts` raises `serverActions.bodySizeLimit` to 520 MB (the platform's
