@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
+  // `next dev`, `next build` and Playwright's own dev server all write to the SAME `.next` by default,
+  // so a build or an e2e run in this folder while someone's dev server is up corrupts that server
+  // ("Cannot find module './1331.js'" from webpack-runtime.js). Verification runs set
+  // NEXT_DIST_DIR (e.g. `.next-e2e`, `.next-gate`) and stay out of the running server's folder.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Pin the trace root to this package: the repo lives under a parent folder
   // that has its own lockfile (unrelated sibling projects), which otherwise
   // makes Next infer a wrong workspace root and nest .next/standalone/server.js

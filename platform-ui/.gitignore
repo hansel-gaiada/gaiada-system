@@ -10,3 +10,5 @@ next-env.d.ts
 /playwright-report
 /blob-report
 /playwright/.cache
+# Isolated Next output dirs used by e2e / build-gate runs (NEXT_DIST_DIR)
+.next-*

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformAuthHeaders } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
+import { getRecording } from "@/lib/meetings";
 
 // Streaming upload proxy for a recording's media (PRD Studio "Upload a file").
 //
@@ -42,6 +43,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json(r.json, { status: r.status, headers: noStore });
   }
 
+  // Preflight BEFORE streaming. The platform authorizes and looks up the recording before it reads
+  // the body, so a 401/403/404 arrives while a 170 MB body is still in flight; Node then closes the
+  // socket and the upload surfaces as a connection error with the real status lost. A cheap read of
+  // the same row first turns those into the messages they are.
+  const pre = await getRecording(userId, tenant, id);
+  if (pre.kind === "forbidden") return NextResponse.json({ error: "You don't have permission to add a recording to this briefing." }, { status: 403, headers: noStore });
+  if (pre.kind === "unavailable") return NextResponse.json({ error: "The platform is not answering right now — try again in a moment.", reason: pre.reason }, { status: 503, headers: noStore });
+  if (!pre.data) return NextResponse.json({ error: "This briefing no longer exists." }, { status: 404, headers: noStore });
+
   const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
   const headers: Record<string, string> = { ...(await platformAuthHeaders(userId)), "content-type": contentType };
   const len = req.headers.get("content-length");
@@ -58,8 +68,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       // @ts-expect-error — `duplex` is not in the DOM RequestInit type yet, but undici needs it for streamed bodies.
       duplex: "half",
     });
-  } catch {
-    return NextResponse.json({ error: "The platform could not be reached — try again in a moment." }, { status: 502, headers: noStore });
+  } catch (e) {
+    // Say WHAT failed — "could not be reached" hid a real cause once (a 170 MB upload). undici puts the
+    // socket-level reason on `cause`.
+    const err = e as { message?: string; cause?: { code?: string; message?: string } };
+    const reason = err.cause?.code ?? err.cause?.message ?? err.message ?? "unknown error";
+    console.error("[meetings/audio] upstream fetch failed:", reason, err);
+    return NextResponse.json({ error: `The platform could not be reached (${reason}) — try again in a moment.` }, { status: 502, headers: noStore });
   }
 
   // Pass the platform's answer through as-is (202 {status:"transcribing"} or its 4xx with a reason).

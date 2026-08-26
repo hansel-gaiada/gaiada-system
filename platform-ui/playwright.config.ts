@@ -111,6 +111,7 @@ export default defineConfig({
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    env: { DEMO_MODE: "1" },
+    // Own output dir: the e2e dev server must never share `.next` with a developer's running server.
+    env: { DEMO_MODE: "1", NEXT_DIST_DIR: process.env.NEXT_DIST_DIR || ".next-e2e" },
   },
 });

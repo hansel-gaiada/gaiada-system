@@ -32,6 +32,13 @@ npm run e2e                    # playwright; self-contained (starts next dev + D
 npx playwright test --project=smoke --grep @smoke   # the CI build-gate smoke check
 ```
 
+**Never share `.next` with a running dev server.** `next dev`, `next build` and Playwright's
+`webServer` all write to `.next` by default; a build or e2e run in this folder while someone's
+`next dev` is up corrupts that server (`Cannot find module './1331.js'` from
+`webpack-runtime.js`, fixed only by restarting it with a clean `.next`). `next.config.ts` reads
+`NEXT_DIST_DIR`, and `playwright.config.ts` sets it to `.next-e2e` for its own server — so run the
+gate as `NEXT_DIST_DIR=.next-gate DEMO_MODE=1 npm run build` whenever a dev server may be running.
+
 **`next build` is the real gate.** `tsc` + vitest have both passed while the build broke and
 routes 500'd (a `server-only` import reaching a client component). CI runs `npm run build`
 then the `smoke` Playwright project against the built app for exactly that reason.
