@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.58.0` - The Office: a command-centre layout, and status that refuses to guess (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- **The side rail is tabbed** — `Cast · Detail · Activity · Legend`. It previously stacked legend,
+  roster and detail in one column, which on a real floor pushed the detail panel below the fold, so
+  selecting an avatar looked like it did nothing. Presentation only: every panel shows something the
+  page already had, and no tab implies a capability that is not built.
+- **Fullscreen** is a CSS state (`.office--fullscreen`), deliberately NOT the browser Fullscreen
+  API: the app shell stays mounted underneath, so leaving returns the user exactly where they were
+  with the sidebar intact, and the API's document takeover would fight the shell's focus handling.
+  Escape exits; the page behind is locked from scrolling while it is open.
+
+**Added**
+- `components/office/OfficeCastStrip.tsx` + `cast-strip.css` — a bottom strip with one card per
+  person, agent and automation, click-to-select, sharing the roster's listbox a11y pattern.
+- An **Activity** panel listing floor-wide recorded movement, with an empty state that says WHY it
+  is empty (movement is derived from two actors on one record, never location tracking) rather than
+  rendering a blank panel.
+
+**Notes**
+- ⚠ **A human card never carries a working/idle badge, by design.** People have no activity feed
+  comparable to an agent run, so a badge would be a presence claim the data cannot support (office
+  plan §4.2/§3 — the same rule that stops the canvas animating a human). Agents and automations do
+  carry real status, resolved through the SAME `emoteKindFor` gate the canvas and roster use, so the
+  three can never disagree. Absence of status is never rendered as "idle": it claims nothing.
+- Verified: `tsc --noEmit` clean; tokens guard 22/22; `vitest run` 177 files / 3414 tests;
+  `DEMO_MODE=1 npm run build` green with `/office` and `/office-lab` both in the route list; and the
+  page driven in a browser against a live-server snapshot — 4 tabs, 33 cast cards, Escape exits.
+
+---
+
 ### platform-nest - lint:migration-rls now catches the kind that broke a deploy (2026-08-26) - DEV-VERIFIED
 
 **Changed**
