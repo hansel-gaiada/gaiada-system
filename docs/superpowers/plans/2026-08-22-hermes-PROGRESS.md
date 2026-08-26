@@ -64,7 +64,8 @@ employee-facing.
 | B19 | ~~Alerting structurally deaf~~ — **RESOLVED 2026-08-23**: ntfy.sh topic wired AND `default-multi` given a webhook leg (it had none — the ticket path was dead even with a URL set). Proven by 3 delivered messages incl. 2 real alerts | — | **RESOLVED** |
 | B21 | `DiskWillFillIn24h` on `sumopod` — **NOT urgent (corrected)**; 6.7 GB reclaimed 2026-08-23 (build cache only, images untouched), 61 G free: the 36 GB drop was a one-off `mimi-*` rebuild 3–6 h ago; disk FLAT for 3 h, 54 GB free. Stale `predict_linear` projection. 97 GB build cache worth reclaiming as housekeeping | nothing imminent | **OWNER — no unscoped prune on that box** |
 | B23 | `aire-nginx` crash-looping ~3 weeks — **ROOT CAUSE CONFIRMED**: SumoPod copy is leftover dev; `aire_n8n_data` proves n8n was removed, orphaning the nginx upstream. Cleanup command prepared; blocked at the destructive-action guardrail | that project only | **OWNER — run `docker compose -p aire down`** |
-| B27 | **`alpha-01.071.0172a` ROLLED BACK by my migration** — self-test INSERTs into FORCE-RLS `activities` as NOBYPASSRLS. Fixed in `7080f232`; live is `0171a` and the migration has NOT applied. Needs a re-release | the P0 attribution columns reaching prod | **OWNER — re-release** |
+| B27 | ~~`0172a` rolled back by my migration~~ — **RESOLVED**: `7080f232` fixed it, `0173a` applied the migration, `0174a` shipped the wiring. Live and verified 2026-08-26 | — | **RESOLVED** |
+| B27-old | (superseded) `alpha-01.071.0172a` ROLLED BACK by my migration — self-test INSERTs into FORCE-RLS `activities` as NOBYPASSRLS. Fixed in `7080f232`; live is `0171a` and the migration has NOT applied. Needs a re-release | the P0 attribution columns reaching prod | **OWNER — re-release** |
 | B26 | **I shipped a label-split in `recordJSON`** — failure paths emitted no `provider` label, creating a second series that latches `SyntheticJourneyFailing` on forever while `avg_over_time` reads 100 %. Same class as the `RemoteWriteStalled` bug fixed the day before. Fixed in source, builds clean | alert trustworthiness | **NEEDS DEPLOY** |
 | B25 | **⚠ ACTIVE 25 % FAILURE RATE** — owner 2026-08-26: no fallback keys available at this stage. Now DOCUMENTED in compose + ALARMED via `GatewayServedByEcho`; exposure itself unchanged. The estate's ENTIRE AI runs on Ollama Cloud alone — `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` are both EMPTY, so `LLM_CHAIN=gemini,claude,openai` is a chain of ONE. Ollama Cloud is borrowed/shared/weekly-rate-limited and the owner's own rules forbid making it a hard prod dependency. Quota 8.9 % used | every AI call; 2026-08-24: latency 10–17 s, 3-of-12 timeouts, and one `provider=echo` response actually served | **OWNER — URGENT: set a real GEMINI/ANTHROPIC key on `ai-gateway`** |
 | B24 | **gaiada's observability host runs 11 compose projects**, several production (incl. zenvix/`bfs`). The disk burst that paged us was `mimi` rebuilding. **An unrelated project can fill the disk and take gaiada's alerting down** | the estate's ability to be told anything | **OWNER — decide deliberately, not during an incident** |
@@ -317,6 +318,53 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 ✅ SHIPPED — `Alpha 01.071.0174a` is LIVE and verified
+
+Release green, deploy green, estate healthy. **This is the first time this session's work is running
+in production.**
+
+| Check | Result |
+|---|---|
+| `/health` | `ok: true`, `Alpha 01.071.0174a` |
+| Running image (the truth, not the field) | `gaiada-platform-nest:alpha-01.071.0174a` |
+| Containers | platform (healthy), platform-ui, mcp-hub, ai-gateway — all up |
+| `activities` attribution columns | `approved_by`, `approval_channel`, `executed_by` — present |
+| Approval CHECKs | `activities_approval_channel_known` + `_required` — both live |
+| `risk_policy` | **13 rows** |
+| `infra_hosts` | `delphi=staging helios=production hostinger-wp=production` |
+| `agent_registry` | 1 row (`router`), **enabled=false, eval_suite=null** |
+
+Both `/health` AND the image tag were checked, because a FAILED deploy can leave `/health` reporting
+a stale version — the field alone is not evidence.
+
+**The enablement gate is holding in production.** The `router` row (seeded 2026-08-24 by a concurrent
+session, before I had tracked the migration as live) sits disabled with no eval suite. It cannot be
+turned on until one exists, which is the CHECK doing exactly its job on real data.
+
+#### Two things that nearly broke this release
+
+1. **HEAD was on another session's branch** (`office-floor-2026-08-26`), not `main` — the checkout
+   hazard `CLAUDE.md` warns about, live. Cut the release from a temporary **worktree** on `main` so
+   their working tree was never touched, and removed it after.
+2. **The VERSION bump dropped the trailing newline.** `deploy.yml` enforces tag ↔ VERSION parity, and
+   that is precisely the invisible difference that fails a release. Caught with `cat -A` before
+   committing.
+
+`deploy.yml` is a `workflow_call` reusable workflow, so it runs as a JOB INSIDE the release run
+(`deploy / deploy → success`) rather than as its own entry — worth knowing before concluding "the
+deploy never fired", which is what a run-list search suggests.
+
+#### What is live vs what is merely present
+
+**Live and working:** the observability fixes, the `agents.*` namespace, `GET /api/agents`, the
+seat-narrowed tool view, the risk ladder tables, the environment registry, and the approval
+attribution columns WITH the wiring that fills them.
+
+**Present but inert, by design:** `agent_registry` holds one disabled seat. `agents.list` returns an
+empty set. **Nothing is enabled and no agent is running** — the seed has not been executed on the
+box, and enabling a seat is a per-seat human decision after shadow mode. That is the correct first
+state, not an unfinished one.
 
 ### 2026-08-26 🔴 MY MIGRATION BROKE A LIVE DEPLOY. `alpha-01.071.0172a` rolled back.
 
