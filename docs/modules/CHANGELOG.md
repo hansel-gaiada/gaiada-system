@@ -108,6 +108,10 @@ local stack). None of these mean "production-done".
   and inline tags stripped — `components/prd/transcriptText.ts`, 6 tests). Saves through the existing
   `POST /:id/transcript` via `setTranscriptAction`; the row goes straight to `transcribed` and the card
   offers Convert. Also offered as "Upload a transcript instead" when transcription failed.
+  **Speakers survive:** Teams/Meet `<v Name>` voice tags and Zoom `Name: …` lines become
+  `Name: …` paragraphs, consecutive cues by one speaker merge, turns are blank-line separated — so
+  the meeting tool's own transcript (the best free, speaker-labelled source; whisper cannot label
+  speakers) reaches the PRD pipeline with who-said-what intact.
 
 **Fixed**
 - ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:
