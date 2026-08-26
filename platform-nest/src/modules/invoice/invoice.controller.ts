@@ -1,7 +1,8 @@
-// Billing / invoicing (BFF §4) — backs platform-ui lib/billing.ts. An invoice is generated for
+// Invoicing (BFF §4) — backs platform-ui lib/invoice.ts. An invoice is generated for
 // a client over a period at an hourly rate; line items are computed at creation from billable
 // time_entries on that client's projects and frozen onto the invoice. Finance = company.manage.
-// WSA-2: moved from src/core to the billing MODULE; gated by ModuleEnabledGuard("billing").
+// WSA-2: moved from src/core to this MODULE; gated by ModuleEnabledGuard("invoice").
+// The module was named `billing` until 2026-08-26; the routes below have always said `invoices`.
 import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { newId, withTenants } from "../../db";
@@ -35,8 +36,8 @@ const INVOICE_SELECT = `
   WHERE i.deleted_at IS NULL`;
 
 @Controller("api")
-@UseGuards(AuthGuard, ModuleEnabledGuard("billing"))
-export class BillingController {
+@UseGuards(AuthGuard, ModuleEnabledGuard("invoice"))
+export class InvoiceController {
   // CC-1: `?clientId=<uuid>` / `?clientId=internal`. This list previously took NO query parameters at
   // all, so there is no prior behaviour to preserve beyond "omitted returns everything".
   @Get(":tenantId/invoices")

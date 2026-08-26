@@ -36,7 +36,7 @@ import {
 } from "../core/keycloak-admin";
 
 const AGENCY_NAME = "Gaia Digital Agency";
-const MODULES = ["agency", "clients", "billing", "pm", "webdev"];
+const MODULES = ["agency", "clients", "invoice", "pm", "webdev"];
 
 /** The password these logins end up with. Overridable; the default is fixed and known ON PURPOSE —
  *  the whole point is that somebody can sign in and look at the portal. These are `.test` addresses

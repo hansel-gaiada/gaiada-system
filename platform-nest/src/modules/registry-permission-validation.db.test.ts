@@ -23,7 +23,7 @@ import type { ModuleContract } from "./contract";
 import { agencyModule } from "./agency";
 import { pmModule } from "./pm";
 import { itModule } from "./it";
-import { billingModule } from "./billing";
+import { invoiceModule } from "./invoice";
 import { clientsModule } from "./clients";
 import { knowledgeModule } from "./knowledge";
 import { automationConsoleModule } from "./automation-console";
@@ -36,7 +36,7 @@ import { webdevModule } from "./webdev";
 // The exact 12-module set main.ts's bootstrap() registers, in the same order — if a 13th module
 // is ever added there, this list (and this test) should grow with it.
 const ALL_PRODUCTION_MODULES: ModuleContract[] = [
-  agencyModule, pmModule, itModule, billingModule, clientsModule, knowledgeModule,
+  agencyModule, pmModule, itModule, invoiceModule, clientsModule, knowledgeModule,
   automationConsoleModule, hrModule, assistantModule, searchModule, reportsModule, webdevModule,
 ];
 

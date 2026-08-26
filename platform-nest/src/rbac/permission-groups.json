@@ -215,32 +215,32 @@
     {
       "key": "invoices_view",
       "name": "View Invoices",
-      "domain": "billing",
+      "domain": "invoice",
       "description": "See client invoices.",
       "permissions": [
-        "billing.invoice.read"
+        "invoice.read"
       ],
       "sensitive": false
     },
     {
       "key": "invoices_manage",
       "name": "Manage Invoices",
-      "domain": "billing",
+      "domain": "invoice",
       "description": "Create, edit, or delete client invoices, including changing an invoice's status.",
       "permissions": [
-        "billing.invoice.create",
-        "billing.invoice.update",
-        "billing.invoice.delete"
+        "invoice.create",
+        "invoice.update",
+        "invoice.delete"
       ],
       "sensitive": true
     },
     {
       "key": "invoices_approve",
       "name": "Approve Invoices",
-      "domain": "billing",
+      "domain": "invoice",
       "description": "Approve an invoice for send/payment. Maker/checker: kept separate from Manage Invoices so an approver's authority can be granted without also granting them the ability to create/edit — and policy denies approving your own invoice regardless of this grant.",
       "permissions": [
-        "billing.invoice.approve"
+        "invoice.approve"
       ],
       "sensitive": true
     },

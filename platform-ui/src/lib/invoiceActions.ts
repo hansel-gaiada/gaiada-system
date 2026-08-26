@@ -5,9 +5,9 @@ import { getSessionUserId } from "./session-server";
 import { getMe, PlatformError } from "./platform";
 import { getActiveTenant } from "./tenant";
 import { can, isElevated } from "./rbac";
-import { createInvoice, setInvoiceStatus, type InvoiceStatus } from "./billing";
+import { createInvoice, setInvoiceStatus, type InvoiceStatus } from "./invoice";
 
-export interface BillingState { error?: string }
+export interface InvoiceFormState { error?: string }
 
 async function ctx() {
   const userId = await getSessionUserId();
@@ -15,11 +15,11 @@ async function ctx() {
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return { error: "Select a company first." } as const;
-  if (!can(me, "company.manage", tenant) && !isElevated(me)) return { error: "Billing is limited to finance administrators." } as const;
+  if (!can(me, "company.manage", tenant) && !isElevated(me)) return { error: "Invoicing is limited to finance administrators." } as const;
   return { userId, tenant } as const;
 }
 
-export async function createInvoiceAction(_prev: BillingState | null, formData: FormData): Promise<BillingState> {
+export async function createInvoiceAction(_prev: InvoiceFormState | null, formData: FormData): Promise<InvoiceFormState> {
   const c = await ctx();
   if ("error" in c) return { error: c.error };
   const clientId = String(formData.get("clientId") ?? "");
@@ -40,16 +40,16 @@ export async function createInvoiceAction(_prev: BillingState | null, formData: 
     }
     throw e;
   }
-  revalidatePath("/billing");
-  redirect(`/billing/${id}`);
+  revalidatePath("/invoices");
+  redirect(`/invoices/${id}`);
 }
 
 async function setStatus(invoiceId: string, status: InvoiceStatus) {
   const c = await ctx();
   if ("error" in c) return;
   try { await setInvoiceStatus(c.userId, c.tenant, invoiceId, status); } catch (e) { if (!(e instanceof PlatformError)) throw e; }
-  revalidatePath(`/billing/${invoiceId}`);
-  revalidatePath("/billing");
+  revalidatePath(`/invoices/${invoiceId}`);
+  revalidatePath("/invoices");
 }
 export async function markInvoiceSent(invoiceId: string): Promise<void> { await setStatus(invoiceId, "sent"); }
 export async function markInvoicePaid(invoiceId: string): Promise<void> { await setStatus(invoiceId, "paid"); }

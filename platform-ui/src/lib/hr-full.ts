@@ -166,7 +166,7 @@ export interface PayGrade {
   id: string; code: string; name: string;
   track: "individual" | "management" | "executive" | "support"; level: number;
   minAmount: string; midAmount: string | null; maxAmount: string;
-  currency: string; payPeriod: string; isActive: boolean;
+  currency: string; rateBasis: string; isActive: boolean;
 }
 export const listPayGrades = (u: string, t: string) =>
   soft(() => platformFetch<PayGrade[]>(`${base(t)}/pay-grades`, u), []);
@@ -213,7 +213,7 @@ export interface ApplicationDetail extends Omit<Application, "daysInStage"> {
   events: { eventType: string; fromStageKey: string | null; toStageKey: string | null; body: string | null; occurredAt: string; createdBy: string | null }[];
   interviews: { id: string; kind: string; scheduledStart: string; scheduledEnd: string; timezone: string; location: string | null; meetingUrl: string | null; status: string; outcome: string | null; panelists: { userId: string; role: string; response: string }[] }[];
   scorecards: { id: string; interviewId: string | null; reviewerUserId: string; scores: unknown[]; overall: string | null; recommendation: string | null; notes: string | null; submittedAt: string | null }[];
-  offer: { id: string; baseAmount: string; currency: string; payPeriod: string; employmentType: string; startOn: string | null; expiresOn: string | null; status: string; employeeId: string | null } | null;
+  offer: { id: string; baseAmount: string; currency: string; rateBasis: string; employmentType: string; startOn: string | null; expiresOn: string | null; status: string; employeeId: string | null } | null;
 }
 export interface PipelineStage {
   id: string; key: string; label: string; sortOrder: number;
@@ -242,7 +242,7 @@ export const getFunnel = (u: string, t: string, requisitionId?: string) =>
 export interface Compensation {
   id: string; employeeId: string; employeeName: string; subjectUserId: string | null;
   gradeId: string | null; gradeCode: string | null; baseAmount: string; currency: string;
-  payPeriod: string; fte: string; effectiveFrom: string; effectiveTo: string | null;
+  rateBasis: string; payFrequency: string; fte: string; effectiveFrom: string; effectiveTo: string | null;
   changeReason: string | null; approvedAt: string | null; note: string | null;
 }
 export interface AllowanceType {
@@ -419,4 +419,23 @@ export function formatMoney(amount: string | number | null | undefined, currency
 /** A percentage that may legitimately be "not applicable" rather than zero. */
 export function formatRate(pct: number | null | undefined): string {
   return pct === null || pct === undefined ? "—" : `${pct.toFixed(1)}%`;
+}
+
+/**
+ * Monthly-equivalent of a rate quoted in some other unit.
+ *
+ * Mirrors platform-nest's `annualisationFactor()` (src/modules/hr/payroll-calc.ts) and the SQL
+ * `hr_annualisation_factor()`. Returns null for piece_rate and for anything unrecognised — the
+ * caller must EXCLUDE and say so, never substitute a default. This is headline payroll cost; a
+ * fabricated multiplier here produces a confident wrong number on a page finance reads.
+ *
+ * The 2080/260 assumptions are full-time-equivalent defaults. A contract with different hours
+ * scales through `fte`, not by meaning something else by "hourly".
+ */
+export function monthlyEquivalent(baseAmount: number, rateBasis: string): number | null {
+  const perYear: Record<string, number> = {
+    hourly: 2080, daily: 260, weekly: 52, monthly: 12, annual: 1,
+  };
+  const factor = perYear[rateBasis];
+  return factor === undefined ? null : (baseAmount * factor) / 12;
 }

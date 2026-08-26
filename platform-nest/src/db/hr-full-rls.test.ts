@@ -161,7 +161,7 @@ describe.skipIf(!TEST_URL)("HR-FULL · the third wall, in the database", () => {
 
       // A DIFFERENT module's scope must not open the hr wall. Here the array IS non-null, so this
       // one really is a hard false rather than a NULL.
-      await c.query(`SELECT set_config('app.scopes', 'pm,billing', true)`);
+      await c.query(`SELECT set_config('app.scopes', 'pm,invoice', true)`);
       expect((await c.query<{ ok: boolean | null }>(`SELECT app_module_allowed('hr') AS ok`)).rows[0].ok).toBe(false);
 
       await c.query(`SELECT set_config('app.scopes', 'hr', true)`);

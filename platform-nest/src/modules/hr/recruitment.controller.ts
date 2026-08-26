@@ -562,7 +562,7 @@ export class RecruitmentController {
           [id],
         );
         const offer = await c.query(
-          `SELECT id, base_amount AS "baseAmount", currency, pay_period AS "payPeriod", employment_type AS "employmentType",
+          `SELECT id, base_amount AS "baseAmount", currency, rate_basis AS "rateBasis", employment_type AS "employmentType",
                   start_on AS "startOn", expires_on AS "expiresOn", status, employee_id AS "employeeId"
            FROM hr_offers WHERE application_id = $1 ORDER BY created_at DESC LIMIT 1`,
           [id],
@@ -749,10 +749,10 @@ export class RecruitmentController {
         }
         await c.query(
           `INSERT INTO hr_offers
-             (id, tenant_id, application_id, base_amount, currency, pay_period, allowances, employment_type,
+             (id, tenant_id, application_id, base_amount, currency, rate_basis, allowances, employment_type,
               probation_months, contract_months, start_on, expires_on, created_by, origin_site)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-          [id, tenantId, applicationId, baseAmount, body?.currency ?? "IDR", body?.payPeriod ?? "monthly",
+          [id, tenantId, applicationId, baseAmount, body?.currency ?? "IDR", body?.rateBasis ?? "monthly",
            JSON.stringify(body?.allowances ?? []), employmentType, body?.probationMonths ?? null,
            body?.contractMonths ?? null, body?.startOn ?? null, body?.expiresOn ?? null, req.principal.userId, config.originSite],
         );
@@ -831,9 +831,9 @@ export class RecruitmentController {
       async (c) => {
         const offer = await c.query<{
           status: string; application_id: string; base_amount: string; currency: string;
-          pay_period: string; employment_type: string; start_on: string | null; probation_months: number | null;
+          rate_basis: string; employment_type: string; start_on: string | null; probation_months: number | null;
         }>(
-          `SELECT status, application_id, base_amount, currency, pay_period, employment_type, start_on, probation_months
+          `SELECT status, application_id, base_amount, currency, rate_basis, employment_type, start_on, probation_months
            FROM hr_offers WHERE id = $1`,
           [id],
         );
@@ -879,10 +879,16 @@ export class RecruitmentController {
         // The opening compensation row. Effective from the hire date, open-ended — the
         // ex_hr_compensation_no_overlap constraint makes a second open row impossible, so a later
         // raise MUST close this one, which is exactly the discipline wave C is built on.
+        //
+        // `pay_frequency` is deliberately NOT set here and takes the column default (monthly). An
+        // offer agrees a RATE, not a payslip cadence — the cadence is Finance's operational
+        // decision and is set on the compensation record afterwards. Writing a frequency from the
+        // offer would put a Finance field under the recruiter's control at exactly the moment
+        // nobody is looking at it.
         await c.query(
-          `INSERT INTO hr_compensation (id, tenant_id, employee_id, base_amount, currency, pay_period, effective_from, change_reason, job_event_id, created_by, origin_site)
+          `INSERT INTO hr_compensation (id, tenant_id, employee_id, base_amount, currency, rate_basis, effective_from, change_reason, job_event_id, created_by, origin_site)
            VALUES ($1,$2,$3,$4,$5,$6,$7,'hire',$8,$9,$10)`,
-          [newId(), tenantId, employeeId, found.base_amount, found.currency, found.pay_period, hireDate, jobEventId, req.principal.userId, config.originSite],
+          [newId(), tenantId, employeeId, found.base_amount, found.currency, found.rate_basis, hireDate, jobEventId, req.principal.userId, config.originSite],
         );
 
         await c.query(

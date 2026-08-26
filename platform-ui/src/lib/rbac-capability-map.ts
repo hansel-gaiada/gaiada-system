@@ -102,12 +102,12 @@ export const CAPABILITY_MAP = {
   //     (managing company-owned connections / mapping another person's seat — the ONE tier
   //     `manager` genuinely holds, per `adminMapSeatAction`'s own comment)
   //   resource_company.yaml action "update" (company edit incl. enabled modules) -> company_admin
-  //   resource_invoice.yaml (billing create/read/update/delete)                  -> company_admin
+  //   resource_invoice.yaml (invoice create/read/update/delete)                  -> company_admin
   //   resource_automation_approval.yaml action "retry" (the AUTOMATION-CONSOLE retry affordance —
   //     a different UI surface from the approvals-inbox retry gated by `approvals.retry` below,
   //     per rbac.ts's census table §1.3 naming "automation console" as one of this capability's
   //     real consuming surfaces) -> company_admin
-  // `manager` holds ONLY the first tier, but the UI gates all FOUR surfaces (Billing, company edit,
+  // `manager` holds ONLY the first tier, but the UI gates all FOUR surfaces (Invoices, company edit,
   // automation console, seat mapping) behind this one capability name. Deriving `ROLE_CAPS` from
   // the catalog under strict ALL would strip `company.manage` from `manager` entirely — reverting
   // the Gap-3 judgment the owner already made on purpose (design doc §3.1's own worked
@@ -124,7 +124,7 @@ export const CAPABILITY_MAP = {
       "core.integration_connection.create", "core.integration_connection.read",
       "core.integration_connection.update", "core.integration_connection.delete",
       "core.company.update",
-      "billing.invoice.create", "billing.invoice.read", "billing.invoice.update", "billing.invoice.delete",
+      "invoice.create", "invoice.read", "invoice.update", "invoice.delete",
       "core.automation_approval.retry",
     ],
     semantics: "any",

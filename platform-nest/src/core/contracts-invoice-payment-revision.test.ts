@@ -1,9 +1,9 @@
 // IAM-GAP-02 — invoice revision tracking's THIRD write path: `contracts.controller.ts::decidePayment()`
-// is the ONLY place `invoices.status` moves to 'paid' outside the billing module entirely (a
+// is the ONLY place `invoices.status` moves to 'paid' outside the invoice module entirely (a
 // staff-confirmed client payment, once the confirmed ledger covers the total). No test file existed
 // for this endpoint before this ticket (`decidePayment` was previously untested end-to-end); this
 // file drives the REAL `POST /api/:t/invoice-payments/:paymentId/decide` route and asserts the same
-// forensic contract billing.test.ts pins for the other two write paths: a revision row per mutation,
+// forensic contract invoice.test.ts pins for the other two write paths: a revision row per mutation,
 // actor-attributed, before-state reconstructible — plus the pre-existing recorder≠confirmer rule and
 // the "don't resurrect a void invoice" guard, both unaffected by this pass.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

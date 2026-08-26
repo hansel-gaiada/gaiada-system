@@ -37,14 +37,14 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   // 2026-08-10 owner directive: Business collapses Projects+Tasks into ONE entry
   // (PM_TERMS.projectManagement) — those two are the PM-domain items, now tabs on
   // `/project-management` alongside Overview/Ball/Timeline/Charts/Productivity (see that page's
-  // own header). Clients/Deliverables/Timesheets/Billing/Agency/Meetings/Delivery Pipeline/Rollups
+  // own header). Clients/Deliverables/Timesheets/Invoices/Agency/Meetings/Delivery Pipeline/Rollups
   // stay siblings — folding those in too would make one page mean everything, defeating the point.
   const business: NavItem[] = [
     { label: PM_TERMS.projectManagement, href: "/project-management", icon: "projects" },
     { label: "Clients", href: "/clients", icon: "finance" },
     { label: "Deliverables", href: "/deliverables", icon: "box" },
     { label: "Timesheets", href: "/timesheets", icon: "clock" },
-    ...(can(me, "company.manage", tenantId) ? [{ label: "Billing", href: "/billing", icon: "wallet" } as NavItem] : []),
+    ...(can(me, "company.manage", tenantId) ? [{ label: "Invoices", href: "/invoices", icon: "wallet" } as NavItem] : []),
     { label: "Agency", href: "/agency", icon: "sales" },
     { label: "Meetings", href: "/meetings", icon: "clock" },
     { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },

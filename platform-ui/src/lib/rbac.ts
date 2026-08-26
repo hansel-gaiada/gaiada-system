@@ -392,7 +392,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // connections/actions.ts::adminMapSeatAction` already documents this as "Only managers/admins
     // can map another person's seat." `manager` was missing `company.manage` here, so that button
     // was silently hidden from every manager even though the backend would have allowed it (the
-    // dangerous under-grant direction). Widening it also surfaces the Billing/Company-edit/
+    // dangerous under-grant direction). Widening it also surfaces the Invoices/Company-edit/
     // automation-retry affordances to managers — those backing resources (resource_invoice.yaml,
     // resource_company.yaml, resource_automation_approval.yaml's `retry`) are company_admin-only,
     // so a manager will now see those buttons and get a clean 403 on the ones Cerbos still
@@ -456,9 +456,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // REMOVED. Verified directly against the backing policies: `it_admin`'s entire Cerbos reach is
   // `resource_device.yaml`'s three `it.device.*` actions (create/update/delete) — ZERO overlap with
   // `company.manage`'s ANY-of-ten set (`core.integration_connection.*`, `core.company.update`,
-  // `billing.invoice.*`, `core.automation_approval.retry`; see that capability's own comment on
+  // `invoice.*`, `core.automation_approval.retry`; see that capability's own comment on
   // `CAPABILITY_MAP` above). IT administers devices and accounts, not company settings / module
-  // enablement / billing / automation retry. Same class of over-claim as DR-1 (a dead button, 1
+  // enablement / invoicing / automation retry. Same class of over-claim as DR-1 (a dead button, 1
   // live holder per IAM-02a-0's live query) — independently recommended by the IAM-05b design
   // ruling (§7 item 2) as a "known first-run red," and confirmed here rather than assumed. Cerbos
   // is unchanged; this is a mirror-only correction. `it_admin` keeps `it.manage`.

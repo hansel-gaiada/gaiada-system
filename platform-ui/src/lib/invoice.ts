@@ -1,5 +1,5 @@
 import "server-only";
-// Billing / invoicing — turns billable time into invoices. Backend TODO (see
+// Invoicing — turns billable time into invoices. Backend TODO (see
 // docs/FRONTEND-BFF-CONTRACT.md); degrades gracefully like the other lib layers.
 // Contract:
 //   GET  /api/:t/invoices                 -> Invoice[]

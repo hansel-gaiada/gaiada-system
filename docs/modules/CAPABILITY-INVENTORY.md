@@ -42,11 +42,11 @@ unfalsifiable after.
 | agency | `agency` | 7 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 2 |
-| billing | `invoices` | 2 |
 | clients | `clients` | 4 |
 | core | `positions` · `role-grants` | 3 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
+| invoice | `invoices` | 2 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 2 |
@@ -64,7 +64,6 @@ unfalsifiable after.
 | agency | `agency.pendingApprovals` | `GET` | `/api/:tenantId/modules/agency/approvals/pending` | read | — |
 | assistant | `orchestrator.ask` | `POST` | `/api/:tenantId/assistant/ask` | write | `low` |
 | automation-console | `automation.listWorkflows` | `GET` | `/api/admin/automation/workflows` | read | — |
-| billing | `billing.listInvoices` | `GET` | `/api/:tenantId/invoices` | read | — |
 | clients | `clients.listClients` | `GET` | `/api/:tenantId/clients` | read | — |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
@@ -99,6 +98,7 @@ unfalsifiable after.
 | hr | `hr.requestLoan` | `POST` | `/api/:tenantId/modules/hr/loans` | write | `high` |
 | hr | `hr.terminateEmployee` | `POST` | `/api/:tenantId/hr/employees/:employeeId/terminate` | write | `high` |
 | hr | `hr.transferEmployee` | `POST` | `/api/:tenantId/hr/employees/:employeeId/transfer` | write | `medium` |
+| invoice | `invoice.listInvoices` | `GET` | `/api/:tenantId/invoices` | read | — |
 | it | `it.listDevices` | `GET` | `/api/:tenantId/it/devices` | read | — |
 | knowledge | `knowledge.listSources` | `GET` | `/api/:tenantId/knowledge/sources` | read | — |
 | monitoring | `monitoring.listMonitors` | `GET` | `/api/:tenantId/monitoring/monitors` | read | — |

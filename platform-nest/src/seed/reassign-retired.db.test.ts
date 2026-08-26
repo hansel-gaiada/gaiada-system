@@ -28,7 +28,7 @@ let taskId: string;
 describe.skipIf(!TEST_URL)("seed:reassign-retired", () => {
   beforeAll(async () => {
     await initTestDb();
-    tenantId = await createCompany(AGENCY, ["agency", "pm", "hr", "reports", "clients", "billing", "webdev", "social", "search"]);
+    tenantId = await createCompany(AGENCY, ["agency", "pm", "hr", "reports", "clients", "invoice", "webdev", "social", "search"]);
     // The real staff the mapping targets must exist or the script refuses outright.
     for (const s of STAFF) await createUser(s.email, s.name, s.title);
     // `gede@gaia.test` -> `reva@gaiada.com` is one of the mappings.

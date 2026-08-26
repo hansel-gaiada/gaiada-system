@@ -581,3 +581,61 @@ export const DEFAULT_PARAMS_UNRATIFIED: StatutoryParams = {
   occupationalCost: { rate: 0.05, monthlyCap: 500_000 },
   thrMinServiceMonths: 1,
 };
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// RATE BASIS → PERIOD AMOUNT
+//
+// `hr_compensation.base_amount` is quoted in a unit (`rate_basis`) that is NOT necessarily the pay
+// period. Before this existed, the payslip generator selected the basis and then ignored it,
+// handing `base_amount` to computePayslip() as though it were always monthly — so an employee on an
+// `annual` row would have been paid their entire annual salary EVERY MONTH. It never fired only
+// because no compensation row has ever existed on the live estate.
+//
+// These two mirror the SQL functions `hr_annualisation_factor()` and `hr_periods_per_year()` in
+// migration 202608260930. They are duplicated deliberately — payroll must not need a database round
+// trip to convert a rate — and `payroll-rate-basis.test.ts` asserts the two copies agree, so the
+// duplication cannot drift silently.
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Multiplier from a quoted rate to an annual figure. NULL-equivalent (undefined) for piece_rate,
+ *  which cannot be annualised from a rate alone: the annual figure depends on output, which is not
+ *  in the compensation row. A guess there would be a fabricated salary. */
+export function annualisationFactor(rateBasis: string): number | undefined {
+  switch (rateBasis) {
+    case "hourly": return 2080;   // 40h x 52w, full-time equivalent
+    case "daily": return 260;     // 5d x 52w
+    case "weekly": return 52;
+    case "monthly": return 12;
+    case "annual": return 1;
+    default: return undefined;
+  }
+}
+
+/** Payslips produced per year. Semi-monthly (24, fixed dates) and biweekly (26, every 14 days) are
+ *  genuinely different and are the pair most often conflated. */
+export function periodsPerYear(payFrequency: string): number | undefined {
+  switch (payFrequency) {
+    case "weekly": return 52;
+    case "biweekly": return 26;
+    case "semi_monthly": return 24;
+    case "monthly": return 12;
+    default: return undefined;
+  }
+}
+
+/**
+ * The gross base owed for ONE pay period, from a rate quoted in some other unit.
+ *
+ * Returns `undefined` rather than a number when the conversion is not defined — an unknown basis or
+ * frequency, or piece_rate. The caller must SKIP AND REPORT that employee, never substitute a
+ * default: a defaulted salary is indistinguishable from a computed one on the payslip, and this is
+ * the one file where a plausible wrong number is worse than a visible gap.
+ */
+export function periodBaseAmount(
+  baseAmount: number, rateBasis: string, payFrequency: string,
+): number | undefined {
+  const factor = annualisationFactor(rateBasis);
+  const periods = periodsPerYear(payFrequency);
+  if (factor === undefined || periods === undefined) return undefined;
+  return (baseAmount * factor) / periods;
+}

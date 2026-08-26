@@ -1,7 +1,7 @@
 // Clients (CRM) module contract (WSA-2). The `clients` RESOURCE routes live in ClientsController
 // (mounted at /api/:tenantId/clients*, gated by ModuleEnabledGuard("clients")).
 // NOTE: `deliverables` and `time_entries` deliberately REMAIN core (ClientWorkController) — they
-// are the shared work substrate every vertical (PM, agency, billing) reads/writes, so they are
+// are the shared work substrate every vertical (PM, agency, invoices) reads/writes, so they are
 // NOT gated behind this module. Only the client-relationship resource is module-gated.
 import type { ModuleContract } from "../contract";
 

@@ -2290,16 +2290,16 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
 
   // Module enablement: DEMO_MODE exists to browse every surface with no backend, so report the full
   // compiled-in set — a demo company whose fixture has an empty enabled_modules would otherwise
-  // dark HR/Clients/Billing/Reports and make the tour look broken. Real gating is a live-backend
+  // dark HR/Clients/Invoices/Reports and make the tour look broken. Real gating is a live-backend
   // concern (see lib/modules.ts).
   if (p.match(/^\/api\/[^/]+\/modules-enabled$/)) {
     return ok({
-      enabled: ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"],
+      enabled: ["agency", "pm", "it", "invoice", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"],
     });
   }
   if (p === "/api/module-catalog") {
     return ok(
-      ["agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"].map(
+      ["agency", "pm", "it", "invoice", "clients", "knowledge", "automation-console", "hr", "search", "reports", "lms"].map(
         (key) => ({ key, label: key, paths: [] }),
       ),
     );
@@ -2402,7 +2402,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     return ok(FILES.filter((f) => (!et || f.entity_type === et) && (!eid || f.entity_id === eid)));
   }
 
-  // Invoices (billing) — POST computes billable hours in the period.
+  // Invoices — POST computes billable hours in the period.
   const invOne = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)$/);
   if (invOne) {
     const inv = INVOICES.find((x) => x.id === invOne[1]);
@@ -2450,7 +2450,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     // REACHABLE state in demo mode. A demo that only ever shows an empty ball list cannot be reviewed.
     const needsUs = cid === "cl-1"
       ? [
-          { kind: "payment", id: "dpay-1", label: "Confirm a client-recorded payment", context: "USD 2,400", href: "/billing/inv-1", since: daysAgoIso(11) },
+          { kind: "payment", id: "dpay-1", label: "Confirm a client-recorded payment", context: "USD 2,400", href: "/invoices/inv-1", since: daysAgoIso(11) },
           { kind: "request", id: "dcr-1", label: "Triage a new change request", context: "Update the pricing page copy", since: daysAgoIso(2), href: `/clients/${cid}/requests` },
         ]
       : [];

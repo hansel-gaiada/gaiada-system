@@ -39,7 +39,7 @@ describe("can() — capability + scope", () => {
   // missing the capability entirely, so `departments/[deptId]/connections`'s admin seat-mapping
   // button was silently hidden from every manager even though Cerbos would have allowed the write
   // (the dangerous under-grant direction this whole ticket is about). Widening it is a deliberate,
-  // reported judgement call: `company.manage` also gates billing/company-edit/automation-retry
+  // reported judgement call: `company.manage` also gates invoicing/company-edit/automation-retry
   // surfaces where Cerbos stays company_admin-only (resource_invoice.yaml, resource_company.yaml,
   // resource_automation_approval.yaml's `retry`) — a manager will now see those too and get a
   // clean 403, which is the SAFE direction (visible refusal, not a silent one).
@@ -488,7 +488,7 @@ describe("pm.contribute mirrors Cerbos pm_task:update", () => {
 // IAM-DR67 / DR-6 (drift register finding #7, owner-decided 2026-08-10) — `it_admin` no longer
 // holds `company.manage`. Verified against resource_device.yaml (it_admin's entire Cerbos reach:
 // it.device.create/update/delete) vs. company.manage's ten-permission ANY set (integration
-// connections, company update, billing, automation retry) — zero overlap. Cerbos is unchanged;
+// connections, company update, invoicing, automation retry) — zero overlap. Cerbos is unchanged;
 // this pins the mirror-only correction so a future edit cannot silently reintroduce the over-claim.
 describe("IAM-DR67 / DR-6 — it_admin no longer holds company.manage", () => {
   const itAdminA = me([{ role: "it_admin", scopeType: "company", scopeId: "co-a" }]);

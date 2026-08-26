@@ -13,7 +13,7 @@
 // — it is never the source of truth and is never used to reconstruct state.
 //
 // Shared by every write path that mutates `invoices` — see each call site for which one:
-//   - src/modules/billing/billing.controller.ts: create() / setStatus() / approve()
+//   - src/modules/invoice/invoice.controller.ts: create() / setStatus() / approve()
 //   - src/core/contracts.controller.ts: decidePayment() (the ONLY other place invoices.status
 //     moves — 'sent' -> 'paid' once the confirmed payment ledger covers the total)
 // `src/seed/agency.ts` and `src/seed/portal-workspace.ts` insert invoices directly with no

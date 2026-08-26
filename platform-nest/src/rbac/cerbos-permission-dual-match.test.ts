@@ -257,7 +257,7 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B12: dual-match isolation across batches 
 
   it("invoice.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .delete", async () => {
     const resource: Resource = { kind: "invoice", id: "x1", tenantId: T1 };
-    const p = principal([], [{ key: "billing.invoice.read", scopeType: "company", scopeId: T1 }]);
+    const p = principal([], [{ key: "invoice.read", scopeType: "company", scopeId: T1 }]);
     expect(await allow(p, resource, "read")).toBe(true);
     expect(await allow(p, { ...resource, tenantId: T2 }, "read")).toBe(false);
     expect(await allow(p, resource, "delete")).toBe(false);

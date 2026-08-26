@@ -311,7 +311,7 @@ describe.skipIf(!RUN)("HR-FULL — the department, driven end-to-end over HTTP",
     expect(tooHigh.json().error).toMatch(/exceeds the requisition's approved maximum/i);
 
     const ok = await call("POST", `${base()}/applications/${applicationId}/offers`, hrMgr, {
-      baseAmount: 12_000_000, payPeriod: "monthly", employmentType: "permanent", startOn: "2026-10-01",
+      baseAmount: 12_000_000, rateBasis: "monthly", employmentType: "permanent", startOn: "2026-10-01",
     });
     expect(ok.statusCode).toBe(201);
     offerId = ok.json().id;

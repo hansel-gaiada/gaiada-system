@@ -1,4 +1,4 @@
-// Billing/invoices (§4) — generate from billable time, status transitions, RBAC.
+// Invoices (§4) — generate from billable time, status transitions, RBAC.
 // Against live Postgres + RLS + Cerbos.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
@@ -11,7 +11,7 @@ import { createCompany, createUser, addMembership, createRole, grantRole, create
 const svc = { authorization: "Bearer svc-token" };
 const asUser = (id: string) => ({ ...svc, "x-user-id": id });
 
-describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
+describe.skipIf(!TEST_URL)("invoices (§4)", () => {
   let app: NestFastifyApplication;
   let tenant: string;
   let admin: string;
@@ -26,7 +26,7 @@ describe.skipIf(!TEST_URL)("billing / invoices (§4)", () => {
   beforeAll(async () => {
     await initTestDb();
     config.serviceToken = "svc-token";
-    tenant = await createCompany("Agency A", ["agency", "billing", "clients"]);
+    tenant = await createCompany("Agency A", ["agency", "invoice", "clients"]);
     admin = await createUser("admin@a.test");
     admin2 = await createUser("admin2@a.test");
     manager = await createUser("mgr@a.test");

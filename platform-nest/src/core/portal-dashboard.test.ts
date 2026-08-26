@@ -77,7 +77,7 @@ describe.skipIf(!TEST_URL)("client portal dashboard (CP-2..CP-5)", () => {
     config.serviceToken = "svc-token";
     resetModules();
     resetCoreRollupProviders();
-    // `billing` is NOT enabled on this company on purpose: the portal's invoice reads must work anyway
+    // `invoice` is NOT enabled on this company on purpose: the portal's invoice reads must work anyway
     // (see PortalCommerceController.listInvoices' header). Invoice rows are inserted directly below
     // rather than through the module-gated staff endpoint, which is also what makes that possible.
     co = await createCompany("Gaiada Creative");

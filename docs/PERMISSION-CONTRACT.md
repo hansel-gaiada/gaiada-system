@@ -65,7 +65,15 @@ decisions, not data, so generating it would silently overwrite rulings).
 **One deliberate exception:** the client portal is its own domain (`portal.*`, not `core.portal.*`) —
 owner decision DR-4, because the portal is a separate trust surface.
 
-Domains: `agency` `assistant` `billing` `core` `hr` `it` `knowledge` `pm` `portal` `reports`
+> **Renamed 2026-08-26:** the `billing` domain is now `invoice`, and its five keys dropped the
+> redundant middle segment (`billing.invoice.read` -> `invoice.read`), following the `portal.*`
+> precedent for a domain whose name equals its Cerbos kind. The kind was ALWAYS `invoice`; only the
+> domain and key prefix moved. Grants were preserved — migration `202608261030` UPDATEs
+> `permissions.key` in place rather than re-inserting, because `role_permissions` cascades on
+> delete. Ticket narrative further down still names the old keys where it is describing what
+> happened at the time; those are history, not the current contract.
+
+Domains: `agency` `assistant` `core` `hr` `invoice` `it` `knowledge` `pm` `portal` `reports`
 `search` `webdev`.
 
 ## 2. Current numbers (re-derived from the artifacts, 2026-08-13, post-P2-02/P2-03)
@@ -337,7 +345,7 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   `has(creatorId) && creatorId != "" && creatorId == principal.id`. Cerbos combines a kind's
   matching rules with deny-overrides semantics, so this DENY beats the pre-existing
   `actions: ["*"]` wildcard for BOTH `platform_admin` and `group_executive` — live-probed and
-  `app.inject`-adversarially-proven for both roles (`src/core/billing.test.ts`'s
+  `app.inject`-adversarially-proven for both roles (`src/core/invoice.test.ts`'s
   `"invoice approve — the self-approval hole, elevated roles (IAM-GAP-02)"` block): each can create
   an invoice and is then 403'd approving that SAME invoice, while still 200ing on a DIFFERENT
   invoice (the DENY does not over-fire into a blanket lockout). No catalog/bundle change — a
@@ -366,9 +374,9 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   answers that question from ANY single revision row alone. `changed_fields` is a derived,
   human-skimmable convenience computed from the two snapshots — never authoritative. Wired into all
   THREE real write paths that ever mutate `invoices` (enumerated and each independently
-  `app.inject`-tested): `billing.controller.ts`'s `create()`/`setStatus()`/`approve()`, and
+  `app.inject`-tested): `invoice.controller.ts`'s `create()`/`setStatus()`/`approve()`, and
   `contracts.controller.ts`'s `decidePayment()` — the ONE place `invoices.status` moves to `'paid'`
-  outside the billing module entirely, previously untested end-to-end at all
+  outside the invoice module entirely, previously untested end-to-end at all
   (`src/core/contracts-invoice-payment-revision.test.ts`, new). Two dev/test-only seed scripts
   (`src/seed/agency.ts`, `src/seed/portal-workspace.ts`) insert invoices directly with no
   authenticated principal and are deliberately NOT wired — fabricating an actor for a seed row would
@@ -385,7 +393,7 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   connectivity to inspect the actual stuck row, so migration `0108` ships a GENERAL recovery rule
   rather than a one-row hand-fix: for every invoice with `created_by IS NULL`, it checks the
   `activities` log (`verb='created', target_entity_type='invoice'`) — which
-  `billing.controller.ts::create()` has written to since before `created_by` existed, recording the
+  `invoice.controller.ts::create()` has written to since before `created_by` existed, recording the
   SAME fact that column was always meant to capture, just in a different table — and backfills
   `created_by` ONLY when exactly one DISTINCT actor claims that invoice's creation (an ambiguous or
   absent signal leaves it NULL, same no-fabrication policy `created_by` itself follows). The
@@ -411,15 +419,15 @@ catch it — treat that one, not the parity suite, as the authority for "no role
   fail-CLOSED condition — `has(creatorId) && creatorId != "" && creatorId != principal.id` — so an
   invoice whose creator is unknown (every pre-migration row; no backfill was possible) is
   permanently unapprovable by anyone but the pre-existing `platform_admin`/`group_executive`
-  wildcard. New catalog key `billing.invoice.approve` (sensitive). The BFF endpoint
-  `POST /api/:tenantId/invoices/:invoiceId/approve` (`billing.controller.ts`) is the only door into
+  wildcard. New catalog key `invoice.approve` (sensitive). The BFF endpoint
+  `POST /api/:tenantId/invoices/:invoiceId/approve` (`invoice.controller.ts`) is the only door into
   `'approved'`; the pre-existing `PATCH .../invoices/:id` cannot set it directly, and `'sent'`/`'paid'`
   now require the invoice to already be `'approved'` (`'draft'`/`'void'` remain reachable from any
   state). No `perm_invoice_approve` permission-arm mirror — the condition is an attribute-instance
   check the flat catalog cannot re-express (same doctrine as `resource_hr_case.yaml`'s excluded
   self-only mirrors). DEV-VERIFIED: live Cerbos probes (creator denied self-approval, a different
   company_admin/manager allowed, unknown-creator legacy row denied, cross-tenant denied, low-assurance
-  denied) and `app.inject` end-to-end tests in `src/core/billing.test.ts`.
+  denied) and `app.inject` end-to-end tests in `src/core/invoice.test.ts`.
 - ~~HR leave decisions ride the generic `core.automation_approval.decide`~~ — **CLOSED, IAM-GAP-01
   (2026-08-13, PROTOTYPED).** New catalog key `hr.leave.decide`, mapped onto a NEW literal Cerbos
   action `decide_leave` on the existing `automation_approval` kind (not a new kind — the unified
@@ -687,7 +695,7 @@ subtraction applied in `role-grants.controller.ts`.
 `docs/superpowers/plans/2026-08-18-sensitivity-review.md`, grouped by domain and marking every key
 that sits in the baseline bundle. Ruling: **a READ is not sensitive authority**, with `hr.record.read`
 the sole exception (bulk personal data). Seven keys were un-flagged — `core.contract.read`,
-`core.identity_link.read`, `core.rollup.read`, `core.role_grant.read`, `billing.invoice.read`,
+`core.identity_link.read`, `core.rollup.read`, `core.role_grant.read`, `invoice.read`,
 `it.account.read`, `hr.case.read` — taking the catalog from **107 to 100** flagged (`0112`). Two
 permission groups (`invoices_view`, `rollups`) lost their derived `sensitive` flag as a mechanical
 consequence, and both `_meta` counts were re-derived rather than hand-edited.

@@ -37,7 +37,7 @@
 //   `clients` needs a first-class `is_internal` boolean. This script uses `clients.custom_fields` as
 //   a NON-SCHEMA-CHANGING stand-in (`{nexus_domain, source: 'nexus-import'}`) so a THROWAWAY test run
 //   can proceed without an unreviewed core-table migration; see the module README / harvest report
-//   for why an `is_internal` column is a bigger, cross-cutting (billing-touching) decision that
+//   for why an `is_internal` column is a bigger, cross-cutting (invoice-touching) decision that
 //   belongs with an architect/senior-db ruling, not a script default.
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";

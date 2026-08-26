@@ -520,7 +520,7 @@ export class HrPolicyController {
       [tenantId],
       (c) => c.query(
         `SELECT id, code, name, track, level, min_amount AS "minAmount", mid_amount AS "midAmount",
-                max_amount AS "maxAmount", currency, pay_period AS "payPeriod", is_active AS "isActive"
+                max_amount AS "maxAmount", currency, rate_basis AS "rateBasis", is_active AS "isActive"
          FROM hr_pay_grades WHERE deleted_at IS NULL ORDER BY track, level, code`,
       ),
       { modules: ["hr"] },
@@ -532,7 +532,7 @@ export class HrPolicyController {
   @HttpCode(201)
   async createPayGrade(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
-    @Body() body: { code?: string; name?: string; track?: string; level?: number; minAmount?: number; midAmount?: number; maxAmount?: number; currency?: string; payPeriod?: string },
+    @Body() body: { code?: string; name?: string; track?: string; level?: number; minAmount?: number; midAmount?: number; maxAmount?: number; currency?: string; rateBasis?: string },
   ) {
     if (!body?.code || !body?.name) throw new BadRequestException("code and name required");
     if (typeof body?.minAmount !== "number" || typeof body?.maxAmount !== "number") {
@@ -545,10 +545,10 @@ export class HrPolicyController {
     await withTenants(
       [tenantId],
       (c) => c.query(
-        `INSERT INTO hr_pay_grades (id, tenant_id, code, name, track, level, min_amount, mid_amount, max_amount, currency, pay_period)
+        `INSERT INTO hr_pay_grades (id, tenant_id, code, name, track, level, min_amount, mid_amount, max_amount, currency, rate_basis)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [id, tenantId, body.code, body.name, track, body?.level ?? 1, body.minAmount, body?.midAmount ?? null,
-         body.maxAmount, body?.currency ?? "IDR", body?.payPeriod ?? "monthly"],
+         body.maxAmount, body?.currency ?? "IDR", body?.rateBasis ?? "monthly"],
       ),
       { modules: ["hr"] },
     );

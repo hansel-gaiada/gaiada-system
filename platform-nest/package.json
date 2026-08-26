@@ -21,6 +21,7 @@
     "seed:hr-config": "node dist/seed/hr-config.js",
     "seed:finance-config": "node dist/seed/finance-config.js",
     "seed:finance-live-defaults": "node dist/seed/finance-live-defaults.js",
+    "seed:finance-demo": "node dist/seed/finance-demo.js",
     "seed:lms-general-track": "node dist/seed/lms-general-track.js",
     "seed:lms-webdev-curriculum": "node dist/seed/lms-webdev-curriculum.js",
     "seed:lms-webdev-labs": "node dist/seed/lms-webdev-labs.js",

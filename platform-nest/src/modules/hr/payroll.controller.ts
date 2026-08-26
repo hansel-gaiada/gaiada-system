@@ -39,14 +39,19 @@ import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
 import type { Principal } from "../../rbac/principal";
 import {
-  computePayslip, computeThr, DEFAULT_PARAMS_UNRATIFIED, terCategoryFor,
+  computePayslip, computeThr, DEFAULT_PARAMS_UNRATIFIED, terCategoryFor, periodBaseAmount,
   type PayComponent, type StatutoryParams,
 } from "./payroll-calc";
 import { computeSeverance, DEFAULT_SEVERANCE_UNRATIFIED, type SeveranceParams } from "./severance";
 import { countWorkingDays, completedMonths, serviceYears } from "./working-days";
 import { loadCalendar } from "./hr-policy.controller";
 
-const PAY_PERIODS = new Set(["monthly", "annual", "hourly", "daily"]);
+// Two independent dimensions, not one list. RATE_BASES is the unit the amount is QUOTED in — HR's
+// fact about the contract. PAY_FREQUENCIES is how often a payslip is produced — Finance's
+// operational cadence. An annual salary paid monthly and an hourly rate paid weekly are both
+// ordinary, and neither can be expressed with a single field.
+const RATE_BASES = new Set(["hourly", "daily", "weekly", "monthly", "annual", "piece_rate"]);
+const PAY_FREQUENCIES = new Set(["weekly", "biweekly", "semi_monthly", "monthly"]);
 const RUN_KINDS = new Set(["regular", "thr", "bonus", "final", "correction"]);
 const CHANGE_REASONS = new Set([
   "hire", "annual_review", "promotion", "market_adjustment", "demotion", "correction", "contract_renewal", "other",
@@ -182,7 +187,8 @@ export class PayrollController {
       (client) => client.query(
         `SELECT c.id, c.employee_id AS "employeeId", e.display_name AS "employeeName",
                 c.subject_user_id AS "subjectUserId", c.grade_id AS "gradeId", g.code AS "gradeCode",
-                c.base_amount AS "baseAmount", c.currency, c.pay_period AS "payPeriod", c.fte,
+                c.base_amount AS "baseAmount", c.currency, c.rate_basis AS "rateBasis",
+                c.pay_frequency AS "payFrequency", c.fte,
                 c.effective_from AS "effectiveFrom", c.effective_to AS "effectiveTo",
                 c.change_reason AS "changeReason", c.approved_at AS "approvedAt", c.note
          FROM hr_compensation c
@@ -209,7 +215,8 @@ export class PayrollController {
   async setCompensation(
     @Req() req: FastifyRequest, @Param("tenantId") tenantId: string,
     @Body() body: {
-      employeeId?: string; baseAmount?: number; currency?: string; payPeriod?: string; fte?: number;
+      employeeId?: string; baseAmount?: number; currency?: string;
+      rateBasis?: string; payFrequency?: string; fte?: number;
       gradeId?: string; effectiveFrom?: string; changeReason?: string; note?: string;
     },
   ) {
@@ -217,7 +224,13 @@ export class PayrollController {
     const baseAmount = typeof body?.baseAmount === "number" ? body.baseAmount : undefined;
     if (baseAmount === undefined || baseAmount < 0) throw new BadRequestException("baseAmount >= 0 required");
     const effectiveFrom = requireIsoDate(body?.effectiveFrom, "effectiveFrom");
-    const payPeriod = body?.payPeriod && PAY_PERIODS.has(body.payPeriod) ? body.payPeriod : "monthly";
+    // Both fall back to monthly rather than rejecting an omission — monthly/monthly is the
+    // Indonesian norm and the shape the payroll engine already expects. An UNRECOGNISED value also
+    // falls back rather than 400ing, matching how every other enum in this controller behaves;
+    // the database CHECK is the wall, this is the convenience.
+    const rateBasis = body?.rateBasis && RATE_BASES.has(body.rateBasis) ? body.rateBasis : "monthly";
+    const payFrequency =
+      body?.payFrequency && PAY_FREQUENCIES.has(body.payFrequency) ? body.payFrequency : "monthly";
     const changeReason = body?.changeReason && CHANGE_REASONS.has(body.changeReason) ? body.changeReason : "other";
     await authorize(req.principal, { kind: "hr_payroll", tenantId, module: "hr" }, "create");
 
@@ -256,11 +269,12 @@ export class PayrollController {
 
         await c.query(
           `INSERT INTO hr_compensation
-             (id, tenant_id, employee_id, subject_user_id, grade_id, base_amount, currency, pay_period, fte,
+             (id, tenant_id, employee_id, subject_user_id, grade_id, base_amount, currency,
+              rate_basis, pay_frequency, fte,
               effective_from, change_reason, note, created_by, origin_site)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
           [id, tenantId, body.employeeId, emp.rows[0].user_id, body?.gradeId ?? null, baseAmount,
-           body?.currency ?? "IDR", payPeriod, body?.fte ?? 1, effectiveFrom, changeReason,
+           body?.currency ?? "IDR", rateBasis, payFrequency, body?.fte ?? 1, effectiveFrom, changeReason,
            body?.note ?? null, req.principal.userId, config.originSite],
         );
 
@@ -271,7 +285,7 @@ export class PayrollController {
           `INSERT INTO hr_job_events (id, tenant_id, employee_id, subject_user_id, effective_on, event_type, previous, current, reason, source_kind, created_by, origin_site)
            VALUES ($1,$2,$3,$4,$5,'compensation_change','{}',$6,$7,'manual',$8,$9)`,
           [jobEventId, tenantId, body.employeeId, emp.rows[0].user_id, effectiveFrom,
-           JSON.stringify({ baseAmount, currency: body?.currency ?? "IDR", payPeriod, fte: body?.fte ?? 1 }),
+           JSON.stringify({ baseAmount, currency: body?.currency ?? "IDR", rateBasis, payFrequency, fte: body?.fte ?? 1 }),
            changeReason, req.principal.userId, config.originSite],
         );
         await c.query(`UPDATE hr_compensation SET job_event_id = $2 WHERE id = $1`, [id, jobEventId]);
@@ -581,15 +595,16 @@ export class PayrollController {
 
         const employees = await c.query<{
           id: string; user_id: string | null; display_name: string; hire_date: string | null;
-          base_amount: string | null; fte: string | null; currency: string | null; pay_period: string | null;
+          base_amount: string | null; fte: string | null; currency: string | null;
+          rate_basis: string | null; pay_frequency: string | null;
           ptkp_status: string | null; ter_category: string | null; has_npwp: boolean | null; tax_resident: boolean | null;
         }>(
           `SELECT e.id, e.user_id, e.display_name, to_char(e.hire_date,'YYYY-MM-DD') AS hire_date,
-                  comp.base_amount, comp.fte, comp.currency, comp.pay_period,
+                  comp.base_amount, comp.fte, comp.currency, comp.rate_basis, comp.pay_frequency,
                   tax.ptkp_status, tax.ter_category, tax.has_npwp, tax.tax_resident
            FROM employees e
            LEFT JOIN LATERAL (
-             SELECT base_amount, fte, currency, pay_period FROM hr_compensation
+             SELECT base_amount, fte, currency, rate_basis, pay_frequency FROM hr_compensation
               WHERE employee_id = e.id AND effective_from <= $1::date
                 AND (effective_to IS NULL OR effective_to >= $1::date)
               ORDER BY effective_from DESC LIMIT 1
@@ -620,6 +635,36 @@ export class PayrollController {
             continue;
           }
 
+          // ── The quoted rate is converted to what is owed for THIS period ───────────────────────
+          // `base_amount` is quoted in `rate_basis`, which is not necessarily the pay period. An
+          // annual-quoted employee owed a monthly slip must be paid a TWELFTH.
+          const rateBasis = e.rate_basis ?? "monthly";
+          const payFrequency = e.pay_frequency ?? "monthly";
+          const periodBase = periodBaseAmount(Number(e.base_amount), rateBasis, payFrequency);
+          if (periodBase === undefined) {
+            skipped.push({
+              employeeId: e.id, name: e.display_name,
+              reason: `cannot convert a '${rateBasis}' rate to a '${payFrequency}' period — piece rate and unknown bases must be entered as a manual payroll input`,
+            });
+            continue;
+          }
+          // ★ The tax engine below runs `mode: "monthly_ter"`, and TER is defined on a MONTHLY
+          // gross. A weekly or biweekly slip taxed with a monthly TER rate would understate the
+          // bracket and under-withhold — a real liability to DJP, not a rounding difference. So a
+          // non-monthly frequency is SKIPPED AND REPORTED rather than approximated. The rest of the
+          // model supports weekly pay today; the tax algorithm for it is a separate piece of work,
+          // and shipping it as "close enough" would hide that.
+          if (payFrequency !== "monthly") {
+            skipped.push({
+              employeeId: e.id, name: e.display_name,
+              reason: `'${payFrequency}' pay frequency: PPh 21 withholding for non-monthly periods is not implemented (the engine is monthly TER only)`,
+            });
+            continue;
+          }
+          // THR is legally computed on a MONTHLY wage whatever the pay cadence, so it needs its own
+          // conversion rather than reusing `periodBase`.
+          const monthlyWage = periodBaseAmount(Number(e.base_amount), rateBasis, "monthly") ?? 0;
+
           const components: PayComponent[] = [];
 
           // Standing allowances in force over the period.
@@ -637,7 +682,7 @@ export class PayrollController {
           );
           for (const a of allowances.rows) {
             const magnitude = a.calc_kind === "percentage" && a.percent !== null
-              ? Number(e.base_amount) * (Number(a.percent) / 100)
+              ? periodBase * (Number(a.percent) / 100)
               : Number(a.amount ?? 0);
             if (!magnitude) continue;
             components.push({
@@ -662,7 +707,7 @@ export class PayrollController {
             // an explicit amount, that wins: somebody computed it deliberately.
             const amount = i.amount !== null
               ? Number(i.amount)
-              : (Number(e.base_amount) / 173) * Number(i.quantity ?? 0);
+              : (periodBase / 173) * Number(i.quantity ?? 0);
             const isDeduction = i.category === "deduction" || i.category === "advance";
             components.push({
               code: i.code ?? i.category, label: i.label,
@@ -699,7 +744,7 @@ export class PayrollController {
           // THR is its own run kind; when this IS that run, base pay is replaced by the allowance.
           if (run.kind === "thr" && e.hire_date) {
             const months = completedMonths(e.hire_date, run.period_end);
-            const thr = computeThr(statutory.params, { monthlyWage: Number(e.base_amount), monthsOfService: months });
+            const thr = computeThr(statutory.params, { monthlyWage, monthsOfService: months });
             if (!thr.eligible) {
               skipped.push({ employeeId: e.id, name: e.display_name, reason: `THR: ${months} months of service is below the eligibility floor` });
               continue;
@@ -733,7 +778,7 @@ export class PayrollController {
               employeeId: e.id,
               // A THR run pays the allowance only — no base. Passing the base too would double-pay
               // the month, which is the single most expensive mistake available in this file.
-              baseAmount: run.kind === "thr" ? 0 : Number(e.base_amount),
+              baseAmount: run.kind === "thr" ? 0 : periodBase,
               fte: Number(e.fte ?? 1),
               workingDays: periodWorkingDays,
               paidDays: run.kind === "thr" ? periodWorkingDays : paidDays,
@@ -755,7 +800,7 @@ export class PayrollController {
                 tax_withheld, net, employer_cost, currency)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
             [
-              payslipId, tenantId, id, e.id, e.user_id, Number(e.base_amount), Number(e.fte ?? 1),
+              payslipId, tenantId, id, e.id, e.user_id, periodBase, Number(e.fte ?? 1),
               periodWorkingDays, run.kind === "thr" ? periodWorkingDays : paidDays, unpaidDays,
               e.ptkp_status ?? "TK/0", e.has_npwp ?? false,
               result.gross, result.taxableGross, result.bpjsBase, result.employeeDeductions,

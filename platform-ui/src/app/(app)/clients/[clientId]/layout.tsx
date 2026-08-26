@@ -12,7 +12,7 @@ import "@/components/clients/clientHub.css";
 // CC-3 — the client hub shell.
 //
 // ── WHY THE HUB EXISTS ───────────────────────────────────────────────────────────────────────────
-// The ERP is organised object-first (`/projects`, `/tasks`, `/billing`, `/approvals`), and before this
+// The ERP is organised object-first (`/projects`, `/tasks`, `/invoices`, `/approvals`), and before this
 // the one page named after a client showed their contacts and calendar and none of their work. The
 // client portal, meanwhile, has always shown a client everything they own on one surface — so staff
 // had a WORSE client-centric view than the client did. This shell is the staff mirror of it.

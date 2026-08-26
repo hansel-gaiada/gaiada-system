@@ -3,7 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
-import { listCompensation, listPayGrades, listAllowanceTypes, listBenefitPlans, formatMoney } from "@/lib/hr-full";
+import { listCompensation, listPayGrades, listAllowanceTypes, listBenefitPlans, formatMoney, monthlyEquivalent } from "@/lib/hr-full";
 import { Card, KpiTile, HairlineTable } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 
@@ -39,10 +39,19 @@ export default async function HrCompensationPage() {
   ]);
 
   const currency = current[0]?.currency ?? "IDR";
-  // Monthly-equivalent payroll cost of the standing base pay. Annual and daily rows are excluded
-  // rather than converted with a guessed multiplier — a wrong headline is worse than a narrower one.
-  const monthly = current.filter((c) => c.payPeriod === "monthly");
-  const monthlyBase = monthly.reduce((sum, c) => sum + Number(c.baseAmount) * Number(c.fte), 0);
+  // Monthly-equivalent payroll cost of the standing base pay.
+  //
+  // Annual and daily rows used to be EXCLUDED here, because converting them needed a multiplier
+  // this page would have had to invent. It no longer does: `monthlyEquivalent` is the same
+  // annualisation the payroll engine and the database both use, so the headline can now include
+  // every row whose basis is convertible. Piece-rate still cannot be converted from a rate alone,
+  // so it is excluded and COUNTED — a narrower headline that says how narrow it is.
+  const converted = current.map((c) => ({
+    c, monthly: monthlyEquivalent(Number(c.baseAmount), c.rateBasis),
+  }));
+  const monthly = converted.filter((x) => x.monthly !== null);
+  const unconvertible = converted.length - monthly.length;
+  const monthlyBase = monthly.reduce((sum, x) => sum + (x.monthly as number) * Number(x.c.fte), 0);
   const ungraded = current.filter((c) => !c.gradeId).length;
   const statutory = plans.filter((p) => p.statutoryCode);
 
@@ -53,7 +62,7 @@ export default async function HrCompensationPage() {
         <KpiTile
           label="Monthly base"
           value={formatMoney(monthlyBase, currency)}
-          foot={monthly.length === current.length ? "FTE-weighted" : `${monthly.length} of ${current.length} on a monthly period`}
+          foot={unconvertible === 0 ? "FTE-weighted, all rate bases" : `FTE-weighted; ${unconvertible} of ${current.length} not convertible from a rate`}
         />
         <KpiTile label="Pay grades" value={String(grades.length)} foot={ungraded ? `${ungraded} person(s) ungraded` : "all graded"} />
         <KpiTile label="Benefit plans" value={String(plans.length)} foot={`${statutory.length} statutory`} />
@@ -74,12 +83,17 @@ export default async function HrCompensationPage() {
           <HairlineTable
             columns={[
               { label: "Employee" }, { label: "Grade" }, { label: "Base", align: "right" },
+              // The basis is shown NEXT TO the amount, not inferred. A monthly 12,000,000 and an
+              // annual 12,000,000 are a twelvefold difference and render identically without it.
+              { label: "Per" }, { label: "Paid" },
               { label: "FTE", align: "right" }, { label: "Since" }, { label: "Reason" },
             ]}
             rows={current.map((c) => [
               c.employeeName,
               c.gradeCode ?? "—",
               formatMoney(c.baseAmount, c.currency),
+              c.rateBasis.replace(/_/g, " "),
+              c.payFrequency.replace(/_/g, " "),
               Number(c.fte).toFixed(2),
               c.effectiveFrom,
               c.changeReason?.replace(/_/g, " ") ?? "—",

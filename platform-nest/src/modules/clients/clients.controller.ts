@@ -298,7 +298,7 @@ export class ClientsController {
         kind: "payment" as const, id: r.id as string,
         label: "Confirm a client-recorded payment",
         context: `${r.currency as string} ${r.amount as number}`,
-        href: `/billing/${r.invoiceId as string}`, since: r.since,
+        href: `/invoices/${r.invoiceId as string}`, since: r.since,
       })),
       ...reviews.rows.map((r: Record<string, unknown>) => ({
         kind: "review" as const, id: r.id as string,

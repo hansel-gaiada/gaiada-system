@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.38.1` | IN PROGRESS | WS1 | 2026-08-25 |
+| platform-nest | `0.39.0` | IN PROGRESS | WS1 | 2026-08-26 |
 | platform-ui | `0.52.0` | IN PROGRESS | WS5 | 2026-08-25 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.11.1` | PROTOTYPED | WS2 | 2026-08-20 |
@@ -50,7 +50,7 @@ versions below; the running build reports it at `GET /health`.
 | webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
-| hr | `0.4.0` | IN PROGRESS | HR | 2026-08-24 |
+| hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
@@ -1126,7 +1126,7 @@ caught in-session this time). Brevo inbound also hands out attachment `DownloadT
 than bytes, so the token→bytes fetch is staging work behind the existing `NormalizedAttachment`
 seam — carried as a named step in design §15 R3 (v4).
 
-## hr â€” People Â· Hiring Â· Pay Â· `0.4.0` Â· IN PROGRESS
+## hr â€” People Â· Hiring Â· Pay Â· `0.5.0` Â· IN PROGRESS
 
 The HR department module. `0028` (WSD-3/4) gave it cases, records, leave, attendance and checklist
 templates; `0081` added employee loans; IAM Phase 2 (`0109`) added the `employees` people file and

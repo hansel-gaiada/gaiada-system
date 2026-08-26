@@ -25,7 +25,7 @@ export async function TopBar({ me, tenantId, moduleLabel, theme }: { me: Me; ten
     { label: "Task", href: "/tasks/new" },
     { label: "Campaign", href: "/agency/new" },
     ...(can(me, "pm.manage", tenantId) ? [{ label: "Client", href: "/clients/new" }, { label: "Deliverable", href: "/deliverables/new" }] : []),
-    ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/billing/new" }] : []),
+    ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/invoices/new" }] : []),
     ...(can(me, "admin.access", tenantId) ? [{ label: "Employee", href: "/people/new" }] : []),
   ];
 

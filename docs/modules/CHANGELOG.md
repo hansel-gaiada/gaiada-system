@@ -11,6 +11,45 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.39.0` - the `billing` module is now `invoice` (2026-08-26) - PROTOTYPED
+
+**Changed**
+- Module key `billing` -> `invoice`. Permission keys `billing.invoice.<action>` -> `invoice.<action>`
+  (two-part, following the `portal.*` precedent for a domain whose name equals its Cerbos kind).
+- `src/modules/billing/` -> `src/modules/invoice/`; `BillingController` -> `InvoiceController`;
+  MCP tool `billing.listInvoices` -> `invoice.listInvoices`.
+- UI `/billing` -> `/invoices`; `lib/billing.ts` -> `lib/invoice.ts`; `lib/billingActions.ts` ->
+  `lib/invoiceActions.ts`. Nav label "Billing" -> "Invoices".
+- Migration `202608261030` moves the STORED copies: `companies.enabled_modules`,
+  `service_assignments.module_key`, `permissions.key`, and the rollup registry's `module`.
+
+**Why**
+- The owner's framing: *"The billing system is supposed to be for the outside contract. gaia digital
+  agency and its clients"* - and what that produces is an invoice. Every route
+  (`/api/:t/invoices`), every table (`invoices`) and the Cerbos kind (`resource_invoice`) already
+  said so; only the module key, its permissions and its UI path disagreed.
+- "Billing" also named two UNRELATED things in this tree - a client's billing ADDRESS, and vendor
+  billing in the search providers - so the word carried three meanings. Those two are untouched.
+
+**Notes**
+- ★ **Grants are preserved because the migration UPDATEs `permissions.key` in place.**
+  `role_permissions` keys off `permission_id` and cascades on delete, so a delete-then-insert would
+  have silently stripped the capability from every role holding it - 17 rows across the baseline
+  roles on the live estate, with nothing reporting the loss.
+- `service_assignments.module_key` is immutable by trigger (correctly - an assignment is a standing
+  agreement to serve a NAMED module). The migration disables that trigger for exactly one statement
+  and re-enables it; `billing-rename.db.test.ts` asserts it came back on.
+- ★ **The rename is tested against a database that HAS THE OLD NAMES.** Every other suite runs on a
+  fresh database where the new name is simply the name, so they all pass with the migration deleted
+  - the seed-rename trap in `platform-nest/CLAUDE.md`, one layer down.
+- `/billing` survives as a 308 redirect (optional catch-all, so `/billing/<id>` lands on that
+  invoice). Old links live in bookmarks and in notification rows already written to the database,
+  which are historical records and must not be rewritten. The shim can go once those age out.
+- 4036 backend tests green; the 4 reds are another session's `config.social.contentBriefSweep`.
+  `CAPABILITY-INVENTORY.md` and `role-permission-bundles.json` regenerated (17 pairs moved).
+
+---
+
 ### platform-ui `0.52.0` - a finance WORKSPACE, not a dashboard (2026-08-25) - PROTOTYPED
 
 **Added**

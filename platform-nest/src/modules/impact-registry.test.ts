@@ -27,7 +27,7 @@ import { agencyModule } from "./agency";
 import { pmModule } from "./pm";
 import { itModule } from "./it";
 import { monitoringModule } from "./monitoring";
-import { billingModule } from "./billing";
+import { invoiceModule } from "./invoice";
 import { clientsModule } from "./clients";
 import { knowledgeModule } from "./knowledge";
 import { automationConsoleModule } from "./automation-console";
@@ -40,7 +40,7 @@ import { socialModule } from "./social";
 
 /** Mirrors main.ts's registration block. Kept as a list so the count can be asserted. */
 const ALL_MODULES = [
-  agencyModule, pmModule, itModule, monitoringModule, billingModule, clientsModule,
+  agencyModule, pmModule, itModule, monitoringModule, invoiceModule, clientsModule,
   knowledgeModule, automationConsoleModule, hrModule, assistantModule, searchModule,
   reportsModule, webdevModule, socialModule,
 ];

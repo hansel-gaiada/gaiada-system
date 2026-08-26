@@ -43,7 +43,7 @@ import { agencyModule } from "./agency";
 import { pmModule } from "./pm";
 import { itModule } from "./it";
 import { monitoringModule } from "./monitoring";
-import { billingModule } from "./billing";
+import { invoiceModule } from "./invoice";
 import { clientsModule } from "./clients";
 import { knowledgeModule } from "./knowledge";
 import { automationConsoleModule } from "./automation-console";
@@ -58,7 +58,7 @@ import { financeModule } from "./finance";
 const ARTIFACT = join(__dirname, "..", "..", "..", "docs", "modules", "CAPABILITY-INVENTORY.md");
 
 const ALL_MODULES = [
-  agencyModule, pmModule, itModule, monitoringModule, billingModule, clientsModule,
+  agencyModule, pmModule, itModule, monitoringModule, invoiceModule, clientsModule,
   knowledgeModule, automationConsoleModule, hrModule, assistantModule, searchModule,
   reportsModule, webdevModule, socialModule, financeModule,
 ];
@@ -164,7 +164,7 @@ function render(rows: Row[], silentModules: string[], golden: GoldenRow[]): stri
  * claim that is true on the day it is written and unfalsifiable thereafter.
  *
  * MATCHING ON THE PATH, NOT ON A NAME. An earlier attempt keyed this on the module key and produced
- * a confident wrong answer: `billing` reported ZERO coverage because its endpoints live at
+ * a confident wrong answer: `invoice` reported ZERO coverage because its endpoints live at
  * `/invoices`, and `automation-console` reported none because its one route is `/api/admin/...` and
  * a `:tenantId` pattern silently skipped it. Both were fine all along. The route family is therefore
  * taken from the tool's own `pathTemplate` — the same registry the rest of this file trusts.

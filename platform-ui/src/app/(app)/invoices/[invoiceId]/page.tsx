@@ -3,8 +3,8 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can, isElevated } from "@/lib/rbac";
-import { getInvoice } from "@/lib/billing";
-import { markInvoiceSent, markInvoicePaid } from "@/lib/billingActions";
+import { getInvoice } from "@/lib/invoice";
+import { markInvoiceSent, markInvoicePaid } from "@/lib/invoiceActions";
 import { money, formatDate } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
@@ -29,7 +29,7 @@ export default async function InvoiceDetailPage({ params }: { params: Params }) 
       <PageHeader
         eyebrow="Invoice"
         title={`${inv.clientName} · ${money(inv.total, inv.currency)}`}
-        breadcrumbs={[{ label: "Billing", href: "/billing" }, { label: inv.clientName }]}
+        breadcrumbs={[{ label: "Invoices", href: "/invoices" }, { label: inv.clientName }]}
         actions={canBill ? (
           <>
             {inv.status === "draft" && <form action={markInvoiceSent.bind(null, inv.id)}><button type="submit" className="lux-btn lux-btn--solid lux-btn--sm">Mark sent</button></form>}

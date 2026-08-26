@@ -4,7 +4,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can, isElevated } from "@/lib/rbac";
-import { listInvoices } from "@/lib/billing";
+import { listInvoices } from "@/lib/invoice";
 import { money } from "@/lib/format";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, KpiTile } from "@/components/ui";
@@ -19,17 +19,17 @@ const COLUMNS: Column[] = [
   { key: "status", header: "Status", format: "status", sortable: true, align: "right" },
 ];
 
-export default async function BillingPage() {
+export default async function InvoicesPage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   const canBill = tenant ? (can(me, "company.manage", tenant) || isElevated(me)) : false;
   if (!tenant) {
-    return (<><PageHeader eyebrow="Business" title="Billing" /><EmptyNote>Select a company from the top bar.</EmptyNote></>);
+    return (<><PageHeader eyebrow="Business" title="Invoices" /><EmptyNote>Select a company from the top bar.</EmptyNote></>);
   }
   if (!canBill) {
-    return (<><PageHeader eyebrow="Business" title="Billing" /><EmptyNote>Billing is limited to finance administrators.</EmptyNote></>);
+    return (<><PageHeader eyebrow="Business" title="Invoices" /><EmptyNote>Invoicing is limited to finance administrators.</EmptyNote></>);
   }
 
   const invoices = await listInvoices(userId, tenant);
@@ -46,9 +46,9 @@ export default async function BillingPage() {
     <>
       <PageHeader
         eyebrow="Business"
-        title="Billing"
+        title="Invoices"
         subtitle="Invoices generated from billable time."
-        actions={<Link href="/billing/new" className="lux-btn lux-btn--solid lux-btn--sm">New invoice</Link>}
+        actions={<Link href="/invoices/new" className="lux-btn lux-btn--solid lux-btn--sm">New invoice</Link>}
       />
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", marginBottom: 20 }}>
         <KpiTile label="Invoices" value={String(invoices.length)} />
@@ -61,7 +61,7 @@ export default async function BillingPage() {
           <EmptyNote>No invoices yet. Generate one from billable time.</EmptyNote>
         </>
       ) : (
-        <DataTable columns={COLUMNS} rows={rows} link={{ base: "/billing", idKey: "id", labelKey: "clientName" }} csvName="invoices" pageSize={20} />
+        <DataTable columns={COLUMNS} rows={rows} link={{ base: "/invoices", idKey: "id", labelKey: "clientName" }} csvName="invoices" pageSize={20} />
       )}
     </>
   );

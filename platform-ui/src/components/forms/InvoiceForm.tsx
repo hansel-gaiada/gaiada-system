@@ -2,13 +2,13 @@
 import { useActionState } from "react";
 import { Field } from "./Field";
 import { Eyebrow, Button } from "@/components/ui";
-import type { BillingState } from "@/lib/billingActions";
+import type { InvoiceFormState } from "@/lib/invoiceActions";
 import "./forms.css";
 
 export function InvoiceForm({
   action, clients,
 }: {
-  action: (prev: BillingState | null, fd: FormData) => Promise<BillingState>;
+  action: (prev: InvoiceFormState | null, fd: FormData) => Promise<InvoiceFormState>;
   clients: { id: string; name: string }[];
 }) {
   const [state, formAction, pending] = useActionState(action, null);

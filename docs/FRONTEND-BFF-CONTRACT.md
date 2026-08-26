@@ -132,8 +132,8 @@ pm.manage, it.manage, approvals.decide, knowledge.review`.
 | ✅ (UI built) | GET/POST/DELETE | `/api/:t/clients[/:id]` | BUILT (`client-work.controller.ts`: GET, GET/:id, POST, PATCH, DELETE). UI: `/clients` list + `/clients/new` + `/clients/[id]` detail. Create/delete gated `pm.manage`. |
 | ✅ (UI built) | GET/POST/PATCH | `/api/:t/deliverables[?projectId][/:id]` | BUILT (`client-work.controller.ts`). UI: `/deliverables` list + `/deliverables/new`. |
 | ✅ (UI built) | GET/POST | `/api/:t/time-entries` | BUILT (incl. PATCH). UI: `/timesheets` (totals + billable rollup + log). POST body `{minutes,projectId?,taskId?,billable,entryDate,notes}`. |
-| ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`billing.controller.ts`: GET, GET/:id, POST, PATCH). **Billing** UI: `/billing` list + `/billing/new` (generate from billable time in a period × rate) + `/billing/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/billing.ts`. `company.manage` only. |
-| — (no UI yet) | POST | `/api/:t/invoices/:invoiceId/approve` | **NEW, IAM-GAP-01 (2026-08-13, BACKEND BUILT, no UI).** Maker/checker: `draft → approved`. Requires `billing.invoice.approve`; policy denies the invoice's own creator (`created_by`, migration `0107`) and fails closed if the creator is unknown (legacy pre-migration rows). `PATCH .../invoices/:id` can no longer reach `'sent'`/`'paid'` unless the invoice is already `'approved'` — `'approved'` itself is reachable ONLY through this endpoint, never via the generic PATCH. Response adds `createdBy`/`approvedBy`/`approvedAt` to the GET/list shape. **UI TODO**: an "Approve" action + these three fields on `/billing/[id]`; not built by this backend-only ticket. **IAM-GAP-02 (2026-08-13) update: the self-approval hole is closed for EVERY approver tier, including `platform_admin`/`group_executive`** (they previously bypassed the creator check via their pre-existing wildcard; now a structural Cerbos `EFFECT_DENY` blocks creator===approver for anyone, no exceptions) — no contract/shape change, callers just see the SAME 403 a company_admin/manager already got, now also for those two roles. |
+| ✅ (UI built) | GET/POST | `/api/:t/invoices[/:id]` (+`PATCH` status) | BUILT (`invoice.controller.ts`: GET, GET/:id, POST, PATCH). **Invoices** UI: `/invoices` list + `/invoices/new` (generate from billable time in a period × rate) + `/invoices/[id]` (line items, mark sent/paid). `Invoice` shape in `lib/invoice.ts`. `company.manage` only. |
+| — (no UI yet) | POST | `/api/:t/invoices/:invoiceId/approve` | **NEW, IAM-GAP-01 (2026-08-13, BACKEND BUILT, no UI).** Maker/checker: `draft → approved`. Requires `invoice.approve`; policy denies the invoice's own creator (`created_by`, migration `0107`) and fails closed if the creator is unknown (legacy pre-migration rows). `PATCH .../invoices/:id` can no longer reach `'sent'`/`'paid'` unless the invoice is already `'approved'` — `'approved'` itself is reachable ONLY through this endpoint, never via the generic PATCH. Response adds `createdBy`/`approvedBy`/`approvedAt` to the GET/list shape. **UI TODO**: an "Approve" action + these three fields on `/invoices/[id]`; not built by this backend-only ticket. **IAM-GAP-02 (2026-08-13) update: the self-approval hole is closed for EVERY approver tier, including `platform_admin`/`group_executive`** (they previously bypassed the creator check via their pre-existing wildcard; now a structural Cerbos `EFFECT_DENY` blocks creator===approver for anyone, no exceptions) — no contract/shape change, callers just see the SAME 403 a company_admin/manager already got, now also for those two roles. |
 | — (no UI, no read endpoint yet) | — | *(data-layer only)* invoice revision history | **NEW, IAM-GAP-02 (2026-08-13, DATA CAPTURE ONLY).** Every invoice mutation (create/status-change/approve, plus the staff payment-confirmation path in `contracts.controller.ts`) now writes one `invoice_revisions` row (who/when/before-snapshot/after-snapshot) in the SAME transaction as the mutation, and every mutation sets `invoices.updated_by`. The GET/list response gains one additive field: **`updatedBy`** alongside the existing `createdBy`/`approvedBy`/`approvedAt`. **No new read endpoint for the revision history itself** — deeper forensics/analysis surface is explicitly deferred to a separate session (per the ticket); this row exists so the UI team knows `updatedBy` is now real data, not so they build a history view against it yet. |
 | ✅ (UI built) | GET | `/api/:t/modules/agency/approvals/decided` | BUILT. Decided-approval **history** (Approvals page "Recently decided"). Add `campaignId` to pending items so the UI deep-links to the campaign. |
 | — | (pure UI) | Calendar `/calendar` | Agenda + workload built entirely from existing task/deliverable/project due dates — no new endpoint. |
@@ -825,6 +825,7 @@ argument, including why `member` IS seeded (it is the `hr_case` precedent) and t
 | Method | Path | Returns |
 |---|---|---|
 | GET / POST | `/compensation[?employeeId&current]` | `Compensation[]` / `{id, supersededRows}` |
+|  | ⚠ **`payPeriod` no longer exists.** POST takes `rateBasis` **and** `payFrequency`; GET returns both. | see §below |
 | GET / POST | `/allowance-types` | `AllowanceType[]` / `{id}` |
 | POST | `/employees/:id/allowances` | `{id}` |
 | GET / POST | `/benefit-plans` | `BenefitPlan[]` / `{id}` |
@@ -854,6 +855,37 @@ argument, including why `member` IS seeded (it is the `hr_case` precedent) and t
 | POST | `/leave/accrue` | `hr_policy` | `AccrualRunResult` |
 | GET | `/leave/ledger[?subjectUserId&year]` | `hr_case` (staff-or-self) | `{subjectUserId, year, entries}` |
 | GET | `/analytics[?from&to]` | `employee` | `HrAnalytics` |
+
+---
+
+### ⚠ Rate basis and pay frequency are two fields, and a consumer must show both
+
+`hr_compensation.pay_period` was split (migration `202608260930`). It conflated the unit an amount
+is QUOTED in with how often a payslip is PRODUCED, which are independent: an annual salary paid
+monthly and an hourly rate paid weekly are both ordinary.
+
+| Field | Owner | Values |
+|---|---|---|
+| `rateBasis` | HR — a fact about the contract | `hourly` `daily` `weekly` `monthly` `annual` `piece_rate` |
+| `payFrequency` | Finance — an operational cadence | `weekly` `biweekly` `semi_monthly` `monthly` |
+
+Three consequences for a consumer:
+
+- **Never render an amount without its basis.** A monthly `12,000,000` and an annual `12,000,000`
+  are a twelvefold difference and look identical on their own.
+- **Do not invent a multiplier to compare rows.** `hr_annualisation_factor()` (SQL),
+  `annualisationFactor()` (platform-nest) and `monthlyEquivalent()` (platform-ui `lib/hr-full.ts`)
+  are the same numbers in three places, pinned against each other by tests. Use one of them.
+- **`piece_rate` cannot be annualised from a rate at all** — the annual figure depends on output,
+  which is not in the row. Every one of those three returns null/undefined for it. Exclude and
+  COUNT such rows; folding a guess into a headline produces a wrong number that looks computed.
+
+`payFrequency` other than `monthly` is accepted and stored, but `calculate` currently SKIPS those
+employees and says why: PPh 21 withholding is implemented as monthly TER only, and taxing a weekly
+slip at a monthly TER rate would under-withhold. That is a reported gap, not a silent approximation.
+
+`hr_pay_grades` and `hr_offers` carry `rateBasis` only — a grade band and an offer quote a rate; the
+cadence is set on the compensation record afterwards.
 
 ---
 
@@ -1611,7 +1643,7 @@ becomes an existence oracle for another client's ids.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/portal/invoices` | `draft` excluded. Adds `paid`, `pendingConfirmation`, `balance`, `overdue`. **Not** `ModuleEnabledGuard("billing")`-gated — a client with invoices must keep reading them if the module is switched off. |
+| ✅ | GET | `/api/:t/portal/invoices` | `draft` excluded. Adds `paid`, `pendingConfirmation`, `balance`, `overdue`. **Not** `ModuleEnabledGuard("invoice")`-gated — a client with invoices must keep reading them if the module is switched off. |
 | ✅ | GET | `/api/:t/portal/invoices/:invoiceId` | Frozen `lines[]` + `payments[]` + `paid`/`balance`. |
 | ✅ | POST | `/api/:t/portal/invoices/:invoiceId/payments` | `{amount, paidOn(YYYY-MM-DD), method, reference?, note?, proof?{filename,contentType,content(base64)}}`. Records a **CLAIM**: inserted `status='pending'`, `invoices.status` untouched, `client_id`/`currency` read from the invoice (never the body). Refuses future dates and overpayment beyond a 1% tolerance. Proof ≤10 MB. Action `pay`; **capability not required**. |
 | ✅ | GET | `/api/:t/portal/contracts` | `draft` excluded. `clientSigned`/`providerSigned`/`termEnded` per row (`termEnded` derived on read, never written back). |
@@ -3976,7 +4008,7 @@ reachable from no scope at all. `is_internal` stays a data-quality signal, not t
 |---|---|---|---|
 | ✅ NEW | GET | `/api/:t/projects?clientId=` | `core/core.controller.ts`. Was unfiltered; the client page used to fetch the tenant and narrow in the browser. |
 | ✅ NEW | GET | `/api/:t/pm/tasks?clientId=` | `modules/pm/pm.controller.ts`. Joins through `projects` — there is no `pm_tasks.client_id`, by decision (one source of truth, no backfill, no sync trigger). Cheap: the task CTE already joins `projects`. **`pm_tasks.project_id` is `NOT NULL`, so no clientless-task branch is needed and adding one would be dead code.** |
-| ✅ NEW | GET | `/api/:t/invoices?clientId=` | `modules/billing/billing.controller.ts`. This list previously accepted no query parameters at all. |
+| ✅ NEW | GET | `/api/:t/invoices?clientId=` | `modules/invoice/invoice.controller.ts`. This list previously accepted no query parameters at all. |
 | ✅ PRE-EXISTING | GET | `/api/:t/{deliverables,contracts,pipeline/runs,meetings/recordings,webdev/change-requests,social/*}?clientId=` | Already had the parameter. **`internal` is NOT yet honoured on these six** — see the gap below. |
 
 ⛔ **KNOWN GAP (slice 2).** The six endpoints that already had `clientId` accept a uuid only; passing

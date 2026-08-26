@@ -42,7 +42,7 @@ export const SERVICE_ASSIGNMENTS_ENABLED = process.env.SERVICE_ASSIGNMENTS_ENABL
 // Known module keys a service assignment can target. Mirrors the owner-locked
 // core-vs-module split (backbone plan §"Locked owner decisions") — hardcoded
 // until WSA-3's `GET /api/modules` registry endpoint ships; swap then.
-export const SERVICE_MODULE_OPTIONS = ["hr", "it", "pm", "billing", "clients", "knowledge", "automation-console"] as const;
+export const SERVICE_MODULE_OPTIONS = ["hr", "it", "pm", "invoice", "clients", "knowledge", "automation-console"] as const;
 export type ServiceModule = (typeof SERVICE_MODULE_OPTIONS)[number];
 
 export type AssignmentStatus = "proposed" | "active" | "suspended" | "revoked";

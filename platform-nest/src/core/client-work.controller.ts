@@ -1,5 +1,5 @@
 // Core client-work routes: deliverables + time_entries. These are the SHARED work substrate
-// that every vertical (PM, agency, billing) reads/writes, so they remain CORE and are NOT
+// that every vertical (PM, agency, invoices) reads/writes, so they remain CORE and are NOT
 // module-gated. The `clients` CRM resource was moved to the clients MODULE (WSA-2 —
 // src/modules/clients/clients.controller.ts, ModuleEnabledGuard("clients")).
 // authorize() → RLS query → activity; time-entry owned by the logger.

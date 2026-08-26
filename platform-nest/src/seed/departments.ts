@@ -647,7 +647,7 @@ export interface SeededDepartments { departments: { id: string; name: string; pe
 
 /** Called from seedAgency() after the org tree exists. `clients` is the agency's client id list
  *  (index 0/1 = the two seeded clients) — the department projects that represent client delivery
- *  attach to them so billing/deliverables and the department views agree on who the work is for. */
+ *  attach to them so invoices/deliverables and the department views agree on who the work is for. */
 export async function seedDepartmentsAndHr(tenantId: string, clients: string[], actorId: string): Promise<SeededDepartments> {
   await mergeOrgPlacements(tenantId);
   const depts = await readDepartments(tenantId);

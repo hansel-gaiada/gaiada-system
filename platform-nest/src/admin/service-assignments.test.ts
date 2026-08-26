@@ -39,7 +39,7 @@ describe.skipIf(!TEST_URL)("service-assignments API (ORG-3)", () => {
     // registry-validation branch — active once ANY module is registered — passes them) plus 'hr'
     // for the base case; "not_a_real_module" is deliberately left unregistered for the negative test.
     for (const key of [
-      "hr", "billing", "accept_test", "suspend_test", "relink_test", "relink_global_test",
+      "hr", "invoice", "accept_test", "suspend_test", "relink_test", "relink_global_test",
       "orphan_repair_test", "relink_target_test", "event_test",
     ]) {
       registerModule({
@@ -104,7 +104,7 @@ describe.skipIf(!TEST_URL)("service-assignments API (ORG-3)", () => {
       method: "POST",
       url: `/api/${A}/org-structure/units/d-hr/assignments`,
       headers: asUser(globalExec),
-      payload: { targets: [B], module: "billing" },
+      payload: { targets: [B], module: "invoice" },
     });
     expect(r.statusCode).toBe(201);
     const body = r.json() as { assignments: Array<{ id: string; target: string; status: string }> };

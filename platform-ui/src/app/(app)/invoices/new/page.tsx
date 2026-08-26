@@ -8,16 +8,16 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { InvoiceForm } from "@/components/forms/InvoiceForm";
-import { createInvoiceAction } from "@/lib/billingActions";
+import { createInvoiceAction } from "@/lib/invoiceActions";
 
 export default async function NewInvoicePage() {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
-  const crumbs = [{ label: "Billing", href: "/billing" }, { label: "New invoice" }];
+  const crumbs = [{ label: "Invoices", href: "/invoices" }, { label: "New invoice" }];
   if (!tenant || (!can(me, "company.manage", tenant) && !isElevated(me))) {
-    return (<><PageHeader eyebrow="Business" title="New invoice" breadcrumbs={crumbs} /><EmptyNote>Billing is limited to finance administrators.</EmptyNote></>);
+    return (<><PageHeader eyebrow="Business" title="New invoice" breadcrumbs={crumbs} /><EmptyNote>Invoicing is limited to finance administrators.</EmptyNote></>);
   }
   const clients = (await listClients(userId, tenant)).map((c) => ({ id: c.id, name: c.name }));
   return (

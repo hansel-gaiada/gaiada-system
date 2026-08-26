@@ -182,7 +182,7 @@ const MIRRORED: Record<string, string> = {
 };
 
 const MODULES = [
-  "agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr",
+  "agency", "pm", "it", "invoice", "clients", "knowledge", "automation-console", "hr",
   "assistant", "search", "reports", "webdev", "social", "monitoring",
 ];
 

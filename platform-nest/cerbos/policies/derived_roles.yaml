@@ -654,7 +654,7 @@ derivedRoles:
       condition:
         match:
           expr: >-
-            request.principal.attr.perms.exists(g, g.key == "billing.invoice.read" && (
+            request.principal.attr.perms.exists(g, g.key == "invoice.read" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_invoice_create
@@ -662,7 +662,7 @@ derivedRoles:
       condition:
         match:
           expr: >-
-            request.principal.attr.perms.exists(g, g.key == "billing.invoice.create" && (
+            request.principal.attr.perms.exists(g, g.key == "invoice.create" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_invoice_update
@@ -670,7 +670,7 @@ derivedRoles:
       condition:
         match:
           expr: >-
-            request.principal.attr.perms.exists(g, g.key == "billing.invoice.update" && (
+            request.principal.attr.perms.exists(g, g.key == "invoice.update" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     - name: perm_invoice_delete
@@ -678,7 +678,7 @@ derivedRoles:
       condition:
         match:
           expr: >-
-            request.principal.attr.perms.exists(g, g.key == "billing.invoice.delete" && (
+            request.principal.attr.perms.exists(g, g.key == "invoice.delete" && (
               g.scopeType == "global" ||
               (g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)))
     # perm_knowledge_source_* — IAM-04-ROLLOUT-B12

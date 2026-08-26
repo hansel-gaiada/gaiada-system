@@ -30,7 +30,7 @@ import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
 import { scrubText } from "./scrub";
 import { notifyBestEffort, resolveClientRecipients } from "./client-notify";
-import { recordInvoiceRevision, snapshotInvoice } from "../modules/billing/invoice-revisions";
+import { recordInvoiceRevision, snapshotInvoice } from "../modules/invoice/invoice-revisions";
 
 const CONTRACT_SELECT = `
   SELECT k.id, k.client_id AS "clientId", cl.name AS "clientName", k.project_id AS "projectId",
@@ -427,7 +427,7 @@ export class ContractsController {
       const fullyPaid = confirmed >= total - 1;
       if (fullyPaid) {
         // IAM-GAP-02: this is the THIRD (and last) place invoices.status ever moves — outside the
-        // billing module entirely. Snapshot before the conditional UPDATE; only record a revision
+        // invoice module entirely. Snapshot before the conditional UPDATE; only record a revision
         // if the UPDATE actually matched a row (it may not: a `void` invoice must not be
         // resurrected to `paid` by a late confirmation, so "0 rows updated" is a legitimate no-op,
         // not an error, and must not fabricate a revision for a mutation that didn't happen).

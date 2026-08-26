@@ -10,7 +10,7 @@
 //      invoice row (already scoped to the caller's clients), never from the request body. A body field
 //      that could redirect a payment at another client's invoice does not exist to forget to validate.
 //   2. A CLAIM IS NOT A PAYMENT. Inserted `status='pending'` — explicitly, not by relying on the
-//      column default — and `confirmed_by`/`confirmed_at` are left NULL. Only staff (the billing
+//      column default — and `confirmed_by`/`confirmed_at` are left NULL. Only staff (the invoice
 //      module, `invoice` resource) can confirm, and only confirmed rows count toward the balance.
 //   3. NO STATUS SIDE EFFECT. Recording a payment does NOT touch `invoices.status`. A client cannot
 //      mark their own invoice paid, not even transitively.
@@ -69,7 +69,7 @@ export class PortalCommerceController {
 
   /** The client's statement. `draft` invoices are excluded — see PortalWorkspaceController.finance().
    *
-   *  NOT gated on the `billing` module. The staff BillingController is (`ModuleEnabledGuard("billing")`)
+   *  NOT gated on the `invoice` module. The staff InvoiceController is (`ModuleEnabledGuard("invoice")`)
    *  because invoicing is an optional capability for a company; but a client who HAS invoices must be
    *  able to read them regardless of whether someone later toggled the module off, and a portal that
    *  answered 403 for that reason would be indistinguishable from a permissions bug. Reads only, and
@@ -219,7 +219,7 @@ export class PortalCommerceController {
     await this.notifyInternal(tenantId, req.principal.userId, result.inv.clientId, "invoice.payment.recorded", {
       title: `Payment recorded by client — ${result.inv.currency} ${amount}`,
       body: "Awaiting your confirmation against the bank statement.",
-      href: `/billing/${invoiceId}`,
+      href: `/invoices/${invoiceId}`,
       entityType: "invoice_payment",
       entityId: id,
       severity: "info",

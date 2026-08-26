@@ -38,7 +38,7 @@ import { registerDriver } from "./modules/monitoring/drivers/registry";
 import { httpDriver, keywordDriver } from "./modules/monitoring/drivers/http";
 import { heartbeatDriver } from "./modules/monitoring/drivers/heartbeat";
 import { startMonitoringRunnerLoop } from "./modules/monitoring/runner";
-import { billingModule } from "./modules/billing";
+import { invoiceModule } from "./modules/invoice";
 import { clientsModule } from "./modules/clients";
 import { knowledgeModule } from "./modules/knowledge";
 import { automationConsoleModule } from "./modules/automation-console";
@@ -411,7 +411,7 @@ async function bootstrap(): Promise<void> {
   registerDriver(httpDriver);
   registerDriver(keywordDriver);
   registerDriver(heartbeatDriver);
-  registerModule(billingModule);
+  registerModule(invoiceModule);
   registerModule(clientsModule);
   registerModule(knowledgeModule);
   registerModule(automationConsoleModule);
