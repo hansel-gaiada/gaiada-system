@@ -39,6 +39,7 @@ const DEMO_USER_IC_ID = "gede-ic";  // IC (Individual Contributor) tier — memb
 // (search_staff HAS search.manage) — that half is still only provable with the existing `member`
 // identity, once it can reach dept-3 at all (see the login-mapping + org-structure note below).
 const DEMO_USER_SEARCH_STAFF_ID = "seo-staff";
+const DEMO_USER_MANAGER_ID = "dept-manager";  // manager tier — drives the GM console's narrowed view (GM-02b)
 // External-client tier. `client` is the ONLY role: `isClientOnly` keys off "holds no staff role", so
 // adding any second role here would silently turn this identity back into staff and stop exercising
 // the portal-only nav + landing redirect this identity exists to cover.
@@ -122,6 +123,25 @@ const ME_SEARCH_STAFF = {
   companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
   roles: [
     { role: "search_staff", scopeType: "company", scopeId: "co-agency" },
+  ],
+};
+
+// manager-tier identity (GM-02b). Exists so the GM console's NARROWED department-lead view is
+// drivable: it is gated on `reports.department.view`, which `manager` holds and `member`/`viewer` do
+// not, so neither ME (platform_admin — full access) nor ME_IC (member — refused) exercises it.
+//
+// ⚠ ONE role, `manager`, and nothing else. Adding a second grant "to make it more realistic" is how
+// a negative-permission fixture stops testing the boundary it was created for — the same warning
+// ME_CLIENT carries about not giving the demo client a second role.
+const ME_MANAGER = {
+  userId: DEMO_USER_MANAGER_ID,
+  name: "Rai Wijaya",
+  email: "manager@gaiada.com",
+  title: "SEO Manager",
+  assurance: "high",
+  companies: [{ id: "co-agency", name: "Gaia Digital Agency", type: "agency" }],
+  roles: [
+    { role: "manager", scopeType: "company", scopeId: "co-agency" },
   ],
 };
 
@@ -1951,6 +1971,7 @@ function mailThreadFor(mailLogId: string) {
 // Resolve the current demo identity based on the logged-in userId.
 function getCurrentDemoIdentity(userId: string) {
   if (userId === DEMO_USER_SEARCH_STAFF_ID) return ME_SEARCH_STAFF;
+  if (userId === DEMO_USER_MANAGER_ID) return ME_MANAGER;
   if (userId === DEMO_USER_IC_ID) return ME_IC;
   if (userId === DEMO_USER_CLIENT_ID) return ME_CLIENT;
   return ME;
@@ -1974,7 +1995,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a
   // finance path with a generic {ok:true}. A cheerful stub on THIS surface would render a balanced
   // trial balance and a clean reconciliation for a company that has neither.
-  const finance = financeDemo(method, p, url.searchParams);
+  const finance = financeDemo(method, p, url.searchParams, userId);
   if (finance) return finance;
 
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).

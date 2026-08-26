@@ -45,7 +45,11 @@ const TITLE = "Business Review";
 // shorthand still sitting in the query string.
 export default async function GmBusinessReviewPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const { deptId } = await params;
-  const ctx = await resolveGmTab(deptId);
+  // `companyGrainOnly` (GM-02b): this tab's entire subject is the company as a whole. A narrowed
+  // department lead is refused with the "company-only" wording — NOT the console-wide "limited to
+  // group executives", which would imply they should not be in the console at all, and NOT a
+  // department-scoped stand-in rendered under a company-titled heading.
+  const ctx = await resolveGmTab(deptId, { companyGrainOnly: true });
   if (!ctx.ok) return <GmTabRefusal reason={ctx.reason} title={TITLE} />;
 
   const sp = await searchParams;

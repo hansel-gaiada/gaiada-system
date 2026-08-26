@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Card, KpiTile, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { BackendPending } from "@/components/BackendPending";
 import { listClients, listProjects, type Client, type Project } from "@/lib/entities";
 import { resolveGmTab, GmTabRefusal } from "@/components/departments/gm/gmTab";
+import { GmMoneyCard } from "@/components/departments/gm/GmMoneyCard";
 
 type Params = Promise<{ deptId: string }>;
 
@@ -11,22 +11,25 @@ const TITLE = "Clients & Money";
 
 // GM console → Oversight → Clients & Money (GM-08).
 //
-// ── THE TWO HALVES ARE BLOCKED DIFFERENTLY, AND THAT IS THE POINT OF THIS FILE ────────────────────
-//   Portfolio half — REAL. `listClients` + `listProjects` are live; the join below is the GM-grain
-//                    question ("which clients do we actually have work in flight for?") that neither
-//                    /clients nor /project-management answers on its own.
-//   Money half     — NO BACKEND AT ALL. There is no tenant-level revenue, margin or month-to-date
-//                    spend endpoint. Only `GET engagements/:id/ledger` exists, which is
-//                    engagement-scoped and search-marketing-only. Owned by SM-17 (tenant-scope
-//                    remainder) / SM-22, PENDING in BFF contract §14.
+// ── BOTH HALVES ARE REAL NOW (GM-09 unblocked, 2026-08-26) ───────────────────────────────────────
+//   Portfolio half — `listClients` + `listProjects`. The join below is the GM-grain question
+//                    ("which clients do we actually have work in flight for?") that neither /clients
+//                    nor /project-management answers on its own.
+//   Money half     — the FINANCE module's books: `finance/profit-and-loss` and `finance/ar/aging`,
+//                    via `GmMoneyCard`.
 //
-// ⚠ THE MONEY HALF MUST NOT BE FAKED BY SUMMING ENGAGEMENT LEDGERS. That ledger is search-marketing
-// cost-to-serve at standard rates — ONE department's provider spend. Presenting it as the group's
-// money would be a confident wrong answer of exactly the class this program keeps catching, and a GM
-// would quote it in a review. Ruled OQ-3: the money half waits.
+// ⚠ THE HISTORY MATTERS, BECAUSE IT NEARLY WENT THE OTHER WAY. This half sat behind a
+// `BackendPending` banner for the whole build, blocked as "no tenant-level spend endpoint exists".
+// That was true, and the tempting fix — summing `engagements/:id/ledger` into a company figure — was
+// ruled out by OQ-3, because that ledger is ONE department's search-marketing provider spend and
+// presenting it as the group's money would have been a confident wrong answer a GM would quote in a
+// review. Waiting was correct: a real double-entry finance module landed, and revenue and margin now
+// come from the books at exactly the right grain. **Do not reintroduce the engagement-ledger
+// shortcut** — it answers a different question and always did.
 //
-// So: a `BackendPending` banner naming the owning tickets, and never a `0`. An empty list is a CLAIM,
-// and "we have no revenue" is not a claim this console is entitled to make.
+// Still true, and the reason `GmMoneyCard` leads with the `listPeriods` gate read: never a `0`. An
+// empty list is a CLAIM, and "we earned nothing" is not one this console may make on the strength of
+// a refused read or an unenabled module.
 
 /** A client is "active" when it has at least one project that is neither internal nor closed.
  *  Derived here rather than read off `client.status`: that field is the RECORD's lifecycle (a client
@@ -43,6 +46,13 @@ export default async function GmMoneyPage({ params }: { params: Params }) {
   const { deptId } = await params;
   const ctx = await resolveGmTab(deptId);
   if (!ctx.ok) return <GmTabRefusal reason={ctx.reason} title={TITLE} />;
+
+  // Month-to-date is the window for a money tab: a GM asking "are we making money?" on this surface
+  // means the month in progress, not the current calendar week the cockpit shows. Stated in the tile
+  // foot (`from → to`) rather than implied, so the two surfaces cannot be misread as disagreeing when
+  // they legitimately report different windows.
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 7)}-01`;
 
   // `listClients` swallows an unavailable endpoint into `[]` (`skipUnavailable`), so an empty client
   // list here cannot be distinguished from a dead endpoint — flagged rather than presented as fact.
@@ -82,11 +92,6 @@ export default async function GmMoneyPage({ params }: { params: Params }) {
 
   return (
     <>
-      <BackendPending
-        what="Group revenue, margin and month-to-date spend have no endpoint yet — only per-engagement cost ledgers exist, and one department's provider spend is not the group's money."
-        contract="GET /api/:t/… tenant-scoped spend (SM-17 / SM-22)"
-      />
-
       <Card
         title="Client portfolio"
         headerRight={<Link href="/clients" className="lux-btn lux-btn--ghost lux-btn--sm">Clients</Link>}
@@ -149,14 +154,18 @@ export default async function GmMoneyPage({ params }: { params: Params }) {
         )}
       </Card>
 
-      <Card title="Money" headerRight={<Link href="/billing" className="lux-btn lux-btn--ghost lux-btn--sm">Billing</Link>}>
-        <EmptyNote>
-          Revenue, margin and cost-to-serve are not shown because no tenant-level endpoint exists for
-          them — see the banner above. They are deliberately left blank rather than filled with the
-          SEO department&rsquo;s engagement ledger, which measures one department&rsquo;s provider
-          spend and would read as the group&rsquo;s cost.
-        </EmptyNote>
-      </Card>
+      {/* `variant="full"` adds the worst-payer list; `explainRefusal` is TRUE here (unlike the
+          cockpit, where the card simply disappears) because this is the tab a GM opens *to ask about
+          money* — silence in answer to that question reads as breakage, where on the home screen it
+          reads as tidiness. */}
+      <GmMoneyCard
+        userId={ctx.userId}
+        tenantId={ctx.tenantId}
+        from={monthStart}
+        to={today}
+        variant="full"
+        explainRefusal
+      />
     </>
   );
 }

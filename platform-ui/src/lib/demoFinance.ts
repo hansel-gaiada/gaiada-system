@@ -284,12 +284,34 @@ function financePath(p: string): string | null {
   return m ? m[1] : null;
 }
 
-export function financeDemo(method: string, p: string, _params: URLSearchParams): DemoResult | null {
+/** Demo identities that hold finance READ access.
+ *
+ *  Added because this store previously modelled NO authz at all — every identity, including a plain
+ *  member, was served the company's books. That is not a harmless fixture shortcut: the whole point of
+ *  DEMO_MODE is to drive negative-permission rendering in a browser, and a surface where the refusal
+ *  path is unreachable is a surface whose refusal path nobody has ever seen.
+ *
+ *  Mirrors the real holders of `finance.statement.read` per `role-permission-bundles.json` —
+ *  `company_admin`, `finance_manager`, `finance_staff`, `owner`, `platform_admin` — intersected with
+ *  the identities `demoFixtures.ts` actually wires. Today that is exactly `demo-hansel`
+ *  (platform_admin). `dept-manager` (manager), `gede-ic` (member) and `seo-staff` (search_staff) hold
+ *  none of them and are correctly refused. */
+const FINANCE_READERS = new Set(["demo-hansel"]);
+
+export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string): DemoResult | null {
   const tail = financePath(p);
   if (tail == null) return null;
   // Read-only: a write must fall through to whatever the caller does with an unhandled route,
   // rather than being answered with a cheerful {ok:true} this store cannot actually model.
   if (method.toUpperCase() !== "GET") return null;
+
+  // 403, not an empty shell. `lib/finance.ts`'s readers deliberately distinguish a refusal from
+  // absent data (`listPeriods` returns null on 403 and [] on 404, and its header explains why), so
+  // answering a refused caller with empty fixtures would defeat the one distinction that file exists
+  // to preserve — and would render a balanced, zeroed set of books for someone entitled to none.
+  if (userId !== undefined && !FINANCE_READERS.has(userId)) {
+    return { status: 403, json: { error: "forbidden" } };
+  }
 
   if (tail === "accounts") return ok(ACCOUNTS);
   // The general ledger for any account, so /finance/ledger is drivable in the build gate.

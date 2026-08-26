@@ -23,14 +23,39 @@ import { loginAsPersona } from "./personas";
 // two identities and a stale shared session would silently test the wrong one — the same reasoning
 // the "social"/"personas"/"pm-unified" projects carry in playwright.config.ts.
 
+// SEQUENCING NOTE — this file runs single-worker, set as `fullyParallel: false` on the `gm` project
+// in playwright.config.ts rather than as `mode: "serial"` here.
+//
+// NOT for shared state — every test here is independent (each signs in fresh, and the GM console is
+// read-only). The cause is dev-server COMPILE CONTENTION: `npm run e2e` runs `next dev`, which
+// compiles each route on first hit, and this suite touches ~8 distinct routes across two identities.
+// At the default 8 workers that first-compile storm pushed navigations past the config's timeouts and
+// 22 of 25 tests failed — while the same 25 passed at `--workers=2`.
+//
+// MEASURED, and the trigger was the app growing around this suite, not a change to it: these tests
+// passed 8-worker parallel on 2026-08-24, and failed on 2026-08-25 after the finance workspace and
+// LMS player landed (`next build` went 20s -> 72s over the same window). A suite whose green depends
+// on the worker count is not evidence — the same conclusion e2e/social-console.spec.ts reached for
+// its own (different) race. Trades wall clock for a result that means something.
+//
+// ⚠ `mode: "serial"` was the FIRST fix and was wrong: it makes every later test in the group SKIP
+// when one fails, so a single stale assertion reported "1 failed, 21 did not run" and hid whatever
+// else was broken. `fullyParallel: false` gives the identical single-worker sequencing with
+// independent pass/fail per test, which is what this suite actually needs.
 const GM = "/departments/dept-5"; // GM, co-agency (lib/org.ts's AGENCY_DEPARTMENTS[4] — appended last)
 const WEBDEV = "/departments/dept-1"; // Web Dev — the non-GM control
 
 const GM_TABS = ["review", "decisions", "depts", "money", "people"] as const;
 
-const REFUSAL = /limited to group executives/i;
+// Matches the CONSOLE-WIDE denial specifically, by its distinctive opening clause.
+//
+// It used to be /limited to group executives/i, which was too loose the moment GM-02b landed: the
+// narrowed-view banner and the company-only refusal BOTH contain that phrase for good reason (it is
+// the true boundary in all three cases), so the loose pattern reported a narrowed lead as denied.
+// Three states need three distinguishable strings, and the test must key on the one it means.
+const REFUSAL = /the GM console reads company-grain figures/i;
 
-async function login(page: Page, context: BrowserContext, persona: "superadmin" | "member") {
+async function login(page: Page, context: BrowserContext, persona: "superadmin" | "member" | "manager") {
   await loginAsPersona(page, persona);
   // Fresh DEMO_MODE sessions default to `companies[0]` (co-holding, a HOLDING that seeds no
   // departments at all — so every `/departments/*` route 404s until this is set). Setting the tenant
@@ -93,14 +118,16 @@ test.describe("every GM tab renders under GM", () => {
     });
   }
 
-  test("the money tab names its missing backend instead of rendering a zero", async ({ page, context }) => {
+  test("the money tab renders real figures, and no longer claims a missing backend", async ({ page, context }) => {
     await login(page, context, "superadmin");
     await page.goto(`${GM}/money`);
-    // OQ-3: the money half must stay honestly absent. A `0` here would be read as "no revenue"
-    // rather than "not built", and summing the SEO engagement ledger into a group figure would be
-    // worse still.
-    await expect(page.getByText(/backend pending/i)).toBeVisible();
-    await expect(page.getByText(/SM-17/)).toBeVisible();
+    // ⚠ THIS EXPECTATION IS INVERTED FROM ITS ORIGINAL, DELIBERATELY. It used to assert a
+    // `BackendPending` banner naming SM-17/SM-22, because no tenant-level money endpoint existed and
+    // OQ-3 forbade faking one from the SEO engagement ledger. A real finance module landed
+    // (2026-08-26), so the honest state changed and the assertion changed with it. The RULE it was
+    // protecting is unchanged and still asserted below: never a fabricated zero.
+    await expect(page.getByText("Revenue")).toBeVisible();
+    await expect(page.getByText(/SM-17/)).toHaveCount(0);
   });
 });
 
@@ -153,5 +180,118 @@ test.describe("toolkit membership — a GM tab is not a generic route", () => {
     await page.goto(WEBDEV);
     await expect(page.getByText("The business")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Command" })).toHaveCount(0);
+  });
+});
+
+test.describe("the narrowed department-lead view (GM-02b)", () => {
+  // A `manager` holds `reports.department.view` but NOT `reports.company.view`. The server narrows
+  // department grain to the led subtree, which is why the UI never needs to identify a lead — and why
+  // this tier gets the console at all instead of the refusal a member gets.
+
+  test("gets the console, WITHOUT the company tier, and is told so", async ({ page, context }) => {
+    await login(page, context, "manager");
+    await page.goto(GM);
+
+    // In: the console renders and the department tier is there.
+    await expect(page.getByRole("heading", { name: "Departments" })).toBeVisible();
+    await expect(page.getByText(REFUSAL)).toHaveCount(0);
+
+    // THE distinction. The company card must be ABSENT — not empty, not zeroed, not a refusal note
+    // sitting where numbers go. A department-scoped figure under a company heading is the single
+    // misreading this console exists to prevent.
+    await expect(page.getByText("The business")).toHaveCount(0);
+    // And the absence is stated rather than left for the reader to notice.
+    await expect(page.getByText(/scoped to the departments you lead/i)).toBeVisible();
+  });
+
+  test("can still switch period — the toggle moves when the company card is gone", async ({ page, context }) => {
+    await login(page, context, "manager");
+    // The toggle normally rides the company card. If it did not move, a narrowed reader would have no
+    // route to a month view except hand-editing the URL.
+    await page.goto(GM);
+    await expect(page.getByRole("link", { name: "Month" })).toBeVisible();
+    await page.getByRole("link", { name: "Month" }).click();
+    await expect(page.getByText(/this month/i)).toBeVisible();
+  });
+
+  test("the Business Review refuses with the COMPANY-ONLY wording, not the console-wide one", async ({ page, context }) => {
+    await login(page, context, "manager");
+    await page.goto(`${GM}/review`);
+    // The wording matters: "limited to group executives" alone would imply they should not be in the
+    // console at all, when in fact every other tab is theirs.
+    await expect(page.getByText(/reports on the company as a whole/i)).toBeVisible();
+    await expect(page.getByText(/the rest of the GM console is scoped to the departments you lead/i)).toBeVisible();
+  });
+
+  for (const tab of ["decisions", "depts", "money", "people"] as const) {
+    test(`the ${tab} tab is available to a narrowed lead`, async ({ page, context }) => {
+      await login(page, context, "manager");
+      await page.goto(`${GM}/${tab}`);
+      await expect(page.getByText(REFUSAL)).toHaveCount(0);
+      await expect(page.getByText(/page not found/i)).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Oversight" })).toBeVisible();
+    });
+  }
+});
+
+test.describe("the money tier (GM-09)", () => {
+  // Unblocked 2026-08-26: a real double-entry finance module landed, so revenue and margin now come
+  // from the ledger's own P&L totals. The blocked-era `BackendPending` banner is gone.
+
+  test("the cockpit answers 'are we making money?' from the books", async ({ page, context }) => {
+    await login(page, context, "superadmin");
+    await page.goto(GM);
+    await expect(page.getByText("Revenue")).toBeVisible();
+    await expect(page.getByText("Net margin")).toBeVisible();
+    await expect(page.getByText("Overdue receivables")).toBeVisible();
+    // The old blocked-state banner must be GONE — leaving it would tell a GM the figures beside it
+    // are unavailable while they are being rendered.
+    await expect(page.getByText(/SM-17/)).toHaveCount(0);
+  });
+
+  test("money sits BELOW the operating tiers, not above them", async ({ page, context }) => {
+    await login(page, context, "superadmin");
+    await page.goto(GM);
+    // Amazon's cadence rule, and the reason the card is ordered where it is: inputs and outputs
+    // first, financials last. Asserted on the CARD HEADINGS rather than on raw page text — the first
+    // attempt searched `main`'s innerText for "Departments" and matched the breadcrumb
+    // ("Home / Organization / Departments / GM"), which sits above everything and made the assertion
+    // meaningless. Headings are the thing being ordered, so they are the thing to assert on.
+    const headings = await page.locator("h2, h3").allTextContents();
+    const at = (t: string) => headings.findIndex((h) => h.trim() === t);
+    expect(at("The business"), "the business card must render").toBeGreaterThanOrEqual(0);
+    expect(at("Money"), "the money card must render").toBeGreaterThanOrEqual(0);
+    expect(at("Departments"), "the departments card must render").toBeGreaterThanOrEqual(0);
+    expect(at("The business")).toBeLessThan(at("Money"));
+    expect(at("Departments")).toBeLessThan(at("Money"));
+  });
+
+  test("the money tab shows the full view, month-to-date", async ({ page, context }) => {
+    await login(page, context, "superadmin");
+    await page.goto(`${GM}/money`);
+    await expect(page.getByText("Revenue")).toBeVisible();
+    await expect(page.getByText("Client portfolio")).toBeVisible();
+  });
+
+  test("a narrowed department lead sees NO money — finance is a separate boundary", async ({ page, context }) => {
+    // THE negative that matters. `manager` holds `reports.department.view` (so the console opens)
+    // but NOT `finance.statement.read` — the finance holders are company_admin, finance_manager,
+    // finance_staff, owner and platform_admin. Folding money into the console's access state would
+    // have handed every department lead the company's P&L.
+    await login(page, context, "manager");
+    await page.goto(GM);
+    await expect(page.getByRole("heading", { name: "Departments" })).toBeVisible();
+    await expect(page.getByText("Net margin")).toHaveCount(0);
+    await expect(page.getByText("Overdue receivables")).toHaveCount(0);
+  });
+
+  test("and is told why on the tab, where they actually asked", async ({ page, context }) => {
+    await login(page, context, "manager");
+    await page.goto(`${GM}/money`);
+    // Silence is right on the home screen and wrong here: this is the tab you open TO ask about
+    // money, so the refusal is stated rather than rendered as an absence.
+    await expect(page.getByText(/limited to finance and administrator roles/i)).toBeVisible();
+    // The rest of the tab still works for them.
+    await expect(page.getByText("Client portfolio")).toBeVisible();
   });
 });

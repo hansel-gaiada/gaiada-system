@@ -5,6 +5,7 @@ import {
   GM_TIER1_LIMIT,
   isGmDept,
   canReadGmConsole,
+  gmAccessFor,
   parseGmPeriodKind,
 } from "./gm";
 import { toolkitFor, deptTabs, hasBespokeToolkit } from "./deptToolkits";
@@ -41,11 +42,13 @@ describe("canReadGmConsole", () => {
     expect(canReadGmConsole(withRole("member"), "c1")).toBe(false);
   });
 
-  it("refuses a department manager", () => {
-    // OQ-1's narrowed department-head view is GM-02b and is NOT built (see lib/gm.ts): until the UI
-    // can identify a unit lead, a manager gets the same honest refusal a member does. When GM-02b
-    // lands this expectation changes deliberately — it is not an accident to be "fixed" quietly.
-    expect(canReadGmConsole(withRole("manager"), "c1")).toBe(false);
+  it("ADMITS a department manager — narrowed (GM-02b landed; this expectation changed on purpose)", () => {
+    // This assertion was the inverse until GM-02b. The original reasoning was "the UI cannot identify
+    // a unit lead, so refuse" — wrong: `reports.department.view` is narrowed by the SERVER to the led
+    // subtree, so the UI never needs to identify anyone. Flipped deliberately, recorded here so the
+    // change reads as a decision rather than a regression someone should "fix" back.
+    expect(canReadGmConsole(withRole("manager"), "c1")).toBe(true);
+    expect(gmAccessFor(withRole("manager"), "c1")).toBe("narrowed");
   });
 
   it("admits the tenant's own administrator", () => {
@@ -64,6 +67,41 @@ describe("canReadGmConsole", () => {
     // The console's subject is the ACTIVE company's business, so switching the tenant in the URL
     // must not carry the grant across.
     expect(canReadGmConsole(withRole("company_admin"), "c2")).toBe(false);
+  });
+});
+
+describe("gmAccessFor (GM-02b — three states, not two)", () => {
+  it("gives a company-grain holder FULL access", () => {
+    expect(gmAccessFor(withRole("company_admin"), "c1")).toBe("full");
+    const admin = { ...base, roles: [{ role: "platform_admin", scopeType: "global", scopeId: null }] } as Me;
+    expect(gmAccessFor(admin, "c1")).toBe("full");
+  });
+
+  it("gives a department-grain holder NARROWED access", () => {
+    // The tiers that hold `reports.department.view` without the company one.
+    for (const role of ["manager", "hr_staff", "hr_manager", "reports_staff", "reports_manager", "org_unit_lead"]) {
+      expect(gmAccessFor(withRole(role), "c1"), `${role} should be narrowed`).toBe("narrowed");
+    }
+  });
+
+  it("gives everyone else NONE", () => {
+    // `member` and `viewer` matter most: they are the baseline grants almost everybody has, and the
+    // narrowed tier must not accidentally admit them. `search_staff`/`social_staff` are module tiers
+    // with no reporting reach at all.
+    for (const role of ["member", "viewer", "search_staff", "social_staff", "it_admin", "agency_approver"]) {
+      expect(gmAccessFor(withRole(role), "c1"), `${role} should be refused`).toBe("none");
+    }
+  });
+
+  it("prefers FULL when a principal holds both capabilities", () => {
+    // Order is the mechanism: checking the department capability first would narrow a company_admin,
+    // who holds both, and quietly remove their company tier.
+    expect(gmAccessFor(withRole("company_admin"), "c1")).toBe("full");
+  });
+
+  it("stays company-scoped for the narrowed tier too", () => {
+    // A manager of one tenant must not read another tenant's departments by switching the URL.
+    expect(gmAccessFor(withRole("manager"), "c2")).toBe("none");
   });
 });
 

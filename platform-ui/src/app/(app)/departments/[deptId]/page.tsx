@@ -9,7 +9,7 @@ import { listPmTasks, listMilestones, listProjectStatuses } from "@/lib/pm";
 import { listWorkActivity, objectLabel, activityHref, humanizeVerb, actorLabel } from "@/lib/activity";
 import { listClaudeSeats, mySeat, launcherSeatProps } from "@/lib/claudeSeats";
 import { toolkitFor } from "@/lib/deptToolkits";
-import { canReadGmConsole, isGmDept, parseGmPeriodKind } from "@/lib/gm";
+import { gmAccessFor, canReadGmMoney, isGmDept, parseGmPeriodKind } from "@/lib/gm";
 import { GmCockpit } from "@/components/departments/gm/GmCockpit";
 import { GmAccessDenied } from "@/components/departments/gm/GmAccessDenied";
 import { Card } from "@/components/ui";
@@ -61,7 +61,10 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
   // `reports.company.view` and why a refusal renders a page rather than a 404.
   if (isGmDept(dept.name)) {
     const { period } = await searchParams;
-    if (!canReadGmConsole(me, tenant)) return <GmAccessDenied />;
+    // Three states, not two (GM-02b): a department lead gets the console NARROWED to the units the
+    // server lets them read, rather than the same refusal a member gets.
+    const access = gmAccessFor(me, tenant);
+    if (access === "none") return <GmAccessDenied />;
     return (
       <GmCockpit
         userId={userId}
@@ -69,6 +72,8 @@ export default async function DepartmentHomePage({ params, searchParams }: { par
         deptId={deptId}
         periodKind={parseGmPeriodKind(period)}
         anchorDate={new Date().toISOString().slice(0, 10)}
+        access={access}
+        canReadMoney={canReadGmMoney(me, tenant)}
       />
     );
   }

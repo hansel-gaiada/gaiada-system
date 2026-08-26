@@ -30,16 +30,28 @@
 // department from the tree in order to hide a console would lie about the org chart. Content is
 // gated; the tree stays true.
 //
-// ── OQ-1 (narrowed department-head view) IS NOT IMPLEMENTED HERE, ON PURPOSE ──────────────────────
-// The ratified answer is that a department head SHOULD get a narrowed console (their own
-// department's row plus the company north stars). It is not built yet because the UI cannot
-// currently identify a department lead: `Me` (`lib/platform.ts`) carries `userId/name/email/title/
-// assurance/companies/roles` and nothing about positions or unit leadership, and `positions.is_lead`
-// is display-and-backfill only on the backend (the P2-05 reconciler that would turn
-// `position_roles` into real grants is NOT BUILT — see platform-nest `seed/positions.ts`).
-// Guessing at lead identity here would ship a leak, so the narrowed tier is tracked as GM-02b with
-// an explicit prerequisite: a lead/position signal on `/api/me` or a positions read. Until then a
-// department head gets the same honest refusal a member does.
+// ── OQ-1 — THE NARROWED DEPARTMENT-HEAD VIEW (GM-02b) ────────────────────────────────────────────
+// This was originally deferred as "blocked: the UI cannot identify a department lead" — `Me` carries
+// no position or unit-leadership signal, and `positions.is_lead` is display-only server-side with the
+// P2-05 reconciler unbuilt. **That framing was wrong, and the capability declarations say why.**
+//
+// The UI never needs to identify a lead. `reports.department.view`'s own comment in `CAPABILITIES`
+// reads: "department-grain (Cerbos `read_department`) — **SERVER narrows to the led unit subtree**".
+// So the correct implementation is to ask for department grain and let Cerbos decide which units come
+// back — which is precisely the standing rule (Cerbos is the authority, this file is a mirror, never
+// a second opinion). Identifying the lead in the browser would have been the second opinion.
+//
+// Hence three states, not two:
+//   "full"     — holds `reports.company.view` (platform_admin, company_admin). Company tier + the
+//                department tier.
+//   "narrowed" — holds `reports.department.view` but NOT the company one (manager, hr_staff,
+//                hr_manager, reports_staff/manager, org_unit_lead). **No company tier at all**, and
+//                the department tier carries whatever the server chose to return.
+//   "none"     — everyone else (member, viewer, search_staff, social_staff, it_*, agency_approver).
+//
+// Two locks on the narrowed tier, deliberately: the UI mirror (`reports.department.view`, which
+// `member` and `viewer` do NOT hold) and the server's own subtree narrowing. Either alone would be
+// enough for correctness; both together mean a mirror drift cannot become a data leak.
 import { can } from "@/lib/rbac";
 import { deptSlug } from "@/lib/deptToolkits";
 import type { Me } from "@/lib/platform";
@@ -53,12 +65,53 @@ export function isGmDept(deptName: string): boolean {
   return deptSlug(deptName) === GM_SLUG;
 }
 
-/** The one gate. Company-scoped on purpose: the console's subject is the ACTIVE company's business,
- *  so a `company_admin` of one tenant must not read another's cockpit by switching the URL. Callers
- *  pass the active tenant; `platform_admin`'s global grant satisfies `scopeCovers` either way. */
-export function canReadGmConsole(me: Me, companyId?: string | null): boolean {
-  return can(me, "reports.company.view", companyId);
+/** How much of the GM console this principal may read. See the OQ-1 block above. */
+export type GmAccess = "full" | "narrowed" | "none";
+
+/** THE gate. Company-scoped on purpose: the console's subject is the ACTIVE company's business, so a
+ *  `company_admin` of one tenant must not read another's cockpit by switching the URL. Callers pass
+ *  the active tenant; `platform_admin`'s global grant satisfies `scopeCovers` either way.
+ *
+ *  Order matters: the company tier is checked FIRST, so a principal holding both capabilities gets
+ *  "full" rather than being narrowed by the more specific-sounding check. */
+export function gmAccessFor(me: Me, companyId?: string | null): GmAccess {
+  if (can(me, "reports.company.view", companyId)) return "full";
+  if (can(me, "reports.department.view", companyId)) return "narrowed";
+  return "none";
 }
+
+/** May this principal read company money (GM-09)?
+ *
+ *  SEPARATE from `gmAccessFor`, deliberately. Finance is its own Cerbos boundary
+ *  (`finance_statement:read`) and its own per-tenant module — a `company_admin` holds both, but a
+ *  narrowed department lead holds the reporting one and NOT the finance one. Folding money into the
+ *  console's access state would have handed every dept lead the company's P&L.
+ *
+ *  ⚠ This is a mirror of two of five real holders. `finance.statement.read` is held by
+ *  `company_admin`, `finance_manager`, `finance_staff`, `owner` and `platform_admin`, but the last
+ *  three have no member in this file's `Role` union at all, so they resolve to zero capabilities
+ *  here — an estate-wide gap affecting the whole `/finance` console, reported rather than widened
+ *  inside a GM ticket. The server still authorizes correctly for them; only this mirror is short,
+ *  and the card degrades to its honest refusal state rather than to a wrong number. */
+export function canReadGmMoney(me: Me, companyId?: string | null): boolean {
+  return can(me, "finance.statement.view", companyId);
+}
+
+/** Convenience for the many call sites that only need "may they open the console at all". */
+export function canReadGmConsole(me: Me, companyId?: string | null): boolean {
+  return gmAccessFor(me, companyId) !== "none";
+}
+
+/** Refusal text for a tab that is company-grain by nature and therefore has nothing to show a
+ *  narrowed principal. Distinct from `GM_DENIED_REASON`: this reader HAS the console, just not this
+ *  tab, and telling them "limited to group executives" would imply they should not be here at all. */
+export const GM_COMPANY_ONLY_REASON =
+  "This view reports on the company as a whole, which is limited to group executives. The rest of the GM console is scoped to the departments you lead.";
+
+/** Banner text for the narrowed console — stated, never implied. A department-scoped figure that
+ *  looks like a company figure is the whole failure mode this console is built to avoid. */
+export const GM_NARROWED_NOTICE =
+  "Scoped to the departments you lead. Company-wide figures are limited to group executives, so they are absent here rather than partial.";
 
 /** The refusal text. Names the actual boundary rather than saying "no access" — same rule the
  *  reports grain pages follow with `ReportAccessDenied`. */

@@ -1,6 +1,11 @@
 # GM console — foundation blueprint
 
-**Status:** `PLANNED` — design only, no code written. · **Scoped:** 2026-08-24
+**Status:** `PROTOTYPED` — GM-01..08, GM-02b and GM-10 are built and driven in a browser against a
+DEMO_MODE build; **nothing here has been driven against live platform-nest**, which is the whole gap
+between PROTOTYPED and DEV-VERIFIED. **All of GM-01..10 is built**, including the money tier — GM-09 was
+unblocked on 2026-08-26 when a real double-entry finance module landed (see §5). · **Scoped:** 2026-08-24 · **Built:** 2026-08-24/25
+**Live task tracking:** [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md)
+— that file is the status authority; this one is the design. Where they disagree, the tracker is right.
 **Subject:** the **Office of the GM** — a department console for `d-gm`, the oversight department at
 the root of the agency's org tree.
 
@@ -175,13 +180,19 @@ never sends, renders a confident wrong answer, and nothing throws. So this secti
 now, with no new backend.** That is a genuinely good position, and it is mostly thanks to
 `reports/overview`.
 
-### Blocked — the money tier
+### The money tier — WAS blocked, unblocked 2026-08-26
 
 | Want | Reality |
 |---|---|
-| Tenant-level MTD spend / margin | **No such endpoint.** Only `GET engagements/:id/ledger` exists (engagement-scoped). Listed PENDING in §14, owned by **SM-17 (tenant-scope remainder) / SM-22**. |
-| Revenue / receivables | `/billing` is `company.manage`-gated; its read surface is **not audited in this doc** — treat as unverified until someone drives it. |
-| Monitoring health tile | §20: **UI prototyped, backend NOT started — every row PENDING.** A GM tile here must render the `BackendPending` shell, never a zero. |
+| Revenue, margin | ✅ `GET /api/:t/finance/profit-and-loss` — the ledger's own `TOTAL_REVENUE` / `TOTAL_EXPENSE` / `NET_PROFIT` rows, from Postgres `finance_profit_and_loss()`. The console reads those codes and never re-sums the lines, so it cannot disagree with `/finance`. |
+| Receivables | ✅ `GET /api/:t/finance/ar/aging` — buckets + `totalOutstanding` per customer. |
+| Monitoring health tile | ❌ §20: **UI prototyped, backend NOT started.** Still deliberately not attempted; a tile here must render `BackendPending`, never a zero. |
+
+⚠ **The superseded plan is left visible on purpose.** This section used to read "NO BACKEND AT ALL …
+owned by SM-17/SM-22", and the tempting shortcut was to sum `engagements/:id/ledger` — one
+department's search-marketing provider spend — into a company figure. That was ruled out (OQ-3) and
+the half shipped behind an honest banner instead. **Do not reintroduce the shortcut**: it answers a
+different question, and the books now answer the real one.
 
 **Ruling:** ship the operational tiers first and let the money tier arrive last. Amazon's own rule —
 *financial metrics at the end of the deck* — makes this sequencing principled rather than an excuse.
@@ -209,11 +220,31 @@ Design:
   gate that hides a page the server would serve reads as broken, not as forbidden.
 - **Do NOT gate the sidebar row.** The row comes from the org structure; hiding a department from the
   tree to hide a console would lie about the org chart. Gate the *content*.
-- **Open question for the owner (OQ-1):** should a **department head** (Azlan, Rai, Monic, Radit) see
-  the GM console read-only — their own department's row plus the company north stars — or nothing?
-  Real GM cockpits in role-based ERPs (NetSuite's executive / managerial / operational tiers) give
-  managers a *narrowed* version rather than a locked door. Recommend: **narrowed**, department-grain
-  only, which the §8 matrix can already express. Not assumed — it needs a ruling.
+- **OQ-1 — RULED AND BUILT (2026-08-25, GM-02b).** A **department head** gets the console
+  **narrowed**: no company tier at all, and the department tier carries whatever the server returns.
+  Three states, `gmAccessFor` in `lib/gm.ts`:
+
+  | Access | Held by | Gets |
+  |---|---|---|
+  | `full` | `reports.company.view` — `platform_admin`, `company_admin` | company tier + department tier |
+  | `narrowed` | `reports.department.view` without the company one — `manager`, `hr_staff`, `hr_manager`, `reports_staff/manager`, `org_unit_lead` | department tier only, server-narrowed to the led subtree |
+  | `none` | everyone else — `member`, `viewer`, `search_staff`, `social_staff`, `it_*`, `agency_approver` | the refusal page |
+
+  ⚠ **This section's original draft said the narrowed tier was blocked because "the UI cannot identify
+  a department lead". That was wrong, and the correction is the most reusable thing in this document.**
+  The UI never needs to identify a lead. `reports.department.view`'s own declaration in `CAPABILITIES`
+  reads *"SERVER narrows to the led unit subtree"* — so the console asks for department grain and
+  Cerbos decides which units come back. Determining leadership in the browser would have been exactly
+  the "second opinion" the mirror rule forbids. The blocker existed only because the wrong mechanism
+  was reached for.
+
+  Two locks on the narrowed tier, deliberately: the UI mirror (`reports.department.view`, which
+  `member` and `viewer` do **not** hold) and the server's own narrowing. Either alone is sufficient
+  for correctness; both together mean a mirror drift cannot become a data leak.
+
+  A company-grain-only tab (the Business Review) declares `companyGrainOnly` and refuses a narrowed
+  lead with its **own** wording — never the console-wide "limited to group executives", which would
+  imply they do not belong in the console at all when every other tab is theirs.
 
 Related: this is squarely `role-bundles-overstate-reach` / `perm-mirror-cannot-express-attr-gates`
 territory. The GM console's gate is **attribute-shaped** ("company grain, own tenant"), so a flat
@@ -290,7 +321,15 @@ almost entirely composition of reads that already work.
 
 ## 11 · Open questions for the owner
 
-- **OQ-1** — do department heads get a narrowed GM console (recommend: yes, department-grain only), or none?
+- ~~**OQ-1**~~ — **RULED + BUILT 2026-08-25:** narrowed, department-grain only. See §6.
 - **OQ-2** — is the Business Review's period **week** or **month** by default? Amazon's cadence is weekly; this estate's report periods seal on both.
-- **OQ-3** — `Clients & Money`: does GM see **cost-to-serve** (which the SEO ledger already computes at standard rates) before real revenue exists, or does the whole tab wait for SM-17?
+- ~~**OQ-3**~~ — **RESOLVED 2026-08-26 by events, not by a compromise.** The question was whether the
+  GM should see search-marketing cost-to-serve before real revenue existed. It never had to be
+  answered: a double-entry finance module landed and revenue, margin and receivables became readable
+  from the BOOKS at company grain. The engagement ledger — the thing this question was about — is
+  still the wrong source for a company figure and is still not used. **The lesson is about the
+  waiting, not the answer:** the money half sat behind an honest `BackendPending` banner for the whole
+  build rather than being filled with the nearest available number, and that position stayed correct
+  while the estate changed underneath it. Manufacturing a figure would have left the console
+  disagreeing with the general ledger, with people already quoting it.
 - **OQ-4** — nav: hoist GM inside `Departments`, or give it its own pinned single-row group?

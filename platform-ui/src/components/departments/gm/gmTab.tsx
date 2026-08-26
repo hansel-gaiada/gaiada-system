@@ -5,7 +5,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { getDepartment } from "@/lib/departments";
 import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { canReadGmConsole, isGmDept } from "@/lib/gm";
+import { gmAccessFor, isGmDept, GM_COMPANY_ONLY_REASON, type GmAccess } from "@/lib/gm";
 import { GmAccessDenied } from "./GmAccessDenied";
 
 // The two checks every GM tab page runs, in one place (GM-02).
@@ -21,10 +21,22 @@ import { GmAccessDenied } from "./GmAccessDenied";
 // executive capability, which would imply the tab would otherwise be there.
 
 export type GmTabContext =
-  | { ok: true; userId: string; tenantId: string; deptId: string }
-  | { ok: false; reason: "not-gm" | "denied" };
+  | { ok: true; userId: string; tenantId: string; deptId: string; access: Exclude<GmAccess, "none"> }
+  | { ok: false; reason: GmRefusal };
 
-export async function resolveGmTab(deptId: string): Promise<GmTabContext> {
+/** The three ways a GM tab can decline to render. Kept as one union so no tab can invent a fourth
+ *  wording for a boundary that already has one. */
+export type GmRefusal = "not-gm" | "denied" | "company-only";
+
+export interface GmTabOptions {
+  /** Set by a tab whose entire subject is the company as a whole. Such a tab refuses a `narrowed`
+   *  principal with `company-only` instead of rendering an empty or department-scoped stand-in — a
+   *  department figure sitting in a company-titled view is the exact confusion this console exists
+   *  to prevent. */
+  companyGrainOnly?: boolean;
+}
+
+export async function resolveGmTab(deptId: string, opts: GmTabOptions = {}): Promise<GmTabContext> {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
@@ -35,14 +47,19 @@ export async function resolveGmTab(deptId: string): Promise<GmTabContext> {
   if (!dept) notFound();
 
   if (!isGmDept(dept.name)) return { ok: false, reason: "not-gm" };
-  if (!canReadGmConsole(me, tenant)) return { ok: false, reason: "denied" };
-  return { ok: true, userId, tenantId: tenant, deptId };
+  const access = gmAccessFor(me, tenant);
+  if (access === "none") return { ok: false, reason: "denied" };
+  // A company-grain-only tab (the Business Review) has nothing to show a narrowed principal, and
+  // `opts.companyGrainOnly` is how it says so — rather than each such tab re-deriving the rule.
+  if (access === "narrowed" && opts.companyGrainOnly) return { ok: false, reason: "company-only" };
+  return { ok: true, userId, tenantId: tenant, deptId, access };
 }
 
 /** Renders the refusal for a non-ok context. `title` is the tab's own name so the card still reads
  *  as the surface the user asked for, rather than an anonymous error. */
-export function GmTabRefusal({ reason, title }: { reason: "not-gm" | "denied"; title: string }) {
+export function GmTabRefusal({ reason, title }: { reason: GmRefusal; title: string }) {
   if (reason === "denied") return <GmAccessDenied />;
+  if (reason === "company-only") return <GmAccessDenied reason={GM_COMPANY_ONLY_REASON} />;
   return (
     <Card title={title}>
       <EmptyNote>{title} is part of the GM console and isn&apos;t configured for this department.</EmptyNote>

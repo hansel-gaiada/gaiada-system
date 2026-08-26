@@ -269,6 +269,22 @@ export const CAPABILITIES = [
   "reports.project.view",     // project-grain (Cerbos `read_project`)
   "reports.department.view",  // department-grain (Cerbos `read_department`) — SERVER narrows to the led unit subtree
   "reports.company.view",     // company-grain (Cerbos `read_company`) — exec/company_admin ONLY; §8 excludes dept lead AND HR ("person data yes, company strategy no")
+
+  // ── finance (GM-09) ────────────────────────────────────────────────────────────────────────────
+  // Mirrors `finance.statement.read` / `finance.ar.read` from platform-nest's permission catalog.
+  // Holders per `role-permission-bundles.json` (regenerated 2026-08-26 and byte-identical to the
+  // committed copy, so this is the live grant set, not a stale one): `company_admin`,
+  // `finance_manager`, `finance_staff`, `owner`, `platform_admin`.
+  //
+  // ⚠ ONLY `company_admin` and `platform_admin` are mirrored below, because they are the only two of
+  // those five that EXIST in this file's `Role` union. `finance_staff`, `finance_manager` and `owner`
+  // are real Cerbos roles with no `Role` member at all — the same defect class as the Gap 1/2/3
+  // comments on the union above, which means those principals currently resolve to ZERO capabilities
+  // in the UI. That is an estate-wide gap affecting the whole `/finance` console, not just the GM
+  // money tier, so it is REPORTED rather than quietly widened here: adding three roles to the union
+  // changes what every capability check in the app returns for them, and that is its own ticket.
+  "finance.statement.view",   // P&L / balance sheet / trial balance (Cerbos `finance_statement:read`)
+  "finance.ar.view",          // receivables + aging (Cerbos `finance_ar:read`)
   "reports.period.seal",      // seal / amend / pin a period (Cerbos `seal`/`amend`/`pin` on report_period) — exec/company_admin only; dept lead ⛔
   "reports.facts.admin",      // rebuild the fact fabric (Cerbos `recompute` on report_admin) — exec/company_admin only; a lead who re-derives a window moves their own team's appraisal inputs
   "reports.ops.poll",         // the n8n reminder/escalation reads (Cerbos `pending_reminders`/`missed_by_unit`) — company_admin ONLY, not a human console
@@ -347,6 +363,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // company-grain / seal / recompute rows read "exec"; resource_report_period.yaml's header
     // establishes that §6.2's "lead" there means the COMPANY's lead, not a per-department manager).
     ...REPORT_READS, ...EXEC_ONLY_REPORTS, "reports.ops.poll", "checkin.read", "checkin.excuse", "appraisal.read",
+    // GM-09: the tenant's own administrator holds the finance read tier in the bundles.
+    "finance.statement.view", "finance.ar.view",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the

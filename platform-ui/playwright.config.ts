@@ -80,6 +80,13 @@ export default defineConfig({
       // file are the only browser-level proof that a plain member cannot read company-grain figures
       // through the GM console, and a stale staff session would turn them all green vacuously.
       name: "gm",
+      // Single-worker for this project. The suite touches ~8 routes across three identities, and
+      // under `next dev` (which compiles each route on first hit) the default worker count produced a
+      // first-compile storm that timed out 22 of 25 tests — while the same 25 passed at
+      // `--workers=2`. Not shared state, and not a product defect: the trigger was the app growing
+      // around the suite (`next build` 20s -> 72s over one day). `fullyParallel: false` rather than
+      // an in-file `mode: "serial"`, which cascades skips onto every later test when one fails.
+      fullyParallel: false,
       use: { ...devices["Desktop Chrome"] },
       testMatch: /gm-console\.spec\.ts/,
     },

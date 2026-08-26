@@ -4,8 +4,9 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { KpiTiles } from "@/components/reports/charts/KpiTiles";
 import { getReportOverview, isForbidden, isRangeTooLarge } from "@/lib/reports-data";
 import type { ReportOverview, ReportOverviewScope } from "@/lib/reports-data";
-import { GM_PERIOD_KINDS, GM_TIER1_LIMIT, type GmPeriodKind } from "@/lib/gm";
+import { GM_PERIOD_KINDS, GM_TIER1_LIMIT, GM_NARROWED_NOTICE, type GmAccess, type GmPeriodKind } from "@/lib/gm";
 import { GmProvenance } from "./GmProvenance";
+import { GmMoneyCard } from "./GmMoneyCard";
 import { GmDeptStrip } from "./GmDeptStrip";
 
 // The GM cockpit — Home of the GM console (GM-03).
@@ -100,17 +101,30 @@ export async function GmCockpit({
   deptId,
   periodKind,
   anchorDate,
+  access,
+  canReadMoney,
 }: {
   userId: string;
   tenantId: string;
   deptId: string;
   periodKind: GmPeriodKind;
+  /** "full" gets the company tier; "narrowed" (a department lead — GM-02b) does not. */
+  access: Exclude<GmAccess, "none">;
+  /** GM-09. A SEPARATE boundary from `access`: finance is its own Cerbos resource and its own
+   *  per-tenant module, so a narrowed lead who legitimately reads department reports must not
+   *  thereby read the company's P&L. */
+  canReadMoney: boolean;
   /** Today, as ISO. Passed in rather than read from a clock here: the page resolves it once so
    *  every tier of one render shares an anchor. */
   anchorDate: string;
 }) {
+  // A narrowed principal does not get the company read AT ALL — not requested, not requested-and-
+  // discarded. Firing it would put a guaranteed 403 in the server log on every page view and invite a
+  // future refactor to "helpfully" render whatever came back.
   const [company, depts] = await Promise.all([
-    readOverview(tenantId, userId, "company", periodKind, anchorDate),
+    access === "full"
+      ? readOverview(tenantId, userId, "company", periodKind, anchorDate)
+      : Promise.resolve<Tier<ReportOverview>>({ state: "forbidden" }),
     readOverview(tenantId, userId, "department", periodKind, anchorDate),
   ]);
 
@@ -122,17 +136,41 @@ export async function GmCockpit({
   const tier1 = companyKpis.slice(0, GM_TIER1_LIMIT);
   const tier1Hidden = companyKpis.length - tier1.length;
 
+  const provenance =
+    company.state === "ok" ? company.data : depts.state === "ok" ? depts.data : null;
+
+  // The money window follows whatever period the cockpit is showing, so revenue and the department
+  // figures above it describe the same days. Falls back to the anchor when neither read answered —
+  // a same-day window is a true (if narrow) statement, where inventing a month would not be.
+  const moneyFrom = provenance?.start ?? anchorDate;
+  const moneyTo = provenance?.end ?? anchorDate;
+
   return (
     <>
-      {company.state === "ok" && (
+      {access === "narrowed" && (
+        // Stated, never implied. A department-scoped number under an unqualified heading is exactly
+        // the misreading this console is built to prevent.
+        <p role="note" style={{
+          margin: "0 0 16px", font: "400 13px/1.6 var(--font-body)", color: "var(--erp-ink-60)",
+          border: "0.5px solid var(--erp-hairline)", borderLeft: "3px solid var(--erp-accent)",
+          background: "var(--tint-hover)", padding: "12px 14px",
+        }}>
+          {GM_NARROWED_NOTICE}
+        </p>
+      )}
+      {/* Provenance comes from whichever read actually answered. A narrowed reader has no company
+          read at all, so echoing `company.data` would drop the line entirely — and the period +
+          "no seal state" caveat matter just as much at department grain. */}
+      {provenance && (
         <GmProvenance
           periodKind={periodKind}
-          start={company.data.start}
-          end={company.data.end}
-          documentHref="/reports/company"
+          start={provenance.start}
+          end={provenance.end}
+          documentHref={access === "full" ? "/reports/company" : "/reports/department"}
         />
       )}
 
+      {access === "narrowed" ? null : (
       <Card title="The business" headerRight={<PeriodToggle deptId={deptId} active={periodKind} />}>
         {company.state !== "ok" ? (
           <TierNote tier={company} subject="Company figures" />
@@ -153,13 +191,20 @@ export async function GmCockpit({
           </>
         )}
       </Card>
+      )}
 
       <Card
         title="Departments"
         headerRight={
-          <Link href={`/departments/${deptId}/depts?period=${periodKind}`} className="lux-btn lux-btn--ghost lux-btn--sm">
-            All metrics
-          </Link>
+          // The toggle normally rides the company card. A narrowed reader has no company card, so it
+          // moves here — otherwise they would have no way to switch period at all, and the `?period=`
+          // URL would be the only route to a month view.
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {access === "narrowed" && <PeriodToggle deptId={deptId} active={periodKind} />}
+            <Link href={`/departments/${deptId}/depts?period=${periodKind}`} className="lux-btn lux-btn--ghost lux-btn--sm">
+              All metrics
+            </Link>
+          </div>
         }
       >
         {depts.state !== "ok" ? (
@@ -181,6 +226,25 @@ export async function GmCockpit({
           />
         )}
       </Card>
+
+      {/* Money LAST, below both operating tiers — the operating-cadence rule this console follows
+          puts financial metrics at the end of the deck, after the input and output metrics that
+          explain them. It first shipped between the two tiers by mistake; the e2e ordering assertion
+          caught it, which is exactly why that assertion is on headings and not on prose.
+
+          `explainRefusal={false}` — a GM without finance access gets NO card rather than a permanent
+          refusal notice on their home screen. The money TAB passes true, because that is the surface
+          where the question was actually asked. */}
+      {canReadMoney && (
+        <GmMoneyCard
+          userId={userId}
+          tenantId={tenantId}
+          from={moneyFrom}
+          to={moneyTo}
+          variant="compact"
+          explainRefusal={false}
+        />
+      )}
     </>
   );
 }

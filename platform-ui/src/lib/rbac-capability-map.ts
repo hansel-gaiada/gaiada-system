@@ -671,6 +671,17 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // GM-09 — the finance read tier. One permission each, so "all" and "any" are equivalent; "all" is
+  // used for consistency with every other single-permission entry in this file.
+  "finance.statement.view": {
+    permissions: ["finance.statement.read"],
+    semantics: "all",
+  },
+  "finance.ar.view": {
+    permissions: ["finance.ar.read"],
+    semantics: "all",
+  },
+
   // "seal / amend / pin a period (Cerbos seal/amend/pin on report_period) — exec/company_admin
   // only; dept lead ⛔". A direct 1:1 citation. `reports.period.view` is deliberately excluded —
   // it is not named in the capability's comment, and this file has no evidence it's gated at all

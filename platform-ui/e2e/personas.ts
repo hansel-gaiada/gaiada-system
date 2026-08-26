@@ -35,13 +35,14 @@ export const personaEmail = (key: PersonaKey): string => `persona.${key}@${EMAIL
 const DEMO_MODE_EMAIL: Partial<Record<PersonaKey, string>> = {
   superadmin: "hansel@gaiada.com", // -> demo-hansel: platform_admin (+ group_executive)
   group_executive: "hansel@gaiada.com", // demo-hansel ALSO carries group_executive — same identity
+  manager: "manager@gaiada.com", // -> dept-manager: plain `manager`, an exact role match (added for GM-02b)
   member: "gede@gaiada.com", // -> gede-ic: plain `member`, an exact role match
   search_staff: "seo-staff@gaiada.com", // -> seo-staff: exact `search_staff` match
   client_contact: "client@northwind.example", // contains "client" -> demo-client, exact `client` match
 };
 
-// The personas with NO demo-mode equivalent today — company_admin, manager, viewer,
-// hr_staff, hr_manager, it_admin, search_manager, agency_approver. Listed explicitly (not derived)
+// The personas with NO demo-mode equivalent today — company_admin, viewer, hr_staff, hr_manager,
+// it_admin, search_manager, agency_approver. (`manager` gained one for GM-02b.) Listed explicitly (not derived)
 // so this file is honest even if someone adds a key to PersonaKey without updating DEMO_MODE_EMAIL.
 export function isDemoModeSupported(key: PersonaKey): boolean {
   return key in DEMO_MODE_EMAIL;

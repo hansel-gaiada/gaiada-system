@@ -259,12 +259,32 @@ function buildDocument(tenantId: string, grain: ReportGrain, scopeRef: string, p
 // to let DEMO_MODE exercise the 403 branch (person-for-someone-else, department, company are
 // exec/lead/self-only) the same way a real backend would deny a plain member. `demo-hansel` is the
 // only demo identity modelled with the elevated (platform_admin + group_executive) grant.
+/** Which units a non-elevated caller LEADS, keyed by demo identity.
+ *
+ *  This exists because §8's department grain is NOT simply "elevated or nothing": the real controller
+ *  admits a unit lead and then **narrows the result to the led subtree** (TR-25 slices the grid; the
+ *  `reports.department.view` capability comment states it outright). A fixture that answered
+ *  all-or-nothing would let a consumer look correct while never exercising the narrowing — and the GM
+ *  console's narrowed view (GM-02b) is built entirely on it.
+ *
+ *  `dept-manager` is the SEO Manager (see `demoFixtures.ts`'s ME_MANAGER), so it leads `dept-3`. */
+const LED_UNITS: Record<string, string[]> = {
+  "dept-manager": ["dept-3"],
+};
+
 function isAuthorized(userId: string, grain: ReportGrain, scopeRef: string): boolean {
   const elevated = userId === "demo-hansel";
   if (grain === "person") return elevated || scopeRef === userId;
   if (grain === "project") return true; // demo: project membership isn't modelled finely enough to deny here
-  if (grain === "department") return elevated;
-  return elevated; // company
+  if (grain === "department") {
+    if (elevated) return true;
+    const led = LED_UNITS[userId];
+    if (!led) return false;
+    // `"*"` is the overview's "would this caller be denied for ANY scope of this grain" probe — a
+    // lead is not denied wholesale, they are narrowed, so it must answer true for them.
+    return scopeRef === "*" || led.includes(scopeRef);
+  }
+  return elevated; // company — exec only, §8's tightest tier, no lead carve-out
 }
 
 // Mirrors `document-builder.ts`'s `resolveCalendarRange` exactly (§6.2: "for non-custom kinds,
@@ -343,7 +363,12 @@ export function reportsDemo(method: string, p: string, params: URLSearchParams, 
     // never sets"). Approximated here as "would the caller be denied for ANY scope of this grain".
     if ((grain === "department" || grain === "company") && !isAuthorized(userId, grain, "*")) return err(403, "forbidden");
     const catalog: Record<string, Record<string, string>> = { project: PROJECT_NAMES, department: DEPARTMENT_NAMES, person: PERSON_NAMES };
-    const names = grain === "company" ? { [tenantId]: COMPANY_NAMES[tenantId] ?? tenantId } : catalog[grain] ?? {};
+    let names = grain === "company" ? { [tenantId]: COMPANY_NAMES[tenantId] ?? tenantId } : catalog[grain] ?? {};
+    // THE narrowing, mirrored. A unit lead asking for department grain gets their led subtree, not the
+    // whole company — so a consumer that renders "every department" for a lead is visibly wrong here
+    // rather than only against the real backend.
+    const led = grain === "department" && userId !== "demo-hansel" ? LED_UNITS[userId] : undefined;
+    if (led) names = Object.fromEntries(Object.entries(names).filter(([id]) => led.includes(id)));
     const scopes = Object.entries(names).map(([scopeRef, name]) => {
       const doc = buildDocument(tenantId, grain, scopeRef, range.periodKind, range.start, range.end);
       return { scopeRef, scopeName: name, kpis: doc.kpis.slice(0, 3) };
