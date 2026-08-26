@@ -104,7 +104,12 @@ export async function ratifyStatutory(): Promise<{
         const bands = DEFAULT_PARAMS_UNRATIFIED.ter[cat];
         await c.query(
           `INSERT INTO hr_statutory_parameters (tenant_id, set_id, key, value_json, unit, note)
-           VALUES ($1,$2,$3,$4::jsonb,'bands',$5)
+           -- unit is NULL, not a made-up 'bands'. The column CHECK allows only
+           -- rate/amount/months/years/count or NULL, and the one existing JSON-valued
+           -- parameter (pph21.brackets) uses NULL. A band table has no single unit; the
+           -- rates live inside the JSON. NOTE: no backticks in this comment -- it sits
+           -- inside a JS template literal, where a backtick ends the string.
+           VALUES ($1,$2,$3,$4::jsonb,NULL,$5)
            -- The unique index is on (tenant_id, set_id, key) — NOT (set_id, key). An ON CONFLICT
            -- target must name a real unique constraint exactly, and the shorter tuple raised
            -- 42P10 against the live database. Checking that "an index mentioning both columns
