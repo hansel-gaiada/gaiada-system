@@ -11,6 +11,54 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui - finance UI: zero axe violations across all 11 routes (2026-08-26) - DEV-VERIFIED
+
+**Method**
+- Rendered every finance route in a real browser (Playwright + axe-core, WCAG 2.0/2.1 A+AA) rather
+  than reasoning about the CSS. This is the first time these pages have been looked at in a browser
+  at all - the standing gap in every previous report.
+
+**Fixed - CRITICAL**
+- `JournalEntryForm`'s grid controls had NO accessible names (`select-name` x4, `label` x2). A
+  `<th scope="col">` names a COLUMN; it does not name a control inside a cell. A screen-reader user
+  tabbing the grid heard "combo box" twice and "edit text" twice per row with nothing distinguishing
+  account from side - on the one surface here where a mistake writes an immutable journal. Names now
+  include the LINE NUMBER, because four identically-named controls are barely better than four
+  unnamed ones.
+
+**Fixed - SERIOUS (contrast, every route)**
+- `.fin-page__asof`, `.fin-muted` and `.fin-verdict__note` stacked `opacity` on top of a ramp colour.
+  The ink ramp's own header says it is "the ONLY source of text color" and each tier is chosen to
+  clear AA on its worst-case surface; multiplying the alpha again threw that away. Moved to
+  `--ink-muted` (5.14:1). That covered most of the explanatory prose on the surface - 25 failing
+  nodes on the overview alone.
+- `HairlineTable` column labels used inline `opacity: 0.5` - the last violation left, and shared by
+  EVERY table in the app. Now `--ink-subtle` (4.54:1), which the ramp documents for exactly this
+  ("small caps labels"). Deliberately NOT `--ink-faint` (2.62:1, "decorative only"): these labels are
+  the only thing saying which column holds the amount.
+
+**Fixed - the overview had no title**
+- `/finance`'s `<h1>` was the fiscal period plus its badge, rendering as "Aug 2026 Open". The
+  department's landing page never said what it was, it was the only tab whose heading changed as the
+  calendar moved, and screen readers/bookmarks got "Aug 2026 Open" as the page name. The heading is
+  now "Overview"; the period moved to the context line where every sibling tab puts its scope.
+
+**Checked and found NOT broken**
+- Tab strip renders all 11 with the active one correctly marked (the `sec-tab--active` fix holds).
+- Sidebar nav is identical across routes - an earlier "nav differs between routes" reading was an
+  artifact of truncating the probe output at 220 chars, not a defect.
+- No page errors, no console errors, no horizontal overflow on any route.
+
+**⚠ An audit that lies is worse than none**
+- A mid-run version reported ONE contrast violation per route, all of them the word "or" on the
+  sign-in form: the login had silently failed and every route redirected to `/login`. That reads as
+  "finance is nearly clean" - the most misleading possible result. The audit script now refuses to
+  run unless it is actually authenticated.
+
+**Verified**: 3416 UI tests, typecheck clean, design-token guard green, DEMO_MODE build green.
+
+---
+
 ### platform-nest - lint:migration-rls now catches the kind that broke a deploy (2026-08-26) - DEV-VERIFIED
 
 **Changed**

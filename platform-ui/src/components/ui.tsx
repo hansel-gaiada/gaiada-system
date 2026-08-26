@@ -180,7 +180,18 @@ export function HairlineTable({ columns, rows, tcols }: {
     <div className="lux-table" style={style}>
       <div className="lux-table__head">
         {columns.map((c) => (
-          <Eyebrow key={c.label} style={{ fontSize: 10, opacity: 0.5, ...(c.align === "right" ? { justifySelf: "end" } : {}) }}>
+          // `--ink-subtle`, not `opacity: 0.5`.
+          //
+          // The ink ramp exists so every text tier clears WCAG AA on its worst-case surface, and
+          // `--ink-subtle` (4.54:1) is documented for precisely this — "small caps labels". Halving
+          // the alpha on top of it discarded that: axe rated these column headers a SERIOUS contrast
+          // failure on EVERY table in the app, and they were the last violation left across all ten
+          // finance routes once the finance-owned rules were moved onto the ramp.
+          //
+          // These labels are not decoration. They are the only thing saying which column holds the
+          // amount and which the account, so `--ink-faint` (2.62:1, "decorative only") would be the
+          // wrong tier even though it looks closer to the old rendering.
+          <Eyebrow key={c.label} style={{ fontSize: 10, color: "var(--ink-subtle)", ...(c.align === "right" ? { justifySelf: "end" } : {}) }}>
             {c.label}
           </Eyebrow>
         ))}

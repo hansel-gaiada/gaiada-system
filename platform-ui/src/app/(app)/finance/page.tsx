@@ -118,11 +118,22 @@ export default async function FinanceOverviewPage() {
     <div className="fin-page">
       <header className="fin-page__head">
         <Eyebrow>Finance &amp; Accounting</Eyebrow>
-        <h1 className="fin-page__title">
+        {/* The heading names the PAGE, not the period.
+​
+            It used to be the fiscal period plus its badge, which rendered an `<h1>` reading
+            "Aug 2026 Open" — so the department's landing page never said what it was, and it was the
+            only tab in the strip whose heading changed under you as the calendar moved. A screen
+            reader announced the page as "Aug 2026 Open"; browser history and bookmarks got the same.
+            The period is CONTEXT for these figures, so it sits on the context line with the as-at
+            date, where every sibling tab already puts its scope. */}
+        <h1 className="fin-page__title">Overview</h1>
+        <p className="fin-page__asof">
           {current ? current.name : "No current period"}{" "}
-          {current && <StatusBadge label={current.state === "OPEN" ? "open" : current.state === "SOFT_LOCK" ? "review" : "done"} />}
-        </h1>
-        <p className="fin-page__asof">Figures as at {asOf}</p>
+          {current && (
+            <StatusBadge label={current.state === "OPEN" ? "open" : current.state === "SOFT_LOCK" ? "review" : "done"} />
+          )}{" "}
+          · figures as at {asOf}
+        </p>
       </header>
 
       <section className="fin-kpis">

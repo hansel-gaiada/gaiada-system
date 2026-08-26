@@ -124,15 +124,22 @@ a.lux-btn { display: inline-flex; align-items: center; text-decoration: none; }
 .fin-page { display: grid; gap: 20px; }
 .fin-page__head { display: grid; gap: 4px; }
 .fin-page__title { display: flex; align-items: center; gap: 10px; margin: 0; }
-.fin-page__asof { margin: 0; opacity: 0.6; font-size: 13px; }
+/* Secondary text uses the INK RAMP, never opacity over --ink-strong.
+   The ramp's own header says it is "the ONLY source of text color" and that each tier is chosen to
+   clear WCAG AA on its worst-case surface. Stacking `opacity` on top of a ramp colour throws that
+   guarantee away: it multiplies the alpha again, and axe measured these three as SERIOUS contrast
+   failures on every finance route (25 nodes on the overview alone) — the as-at line, the muted
+   paragraphs and the verdict notes, which is most of the explanatory prose on the surface.
+   --ink-muted is 5.14:1; the 0.6/0.7 opacities put them under 4.5:1. */
+.fin-page__asof { margin: 0; color: var(--ink-muted); font-size: 13px; }
 
 .fin-kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 
 .fin-verdicts { display: grid; gap: 8px; }
 .fin-verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.fin-verdict__note { opacity: 0.6; font-size: 13px; }
+.fin-verdict__note { color: var(--ink-muted); font-size: 13px; }
 
-.fin-muted { opacity: 0.7; margin: 0; }
+.fin-muted { color: var(--ink-muted); margin: 0; }
 
 @media (max-width: 640px) {
   /* The aging tables are wide by nature — let them scroll rather than crush the columns, which is
