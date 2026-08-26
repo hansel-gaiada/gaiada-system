@@ -75,12 +75,26 @@ describe.skipIf(!dbUp)("knowledge service", () => {
     expect(hits[0].text).toContain("diesel");
   });
 
-  it("an unknown envelope resolves to an empty tenant set → zero hits", async () => {
+  // ⚠ UPDATED 2026-08-26 — this assertion was STALE and had been red on main, which is worse than
+  // useless: it reads as a tenant-isolation leak to anyone who looks, and a red test masks the next
+  // real failure.
+  //
+  // It predates D9.4's two-tier corpus. `audience: "public"` (the gaiada.com crawl) is readable with
+  // NO identity at all, on purpose — that is how a lead or client on WhatsApp gets an answer, and the
+  // live estate verified an anonymous caller receiving public hits. So "unknown envelope -> zero
+  // hits" stopped being the design, and the test kept asserting it.
+  //
+  // The property that DOES still matter is narrower and is what is asserted now: an unknown envelope
+  // may see the public tier and must NEVER see `internal`. Asserting zero hits tested isolation only
+  // by accident; asserting "public only" tests it on purpose.
+  it("an unknown envelope sees the PUBLIC tier only — never internal", async () => {
     const r = await app.inject({
       method: "POST", url: "/search", headers: { ...svc, "x-obo-provider": "whatsapp", "x-obo-external-id": "nobody" },
       payload: { query: "diesel delivery thursday", scope: "anything" },
     });
-    expect((r.json() as { hits: unknown[] }).hits).toEqual([]);
+    const { hits } = r.json() as { hits: Array<{ audience?: string }> };
+    expect(hits.every((h) => h.audience === "public")).toBe(true);
+    expect(hits.some((h) => h.audience === "internal")).toBe(false);
   });
 
   it("lists sources for a tenant (service-token gated)", async () => {

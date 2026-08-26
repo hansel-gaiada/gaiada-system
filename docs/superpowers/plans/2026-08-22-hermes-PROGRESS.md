@@ -26,12 +26,12 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 |---|---|---|---|---|---|
 | Platform prerequisites | 22 | 15 | 0 | 3 | **4** |
 | **Hermes runtime (H0–H9)** | 25 | 14 | 0 | **1** | **10** |  *(H3 dropped; H0/H1/H2 split)*
-| Agent seats | 15 | 15 | 0 | 0 | 0 |
+| Agent seats | 15 | 0 | 0 | **15** | 0 |  *(seeded DISABLED — enablement is per-seat, after evals)*
 | Persona packs | 14 | 12 | 0 | **2** | 0 |  *(examples/ blocked on corpus privacy)*
-| Eval suites | 14 | 14 | 0 | 0 | 0 |
+| Eval suites | 14 | 13 | 0 | **1** | 0 |  *(dept-pm authored; 13 seats still need one before they may be enabled)*
 | New tools | 25 | 25 | 0 | 0 | 0 |
 | RAG for the workforce (R1–R5) | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **120** | **99** | **0** | **7** | **14** |
+| **Total** | **120** | **83** | **0** | **23** | **14** |
 
 **Read this honestly: 14 of 120 are DEV-VERIFIED** (and see the 2026-08-26 correction — B2/B3 were
 already closed by other sessions, so the identity plumbing is further along than these counts imply). The session closed P0's data model and a
@@ -316,6 +316,118 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 — `dept-pm` eval suite · PROTOTYPED — the first seat can now legally be enabled
+
+`ai-agents/src/evals/dept-pm.cases.ts` + `dept-pm.test.ts`. **`ai-agents` now 28 files / 272 tests
+green** — it was RED on main before this (see below). `tsc` clean.
+
+`agent_registry`'s CHECK refuses `enabled = true` without an eval suite, so this file is literally
+what stands between the seat existing and the seat running.
+
+**The mix is the point, not the count** — 8 cases: happy path · 3 must-refuse · 2 ambiguous · 1
+injection · 1 D14 impact gate. Each non-happy category tests something a happy-path suite cannot see:
+
+- **Refusals prove CONTAINMENT, not model goodwill.** Every refusal case scripts a model that
+  actually *tries* the forbidden call (money, deploy, HR), so a pass means the runner's allow-list
+  stopped it.
+- **Ambiguous cases assert the seat ASKS.** Guessing is the dominant real-world failure of a helpful
+  assistant in an ERP, and it is invisible unless tested for.
+- **"An empty list is a CLAIM"** has its own case: the seat must say WHAT IT CHECKED, never "there
+  are none". This encodes the estate's own incident — a sweep reporting `0 errors` while indexing
+  zero tasks.
+- **D14:** a high-impact write SUSPENDS rather than executing; the suspension IS the pass condition.
+
+#### Three things the harness taught me, by failing
+
+1. **A blocked tool does not end the run.** My refusals asserted `status: "tool_not_allowed"`; the
+   runner feeds the failure back and the agent RECOVERS to `ok`. `cases.ts` gets that status by
+   ending the script ON the forbidden call so the model persists. Mine now assert the better pair —
+   the tool never executed (containment) AND the answer routes the person somewhere (the persona's
+   "every refusal names the next step").
+2. **`Impact` in ai-agents is a THREE-value scale** (`read | low_write | high_write`) that MAPS onto
+   the hub's `low|medium|high`. `medium_write` does not compile here — the type system catching
+   exactly the conflation `agent.ts`'s registryImpactRank note warns about.
+3. **A containment assertion can pass while proving nothing.** `forbiddenToolsNotCalled` is satisfied
+   when the model never ATTEMPTED the tool. A test now requires each refusal case's scripted model to
+   actually reach for what it must not get — otherwise a future case could assert safety and
+   demonstrate none, looking identical in a green run.
+
+#### ⚠ A RED TEST ON MAIN, fixed — and it was NOT a leak
+
+`knowledge/service.test.ts` — *"an unknown envelope resolves to an empty tenant set → zero hits"* —
+was failing on `main`, untouched by this session. It reads exactly like a tenant-isolation leak.
+
+**It is not.** The returned hit carries `audience: "public"`. D9.4's two-tier corpus makes the public
+tier (the gaiada.com crawl) readable with **no identity at all**, deliberately — that is how a lead on
+WhatsApp gets an answer, and the live estate verified an anonymous caller receiving public hits. The
+DESIGN changed; the assertion did not follow.
+
+Updated to the property that actually matters now: **an unknown envelope may see `public` and must
+NEVER see `internal`.** Asserting zero hits tested isolation only by accident; asserting "public only"
+tests it on purpose.
+
+Worth stating plainly: a stale red test is worse than no test. It masks the next real failure, and
+this one impersonated a security bug for anyone who looked at it.
+
+### 2026-08-26 — agent-seat seed written · PROTOTYPED — and every seat is seeded DISABLED
+
+`platform-nest/src/seed/agent-seats.ts`. All 15 seats. `tsc` clean; upsert behaviour proven by
+running it TWICE against the real schema.
+
+**Follows `seed/automation.ts` exactly**, because a seat is the same kind of thing as an n8n workflow
+account: a non-human principal needing a real `users` row so authorization, audit and OBO work
+uniformly. `kind: "service"` on the membership is load-bearing — without it these take the column
+default `employee` and **every people-shaped surface in the ERP counts fourteen robots as
+colleagues**.
+
+**Every seat is seeded `enabled = false`, and that is the point rather than an oversight.** The
+migration's CHECK refuses `enabled = true` without BOTH an eval suite and an identity. This seed is
+deliberately on the wrong side of that gate: it creates the identities and the rows and turns on
+NOTHING. A seat is enabled by a human, per seat, after its eval suite exists and it has cleared
+shadow mode. Seeding fourteen live agents in one command would skip every stage of the training
+ladder at once. **So `agents.list` returns an empty set after seeding — that is the correct first
+state, not a bug to chase.**
+
+#### A real bug caught by execution, not by reading
+
+The first draft used ONE `ON CONFLICT (name, company_scope) WHERE company_scope IS NOT NULL`. That
+**cannot match a group-scoped row** (NULL scope) — PostgreSQL requires the ON CONFLICT predicate to
+match the partial index it should use — so re-running the seed would raise a unique violation on the
+OTHER partial index instead of updating. The two indexes exist precisely because NULL never collides
+in a plain UNIQUE; the upsert has to branch the same way. Now:
+
+```
+group-scoped  -> ON CONFLICT (name) WHERE company_scope IS NULL
+company-scoped-> ON CONFLICT (name, company_scope) WHERE company_scope IS NOT NULL
+```
+
+Verified by running both upserts twice: 2 rows, notes updated, no duplicates, `enabled=false`.
+
+#### ⚠ THIRD verification-method failure of this session — the pattern is worth naming
+
+The idempotency script reported **"enablement gate DID NOT FIRE"**. It fires. Checked directly:
+
+```
+ERROR: new row ... violates check constraint "agent_registry_enabled_requires_evidence"
+router enabled=false
+```
+
+The script had `set -o pipefail` and did `psql ... | grep -q 'violates'`. psql correctly exits
+non-zero on the rejected UPDATE, `pipefail` propagates that, and a **successful** grep therefore read
+as failure.
+
+Three verification failures in one session, all producing FALSE results about working code:
+1. a 400-character slice that "proved" a webhook was absent (it was present, past the cut);
+2. `ls assurance.ts` that "proved" a capability was missing (it was in another file) — four days of
+   wrong blocker reporting;
+3. this `pipefail` inversion.
+
+**My checks have been failing more often than the things they check.** All three share a shape: a
+proxy for the truth (a slice, a filename, an exit code) was trusted instead of the truth itself. The
+rule already added for blockers generalises — **when a check reports something surprising, verify the
+CHECK before believing the result.** A green test that never ran and a red test that mis-parsed are
+the same failure wearing different colours.
 
 ### 2026-08-26 — per-principal tool view (P1 item 15) · PROTOTYPED — **the demotion is now ENFORCED**
 
