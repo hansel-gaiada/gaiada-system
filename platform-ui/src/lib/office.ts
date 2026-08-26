@@ -984,3 +984,83 @@ export function automationColorToken(settingToken: string | null | undefined, de
   if (deptId) return catToken(deptId);
   return AUTOMATION_GREY_TOKEN;
 }
+
+// ── Ambient drift — decorative motion WITHIN a room (owner decision 2026-08-26) ─────────────────
+// See docs/superpowers/plans/2026-08-23-virtual-office-plan.md §2/§3/§6. The plan bans motion that
+// implies activity the data cannot support ("motion is a claim"), and everything above this point
+// in the file is that claim: `buildReplaySteps`/`replayPositions` walk an avatar ONLY because a
+// real recorded handover said so. Ambient drift is the deliberate second tier the owner asked for —
+// small motion INSIDE a room, with zero informational content — and the only way it can coexist
+// with the honesty rule is if it is UNCONDITIONAL: a function of (avatarId, wall-clock time) alone,
+// nothing else. `ambientDriftOffset` below therefore does not accept `activeRunId`, `busyUntil`,
+// `automationSignal`, or any working/kind state — not even as an optional parameter — because the
+// day someone adds one "to make busy people move more", the drift stops being decoration and starts
+// being a claim, which is exactly what this section exists to prevent.
+//
+// The bound is DERIVED, not a free literal chosen by eye: half of the tighter of the two desk
+// pitches (`DESK_SPACING_TILES` horizontal, `DESK_ROW_TILES` vertical), pulled well inside that
+// half so two neighbours drifting straight at each other can never meet, let alone overlap a desk
+// seat. Both pitches are already sized (via `roomSizeTiles`) with margins to the room's own walls
+// several times this radius, so the same bound keeps every avatar off the walls too, regardless of
+// which room or slot it occupies — see that function's margins above.
+export const AMBIENT_DRIFT_RADIUS_TILES = Math.min(DESK_SPACING_TILES, DESK_ROW_TILES) / 5;
+
+/** Base period of the slower of the two drift axes, in ms — "small, slow, unhurried" per the plan.
+ *  Deliberately measured in tens of seconds: this is background life, not a game loop. */
+const AMBIENT_PERIOD_BASE_MS = 9_000;
+
+/** Deterministic small offset (tile units) from an avatar's desk/seat. Same `avatarId` + same
+ *  `nowMs` always returns the same offset — no per-avatar state, nothing to reset, and a fixed
+ *  instant is reproducible in a test exactly like `restingRoomKey`'s `asOfMs` is.
+ *
+ *  Two out-of-phase sine waves, period and phase both seeded from the id hash so 80 avatars don't
+ *  drift in lockstep, trace a slow lissajous loop that keeps passing back through zero — "settles
+ *  back at its desk" (req #1) is therefore not a special case to code, it's just where the curve
+ *  periodically is. Bounded to `AMBIENT_DRIFT_RADIUS_TILES` on both axes by construction (a sine
+ *  never exceeds amplitude 1), so the "never leaves the room / never overlaps a neighbour's desk"
+ *  guarantee holds for every caller without this function needing to know the room at all. */
+export function ambientDriftOffset(avatarId: string, nowMs: number): { dx: number; dy: number } {
+  const h = hashId(avatarId);
+  const phaseX = ((h % 1000) / 1000) * Math.PI * 2;
+  const phaseY = (((h >>> 10) % 1000) / 1000) * Math.PI * 2;
+  const periodX = AMBIENT_PERIOD_BASE_MS + (h % 5) * 900;
+  const periodY = AMBIENT_PERIOD_BASE_MS * 1.4 + ((h >>> 6) % 5) * 700;
+  const dx = Math.sin((nowMs / periodX) * Math.PI * 2 + phaseX) * AMBIENT_DRIFT_RADIUS_TILES;
+  const dy = Math.sin((nowMs / periodY) * Math.PI * 2 + phaseY) * AMBIENT_DRIFT_RADIUS_TILES;
+  return { dx, dy };
+}
+
+// ── Ambient speech bubbles — a curated bank, and nothing else (plan §6: "LLM-generated jokes cause
+// an HR incident. Curated bank only. No generative text in the office.") ────────────────────────
+// Fixed, hand-authored, workplace-safe lines. Nothing here may name a real project, record, client
+// or task — that would make a decorative bubble read as a real statement by the person it floats
+// over, which is the one thing this bank must never do. `OfficeCanvas.tsx` fires at most one or two
+// of these at a time, briefly, on avatars chosen at random — never on one with a REAL activity
+// bubble already showing (`emoteKindFor`), so the two kinds of bubble never stack.
+export const AMBIENT_LINES: readonly string[] = [
+  "Anyone seen the good stapler?",
+  "Coffee run in five?",
+  "Is it Friday yet?",
+  "Just stretching the legs.",
+  "This plant is doing better than me.",
+  "Someone left a pen on my desk. Thanks, mystery person.",
+  "Quick lap before the next thing.",
+  "Standing desk life.",
+  "Who keeps changing the thermostat?",
+  "Almost lunchtime.",
+  "Found a good podcast for the commute.",
+  "The printer is fine today. Suspicious.",
+  "Long week, good week.",
+  "Water break.",
+  "Nice light in here this afternoon.",
+  "Chair finally stopped squeaking.",
+];
+
+/** Deterministic pick from `AMBIENT_LINES` — same `seed` always returns the same line, so a fixed
+ *  seed is reproducible in a test. Callers derive `seed` from BOTH the avatar id and a coarse time
+ *  bucket (never the avatar id alone, which would give one avatar a single line for its whole life;
+ *  never wall-clock time alone, which would give every avatar on screen the same line at once). */
+export function pickAmbientLine(seed: number): string {
+  const idx = Math.abs(seed) % AMBIENT_LINES.length;
+  return AMBIENT_LINES[idx];
+}

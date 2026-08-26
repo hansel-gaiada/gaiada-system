@@ -14,6 +14,7 @@ import {
   DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
   ZOOM_LEVELS, fitScale, nearestZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_STATE_LABEL,
+  ambientDriftOffset, pickAmbientLine,
   type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeFloor, type OfficeAvatar, type ReplayStep,
   type Camera, type AutomationActivityState,
 } from "@/lib/office";
@@ -50,6 +51,17 @@ import "./office.css";
 //      `executing`/`awaiting_approval`. It is a ~450ms `setInterval`, not a per-frame RAF, shared by
 //      both sources rather than one loop each, and it stops entirely (cleared) the moment neither
 //      is true. Paused by the SAME visibility/offscreen refs as the replay loop.
+//   4. A FOURTH timer — ambient drift (owner decision 2026-08-26) — the two-tier honesty rule this
+//      canvas now draws: room-to-room movement is REAL (paths #2 above, untouched by this), motion
+//      WITHIN a room is decorative and means nothing. ONE shared ~200ms `setInterval` (never one per
+//      avatar — this must scale to 80+ seats) redraws every steady-state avatar at a small offset
+//      from `lib/office.ts`'s `ambientDriftOffset`, which is a pure function of (avatarId,
+//      wall-clock time) ONLY — no `activeRunId`, `busyUntil`, `automationSignal` or working state is
+//      ever read by it, because that is precisely what would turn decoration into a claim (plan §3:
+//      "motion is a claim"). The SAME timer occasionally puts a curated, hard-coded line (never
+//      generated — plan §6) in a speech bubble over one or two avatars at a time. Paused by the SAME
+//      visibility/offscreen refs as everything else, and killed outright by `prefers-reduced-motion`
+//      (avatars sit at their desks; no bubbles either).
 
 type RailTab = "cast" | "detail" | "activity" | "legend";
 const RAIL_TABS: { key: RailTab; label: string }[] = [
@@ -112,6 +124,12 @@ interface Positioned {
   tile: { x: number; y: number };
   inTransit: boolean;
   transitLabel?: string;
+}
+
+/** Tile-space addition — trivial, but named so the ambient-drift render call site below reads as
+ *  "desk tile plus a small offset" rather than an anonymous object literal. */
+function addTile(tile: { x: number; y: number }, d: { dx: number; dy: number }): { x: number; y: number } {
+  return { x: tile.x + d.dx, y: tile.y + d.dy };
 }
 
 /** Groups avatars into their CURRENT room (steady-state) and assigns each a stable desk slot —
@@ -1102,6 +1120,49 @@ function drawEmoteBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.restore();
 }
 
+/** Ambient speech bubble (owner decision 2026-08-26, plan §6: curated bank only, never generated).
+ *  Visually a rounded plate with a small pointer tail, same shape language as `drawEmoteBubble`, but
+ *  never confused with it: this one carries WORDS from `AMBIENT_LINES` (lib/office.ts) and fires on
+ *  ANY avatar occasionally; the glyph bubble fires only on a genuinely-working agent/automation. The
+ *  Pass 3 call site never schedules this on an avatar that already has a real `emoteKind`, so the
+ *  two never stack — this function does not need to know that; it only draws what it is handed. */
+function drawSpeechBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string, tokens: TokenSet) {
+  const fontPx = Math.round(tilesToPx(0.46));
+  ctx.save();
+  ctx.font = `500 ${fontPx}px ${tokens.fontBody}`;
+  const label = fitLabel(ctx, text, tilesToPx(10));
+  const padX = Math.round(tilesToPx(0.32));
+  const padY = Math.round(tilesToPx(0.2));
+  const w = ctx.measureText(label).width + padX * 2;
+  const h = fontPx + padY * 2;
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  const radius = Math.min(h / 2, tilesToPx(0.3));
+
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, radius);
+  else ctx.rect(x, y, w, h);
+  ctx.fillStyle = tokens.card;
+  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = tokens.hairline;
+  ctx.stroke();
+  // Small pointer tail toward the avatar's head, same idea as drawEmoteBubble's tail.
+  ctx.beginPath();
+  ctx.moveTo(cx - 3, cy + h / 2 - 1);
+  ctx.lineTo(cx + 3, cy + h / 2 - 1);
+  ctx.lineTo(cx, cy + h / 2 + 5);
+  ctx.closePath();
+  ctx.fillStyle = tokens.card;
+  ctx.fill();
+
+  ctx.fillStyle = tokens.ink;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, cx, cy);
+  ctx.restore();
+}
+
 /** The one place that decides which emote glyph (if any) an avatar earns — agent and automation
  *  share this so the bubble/desk-tint/roster-badge call sites never re-derive the mapping three
  *  different ways. An agent's kind comes from its own real, currently-fresh run event (O4,
@@ -1166,6 +1227,7 @@ function deskActivityFor(avatar: OfficeAvatar, workingIds: Set<string>, nowMs: n
 function drawAvatar(
   ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean,
   scale: number, emoteKind: AgentRunEventKind | null, pulseOn: boolean, transitLane = 0,
+  ambientLine: string | null = null,
 ) {
   const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
   const r = tilesToPx(0.62);
@@ -1305,6 +1367,9 @@ function drawAvatar(
   // except a genuinely-working `agent` with a real event kind — see the Pass 3 call site for the
   // two-layer guarantee that a human never reaches this branch.
   if (emoteKind) drawEmoteBubble(ctx, cx, cy - r * 3.6, emoteKind, tokens, pulseOn);
+  // Ambient speech bubble (owner decision 2026-08-26) — same slot as the emote bubble, mutually
+  // exclusive with it (the Pass 3 call site never hands both at once), decoration only.
+  else if (ambientLine) drawSpeechBubble(ctx, cx, cy - r * 3.6, ambientLine, tokens);
 }
 
 const WORKING_POLL_MS = 8000;
@@ -1318,6 +1383,19 @@ const WORKING_POLL_MS = 8000;
  *  Longer than the run poll because this re-runs a whole server component, not one endpoint. */
 const SCENE_REFRESH_MS = 15_000;
 const PULSE_TICK_MS = 450;
+
+// ── Ambient drift + speech bubbles (owner decision 2026-08-26) ──────────────────────────────────
+// One shared tick for both. 200ms is plenty of resolution for motion this slow (`ambientDriftOffset`
+// periods run 9-13s) and far cheaper than a 60fps RAF across 80+ avatars.
+const AMBIENT_TICK_MS = 200;
+/** "on at most one or two avatars at a time" — the whole reason bubble scheduling needs shared
+ *  state at all, rather than each avatar rolling its own dice independently. */
+const AMBIENT_BUBBLE_MAX_CONCURRENT = 2;
+/** Per-tick chance of starting ONE new bubble, checked only while under the concurrency cap above —
+ *  tuned for "occasionally": at a 200ms tick this is roughly one new bubble every ~20s while the
+ *  floor has spare capacity, never a queue and never silence for whole minutes. */
+const AMBIENT_BUBBLE_CHANCE_PER_TICK = 0.01;
+const AMBIENT_BUBBLE_DURATION_MS = 3600;
 
 export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initialZoom: OfficeZoom }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1519,6 +1597,14 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   // reads it synchronously at call time and a redraw is already triggered explicitly wherever this
   // flips; making it state too would just double every working-desk redraw for no benefit.
   const pulseOnRef = useRef(false);
+  // Active ambient speech bubbles, keyed by avatar id (owner decision 2026-08-26) — a ref for the
+  // same reason as `pulseOnRef`: `draw()` reads it synchronously, and the ambient timer below is
+  // what mutates it and triggers the redraw explicitly. Scheduling (who gets a bubble, and when)
+  // lives in that timer's own callback, never inside `draw()` itself — `draw()` also runs once per
+  // replay animation frame (up to 60/s) and once per hover/selection change, and rolling dice on
+  // every one of those calls would make bubbles far more frequent than "occasionally" and burn
+  // cycles for no visual gain.
+  const ambientBubbleRef = useRef<Map<string, { text: string; untilMs: number }>>(new Map());
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -1541,6 +1627,12 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   // from `lastHeardMs` (rather than folding kind into that map) because most existing consumers of
   // `lastHeardMs` only ever wanted the timestamp; adding kind there would force them to unwrap it.
   const [emoteKinds, setEmoteKinds] = useState<Map<string, AgentRunEventKind | null>>(new Map());
+  // Mirrored into refs for the ambient-bubble scheduler below, which must NOT re-subscribe its
+  // setInterval every time a poll updates either of these (see that effect's own deps for why).
+  const workingIdsRef = useRef(workingIds);
+  const emoteKindsRef = useRef(emoteKinds);
+  workingIdsRef.current = workingIds;
+  emoteKindsRef.current = emoteKinds;
 
   // Automations (2026-08-24): no poll exists for these — office-data.ts already resolved the real
   // signal server-side, once, at this page's own render; there is nothing further to fetch client-
@@ -1697,6 +1789,10 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       .sort((a, b) => a.tile.x - b.tile.x)
       .forEach((pp, i) => transitLanes.set(pp.avatar.id, i % 2));
 
+    // Ambient drift's own clock (owner decision 2026-08-26) — REAL wall-clock time, deliberately
+    // NOT the frozen `nowMs` state above (that is a fixed demo snapshot; drift needs an actual
+    // clock that moves). Read once per draw() call so every avatar drawn this frame agrees on "now".
+    const ambientMs = Date.now();
     for (const pos of positions) {
       // Two independent layers keep an emote bubble off a human, not one: office-data.ts only ever
       // sets `activeRunId`/`automationSignal` on an `agent`/`automation`-kind avatar respectively
@@ -1705,10 +1801,22 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       // is the same 45s-freshness gate the desk monitor tint already uses for agents; automations
       // resolve their own freshness inside `resolveAutomationState` using that identical window.
       const emoteKind = emoteKindFor(pos.avatar, workingIds, emoteKinds, nowMs);
-      drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current, transitLanes.get(pos.avatar.id) ?? 0);
+      // Ambient drift is a RENDER-ONLY offset off the canonical `pos.tile` computed above —
+      // `positions`/`lastPositionsRef` stay canonical so hit-testing and camera-follow are never
+      // thrown off by a few tenths of a tile of pure decoration. It applies only to a steady,
+      // non-transit avatar (a real transit already owns its own path — the plan's "always wins"
+      // rule) and never while reduced motion is on, which is this feature's hard kill switch.
+      // `ambientDriftOffset` itself takes no signal beyond (avatarId, time) — see its doc in
+      // lib/office.ts for why that is load-bearing, not incidental.
+      const renderPos = !reducedMotion && !pos.inTransit
+        ? { ...pos, tile: addTile(pos.tile, ambientDriftOffset(pos.avatar.id, ambientMs)) }
+        : pos;
+      const bubble = !reducedMotion && !pos.inTransit && !emoteKind ? ambientBubbleRef.current.get(pos.avatar.id) : undefined;
+      const ambientLine = bubble && bubble.untilMs > ambientMs ? bubble.text : null;
+      drawAvatar(ctx, renderPos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current, transitLanes.get(pos.avatar.id) ?? 0, ambientLine);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds, scale, emoteKinds]);
+  }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds, scale, emoteKinds, reducedMotion]);
 
   // One-shot redraw on mount, scene/floor change, resize, and theme flips (data-theme is an
   // attribute change, not a resize — MutationObserver is the only signal for it).
@@ -1749,6 +1857,52 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workingIds, automationPulseIds, reducedMotion, draw, replaying]);
+
+  // ── Ambient drift + speech bubbles (owner decision 2026-08-26) — the second, decorative movement
+  // tier. UNCONDITIONAL and ALWAYS ON while motion is allowed at all: unlike the pulse timer above,
+  // this does not gate on any real activity signal — every avatar drifts, all the time, precisely
+  // because doing otherwise would make drift a claim about who it is (see `ambientDriftOffset`'s
+  // own doc in lib/office.ts). ONE shared `setInterval` for both drift and bubble scheduling, never
+  // one per avatar — this is what lets it scale to 80+ seats. Paused by the SAME visibility/
+  // offscreen refs as the replay loop and the pulse timer, and reduced motion kills it outright:
+  // the branch below does one settling `draw()` (so any drift/bubble already on screen is cleared)
+  // and starts no interval at all.
+  useEffect(() => {
+    if (reducedMotion) {
+      ambientBubbleRef.current.clear();
+      draw(replayRef.current && replaying ? performance.now() - replayRef.current.startPerf : null);
+      return;
+    }
+    const id = setInterval(() => {
+      if (pausedByVisibility.current || pausedByOffscreen.current) return;
+      // Bubble scheduling lives HERE, not inside draw() — draw() also runs on every replay animation
+      // frame (up to 60/s) and every hover/selection change, and rolling dice there would make
+      // bubbles far more frequent than "occasionally" for no visual gain. This tick is the only
+      // place a bubble is started or expired.
+      const now = Date.now();
+      for (const [id2, b] of ambientBubbleRef.current) {
+        if (now >= b.untilMs) ambientBubbleRef.current.delete(id2);
+      }
+      if (ambientBubbleRef.current.size < AMBIENT_BUBBLE_MAX_CONCURRENT && Math.random() < AMBIENT_BUBBLE_CHANCE_PER_TICK) {
+        // Candidates come from the CURRENT floor's last-drawn positions (already scoped to
+        // `floorRoomKeys` by draw()'s own filter) — never an avatar mid-transit (a real handover
+        // owns the moment) and never one that already carries a real emote bubble (the two bubble
+        // kinds must never stack; see drawAvatar's own doc).
+        const candidates = lastPositionsRef.current.filter(
+          (p) => !p.inTransit && !ambientBubbleRef.current.has(p.avatar.id)
+            && !emoteKindFor(p.avatar, workingIdsRef.current, emoteKindsRef.current, nowMs),
+        );
+        if (candidates.length > 0) {
+          const pick = candidates[Math.floor(Math.random() * candidates.length)];
+          const line = pickAmbientLine(hashId(pick.avatar.id) ^ Math.floor(now / 4000));
+          ambientBubbleRef.current.set(pick.avatar.id, { text: line, untilMs: now + AMBIENT_BUBBLE_DURATION_MS });
+        }
+      }
+      draw(replayRef.current && replaying ? performance.now() - replayRef.current.startPerf : null);
+    }, AMBIENT_TICK_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reducedMotion, draw, replaying]);
 
   // ── Replay: a RAF loop that exists ONLY while playing, paused (not merely throttled) when the
   // tab is hidden or the canvas leaves the viewport. Nothing runs at all otherwise. ──────────────
@@ -1982,9 +2136,10 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       <div className="office__toolbar">
         <span className="office__demo-badge" role="status">DEMO — not live</span>
         <p className="office__hint">
-          One connected floor — real departments open onto real corridors. Who is shown and any
-          movement is DERIVED from real recorded handoffs — two people acting on one record — never from
-          location tracking. Nobody is tracked and no position is stored.
+          One connected floor — real departments open onto real corridors. Who is shown, and any
+          movement BETWEEN rooms, is DERIVED from real recorded handoffs — two people acting on one
+          record. Movement WITHIN a room is just ambient background life and means nothing about the
+          person. Never location tracking, nothing stored.
         </p>
         <div className="office__zoom" role="group" aria-label="Camera zoom">
           <button type="button" className="office__zoom-btn" onClick={() => stepZoom(-1)} disabled={scale <= ZOOM_LEVELS[0]} aria-label="Zoom out">−</button>

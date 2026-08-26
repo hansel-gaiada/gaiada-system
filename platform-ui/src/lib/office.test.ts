@@ -9,6 +9,8 @@ import {
   CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES, DESK_TOP_TILES,
   ZOOM_LEVELS, fitZoomLevel, fitScale, nearestZoomLevel, MIN_FIT_SCALE, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   groupAgentSeats, describeAgentSeat,
+  ambientDriftOffset, AMBIENT_DRIFT_RADIUS_TILES, AMBIENT_LINES, pickAmbientLine,
+  DESK_SPACING_TILES, DESK_ROW_TILES,
   type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor, type Camera,
   type AutomationSignal, type AgentSeatGoal, type AgentSeat,
 } from "./office";
@@ -855,5 +857,86 @@ describe("automationColorToken — settable colour, then department tone, then g
 
   it("a real per-automation setting wins over the department tone", () => {
     expect(automationColorToken("--cat-3", "dept-42")).toBe("--cat-3");
+  });
+});
+
+describe("ambientDriftOffset — decorative motion WITHIN a room, unconditional by construction (owner decision 2026-08-26)", () => {
+  it("is deterministic — same avatar id and same instant always give the same offset", () => {
+    expect(ambientDriftOffset("agent-1", 12_345)).toEqual(ambientDriftOffset("agent-1", 12_345));
+  });
+
+  it("is a pure function of (avatarId, time) alone — its signature accepts nothing that could turn drift into a claim", () => {
+    // Structural proof, not a runtime one: the function takes exactly two parameters. If a future
+    // change ever threads `activeRunId`/`busyUntil`/`automationSignal`/working state through here,
+    // this test breaks immediately and loudly, which is the point — see the function's own doc.
+    expect(ambientDriftOffset.length).toBe(2);
+  });
+
+  it("stays within its bounded radius on both axes, for many avatars and many instants", () => {
+    const ids = ["human-1", "agent-42", "automation-7", "external-3", "p-019fb652"];
+    const instants = [0, 1_000, 60_000, 3_600_000, 86_400_000];
+    for (const id of ids) {
+      for (const t of instants) {
+        const { dx, dy } = ambientDriftOffset(id, t);
+        expect(Math.abs(dx)).toBeLessThanOrEqual(AMBIENT_DRIFT_RADIUS_TILES + 1e-9);
+        expect(Math.abs(dy)).toBeLessThanOrEqual(AMBIENT_DRIFT_RADIUS_TILES + 1e-9);
+      }
+    }
+  });
+
+  it("the bounded radius is safely inside HALF a desk pitch — two neighbours drifting straight at each other can never meet, let alone overlap a seat", () => {
+    const halfTighterPitch = Math.min(DESK_SPACING_TILES, DESK_ROW_TILES) / 2;
+    expect(AMBIENT_DRIFT_RADIUS_TILES * 2).toBeLessThan(halfTighterPitch);
+  });
+
+  it("moves over time — it is not a frozen constant offset", () => {
+    const early = ambientDriftOffset("agent-1", 0);
+    const later = ambientDriftOffset("agent-1", 4_000);
+    expect(early).not.toEqual(later);
+  });
+
+  it("gives different avatars different phases at the same instant, so 80 avatars do not drift in lockstep", () => {
+    const a = ambientDriftOffset("agent-alpha", 5_000);
+    const b = ambientDriftOffset("agent-beta", 5_000);
+    expect(a).not.toEqual(b);
+  });
+
+  it("periodically returns near its desk — 'settles back' is the lissajous curve passing near zero, not a special case", () => {
+    // dx and dy run on DIFFERENT periods (by design, so 80 avatars don't move in lockstep), so the
+    // two axes are near zero at different moments in general; sample widely enough (200s, well over
+    // twice the slower axis's period for any id) that the COMBINED offset still gets close to its
+    // desk somewhere in the window, for several different ids.
+    for (const id of ["agent-1", "human-1", "office-avatar-99"]) {
+      let minMag = Infinity;
+      for (let t = 0; t < 200_000; t += 100) {
+        const { dx, dy } = ambientDriftOffset(id, t);
+        minMag = Math.min(minMag, Math.hypot(dx, dy));
+      }
+      expect(minMag).toBeLessThan(0.15);
+    }
+  });
+});
+
+describe("pickAmbientLine / AMBIENT_LINES — a curated bank, never generated (plan §6)", () => {
+  it("is a real, fixed bank with more than a couple of lines", () => {
+    expect(AMBIENT_LINES.length).toBeGreaterThan(8);
+  });
+
+  it("every line is short, plain text, workplace-safe (no obvious placeholder/empty entries)", () => {
+    for (const line of AMBIENT_LINES) {
+      expect(typeof line).toBe("string");
+      expect(line.trim().length).toBeGreaterThan(0);
+      expect(line.length).toBeLessThan(80);
+    }
+  });
+
+  it("picks deterministically from the bank — same seed always gives the same line", () => {
+    expect(pickAmbientLine(7)).toBe(pickAmbientLine(7));
+  });
+
+  it("always returns a real member of AMBIENT_LINES, for any seed including negative ones", () => {
+    for (const seed of [0, 1, 7, 1000, -3, -9999]) {
+      expect(AMBIENT_LINES).toContain(pickAmbientLine(seed));
+    }
   });
 });
