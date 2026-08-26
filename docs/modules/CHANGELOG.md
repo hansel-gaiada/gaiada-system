@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest - a migration self-test that CI structurally could not fail (2026-08-26) - DEV-VERIFIED
+
+**Fixed**
+- `202608261100_activity_approval_attribution.sql` aborted the deploy of `alpha-01.071.0172a`:
+  `new row violates row-level security policy for table "activities"`. Its self-assertion block
+  INSERTs two probe rows to prove both new CHECK constraints REJECT - but `activities` is FORCE-RLS
+  and migrations run as `platform_app`, which is NOBYPASSRLS, so the POLICY refused the rows before
+  either CHECK could fire. That error is neither `check_violation` nor `not_null_violation`, so the
+  block's handlers did not catch it. Fixed by setting `app.current_tenant_ids` before the probes.
+
+**★ Why CI was green and live was not**
+- Test databases run migrations as a SUPERUSER, which BYPASSES RLS. The probes inserted happily and
+  all four shards passed. The privilege difference between the test harness and the live migrator is
+  the entire bug and it is invisible from the test side - no amount of test-suite green could have
+  caught it.
+- `lint:migration-rls` did not catch it either: it flags UPDATE/DELETE/INSERT..SELECT backfills over
+  a FORCE-RLS table's existing rows, not a plain `INSERT .. VALUES`. Worth widening, but that is its
+  own change.
+- Verified the fix the only way that is meaningful: replayed the migration against the LIVE schema as
+  `platform_owner` (NOBYPASSRLS, table owner) inside a transaction that was ROLLED BACK. Clean run,
+  `DO` block completed - so both CHECKs fired - and zero columns left behind afterwards.
+
+**⚠ Widening the EXCEPTION handler would have been the wrong fix**
+- Catching the RLS error would make both assertions "pass" while proving NOTHING: the row is rejected
+  by the policy and never reaches the CHECK the block exists to exercise. A constraint that is never
+  exercised is indistinguishable from one that is absent - which is that block's own stated argument.
+
+**Deploy state**
+- `alpha-01.071.0172a` rolled back cleanly. Production stayed healthy on `alpha-01.071.0171a`
+  throughout; the failed migration was NOT recorded and left no partial columns.
+- `docs/MAP.md` regenerated - stale again from concurrent commits.
+
+---
+
 ### platform-nest `0.40.1` - one content-brief sweep, not two: the decision, recorded (2026-08-26) - PROTOTYPED
 
 **Decided**

@@ -89,11 +89,32 @@ BEGIN
    WHERE table_name = 'activities' AND column_name IN ('approved_by','approval_channel','executed_by');
   IF n <> 3 THEN RAISE EXCEPTION 'expected 3 new columns, found %', n; END IF;
 
-  SELECT id INTO t FROM companies LIMIT 1;
+  SELECT id INTO t FROM companies ORDER BY id LIMIT 1;
   IF t IS NULL THEN
     RAISE NOTICE 'no company row — constraint assertions skipped (fresh database)';
     RETURN;
   END IF;
+
+  -- ⚠ THE TENANT GUC IS REQUIRED, AND ITS ABSENCE FAILED A LIVE DEPLOY (2026-08-26).
+  --
+  -- `activities` is FORCE-RLS. Migrations run as `platform_owner`, which is NOBYPASSRLS, so the two
+  -- probe INSERTs below are refused by the POLICY before either CHECK can fire:
+  --   "new row violates row-level security policy for table \"activities\""
+  -- That error is neither `check_violation` nor `not_null_violation`, so the handlers below did not
+  -- catch it, the DO block aborted, and the deploy of alpha-01.071.0172a rolled back.
+  --
+  -- ★ CI COULD NOT HAVE CAUGHT THIS. Test databases run migrations as a SUPERUSER, which bypasses
+  -- RLS, so the probes inserted happily and the whole suite was green. The privilege difference
+  -- between the test harness and the live migrator is the entire bug, and it is invisible from the
+  -- test side. Same family as the trap platform-nest/CLAUDE.md documents for backfills, with the
+  -- opposite symptom: a backfill silently matches ZERO rows, an INSERT loudly refuses.
+  --
+  -- Setting the GUC rather than widening the EXCEPTION handler is deliberate. Catching the RLS error
+  -- would make both assertions "pass" while proving NOTHING — the row would be rejected by the
+  -- policy, never reaching the CHECK the block exists to exercise, and a constraint that is never
+  -- exercised is indistinguishable from a constraint that is not there. Which is precisely the
+  -- argument in this block's own header.
+  PERFORM set_config('app.current_tenant_ids', t::text, true);
 
   -- An approval with no channel must fail.
   BEGIN
