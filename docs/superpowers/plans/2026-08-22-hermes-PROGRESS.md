@@ -64,6 +64,7 @@ employee-facing.
 | B19 | ~~Alerting structurally deaf~~ — **RESOLVED 2026-08-23**: ntfy.sh topic wired AND `default-multi` given a webhook leg (it had none — the ticket path was dead even with a URL set). Proven by 3 delivered messages incl. 2 real alerts | — | **RESOLVED** |
 | B21 | `DiskWillFillIn24h` on `sumopod` — **NOT urgent (corrected)**; 6.7 GB reclaimed 2026-08-23 (build cache only, images untouched), 61 G free: the 36 GB drop was a one-off `mimi-*` rebuild 3–6 h ago; disk FLAT for 3 h, 54 GB free. Stale `predict_linear` projection. 97 GB build cache worth reclaiming as housekeeping | nothing imminent | **OWNER — no unscoped prune on that box** |
 | B23 | `aire-nginx` crash-looping ~3 weeks — **ROOT CAUSE CONFIRMED**: SumoPod copy is leftover dev; `aire_n8n_data` proves n8n was removed, orphaning the nginx upstream. Cleanup command prepared; blocked at the destructive-action guardrail | that project only | **OWNER — run `docker compose -p aire down`** |
+| B27 | **`alpha-01.071.0172a` ROLLED BACK by my migration** — self-test INSERTs into FORCE-RLS `activities` as NOBYPASSRLS. Fixed in `7080f232`; live is `0171a` and the migration has NOT applied. Needs a re-release | the P0 attribution columns reaching prod | **OWNER — re-release** |
 | B26 | **I shipped a label-split in `recordJSON`** — failure paths emitted no `provider` label, creating a second series that latches `SyntheticJourneyFailing` on forever while `avg_over_time` reads 100 %. Same class as the `RemoteWriteStalled` bug fixed the day before. Fixed in source, builds clean | alert trustworthiness | **NEEDS DEPLOY** |
 | B25 | **⚠ ACTIVE 25 % FAILURE RATE** — owner 2026-08-26: no fallback keys available at this stage. Now DOCUMENTED in compose + ALARMED via `GatewayServedByEcho`; exposure itself unchanged. The estate's ENTIRE AI runs on Ollama Cloud alone — `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` are both EMPTY, so `LLM_CHAIN=gemini,claude,openai` is a chain of ONE. Ollama Cloud is borrowed/shared/weekly-rate-limited and the owner's own rules forbid making it a hard prod dependency. Quota 8.9 % used | every AI call; 2026-08-24: latency 10–17 s, 3-of-12 timeouts, and one `provider=echo` response actually served | **OWNER — URGENT: set a real GEMINI/ANTHROPIC key on `ai-gateway`** |
 | B24 | **gaiada's observability host runs 11 compose projects**, several production (incl. zenvix/`bfs`). The disk burst that paged us was `mimi` rebuilding. **An unrelated project can fill the disk and take gaiada's alerting down** | the estate's ability to be told anything | **OWNER — decide deliberately, not during an incident** |
@@ -85,7 +86,7 @@ employee-facing.
 | 2 | Risk-tier schema (R0–R3) | **DEV-VERIFIED** | `risk_policy` in `202608221746`; `min_tier` DEFAULT `R2` asserted in-migration (fail closed) |
 | 3 | Environment registry | **DEV-VERIFIED** | **REUSED `infra_hosts`** rather than a second table; delphi/helios/hostinger-wp seeded, closing MSO-04 OQ-1 |
 | 4 | Risk computation fn | **DEV-VERIFIED** | `mcp-hub/src/risk.ts`, 16/16 tests, `tsc` clean. Both invariants pinned (floor; fail-closed) |
-| 5 | Attribution: `approved_by` + `executed_by` | **PROTOTYPED** | `202608261100`; + `approval_channel` with two CHECKs, both proven to reject. Ambient wiring is a follow-up |
+| 5 | Attribution: `approved_by` + `executed_by` | **PROTOTYPED — broke a deploy, fixed** | `202608261100` + `7080f232`. Self-test INSERTs were refused by FORCE-RLS as NOBYPASSRLS; `0172a` rolled back. Re-verified under live-shaped privileges. NOT yet applied to prod |
 | 6 | Persona pack format frozen | **PROTOTYPED** | `persona/README.md` + two packs authored against it |
 | 7 | `x-act-for` envelope contract frozen | PLANNED | contract only; implementation is P3 |
 | 8 | Naming decision | **RESOLVED 2026-08-23** | `SOUL.md` says **Zedano**, identity is `zedano@gaiada.com` — two sources already agree. Standardise on **Zedano** |
@@ -316,6 +317,67 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 🔴 MY MIGRATION BROKE A LIVE DEPLOY. `alpha-01.071.0172a` rolled back.
+
+**The most serious error of this session, and it reached production.**
+
+`202608261100`'s self-assertion block INSERTs two probe rows into `activities` to prove the CHECKs
+reject. `activities` is **FORCE-RLS**, and migrations run as `platform_owner` — **NOBYPASSRLS**. The
+policy refused both probes before either CHECK could fire:
+
+```
+new row violates row-level security policy for table "activities"
+```
+
+That is neither `check_violation` nor `not_null_violation`, so my EXCEPTION handlers did not catch
+it, the DO block aborted, and the release rolled back. Fixed by someone else in `7080f232`.
+
+**Live state confirmed:** platform healthy on **`Alpha 01.071.0171a`** (the rollback target), and
+`SELECT count(*) FROM schema_migrations WHERE name LIKE '%activity_approval%'` → **0**. The migration
+has not applied. The estate is fine; the release is not.
+
+#### How I got it wrong — and it is documented in the file I should have read
+
+I asked "is `activities` FORCE-RLS?" with a grep over the migrations for `activities` on the same
+line as `FORCE ROW`. It matched nothing, so I concluded no RLS. **RLS is applied via a DO-loop over
+table NAMES**, which a line-based grep structurally cannot see.
+
+`platform-nest/CLAUDE.md` says, in as many words:
+
+> **⚠ Grep is not a census.** … Ask the database what a table contains, never the source.
+
+I had that file in context and grepped anyway.
+
+#### The deeper failure: my verification environment did not reproduce the target's PRIVILEGE MODEL
+
+I did "verify by execution" — against a scratch database where I created `activities` myself, with no
+RLS, as superuser. That proved the CHECKs fire and **nothing whatsoever** about whether the migration
+can run where it actually runs. The fix's own comment names why CI could not catch it either: test
+databases migrate as SUPERUSER, which bypasses RLS, so the whole suite was green.
+
+**A verification that omits the one property that differs is not a weaker check — it is a check of a
+different thing.** Five of this session's verification errors were proxies (a slice, a filename, an
+exit code, malformed JSON, a grep). This one was a proxy ENVIRONMENT, and it is the one that shipped.
+
+#### Amends: re-verified under the live shape
+
+Rebuilt the scratch to reproduce the live privilege model — `activities` FORCE-RLS, migrator
+NOBYPASSRLS non-superuser — and applied the FIXED migration as that role:
+
+```
+APPLIED under live-shaped privileges ✓
+activities_approval_channel_known
+activities_approval_channel_required
+```
+
+(Two harness bugs of my own on the way: a missing `GRANT USAGE, CREATE ON SCHEMA public` that read as
+a migration failure, and a stale constraint listing I nearly reported as a result.)
+
+**Standing rule this earns:** a migration touching a FORCE-RLS table must be applied, before commit,
+as a NOBYPASSRLS non-owner role against a schema that has the policy — not as superuser against a
+table you built for the test. And the RLS question is answered by **asking the database**, never by
+grepping the migrations.
 
 ### 2026-08-26 — approval attribution columns (P0 item 5) · PROTOTYPED
 
