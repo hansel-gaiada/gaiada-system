@@ -351,7 +351,10 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/finance`
 - `/finance/[...unbuilt]`
 - `/finance/accounts`
+- `/finance/assets`
 - `/finance/close`
+- `/finance/consolidation`
+- `/finance/cutover`
 - `/finance/journals`
 - `/finance/journals/[entryId]`
 - `/finance/ledger`
@@ -361,6 +364,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/finance/reports`
 - `/finance/settings`
 - `/finance/tax`
+- `/finance/treasury`
 - `/hr`
 - `/hr/analytics`
 - `/hr/attendance`
@@ -414,6 +418,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring/new`
 - `/notifications`
 - `/office`
+- `/office-lab`
 - `/office/credits`
 - `/organization`
 - `/organization/access`

@@ -174,3 +174,21 @@ export async function recordArReceipt(input: {
   }
   return r as FinanceActionResult<{ id: string; allocated: number; onAccount: number }>;
 }
+
+/**
+ * Charge depreciation for a fiscal period. THIS POSTS TO THE LEDGER.
+ *
+ * The only write among the four engine surfaces, and the only one whose Cerbos action is `post`
+ * rather than `read`. A period already charged is refused by a unique index in the database, which
+ * is what makes the button safe to press twice — an "already run?" check in this file could not
+ * promise that against two people clicking at once.
+ */
+export async function runDepreciation(periodId: string): Promise<FinanceActionResult<{ runId: string }>> {
+  const r = await send<{ runId: string }>(`/finance/periods/${periodId}/depreciation`, {});
+  if (r.ok) {
+    revalidatePath("/finance/assets");
+    revalidatePath("/finance");        // the overview carries the close gate, which depreciation feeds
+    revalidatePath("/finance/reports");
+  }
+  return r;
+}
