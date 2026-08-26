@@ -31,7 +31,7 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 | Eval suites | 14 | 13 | 0 | **1** | 0 |  *(dept-pm authored; 13 seats still need one before they may be enabled)*
 | New tools | 25 | 25 | 0 | 0 | 0 |
 | RAG for the workforce (R1–R5) | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **120** | **83** | **0** | **23** | **14** |
+| **Total** | **120** | **83** | **0** | **22** | **15** |
 
 **Read this honestly: 14 of 120 are DEV-VERIFIED** (and see the 2026-08-26 correction — B2/B3 were
 already closed by other sessions, so the identity plumbing is further along than these counts imply). The session closed P0's data model and a
@@ -316,6 +316,39 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 — `agents.*` verified against the LIVE Cerbos policy · DEV-VERIFIED
+
+Registering a tool does not make it callable. **Cerbos is authoritative whenever `CERBOS_URL` is
+set**, and `resource_mcp_tool.yaml`'s own header warns that *"drift fails CLOSED — registry entry
+without a policy entry ⇒ Cerbos deny"*. Had the rules been name-based, every tool built this session
+would have been **inert in production** while passing all 332 unit tests.
+
+Probed the running Cerbos (`localhost:3592`, health `SERVING`) with a seat-shaped principal
+(`hub_caller`, `assurance: low`, `isUnattended: true`, `agent: "agent:dept-pm"`):
+
+| Tool | Decision |
+|---|---|
+| `agents.list` | **EFFECT_ALLOW** |
+| `agents.invoke` (write, impact low) | **EFFECT_ALLOW** |
+| `agents.status` | **EFFECT_ALLOW** |
+| `agents.runs` | **EFFECT_ALLOW** |
+| *control:* `pm.setStatus` (write, impact **medium**, unattended) | **EFFECT_DENY** |
+
+**No policy change is needed.** The allow rule matches on tool ATTRIBUTES (assurance, automation
+scope, impact) rather than names, so a new namespace is admitted by construction. The name list in
+that file governs only the D14-13 approved-executables path, which a low-impact tool never reaches.
+
+**The control row is what makes the other four meaningful.** Without it, four ALLOWs would be equally
+consistent with a policy that allows everything. The DENY proves the impact gate is live in the
+policy, not merely in the hub's in-code fallback — which is precisely where the pre-2026-08-20 hole
+actually lived.
+
+**A near-miss in the method, again:** the first probe reported `NO RESULT` for the three read tools
+and I nearly recorded that as a finding. It was malformed JSON of my own making (an empty `impact`
+double-quoted into `"""`). The control's DENY is what showed the probe shape was otherwise sound.
+Fourth verification-method error of the session; the rule stands — **when a check says something
+surprising, check the CHECK first.**
 
 ### 2026-08-26 — `dept-pm` eval suite · PROTOTYPED — the first seat can now legally be enabled
 
