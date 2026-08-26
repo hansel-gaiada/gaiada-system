@@ -5,18 +5,35 @@
 // for one company so the ledger, the agings, the statements and the asset register all carry real
 // figures that tie.
 //
-// ── EVERY ENTRY IS TAGGED, AND THAT IS THE POINT ───────────────────────────────────────────────
+// ── MOST ENTRIES ARE TAGGED — BUT NOT ALL, AND THE DIFFERENCE MATTERS ──────────────────────────
 // ★ This writes into REAL BOOKS. Not a sandbox — the same ledger that will carry the company's
 // actual transactions, and the ledger is append-only, so nothing here can be deleted later.
 //
-// So every journal this seeds carries `source_event_id` beginning `demo-seed:`. That makes the
-// whole set findable in one query and reversible as a batch:
+// Every journal this file posts DIRECTLY carries `source_event_id` beginning `demo-seed:`.
 //
+// ⚠ THAT DOES NOT COVER EVERYTHING THIS SEED CREATES. Sections 6 and 8 do not post journals
+// themselves — they call `finance_capitalise_asset()` and `finance_run_depreciation()`, and those
+// SQL functions mint their OWN ids (`fa-acquire:<assetId>`, `fa-depreciation:<runId>`). The seed
+// cannot tag them, and an earlier version of this comment claimed it could. Verified against the
+// live estate on 2026-08-26: a 12-entry run produced 8 tagged and 4 untagged, the untagged four
+// being three capitalisations and one depreciation charge — the largest single entry among them a
+// 380,000,000 vehicle. Cleaning up on the `demo-seed:%` filter alone would silently leave those.
+//
+// The honest cleanup is therefore THREE queries, not one — and the `fa-` prefixes must be narrowed
+// to the rows this seed created, because a genuine asset acquired later carries the same prefix:
+//
+//   -- 1. everything posted directly here
 //   SELECT * FROM finance_journal_entries WHERE source_event_id LIKE 'demo-seed:%';
+//   -- 2. the capitalisations, via the assets this seed created (codes below)
+//   SELECT e.* FROM finance_journal_entries e JOIN finance_assets a
+//     ON e.source_event_id = 'fa-acquire:' || a.id
+//    WHERE a.code IN ('IT-001','IT-002','VEH-001');
+//   -- 3. the depreciation charge(s) those assets produced
+//   SELECT * FROM finance_journal_entries WHERE source_event_id LIKE 'fa-depreciation:%';
 //
-// Without that marker, demo figures and real ones would be indistinguishable within a week, and the
-// only way to clean up would be to read every entry and judge it. A prefix costs nothing now and is
-// the difference between "reversible" and "permanent".
+// And note the ledger is not the whole footprint: `finance_assets`, `finance_asset_classes` and
+// `finance_instruments` rows also exist and are NOT journals, so reversing entries leaves the
+// register populated. Those are ordinary rows and can be deleted.
 //
 // ── IDEMPOTENT BY THE LEDGER'S OWN RULE ────────────────────────────────────────────────────────
 // `source_event_id` is unique per company, so a second run does not double-post — it fails on the
@@ -192,6 +209,142 @@ export async function seedFinanceDemo(companyName = COMPANY): Promise<{ posted: 
     ]);
   }
 
+  // ── 7b. Receivables and payables THROUGH THE SUBLEDGERS ───────────────────────────────────────
+  // ★ Sections 2 and 5 above post CASH and direct GL entries — money already received, a vendor
+  // liability booked straight to 2120. Neither creates a subledger document, so the receivables and
+  // payables agings stayed EMPTY while the ledger looked healthy. That was verified on the live
+  // estate: 12 entries posted, and `finance_ar_invoices`/`finance_ap_bills` both still zero.
+  //
+  // An empty aging beside a populated ledger is exactly the "everything is on screen and nothing is
+  // findable" complaint this whole seed exists to answer, so the two subledgers get real documents:
+  // an ISSUED invoice that is not yet paid, one that is partly paid, and an APPROVED bill carrying
+  // Indonesian withholding. Each is created as a draft row and then put through its subledger
+  // function, never posted by hand — `finance_ar_issue_invoice` and `finance_ap_approve_bill` are
+  // what write the journal and move the control account, and a hand-written journal to 1210/2110 is
+  // barred precisely so the aging can be trusted to tie.
+  const arApExist = await fin(co, async (c) =>
+    Number((await c.query<{ n: string }>(`SELECT count(*) n FROM finance_ar_invoices WHERE tenant_id=$1`, [co])).rows[0].n),
+  );
+  if (arApExist === 0) {
+    await fin(co, async (c) => {
+      const acct = async (code: string) =>
+        (await c.query<{ id: string }>(
+          `SELECT id FROM finance_accounts WHERE tenant_id=$1 AND code=$2`, [co, code],
+        )).rows[0]?.id ?? null;
+      const bank = await acct("1120");
+      const revenue = await acct("4100");   // Pendapatan jasa
+      const proServices = await acct("6600"); // Jasa profesional
+
+      // Two customers on DIFFERENT payment terms, so the aging buckets are not all the same shape.
+      const cust: string[] = [];
+      for (const [code, name, terms] of [
+        ["C-001", "PT Bali Beach Resort", 30],
+        ["C-002", "CV Nusantara Kopi", 14],
+      ] as const) {
+        const r = await c.query<{ id: string }>(
+          `INSERT INTO finance_ar_customers (tenant_id, code, name, payment_terms_days, is_pkp)
+           VALUES ($1,$2,$3,$4,true) RETURNING id`,
+          [co, code, name, terms],
+        );
+        cust.push(r.rows[0].id);
+      }
+
+      // Invoice dates are chosen so the two land in DIFFERENT aging buckets as of the seeded month
+      // end — an aging where every row sits in "current" demonstrates nothing about the bucketing.
+      const invoices: Array<[string, number, string, string, string, number]> = [
+        // [no, customerIdx, invoiceDate, dueDate, memo, alreadyPaid]
+        ["INV-2026-001", 0, `${YEAR}-02-10`, `${YEAR}-03-12`, "Retainer Februari", 0],
+        ["INV-2026-002", 1, `${YEAR}-03-20`, `${YEAR}-04-03`, "Kampanye peluncuran produk", 0],
+      ];
+      const invoiceIds: string[] = [];
+      for (const [no, ci, date, due, memo, paid] of invoices) {
+        const sub = no.endsWith("001") ? 60_000_000 : 25_000_000;
+        const tax = Math.round(sub * (11 / 12) * 0.12);
+        const r = await c.query<{ id: string }>(
+          `INSERT INTO finance_ar_invoices
+             (tenant_id, customer_id, invoice_no, invoice_date, due_date, currency_code,
+              subtotal, tax_total, total, amount_paid, status)
+           VALUES ($1,$2,$3,$4::date,$5::date,'IDR',$6,$7,$8,$9,'draft') RETURNING id`,
+          [co, cust[ci], no, date, due, sub, tax, sub + tax, paid],
+        );
+        // ⚠ A HEADER IS NOT AN INVOICE. `finance_ar_issue_invoice` refuses one with no lines
+        // (FINANCE_AR_EMPTY_INVOICE) — caught by dry-running this against the live schema inside a
+        // rolled-back transaction before it ever ran for real. The revenue account is per LINE, not
+        // per invoice, because one invoice legitimately spans service and product revenue and
+        // collapsing that is how a P&L stops being able to answer "what did we sell".
+        await c.query(
+          `INSERT INTO finance_ar_invoice_lines
+             (tenant_id, invoice_id, line_no, description, quantity, unit_price, line_subtotal,
+              revenue_account_id, tax_code, tax_rate, tax_amount)
+           VALUES ($1,$2,1,$3,1,$4,$4,$5,'PPN',12,$6)`,
+          [co, r.rows[0].id, memo, sub, revenue, tax],
+        );
+        // Issuing is what posts the journal and moves the AR control account.
+        await c.query(`SELECT finance_ar_issue_invoice($1,$2)`, [r.rows[0].id, actor]);
+        invoiceIds.push(r.rows[0].id);
+      }
+
+      // A receipt that is PARTLY allocated, deliberately.
+      //
+      // Banking the money and deciding which debt it settles are two separate acts here:
+      // `finance_ar_record_receipt` posts the cash, and `finance_ar_allocate` — which posts NOTHING
+      // — records which invoice it pays down. So 30,000,000 arrives, 20,000,000 is allocated
+      // against INV-2026-001, and 10,000,000 remains ON ACCOUNT.
+      //
+      // That leftover is the whole reason the receivables page shows open invoices, payments on
+      // account and the net as three separate figures rather than one. A fully-allocated book would
+      // make those three look redundant, and the reader would never see the case that actually
+      // bites: an unallocated receipt quietly lowering the net while the invoice it should have
+      // settled still sits in the aging, so a customer gets chased for money already paid.
+      if (bank) {
+        const rec = await c.query<{ id: string }>(
+          `INSERT INTO finance_ar_receipts
+             (tenant_id, customer_id, receipt_no, receipt_date, currency_code, amount, bank_account_id, reference)
+           VALUES ($1,$2,'RCPT-2026-001',$3::date,'IDR',$4,$5,'Transfer BCA') RETURNING id`,
+          [co, cust[0], `${YEAR}-03-15`, 30_000_000, bank],
+        );
+        await c.query(`SELECT finance_ar_record_receipt($1,$2)`, [rec.rows[0].id, actor]);
+        if (invoiceIds[0]) {
+          await c.query(`SELECT finance_ar_allocate($1,$2,$3,$4)`,
+            [rec.rows[0].id, invoiceIds[0], 20_000_000, actor]);
+        }
+      }
+
+      // One vendor bill WITH withholding — the case a single "accounts payable" line hides. PPh 23
+      // at 2% on a service bill: the vendor is owed the net, DJP the rest.
+      const ven = await c.query<{ id: string }>(
+        `INSERT INTO finance_ap_vendors (tenant_id, code, name, is_pkp, default_withholding_code, default_withholding_rate)
+         VALUES ($1,'V-001','PT Kreatif Media Nusantara',true,'PPH23',0.02) RETURNING id`,
+        [co],
+      );
+      const wht = (
+        await c.query<{ id: string }>(`SELECT id FROM finance_accounts WHERE tenant_id=$1 AND code='2151'`, [co])
+      ).rows[0]?.id ?? null;
+      const sub = 35_000_000;
+      const tax = Math.round(sub * (11 / 12) * 0.12);
+      const whtAmt = Math.round(sub * 0.02);
+      const bill = await c.query<{ id: string }>(
+        `INSERT INTO finance_ap_bills
+           (tenant_id, vendor_id, bill_no, bill_date, due_date, currency_code, subtotal, tax_total, total,
+            withholding_code, withholding_rate, withholding_amount, withholding_account_id,
+            amount_payable, amount_paid, status)
+         VALUES ($1,$2,'BILL-8841',$3::date,$4::date,'IDR',$5,$6,$7,'PPH23',0.02,$8,$9,$10,0,'draft')
+         RETURNING id`,
+        [co, ven.rows[0].id, `${YEAR}-03-18`, `${YEAR}-04-17`, sub, tax, sub + tax, whtAmt, wht,
+         sub + tax - whtAmt],
+      );
+      await c.query(
+        `INSERT INTO finance_ap_bill_lines
+           (tenant_id, bill_id, line_no, description, quantity, unit_price, line_subtotal,
+            expense_account_id, tax_code, tax_rate, tax_amount)
+         VALUES ($1,$2,1,'Produksi konten video',1,$3,$3,$4,'PPN',12,$5)`,
+        [co, bill.rows[0].id, sub, proServices, tax],
+      );
+      await c.query(`SELECT finance_ap_approve_bill($1,$2)`, [bill.rows[0].id, actor]);
+    });
+    posted += 4;
+  }
+
   // ── 8. Depreciation for March ─────────────────────────────────────────────────────────────────
   // Run LAST, because it charges whatever assets exist by then. Running it before section 6 would
   // post a zero charge and look like the engine was broken.
@@ -223,9 +376,16 @@ async function main() {
   const r = await seedFinanceDemo(name);
   console.log(`finance demo data for ${name}: ${r.posted} posted, ${r.skipped} already present`);
   console.log("");
-  console.log("Every journal carries source_event_id 'demo-seed:*'. To find or reverse them later:");
-  console.log("  SELECT id, source_event_id, description FROM finance_journal_entries");
-  console.log("   WHERE source_event_id LIKE 'demo-seed:%';");
+  console.log("To find what this seeded, THREE queries are needed — not one. Entries posted through");
+  console.log("the fixed-asset subledger carry ITS ids, not this seed's, and are easy to miss:");
+  console.log("  SELECT * FROM finance_journal_entries WHERE source_event_id LIKE 'demo-seed:%';");
+  console.log("  SELECT e.* FROM finance_journal_entries e JOIN finance_assets a");
+  console.log("    ON e.source_event_id = 'fa-acquire:' || a.id");
+  console.log("   WHERE a.code IN ('IT-001','IT-002','VEH-001');");
+  console.log("  SELECT * FROM finance_journal_entries WHERE source_event_id LIKE 'fa-depreciation:%';");
+  console.log("");
+  console.log("Also NOT journals, so unaffected by a reversal: finance_assets, finance_asset_classes");
+  console.log("and finance_instruments rows. Those are ordinary rows and can be deleted outright.");
   console.log("");
   console.log("⚠ These are REAL entries in REAL books. The ledger is append-only — they can be");
   console.log("  reversed, never deleted. Reverse them before the company's actual transactions");

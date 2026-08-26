@@ -11,6 +11,35 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.39.1` - the finance demo seed reaches the AR/AP subledgers (2026-08-26) - DEV-VERIFIED
+
+**Fixed**
+- ★ **The seed's central claim was FALSE.** Its header said every journal it posts carries
+  `source_event_id` beginning `demo-seed:`, making the set reversible as a batch. Running it on live
+  proved otherwise: 12 entries, 8 tagged, 4 NOT - three asset capitalisations and a depreciation
+  charge, posted by `finance_capitalise_asset()`/`finance_run_depreciation()`, which mint their own
+  `fa-acquire:`/`fa-depreciation:` ids. Cleaning up on the documented filter would have silently
+  left those behind, the largest a 380,000,000 vehicle. The header and the CLI output now give the
+  three queries actually required, and note that `finance_assets`/`finance_instruments` rows are not
+  journals at all so a reversal does not touch them.
+- The seed posted only CASH and direct GL entries, so `finance_ar_invoices` and `finance_ap_bills`
+  stayed at zero and the Receivables/Payables tabs rendered empty beside a populated ledger. It now
+  creates real subledger documents: two issued invoices on different payment terms, a receipt that
+  is PARTLY allocated (30,000,000 banked, 20,000,000 allocated, 10,000,000 left on account - which
+  is the case the three-part position exists to show), and an approved vendor bill with PPh 23.
+
+**Notes**
+- ⚠ A HEADER IS NOT AN INVOICE: `finance_ar_issue_invoice` refuses one with no lines
+  (`FINANCE_AR_EMPTY_INVOICE`). Caught by dry-running the SQL against the LIVE schema inside a
+  rolled-back transaction before it ever ran for real - not by a test, and not on live.
+- Verified the same way: aging returns a row and `finance_ar_reconcile` returns ZERO problems, so
+  the subledger ties to the general ledger.
+- Live books after the first run: 12 entries, debits = credits = 1,509,000,000, zero unbalanced
+  entries, P&L revenue 150,000,000 / expense 144,500,000 / net 5,500,000, of which 8,500,000 is
+  exactly one month's depreciation on the three seeded assets.
+
+---
+
 ### platform-ui `0.54.0` - the five remaining finance tabs are real pages (2026-08-26) - PROTOTYPED
 
 **Added**
