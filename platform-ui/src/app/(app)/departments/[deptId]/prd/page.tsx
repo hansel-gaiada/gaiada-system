@@ -5,12 +5,14 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
+import { getDepartment } from "@/lib/departments";
+import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
 import { getPipelineRun, listPipelineRuns, type PipelineGate, type PipelineRun } from "@/lib/pipeline";
 import { listRecordings, type MeetingRecording } from "@/lib/meetings";
 import { listClients, listProjects } from "@/lib/entities";
 import { ingestAction, retryAudioAction, startRecordingAction, uploadAudioAction } from "@/lib/meetingsActions";
 import { decideGateAction } from "@/lib/pipelineActions";
-import { briefingPhase, flowCounts } from "@/lib/prdFlow";
+import { briefingPhase, flowCounts, scopeToDepartment } from "@/lib/prdFlow";
 import { PrdFlowHeader } from "@/components/prd/PrdFlowHeader";
 import { BriefingComposer } from "@/components/prd/BriefingComposer";
 import { BriefingCard } from "@/components/prd/BriefingCard";
@@ -33,6 +35,11 @@ const PHASE_ORDER = { ready: 0, failed: 1, capture: 2, processing: 3, in_pipelin
 // PRD Studio — one flow, four beats: create a briefing → add its recording → convert the transcript
 // into a PRD run → clear GM review and client sign-off. Every state shown comes from a field the
 // backend already returns (meeting_recordings.status, pipeline_gates); see lib/prdFlow.ts.
+//
+// This is a WEB DEV tab. The route is the generic `/departments/[deptId]/prd`, so two things hold it
+// to that: the page 404s for any department whose toolkit has no `prd` tab, and everything it lists
+// is scoped to this department's projects (`scopeToDepartment`) — recordings and runs are tenant-wide
+// on the backend and an SEO scope call must not show up as a Web Dev briefing.
 export default async function PrdStudioPage({ params }: { params: Params }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -41,22 +48,30 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
   const { deptId } = await params;
   if (!tenant) notFound();
 
+  const dept = await getDepartment(userId, tenant, deptId);
+  if (!dept) notFound();
+  if (!deptTabs(toolkitFor(dept.name)).some((t) => t.key === "prd")) notFound();
+
   // AGN-3: the run list is this page's subject, so a refusal is stated rather than rendered as an
   // empty list — "nothing produced" and "you may not see it" are different claims.
   const runsResult = await listPipelineRuns(userId, tenant);
   if (runsResult.kind === "forbidden") return <ReadRefusal subject="this department's delivery runs" kind="forbidden" />;
   if (runsResult.kind === "unavailable") return <ReadRefusal subject="This department's delivery runs" kind="unavailable" reason={runsResult.reason} />;
-  const runs = runsResult.data;
+  const allRuns = runsResult.data;
 
   const [recordingsResult, clients, projects] = await Promise.all([
     listRecordings(userId, tenant),
     listClients(userId, tenant),
     listProjects(userId, tenant).catch(() => []),
   ]);
-  const recordings: MeetingRecording[] = recordingsResult.kind === "ok" ? recordingsResult.data : [];
+  const allRecordings: MeetingRecording[] = recordingsResult.kind === "ok" ? recordingsResult.data : [];
   const clientName = new Map(clients.map((c) => [c.id, c.name]));
   const projectName = new Map(projects.map((p) => [p.id, p.name]));
-  const recordingByMeetingId = new Map(recordings.map((r) => [r.meeting_id, r]));
+  const recordingByMeetingId = new Map(allRecordings.map((r) => [r.meeting_id, r]));
+
+  // Web Dev only: this department's projects decide what belongs on this tab.
+  const deptProjects = projects.filter((p) => p.department_id === deptId);
+  const { recordings, runs } = scopeToDepartment(new Set(deptProjects.map((p) => p.id)), allRecordings, allRuns);
 
   // Gates for the active runs — the approval chips need them; the list read does not carry them.
   const activeRuns = runs.filter((r) => r.status !== "complete");
@@ -117,7 +132,9 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
       <Card title="Start here — create a briefing">
         <BriefingComposer
           clients={clients.map((c) => ({ id: c.id, name: c.name }))}
-          projects={projects.map((p) => ({ id: p.id, name: p.name, client_id: p.client_id }))}
+          projects={deptProjects.map((p) => ({ id: p.id, name: p.name, client_id: p.client_id }))}
+          departmentName={dept.name}
+          projectsHref={`/departments/${deptId}/projects`}
           action={startRecordingAction}
         />
       </Card>
@@ -130,7 +147,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
           {recordingsResult.kind !== "ok" ? (
             <ReadRefusal subject="this department's briefings" kind={recordingsResult.kind} reason={recordingsResult.kind === "unavailable" ? recordingsResult.reason : undefined} />
           ) : briefings.length === 0 ? (
-            <EmptyNote>No briefings waiting. Create one above — it appears here with its next step.</EmptyNote>
+            <EmptyNote>No {dept.name} briefings waiting. Create one above — it appears here with its next step.</EmptyNote>
           ) : (
             <div className="prd-briefings">
               {briefings.map((r) => (
@@ -153,7 +170,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
           headerRight={<Link href="/pipeline" className="lux-btn lux-btn--ghost lux-btn--sm">Open pipeline →</Link>}
         >
           {runs.length === 0 ? (
-            <EmptyNote>No PRD runs yet. Convert a transcribed briefing above and its approvals appear here.</EmptyNote>
+            <EmptyNote>No {dept.name} PRD runs yet. Convert a transcribed briefing above and its approvals appear here.</EmptyNote>
           ) : (
             <>
               {activeRuns.length === 0 ? (

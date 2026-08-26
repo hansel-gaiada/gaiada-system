@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { approvalTrack, briefingPhase, flowCounts } from "./prdFlow";
+import { approvalTrack, briefingPhase, flowCounts, scopeToDepartment } from "./prdFlow";
 import type { PipelineGate } from "./pipeline";
 
 function gate(over: Partial<PipelineGate>): PipelineGate {
@@ -149,5 +149,34 @@ describe("flowCounts — the numbers the flow header shows", () => {
       ],
     );
     expect(counts).toEqual({ toCapture: 2, processing: 1, readyToConvert: 1, failed: 1, awaitingGm: 1, awaitingClient: 1, complete: 1 });
+  });
+});
+
+describe("scopeToDepartment — PRD Studio is a Web Dev tab, so it shows Web Dev work only", () => {
+  const webDev = new Set(["p-web-1", "p-web-2"]);
+  const rec = (id: string, project_id: string | null, meeting_id = `mtg-${id}`) => ({ id, project_id, meeting_id, status: "transcribed" as const });
+  const run = (id: string, project_id: string | null | undefined, source_meeting_id: string | null) => ({ id, project_id, source_meeting_id });
+
+  it("keeps briefings whose project belongs to the department, drops the rest — including project-less ones", () => {
+    const out = scopeToDepartment(webDev, [rec("a", "p-web-1"), rec("b", "p-seo-1"), rec("c", null)], []);
+    expect(out.recordings.map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("keeps a run whose own project is in the department", () => {
+    const out = scopeToDepartment(webDev, [], [run("r1", "p-web-2", null), run("r2", "p-seo-1", null)]);
+    expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
+  });
+
+  it("falls back to the source briefing's project when the run carries none (pre-WD-30 rows)", () => {
+    const recordings = [rec("a", "p-web-1", "mtg-a"), rec("b", "p-seo-1", "mtg-b")];
+    const out = scopeToDepartment(webDev, recordings, [run("r1", null, "mtg-a"), run("r2", undefined, "mtg-b"), run("r3", null, null)]);
+    expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
+  });
+
+  it("the fallback looks at ALL recordings, not just the department's own", () => {
+    // A run's project wins over its briefing's project when both exist.
+    const out = scopeToDepartment(webDev, [rec("a", "p-seo-1", "mtg-a")], [run("r1", "p-web-1", "mtg-a")]);
+    expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
+    expect(out.recordings).toEqual([]);
   });
 });

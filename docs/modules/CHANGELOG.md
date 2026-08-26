@@ -88,6 +88,15 @@ local stack). None of these mean "production-done".
   shell: a duplicate `pipeline:<gateId>` key from `lib/queue.ts` (work rail) and a hydration
   attribute mismatch under `(app)/layout`'s `<link>`.
 
+- **Web Dev only.** The route is the generic `/departments/[deptId]/prd`, so the page now 404s for any
+  department whose toolkit has no `prd` tab, and everything it lists is scoped through PROJECTS
+  (`lib/prdFlow.ts::scopeToDepartment`): a briefing belongs iff its project is this department's;
+  a run iff its own `project_id` is (WD-30) or, for pre-WD-30 rows, its source briefing's project is.
+  Consequence: **project is required** on the composer (it is the only recording→department link),
+  and a client with no Web Dev project is told to create one in Project Management first. Recordings
+  and runs are tenant-wide on the backend — the SEO scope call in the demo store no longer appears
+  as a Web Dev briefing, and the e2e asserts that.
+
 **Known gap (frontend)**
 - Gate chips need `GET /pipeline/runs/:id` per active run (the LIST carries no gates) — capped at 12;
   runs past the cap say "open the run to see its approvals" rather than guessing. A list-with-gates

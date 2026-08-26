@@ -144,3 +144,22 @@ export function flowCounts(
   }
   return counts;
 }
+
+// ── Department scoping ────────────────────────────────────────────────────────────────────────────
+// PRD Studio is a Web Dev tab; recordings and runs are tenant-wide. The only link from either to a
+// department is the PROJECT (`projects.department_id`), so: a briefing belongs here iff its project
+// is one of this department's; a run belongs here iff its own project is (WD-30 populates it) or,
+// failing that, its source briefing's project is (rows written before WD-30 carry no project).
+// Project-less briefings cannot be attributed and are left to /meetings — which is also why the
+// composer requires a project.
+export function scopeToDepartment<
+  R extends { project_id: string | null; meeting_id: string },
+  U extends { project_id?: string | null; source_meeting_id: string | null },
+>(deptProjectIds: Set<string>, recordings: R[], runs: U[]): { recordings: R[]; runs: U[] } {
+  const projectByMeeting = new Map(recordings.map((r) => [r.meeting_id, r.project_id]));
+  const inDept = (projectId: string | null | undefined) => !!projectId && deptProjectIds.has(projectId);
+  return {
+    recordings: recordings.filter((r) => inDept(r.project_id)),
+    runs: runs.filter((run) => inDept(run.project_id) || (run.source_meeting_id ? inDept(projectByMeeting.get(run.source_meeting_id)) : false)),
+  };
+}

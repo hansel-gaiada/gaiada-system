@@ -241,9 +241,12 @@ test("PRD Studio run rows deep-link into the pipeline workspace", async ({ page 
   await page.goto("/departments/dept-1/prd");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
   await expect(page.getByRole("heading", { name: /prd runs/i })).toBeVisible();
-  await page.getByRole("link", { name: "Mobile app revamp — discovery" }).click();
-  await page.waitForURL(/\/pipeline\/run-demo-2$/);
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
+  // run-demo-2 carries no project and no source briefing, so it is NOT a Web Dev row here (it stays
+  // on /pipeline). run-demo-1's project is the Web Dev "Client site redesign".
+  await expect(page.getByRole("link", { name: "Mobile app revamp — discovery" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Northwind — site redesign kickoff", exact: true }).click();
+  await page.waitForURL(/\/pipeline\/run-demo-1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
 });
 
 test("PRD Studio reads as one flow: create → record → convert → approve", async ({ page }) => {
@@ -257,23 +260,32 @@ test("PRD Studio reads as one flow: create → record → convert → approve", 
   await expect(beats.nth(3)).toContainText(/get it approved/i);
 
   // A briefing with no recording yet offers exactly the three ways to add one, and nothing else.
-  const intake = page.getByRole("article", { name: "Cedar Group — intake call" });
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
   await expect(intake.getByText("No recording yet")).toBeVisible();
   await expect(intake.getByRole("button", { name: "Record here" })).toBeVisible();
   await expect(intake.getByRole("button", { name: "Desktop capture helper" })).toBeVisible();
   await expect(intake.getByRole("button", { name: "Upload a file" })).toBeVisible();
   await expect(intake.getByRole("button", { name: /convert to prd run/i })).toHaveCount(0);
   await intake.getByRole("button", { name: "Desktop capture helper" }).click();
-  await expect(intake.getByText("mtg-cedar-intake")).toBeVisible();
+  await expect(intake.getByText("mtg-northwind-intake")).toBeVisible();
 
   // A transcribed briefing has one primary action: convert.
-  const scope = page.getByRole("article", { name: "Cedar Group — SEO scope call" });
+  const scope = page.getByRole("article", { name: "Northwind — checkout flow scope call" });
   await expect(scope.getByText("Transcript ready")).toBeVisible();
   await expect(scope.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
 
-  // The approvals list shows both beats per run, in plain words.
+  // Web Dev only: the SEO department's transcribed call is not a Web Dev briefing.
+  await expect(page.getByRole("article", { name: "Cedar Group — SEO scope call" })).toHaveCount(0);
+
+  // The approvals list shows both beats per run, in plain words (run-demo-1: approved + signed).
   await expect(page.getByRole("heading", { name: /prd runs/i })).toBeVisible();
-  await expect(page.getByText(/still being drafted from the transcript/i)).toBeVisible(); // run-demo-2: no prd_review yet
+  await expect(page.getByText(/prd approved and signed — the build is unlocked/i)).toBeVisible();
+});
+
+test("PRD Studio exists for Web Dev only — another department's /prd is not found", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-3/prd"); // SEO — its toolkit has no `prd` tab
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/page not found/i);
 });
 
 test("PRD Studio: creating a briefing puts it straight into the capture step", async ({ page }) => {
@@ -281,6 +293,7 @@ test("PRD Studio: creating a briefing puts it straight into the capture step", a
   await page.goto("/departments/dept-1/prd");
   await page.getByLabel(/what is this briefing about/i).fill("Playwright — kickoff briefing");
   await page.getByRole("combobox", { name: "Client" }).selectOption({ label: "Northwind Traders" });
+  await page.getByRole("combobox", { name: "Project" }).selectOption({ label: "Client site redesign" });
   await page.getByRole("radio", { name: "Audio + video" }).click();
   await page.getByRole("button", { name: "Create briefing" }).click();
   await expect(page.getByText(/briefing created — add its recording below/i)).toBeVisible();

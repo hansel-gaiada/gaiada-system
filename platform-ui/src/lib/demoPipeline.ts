@@ -26,7 +26,7 @@ interface DemoGate {
 }
 interface DemoRun {
   id: string; title: string | null; status: string; source_meeting_id: string | null;
-  client_id: string | null; mom_ref: string | null; created_by: string | null;
+  client_id: string | null; project_id?: string | null; mom_ref: string | null; created_by: string | null;
   created_at: string; updated_at: string;
 }
 interface DemoResult { status: number; json: unknown }
@@ -87,6 +87,7 @@ const RUNS: DemoRun[] = [
     status: "scope_pending",
     source_meeting_id: "mtg-northwind-kickoff", // matches demoMeetings.ts rec-demo-1.meeting_id
     client_id: "cl-1", // Northwind Traders
+    project_id: "p-web-1", // WD-30 populates this from the source meeting — the Web Dev "Client site redesign"
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-07-18T03:10:00Z",
@@ -98,6 +99,7 @@ const RUNS: DemoRun[] = [
     status: "delivery_active",
     source_meeting_id: null, // exercises "no source meeting" as well as "no client" in the same run
     client_id: null, // KNOWN GAP: the dispatcher currently drops client context on some ingests
+    project_id: null, // no project either — so this run is NOT a Web Dev PRD Studio row (only /pipeline shows it)
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-07-23T01:00:00Z",

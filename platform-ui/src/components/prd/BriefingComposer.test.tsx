@@ -18,7 +18,8 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     render(<BriefingComposer clients={clients} projects={projects} action={vi.fn(async () => ({ ok: true, id: "rec-9" }))} />);
     expect(screen.getByLabelText(/what is this briefing about/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^client/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/project/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^project/i)).toBeRequired();
+    expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^audio$/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /audio \+ video/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create briefing/i })).toBeInTheDocument();
@@ -31,6 +32,14 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     const options = Array.from((screen.getByLabelText(/project/i) as HTMLSelectElement).options).map((o) => o.textContent);
     expect(options).toContain("Cedar site");
     expect(options).not.toContain("Northwind SEO");
+  });
+
+  it("a client with no project in this department gets told where to make one, not a dead select", () => {
+    render(<BriefingComposer clients={clients} projects={[projects[0]]} departmentName="Web Dev" projectsHref="/departments/dept-1/projects" action={vi.fn(async () => ({ ok: true }))} />);
+    fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-2" } });
+    expect(screen.getByText(/no web dev project for northwind yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /create one in project management/i })).toHaveAttribute("href", "/departments/dept-1/projects");
+    expect(screen.getByRole("button", { name: /create briefing/i })).toBeDisabled();
   });
 
   it("submits title, client, project and the chosen medium to the start action", async () => {
@@ -54,6 +63,7 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     render(<BriefingComposer clients={clients} projects={projects} action={action} />);
     fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "Cedar — intake call" } });
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
+    fireEvent.change(screen.getByLabelText(/^project/i), { target: { value: "p-1" } });
     fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
     await waitFor(() => expect(screen.getByText(/briefing created/i)).toBeInTheDocument());
     expect(screen.getByText(/add its recording/i)).toBeInTheDocument();
@@ -64,6 +74,7 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     render(<BriefingComposer clients={clients} projects={projects} action={action} />);
     fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "X" } });
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
+    fireEvent.change(screen.getByLabelText(/^project/i), { target: { value: "p-1" } });
     fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
     await waitFor(() => expect(screen.getByText(/no active company selected/i)).toBeInTheDocument());
   });

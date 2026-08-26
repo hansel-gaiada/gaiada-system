@@ -7,19 +7,27 @@ import "./prd-studio.css";
 // Step 1 — create the briefing as an item FIRST. Nothing records here: this only registers the
 // meeting (`startRecordingAction` → POST /meetings/recordings/start), which mints the stable
 // meeting id the capture methods attach to. Client is required because the client sign-off beat
-// (step 4) needs a client on the run, and `createRun` derives it from this meeting. Medium is chosen
-// now because the backend stores `kind` on the row and the browser recorder must know which devices
-// to ask for before the take starts.
+// (step 4) needs a client on the run, and `createRun` derives it from this meeting. Project is
+// required because it is the ONLY thing tying a recording to a department — PRD Studio is a Web Dev
+// tab and shows Web Dev projects' briefings only; a project-less briefing would belong to no
+// department. `projects` is therefore already this department's list. Medium is chosen now because
+// the backend stores `kind` on the row and the browser recorder must know which devices to ask for.
 export interface ComposerClient { id: string; name: string }
 export interface ComposerProject { id: string; name: string; client_id: string | null }
 
 export function BriefingComposer({
   clients,
   projects,
+  departmentName = "this department",
+  projectsHref,
   action,
 }: {
   clients: ComposerClient[];
+  /** This department's projects only. */
   projects: ComposerProject[];
+  departmentName?: string;
+  /** Where to create a project when the chosen client has none here. */
+  projectsHref?: string;
   action: (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
 }) {
   const router = useRouter();
@@ -32,6 +40,8 @@ export function BriefingComposer({
     () => (clientId ? projects.filter((p) => p.client_id === clientId) : []),
     [projects, clientId],
   );
+  const clientLabel = clients.find((c) => c.id === clientId)?.name ?? "this client";
+  const noProjectForClient = !!clientId && clientProjects.length === 0;
 
   // On success: re-read the page so the new briefing card appears, and clear the form for the next
   // one. The confirmation stays visible — it is the hand-off to step 2.
@@ -59,13 +69,20 @@ export function BriefingComposer({
           </select>
         </label>
         <label className="prd-field">
-          <span>Project <span className="prd-field__optional">(optional)</span></span>
-          <select name="projectId" defaultValue="" disabled={!clientId}>
-            <option value="">{clientId ? "None" : "Choose a client first"}</option>
+          Project
+          <select name="projectId" required defaultValue="" disabled={!clientId || noProjectForClient}>
+            <option value="">{!clientId ? "Choose a client first" : noProjectForClient ? "No project here" : "Choose…"}</option>
             {clientProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
       </div>
+      {noProjectForClient && (
+        <p className="prd-note">
+          No {departmentName} project for {clientLabel} yet.{" "}
+          {projectsHref ? <a href={projectsHref}>Create one in Project Management</a> : "Create one in Project Management"} first — the
+          briefing is filed under it.
+        </p>
+      )}
 
       <div className="prd-field" style={{ display: "grid", gap: 6 }}>
         <span id="prd-kind-label">You will record</span>
@@ -77,7 +94,7 @@ export function BriefingComposer({
       </div>
 
       <div className="prd-composer__foot">
-        <button type="submit" className="lux-btn lux-btn--solid lux-btn--md" disabled={pending}>
+        <button type="submit" className="lux-btn lux-btn--solid lux-btn--md" disabled={pending || noProjectForClient}>
           {pending ? "Creating…" : "Create briefing"}
         </button>
         {state?.ok ? (

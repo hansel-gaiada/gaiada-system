@@ -110,14 +110,14 @@ const RECORDINGS: DemoRec[] = [
     created_at: "2026-07-27T04:00:00Z",
     updated_at: "2026-07-27T04:23:00Z",
   },
-  // PRD Studio step 2 — a briefing that exists but has no recording yet (exactly what "Create
-  // briefing" produces), so the capture methods are drivable in DEMO_MODE.
+  // PRD Studio step 2 — a Web Dev briefing that exists but has no recording yet (exactly what
+  // "Create briefing" produces), so the capture methods are drivable in DEMO_MODE.
   {
     id: "rec-demo-4",
-    meeting_id: "mtg-cedar-intake",
-    client_id: "cl-2",
-    project_id: "p-seo-1",
-    title: "Cedar Group — intake call",
+    meeting_id: "mtg-northwind-intake",
+    client_id: "cl-1",
+    project_id: "p-web-1",
+    title: "Northwind — checkout flow intake",
     kind: "audio",
     status: "recording",
     started_at: null,
@@ -135,6 +135,33 @@ const RECORDINGS: DemoRec[] = [
     created_by: "demo-hansel",
     created_at: "2026-08-25T02:00:00Z",
     updated_at: "2026-08-25T02:00:00Z",
+  },
+  // PRD Studio step 3 — a Web Dev briefing whose transcript is ready, so "Convert to PRD run" is
+  // drivable. (rec-demo-2 is transcribed too, but it is an SEO project and must NOT appear on the
+  // Web Dev tab — that exclusion is part of what the e2e checks.)
+  {
+    id: "rec-demo-5",
+    meeting_id: "mtg-northwind-checkout-scope",
+    client_id: "cl-1",
+    project_id: "p-web-1",
+    title: "Northwind — checkout flow scope call",
+    kind: "video",
+    status: "transcribed",
+    started_at: "2026-08-24T03:00:00Z",
+    ended_at: "2026-08-24T03:35:00Z",
+    duration_sec: 2100,
+    size_bytes: 310_000_000,
+    local_hint: null,
+    transcript: "Checkout must drop to two steps. Guest checkout stays. Apple Pay and GoPay before launch. Analytics events per step.",
+    transcript_ref: null,
+    audio_ref: "demo-audio-rec-5",
+    drive_status: "none",
+    drive_file_id: null,
+    drive_link: null,
+    pipeline_run_id: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-24T03:00:00Z",
+    updated_at: "2026-08-24T03:40:00Z",
   },
 ];
 
