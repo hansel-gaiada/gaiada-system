@@ -53,9 +53,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!pre.data) return NextResponse.json({ error: "This briefing no longer exists." }, { status: 404, headers: noStore });
 
   const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
+  // Content-type (with its multipart boundary) is forwarded; content-length deliberately is NOT.
+  // Forwarding it made undici police the byte count of the streamed body and a 170 MB upload died
+  // with UND_ERR_REQ_CONTENT_LENGTH_MISMATCH. Without it the hop is chunked, which @fastify/multipart
+  // (busboy) reads exactly the same way, and the platform's own size caps still apply.
   const headers: Record<string, string> = { ...(await platformAuthHeaders(userId)), "content-type": contentType };
-  const len = req.headers.get("content-length");
-  if (len) headers["content-length"] = len;
 
   let upstream: Response;
   try {
