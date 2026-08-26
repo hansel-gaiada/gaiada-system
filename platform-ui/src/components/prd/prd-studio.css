@@ -1,0 +1,187 @@
+/* PRD Studio (departments/[deptId]/prd) — one flow, four beats.
+   Extends ui.css: hairlines, tokens only (guarded by styles/tokens.test.ts), radius through
+   var(--radius-*). The one deliberate device on this tab is the flow strip at the top: it is the
+   page's table of contents and its progress bar at once, so everything below it stays quiet. */
+
+/* ── Flow strip ─────────────────────────────────────────────────────────────────────────────── */
+.prd-flow {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 0.5px solid var(--erp-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+}
+.prd-flow__beat {
+  position: relative;
+  min-width: 0;
+  padding: 16px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-left: 0.5px solid var(--erp-hairline);
+}
+.prd-flow__beat:first-child { border-left: 0; }
+/* The thread between beats: a small arrow sitting on the shared hairline. */
+.prd-flow__beat:not(:last-child)::after {
+  content: "→";
+  position: absolute;
+  right: -7px;
+  top: 18px;
+  padding: 0 2px;
+  background: var(--surface-card);
+  color: var(--ink-faint);
+  font: 400 13px var(--font-body);
+  z-index: 1;
+}
+.prd-flow__num { font: 700 10px var(--font-body); letter-spacing: 0.14em; text-transform: uppercase; color: var(--erp-accent); }
+.prd-flow__label { font: 600 15px/1.25 var(--font-body); color: var(--text-primary); }
+.prd-flow__count { font: 400 13px/1.4 var(--font-body); color: var(--ink-subtle); }
+.prd-flow__count--live { color: var(--text-primary); }
+@media (max-width: 900px) {
+  .prd-flow { grid-template-columns: 1fr 1fr; }
+  .prd-flow__beat:nth-child(3) { border-left: 0; }
+  .prd-flow__beat:nth-child(n + 3) { border-top: 0.5px solid var(--erp-hairline); }
+  .prd-flow__beat:nth-child(2)::after { display: none; }
+}
+
+/* ── Composer — step 1 ─────────────────────────────────────────────────────────────────────── */
+.prd-composer { display: grid; gap: 16px; }
+.prd-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.prd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font: 700 10px var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--erp-ink-50);
+}
+.prd-field input,
+.prd-field select {
+  min-width: 0;
+  border: 0.5px solid var(--line-control);
+  border-radius: var(--radius-sm);
+  background: var(--surface-page);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font: 400 14px var(--font-body);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.prd-field input:focus-visible,
+.prd-field select:focus-visible,
+.prd-segment__opt:focus-visible,
+.prd-method:focus-visible {
+  outline: 2px solid var(--erp-accent);
+  outline-offset: 1px;
+}
+.prd-field__optional { font-weight: 400; letter-spacing: normal; text-transform: none; color: var(--ink-subtle); }
+.prd-segment { display: inline-flex; border: 0.5px solid var(--line-control); border-radius: var(--radius-sm); overflow: hidden; width: max-content; }
+.prd-segment__opt {
+  background: transparent;
+  border: 0;
+  padding: 9px 14px;
+  font: 500 13px var(--font-body);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.2s var(--erp-ease);
+}
+.prd-segment__opt + .prd-segment__opt { border-left: 0.5px solid var(--line-control); }
+.prd-segment__opt:hover { background: var(--tint-hover); }
+.prd-segment__opt[aria-checked="true"] { background: var(--erp-accent); color: var(--text-on-accent); }
+.prd-composer__foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+.prd-hint { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-subtle); max-width: 62ch; }
+.prd-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
+.prd-note--error { color: var(--status-critical-fg); }
+.prd-note--ok { color: var(--status-ok-fg); }
+
+/* ── Briefing cards — steps 2 and 3 ────────────────────────────────────────────────────────── */
+.prd-briefings { display: grid; gap: 12px; }
+.prd-card {
+  border: 0.5px solid var(--erp-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  padding: 16px 18px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+/* The one card that needs a person right now is the only one allowed an accent edge. */
+.prd-card--ready { border-left: 3px solid var(--erp-accent); }
+.prd-card--failed { border-left: 3px solid var(--status-critical); }
+.prd-card__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.prd-card__title { margin: 0; font: 600 15px/1.3 var(--font-body); color: var(--text-primary); }
+.prd-card__meta { display: flex; gap: 8px; flex-wrap: wrap; font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; }
+.prd-card__open { font: 400 12px var(--font-body); color: var(--ink-subtle); text-decoration: none; white-space: nowrap; }
+.prd-card__open:hover { color: var(--text-primary); }
+.prd-state { display: grid; gap: 2px; }
+.prd-state__headline { display: inline-flex; align-items: center; gap: 8px; font: 600 13px var(--font-body); color: var(--text-primary); }
+.prd-state__next { font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); }
+.prd-methods { display: flex; gap: 8px; flex-wrap: wrap; }
+.prd-method {
+  border: 0.5px solid var(--line-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  padding: 9px 14px;
+  font: 500 13px var(--font-body);
+  cursor: pointer;
+  transition: background 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
+}
+.prd-method:hover { background: var(--tint-hover); }
+.prd-method[aria-pressed="true"] { border-color: var(--erp-accent); background: var(--tint-active); }
+.prd-panel { border-top: 0.5px solid var(--erp-hairline-soft); padding-top: 12px; display: grid; gap: 10px; }
+.prd-panel input[type="file"] { font: 400 13px var(--font-body); color: var(--text-primary); }
+.prd-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.prd-mono { font-family: var(--font-data); font-size: 13px; color: var(--text-primary); user-select: all; }
+/* Label + value on one line; the value keeps its case (ids are case-sensitive). */
+.prd-kv { display: inline-flex; align-items: center; gap: 10px; }
+.prd-kv__label { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.prd-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--status-progress); animation: prd-pulse 1.4s var(--erp-ease) infinite; }
+@keyframes prd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .prd-pulse { animation: none; } }
+
+/* ── Runs and their approvals — step 4 ─────────────────────────────────────────────────────── */
+.prd-runs { display: grid; }
+.prd-run {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr);
+  gap: 10px 24px;
+  padding: 14px 0;
+  border-bottom: 0.5px solid var(--erp-hairline-soft);
+  align-items: start;
+}
+.prd-run:last-child { border-bottom: 0; }
+.prd-run__title { margin: 0; font: 600 15px/1.3 var(--font-body); }
+.prd-run__title a { color: var(--text-primary); text-decoration: none; }
+.prd-run__title a:hover { text-decoration: underline; }
+.prd-run__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+.prd-run__meta a { color: inherit; }
+.prd-track { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.prd-beat { display: grid; gap: 4px; min-width: 0; }
+.prd-beat__name { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-subtle); }
+.prd-beat__where { font: 400 11px var(--font-body); color: var(--ink-subtle); }
+.prd-chip { display: inline-flex; align-items: center; gap: 7px; font: 600 12px var(--font-body); color: var(--text-primary); }
+.prd-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--status-idle); flex: none; }
+.prd-chip[data-tone="idle"] { color: var(--ink-subtle); font-weight: 400; }
+.prd-chip[data-tone="waiting"]::before { background: var(--status-warning); }
+.prd-chip[data-tone="done"]::before { background: var(--status-ok); }
+.prd-chip[data-tone="attention"]::before { background: var(--status-critical); }
+.prd-track__arrow { color: var(--ink-faint); font: 400 14px var(--font-body); padding-top: 16px; }
+.prd-run__sentence { grid-column: 1 / -1; margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); }
+.prd-run__decide { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.prd-done { margin-top: 16px; }
+.prd-done__summary { cursor: pointer; list-style: none; width: max-content; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-accent); padding: 3px 0; }
+.prd-done__summary::-webkit-details-marker { display: none; }
+.prd-done__summary::before { content: "+ "; }
+.prd-done[open] .prd-done__summary::before { content: "− "; }
+
+@media (max-width: 760px) {
+  .prd-fields { grid-template-columns: 1fr; }
+  .prd-run { grid-template-columns: 1fr; }
+}

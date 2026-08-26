@@ -246,6 +246,49 @@ test("PRD Studio run rows deep-link into the pipeline workspace", async ({ page 
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
 });
 
+test("PRD Studio reads as one flow: create → record → convert → approve", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+
+  // The flow strip names the four beats in the order a person does them.
+  const beats = page.getByRole("list", { name: /how a briefing becomes an approved prd/i }).getByRole("listitem");
+  await expect(beats).toHaveCount(4);
+  await expect(beats.nth(0)).toContainText(/create a briefing/i);
+  await expect(beats.nth(3)).toContainText(/get it approved/i);
+
+  // A briefing with no recording yet offers exactly the three ways to add one, and nothing else.
+  const intake = page.getByRole("article", { name: "Cedar Group — intake call" });
+  await expect(intake.getByText("No recording yet")).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Record here" })).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Desktop capture helper" })).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Upload a file" })).toBeVisible();
+  await expect(intake.getByRole("button", { name: /convert to prd run/i })).toHaveCount(0);
+  await intake.getByRole("button", { name: "Desktop capture helper" }).click();
+  await expect(intake.getByText("mtg-cedar-intake")).toBeVisible();
+
+  // A transcribed briefing has one primary action: convert.
+  const scope = page.getByRole("article", { name: "Cedar Group — SEO scope call" });
+  await expect(scope.getByText("Transcript ready")).toBeVisible();
+  await expect(scope.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
+
+  // The approvals list shows both beats per run, in plain words.
+  await expect(page.getByRole("heading", { name: /prd runs/i })).toBeVisible();
+  await expect(page.getByText(/still being drafted from the transcript/i)).toBeVisible(); // run-demo-2: no prd_review yet
+});
+
+test("PRD Studio: creating a briefing puts it straight into the capture step", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  await page.getByLabel(/what is this briefing about/i).fill("Playwright — kickoff briefing");
+  await page.getByRole("combobox", { name: "Client" }).selectOption({ label: "Northwind Traders" });
+  await page.getByRole("radio", { name: "Audio + video" }).click();
+  await page.getByRole("button", { name: "Create briefing" }).click();
+  await expect(page.getByText(/briefing created — add its recording below/i)).toBeVisible();
+  const card = page.getByRole("article", { name: "Playwright — kickoff briefing" });
+  await expect(card.getByText("No recording yet")).toBeVisible();
+  await expect(card.getByText(/audio \+ video/i)).toBeVisible();
+});
+
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {
   await page.goto("/meetings/rec-demo-1");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);

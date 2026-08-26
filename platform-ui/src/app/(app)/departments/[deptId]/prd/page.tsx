@@ -1,22 +1,38 @@
 import Link from "next/link";
-import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listPipelineRuns } from "@/lib/pipeline";
-import { listRecordings } from "@/lib/meetings";
-import { RecordControls } from "@/components/meetings/RecordControls";
-import { Card, HairlineTable, StatusBadge } from "@/components/ui";
+import { can } from "@/lib/rbac";
+import { getPipelineRun, listPipelineRuns, type PipelineGate, type PipelineRun } from "@/lib/pipeline";
+import { listRecordings, type MeetingRecording } from "@/lib/meetings";
+import { listClients, listProjects } from "@/lib/entities";
+import { ingestAction, retryAudioAction, startRecordingAction, uploadAudioAction } from "@/lib/meetingsActions";
+import { decideGateAction } from "@/lib/pipelineActions";
+import { briefingPhase, flowCounts } from "@/lib/prdFlow";
+import { PrdFlowHeader } from "@/components/prd/PrdFlowHeader";
+import { BriefingComposer } from "@/components/prd/BriefingComposer";
+import { BriefingCard } from "@/components/prd/BriefingCard";
+import { RunApprovalRow } from "@/components/prd/RunApprovalRow";
+import { Card } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
-import { formatDateTime } from "@/lib/format";
+import { ReadRefusal } from "@/components/systems/ReadRefusal";
 
 type Params = Promise<{ deptId: string }>;
 
-// PRD Studio — requirements capture → PRD. Records a client/stakeholder briefing
-// through the WS11 capture edge (local-first: saved + transcribed on the machine,
-// only the transcript enters the pipeline), which the delivery pipeline turns into
-// a PRD across its three tracks. This tab is the Web Dev entry point onto that flow.
+// How many active runs get their gates read (one `getPipelineRun` each — the list endpoint carries no
+// gates). Beyond this the row still renders, but says "open the run to see its approvals" rather than
+// guessing. A list-with-gates read on the backend would remove the cap; tracked as a frontend gap.
+const GATE_DETAIL_CAP = 12;
+const RECENTLY_CONVERTED_MS = 60 * 60 * 1000;
+
+// Briefings needing a person come first, then the ones that will move on their own.
+const PHASE_ORDER = { ready: 0, failed: 1, capture: 2, processing: 3, in_pipeline: 4 } as const;
+
+// PRD Studio — one flow, four beats: create a briefing → add its recording → convert the transcript
+// into a PRD run → clear GM review and client sign-off. Every state shown comes from a field the
+// backend already returns (meeting_recordings.status, pipeline_gates); see lib/prdFlow.ts.
 export default async function PrdStudioPage({ params }: { params: Params }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
@@ -26,61 +42,132 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
   if (!tenant) notFound();
 
   // AGN-3: the run list is this page's subject, so a refusal is stated rather than rendered as an
-  // empty PRD list — "this department has produced nothing" is a very different claim from "you may
-  // not see what it produced".
+  // empty list — "nothing produced" and "you may not see it" are different claims.
   const runsResult = await listPipelineRuns(userId, tenant);
-  if (runsResult.kind === "forbidden") {
-    return <ReadRefusal subject="this department's delivery runs" kind="forbidden" />;
-  }
-  if (runsResult.kind === "unavailable") {
-    return <ReadRefusal subject="This department's delivery runs" kind="unavailable" reason={runsResult.reason} />;
-  }
+  if (runsResult.kind === "forbidden") return <ReadRefusal subject="this department's delivery runs" kind="forbidden" />;
+  if (runsResult.kind === "unavailable") return <ReadRefusal subject="This department's delivery runs" kind="unavailable" reason={runsResult.reason} />;
   const runs = runsResult.data;
-  // WD-07: resolve each run's source recording so "Source meeting" is a clickable chip back into
-  // the registry, not just a raw meetingId string — the same recording<->run link WD-02 draws in
-  // the run workspace, just the other direction.
-  const recordings = runs.some((r) => r.source_meeting_id)
-      // AGN-3: enrichment only (resolves a run's meeting into a link); unwrapped, see note in
-      // pipeline/page.tsx. The PRD list itself is unaffected by a recordings refusal.
-      ? await listRecordings(userId, tenant).then((r) => (r.kind === "ok" ? r.data : []))
-      : [];
-  const recordingIdByMeetingId = new Map(recordings.map((r) => [r.meeting_id, r.id]));
+
+  const [recordingsResult, clients, projects] = await Promise.all([
+    listRecordings(userId, tenant),
+    listClients(userId, tenant),
+    listProjects(userId, tenant).catch(() => []),
+  ]);
+  const recordings: MeetingRecording[] = recordingsResult.kind === "ok" ? recordingsResult.data : [];
+  const clientName = new Map(clients.map((c) => [c.id, c.name]));
+  const projectName = new Map(projects.map((p) => [p.id, p.name]));
+  const recordingByMeetingId = new Map(recordings.map((r) => [r.meeting_id, r]));
+
+  // Gates for the active runs — the approval chips need them; the list read does not carry them.
+  const activeRuns = runs.filter((r) => r.status !== "complete");
+  const doneRuns = runs.filter((r) => r.status === "complete");
+  const detailed = activeRuns.slice(0, GATE_DETAIL_CAP);
+  const details = await Promise.all(detailed.map((r) => getPipelineRun(userId, tenant, r.id)));
+  const gatesByRun = new Map<string, PipelineGate[] | null>();
+  detailed.forEach((r, i) => {
+    const d = details[i];
+    gatesByRun.set(r.id, d.kind === "ok" && d.data ? d.data.gates : null);
+  });
+
+  // A briefing leaves this list once converted — but not instantly. Right after "Convert to PRD run"
+  // the card stays for a while saying it was converted and where its approvals now live; otherwise
+  // the item a person just acted on vanishes under them with no hand-off. Older converted briefings
+  // are only reachable through their run (and /meetings).
+  const recentCutoff = Date.now() - RECENTLY_CONVERTED_MS;
+  const briefings = recordings
+    .filter((r) => r.status !== "ingested" || Date.parse(r.updated_at) >= recentCutoff)
+    .sort((a, b) => {
+      const pa = PHASE_ORDER[briefingPhase(a.status).phase];
+      const pb = PHASE_ORDER[briefingPhase(b.status).phase];
+      return pa !== pb ? pa - pb : b.created_at.localeCompare(a.created_at);
+    });
+
+  const counts = flowCounts(
+    recordings,
+    runs.map((run) => ({ run, gates: gatesByRun.get(run.id) ?? [] })),
+  );
+
+  const mayDecide = can(me, "approvals.decide", tenant);
+  const prdPath = `/departments/${deptId}/prd`;
+  async function onDecide(formData: FormData) {
+    "use server";
+    await decideGateAction(formData);
+    revalidatePath(prdPath);
+  }
+
+  const renderRun = (run: PipelineRun) => {
+    const rec = run.source_meeting_id ? recordingByMeetingId.get(run.source_meeting_id) : undefined;
+    return (
+      <RunApprovalRow
+        key={run.id}
+        run={run}
+        gates={gatesByRun.has(run.id) ? gatesByRun.get(run.id)! : run.status === "complete" ? [] : null}
+        briefingHref={rec ? `/meetings/${rec.id}` : null}
+        briefingTitle={rec?.title ?? null}
+        mayDecide={mayDecide}
+        onDecide={onDecide}
+      />
+    );
+  };
 
   return (
     <>
-      <Card title="Capture a requirements briefing">
-        <p style={{ margin: "0 0 14px", font: "400 13px/1.5 var(--font-body)", color: "var(--erp-ink-50)", maxWidth: 620 }}>
-          Record the client or stakeholder session. It is transcribed locally, then the delivery
-          pipeline drafts the PRD (and the report & scope tracks) from the transcript — you review
-          and sign off the PRD gate before it goes further.
-        </p>
-        <RecordControls />
+      <PrdFlowHeader counts={counts} />
+
+      <Card title="Start here — create a briefing">
+        <BriefingComposer
+          clients={clients.map((c) => ({ id: c.id, name: c.name }))}
+          projects={projects.map((p) => ({ id: p.id, name: p.name, client_id: p.client_id }))}
+          action={startRecordingAction}
+        />
       </Card>
 
       <div style={{ marginTop: 28 }}>
         <Card
-          title="PRD runs"
+          title={briefings.length > 0 ? `Briefings in progress (${briefings.length})` : "Briefings in progress"}
+          headerRight={<Link href="/meetings" className="lux-btn lux-btn--ghost lux-btn--sm">All meetings →</Link>}
+        >
+          {recordingsResult.kind !== "ok" ? (
+            <ReadRefusal subject="this department's briefings" kind={recordingsResult.kind} reason={recordingsResult.kind === "unavailable" ? recordingsResult.reason : undefined} />
+          ) : briefings.length === 0 ? (
+            <EmptyNote>No briefings waiting. Create one above — it appears here with its next step.</EmptyNote>
+          ) : (
+            <div className="prd-briefings">
+              {briefings.map((r) => (
+                <BriefingCard
+                  key={r.id}
+                  recording={r}
+                  clientName={r.client_id ? clientName.get(r.client_id) ?? null : null}
+                  projectName={r.project_id ? projectName.get(r.project_id) ?? null : null}
+                  actions={{ upload: uploadAudioAction, retry: retryAudioAction, ingest: ingestAction }}
+                />
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 28 }}>
+        <Card
+          title="PRD runs — approvals"
           headerRight={<Link href="/pipeline" className="lux-btn lux-btn--ghost lux-btn--sm">Open pipeline →</Link>}
         >
           {runs.length === 0 ? (
-            <EmptyNote>No PRD runs yet. Record a briefing above — a run appears here once the meeting is dispatched into the pipeline.</EmptyNote>
+            <EmptyNote>No PRD runs yet. Convert a transcribed briefing above and its approvals appear here.</EmptyNote>
           ) : (
-            <div className="lux-table-scroll erp-scroll" style={{ ["--lux-table-min" as string]: "480px" }}>
-              <HairlineTable
-                columns={[{ label: "Run" }, { label: "Source meeting" }, { label: "Status" }, { label: "Started", align: "right" }]}
-                tcols="2fr 1.3fr 1fr 1fr"
-                rows={runs.map((r) => [
-                  <Link key="t" href={`/pipeline/${r.id}`}>{r.title ?? "(untitled)"}</Link>,
-                  r.source_meeting_id ? (
-                    recordingIdByMeetingId.has(r.source_meeting_id) ? (
-                      <Link key="m" href={`/meetings/${recordingIdByMeetingId.get(r.source_meeting_id)}`}>{r.source_meeting_id}</Link>
-                    ) : r.source_meeting_id
-                  ) : "—",
-                  <StatusBadge key="s" label={r.status.replace(/_/g, " ")} />,
-                  formatDateTime(r.created_at),
-                ])}
-              />
-            </div>
+            <>
+              {activeRuns.length === 0 ? (
+                <EmptyNote>Nothing waiting for approval. Every run is complete.</EmptyNote>
+              ) : (
+                <div className="prd-runs">{activeRuns.map(renderRun)}</div>
+              )}
+              {doneRuns.length > 0 && (
+                <details className="prd-done">
+                  <summary className="prd-done__summary">Done ({doneRuns.length})</summary>
+                  <div className="prd-runs">{doneRuns.map(renderRun)}</div>
+                </details>
+              )}
+            </>
           )}
         </Card>
       </div>

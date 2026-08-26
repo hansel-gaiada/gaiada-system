@@ -110,6 +110,32 @@ const RECORDINGS: DemoRec[] = [
     created_at: "2026-07-27T04:00:00Z",
     updated_at: "2026-07-27T04:23:00Z",
   },
+  // PRD Studio step 2 — a briefing that exists but has no recording yet (exactly what "Create
+  // briefing" produces), so the capture methods are drivable in DEMO_MODE.
+  {
+    id: "rec-demo-4",
+    meeting_id: "mtg-cedar-intake",
+    client_id: "cl-2",
+    project_id: "p-seo-1",
+    title: "Cedar Group — intake call",
+    kind: "audio",
+    status: "recording",
+    started_at: null,
+    ended_at: null,
+    duration_sec: null,
+    size_bytes: null,
+    local_hint: null,
+    transcript: null,
+    transcript_ref: null,
+    audio_ref: null,
+    drive_status: "none",
+    drive_file_id: null,
+    drive_link: null,
+    pipeline_run_id: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-25T02:00:00Z",
+    updated_at: "2026-08-25T02:00:00Z",
+  },
 ];
 
 interface DemoResult { status: number; json: unknown }

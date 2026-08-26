@@ -63,6 +63,36 @@ local stack). None of these mean "production-done".
 
 ---
 
+### platform-ui `0.55.0` - PRD Studio reads as one flow: create, record, convert, approve (2026-08-26) - PROTOTYPED
+
+**Changed**
+- ★ `/departments/[deptId]/prd` was three unrelated forms (record now / register for the helper /
+  upload) above a bare run table, with the "dispatch into the pipeline" button living on a different
+  page and no trace of the approvals. It is now ONE flow with four numbered beats, and each beat
+  shows only what that beat needs: **1 Create a briefing** (title, client — required, because the
+  client sign-off needs one — project, audio/video; nothing records yet) → **2 Add the recording**
+  (per-briefing card; the three capture methods appear only while there is no recording, one at a
+  time) → **3 Convert to PRD run** (the only button once the transcript exists; ingest failures are
+  said in plain words) → **4 Get it approved** (per run: a `GM review` chip from `prd_review` and a
+  `Client sign-off` chip from `prd_sign`, one sentence saying who holds it; a GM approves / requests
+  changes inline via the existing `decideGateAction`; the client beat is read-only and says it is
+  signed in the portal).
+- A flow strip at the top carries live counts per beat ("2 waiting for a recording · 1 with the GM").
+- Frontend only, against endpoints that already exist. New: `lib/prdFlow.ts` (pure status→copy
+  mapping, 15 tests), `components/prd/{PrdFlowHeader,BriefingComposer,BriefingCard,RunApprovalRow}`
+  + `prd-studio.css` (tokens only). `RecordControls` is untouched — the client/project workspaces
+  still use it. Demo store gains `rec-demo-4` (a briefing with no recording) so the capture step is
+  drivable; two Playwright tests cover the strip, the per-state cards and creating a briefing.
+- Driven in a browser under `DEMO_MODE=1` (all four beats, convert included) — not yet against a
+  live platform, hence PROTOTYPED. Two console errors seen on the page pre-date it and live in the
+  shell: a duplicate `pipeline:<gateId>` key from `lib/queue.ts` (work rail) and a hydration
+  attribute mismatch under `(app)/layout`'s `<link>`.
+
+**Known gap (frontend)**
+- Gate chips need `GET /pipeline/runs/:id` per active run (the LIST carries no gates) — capped at 12;
+  runs past the cap say "open the run to see its approvals" rather than guessing. A list-with-gates
+  read on the backend removes the cap.
+
 ### platform-ui `0.54.0` - the five remaining finance tabs are real pages (2026-08-26) - PROTOTYPED
 
 **Added**
