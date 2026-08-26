@@ -18,6 +18,7 @@ import { registerPlatformWriteTools } from "./platform-write-tools";
 import { registerPipelineTools } from "./pipeline-tools";
 import { registerDeliveryTools } from "./delivery-tools";
 import { registerPmTools } from "./pm-tools";
+import { registerAgentsTools } from "./agents-tools";
 import { registerWorkActivityTools } from "./work-activity-tools";
 import { startModuleToolsBootstrap, moduleToolsStatus } from "./module-tools";
 import { take } from "./ratelimit";
@@ -49,6 +50,9 @@ export function buildHttpApp(): express.Express {
     withSource("delivery", registerDeliveryTools);
     withSource("pm", registerPmTools);
     withSource("work-activity", registerWorkActivityTools);
+    // The router's own namespace. Registered LAST so it reads as what it is: a control plane over
+    // everything above, not another department surface.
+    withSource("agents", registerAgentsTools);
   }
   const app = express();
   app.use(express.json({ limit: "4mb" }));

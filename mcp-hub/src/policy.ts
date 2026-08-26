@@ -9,6 +9,7 @@ import { isAutomation, workflowScope } from "./automation-policy";
 import { isUnattended } from "./principal";
 import { cerbosEnabled, cerbosAllowedTools, cerbosAllowsTool } from "./cerbos";
 import { grantAuthorizesTool, type VerifiedExecutionGrant } from "./approval-grant";
+import { resolveSeatView, filterToolsForSeat } from "./seat-view";
 
 const RANK: Record<Assurance, number> = { anonymous: 0, low: 1, verified: 2 };
 
@@ -86,8 +87,25 @@ export function authorize(principal: Principal, toolName: string, grant?: Verifi
 // supplies the deny/suspend reason. Any Cerbos transport error falls back to the (deny-by-default)
 // in-code engine — never fail open.
 
-/** Tools this principal may see/use, Cerbos-authoritative when configured. */
+/** Tools this principal may see/use, Cerbos-authoritative when configured.
+ *
+ *  P1 item 15: the result is then narrowed to the SEAT's registry namespaces (layer 2). The order
+ *  matters and is deliberate — the seat filter runs LAST, over whatever the authority allowed, so it
+ *  can only ever REMOVE. Running it first would let a registry row appear to widen a view that Cerbos
+ *  had already denied, which is the one thing layer 2 must never be able to do.
+ *
+ *  A non-seat principal (a human, an n8n workflow) is returned unchanged — see seat-view.ts. */
 export async function visibleToolsFor(principal: Principal): Promise<HubTool[]> {
+  const base = await visibleToolsForBeforeSeat(principal);
+  const view = await resolveSeatView(principal);
+  if (view.seat && !view.resolved) {
+    // Loud, because the alternative is a seat that silently sees nothing and looks merely unhelpful.
+    console.warn(`[policy] seat view unresolved for ${view.seat} (${view.reason}) — serving an EMPTY tool view`);
+  }
+  return filterToolsForSeat(base, view);
+}
+
+async function visibleToolsForBeforeSeat(principal: Principal): Promise<HubTool[]> {
   const inCode = visibleTools(principal);
   if (!cerbosEnabled()) return inCode;
   try {

@@ -29,6 +29,12 @@ export const config = {
   // NEVER touches the platform database.
   platformUrl: process.env.PLATFORM_URL ?? "http://localhost:3004",
   platformToken: process.env.PLATFORM_SERVICE_TOKEN ?? "",
+  // Agent runner (WS8, ai-agents/src/runner/service.ts on :3006) — the EXECUTOR behind `agents.*`.
+  // The hub routes; it never runs an agent in-process. Empty URL => the `agents.*` tools refuse with
+  // a typed error rather than silently pretending to dispatch (fail-closed, same posture as every
+  // other outbound in this file).
+  agentRunnerUrl: process.env.AGENT_RUNNER_URL ?? "",
+  agentRunnerToken: process.env.AGENT_RUNNER_TOKEN ?? "",
   // Knowledge service (WS8-owned derived store). The hub's search tool is a THIN wrapper (D9).
   knowledgeUrl: process.env.KNOWLEDGE_URL ?? "http://localhost:3005",
   knowledgeToken: process.env.KNOWLEDGE_SERVICE_TOKEN ?? "",

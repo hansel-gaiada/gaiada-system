@@ -24,14 +24,21 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
-| Platform prerequisites | 22 | 20 | 0 | 2 | 0 |
+| Platform prerequisites | 22 | 15 | 0 | 3 | **4** |
 | **Hermes runtime (H0–H9)** | 25 | 14 | 0 | **1** | **10** |  *(H3 dropped; H0/H1/H2 split)*
 | Agent seats | 15 | 15 | 0 | 0 | 0 |
-| Persona packs | 14 | 12 | 0 | **2** | 0 |
+| Persona packs | 14 | 12 | 0 | **2** | 0 |  *(examples/ blocked on corpus privacy)*
 | Eval suites | 14 | 14 | 0 | 0 | 0 |
 | New tools | 25 | 25 | 0 | 0 | 0 |
 | RAG for the workforce (R1–R5) | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **120** | **107** | **0** | **3** | **10** |
+| **Total** | **120** | **99** | **0** | **7** | **14** |
+
+**Read this honestly: 14 of 120 are DEV-VERIFIED** (and see the 2026-08-26 correction — B2/B3 were
+already closed by other sessions, so the identity plumbing is further along than these counts imply). The session closed P0's data model and a
+run of live operational defects; the WORKFORCE itself — 15 seats, 14 eval suites, 25 new tools,
+delegation, escort mode, the Pantheon link — is almost entirely untouched. B1 is no longer the
+blocker; **B2 (assurance → `verified`) and B3 (`x-act-for`) now are**, and they gate everything
+employee-facing.
 
 ---
 
@@ -39,18 +46,18 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 
 | # | Blocker | Stops | Status |
 |---|---|---|---|
-| B1 | `agent_registry` does not exist | **everything** | PLANNED |
-| B2 | Assurance has no path to `verified`; `assurance.ts` module absent (only its test file exists) | **every approved agent write in the estate** — the approval inbox fills and never drains | PLANNED |
-| B3 | `x-act-for` delegation absent | **all employee-facing work** | PLANNED |
+| B1 | ~~`agent_registry` does not exist~~ — **written + committed 2026-08-23** (`202608221745`). Applied to prod on the next release | — | **PENDING RELEASE** |
+| B2 | ~~Assurance has no path to `verified`~~ — **WRONG, CLOSED.** `elevateAssurance` in `principal.ts:126`, wired at `server.ts:219`, `HUB_ASSURANCE_TOKEN` set, 22/22 tests pass. I inferred absence from a missing FILENAME | — | **RESOLVED (my error)** |
+| B3 | ~~`x-act-for` delegation absent~~ — **WRONG, CLOSED.** `guards.ts:94` parses it (dated 2026-08-22); `core/http.ts:69–90` does the double Cerbos check and fails closed; `act-for-delegation.db.test.ts` exists | — | **RESOLVED (my error)** |
 | B4 | ~~`hermes-gateway` outside CI~~ — **DROPPED 2026-08-23: it retires instead** (runtime plan §7) | — | RESOLVED |
 | B5 | Who administers the airlock/unified-backend box? *(partly answered: unified backend stays under ERP control)* | the Pantheon link being real vs cosmetic | **OWNER — partly answered** |
-| B6 | Break-glass undesigned (WS7 §9) | the Pantheon link | PLANNED |
+| B6 | Break-glass undesigned (WS7 §9) — **re-verified 2026-08-26 and still open.** `key-custody.md`'s "break-glass" is crypto-shred quorum loss, a DIFFERENT concept from emergency ACCESS | the Pantheon link | PLANNED |
 | B7 | Hermes' brain not in version control — `hermes-config/` scaffolded + **installer written and dry-run verified 2026-08-23**. CI wiring still open (needs a privilege decision: `/opt/hermes-zen` is 0700 azlan) | every change to the router's behaviour | **PARTIALLY RESOLVED** |
 | B20 | ~~`GAIADA_HUB_TOKEN` exposed in transcript~~ — **ROTATED + VERIFIED 2026-08-23** (`pong` end-to-end through the hub). Installer rewritten so substitution cannot recur | — | **RESOLVED** |
 | B8 | ~~Router on free-tier Gemini~~ — **closed by design 2026-08-23**: Hermes draws inference through the ai-gateway and stops holding its own provider credential (runtime plan §7.4) | — | RESOLVED, pending cutover H1 |
 | B10 | **Ordering trap — MECHANISM unreachable, RISK CLASS still live.** Probed 2026-08-23: `TOPOLOGY_MODE=central` + `GATEWAY_CENTRAL_URL` empty, so cloud providers are never stripped and the `[hermes(dead), central-forward(dead), echo]` path cannot form. **Do NOT read this as "resolved":** the silent-degradation *outcome* it predicted happened anyway via a different door (B14 wedge → 24h silent failover, nothing paged). The defence is **B16**, not this row. Re-arms instantly if anyone flips to `site` mode | — | **DOWNGRADED — see B16** |
 | B11 | **ollama is a SINGLE POINT OF FAILURE for the RAG corpus** — live `EMBED_CHAIN=ollama` with **no fallback** (repo default has `,gemini`). 768-dim `nomic-embed-text` matches `vector(768)`, so a model change is a FULL REINDEX | the RAG corpus | **UPGRADED — retire from `LLM_CHAIN` only, never touch `EMBED_CHAIN`** |
-| B12 | **Hermes is the stack's PRIMARY brain** — live `LLM_CHAIN=hermes,gemini,claude,openai`, hermes FIRST. Retiring it changes the primary path for every LLM call | the cutover's blast radius | **PLANNED** |
+| B12 | ~~Hermes is the primary brain~~ — **RESOLVED 2026-08-23**: verified live `LLM_CHAIN=gemini,claude,openai`, `HERMES_URL` empty | — | **RESOLVED** |
 | B13 | ~~30s poll~~ — **FIXED 2026-08-23**: interval 30s → 5 min (2,880 → 288 calls/day, 144 % → 14 % of cap). Verified `intervalMs: 300000`, all journeys green | — | **RESOLVED** |
 | B18 | `GATEWAY_DAILY_CALL_CAP=2000` untuned; counter is **in-memory** (a restart silently resets it, masking exhaustion). **CORRECTED: an alert DOES exist** (`GatewayBudgetNearCap` >0.9) and it fired — into the void (B19). Ratio now 0.65 % after the interval fix | real user traffic once usage grows | **PLANNED — tune after B19** |
 | B16 | ~~Probes cannot detect a provider outage~~ — **REFRAMED 2026-08-23: they CAN and DID.** `SyntheticJourneyFailing` fired ~14 h/day. The gap is DELIVERY, not detection — see B19. Prober now also records WHICH provider served (diagnosis) | — | **PROTOTYPED, reframed** |
@@ -74,12 +81,12 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 1 | `agent_registry` table + migration | PLANNED | `eval_suite` NOT NULL; `enabled` toggles without a deploy |
-| 2 | Risk-tier schema (R0–R3) | PLANNED | **unclassified must fail CLOSED** — already true at `policy.ts:73`; pin with a test *before* refactoring |
-| 3 | Environment registry | PLANNED | delphi=staging(low) · helios=production(high) · Hostinger WP(high) |
-| 4 | Risk computation fn | PLANNED | tool `impact` is a **floor**; computation may raise, never lower |
+| 1 | `agent_registry` table + migration | **DEV-VERIFIED** | `202608221745`; applied to a scratch DB, all 5 self-assertions fired. Enablement gate is a CHECK, not a convention |
+| 2 | Risk-tier schema (R0–R3) | **DEV-VERIFIED** | `risk_policy` in `202608221746`; `min_tier` DEFAULT `R2` asserted in-migration (fail closed) |
+| 3 | Environment registry | **DEV-VERIFIED** | **REUSED `infra_hosts`** rather than a second table; delphi/helios/hostinger-wp seeded, closing MSO-04 OQ-1 |
+| 4 | Risk computation fn | **DEV-VERIFIED** | `mcp-hub/src/risk.ts`, 16/16 tests, `tsc` clean. Both invariants pinned (floor; fail-closed) |
 | 5 | Attribution: `approved_by` + `executed_by` | PLANNED | explicit-absence rule; extends the shipped `actor_id`/`metadata.via` |
-| 6 | Persona pack format frozen | PLANNED | 6 files, §4 of the inventory |
+| 6 | Persona pack format frozen | **PROTOTYPED** | `persona/README.md` + two packs authored against it |
 | 7 | `x-act-for` envelope contract frozen | PLANNED | contract only; implementation is P3 |
 | 8 | Naming decision | **RESOLVED 2026-08-23** | `SOUL.md` says **Zedano**, identity is `zedano@gaiada.com` — two sources already agree. Standardise on **Zedano** |
 | 9 | **Corpus capture — PM** | PLANNED | ≥100 real requests. **Longest lead item; start now** |
@@ -92,8 +99,8 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 14 | `agents.*` hub namespace (4 tools) | PLANNED | the highest-leverage change in the program |
-| 15 | Per-principal tool view in the hub | PLANNED | each principal sees only its registry namespaces |
+| 14 | `agents.*` hub namespace (4 tools) | **PROTOTYPED** | `agents-tools.ts`, 9/9 tests, full suite green. `agents.list` awaits a platform `/api/agents` |
+| 15 | Per-principal tool view in the hub | **PROTOTYPED** | `seat-view.ts`, 13 tests; runs LAST so it can only remove; unresolvable seat ⇒ EMPTY view |
 | 16 | Cut Hermes' view to the router set | PLANNED | **Acceptance: Hermes provably cannot call a PM tool directly** |
 | 17 | `dept-pm` seat end-to-end | PLANNED | reuses the 7 existing PM specialists |
 | 18 | `dept-pm` persona pack | PLANNED | after corpus |
@@ -309,6 +316,201 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 — per-principal tool view (P1 item 15) · PROTOTYPED — **the demotion is now ENFORCED**
+
+`mcp-hub/src/seat-view.ts` + 13 tests, wired into `visibleToolsFor`. **Full suite 24 files / 332
+tests green**, `tsc` clean. This is layer 2 of the three-layer allow-list, and it is what turns the
+demotion from designed into real: a seat now sees ONLY its registry namespaces.
+
+**Order is load-bearing.** The seat filter runs **LAST**, over whatever the authority already
+allowed, so it can only ever REMOVE. Running it first would let a registry row appear to widen a view
+Cerbos had denied — the one thing a mirror layer must never be able to do. Pinned by a test that
+gives the filter a pre-narrowed list and confirms a `money` namespace cannot restore what was
+withheld.
+
+**Only seats are filtered.** A human's gate is assurance; an n8n workflow's is the allow-list. Both
+untouched — and a test asserts a human principal triggers **no registry lookup at all**. Filtering
+humans by a registry they do not appear in would not be a security improvement, it would be an outage.
+
+**The contestable choice, recorded rather than assumed: an unresolvable seat sees NOTHING.** The
+tempting fallback is *"show everything, Cerbos still gates it"* — true about safety, wrong about
+purpose. It would mean a registry blip silently restores the pre-demotion behaviour (Hermes holding
+every tool) with every call still succeeding and nothing to surface it. So a seat missing from the
+registry, a disabled seat, and an unreachable platform all get an empty view, and the unresolved case
+logs loudly. Compare `revocation.ts`, which fails OPEN deliberately and for the opposite reason:
+there, closing denies a real human their access.
+
+**`agents.*` is always visible to a seat**, whatever its row says. Without that exception a router
+whose registry row had a typo would be silently INERT — able to answer, unable to route, with nothing
+to show for it. It grants no business reach.
+
+**Failures are not cached** (one blip must not blind a seat for a whole TTL), while resolved views
+share the revocation TTL — same question, same platform, and a second freshness window is a second
+thing to reason about when a seat is changed and does not take effect.
+
+#### The P1 slice is now structurally complete
+
+`agent_registry` (migration) → `GET /api/agents` (platform) → `agents.*` (hub) → seat-narrowed tool
+view. **What remains before it does anything observable:** no seats are seeded, and none of it is
+deployed. Both are release-gated, not design-gated.
+
+### 2026-08-26 — `GET /api/agents`: the registry becomes REACHABLE · PROTOTYPED
+
+`platform-nest/src/admin/agents.controller.ts`, registered in `app.module.ts`. `tsc --noEmit` clean.
+**Query verified by execution against the real schema in a scratch DB**, not by inspection.
+
+This closes the vertical slice: **registry row → platform read → hub tool → router**. The migration
+created the table; the hub has no DB access by design; so the router's "who can help with this?"
+question had to be answerable here or `agents.list` was decoration.
+
+| Case | Result |
+|---|---|
+| no filters | 3 enabled seats; the disabled one excluded |
+| `tenant=Acme` | Acme's seat **+ the group seat**; the other company's seat excluded |
+| `+ capability=project` | array overlap narrows correctly (GIN-indexed `&&`, not a LIKE) |
+| `includeDisabled=true` | the disabled seat appears |
+
+**The behaviour that mattered most is row 2.** `tenant` narrows to that company's seats **PLUS** the
+group-scoped ones, never instead of them. Getting this wrong would make group seats unaddressable and
+the router would silently under-route — a failure that reads as *"the agent didn't know about that
+department"* rather than as an authorization error, and would be blamed on the model.
+
+**Deliberately NOT under `/api/:t/`.** A seat's `company_scope` is its REACH, not its owner; a group
+seat belongs to no tenant by construction, so a tenant prefix would make it unreachable.
+
+**Deliberately NOT an authorization surface.** The table is global and RLS-free (same posture as
+`permissions`/`roles`/`infra_hosts`), and the filtering is a convenience for the caller. What a seat
+may DO is decided by Cerbos at the point of action; `toolNamespaces` is returned only so the router
+can explain its choice and so a drift between what a seat advertises and what the hub serves it
+becomes visible. **Treat this endpoint as a catalogue.**
+
+`enabled` defaults to TRUE in the response filter, because `enabled=false` is the program's kill
+switch — a router that offered disabled seats would route to something that cannot run, and the
+switch would mean nothing.
+
+#### What is still NOT done in this slice — stated so it is not discovered later
+
+1. **No seats are seeded.** The table will be empty on first deploy; `agents.list` returns `[]`.
+   Seeding the 15 rows is its own step and needs the identity `users` rows to exist first.
+2. **The per-principal tool view (P1 item 15) is not built.** Until it is, `tool_namespaces` is
+   advisory: the hub still serves every principal the same catalogue, so Hermes' view is not yet
+   actually cut. **The demotion is designed and reachable, not yet enforced.**
+3. **Nothing here is deployed** — it ships with the same release as the migration.
+
+### 2026-08-26 — `agents.*` namespace built (P1 item 14) · PROTOTYPED
+
+`mcp-hub/src/agents-tools.ts` + tests. **9/9 new tests; full hub suite 23 files / 319 tests, no
+regressions.** `tsc --noEmit` clean.
+
+The architecture doc calls this *"the single highest-leverage change in the plan"* — it is what turns
+Hermes from one big agent holding ~70 flat tools into a **control plane** holding four.
+
+| Tool | Routes to | Notes |
+|---|---|---|
+| `agents.list` | **platform** `/api/agents` | the SEAT REGISTRY is the authority on who exists |
+| `agents.invoke` | runner `POST /goals` | async: returns a goal id, does not wait |
+| `agents.status` | runner `GET /goals/:id` | `suspended` ≠ failed — it is waiting on a person |
+| `agents.runs` | runner `GET /runs/:id` | tracing, for explaining rather than reporting |
+
+**Decisions worth recording, because each has a tempting wrong answer:**
+
+- **`agents.list` reads the PLATFORM, not the runner.** Asking the runner would answer "which agent
+  definitions are compiled in" — a different, much weaker question. The registry is what a new company
+  adds ROWS to, so it must be the source.
+- **`agents.invoke` carries `impact: "low"`, and that is the FLOOR not the gate.** It files a goal; it
+  mutates no business data. Gating the ask would double-gate the request AND — worse — let an approved
+  invoke imply approval of whatever the seat later attempts. **The gate belongs at the act.**
+- **The caller's OBO envelope is forwarded VERBATIM**, never a service identity, because "an agent can
+  never act with more authority than the human it serves" is enforced by exactly that. Pinned by test.
+- **An unset `AGENT_RUNNER_URL` REFUSES** rather than silently pretending to dispatch. Pinned by test.
+- **The runner's own `{error}` body is surfaced**, not a bare status: a bare 429 makes an agent retry
+  forever; "goal queue full" tells it to stop.
+
+**`agents.cancel` deliberately does NOT exist, and a test pins its absence.** The runner exposes no
+cancel endpoint, and a tool that silently fails to cancel is worse than no tool — an operator who
+believes a runaway goal was stopped will not go and stop it. The containment that genuinely exists is
+the per-goal budget, the cycle/fan-out guards, and `enabled=false` on the seat's registry row.
+
+Two tests guard the demotion itself: the namespace must hold **exactly four** tools and **only
+`agents.invoke` may write**. If either creeps, the split-brain the design exists to prevent has begun.
+
+**Not wired end-to-end yet.** `agents.list` calls `/api/agents`, which **does not exist on the
+platform** — that is the next piece (a read-only controller over `agent_registry`). Recorded here
+rather than discovered later.
+
+### 2026-08-26 — FULL BLOCKER RE-VERIFICATION (every row checked against the repo, not memory)
+
+Prompted by the B2/B3 correction. **Method recorded next to each verdict**, per the new rule.
+
+| # | Verified how | Verdict |
+|---|---|---|
+| **B1** | `ls platform-nest/migrations/*agent_registry*` | **written + committed, NOT applied to prod** — it ships with the next release. Downgraded from "blocks everything" to "pending release" |
+| **B2** | `vitest run assurance.test.ts` → 22/22; `server.ts:219` calls it; `HUB_ASSURANCE_TOKEN` SET on box | **RESOLVED** (was my error) |
+| **B3** | `guards.ts:94` parses; `core/http.ts:69–90` double-checks + fails closed; `act-for-delegation.db.test.ts` exists | **RESOLVED** (was my error) |
+| **B6** | grep `break.?glass` → hits in `key-custody.md`, `owner-grant.ts` | **STILL OPEN.** Those are **crypto-shred key custody** (losing a Shamir quorum = permanent PII loss), NOT WS7 §9 emergency ACCESS. Same word, different concept |
+| **B9** | `du -sh /opt/hermes-zen/{sessions,state.db}`; `ls memories \| wc -l` | **STILL OPEN, unchanged** — sessions **636 M**, state.db **212 M**, `memories/` still 0 |
+| **B11** | live `EMBED_CHAIN=ollama` | **STILL OPEN** — no fallback; a model change is a full reindex |
+| **B12** | live `LLM_CHAIN=gemini,claude,openai`, `HERMES_URL=` empty | **RESOLVED** — hermes is out of the chain |
+| **B18** | live `cap: 2000/day`, counter in-memory | **STILL OPEN** — untuned default |
+| **B21** | `df -h /` on sumopod → 82 G free, flat | **RESOLVED** — was a one-off burst; 6.7 GB reclaimed |
+| **B23** | `docker ps -a` → `aire-nginx Exited (1)`, not restarting | **LARGELY RESOLVED** — crash loop stopped; 9 containers remain (owner's call) |
+| **B24** | 11 compose projects on the obs host | **STILL OPEN** — structural |
+| **B25** | `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` both empty | **STILL OPEN** — owner: parked, no keys at this stage |
+| **B26** | `git log -1 -- .../main.go` → `3805f077` | **FIXED + COMMITTED, awaiting push + release** |
+
+**Net: 5 of 13 open blockers were stale.** Three (B2, B3, B12) were fully resolved, two (B21, B23)
+had resolved themselves or been handled by the owner. Only **B6, B9, B11, B18, B24, B25** are genuinely
+open, plus B1/B26 pending a release and B5 pending an owner answer.
+
+**The lesson, stated for whoever reads this next:** this tracker's blocker list decayed at roughly
+**40 % per four days** in a repo with concurrent sessions. A blocker list is a CACHE, not a record,
+and an unrefreshed cache in a shared checkout is actively misleading — it was mine that made the
+program look far more blocked than it was.
+
+### 2026-08-26 ⚠⚠ CORRECTION: B2 AND B3 WERE ALREADY DONE. I was wrong for four days.
+
+I have reported B2 and B3 as **"the two blockers gating everything employee-facing"** in nearly every
+update since 2026-08-22. **Both are implemented, wired and tested.** Verified today:
+
+**B2 — assurance → `verified`: CLOSED.**
+- `elevateAssurance` lives in `principal.ts:126`; `platformVouchesFor` / `resolvePlatformIdentity` in
+  `revocation.ts`. **`assurance.test.ts` passes 22/22.**
+- It is WIRED, not merely present: `server.ts:210` resolves the platform identity and `:219` calls
+  `elevateAssurance(base, { callerEntitled, vouched: platformVouchesFor(identity) })`.
+- The config that gates it is populated: **`HUB_ASSURANCE_TOKEN` is SET** on the box.
+
+**B3 — `x-act-for` delegation + double Cerbos check: CLOSED.**
+- `guards.ts:94` parses the header (comment dated **2026-08-22** — the same day I called it absent).
+- `core/http.ts:69–90` performs the **double check**: assembles the acting user, runs a SECOND
+  `check()` as them, denies if either refuses, and **fails closed** when the user is unresolvable
+  ("proceeding with the caller's own authority would silently convert a delegated call into a
+  full-authority one").
+- `act-for-delegation.db.test.ts` exists.
+- It even resolves a subtlety I never raised: no D11 session check on the acting user, because that
+  principal is assembled at decision time from the database, so there is no stale window to close.
+
+**How I got it wrong — two mistakes, and the second is worse:**
+
+1. **I inferred a missing capability from a missing FILENAME.** `ls mcp-hub/src/assurance.ts` returned
+   nothing, so I concluded the module did not exist. The design doc named a *concept*; the
+   implementation put those functions in `principal.ts` and `revocation.ts`, and the test file is
+   named after the concept. **A filename is not a capability** — the same shape as this program's own
+   "a missing field reads exactly like NULL".
+2. **I checked once and then asserted from memory for four days**, while concurrent sessions were
+   actively building both. `CLAUDE.md`'s most prominent rules are *"this checkout is shared by
+   concurrent agent sessions"* and *"where truth lives — check here, never assert from memory"*. I
+   broke both, and repeated the stale claim into this tracker at least five times, which then made it
+   look corroborated.
+
+**What this changes:** the employee-facing path is **not** blocked on identity plumbing. B1, B2 and B3
+— the three things this tracker called foundational — are all closed. What remains is the WORKFORCE:
+15 seats, 14 eval suites, 25 tools, escort mode, the Pantheon airlock. Those are build work, not
+blockers.
+
+**Process change for this tracker:** a blocker older than one day must be RE-VERIFIED against the
+repo before being restated, and the verification method recorded next to it. A blocker that is merely
+remembered is a rumour.
 
 ### 2026-08-26 — no fallback keys "at this stage" (owner): documented, and the gap ALARMED instead
 

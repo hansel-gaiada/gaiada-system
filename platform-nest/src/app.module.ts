@@ -61,6 +61,7 @@ import { ServiceAssignmentsController } from "./admin/service-assignments.contro
 import { CompanyCrudController } from "./admin/company-crud.controller";
 import { AdminSystemsController } from "./admin/admin-systems.controller";
 import { ObservabilityController } from "./admin/observability.controller";
+import { AgentsController } from "./admin/agents.controller";
 import { MonitoringController, MonitoringHeartbeatController } from "./modules/monitoring/monitoring.controller";
 import { BotAdminController } from "./admin/bot-admin.controller";
 import { IntelligenceController } from "./admin/intelligence.controller";
@@ -133,7 +134,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
     AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
-    CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
+    CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, HrController, LoansController,
     HrPolicyController, RecruitmentController, PayrollController, HrLifecycleController,
