@@ -30,10 +30,12 @@ is the gap between PROTOTYPED and DEV-VERIFIED for every row below.
 | Docs (D1..D4) | 4 | 0 | 0 | **4** | 0 |
 | **Total** | **15** | **0** | **0** | **15** | **0** |
 
-**All 15 PROTOTYPED. Nothing is blocked.** GM-02b came off the list when B1 turned out to be a
+**All 15 built; 14 now DEV-VERIFIED against a real backend.** GM-02b came off the list when B1 turned out to be a
 mis-framing (F10); GM-09 came off it when a real double-entry finance module landed and made B2
-obsolete (F16). The single remaining gap for every row is **B4** — none of it has been driven against
-live `platform-nest`, which is the whole distance between PROTOTYPED and DEV-VERIFIED.
+obsolete (F16). B4 is now largely closed: the console has been driven against a real platform-nest on real Postgres +
+Cerbos with the actual roster seeded (F21). The one thing still resting on fixtures is the money
+tier's **figures** — the seeded estate has no fiscal calendar, so the card correctly showed its setup
+state rather than books (F24).
 
 ---
 
@@ -57,7 +59,7 @@ live `platform-nest`, which is the whole distance between PROTOTYPED and DEV-VER
 | ~~**B1**~~ | ~~The UI cannot identify a department LEAD.~~ `Me` (`lib/platform.ts`) carries `userId/name/email/title/assurance/companies/roles` and nothing about positions or unit leadership; `positions.is_lead` is display-and-backfill only server-side, and the P2-05 reconciler that would turn `position_roles` into real grants is **not built**. | ~~GM-02b~~ | **RESOLVED 2026-08-25 — the blocker was mis-framed.** The UI never needed to identify a lead: `reports.department.view`'s own declaration says the **SERVER narrows to the led unit subtree**. Asking for department grain and letting Cerbos decide is the standing rule; identifying the lead in the browser would have been the second opinion that rule forbids. See F10. |
 | ~~**B2**~~ | ~~**No tenant-level spend/margin endpoint exists.**~~ Only `GET engagements/:id/ledger` (engagement-scoped, search-marketing only). BFF contract §14 lists it PENDING under **SM-17 (tenant-scope remainder) / SM-22**. | ~~GM-09~~ | **RESOLVED 2026-08-26 — overtaken by events, not by a workaround.** A real double-entry finance module landed (`platform-nest/src/modules/finance`, Cerbos-authorized, `finance_profit_and_loss()` in Postgres). Revenue and margin now come from the BOOKS at company grain. The SEO engagement ledger — the thing OQ-3 forbade summing — is still the wrong source and is still not used. See F16. |
 | **B3** | Monitoring has **no backend at all** (BFF contract §20: "UI PROTOTYPED, BACKEND NOT STARTED — every row PENDING"). | a monitoring/health tile anywhere in the cockpit | **BLOCKED** — deliberately not attempted; a tile here must render `BackendPending`, never a zero. |
-| **B4** | Nothing here has been driven against live `platform-nest`. The local 16-container stack is OFF by owner decision. | **every** row moving PROTOTYPED → DEV-VERIFIED | **OPEN** — needs a run against the server or against test containers from source. |
+| ~~**B4**~~ | ~~Nothing here has been driven against live `platform-nest`.~~ | every row moving PROTOTYPED → DEV-VERIFIED | **LARGELY CLOSED 2026-08-26.** Driven against a real platform-nest built from source, on the real Postgres + Cerbos test containers, with the actual agency roster seeded into an ISOLATED database (`gaiada_gm_b4`). Full-access, narrowed and refused paths all exercised end to end. **One gap remains:** the money tier's *figures* — that estate has no fiscal calendar, so the card correctly rendered its setup state and the P&L/AR numbers themselves are still only demo-verified. See F21–F24. |
 
 ---
 
@@ -277,6 +279,45 @@ browsers** (23 of them) saturating the machine — the suite passed in 20s once 
 A slow, shared machine produces failures that look exactly like defects; check the machine before
 believing the report.
 
+**F21 — B4 was worth every minute: the GM cannot see the company.** Driven against a real
+platform-nest (built from source, real Postgres + Cerbos, actual agency roster seeded into an isolated
+`gaiada_gm_b4` database), **Edward — the actual General Manager — holds only `member` + `manager`**.
+The API agrees precisely: `reports/overview?grain=company` → **403**, `grain=department` → **200**. So
+the real GM gets the **narrowed** console, and the "full" tier the console was built for is unreachable
+by the person it was built for.
+
+**The console is correct; the estate's grants are not.** `gmAccessFor` returned exactly what Cerbos
+returned — the mirror held. But every DEMO_MODE run used `demo-hansel` (platform_admin), which masked
+this completely. **This is an IAM seeding gap** (Edward has no company-grain grant), and it is the
+single most valuable thing this whole session surfaced. It needs an owner ruling: either Edward is
+granted `company_admin` (or `owner`) on the agency, or the GM console's full tier is accepted as
+company-admin-only and the GM works from the narrowed view.
+
+**F22 — a real defect only real data could show.** The department strip's columns are DERIVED from the
+metric registry, and the live registry returns longer labels than the demo one ("THROUGHPUT WEIGHTED",
+"TASKS COMPLETED"). At `1fr` those columns were narrower than their own headers and **"ON TIME RATE"
+and "TASKS COMPLETED" rendered on top of each other**. Fixed with `minmax(96px, 1fr)`. Derived columns
+cannot have their widths tuned to any one label set — which is exactly why a fixture with short labels
+proved nothing here.
+
+**F23 — the three-state money card earned its design against a real 404.** The seeded estate has the
+finance module but no fiscal calendar, so `listPeriods` returned `[]` and the card rendered *"This
+company has no fiscal calendar yet — or the finance module is not enabled for it… This is a setup
+state, not a zero."* That is the middle state, hit for real rather than simulated. Had the card keyed
+off `getProfitAndLoss` (which folds 403/404 into `[]`), it would have shown a confident **0** revenue
+for a company whose books simply do not exist yet.
+
+**F24 — what B4 did NOT verify, stated plainly.** The money tier's *figures* — revenue, margin, AR
+aging — were never rendered from real books, because no seeded estate has a fiscal calendar. The
+card's refusal and setup states are live-verified; its **numbers** remain demo-verified only. GM-09 is
+therefore DEV-VERIFIED for behaviour and PROTOTYPED for arithmetic-against-real-data.
+
+**F25 — two more "failures" that were the machine, not the code.** `next build` failed once with
+"Failed to collect page data for /(.)tasks/[taskId]" and `pm.test.ts > getBurndown` failed twice —
+both while my own platform-nest and platform-ui dev servers were running alongside other sessions'
+work. Both passed cleanly the moment those servers were stopped. Third occurrence this session of the
+same lesson: **on a shared, loaded machine, check the machine before believing a red result.**
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -341,3 +382,14 @@ believing the report.
 - **2026-08-26** — Gates: `tsc` clean · **3209 tests / 177 files green** · `DEMO_MODE=1 next build`
   clean · GM e2e **30 tests**. F17 (three finance roles missing from the UI `Role` union) is left as a
   reported estate-wide gap, deliberately not widened inside this ticket.
+- **2026-08-26 (B4)** — Drove the whole console against a REAL backend. Built platform-nest from
+  source (the committed `dist` was stale and boot-blocked on the other session's billing→invoice
+  catalog rename), pointed it at an **isolated** `gaiada_gm_b4` database on the shared test Postgres —
+  deliberately not `gaiada_platform_test`, which the `*.db.test.ts` suite seeds and truncates per test
+  — migrated it, and seeded the real agency roster (GM department, 5 people). Verified: the full
+  cockpit (real KPIs, all five departments, derived columns), the People tab (26 people / 21 seats /
+  the 2 real vacancies / 92% compliance), the narrowed path as the REAL Edward, and the refusal path
+  as a real member. Fixed F22 (column collision) — a defect no fixture could have exposed.
+- **2026-08-26 (B4)** — Gates after the fix: `tsc` clean · **3222 tests / 177 files green** ·
+  `DEMO_MODE=1 next build` clean. F21 (the GM has no company-grain grant) is an **owner decision**,
+  not a code change, and is the one thing this work now waits on.

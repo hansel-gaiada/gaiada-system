@@ -90,7 +90,13 @@ export function GmDeptStrip({ scopes, limit, hrefFor }: GmDeptStripProps) {
 
   return (
     <>
-      <HairlineTable columns={columns} rows={rows} tcols={`1.6fr repeat(${shown.length}, 1fr) 0.5fr`} />
+      {/* `minmax(96px, 1fr)`, not a bare `1fr`. MEASURED against the real metric registry during
+          B4: the live grain returns labels like "THROUGHPUT WEIGHTED" and "TASKS COMPLETED", and at
+          `1fr` those columns were narrower than their own headers, so "ON TIME RATE" and "TASKS
+          COMPLETED" rendered on top of one another. The DEMO_MODE registry happened to return
+          shorter labels, so this was invisible until the console met real data — the columns are
+          derived, so their widths cannot be tuned to any one label set. */}
+      <HairlineTable columns={columns} rows={rows} tcols={`1.6fr repeat(${shown.length}, minmax(96px, 1fr)) 0.5fr`} />
       {hiddenCount > 0 && (
         <p style={{ margin: "10px 0 0", font: "400 12px/1.5 var(--font-body)", color: "var(--erp-ink-60)" }}>
           {hiddenCount} further metric{hiddenCount === 1 ? "" : "s"} per department — open a department to see all of them.
