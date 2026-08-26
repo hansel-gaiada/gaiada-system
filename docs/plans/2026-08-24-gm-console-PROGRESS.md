@@ -58,7 +58,7 @@ state rather than books (F24).
 |---|---|---|---|
 | ~~**B1**~~ | ~~The UI cannot identify a department LEAD.~~ `Me` (`lib/platform.ts`) carries `userId/name/email/title/assurance/companies/roles` and nothing about positions or unit leadership; `positions.is_lead` is display-and-backfill only server-side, and the P2-05 reconciler that would turn `position_roles` into real grants is **not built**. | ~~GM-02b~~ | **RESOLVED 2026-08-25 — the blocker was mis-framed.** The UI never needed to identify a lead: `reports.department.view`'s own declaration says the **SERVER narrows to the led unit subtree**. Asking for department grain and letting Cerbos decide is the standing rule; identifying the lead in the browser would have been the second opinion that rule forbids. See F10. |
 | ~~**B2**~~ | ~~**No tenant-level spend/margin endpoint exists.**~~ Only `GET engagements/:id/ledger` (engagement-scoped, search-marketing only). BFF contract §14 lists it PENDING under **SM-17 (tenant-scope remainder) / SM-22**. | ~~GM-09~~ | **RESOLVED 2026-08-26 — overtaken by events, not by a workaround.** A real double-entry finance module landed (`platform-nest/src/modules/finance`, Cerbos-authorized, `finance_profit_and_loss()` in Postgres). Revenue and margin now come from the BOOKS at company grain. The SEO engagement ledger — the thing OQ-3 forbade summing — is still the wrong source and is still not used. See F16. |
-| **B3** | Monitoring has **no backend at all** (BFF contract §20: "UI PROTOTYPED, BACKEND NOT STARTED — every row PENDING"). | a monitoring/health tile anywhere in the cockpit | **BLOCKED** — deliberately not attempted; a tile here must render `BackendPending`, never a zero. |
+| ~~**B3**~~ | ~~Monitoring has **no backend at all**.~~ | a monitoring/health tile in the cockpit | **RESOLVED 2026-08-26 — stale, like B1 and B2 before it.** `platform-nest/src/modules/monitoring` ships a real controller (`summary`, `monitors`, `incidents`, `maintenance`, `kinds`, heartbeat ingest) and the module is enabled. `GmMonitoringCard` reads `monitoring/summary`. **Third stale blocker this session** — see F28. |
 | ~~**B4**~~ | ~~Nothing here has been driven against live `platform-nest`.~~ | every row moving PROTOTYPED → DEV-VERIFIED | **LARGELY CLOSED 2026-08-26.** Driven against a real platform-nest built from source, on the real Postgres + Cerbos test containers, with the actual agency roster seeded into an ISOLATED database (`gaiada_gm_b4`). Full-access, narrowed and refused paths all exercised end to end. **One gap remains:** the money tier's *figures* — that estate has no fiscal calendar, so the card correctly rendered its setup state and the P&L/AR numbers themselves are still only demo-verified. See F21–F24. |
 
 ---
@@ -362,6 +362,47 @@ citable in the generator's own list — *an entry not named there is drift weari
 file had already been extended once for the same class of gap (HIER-3, module roles), so this
 completes its model rather than silencing it.
 
+**F28 — three "blocked" rows out of three turned out to be stale. That is a pattern, not luck.**
+B1 (the narrowed view) was a mis-framing; B2 (the money tier) dissolved when the finance module
+landed; B3 (monitoring) dissolved because the monitoring module shipped a backend while the row still
+said "BACKEND NOT STARTED — every row PENDING". **In an estate this active, a blocker is a claim with
+a shelf life.** The habit that keeps paying: re-read the blocker against the code before quoting it,
+especially before telling the owner something cannot be done. Every one of these three would have
+stayed closed if the note had been trusted.
+
+**F29 — F21 fixed in the SEED, where the defect actually was.** Owner ruling: *"Edward is the GM so it
+should be clean."* The `agency.ts` roster loop graded `gm | head | manager` all to `manager`, so the
+General Manager got no company-grain grant. Now `gm` additionally gets `company_admin` — scoped to the
+company he runs.
+
+`company_admin`, deliberately not `owner`: Edward **runs** the agency, he does not own it (the owner
+fixture is Ayu, "Managing Director"). `company_admin` is company-scoped and carries exactly the tier
+the console needs (`reports.company.view` + the finance read pair); `owner` is holding-wide business
+authority granted per OWNED company, which is a different claim about the same person.
+
+Verified by reseeding a fresh isolated database and driving it: `reports/overview?grain=company` went
+**403 → 200**, `positions` **403 → 200**, and the real Edward now renders the FULL cockpit — company
+tier, all five departments with real per-department figures, no narrowed banner.
+
+**F30 — Plane A vs Plane B, and why the monitoring card is Plane B only.** The card reads the
+**client's** properties and services — the work the agency sells. Our own infrastructure
+(Prometheus/Grafana/Loki/Tempo, containers, scrape targets) is Plane A: it lives outside the ERP behind
+an SSH tunnel and is deliberately not a nav row at all. The 2026-08-13 nav decision put Monitoring
+under *Business* rather than *Systems* for exactly this reason — filing it as internal plumbing would
+"quietly re-merge the two planes the design keeps apart". So the GM's question here is *"is the work we
+sell our clients healthy?"*, never *"are our containers up?"* — and a Plane A number on this card would
+be one the GM cannot act on commercially.
+
+Ungated, unlike the money tier: `monitoring.read` on the backend is the boundary and the sidebar row is
+ungated for every principal, so a narrowed department lead sees client health but still not the P&L.
+Pinned by an e2e test asserting exactly that asymmetry.
+
+**F31 — `pm.test.ts > getBurndown` has no timeout headroom, and it is not mine.** Measured across four
+runs: 1099 ms, 1381 ms, 3198 ms, 3233 ms, **5007 ms** — the last against a 5 s budget, so it fails.
+It passes in isolation every time and the file is untouched by this work. Not fixed here (raising
+another team's test budget is their call), but recorded because it will keep firing on a shared machine
+and reads exactly like a real regression.
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -445,3 +486,11 @@ completes its model rather than silencing it.
   roles. Gates: `tsc` clean · **3414 tests / 177 files green** · `DEMO_MODE=1 next build` clean.
   Remaining open: **F21** (the GM holds no company-grain grant — owner ruling), **B3** (monitoring has
   no backend), and the pre-existing shell key/hydration warnings (F8).
+- **2026-08-26** — **F21 closed by owner ruling, B3 closed as stale.** `agency.ts`: `gm` level now
+  also gets `company_admin`. New `GmMonitoringCard` (Plane B client health) sits with the operating
+  tiers, above money, and is ungated — the asymmetry with the money tier is deliberate and e2e-pinned.
+  Verified on a fresh isolated DB: the real Edward now gets the full cockpit (company grain 403 → 200).
+  Gates: `tsc` clean · **3413/3414 tests** (the one failure is F31's pre-existing flake, passes in
+  isolation) · `DEMO_MODE=1 next build` clean · GM e2e **32/32**.
+- **2026-08-26** — Open after this: nothing in this program. Remaining items are other teams' — F17's
+  sibling gaps if any, F31's flaky budget, and the pre-existing shell key/hydration warnings (F8).

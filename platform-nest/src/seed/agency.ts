@@ -256,6 +256,24 @@ export async function seedAgency(): Promise<SeededAgency> {
     if (s.level === "gm" || s.level === "head" || s.level === "manager") {
       await grantRole(id, roleManager, "company", tenantId);
     }
+    // F21 (owner ruling 2026-08-26): the GM gets COMPANY-GRAIN authority over the company they run.
+    //
+    // Found by driving the GM console against a real backend rather than fixtures: Edward held
+    // `member` + `manager` only, so `reports/overview?grain=company` answered **403** and the actual
+    // General Manager was served the NARROWED console — the "full" tier the console exists for was
+    // unreachable by the one person it was built for. Every DEMO_MODE run used a `platform_admin`
+    // identity, which hid this completely.
+    //
+    // `company_admin`, not `owner`: Edward RUNS the agency, he does not own it (the owner fixture is
+    // Ayu, "Managing Director"). `company_admin` is scoped to this company and carries exactly the
+    // tier the console needs — `reports.company.view` + the finance read pair — where `owner` is
+    // holding-wide business authority granted per OWNED company, which is a different claim.
+    //
+    // Additive, like `manager` above: `member` and `manager` both stay, because several policies key
+    // off them and a GM is still a member of the company they run.
+    if (s.level === "gm") {
+      await grantRole(id, roleCompanyAdmin, "company", tenantId);
+    }
     rosterIds.set(s.email, id);
     (placements[s.target] ??= []).push({ id, name: s.name });
   }
