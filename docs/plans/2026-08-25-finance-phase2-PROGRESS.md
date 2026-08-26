@@ -19,12 +19,68 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
 | S · Seed live finance | 6 | 0 | 0 | 0 | **6** |
+| S · Seed-all for dev (§S, incl. **S-7 purge-provability**) | 1+ | 1 | 0 | 0 | 0 |
 | F8 · Fixed assets + depreciation | 14 | 1 | 0 | **13** | 0 |
 | F9 · Consolidation | 12 | 7 | 0 | **5** | 0 |
 | F10 · Opening balances + cutover + year-end close | 10 | 10 | 0 | 0 | 0 |
 | F11 · Treasury: loans, bonds, leases | 13 | 13 | 0 | 0 | 0 |
 | UI · Configuration surfaces (ownership, settings) | 8 | 8 | 0 | 0 | 0 |
 | **Total** | **63** | **39** | **0** | **18** | **6** |
+
+---
+
+## §S — SEED-ALL RULING, 2026-08-26 (owner) — read this BEFORE §A
+
+**Owner direction:** seed **everything, for all three entities**, in DEV. At staging the entire dev
+seed is PURGED and rebuilt from real data. The dev seed's job is to be the **template** the real
+staging seed is built from: "hard now, easy later".
+
+**This does NOT overturn §A.** The two govern different things and both stand:
+
+| | DEV (now) | LIVE / STAGING (later) |
+|---|---|---|
+| Entities | **all three** | **Gaia Digital Agency only** (§A1) |
+| Fiscal calendar | all three, calendar year | Gaia, calendar year, **first period 1 Jan 2027** (§A2) |
+| Tax shapes | **every** shape: PKP + non-PKP, PPh 21 **and** 23 **and** 4(2) | PKP, **PPh 21 only** (§A3) |
+| Opening balances | exercise the cutover path | **clean start, none** (§A4) |
+
+§A answers what is cut into the **books of record**. §S answers what dev carries so the template is
+complete. Seeding a shape in dev creates no obligation to seed it live.
+
+**What this UNBLOCKS**
+
+- **F9 consolidation becomes verifiable.** Under §A alone only one entity had books, and a green
+  consolidation over a single set of books proves nothing. With all three seeded in dev — the
+  holding plus two subsidiaries — the parent/subsidiary path can be exercised and DEV-VERIFIED for
+  real. This was the single largest thing §A blocked, and §S unblocks it.
+- **PPh 23 and PPh 4(2) get built and exercised now**, rather than being discovered as missing at
+  the first vendor payment run. §A's warning about that stands for live; dev no longer defers the
+  work.
+
+**★ THE RISK THIS DIRECTION CARRIES, AND WHAT MUST BE FIXED FIRST**
+
+"Purge and rebuild" is only cheap if the purge is TOTAL and PROVABLE. Today it is neither, and
+`finance-demo.ts`'s own header says so: a 12-entry run on the live estate produced **8 tagged and 4
+untagged**. `finance_capitalise_asset()` and `finance_run_depreciation()` mint their own
+`source_event_id`s (`fa-acquire:<id>`, `fa-depreciation:<runId>`), so the seed cannot tag them, and
+a cleanup on `demo-seed:%` alone silently leaves them behind — the largest a 380,000,000 vehicle.
+The ledger is **append-only**, so residue cannot be deleted later, only reversed.
+
+Scaling that from one entity to three, plus treasury and cutover, scales the residue with it. So:
+
+> **S-7 (NEW, blocks the seed-all build): make the dev seed provably purgeable in ONE operation.**
+> Every row any seed path creates — including rows minted inside SQL functions — must be
+> attributable to the seed run, and a purge must be able to report **zero remaining**. A purge that
+> needs three hand-written queries and still misses rows is not a purge; it is a hope. Options:
+> a seed-run id threaded into the SQL functions, or a `finance_seed_ledger` mapping table written
+> in the same transaction as each call.
+
+Without S-7, "easy later" is false: the staging cutover would start from books that quietly contain
+dev figures nobody can enumerate.
+
+**Sequencing note:** this expands the S track well beyond its current 6 items. It does not become
+urgent through 1 Jan 2027 — but S-7 must land before the bulk seeding, not after, because every
+untagged row written in the meantime is permanent.
 
 ---
 
