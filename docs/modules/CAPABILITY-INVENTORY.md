@@ -46,7 +46,7 @@ unfalsifiable after.
 | core | `positions` · `role-grants` | 3 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
-| invoice | `invoices` | 2 |
+| invoice | `invoices` | 3 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
 | monitoring | `monitoring` | 2 |
