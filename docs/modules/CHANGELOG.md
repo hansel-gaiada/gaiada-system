@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.1.0` - Zone B exists: a contained content engine with its own RLS ledger (2026-08-26) - DEV-VERIFIED
+
+**Added**
+- `webdesk/` — the Zone B project: a Payload 3 content engine plus a NestJS read API, its own
+  Postgres, its own migration ledger (`migrations/0001-0005`) and its own owner/migrator/app role
+  split. All three roles are NOSUPERUSER NOBYPASSRLS, so no role in Zone B can read across tenants
+  even by mistake.
+- Payload runs as TWO listeners on purpose: an internal one carrying `/admin` and the raw
+  collection REST, bound to localhost, and a public gateway that is the only process the public
+  vhost may reach. The split is structural — a misrouted vhost cannot expose the admin panel.
+- `api/` — API keys stored as `sha256(key + pepper)` with the pepper out of the DB, scope guards,
+  per-tenant read quotas, tenant-scoped pools and an audit trail.
+- `spike-rls/` — the WSK-00 layer-1 findings the design rests on, kept in-tree because the design's
+  fail-closed claims are only as good as the probes that proved them.
+
+**★ Containment, and why it is enforced by absence**
+- Zone B carries ZERO Zone A credentials or hostnames — not the ERP host, not a Keycloak realm, not
+  a Zone A connection string. The control-channel values in `.env.example` are local placeholders
+  for work that lands at WSK-21/22. This is a hard rule, not a convention, and it is checkable by
+  grep precisely because there is nothing to find.
+- Payload's dev schema push DISABLES row security and drops policies while leaving
+  `relforcerowsecurity=true` — fail-OPEN and invisible. Both opt-in flags are left unset, and the
+  second one is named so that setting it is a deliberate act.
+
+**Known gaps**
+- Read quota enforcement is in-memory/single-process: it under-enforces the moment the api service
+  runs more than one replica. Redis-backed impl is a drop-in.
+- Not in any server compose profile. Nothing about this ships to the live estate in this release.
+
+---
+
 ### platform-ui `0.58.0` - The Office: one building, the art actually used, and two tiers of movement (2026-08-26) - DEV-VERIFIED
 
 **Changed**

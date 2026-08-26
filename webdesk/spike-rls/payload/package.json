@@ -1,0 +1,32 @@
+{
+  "name": "webdesk-spike-rls-payload",
+  "private": true,
+  "version": "0.0.0",
+  "description": "WSK-00 layer 2 - Payload-side half of the RLS feasibility spike. Isolated from the root spike package.json on purpose.",
+  "type": "module",
+  "scripts": {
+    "probe:local-api": "node probes/p8-local-api.mjs",
+    "probe:rest": "node probes/p9-rest.mjs",
+    "probe:admin": "node probes/p10-admin.mjs",
+    "probe:jobs": "node probes/p11-jobs.mjs",
+    "probe:migrations": "node probes/p12-migrations.mjs",
+    "probe:leak": "node probes/p13-leak.mjs"
+  },
+  "dependencies": {
+    "payload": "3.88.0",
+    "@payloadcms/db-postgres": "3.88.0",
+    "@payloadcms/next": "3.88.0",
+    "@payloadcms/richtext-lexical": "3.88.0",
+    "next": "15.4.11",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "graphql": "16.9.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/react": "19.1.0",
+    "@types/react-dom": "19.1.0",
+    "@types/node": "^22.0.0"
+  }
+}

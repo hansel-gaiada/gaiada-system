@@ -1,0 +1,47 @@
+# WebDesk (Zone B) — Caddy proxy. WSK-01 stub, hardened at WSK-02.
+#
+# This is the ONLY public listener in the Zone B topology (design §02/§03).
+#
+# WSK-02 CHANGE — the stub used to `reverse_proxy /admin* payload:3000` on this public vhost.
+# That contradicted WSK-D20 and design D-5 ("Payload admin is never public") and would have
+# exposed the admin panel the moment the stack ran anywhere reachable. Removed.
+#
+# The invariant this file must preserve, from WSK-D20:
+#   /v1  is the ONLY contract a client site ever sees.
+#   Payload's admin, its GraphQL, and its unscoped/raw collection REST are NEVER routed here.
+#
+# Defence in depth: even if a route below were mis-edited, `payload/src/public-gateway.mjs`
+# carries its own hardcoded denylist (/admin, /api/graphql, /api/*) checked before any
+# allowlist, and that gateway process never imports payload or next. This proxy is the first
+# gate, not the only one — see webdesk/payload/test/lockdown.test.mjs (11/11) for the proof.
+
+{
+	auto_https off
+}
+
+:80 {
+	respond /healthz 200 {
+		body "webdesk proxy ok"
+	}
+
+	# --- PUBLIC content surface -------------------------------------------------
+	# The frozen /v1 envelope (WSK-06 builds it). Routed to the Payload public
+	# GATEWAY, never to the internal listener directly.
+	reverse_proxy /v1/* payload-gateway:3000
+
+	# Public form submission (WSK-10) + public media serving (WSK-07) live on the api
+	# service. Scoped per-tenant by API key; never the control plane.
+	reverse_proxy /forms/* api:3000
+	reverse_proxy /media/* api:3000
+
+	# --- EXPLICITLY NOT ROUTED HERE (WSK-D20 / D-5) ----------------------------
+	# /admin*            -> internal listener only, proxy-allowlisted (WSK-28)
+	# /api/graphql*      -> disabled in config AND unwired; must never be reachable
+	# /api/*  (raw REST) -> Payload's unscoped collection REST bypasses the contract
+	# /control/*         -> the control vhost, mTLS + Keycloak + WS4 (WSK-21/22)
+	# A request to any of these falls through to the 404 below.
+	@denied path /admin*, /api/*, /control/*
+	respond @denied 404
+
+	respond "webdesk" 404
+}

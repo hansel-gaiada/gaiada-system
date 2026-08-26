@@ -107,6 +107,33 @@ state rather than books (F24).
 
 ---
 
+## Release / deploy status
+
+**All GM work is committed and pushed; NONE of it is live yet, and this session did not deploy.**
+
+| | |
+|---|---|
+| Commits | 8, all on `origin/main` (pushed by a concurrent session, not by this one) |
+| Staged release | `alpha-01.071.0174a` — cut by **another session**; tag exists LOCALLY, not pushed |
+| Contains the GM work? | **Yes** — including the last two fixes (`a7d64d91`, `2f1b63a6`) |
+| CI on that commit | `ci` + `docs-map` both **success** |
+| Live right now | **`Alpha 01.071.0171a`** |
+
+⚠ **Deploy deliberately NOT fired (owner decision 2026-08-26, option 1: let the owning session ship).**
+`git push --tags` is the single deploy trigger, so pushing `alpha-01.071.0174a` would have fired
+*someone else's* release on timing they did not choose — and done it **into an open incident**:
+`alpha-01.071.0172a` was rolled back earlier the same day when a migration's probe INSERTs hit
+FORCE-RLS as NOBYPASSRLS, live fell back to `0171a`, and the attribution migration has still not
+applied (`docs/superpowers/plans/2026-08-22-hermes-PROGRESS.md`, B27 — marked "OWNER — re-release").
+
+It would also have shipped two commits this session never reviewed: `f79bf817` (another session's IAM
+attribution feature) and `7080f232` (their fix for the migration that caused the rollback).
+
+**Nothing is stranded.** The GM console ships with `0174a` whenever its owner releases it — no
+re-tagging, no fresh release commit, no action from this program. The local tag was left untouched.
+
+---
+
 ## Findings
 
 **F1 — `rollups.view` is held by NO role bundle except `platform_admin`'s wholesale `ALL`.**
@@ -555,3 +582,8 @@ can tell a tuned budget from a guessed one.
   DEMO_MODE at all. Verified 10 warnings → 0 against real data. `getBurndown`'s timeout given real
   headroom (F35). Gates: `tsc` clean · **3416 tests / 177 files green** · `DEMO_MODE=1 next build`
   clean.
+- **2026-08-26** — Asked to push and deploy. **Push: nothing to do** — all 8 commits were already on
+  `origin/main`. **Deploy: declined and escalated**, then owner chose option 1 (let the owning session
+  ship `0174a`). Reasons on the record above: it is another session's staged release, prod is mid-
+  incident on `0171a` after the `0172a` rollback, and it carries two commits this session never
+  reviewed. No tag was pushed. The GM work rides in `0174a`.
