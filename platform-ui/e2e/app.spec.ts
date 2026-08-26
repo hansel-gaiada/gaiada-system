@@ -214,8 +214,9 @@ test("pipeline list links a run into its workspace (client-linked, pending clien
   await expect(page.getByRole("heading", { name: /scope agreement/i })).toBeVisible();
 
   // Gate history: the decided prd_sign + the pending scope_signoff both show, correctly labeled.
-  await expect(page.getByText(/prd sign-off \(client\)/i)).toBeVisible();
-  await expect(page.getByText(/waiting on client/i)).toBeVisible();
+  // Scoped to the gate row: the workspace's open-gate <select> also lists "PRD sign-off (client)".
+  await expect(page.locator(".pl-gate-row", { hasText: /prd sign-off \(client\)/i })).toBeVisible();
+  await expect(page.getByText(/waiting on client/i).first()).toBeVisible(); // badge + scope summary both say it
 });
 
 test("pipeline workspace degrades cleanly with no client linked and decides its own internal gate", async ({ page }) => {
@@ -223,7 +224,7 @@ test("pipeline workspace degrades cleanly with no client linked and decides its 
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
 
   // KNOWN GAP teach-state: client_id is null on this demo run (mirrors the live dispatcher gap).
-  await expect(page.getByText(/no client is linked to this run yet/i)).toBeVisible();
+  await expect(page.getByText(/no client is linked to this run/i)).toBeVisible();
   await expect(page.getByText(/no source meeting linked/i)).toBeVisible();
 
   // Both un-drafted stages (scope + report) degrade to the empty note, not a blank/broken panel.
@@ -316,6 +317,22 @@ test("PRD Studio: a transcript can be supplied directly — no transcription ser
   await save.click();
   await expect(intake.getByText("Transcript ready")).toBeVisible();
   await expect(intake.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
+});
+
+test("PRD Studio: when the AI pipeline is not connected, the run can be started by hand", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  const card = page.getByRole("article", { name: "Northwind — payments follow-up" });
+  await expect(card.getByText("Transcript ready")).toBeVisible();
+  await card.getByRole("button", { name: /convert to prd run/i }).click();
+  await expect(card.getByText(/ai pipeline .*isn.t connected on this platform/i)).toBeVisible();
+  await card.getByRole("button", { name: "Start the run without the AI draft" }).click();
+  await expect(card.getByText("In the pipeline")).toBeVisible();
+  await expect(card.getByRole("link", { name: /open the run/i })).toHaveAttribute("href", /\/pipeline\/run-demo-/);
+  // The run is now under approvals, telling the reader what happens next.
+  const row = page.locator(".prd-run", { hasText: "Northwind — payments follow-up" });
+  await expect(row.getByText(/no prd review yet/i)).toBeVisible();
+  await expect(row.getByText(/from briefing: northwind — payments follow-up/i)).toBeVisible();
 });
 
 test("PRD Studio exists for Web Dev only — another department's /prd is not found", async ({ page }) => {

@@ -163,6 +163,32 @@ const RECORDINGS: DemoRec[] = [
     created_at: "2026-08-24T03:00:00Z",
     updated_at: "2026-08-24T03:40:00Z",
   },
+  // PRD Studio "no AI pipeline" path: transcribed, Web Dev, and its ingest answers bridge_not_configured
+  // (see the ingest route below) — so the by-hand run start is drivable in DEMO_MODE.
+  {
+    id: "rec-demo-6",
+    meeting_id: "mtg-northwind-payments-nobridge",
+    client_id: "cl-1",
+    project_id: "p-web-1",
+    title: "Northwind — payments follow-up",
+    kind: "audio",
+    status: "transcribed",
+    started_at: "2026-08-25T04:00:00Z",
+    ended_at: "2026-08-25T04:20:00Z",
+    duration_sec: 1200,
+    size_bytes: 18_000_000,
+    local_hint: null,
+    transcript: "Dana Whitfield: GoPay and Apple Pay both before launch. Made Putra: Apple Pay needs the merchant account first.",
+    transcript_ref: null,
+    audio_ref: "demo-audio-rec-6",
+    drive_status: "none",
+    drive_file_id: null,
+    drive_link: null,
+    pipeline_run_id: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-25T04:00:00Z",
+    updated_at: "2026-08-25T04:25:00Z",
+  },
 ];
 
 interface DemoResult { status: number; json: unknown }
@@ -225,7 +251,10 @@ export function meetingsDemo(method: string, p: string, params: URLSearchParams,
     const rec = RECORDINGS.find((r) => r.id === ingestM[1]);
     if (!rec) return { status: 404, json: { error: "recording not found" } };
     if (!rec.transcript) return { status: 400, json: { error: "no transcript to ingest" } };
-    // Demo: simulate a successful dispatch (real bridge is proxied server-side in prod).
+    // Demo: a meeting id ending in "-nobridge" answers the way a platform with no n8n configured does,
+    // so PRD Studio's "start the run without the AI draft" path is drivable. Everything else
+    // simulates a successful dispatch (the real bridge is proxied server-side in prod).
+    if (rec.meeting_id.endsWith("-nobridge")) return ok({ ok: false, reason: "bridge_not_configured" });
     rec.status = "ingested"; rec.pipeline_run_id = rec.pipeline_run_id ?? nid("run"); rec.updated_at = now();
     return ok({ ok: true, runId: rec.pipeline_run_id, deduped: false });
   }

@@ -85,7 +85,7 @@ export function approvalTrack(_run: { status: RunStatus }, gates: PipelineGate[]
   const sign = latestOfKind(gates, "prd_sign");
 
   if (!review) {
-    return { gm: NOT_YET, client: NOT_YET, sentence: "The PRD is still being drafted from the transcript.", pendingGmGate: null };
+    return { gm: NOT_YET, client: NOT_YET, sentence: "No PRD review yet — the PRD is drafted (by the pipeline, or written by hand) in the run workspace, then GM review is opened there.", pendingGmGate: null };
   }
 
   const gm = decisionChip(review, "Waiting on GM", "Approved");

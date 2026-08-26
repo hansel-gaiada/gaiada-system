@@ -20,6 +20,7 @@ function actions(over: Partial<BriefingCardActions> = {}): BriefingCardActions {
     retry: vi.fn(async () => ({ ok: true, id: "rec-1" })),
     setTranscript: vi.fn(async () => ({ ok: true, id: "rec-1" })),
     ingest: vi.fn(async () => ({ ok: true, id: "rec-1", runId: "run-9" })),
+    startRunManually: vi.fn(async () => ({ ok: true, id: "rec-1", runId: "run-9" })),
     ...over,
   };
 }
@@ -134,11 +135,44 @@ describe("BriefingCard — transcript ready", () => {
     expect(String(ingest.mock.calls[0][1].get("id"))).toBe("rec-1");
   });
 
-  it("explains an ingest failure in plain words instead of failing silently", async () => {
+  it("a missing pipeline bridge is explained in human words, not the env-var message", async () => {
     const a = actions({ ingest: vi.fn(async () => ({ ok: false, error: "Pipeline bridge not configured — set N8N_WEBHOOK_BASE_URL + N8N_BRIDGE_SECRET on the platform.", reason: "bridge_not_configured" })) });
     render(<BriefingCard recording={rec({ status: "transcribed" })} actions={a} />);
     fireEvent.click(screen.getByRole("button", { name: /convert to prd run/i }));
-    await waitFor(() => expect(screen.getByText(/bridge not configured/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/ai pipeline .*isn.t connected/i)).toBeInTheDocument());
+    expect(screen.queryByText(/N8N_WEBHOOK_BASE_URL/)).not.toBeInTheDocument();
+  });
+});
+
+describe("BriefingCard — when the AI pipeline is not connected, the run can still be started by hand", () => {
+  const noBridge = () => vi.fn<BriefingCardActions["ingest"]>(async () => ({ ok: false, error: "Pipeline bridge not configured — set N8N_WEBHOOK_BASE_URL + N8N_BRIDGE_SECRET on the platform.", reason: "bridge_not_configured" }));
+
+  it("explains in plain words and offers to start the run without the AI draft", async () => {
+    render(<BriefingCard recording={rec({ status: "transcribed" })} actions={actions({ ingest: noBridge() })} />);
+    fireEvent.click(screen.getByRole("button", { name: /convert to prd run/i }));
+    await waitFor(() => expect(screen.getByText(/ai pipeline .*isn.t connected/i)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /start the run without the ai draft/i })).toBeInTheDocument();
+  });
+
+  it("starting it by hand converts the briefing and points at the run workspace", async () => {
+    const startRunManually = vi.fn<BriefingCardActions["startRunManually"]>(async () => ({ ok: true, id: "rec-1", runId: "run-77" }));
+    render(<BriefingCard recording={rec({ status: "transcribed" })} actions={actions({ ingest: noBridge(), startRunManually })} />);
+    fireEvent.click(screen.getByRole("button", { name: /convert to prd run/i }));
+    const manual = await screen.findByRole("button", { name: /start the run without the ai draft/i });
+    fireEvent.click(manual);
+    await waitFor(() => expect(startRunManually).toHaveBeenCalledTimes(1));
+    expect(startRunManually.mock.calls[0][1].get("id")).toBe("rec-1");
+    await waitFor(() => expect(screen.getByText("In the pipeline")).toBeInTheDocument());
+    expect(screen.getByText(/write or paste the prd in the run workspace/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open the run/i })).toHaveAttribute("href", "/pipeline/run-77");
+  });
+
+  it("an ordinary ingest error does NOT offer the manual path", async () => {
+    const ingest = vi.fn<BriefingCardActions["ingest"]>(async () => ({ ok: false, error: "Dispatcher error: dispatcher_500.", reason: "dispatcher_500" }));
+    render(<BriefingCard recording={rec({ status: "transcribed" })} actions={actions({ ingest })} />);
+    fireEvent.click(screen.getByRole("button", { name: /convert to prd run/i }));
+    await waitFor(() => expect(screen.getByText(/dispatcher error/i)).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /start the run without the ai draft/i })).not.toBeInTheDocument();
   });
 });
 

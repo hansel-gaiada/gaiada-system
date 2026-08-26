@@ -295,16 +295,23 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
   const createRunM = p.match(/^\/api\/[^/]+\/pipeline\/runs$/);
   if (createRunM && m === "POST") {
     const b = JSON.parse(body || "{}") as {
-      title?: string; clientId?: string; projectId?: string;
+      title?: string; clientId?: string; projectId?: string; sourceMeetingId?: string;
       stages?: { track: string; name: string; status?: string }[];
     };
     if (!b.title) return { status: 400, json: { error: "title required" } };
+    // Mirror the real controller: a run started FROM a briefing (PRD Studio's by-hand path) carries
+    // its meeting id and project, and a second create for the same meeting returns the existing run
+    // (`deduped: true`). A run started with neither is the hand-started, no-meeting case.
+    if (b.sourceMeetingId) {
+      const existing = RUNS.find((r) => r.source_meeting_id === b.sourceMeetingId);
+      if (existing) return { status: 201, json: { id: existing.id, deduped: true } };
+    }
     const id = nid("run-demo");
     RUNS.push({
       id, title: b.title, status: "extracting",
-      // Null on purpose: a hand-started run has no meeting, which is exactly what distinguishes it.
-      source_meeting_id: null,
+      source_meeting_id: b.sourceMeetingId ?? null,
       client_id: b.clientId ?? null,
+      project_id: b.projectId ?? null,
       mom_ref: null, created_by: "demo-hansel", created_at: now(), updated_at: now(),
     } as DemoRun);
     for (const st of b.stages ?? []) {

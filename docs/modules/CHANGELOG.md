@@ -113,6 +113,17 @@ local stack). None of these mean "production-done".
   the meeting tool's own transcript (the best free, speaker-labelled source; whisper cannot label
   speakers) reaches the PRD pipeline with who-said-what intact.
 
+- **"Start the run without the AI draft."** "Convert to PRD run" = the platform's `ingest`, which
+  hands the transcript to n8n's `mtg-dispatcher` (LLM summarize + 3 extractions) — and on a platform
+  with no n8n / no LLM key it answers `bridge_not_configured` and nothing happens. The card now says
+  that in plain words and offers the same run started by hand: `lib/prdActions.ts::startRunManuallyAction`
+  → `POST /pipeline/runs` (source meeting, client, project, three PENDING stages; dedupes on the
+  meeting id) → `PATCH /recordings/:id {status:"ingested"}` → best-effort `relink-orphans`. The run
+  then reads "No PRD review yet — the PRD is drafted (by the pipeline, or written by hand) in the run
+  workspace, then GM review is opened there", and the workspace's artifact editor + open-gate form
+  carry it from there. Offered ONLY after `ingest` answers `bridge_not_configured`; other dispatcher
+  errors stay errors. 5 action tests; demo `rec-demo-6` (meeting id `*-nobridge`) drives it in e2e.
+
 **Fixed**
 - ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:
   every upload path went through a Server Action, and Next caps action bodies at 1 MB by default.

@@ -22,9 +22,9 @@ describe("RunApprovalRow — one run, two approval beats", () => {
   it("links the run title into its workspace and names both beats", () => {
     render(<RunApprovalRow run={run()} gates={[]} briefingHref="/meetings/rec-1" mayDecide={false} onDecide={noop} />);
     expect(screen.getByRole("link", { name: "Northwind — site redesign" })).toHaveAttribute("href", "/pipeline/run-1");
-    expect(screen.getByText(/gm review/i)).toBeInTheDocument();
-    expect(screen.getByText(/client sign-off/i)).toBeInTheDocument();
-    expect(screen.getByText(/still being drafted/i)).toBeInTheDocument();
+    expect(screen.getByText("GM review", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Client sign-off", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(/no prd review yet/i)).toBeInTheDocument();
   });
 
   it("a GM sees Approve / Request changes only while the PRD review is pending", () => {
@@ -42,7 +42,7 @@ describe("RunApprovalRow — one run, two approval beats", () => {
   it("when gates were not read (beyond the detail cap), it says so instead of guessing", () => {
     render(<RunApprovalRow run={run()} gates={null} mayDecide onDecide={noop} />);
     expect(screen.getByText(/open the run to see its approvals/i)).toBeInTheDocument();
-    expect(screen.queryByText(/still being drafted/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no prd review yet/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 

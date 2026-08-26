@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useActionState, useCallback, useEffect, useState } from "react";
 import type { MeetingRecording, RecordingStatus } from "@/lib/meetings";
 import type { AudioUploadResult, MeetingResult } from "@/lib/meetingsActions";
+import type { BriefingResult } from "@/lib/prdActions";
 import { briefingPhase } from "@/lib/prdFlow";
 import { LiveRecorder } from "@/components/meetings/LiveRecorder";
 import { formatMb, uploadRecordingFile, type UploadOutcome, type UploadProgress } from "./uploadWithProgress";
@@ -26,8 +27,11 @@ export interface BriefingCardActions {
   /** `setTranscriptAction` — supply the transcript directly (pasted or from a .txt/.md/.srt/.vtt file);
    *  no transcription service involved. The row goes straight to `transcribed`. */
   setTranscript: (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
-  /** `ingestAction` — convert the transcript into a PRD pipeline run. */
+  /** `ingestAction` — convert the transcript into a PRD pipeline run (via n8n + LLM). */
   ingest: (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
+  /** `startRunManuallyAction` — the same run without the AI draft, when the pipeline bridge is not
+   *  configured on this platform. Offered only after `ingest` answers `bridge_not_configured`. */
+  startRunManually: (prev: BriefingResult | null, formData: FormData) => Promise<BriefingResult>;
 }
 
 type Method = "browser" | "helper" | "upload" | "transcript";
@@ -57,6 +61,8 @@ export function BriefingCard({
   const [transcriptText, setTranscriptText] = useState("");
   const [transcriptNote, setTranscriptNote] = useState<string | null>(null);
   const [ingestState, ingestAction, ingesting] = useActionState<MeetingResult | null, FormData>(actions.ingest, null);
+  const [manualState, manualAction, startingManually] = useActionState<BriefingResult | null, FormData>(actions.startRunManually, null);
+  const bridgeMissing = !!ingestState && !ingestState.ok && ingestState.reason === "bridge_not_configured";
 
   // Server data wins whenever the page re-renders with a newer row.
   useEffect(() => setLiveStatus(recording.status), [recording.status]);
@@ -123,6 +129,10 @@ export function BriefingCard({
   useEffect(() => {
     if (ingestState?.ok) { setLiveStatus("ingested"); router.refresh(); }
   }, [ingestState, router]);
+
+  useEffect(() => {
+    if (manualState?.ok) { setLiveStatus("ingested"); router.refresh(); }
+  }, [manualState, router]);
 
   const view = briefingPhase(liveStatus);
   const isVideo = recording.kind === "video";
@@ -248,16 +258,39 @@ export function BriefingCard({
       )}
 
       {view.phase === "ready" && (
-        <form action={ingestAction} className="prd-actions">
-          <input type="hidden" name="id" value={recording.id} />
-          <button type="submit" className="lux-btn lux-btn--solid lux-btn--md" disabled={ingesting}>{ingesting ? "Converting…" : "Convert to PRD run"}</button>
-          <Link href={`/meetings/${recording.id}`} className="prd-card__open">Read the transcript first</Link>
-          {ingestState && !ingestState.ok && ingestState.error && <p className="prd-note prd-note--error">{ingestState.error}</p>}
-        </form>
+        <>
+          <form action={ingestAction} className="prd-actions">
+            <input type="hidden" name="id" value={recording.id} />
+            <button type="submit" className="lux-btn lux-btn--solid lux-btn--md" disabled={ingesting || startingManually}>{ingesting ? "Converting…" : "Convert to PRD run"}</button>
+            <Link href={`/meetings/${recording.id}`} className="prd-card__open">Read the transcript first</Link>
+            {ingestState && !ingestState.ok && ingestState.error && !bridgeMissing && <p className="prd-note prd-note--error">{ingestState.error}</p>}
+          </form>
+          {bridgeMissing && (
+            <form action={manualAction} className="prd-panel">
+              <p className="prd-note">
+                The AI pipeline (n8n) isn&rsquo;t connected on this platform, so nothing can draft the PRD from the transcript automatically.
+                You can still start the run and write the PRD yourself.
+              </p>
+              <input type="hidden" name="id" value={recording.id} />
+              <div className="prd-actions">
+                <button type="submit" className="lux-btn lux-btn--solid lux-btn--sm" disabled={startingManually}>{startingManually ? "Starting…" : "Start the run without the AI draft"}</button>
+                <span className="prd-hint">Creates the PRD run for this briefing with empty stages — you write or paste the PRD in the run workspace, then open GM review.</span>
+                {manualState && !manualState.ok && manualState.error && <p className="prd-note prd-note--error">{manualState.error}</p>}
+              </div>
+            </form>
+          )}
+        </>
       )}
 
       {view.phase === "in_pipeline" && (
-        <p className="prd-note prd-note--ok">Converted. Its approvals now show under PRD runs below.</p>
+        manualState?.ok ? (
+          <p className="prd-note prd-note--ok">
+            Converted. Write or paste the PRD in the run workspace, then open GM review there.{" "}
+            <Link href={`/pipeline/${manualState.runId}`}>Open the run →</Link>
+          </p>
+        ) : (
+          <p className="prd-note prd-note--ok">Converted. Its approvals now show under PRD runs below.</p>
+        )
       )}
     </article>
   );

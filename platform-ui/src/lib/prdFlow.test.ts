@@ -55,7 +55,8 @@ describe("approvalTrack — the two beats a PRD run must clear: GM review, then 
     const t = approvalTrack({ status: "extracting" }, []);
     expect(t.gm).toEqual({ label: "Not yet", tone: "idle" });
     expect(t.client).toEqual({ label: "Not yet", tone: "idle" });
-    expect(t.sentence).toMatch(/still being drafted/i);
+    expect(t.sentence).toMatch(/no prd review yet/i);
+    expect(t.sentence).toMatch(/run workspace/i);
     expect(t.pendingGmGate).toBeNull();
   });
 

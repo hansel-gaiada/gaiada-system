@@ -13,6 +13,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
+import { getRecording } from "./meetings";
 
 export type BriefingResult = {
   ok: boolean;
@@ -23,6 +24,8 @@ export type BriefingResult = {
    *  second step, so a created project is never silently orphaned. */
   projectId?: string;
   projectCreated?: boolean;
+  /** The pipeline run, when the action produced one (startRunManuallyAction). */
+  runId?: string;
 };
 
 async function ctx(): Promise<{ userId: string; tenant: string; me: Me } | { error: string }> {
@@ -90,4 +93,70 @@ export async function createBriefingAction(_prev: BriefingResult | null, formDat
         : reason,
     };
   }
+}
+
+/** The PRD run WITHOUT the AI draft.
+ *
+ *  "Convert to PRD run" normally asks the platform to `ingest`: the transcript goes to the n8n
+ *  dispatcher, an LLM drafts PRD/report/scope, and the run comes back with its stages filled. When
+ *  that bridge is not configured (no n8n, or no LLM key behind the gateway) the platform answers
+ *  `bridge_not_configured` and nothing happens. This is the same run, started by hand: created
+ *  directly from the briefing with its three stages PENDING, so a person writes or pastes the PRD in
+ *  the run workspace and opens GM review there. Same client, same project, same approvals after
+ *  that — the capability works under a human exactly as it does under the automation.
+ *
+ *  Writes, all existing endpoints: `POST /pipeline/runs` (dedupes on the meeting id, so a second
+ *  click returns the same run), `PATCH /meetings/recordings/:id {status:"ingested"}` (the card
+ *  leaves the capture list), and best-effort `POST /meetings/recordings/relink-orphans` (sets
+ *  `pipeline_run_id`; company_admin only — a refusal is not a failure, the run still links back
+ *  through `source_meeting_id`). */
+export async function startRunManuallyAction(_prev: BriefingResult | null, formData: FormData): Promise<BriefingResult> {
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return { ok: false, error: "recording id required." };
+  const c = await ctx();
+  if ("error" in c) return { ok: false, error: c.error };
+
+  const read = await getRecording(c.userId, c.tenant, id);
+  if (read.kind === "forbidden") return { ok: false, error: "You don't have permission to convert this briefing." };
+  if (read.kind === "unavailable") return { ok: false, error: "The platform is not answering right now — try again in a moment." };
+  const rec = read.data;
+  if (!rec) return { ok: false, error: "This briefing no longer exists." };
+  if (!rec.transcript || !rec.transcript.trim()) return { ok: false, error: "This briefing has no transcript yet — add the recording or upload a transcript first." };
+
+  let runId: string;
+  try {
+    const run = await platformFetch<{ id: string; deduped?: boolean }>(`/api/${c.tenant}/pipeline/runs`, c.userId, {
+      method: "POST",
+      body: JSON.stringify({
+        sourceMeetingId: rec.meeting_id,
+        title: rec.title ?? "Untitled briefing",
+        clientId: rec.client_id ?? undefined,
+        projectId: rec.project_id ?? undefined,
+        stages: [
+          { track: "delivery", name: "prd_extract", status: "pending" },
+          { track: "report", name: "report_extract", status: "pending" },
+          { track: "scope", name: "scope_extract", status: "pending" },
+        ],
+      }),
+    });
+    runId = run.id;
+  } catch (e) {
+    return { ok: false, error: messageOf(e) };
+  }
+
+  try {
+    await platformFetch(`/api/${c.tenant}/meetings/recordings/${id}`, c.userId, { method: "PATCH", body: JSON.stringify({ status: "ingested" }) });
+  } catch (e) {
+    return { ok: false, runId, error: `The run was created (open it under PRD runs), but the briefing could not be marked as converted: ${messageOf(e)}` };
+  }
+  try {
+    await platformFetch(`/api/${c.tenant}/meetings/recordings/relink-orphans`, c.userId, { method: "POST", body: JSON.stringify({}) });
+  } catch (e) {
+    if (!(e instanceof PlatformError)) throw e; // a refusal here is expected for non-admins; the run still links via source_meeting_id
+  }
+
+  revalidatePath("/meetings");
+  revalidatePath(`/meetings/${id}`);
+  revalidatePath("/pipeline");
+  return { ok: true, id, runId };
 }
