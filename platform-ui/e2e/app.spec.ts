@@ -358,6 +358,26 @@ test("PRD Studio: creating a briefing puts it straight into the capture step", a
   await expect(card.getByText(/· Playwright — kickoff briefing/)).toBeVisible();
 });
 
+test("Repositories tab is the department's code inventory — repos from provisioned runs, problems first", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories");
+  await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+  // run-demo-1 (Web Dev project) has two provisioned sites in the demo store: one failed, one live.
+  await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
+  const rows = page.locator(".repo-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveClass(/repo-row--failed/); // problems first
+  await expect(rows.nth(0).getByText(/that name belongs to someone else's site/i)).toBeVisible();
+  await expect(rows.nth(0).getByRole("link", { name: /start a new provision/i })).toHaveAttribute("href", "/pipeline/run-demo-1");
+  await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/Gaia-Digital-Agency\/northwind-site-redesign-kickoff/);
+  await expect(rows.nth(1).getByText("Northwind Traders · Client site redesign")).toBeVisible();
+  await expect(rows.nth(1).getByText("Live")).toBeVisible();
+  await expect(rows.nth(1).getByRole("link", { name: /northwind-site-redesign-kickoff\.gaiada\.online/ })).toBeVisible();
+  // GitHub line: the demo persona has an identity-only connection, and the App isn't installed.
+  await expect(page.getByText(/github: hansel-gh · identity only/i)).toBeVisible();
+  await expect(page.getByText(/commit and pr activity appears once the github app is connected/i)).toBeVisible();
+});
+
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {
   await page.goto("/meetings/rec-demo-1");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);

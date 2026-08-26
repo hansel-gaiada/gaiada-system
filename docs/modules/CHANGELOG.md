@@ -124,6 +124,20 @@ local stack). None of these mean "production-done".
   carry it from there. Offered ONLY after `ingest` answers `bridge_not_configured`; other dispatcher
   errors stay errors. 5 action tests; demo `rec-demo-6` (meeting id `*-nobridge`) drives it in e2e.
 
+- **Repositories tab is real.** It was a placeholder ("No repositories connected → Go to
+  Connections") that read no data — and connecting GitHub there produces no repos anyway (that
+  connection is an identity string; the GitHub App is WD-21/22, an owner action). It is now the
+  department's **code inventory**: every repository the delivery pipeline provisioned
+  (`webdev_provisioned_sites`, read tenant-wide via `GET /modules/webdev/provisioned-sites` with no
+  `runId` — the endpoint already behaves that way — then attributed run → project → department,
+  PRD Studio's rule; `lib/repoInventory.ts`, 6 tests). One row per repo: name → GitHub, client ·
+  project, status, staging URL, the PRD run it came from, last check. Problems first; a failed row
+  carries the plain-language reason from `webdevProvisionedSites.ts` and offers "Check status now"
+  (existing `reconcileSiteAction`) or a link to the run to re-provision. Empty state says where repos
+  come from (a provisioned run), not "connect GitHub". A GitHub line states the viewer's connection
+  and that commit/PR activity needs the App. Module-off and refused reads are stated, not blanked.
+  `components/repositories/RepoInventory` (6 tests); e2e drives the demo store's failed + live pair.
+
 **Fixed**
 - **61 unstyled buttons.** `className="btn"` / `"btn btn-primary"` is used in 27 components (pipeline
   gates, PM forms, meetings, IT/HR actions…) and no stylesheet ever defined those classes — git has
