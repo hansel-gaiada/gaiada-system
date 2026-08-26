@@ -894,4 +894,365 @@ export class FinanceController {
     });
   }
 
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // THE FOUR ENGINES THAT HAD NO DOOR (F8 · F9 · F10 · F11)
+  //
+  // Fixed assets, consolidation, cutover and treasury were built in SQL, tested, and completely
+  // unreachable: zero endpoints, zero UI. The depreciation engine had even RUN on the live estate —
+  // the 8,500,000 charge in March's P&L is genuinely it — but only because a seed script called the
+  // function directly. Nobody could see an asset, run a period, read a consolidated trial balance or
+  // look at a loan's amortisation. An engine nobody can reach is not a delivered capability.
+  //
+  // ── NO NEW CERBOS KIND, DELIBERATELY ──────────────────────────────────────────────────────────
+  // Adding a kind touches SIX coupled artifacts (policy, catalog, groups, generated bundles, the
+  // migration, the parity suites) and every one of them has gone stale in this repo at least once.
+  // These surfaces map cleanly onto kinds that already exist, so they authorize against those:
+  //
+  //   assets + treasury (read)   finance_ledger:read     — both are subledgers behind GL control
+  //                                                          accounts; seeing them is seeing the ledger
+  //   run depreciation           finance_ledger:post     — it POSTS journals. Not a read dressed up
+  //                                                          as one, and priced accordingly.
+  //   consolidation (read)       finance_statement:read  — a consolidated trial balance IS a statement
+  //   cutover (read)             finance_period:read     — an opening balance is a property of the
+  //                                                          period it opens
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  // ── F8: fixed assets ──────────────────────────────────────────────────────────────────────────
+
+  /** The register. Book AND tax carrying values side by side, because they legitimately differ and
+   *  a single "net book value" column would have to silently pick one. */
+  @Get(":tenantId/finance/assets")
+  async listAssets(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("asOf") asOf?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    const at = isoDate(asOf, "asOf");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT a.id, a.code, a.name, a.status,
+                to_char(a.acquisition_date,'YYYY-MM-DD') AS "acquisitionDate",
+                to_char(a.in_service_date,'YYYY-MM-DD')  AS "inServiceDate",
+                a.cost, cl.code AS "classCode", cl.name AS "className",
+                cl.book_method AS "bookMethod", cl.book_life_months AS "bookLifeMonths",
+                cl.tax_golongan AS "taxGolongan",
+                v.book_accum AS "bookAccum", v.book_nbv AS "bookNbv",
+                v.tax_accum AS "taxAccum",  v.tax_nbv  AS "taxNbv"
+           FROM finance_assets a
+           JOIN finance_asset_classes cl ON cl.id = a.class_id
+           LEFT JOIN LATERAL finance_asset_book_values(a.id, $2::date) v ON true
+          WHERE a.tenant_id = $1
+          ORDER BY cl.code, a.code`,
+        [tenantId, at ?? null],
+      );
+      return r.rows;
+    });
+  }
+
+  /** One asset's full schedule — book and tax, period by period. Derived, never stored. */
+  @Get(":tenantId/finance/assets/:assetId/schedule")
+  async assetSchedule(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("assetId") assetId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_assets WHERE id = $1 AND tenant_id = $2`, [assetId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such asset in this company");
+      const r = await c.query(
+        `SELECT seq, to_char(period_start,'YYYY-MM-DD') AS "periodStart",
+                book_charge AS "bookCharge", book_accum AS "bookAccum", book_nbv AS "bookNbv",
+                tax_charge  AS "taxCharge",  tax_accum  AS "taxAccum",  tax_nbv  AS "taxNbv"
+           FROM finance_asset_depreciation_schedule($1)`,
+        [assetId],
+      );
+      return r.rows;
+    });
+  }
+
+  /** The register-to-GL tie-out. Empty means the register agrees with its control accounts. */
+  @Get(":tenantId/finance/assets/reconcile")
+  async reconcileAssets(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(`SELECT problem, detail FROM finance_fa_reconcile($1)`, [tenantId]);
+      return { problems: r.rows, clean: r.rows.length === 0 };
+    });
+  }
+
+  /** Depreciation runs already recorded, so a reader can see what HAS been charged. */
+  @Get(":tenantId/finance/depreciation-runs")
+  async listDepreciationRuns(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        // The run row already stores its own totals (asset_count / book_total / tax_total), so this
+        // reads them rather than re-aggregating the lines. Re-summing would be a second computation
+        // of a figure the engine already committed, free to disagree with what was actually posted.
+        `SELECT d.id, d.period_id AS "periodId", p.name AS "periodName",
+                p.start_date::text AS "periodStart",
+                d.journal_id AS "journalId", d.run_at AS "runAt",
+                d.asset_count AS "assetCount", d.book_total AS "bookTotal", d.tax_total AS "taxTotal"
+           FROM finance_depreciation_runs d
+           JOIN finance_fiscal_periods p ON p.id = d.period_id
+          WHERE d.tenant_id = $1
+          ORDER BY p.start_date DESC`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
+  /**
+   * Charge depreciation for a period. POSTS to the ledger.
+   *
+   * Authorized as `finance_ledger:post`, not as a read — it creates journal entries, and a period
+   * already charged is refused by a unique index rather than by a check here. That refusal is the
+   * idempotency guarantee: the same period cannot be charged twice even if two people press the
+   * button at once, which a handler-side "already run?" lookup could not promise.
+   */
+  @Post(":tenantId/finance/periods/:periodId/depreciation")
+  @HttpCode(201)
+  async runDepreciation(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("periodId") periodId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "post");
+    return withFinance(tenantId, async (c) => {
+      const p = await c.query(`SELECT 1 FROM finance_fiscal_periods WHERE id = $1 AND tenant_id = $2`, [periodId, tenantId]);
+      if (p.rowCount === 0) throw new NotFoundException("no such fiscal period in this company");
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_run_depreciation($1,$2,$3) AS id`,
+        [tenantId, periodId, req.principal.userId],
+      );
+      return { runId: r.rows[0].id };
+    });
+  }
+
+  // ── F11: treasury ─────────────────────────────────────────────────────────────────────────────
+
+  /** Loans, bonds and leases — one model, distinguished by `kind`. */
+  @Get(":tenantId/finance/instruments")
+  async listInstruments(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT id, code, name, kind, counterparty_name AS "counterpartyName",
+                currency_code AS "currencyCode", principal, nominal_rate AS "nominalRate",
+                effective_rate AS "effectiveRate",
+                to_char(start_date,'YYYY-MM-DD')    AS "startDate",
+                to_char(maturity_date,'YYYY-MM-DD') AS "maturityDate",
+                repayment_method AS "repaymentMethod", payment_months AS "paymentMonths"
+           FROM finance_instruments
+          WHERE tenant_id = $1
+          ORDER BY kind, code`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
+  /** One instrument's amortisation schedule. Derived at the EFFECTIVE rate when one is set. */
+  @Get(":tenantId/finance/instruments/:instrumentId/schedule")
+  async instrumentSchedule(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("instrumentId") instrumentId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_instruments WHERE id = $1 AND tenant_id = $2`, [instrumentId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such instrument in this company");
+      const r = await c.query(
+        `SELECT seq, to_char(due_date,'YYYY-MM-DD') AS "dueDate",
+                opening, interest, principal, closing
+           FROM finance_instrument_schedule($1)`,
+        [instrumentId],
+      );
+      return r.rows;
+    });
+  }
+
+  /** Current vs non-current split — the balance-sheet presentation question, answered as at a date. */
+  @Get(":tenantId/finance/treasury/maturity")
+  async treasuryMaturity(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("asOf") asOf?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    const at = requiredIsoDate(asOf ?? new Date().toISOString().slice(0, 10), "asOf");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT instrument_id AS "instrumentId", code, kind, outstanding,
+                current_portion AS "currentPortion", non_current_portion AS "nonCurrentPortion",
+                to_char(maturity_date,'YYYY-MM-DD') AS "maturityDate"
+           FROM finance_instrument_maturity_split($1,$2::date)`,
+        [tenantId, at],
+      );
+      return r.rows;
+    });
+  }
+
+  /** Treasury tie-out: instrument balances against the accounts that carry them. */
+  @Get(":tenantId/finance/treasury/reconcile")
+  async reconcileTreasury(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("asOf") asOf?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ledger", tenantId, module: "finance" }, "read");
+    const at = isoDate(asOf, "asOf");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(`SELECT problem, detail FROM finance_treasury_reconcile($1,$2::date)`, [tenantId, at ?? null]);
+      return { problems: r.rows, clean: r.rows.length === 0 };
+    });
+  }
+
+  // ── F9: consolidation ─────────────────────────────────────────────────────────────────────────
+
+  /** Consolidation runs recorded for this parent. */
+  @Get(":tenantId/finance/consolidation/runs")
+  async listConsolidationRuns(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_statement", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT r.id, to_char(r.as_of,'YYYY-MM-DD') AS "asOf", r.label, r.created_at AS "createdAt",
+                (SELECT count(*) FROM finance_consolidation_entries e WHERE e.run_id = r.id) AS "entryCount"
+           FROM finance_consolidation_runs r
+          WHERE r.tenant_id = $1
+          ORDER BY r.as_of DESC, r.created_at DESC`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
+  /**
+   * The consolidated trial balance for a run.
+   *
+   * ★ The SQL function REFUSES a run with no elimination entries. That refusal is the whole point:
+   * a sum of the members is a legitimate figure, but it is NOT consolidated, and serving one under
+   * this name is how a group reports its intercompany revenue twice. The refusal surfaces here as a
+   * 409 through FinanceErrorFilter rather than being softened into an empty list.
+   */
+  @Get(":tenantId/finance/consolidation/runs/:runId/trial-balance")
+  async consolidatedTrialBalance(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("runId") runId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_statement", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_consolidation_runs WHERE id = $1 AND tenant_id = $2`, [runId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such consolidation run in this company");
+      const rows = await c.query(
+        `SELECT account_code AS "accountCode", account_name AS "accountName",
+                account_type AS "accountType", debit, credit
+           FROM finance_consolidated_trial_balance($1)`,
+        [runId],
+      );
+      const totalDebit = rows.rows.reduce((t, r) => t + Number(r.debit), 0);
+      const totalCredit = rows.rows.reduce((t, r) => t + Number(r.credit), 0);
+      return {
+        rows: rows.rows,
+        totalDebit: totalDebit.toFixed(2),
+        totalCredit: totalCredit.toFixed(2),
+        balanced: Math.abs(totalDebit - totalCredit) < 0.005,
+      };
+    });
+  }
+
+  /** What a run has NOT addressed. "Considered and not applicable" and "never considered" look
+   *  identical in a working paper, and only one of them is a finished job. */
+  @Get(":tenantId/finance/consolidation/runs/:runId/completeness")
+  async consolidationCompleteness(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("runId") runId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_statement", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_consolidation_runs WHERE id = $1 AND tenant_id = $2`, [runId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such consolidation run in this company");
+      const r = await c.query(`SELECT note, detail FROM finance_consolidation_completeness($1)`, [runId]);
+      return { notes: r.rows, complete: r.rows.length === 0 };
+    });
+  }
+
+  // ── F10: cutover ──────────────────────────────────────────────────────────────────────────────
+
+  /** Cutovers recorded for this company, with their opening-balance line counts. */
+  @Get(":tenantId/finance/cutovers")
+  async listCutovers(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT c.id, to_char(c.cutover_date,'YYYY-MM-DD') AS "cutoverDate", c.status,
+                c.journal_id AS "journalId", c.committed_at AS "committedAt", c.notes,
+                (SELECT count(*) FROM finance_opening_balances o WHERE o.cutover_id = c.id) AS "lineCount"
+           FROM finance_cutovers c
+          WHERE c.tenant_id = $1
+          ORDER BY c.cutover_date DESC`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
+  /** The cutover gate. An unbalanced opening is REPORTED, never plugged. */
+  @Get(":tenantId/finance/cutovers/:cutoverId/readiness")
+  async cutoverReadiness(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("cutoverId") cutoverId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_cutovers WHERE id = $1 AND tenant_id = $2`, [cutoverId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such cutover in this company");
+      const r = await c.query(`SELECT blocker, detail FROM finance_cutover_readiness($1)`, [cutoverId]);
+      return { blockers: r.rows, ready: r.rows.length === 0 };
+    });
+  }
+
+  /** The opening balance lines themselves — what the cutover will post. */
+  @Get(":tenantId/finance/cutovers/:cutoverId/opening-balances")
+  async cutoverOpeningBalances(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("cutoverId") cutoverId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(`SELECT 1 FROM finance_cutovers WHERE id = $1 AND tenant_id = $2`, [cutoverId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such cutover in this company");
+      const r = await c.query(
+        // Opening balances key on account CODE, not an id: a cutover is authored before the chart is
+        // necessarily final, and a code is what an accountant hands over. The join is therefore a
+        // LEFT one — a code with no matching account is a real state the readiness gate reports, and
+        // an inner join would silently drop exactly the row somebody needs to see.
+        `SELECT o.id, o.account_code AS "accountCode", a.name AS "accountName",
+                o.debit, o.credit, o.memo
+           FROM finance_opening_balances o
+           LEFT JOIN finance_accounts a ON a.tenant_id = o.tenant_id AND a.code = o.account_code
+          WHERE o.cutover_id = $1
+          ORDER BY o.account_code`,
+        [cutoverId],
+      );
+      const debit = r.rows.reduce((t, x) => t + Number(x.debit ?? 0), 0);
+      const credit = r.rows.reduce((t, x) => t + Number(x.credit ?? 0), 0);
+      return {
+        rows: r.rows,
+        totalDebit: debit.toFixed(2),
+        totalCredit: credit.toFixed(2),
+        balanced: Math.abs(debit - credit) < 0.005,
+      };
+    });
+  }
+
 }

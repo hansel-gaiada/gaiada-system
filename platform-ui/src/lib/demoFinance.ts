@@ -316,6 +316,145 @@ const AR_OPEN_INVOICES = [
   },
 ];
 
+// ── The four engine surfaces (F8/F9/F10/F11) ────────────────────────────────────────────────────
+// Without these the new tabs render EMPTY in demo mode while the build gate still passes — the
+// "looks built, is unusable" failure this store exists to prevent. The figures mirror the shapes the
+// live estate actually returns, including the two that are deliberately NOT clean: treasury has a
+// tagging discrepancy, and the consolidation run below carries eliminations so its trial balance is
+// legitimately servable.
+
+const FIXED_ASSETS = [
+  {
+    id: "asset-1", code: "IT-001", name: "MacBook Pro 16 — Creative", status: "active",
+    acquisitionDate: "2026-02-10", inServiceDate: "2026-02-10", cost: "42000000.00",
+    classCode: "IT", className: "Peralatan IT", bookMethod: "straight_line", bookLifeMonths: 36,
+    taxGolongan: "gol_1",
+    bookAccum: "8166666.67", bookNbv: "33833333.33", taxAccum: "10500000.00", taxNbv: "31500000.00",
+  },
+  {
+    id: "asset-2", code: "VEH-001", name: "Toyota Innova — operasional", status: "active",
+    acquisitionDate: "2026-01-20", inServiceDate: "2026-01-20", cost: "380000000.00",
+    classCode: "VEH", className: "Kendaraan", bookMethod: "straight_line", bookLifeMonths: 60,
+    taxGolongan: "gol_2",
+    bookAccum: "44333333.33", bookNbv: "335666666.67", taxAccum: "47500000.00", taxNbv: "332500000.00",
+  },
+];
+
+const ASSET_SCHEDULE = Array.from({ length: 6 }, (_, i) => ({
+  seq: i + 1,
+  periodStart: `2026-0${i + 2}-01`,
+  bookCharge: "1166666.67",
+  bookAccum: String((i + 1) * 1166666.67),
+  bookNbv: String(42000000 - (i + 1) * 1166666.67),
+  taxCharge: "1750000.00",
+  taxAccum: String((i + 1) * 1750000),
+  taxNbv: String(42000000 - (i + 1) * 1750000),
+}));
+
+const DEPRECIATION_RUNS = [
+  {
+    id: "dep-1", periodId: "per-3", periodName: "Mar 2026", periodStart: "2026-03-01",
+    journalId: "jrn-dep-1", runAt: "2026-03-31T12:00:00.000Z",
+    assetCount: 3, bookTotal: "8500000.00", taxTotal: "9750000.00",
+  },
+];
+
+const INSTRUMENTS = [
+  {
+    id: "instr-1", code: "BCA-01", name: "Kredit modal kerja BCA", kind: "loan_payable",
+    counterpartyName: "Bank BCA", currencyCode: "IDR", principal: "240000000.00",
+    nominalRate: "11.500000", effectiveRate: "11.500000",
+    startDate: "2026-02-01", maturityDate: "2028-02-01",
+    repaymentMethod: "annuity", paymentMonths: 1,
+  },
+];
+
+const INSTRUMENT_SCHEDULE = Array.from({ length: 6 }, (_, i) => {
+  const opening = 240000000 - i * 9500000;
+  const interest = Math.round(opening * 0.115 / 12);
+  const principal = 11700000 - interest;
+  return {
+    seq: i + 1,
+    dueDate: `2026-0${i + 3}-01`,
+    opening: opening.toFixed(2),
+    interest: interest.toFixed(2),
+    principal: principal.toFixed(2),
+    closing: (opening - principal).toFixed(2),
+  };
+});
+
+const TREASURY_MATURITY = [
+  {
+    instrumentId: "instr-1", code: "BCA-01", kind: "loan_payable",
+    outstanding: "212400000.00", currentPortion: "104800000.00",
+    nonCurrentPortion: "107600000.00", maturityDate: "2028-02-01",
+  },
+];
+
+// NOT clean, on purpose. The live estate reports exactly this: the tie-out sums accounts TAGGED as
+// treasury, and the seeded loan sits on an untagged liability account. A fixture that reported clean
+// would hide the one state this page has real copy for.
+const TREASURY_RECONCILE = {
+  clean: false,
+  problems: [
+    {
+      problem: "TREASURY_CONTROL_MISMATCH",
+      detail: "Instrument balances total 212,400,000 but accounts tagged `treasury` total 0 — check account tagging before hunting for a missing entry.",
+    },
+  ],
+};
+
+const CONSOLIDATION_RUNS = [
+  { id: "consol-1", asOf: "2026-08-31", label: "August group pack", createdAt: "2026-09-01T02:00:00.000Z", entryCount: 3 },
+];
+
+const CONSOLIDATED_TB = {
+  rows: [
+    { accountCode: "1120", accountName: "Bank", accountType: "asset", debit: "612500000.00", credit: "0.00" },
+    { accountCode: "1210", accountName: "Aset tetap", accountType: "asset", debit: "458000000.00", credit: "0.00" },
+    { accountCode: "2210", accountName: "Utang bank", accountType: "liability", debit: "0.00", credit: "212400000.00" },
+    { accountCode: "3100", accountName: "Modal saham", accountType: "equity", debit: "0.00", credit: "500000000.00" },
+    { accountCode: "4100", accountName: "Pendapatan jasa", accountType: "revenue", debit: "0.00", credit: "506100000.00" },
+    { accountCode: "6100", accountName: "Beban gaji", accountType: "expense", debit: "148000000.00", credit: "0.00" },
+  ],
+  totalDebit: "1218500000.00",
+  totalCredit: "1218500000.00",
+  balanced: true,
+};
+
+const CONSOLIDATION_COMPLETENESS = {
+  complete: false,
+  notes: [
+    { note: "NCI_NOT_RECOGNISED", detail: "No non-controlling interest has been recognised for any partially-owned member (PSAK 65)." },
+  ],
+};
+
+const CUTOVERS = [
+  {
+    id: "cut-1", cutoverDate: "2026-01-01", status: "draft", journalId: null,
+    committedAt: null, notes: "Balances carried in from the previous bookkeeper", lineCount: 4,
+  },
+];
+
+const CUTOVER_READINESS = {
+  ready: false,
+  blockers: [
+    { blocker: "OPENING_UNBALANCED", detail: "Opening debits 500,000,000 against credits 498,000,000 — a difference of 2,000,000. Reported, never plugged." },
+  ],
+};
+
+const OPENING_BALANCES = {
+  rows: [
+    { id: "ob-1", accountCode: "1120", accountName: "Bank", debit: "300000000.00", credit: "0.00", memo: "BCA closing balance" },
+    { id: "ob-2", accountCode: "1210", accountName: "Aset tetap", debit: "200000000.00", credit: "0.00", memo: null },
+    { id: "ob-3", accountCode: "3100", accountName: "Modal saham", debit: "0.00", credit: "498000000.00", memo: null },
+    { id: "ob-4", accountCode: "9999", accountName: null, debit: "0.00", credit: "0.00", memo: "code not in the chart — the readiness gate reports this" },
+  ],
+  totalDebit: "500000000.00",
+  totalCredit: "498000000.00",
+  balanced: false,
+};
+
 export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string): DemoResult | null {
   const tail = financePath(p);
   if (tail == null) return null;
@@ -346,6 +485,20 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   // The two pickers the receivables write forms are built from. Without these the forms render
   // with EMPTY dropdowns in demo mode and the build gate still passes — the page would look built
   // and be unusable, which is the frontend-first drift this codebase keeps getting bitten by.
+  if (tail === "assets") return ok(FIXED_ASSETS);
+  if (tail === "assets/reconcile") return ok({ problems: [], clean: true });
+  if (/^assets\/[^/]+\/schedule$/.test(tail)) return ok(ASSET_SCHEDULE);
+  if (tail === "depreciation-runs") return ok(DEPRECIATION_RUNS);
+  if (tail === "instruments") return ok(INSTRUMENTS);
+  if (/^instruments\/[^/]+\/schedule$/.test(tail)) return ok(INSTRUMENT_SCHEDULE);
+  if (tail === "treasury/maturity") return ok(TREASURY_MATURITY);
+  if (tail === "treasury/reconcile") return ok(TREASURY_RECONCILE);
+  if (tail === "consolidation/runs") return ok(CONSOLIDATION_RUNS);
+  if (/^consolidation\/runs\/[^/]+\/trial-balance$/.test(tail)) return ok(CONSOLIDATED_TB);
+  if (/^consolidation\/runs\/[^/]+\/completeness$/.test(tail)) return ok(CONSOLIDATION_COMPLETENESS);
+  if (tail === "cutovers") return ok(CUTOVERS);
+  if (/^cutovers\/[^/]+\/readiness$/.test(tail)) return ok(CUTOVER_READINESS);
+  if (/^cutovers\/[^/]+\/opening-balances$/.test(tail)) return ok(OPENING_BALANCES);
   if (tail === "ar/customers") return ok(AR_CUSTOMERS);
   if (tail === "ar/open-invoices") return ok(AR_OPEN_INVOICES);
   if (tail === "ar/aging") return ok(AR_AGING);
