@@ -29,13 +29,13 @@ misleads real tickets.
 | Part | Items | ✅ | 🟡 | ⬜ | ⏸ |
 |---|---|---|---|---|---|
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
-| B · Milestone 0 — gaiada.com live | 13 | **5** | 2 | 6 | 0 |
+| B · Milestone 0 — gaiada.com live | 14 | **11** | 0 | 2 | 1 |
 | C · Contract, codegen & the rail | 7 | 0 | 0 | 7 | 0 |
 | D · Control plane · ERP console · envs | 9 | 0 | 0 | 8 | 1 |
 | E · AI execution & approvals | 3 | 0 | 0 | 3 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
 | G · New from reassessment | 2 | 0 | 0 | 2 | 0 |
-| **Total** | **50** | **15** | **2** | **31** | **2** |
+| **Total** | **51** | **21** | **0** | **27** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -90,14 +90,15 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅ | WSK-01 | Zone B project skeleton — compose (project `webdesk`, 9 services, dev profile), own ledger `0001+` + runner, RLS/backfill lint ported from platform-nest, `.env.example`, Caddy/otel/postgres configs | medior | — |
 | ✅ | WSK-02 | **Payload 3 vendored + rebranded** — `postgresAdapter({ pg })` + ALS anchored on `globalThis`; `graphQL.disable` + no graphql route file + a separate public gateway process (denylist before allowlist, never imports payload/next); two-flag dev-push guard; telemetry off. **Coordinator-verified:** setup-schema → my RLS gate OK on 15 tables · **lockdown 11/11** (public `/admin`, `/api/*`, `/api/graphql` all 404; internal admin reachable) · push guard refuses a single flag · egress clean. ⚠️ **admin SSR first paint = CANNOT-VERIFY** (fails closed; Local API + REST clean) | senior-be | WSK-01 |
 | ✅ | WSK-03 | Platform-core schema `0001`–`0004` (core · content+locale · forms+consent · mail), 15 tables all FORCE RLS, role split NOBYPASSRLS, + permanent 13-assertion probe suite | senior-db | WSK-01 |
-| 🟡 | WSK-04 ⚡ | **Condition 1 already DEV-VERIFIED — `webdesk/scripts/check-rls-integrity.mjs`** (3-fact gate, selftest 6/6, wired into `npm test`; proven on a real 14-table migrated schema: PASS healthy → exit 1 when a table is disarmed **with its policy still present**, i.e. the case a force+policy-count check misses). Remainder: **RLS — the tenancy wall.** `opus·high`. Zero rows via *every* access path. **+app-layer scoping alongside** (R-1). **+4 conditions from WSK-00: (1) CI RLS-integrity gate asserting `relrowsecurity` AND `relforcerowsecurity` AND ≥1 policy per tenant table — a Payload **dev schema push** DISABLES row security and drops the policy while leaving `relforcerowsecurity=true`, i.e. FAIL-OPEN and invisible (`migrate` is clean; reproduced twice); (2) decide + encode how RLS survives Payload owning the schema (policy applied BY a migration, or push forbidden + mandatory re-apply); (3) a test pinning our `pg.Pool` subclass to the path Payload actually uses; (4) close the P10 admin-SSR gap (proposed `globalThis`-anchored ALS is UNTESTED)** | senior-db | WSK-00 ✅, 02, 03 ✅ |
+| ✅ | WSK-04 ⚡ | **The tenancy wall** — consolidated cross-path suite (`scripts/wsk04-cross-path-suite.mjs`) + **mutual independence PROVEN** (RLS off ⇒ app layer alone still isolates, with a negative control that leaks; app predicate omitted ⇒ RLS alone still isolates) + pool-subclass identity pin + condition 3 (**Option B**: push forbidden, generic `reapply-and-verify-rls.mjs` gated by `check-rls-integrity.mjs`). **Coordinator-verified:** 12/12 on a fresh migrated DB; gate exits 1 on a disarmed table, repair tool exits 1 when it cannot fix. ⚠️ **Two carried gaps — see session log:** Payload-side app-layer scoping is absent (independence proven only on `api`), and the repair tool's coverage is narrower than the gate's detection. Condition 4 (admin SSR) **left labelled**, reproduced on a clean env. | senior-db | WSK-00 ✅ |
+| ✅ | WSK-04b ⚡ | **Payload-side app-layer predicate** (WSK-D25) — `src/tenant-access.mjs` reads the `globalThis`-anchored ALS directly and never touches Postgres, so the two layers genuinely fail separately. **Coordinator-verified:** mutual independence **19/19** incl. a negative control that **leaked both tenants** with the predicate removed, RLS restored and re-confirmed via the CI gate's own `evaluate()`; create-side positive control 4/4. ⚠️ **Only PARTIALLY closes the gap, structurally:** Payload runs `access` only `if (!overrideAccess)` and **Local API defaults it to `true`** — so REST gets two walls, the default Local API path gets RLS alone. Client reads unaffected (WSK-D24: `/v1` never touches Payload). **Needs a lint forcing `overrideAccess: false`** or the gap returns silently | senior-be | WSK-04 ✅ |
 | ✅ | WSK-05 | **API keys — DEV-VERIFIED**, `webdesk/api/` (NestJS+Fastify): mint/rotate/revoke (plaintext returned exactly once; sha256+pepper at rest, dump-grep proven — searched every `api_keys`/`audit_entries` column across every tenant for the minted plaintexts, found none); `ApiKeyAuthGuard` resolves key→tenant+env+scope from the route's `:tenantSlug` (never from the key itself, per 0001's own comment) and runs the request under `webdesk.tenant_ctx` (own `TenantAwarePool`, ALS anchored on `globalThis`, per WSK-00's mechanism); `ScopeGuard` (write implies read); per-tenant fixed-window read quota (`TenantQuotaService`/`TenantQuotaGuard`) closing the reassessment's noisy-neighbour AC — keyed by tenant, not by key, so rotating keys can't multiply a budget. 26/26 tests green (scope matrix, revoked-key probe dying on the very next call, no-key probe, plaintext dump-grep, quota isolation, a direct pool forced-reuse leak probe) against a fresh throwaway Postgres via the project's own `init-roles.sh` + `migrations/migrate.mjs`. **Gap flagged, not closed:** `/internal/tenants/:slug/api-keys*` has no control-channel auth of its own yet — WSK-21/22's job. **Needs 2 new vars in `.env.example`** (`API_KEY_PEPPER`, `WEBDESK_READ_QUOTA_PER_MIN`) — reported, not added (WSK-01's file). Not wired into `docker-compose.yml`'s `api` stub (also WSK-01's file) | senior-be | WSK-03 ✅ · **independently re-verified by coordinator** (documented runbook, fresh DB, migrations 4/4, RLS gate OK, `tsc` clean, **26/26 tests**). ⚠️ **Two carried risks:** `/internal/…/api-keys*` has **no control-channel auth of its own** — must NOT be exposed via the public proxy until WSK-21/22; and the read quota is **in-memory single-process**, so it under-enforces with >1 api replica (Redis drop-in shaped, `REDIS_URL` already in compose). |
-| 🟡 | WSK-06 ⚡ | **Envelope `/v1` + vocabulary v1** — 8 primitives, 9 blocks, cache tags. **+R-4: locale, localizations, pagination, error envelope, `meta.x`. +redirects/sitemap collection. +tsvector search. +scheduled publishing.** ⚠️ **The freeze happens here** — shape now pinned in design §05 | senior-be | WSK-02 |
-| ⬜ | WSK-07 | Media path — **self-hosted MinIO (WSK-D23)**, ClamAV, cookieless serving, imgproxy transforms. **4 buckets: `media` (public) · `video` (public) · `uploads` (PRIVATE, form attachments, presigned-only) · `artifacts` (platform)**. Versioning + object lock on. **AC rewritten: the API refuses cross-tenant prefix reads — storage creds never leave Zone B, no per-tenant keys.** +storage abstraction test (endpoint swap to R2/NAS = config only) | medior | WSK-01, 02 |
-| ⬜ | WSK-10 ⚡ | Forms service — CORS allowlist, Turnstile, honeypot, rate limits, zod, retention. **+file uploads. +consent record (R-5)** | senior-be | WSK-04, 05 |
-| ⬜ | WSK-11 | Mail service — provider adapter, BullMQ retry, per-tenant templates, suppression. Dev sink Mailpit; Brevo key on the Staging Reopen Register | senior-be | WSK-01 |
+| ✅ | WSK-06 ⚡ | **`/v1` envelope FROZEN + vocabulary v1** — 8 primitives · 9 blocks · locale + `localizations` + `meta.x` · cursor pagination · RFC 9457 errors · cache tags · redirects + sitemap · scheduled publish · tsvector search. **Coordinator-verified:** vocabulary 40/40 · envelope contract **60/60** on a real migrated DB (two differently-composed tenants) · RLS gate OK 15 tables · **lockdown still 11/11 after I wired `/v1` publicly**. New `0005_tenant_locales.sql` (additive columns only). ⚠️ **See WSK-D24 — `/v1` reads bypass Payload's query layer entirely (hand-rolled SQL router); needs an owner ruling.** | senior-be | WSK-02 |
+| ✅ | WSK-07 | **Media path** — 4 buckets (`media`/`video` public, **`uploads` PRIVATE**, `artifacts`) with versioning + GOVERNANCE object-lock verified via `mc`; EICAR refused + audit row; **corrected AC honoured** (cross-tenant → 404, no existence oracle, no per-tenant storage creds ever issued); cookieless serving + `Cache-Tag`; 3-layer storage-abstraction proof; per-tenant quota. 21/21 media, 47/47 combined with WSK-05. **Coordinator wired** `MediaModule`, the `imgproxy` compose service, and the media env vars. ⚠️ **imgproxy transform route is PROTOTYPED only** (no live instance was up during its run); **`STORAGE_ACCESS_KEY_ID` unset falls back to MinIO ROOT — dev-only, must be a scoped service account before A-12's box** | medior | WSK-01, 02 |
+| ✅ | WSK-10 ⚡ | **Forms service — the web3forms kill** — CORS allowlist · Turnstile seam (stub; real key stays on the Reopen Register) · honeypot · per-IP + per-form rate limits · zod from `form_defs.schema` · consent record (WSK-D22) · attachments to the PRIVATE `uploads` bucket, ClamAV-scanned · retention purge sweep. **Coordinator-verified 23/23** on my own stack via its README runbook: hostile payload stored inert, EICAR refused, honeypot silently dropped, both notification + autoresponder landed in Mailpit. ⚠️ **Route deviates from the design's literal `/v1/forms/:formId/submit` → `/v1/t/:tenantSlug/forms/:formId/submit`**, forced by `0003_forms.sql`'s single-mode RLS (a form cannot be resolved by id before a tenant context exists); consistent with WSK-06's `/v1/t/:slug/…` shape. Purge sweep has no scheduler yet | senior-be | WSK-04 ✅, 05 ✅ |
+| ✅ | WSK-11 | **Mail service (C-03)** — agent-reported DEV-VERIFIED, **coordinator verification IN FLIGHT**. Identity rule is the strong part: `resolveFromIdentity()` takes **zero arguments** and `MailJobData` has **no `from` field**, so a queued job physically cannot spoof identity; Zone A domains denylisted on both `From:` and `Reply-To:`; 3 test layers incl. a source-literal sweep and an `as never`-smuggled override. Retry proven by a **real `docker stop`/`start`** of Mailpit mid-flight. Suppression re-checked at worker time, not just enqueue. `mail_log` DELETE denied to `webdesk_app`. **Coordinator wired** `MailModule`, compose env passthrough, and reconciled `.env.example` (`MAILPIT_SMTP_URL` was dead config nothing read). ✅ **Coordinator-verified 25/25** on my own stack (its 6 specs incl. retry-backoff). Earlier I could not reproduce it: My own harness (pg/redis/mailpit on 55470-3, migrations 5/5 clean) got **11 passed / 13 failed**, all environment-shaped (blank `AggregateError`s, `ECONNREFUSED` to the hardcoded `:55450` default) despite exporting every env var I could find by reading the code. **Root cause is a missing runbook** — WSK-05 documented one I followed verbatim and reproduced 26/26 first try; this ticket shipped none. Also `mail-retry-backoff.spec.ts` shells `docker stop wsk11-mailpit` and, when that container is absent, **stalled for 2.8 hours** instead of skipping. **Root cause was undocumented shadow env vars** (`WSK11_APP_DATABASE_URL`, plus a `WSK05_TEST_DATABASE_URL` copy-pasted from another ticket) — my correct exports were silently ignored. Fixed: real env names, a documented runbook, and the retry spec now **skips in 3.3s** instead of stalling 2.8h. ⚠️ **Gaps:** `mail_log` has **no persisted render payload** — if Redis is lost a `queued` row can never be resent or diagnosed; no `tenants` domain column for the own-domain seam (adapter half only); the BullMQ worker runs **in-process** with `api`, not in the `worker` service | senior-be | WSK-01 |
 | ⬜ | WSK-12 ⚡ | Zone B→A signed events, both halves — HMAC emitter + `wd-zoneb-intake` + `webdev_zoneb_event_log` (**timestamp-named migration**) | senior-integrator | WSK-10 |
-| ⬜ | WSK-08′ | **gaiada.com live** — real site on **Cloudflare Pages** (R-2) reading real content through a scoped key | medior | WSK-05, 06, 07 |
+| ⏸ | WSK-08′ | **gaiada.com live** — **BLOCKED by WSK-D26's two collisions** (observe-only ruling on `delphi`/`helios`; neither host reachable) **plus a tenant-zero conflict**: gaiada.com is WordPress on Hostinger, so under D26 it stays there — which makes tenant zero P6 work, not Milestone 0. See the findings block below | medior | owner decisions |
 | ⬜ | WSK-M0 | **M0 QA gate** (merges old WSK-09+13) — cross-tenant battery × RLS × key scope × storage prefix, envelope contract suite, forms abuse battery, forgery/replay, retention purge walk, egress sweep, **GraphQL-off probe** | qa | all of B |
 
 ---
@@ -191,11 +192,78 @@ None of them block Milestone 0.
 
 ---
 
+
+## ⏸ Tenant-zero findings (2026-08-26) — two prerequisites WSK-08′ cannot proceed without
+
+Established by direct, zero-touch inspection (DNS + HTTP headers), not from documentation:
+
+| Fact | Evidence |
+|---|---|
+| **gaiada.com is on Hostinger** | Nameservers `ns1/ns2.dns-parking.com` (Hostinger's); A records `88.223.91.188`, `153.92.12.49` + `2a02:4780::/29` IPv6 (Hostinger ranges); response header **`platform: hostinger`**, `Server: hcdn` |
+| **gaiada.com is WordPress** | `Link: <https://gaiada.com/wp-json/>; rel="https://api.w.org/"` — the WP REST discovery link |
+| **It is NOT on `delphi` or `helios`** | Neither IP matches: `delphi` = `72.61.142.88`, `helios` = `187.77.116.133`, gaiada.com resolves to Hostinger space. Owner's belief confirmed |
+| **Both boxes are unreachable from the dev machine** | SSH and HTTP to both time out — firewalled to specific sources or tunnel-only. Could not enumerate their vhosts; DNS made that unnecessary. Note both are **OBSERVE-ONLY** (owner ruling 2026-08-22) so nothing was modified |
+| **No gaiada domain is on Cloudflare DNS** | `gaiada.com` → Hostinger `dns-parking.com`; `gaiada.online` → GoDaddy `ns37/ns38.domaincontrol.com` (`erp.gaiada.online` → `35.240.135.48`) |
+
+### ✅ SUPERSEDED — the Cloudflare prerequisite is MOOT (owner ruling, 2026-08-26 later same day)
+
+**WSK-D26 reverses WSK-D17/R-2: no move to Cloudflare, respect the current estate.** Hosting routes
+by project type — **WP → Hostinger WP host** · **non-WP staging → `delphi`** · **non-WP production
+→ `helios`**. No nameservers move, so the zone-control prerequisite disappears entirely.
+
+**Net win:** frontend hosting needs **no new box**, so procurement (A-12 / OQ-W1) narrows to the
+Zone B *backend* only.
+
+**What the reversal reinstates** — work WSK-D17 had deleted:
+
+| Ticket | Was, under Pages | Is again, under WSK-D26 |
+|---|---|---|
+| **WSK-26′** | one small "Pages deploy + domain adapter" | **splits back into two**: per-branch **preview slots on `delphi`** (D-8 gate-scoped, slot caps, TTLs) + **custom domains & TLS** |
+| **WSK-25** | shrunk to content promotion + a deploy hook | **regrows**: FE artifact deploy, domain/TLS activation, purge/warm. Re-rate toward `opus·medium` again |
+| **WSK-29** | tools pointed at a Pages token | deploy tooling must reach `delphi`/`helios` — see blocker 2 |
+
+### ⛔ Two blockers WSK-D26 must clear before any frontend ships
+
+| # | Blocker | Why it is hard |
+|---|---|---|
+| 1 | **`delphi`/`helios` are OBSERVE-ONLY** (owner ruling 2026-08-22: collect FROM, never modify ON) | Deploying a frontend *is* modifying them. Needs an explicit ruling lifting observe-only **for deployment**, which is a narrower question than re-authorising the monitoring agent tier |
+| 2 | **Neither host is reachable from the dev machine** — SSH and HTTP both time out (`delphi` 72.61.142.88, `helios` 187.77.116.133) | Access is clearly *intended* (both are in `~/.ssh/config`), so this is an allowlist / tunnel / CI-identity question. WSK-29's deploy tooling needs the same answer |
+
+### Tenant zero, under the new rule
+
+`gaiada.com` is **WordPress on Hostinger**, so WSK-D26 keeps it on the WP host — making tenant zero
+a **headless-WP** case (Phase 6: WSK-34 PHP SDK + WSK-35 theme), not the Astro/Node path Milestone 0
+assumed. Options: pull P6 forward for our own site, or make tenant zero a **non-WP site on `delphi`**
+and let gaiada.com join at P6.
+
+Hostinger is **shared hosting** — per `infra/runbooks/onboard-server.md` there is no shell-access
+model, so any migration is a DNS + content-export exercise, never a server-side one.
+
+---
+
 ## Session log
+
+> **Full `webdesk/api` suite, coordinator-run 2026-08-26: 105/107, `tsc` 0 errors.** The 2 failures were
+> **WSK-07's** media specs and were purely my missing env (`MINIO_*`, `WEBDESK_MEDIA_MAX_UPLOAD_BYTES`) —
+> both pass once set. **WSK-07 shipped no verification runbook**, the same gap that cost hours on WSK-11;
+> it should get one before WSK-M0.
+
+
+> **WSK-04b caveat worth re-reading before WSK-M0:** the Payload predicate is real and proven, but
+> Payload's Local API defaults `overrideAccess: true`, so the second wall is opt-IN there. Two existing
+> project callers rely on that default and therefore run RLS-only today. A lint is the fix.
+
+
+> **Committed 2026-08-26:** `c943a586` on branch **`webdesk-zone-b-2026-08-26`** — 66 files, +5482/-32,
+> made via `git worktree` so the shared checkout's HEAD (another session's `office-floor` branch) was
+> never moved. Also removes the 8-line debug block a concurrent commit had captured into history.
+
 
 | Date | What moved |
 |---|---|
 | 2026-08-26 | Reassessment written + indexed in `BLUEPRINTS.md`. **R-1 ruled** (RLS under shared Payload retained; mitigations attached). **R-2 ruled** (Cloudflare Pages adopted). This tracker created. |
+| 2026-08-26 | **WSK-04 + WSK-07 DEV-VERIFIED.** WSK-04 proved WSK-D16's mutual independence for real: with RLS disabled the app-layer predicate alone still isolated tenants (negative control leaked, so the predicate did the work), and with the app predicate omitted RLS alone still isolated. Condition 3 ruled **Option B** — push forbidden + a generic reapply step — rejecting a migration-based fix because a migration's `up()` runs once and would never cover future collections. **Three real gaps recorded rather than absorbed:** (1) **Payload's collections have NO independent app-layer tenant filter** — mutual independence is proven on `webdesk/api` only, so WSK-D16's guarantee is **not yet symmetric**; needs an `access` predicate in `payload.config.ts`. (2) The repair tool scopes to `relowner = current_user`, but **all 16 tables are owned by `webdesk_migrator`** — so run as owner it silently matches nothing; it exits 1 and says GATE FAILED (fail-loud, correct) but gives no hint to re-run as the owning role. (3) Jobs path unprobed — `payload.config.ts` has no `jobs` block. **Git hygiene:** a concurrent session's commit captured an 8-line debug block into HEAD; my working tree has it removed and is correct — **HEAD is not**. |
+| 2026-08-26 | **WSK-06 DEV-VERIFIED — the `/v1` contract is FROZEN.** 40/40 vocabulary + **60/60** envelope contract assertions on a real DB, re-run by coordinator. **A real bug its own AC caught:** `pg` parses `timestamptz` to a millisecond-precision JS `Date` while Postgres stores microseconds, so a cursor built from the truncated value re-returned the boundary row on the next page — reproduced live, fixed by building the cursor from `created_at::text` and never round-tripping through `Date`. Exactly what "pagination stable under concurrent publish" exists to catch. **Coordinator wired the blocker:** WSK-06 was fenced out of `app/**`, so I added `app/(payload)/v1/[...slug]/route.ts` and the compose `DATABASE_URI`/`API_KEY_PEPPER` vars; **lockdown re-verified 11/11 afterwards**. |
 | 2026-08-26 | **WSK-02 DEV-VERIFIED (with one honest CANNOT-VERIFY).** Lockdown proven 11/11 in three independent layers. **Security fix applied by coordinator:** WSK-01's Caddyfile stub was routing `/admin*` to Payload on the **public** vhost — a direct contradiction of WSK-D20/D-5 that would have exposed the admin panel anywhere reachable. Public vhost now serves only `/v1`, `/forms`, `/media`, `/healthz` and explicitly 404s `/admin`, `/api/*`, `/control/*`; the internal listener is bound to **127.0.0.1** and a separate `payload-gateway` service is the only Payload process the public vhost may reach. `.env.example` gained the two listener ports + both push-guard flags. Cross-validation worth noting: my WSK-04 gate and WSK-02's own setup-schema check agree independently on the post-push schema. **Open:** admin SSR first paint still does not render rows (fails closed); carried to WSK-04 condition 4. |
 | 2026-08-26 | **WSK-05 (API keys) DEV-VERIFIED + independently re-verified.** Coordinator re-ran it from scratch on the documented runbook: 26/26 tests, `tsc` clean, RLS gate OK on the fresh schema. Scope matrix, revoked-key (no cache window), no-key, quota, and a **dump-grep proof that no plaintext key exists in any column** all hold. `.env.example` gained `API_KEY_PEPPER` + quota vars. **Correction on the record:** an earlier local run of mine showed 5 failing suites and I implied the harness override was broken — it is not; a dead-port test proved the override is honoured. That failure was my own invocation. |
 | 2026-08-26 | **WSK-04 condition 1 DEV-VERIFIED:** `scripts/check-rls-integrity.mjs` asserts `relrowsecurity` AND `relforcerowsecurity` AND ≥1 policy per tenant-scoped table. Selftest 6/6 (incl. the exact regression); proven live on a freshly-migrated 14-table Zone B schema — OK when healthy, **exit 1 when `sites` was disarmed as `webdesk_migrator` while its policy remained**, catching it purely on `relrowsecurity=false`. Wired into `npm test`. Side finding: `webdesk_owner` **cannot** disable RLS on migrator-owned tables — only the table owner can, so the migrator is the role to watch. |

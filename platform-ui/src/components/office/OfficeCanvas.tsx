@@ -14,17 +14,17 @@ import {
   DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
   ZOOM_LEVELS, fitScale, nearestZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_STATE_LABEL,
-  ambientDriftOffset, pickAmbientLine,
+  ambientWalkState, pickAmbientLine,
   type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeFloor, type OfficeAvatar, type ReplayStep,
-  type Camera, type AutomationActivityState,
+  type Camera, type AutomationActivityState, type AmbientWalk,
 } from "@/lib/office";
 import {
   LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS,
-  spriteAssetPath, pickGender, pickSkinTone, hexToRgb,
+  spriteAssetPath, pickGender, pickSkinTone, facingRow, hexToRgb,
   type SpriteGender, type SpritePose,
 } from "@/lib/office-sprites";
 import {
-  CHAR_PX, CHAR_DRAW_SCALE, agentSpritePath, automationSpritePath, activeBobPx, walkBobPx,
+  CHAR_PX, CHAR_DRAW_SCALE, agentSpritePath, automationSpritePath, personPropSpritePath, activeBobPx, walkBobPx,
 } from "@/lib/officeChars";
 import { OfficeCastStrip, type CastMember } from "./OfficeCastStrip";
 import "./office.css";
@@ -51,17 +51,21 @@ import "./office.css";
 //      `executing`/`awaiting_approval`. It is a ~450ms `setInterval`, not a per-frame RAF, shared by
 //      both sources rather than one loop each, and it stops entirely (cleared) the moment neither
 //      is true. Paused by the SAME visibility/offscreen refs as the replay loop.
-//   4. A FOURTH timer — ambient drift (owner decision 2026-08-26) — the two-tier honesty rule this
-//      canvas now draws: room-to-room movement is REAL (paths #2 above, untouched by this), motion
-//      WITHIN a room is decorative and means nothing. ONE shared ~200ms `setInterval` (never one per
-//      avatar — this must scale to 80+ seats) redraws every steady-state avatar at a small offset
-//      from `lib/office.ts`'s `ambientDriftOffset`, which is a pure function of (avatarId,
-//      wall-clock time) ONLY — no `activeRunId`, `busyUntil`, `automationSignal` or working state is
-//      ever read by it, because that is precisely what would turn decoration into a claim (plan §3:
-//      "motion is a claim"). The SAME timer occasionally puts a curated, hard-coded line (never
-//      generated — plan §6) in a speech bubble over one or two avatars at a time. Paused by the SAME
-//      visibility/offscreen refs as everything else, and killed outright by `prefers-reduced-motion`
-//      (avatars sit at their desks; no bubbles either).
+//   4. A FOURTH timer — ambient WALKING (owner decision 2026-08-26, revised same day for "too
+//      rigid" feedback) — the two-tier honesty rule this canvas now draws: room-to-room movement is
+//      REAL (paths #2 above, untouched by this), motion WITHIN a room is decorative and means
+//      nothing. ONE shared ~200ms `setInterval` (never one per avatar — this must scale to 80+
+//      seats) redraws every steady-state avatar at a small offset from `lib/office.ts`'s
+//      `ambientWalkState`, which is a pure function of (avatarId, wall-clock time) ONLY — no
+//      `activeRunId`, `busyUntil`, `automationSignal` or working state is ever read by it, because
+//      that is precisely what would turn decoration into a claim (plan §3: "motion is a claim").
+//      `ambientWalkState` walks a short discrete leg out, pauses, and walks back — not the
+//      continuous sine curve `ambientDriftOffset` (still in lib/office.ts, still tested, just no
+//      longer called from here) traced, which glided every avatar all the time and read as
+//      sliding rather than walking. The SAME timer occasionally puts a curated, hard-coded line
+//      (never generated — plan §6) in a speech bubble over one or two avatars at a time. Paused by
+//      the SAME visibility/offscreen refs as everything else, and killed outright by
+//      `prefers-reduced-motion` (avatars sit at their desks; no bubbles either).
 
 type RailTab = "cast" | "detail" | "activity" | "legend";
 const RAIL_TABS: { key: RailTab; label: string }[] = [
@@ -395,9 +399,12 @@ function drawWalls(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: Toke
   }
 }
 
-/** A name plate mounted on the wall AWAY from the corridor (the room's "front of house" wall,
- *  opposite its own doorway) so it never collides with the doorway gap `drawWalls` just cut. */
-function drawNamePlate(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet) {
+/** The nameplate's own rect, in CANVAS px — factored out of `drawNamePlate` so `drawRoomDressing`
+ *  can compute exactly where NOT to put a painting/bookshelf/clock without re-deriving (and
+ *  risking drifting from) the nameplate's own geometry. Mounted on the wall AWAY from the corridor
+ *  (the room's "front of house" wall, opposite its own doorway) so it never collides with the
+ *  doorway gap `drawWalls` cuts. */
+function namePlateRect(room: OfficeRoom): { x: number; y: number; w: number; h: number } {
   const rect = roomTileRect(room);
   const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
   const plateW = Math.min(w - tilesToPx(1.2), tilesToPx(6.5));
@@ -405,6 +412,11 @@ function drawNamePlate(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: 
   const px = x + (w - plateW) / 2;
   const onTop = room.side === "north"; // door is on the bottom, so the nameplate sits up top
   const py = onTop ? y + tilesToPx(WALL_TILES) - 1 : y + h - tilesToPx(WALL_TILES) - plateH + 1;
+  return { x: px, y: py, w: plateW, h: plateH };
+}
+
+function drawNamePlate(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet) {
+  const { x: px, y: py, w: plateW, h: plateH } = namePlateRect(room);
   ctx.fillStyle = tokens.raised;
   ctx.fillRect(px, py, plateW, plateH);
   ctx.strokeStyle = tokens.hairline;
@@ -550,32 +562,97 @@ function drawDesk(
   }
 }
 
-/** Small wall-mounted furniture set for rooms that have desks — a printer, whiteboard, filing
- *  cabinet, bookshelf or notice board, one per room, picked and placed by a STABLE hash of the
- *  room's own key (`hashId`, lib/office.ts — the same deterministic-identity helper the avatar
- *  sprites already use for their own art variant) so the same room always earns the same prop in
- *  the same spot on every render. Nothing here may read `nowMs`, avatar state, or draw order — a
- *  jittering prop would be worse than none (req #4: "nothing jitters between frames or
- *  re-renders").
- *
- *  Placed in the header band above the FIRST desk row — the same clear strip the department's own
- *  back-corner plant (Pass 2 below) already uses on the OPPOSITE wall — so it can never land on a
- *  desk slot regardless of how many occupants the room has or how many columns `deskCols` grew to. */
+/** A small personal item on a HUMAN's own desk (owner feedback 2026-08-26: "identical people...
+ *  reads as GENERATED"). Deterministic per AVATAR id, never per desk or room, so the same person
+ *  keeps the same item if they ever change seats — see `officeChars.ts`'s own doc on why these 36
+ *  files sit beside a person's desk rather than replacing their (real, walking) LPC body. Drawn
+ *  after `drawDesk` (Pass 2 ordering) so it sits ON the desk surface, and only ever for an OCCUPIED
+ *  human desk — a vacant seat has no person to own an item, and an agent/automation already carries
+ *  its own fixed visual identity from the same pack. */
+function drawDeskFigurine(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, avatarId: string) {
+  const img = getRawImage(personPropSpritePath(avatarId, hashId));
+  if (!img) return; // still loading, or 404'd — the desk reads fine without it
+  const cx = tilesToPx(tile.x), cy = tilesToPx(tile.y);
+  const r = tilesToPx(0.62);
+  const deskH = tilesToPx(1.9);
+  const deskY = cy - r * 0.15 - deskH;
+  const size = tilesToPx(0.55);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, cx + tilesToPx(0.55), deskY + deskH * 0.15, size, size);
+}
+
+/** Wall-mounted dressing for rooms that have desks — printer/whiteboard/filing/bookshelf/notice
+ *  board (the original furniture set) PLUS the two previously-committed-but-unreferenced pools
+ *  named in the owner's 2026-08-26 "bare walls" feedback: all 12 `office-env/paintings/*` and a
+ *  second, taller bookshelf + wall clock. Picked and placed by a STABLE hash of the room's own key
+ *  (`hashId`, lib/office.ts — the same deterministic-identity helper the avatar sprites already use
+ *  for their own art variant) so the same room always earns the same items in the same spots on
+ *  every render. Nothing here may read `nowMs`, avatar state, or draw order — a jittering prop
+ *  would be worse than none (req #4: "nothing jitters between frames or re-renders"). */
 const ROOM_DRESSING_PROPS = [
   "/office-env/furniture/common/whiteboard.png",
   "/office-env/furniture/common/printer_stand.png",
   "/office-env/furniture/storage/filing_cabinet.png",
   "/office-env/furniture/storage/bookshelf.png",
+  "/office-env/furniture/storage/bookshelf_tall.png",
   "/office-env/furniture/common/notice_board.png",
+  "/office-env/office_equipment/clock.png",
+  "/office-env/paintings/abstract_blue.png",
+  "/office-env/paintings/abstract_warm.png",
+  "/office-env/paintings/cityscape.png",
+  "/office-env/paintings/forest.png",
+  "/office-env/paintings/geometric.png",
+  "/office-env/paintings/green_botanical.png",
+  "/office-env/paintings/landscape_mountain.png",
+  "/office-env/paintings/minimal_arch.png",
+  "/office-env/paintings/ocean.png",
+  "/office-env/paintings/office_motivational.png",
+  "/office-env/paintings/pixel_moon.png",
+  "/office-env/paintings/sunset.png",
 ] as const;
 
+/** Footprint of one wall-dressing item, and the gap between neighbours — both tuned so a run of
+ *  items never has to spill past the nameplate's own Y band into the desk furniture below it (see
+ *  `DESK_TOP_TILES`'s own doc in lib/office.ts for the clearance this all rests on). */
+const WALL_ART_ITEM_TILES = 0.85;
+const WALL_ART_GAP_TILES = 0.25;
+
+/** Hangs 0-3 items per side, FLANKING the nameplate rather than fighting it — the two runs start
+ *  flush against the plate's own left/right edge (with one gap's worth of breathing room) and grow
+ *  outward toward the room's side walls, vertically centred on the plate's own Y band. That band is
+ *  guaranteed clear of both the nameplate (disjoint X ranges by construction — a run never crosses
+ *  `plate.x`/`plate.x + plate.w`) and the desk furniture below it (`DESK_TOP_TILES` already reserves
+ *  this whole band for the nameplate; anything sharing its Y sits inside that same reservation).
+ *  `count` is derived from how many items ACTUALLY fit the room's own margin — never a fixed number
+ *  guessed by eye — so a narrow department gets fewer items than a wide one instead of overflowing
+ *  into a wall it was never sized to clear. */
 function drawRoomDressing(ctx: CanvasRenderingContext2D, room: OfficeRoom) {
-  const img = getRawImage(ROOM_DRESSING_PROPS[hashId(room.key) % ROOM_DRESSING_PROPS.length]);
-  if (!img) return; // still loading, or 404'd — the room reads fine without it, no fallback shape needed
-  const backY = room.side === "north" ? room.y + 0.9 : room.y + room.hTiles - 0.7;
-  const propW = tilesToPx(0.85), propH = tilesToPx(0.85);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, tilesToPx(room.x + 0.55), tilesToPx(backY) - propH * 0.5, propW, propH);
+  const plate = namePlateRect(room);
+  const rect = roomTileRect(room);
+  const wall = tilesToPx(WALL_TILES);
+  const innerLeft = tilesToPx(rect.x) + wall;
+  const innerRight = tilesToPx(rect.x + rect.w) - wall;
+  const itemPx = tilesToPx(WALL_ART_ITEM_TILES);
+  const gapPx = tilesToPx(WALL_ART_GAP_TILES);
+  const stridePx = itemPx + gapPx;
+  const centerY = plate.y + plate.h / 2;
+
+  const leftMarginPx = plate.x - innerLeft;
+  const rightMarginPx = innerRight - (plate.x + plate.w);
+  const leftCount = Math.max(0, Math.min(3, Math.floor(leftMarginPx / stridePx)));
+  const rightCount = Math.max(0, Math.min(3, Math.floor(rightMarginPx / stridePx)));
+
+  let slot = 0;
+  const draw = (cx: number) => {
+    const path = ROOM_DRESSING_PROPS[hashId(`${room.key}:${slot}`) % ROOM_DRESSING_PROPS.length];
+    slot += 1;
+    const img = getRawImage(path);
+    if (!img) return; // still loading, or 404'd — the wall reads fine bare, no fallback shape needed
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, cx - itemPx / 2, centerY - itemPx / 2, itemPx, itemPx);
+  };
+  for (let i = 0; i < leftCount; i++) draw(plate.x - gapPx - itemPx / 2 - i * stridePx);
+  for (let i = 0; i < rightCount; i++) draw(plate.x + plate.w + gapPx + itemPx / 2 + i * stridePx);
 }
 
 /** The lobby is the airlock waiting area (plan §4.3), not a workspace — a simple chair, no desk,
@@ -671,6 +748,21 @@ function drawPlant(ctx: CanvasRenderingContext2D, cx: number, baselineY: number,
     ctx.ellipse(cx + ox * leafR * 2, baselineY - potH + oy * leafR * 2, leafR, leafR * 0.75, ox * 0.6, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+/** The two previously-committed-but-unreferenced corner plants named in the owner's 2026-08-26
+ *  feedback — a real sprite where `drawPlant` above draws a procedural one, picked deterministically
+ *  per `seed` (a room key) so the same corner always gets the same plant. Degrades to the exact
+ *  procedural plant above the instant either sprite hasn't decoded yet (or 404s), matching every
+ *  other sprite in this file's fallback discipline — the corner never goes bare while loading. */
+const CORNER_PLANT_SPRITES = ["/office-env/plants/plant_corner.png", "/office-env/plants/plant_tall.png"] as const;
+
+function drawPottedPlant(ctx: CanvasRenderingContext2D, cx: number, baselineY: number, tokens: TokenSet, seed: string) {
+  const img = getRawImage(CORNER_PLANT_SPRITES[hashId(seed) % CORNER_PLANT_SPRITES.length]);
+  if (!img) { drawPlant(ctx, cx, baselineY, tokens); return; }
+  const w = tilesToPx(0.9), h = tilesToPx(0.9);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, cx - w / 2, baselineY - h, w, h);
 }
 
 /** The utility room is "where the automations sit" (no department tone, plan §4.3) — a rack/server
@@ -964,22 +1056,33 @@ function recolorFrame(img: HTMLImageElement, frame: { col: number; row: number }
 }
 
 /** A fully composited, tone-applied 64x64 character frame — body, head, bottom, top, shoes, hair
- *  (plan §4.4a's layer order). Built once per (gender, pose, tone key) and cached from then on.
+ *  (plan §4.4a's layer order). Built once per (gender, pose, FRAME, tone key) and cached from then
+ *  on — extended 2026-08-26 to key on `frame` (not just `pose`) so ambient walking can request a
+ *  facing row other than `POSE_FRAME[pose]`'s own default without thrashing the cache: with 80+
+ *  avatars, at most a handful of distinct (gender, tone, frame) combinations are ever actually
+ *  drawn, so this stays bounded by avatar count, never by the full cross-product. `frame` defaults
+ *  to `POSE_FRAME[pose]` — every EXISTING caller (sit, and corridor-transit walk) is byte-for-byte
+ *  unchanged, only a caller that explicitly overrides it (ambient walking, below) sees new rows.
  *  Returns null until every layer image for this gender/pose has finished loading. */
-function getComposedSprite(gender: SpriteGender, pose: SpritePose, toneKey: string, ramp: string[]): HTMLCanvasElement | null {
-  const cacheKey = `${gender}:${pose}:${toneKey}`;
+function getComposedSprite(
+  gender: SpriteGender, pose: SpritePose, toneKey: string, ramp: string[],
+  frame: { col: number; row: number } = POSE_FRAME[pose],
+): HTMLCanvasElement | null {
+  const cacheKey = `${gender}:${pose}:${frame.col}:${frame.row}:${toneKey}`;
   const cached = spriteCache.get(cacheKey);
   if (cached) return cached;
 
   const layers = LAYER_PATHS[gender];
-  const frame = POSE_FRAME[pose];
   const frames: HTMLCanvasElement[] = [];
   for (const { key, recolorable } of LAYER_ORDER) {
     const variant = layers[key];
     const src = spriteAssetPath(variant, pose);
     const img = getRawImage(src);
     if (!img) return null; // any missing layer stalls the whole composite — never a partial figure
-    frames.push(recolorFrame(img, frame, recolorable ? ramp : null, `${src}:${recolorable ? toneKey : "raw"}`));
+    // frame.row is part of the cache key here too — recolorCache is shared across every distinct
+    // frame cropped from the SAME sheet (`src` alone does not vary by row), so two different rows
+    // of the same walk.png must not collide onto one cached crop.
+    frames.push(recolorFrame(img, frame, recolorable ? ramp : null, `${src}:${frame.col}:${frame.row}:${recolorable ? toneKey : "raw"}`));
   }
 
   const canvas = document.createElement("canvas");
@@ -1228,6 +1331,12 @@ function drawAvatar(
   ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean,
   scale: number, emoteKind: AgentRunEventKind | null, pulseOn: boolean, transitLane = 0,
   ambientLine: string | null = null,
+  // Ambient WALKING (owner feedback 2026-08-26: "movement can really look like walking" / current
+  // motion is "too rigid") — null while paused at the desk (or while reduced motion/replay-transit
+  // already own the moment; see the Pass 3 call site's own guards). `walking` gates the "walk" pose
+  // + a facing row instead of "sit" for a human, and the existing `walkBobPx` step instead of the
+  // working pulse for an agent/automation — never BOTH a real transit AND an ambient walk at once.
+  ambientWalk: AmbientWalk | null = null,
 ) {
   const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
   const r = tilesToPx(0.62);
@@ -1256,9 +1365,11 @@ function drawAvatar(
       if (sprite) {
         ctx.imageSmoothingEnabled = false;
         const size = CHAR_PX * CHAR_DRAW_SCALE;
-        // In transit the bob comes from DISTANCE (walkBobPx) so the android steps instead of
-        // gliding; at a desk it comes from the working pulse. Never both.
-        const bob = pos.inTransit ? walkBobPx(true, cx) : activeBobPx(emoteKind !== null, pulseOn);
+        // In transit — OR taking an ambient step (owner feedback 2026-08-26) — the bob comes from
+        // DISTANCE (walkBobPx) so the android steps instead of gliding; paused at a desk it comes
+        // from the working pulse. Never more than one of the three at once.
+        const stepping = pos.inTransit || (ambientWalk?.walking ?? false);
+        const bob = stepping ? walkBobPx(true, cx) : activeBobPx(emoteKind !== null, pulseOn);
         ctx.drawImage(sprite, cx - size / 2, cy - size * 0.6 - bob, size, size);
       } else {
         drawHumanoid(ctx, cx, cy, r, tokens.steel, tokens.ink, true);
@@ -1273,11 +1384,22 @@ function drawAvatar(
       // Humans stay on LPC ON PURPOSE. Those sheets carry real `walk` and `sit` poses; the new
       // 32px pack has one frame and one direction, so switching would trade a working walk cycle
       // for correct scale. That trade is worth making when the four directions land, not before.
+      //
+      // Ambient walking (owner feedback 2026-08-26) reuses that SAME real walk pose — never a
+      // replay transit's own fixed "toward viewer" row, but a row chosen to FACE the direction of
+      // travel (`facingRow`, office-sprites.ts), so a person taking a short lap actually turns to
+      // walk it instead of sliding sideways. A real transit always wins when both could apply (the
+      // Pass 3 call site already never hands both at once, but the `pos.inTransit` check here is
+      // the second, redundant guard the rest of this file's honesty layers all carry).
+      const inAmbientWalk = !pos.inTransit && (ambientWalk?.walking ?? false);
       const gender = pickGender(avatar.recordId);
-      const pose: SpritePose = pos.inTransit ? "walk" : "sit";
+      const pose: SpritePose = pos.inTransit || inAmbientWalk ? "walk" : "sit";
       const toneKey: string = pickSkinTone(avatar.recordId);
       const ramp: string[] = SKIN_RAMPS[pickSkinTone(avatar.recordId)];
-      const sprite = getComposedSprite(gender, pose, toneKey, ramp);
+      const frame = inAmbientWalk
+        ? { col: POSE_FRAME.walk.col, row: facingRow(ambientWalk!.dirX, ambientWalk!.dirY) }
+        : POSE_FRAME[pose];
+      const sprite = getComposedSprite(gender, pose, toneKey, ramp, frame);
       if (sprite) {
         ctx.imageSmoothingEnabled = false;
         // Native 64x64 frame at integer 1x scale = exactly 2 tiles at this canvas's TILE_PX*ZOOM
@@ -1315,6 +1437,10 @@ function drawAvatar(
         ctx.restore();
         ctx.imageSmoothingEnabled = false;
         const size = CHAR_PX * CHAR_DRAW_SCALE;
+        // Unchanged: an automation never walks, even ambiently (legal/asset-licences.md's own
+        // design note — "it fires and completes... a walking robot would be inventing a journey
+        // that does not exist"). It still receives the small ambient POSITION offset every avatar
+        // gets (see the Pass 3 call site), just never the walking BOB — only the working pulse.
         const bob = activeBobPx(emoteKind !== null, pulseOn);
         ctx.drawImage(sprite, cx - size / 2, cy - size * 0.6 - bob, size, size);
       } else {
@@ -1384,9 +1510,9 @@ const WORKING_POLL_MS = 8000;
 const SCENE_REFRESH_MS = 15_000;
 const PULSE_TICK_MS = 450;
 
-// ── Ambient drift + speech bubbles (owner decision 2026-08-26) ──────────────────────────────────
-// One shared tick for both. 200ms is plenty of resolution for motion this slow (`ambientDriftOffset`
-// periods run 9-13s) and far cheaper than a 60fps RAF across 80+ avatars.
+// ── Ambient walking + speech bubbles (owner decision 2026-08-26) ────────────────────────────────
+// One shared tick for both. 200ms is plenty of resolution for motion this slow (`ambientWalkState`
+// cycles run 14-22s, with ~1.1-1.5s walk legs) and far cheaper than a 60fps RAF across 80+ avatars.
 const AMBIENT_TICK_MS = 200;
 /** "on at most one or two avatars at a time" — the whole reason bubble scheduling needs shared
  *  state at all, rather than each avatar rolling its own dice independently. */
@@ -1755,7 +1881,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       if (room.kind === "department") {
         // A plant in the back inner corner, opposite the doorway — never on top of a desk slot.
         const backY = room.side === "north" ? room.y + 0.9 : room.y + room.hTiles - 0.7;
-        drawPlant(ctx, tilesToPx(room.x + room.wTiles - 0.9), tilesToPx(backY), tokens);
+        drawPottedPlant(ctx, tilesToPx(room.x + room.wTiles - 0.9), tilesToPx(backY), tokens, room.key);
       }
       // A deterministic wall prop (whiteboard/printer/filing cabinet/bookshelf/notice board) for
       // every room that has desks — mirrors the plant/server-rack corner above onto the OPPOSITE
@@ -1766,6 +1892,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       for (const p of occupants) {
         const activity = deskActivityFor(p.avatar, workingIds, nowMs);
         drawDesk(ctx, p.tile, tokens, true, room.kind, activity, pulseOnRef.current);
+        if (p.avatar.kind === "human") drawDeskFigurine(ctx, p.tile, p.avatar.id);
       }
       const vacant = vacantDeskSlots(occupants.length, room.deskCols);
       for (let i = 0; i < vacant; i++) drawDesk(ctx, deskSlotTile(room, occupants.length + i), tokens, false, room.kind);
@@ -1801,19 +1928,21 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       // is the same 45s-freshness gate the desk monitor tint already uses for agents; automations
       // resolve their own freshness inside `resolveAutomationState` using that identical window.
       const emoteKind = emoteKindFor(pos.avatar, workingIds, emoteKinds, nowMs);
-      // Ambient drift is a RENDER-ONLY offset off the canonical `pos.tile` computed above —
-      // `positions`/`lastPositionsRef` stay canonical so hit-testing and camera-follow are never
-      // thrown off by a few tenths of a tile of pure decoration. It applies only to a steady,
-      // non-transit avatar (a real transit already owns its own path — the plan's "always wins"
-      // rule) and never while reduced motion is on, which is this feature's hard kill switch.
-      // `ambientDriftOffset` itself takes no signal beyond (avatarId, time) — see its doc in
-      // lib/office.ts for why that is load-bearing, not incidental.
-      const renderPos = !reducedMotion && !pos.inTransit
-        ? { ...pos, tile: addTile(pos.tile, ambientDriftOffset(pos.avatar.id, ambientMs)) }
-        : pos;
+      // Ambient WALKING (owner feedback 2026-08-26: replaces the old continuous lissajous drift,
+      // which glided every avatar all the time and read as "too rigid") is a RENDER-ONLY offset off
+      // the canonical `pos.tile` computed above — `positions`/`lastPositionsRef` stay canonical so
+      // hit-testing and camera-follow are never thrown off by a few tenths of a tile of pure
+      // decoration. It applies only to a steady, non-transit avatar (a real transit already owns
+      // its own path — the plan's "always wins" rule) and never while reduced motion is on, which
+      // is this feature's hard kill switch. `ambientWalkState` itself takes no signal beyond
+      // (avatarId, time) — see its doc in lib/office.ts for why that is load-bearing, not
+      // incidental; `ambientDriftOffset` stays in lib/office.ts, untouched and still tested, this
+      // is simply a different caller choice.
+      const walk = !reducedMotion && !pos.inTransit ? ambientWalkState(pos.avatar.id, ambientMs) : null;
+      const renderPos = walk ? { ...pos, tile: addTile(pos.tile, walk) } : pos;
       const bubble = !reducedMotion && !pos.inTransit && !emoteKind ? ambientBubbleRef.current.get(pos.avatar.id) : undefined;
       const ambientLine = bubble && bubble.untilMs > ambientMs ? bubble.text : null;
-      drawAvatar(ctx, renderPos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current, transitLanes.get(pos.avatar.id) ?? 0, ambientLine);
+      drawAvatar(ctx, renderPos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current, transitLanes.get(pos.avatar.id) ?? 0, ambientLine, walk);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds, scale, emoteKinds, reducedMotion]);
@@ -1858,11 +1987,12 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workingIds, automationPulseIds, reducedMotion, draw, replaying]);
 
-  // ── Ambient drift + speech bubbles (owner decision 2026-08-26) — the second, decorative movement
-  // tier. UNCONDITIONAL and ALWAYS ON while motion is allowed at all: unlike the pulse timer above,
-  // this does not gate on any real activity signal — every avatar drifts, all the time, precisely
-  // because doing otherwise would make drift a claim about who it is (see `ambientDriftOffset`'s
-  // own doc in lib/office.ts). ONE shared `setInterval` for both drift and bubble scheduling, never
+  // ── Ambient walking + speech bubbles (owner decision 2026-08-26) — the second, decorative
+  // movement tier. UNCONDITIONAL and ALWAYS ON while motion is allowed at all: unlike the pulse
+  // timer above, this does not gate on any real activity signal — every avatar takes its short
+  // walks, all the time, precisely because doing otherwise would make the walk a claim about who it
+  // is (see `ambientWalkState`'s own doc in lib/office.ts). ONE shared `setInterval` for both the
+  // walk and bubble scheduling, never
   // one per avatar — this is what lets it scale to 80+ seats. Paused by the SAME visibility/
   // offscreen refs as the replay loop and the pulse timer, and reduced motion kills it outright:
   // the branch below does one settling `draw()` (so any drift/bubble already on screen is cleared)

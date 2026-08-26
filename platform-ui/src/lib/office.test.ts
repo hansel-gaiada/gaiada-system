@@ -10,9 +10,10 @@ import {
   ZOOM_LEVELS, fitZoomLevel, fitScale, nearestZoomLevel, MIN_FIT_SCALE, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   groupAgentSeats, describeAgentSeat,
   ambientDriftOffset, AMBIENT_DRIFT_RADIUS_TILES, AMBIENT_LINES, pickAmbientLine,
-  DESK_SPACING_TILES, DESK_ROW_TILES,
+  ambientWalkState,
+  DESK_SPACING_TILES, DESK_ROW_TILES, POD_PAIR_OFFSET_TILES,
   type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor, type Camera,
-  type AutomationSignal, type AgentSeatGoal, type AgentSeat,
+  type AutomationSignal, type AgentSeatGoal, type AgentSeat, type AmbientWalk,
 } from "./office";
 
 function room(key: string, kind: OfficeRoomInput["kind"], occupantCount: number, extra: Partial<OfficeRoomInput> = {}): OfficeRoomInput {
@@ -459,6 +460,122 @@ describe("deskSlotTile — desk rows anchor to the room's OWN nameplate wall, co
         expect(slot.y).toBeLessThan(rect.y + rect.h);
       }
     }
+  });
+});
+
+describe("deskSlotTile — pods vary the ARRANGEMENT, never the index -> desk mapping (owner feedback 2026-08-26)", () => {
+  it("never touches X — same column always gives the same X regardless of the pod nudge", () => {
+    const [floor] = buildFloors([{ key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 9 }]);
+    const [r] = floor.rooms;
+    for (let i = 0; i < 9; i++) {
+      const col = i % r.deskCols;
+      expect(deskSlotTile(r, i).x).toBeCloseTo(r.x + 1.6 + col * DESK_SPACING_TILES, 9);
+    }
+  });
+
+  it("the FIRST desk of every pair (even columns, including column 0) sits exactly on the untouched grid line", () => {
+    const [floor] = buildFloors([{ key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 9 }]);
+    const [r] = floor.rooms;
+    for (let i = 0; i < 9; i++) {
+      const col = i % r.deskCols;
+      const row = Math.floor(i / r.deskCols);
+      if (col % 2 !== 0) continue;
+      const yBase = r.side === "north" ? r.y + DESK_TOP_TILES + row * DESK_ROW_TILES : r.y + r.hTiles - DESK_TOP_TILES - row * DESK_ROW_TILES;
+      expect(deskSlotTile(r, i).y).toBeCloseTo(yBase, 9);
+    }
+  });
+
+  it("the SECOND desk of a pair (odd columns) nudges off the grid line by exactly POD_PAIR_OFFSET_TILES, never more", () => {
+    const [floor] = buildFloors([{ key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 9 }]);
+    const [r] = floor.rooms;
+    for (let i = 0; i < 9; i++) {
+      const col = i % r.deskCols;
+      const row = Math.floor(i / r.deskCols);
+      if (col % 2 !== 1) continue;
+      const yBase = r.side === "north" ? r.y + DESK_TOP_TILES + row * DESK_ROW_TILES : r.y + r.hTiles - DESK_TOP_TILES - row * DESK_ROW_TILES;
+      const delta = deskSlotTile(r, i).y - yBase;
+      expect(Math.abs(delta)).toBeCloseTo(POD_PAIR_OFFSET_TILES, 9);
+    }
+  });
+
+  it("a pod nudge can never reach the row above or below (bounded well inside DESK_ROW_TILES)", () => {
+    expect(POD_PAIR_OFFSET_TILES * 2).toBeLessThan(DESK_ROW_TILES / 2);
+  });
+
+  it("is deterministic — the same room and index always yields the same pod arrangement", () => {
+    const [floor] = buildFloors([{ key: "d1", label: "d1", kind: "department", boundTo: "x", occupantCount: 9 }]);
+    const [r] = floor.rooms;
+    for (let i = 0; i < 9; i++) expect(deskSlotTile(r, i)).toEqual(deskSlotTile(r, i));
+  });
+});
+
+describe("ambientWalkState — discrete short walks with pauses, not a continuous glide (owner feedback 2026-08-26)", () => {
+  it("returns the SAME state for the same id and instant, every time", () => {
+    for (const [id, t] of [["agent-1", 12_345], ["human-42", 999_999], ["", 0]] as const) {
+      expect(ambientWalkState(id, t)).toEqual(ambientWalkState(id, t));
+    }
+  });
+
+  it("takes no signal beyond (avatarId, nowMs) — same unconditional contract as ambientDriftOffset", () => {
+    expect(ambientWalkState.length).toBe(2);
+  });
+
+  it("stays bounded to AMBIENT_DRIFT_RADIUS_TILES on both axes, same bound ambientDriftOffset uses", () => {
+    for (const id of ["a", "b", "agent-supervisor", "person-19"]) {
+      for (let t = 0; t < 40_000; t += 137) {
+        const { dx, dy } = ambientWalkState(id, t);
+        expect(Math.abs(dx)).toBeLessThanOrEqual(AMBIENT_DRIFT_RADIUS_TILES + 1e-9);
+        expect(Math.abs(dy)).toBeLessThanOrEqual(AMBIENT_DRIFT_RADIUS_TILES + 1e-9);
+      }
+    }
+  });
+
+  it("carries a direction ONLY while walking — paused states never claim a heading", () => {
+    for (const id of ["a", "b", "agent-supervisor", "person-19"]) {
+      for (let t = 0; t < 40_000; t += 211) {
+        const s: AmbientWalk = ambientWalkState(id, t);
+        if (!s.walking) {
+          expect(s.dirX).toBe(0);
+          expect(s.dirY).toBe(0);
+        }
+      }
+    }
+  });
+
+  it("is mostly paused, not mostly walking — a person sits most of the time", () => {
+    for (const id of ["a", "b", "agent-supervisor"]) {
+      let walkingTicks = 0, total = 0;
+      for (let t = 0; t < 60_000; t += 100) {
+        total += 1;
+        if (ambientWalkState(id, t).walking) walkingTicks += 1;
+      }
+      expect(walkingTicks / total).toBeLessThan(0.35);
+    }
+  });
+
+  it("actually reaches both a walking and a paused state over one sweep — not a degenerate constant", () => {
+    for (const id of ["a", "b", "agent-supervisor"]) {
+      const states = Array.from({ length: 300 }, (_, i) => ambientWalkState(id, i * 137));
+      expect(states.some((s) => s.walking)).toBe(true);
+      expect(states.some((s) => !s.walking)).toBe(true);
+    }
+  });
+
+  it("settles back exactly at the desk (0,0) — never left mid-air between cycles", () => {
+    for (const id of ["a", "b", "agent-supervisor"]) {
+      const atDesk = Array.from({ length: 300 }, (_, i) => ambientWalkState(id, i * 137))
+        .some((s) => !s.walking && s.dx === 0 && s.dy === 0);
+      expect(atDesk).toBe(true);
+    }
+  });
+
+  it("80 avatars do not move in lockstep — different ids reach different states at the same instant", () => {
+    const ids = Array.from({ length: 80 }, (_, i) => `avatar-${i}`);
+    const t = 5_000;
+    const walkingCount = ids.filter((id) => ambientWalkState(id, t).walking).length;
+    // Never all-still and never all-walking at the same shared instant.
+    expect(walkingCount).toBeGreaterThan(0);
+    expect(walkingCount).toBeLessThan(ids.length);
   });
 });
 

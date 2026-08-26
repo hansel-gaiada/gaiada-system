@@ -179,7 +179,18 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('[rls-integrity] ERROR', err.message);
-  process.exit(2);
-});
+// WSK-04 (this ticket, condition 3): guarded like migrations/migrate.mjs's own pattern, so this
+// file's `evaluate` export can be imported by another script (scripts/reapply-and-verify-rls.mjs
+// does exactly this, to make check-rls-integrity.mjs "the enforcing gate" for the condition-3
+// re-apply step, per that ticket's own requirement) WITHOUT also running this CLI's `main()` as
+// an unwanted side effect of the import. Direct invocation (`node scripts/check-rls-integrity.mjs
+// [--selftest]`) is unchanged.
+const invokedDirectly =
+  typeof process.argv[1] === 'string' &&
+  import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('[rls-integrity] ERROR', err.message);
+    process.exit(2);
+  });
+}

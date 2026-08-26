@@ -60,14 +60,6 @@ class TenantAwarePool extends pg.Pool {
     const connId = idFor(client)
 
     tenantCheckoutLog.push({ phase: 'checkout', tenantId, connId })
-    // TEMPORARY WSK-04 diagnostic (added, to be reverted before this ticket's report — see the
-    // report's condition-4 section): console output survives across the Next.js module-graph
-    // duplication that broke the plain-singleton tenantCheckoutLog array in the P10 spike, because
-    // it does not depend on which copy of THIS module's top-level state is "live" — every copy's
-    // own connect() override runs this same source line wherever the real pool object actually is.
-    if (process.env.WSK04_DIAG_CHECKOUT_LOG) {
-      console.error(`[wsk04-diag] checkout connId=${connId} tenantId=${JSON.stringify(tenantId)}`)
-    }
 
     // Stamp (or explicitly clear) on EVERY checkout, never conditionally skip the clear branch —
     // the physical connection may carry a previous tenant's value, and "no ALS context" must mean

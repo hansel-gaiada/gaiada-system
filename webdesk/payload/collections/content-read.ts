@@ -46,20 +46,31 @@ interface ContentRow {
   publish_at: string | null
   unpublish_at: string | null
   created_at: string
+  /** Postgres's own text rendering of created_at, full microsecond precision — see encodeCursor. */
+  created_at_raw: string
   updated_at: string
   localization_group_id: string
   effective_published: boolean
 }
 
 /**
- * Cursor = base64url(`${created_at}|${id}`). Ordering by (created_at, id) — both IMMUTABLE once a
- * row exists — rather than updated_at is what makes pagination stable under concurrent publish
- * (design §06 AC): a publish/unpublish flips `publish_state`/`updated_at`, never `created_at` or
- * `id`, so a row already handed to a client keeps its exact position in the sequence regardless
- * of what happens to any row (including itself) after the cursor was minted.
+ * Cursor = base64url(`${created_at_raw}|${id}`). Ordering by (created_at, id) — both IMMUTABLE
+ * once a row exists — rather than updated_at is what makes pagination stable under concurrent
+ * publish (design §06 AC): a publish/unpublish flips `publish_state`/`updated_at`, never
+ * `created_at` or `id`, so a row already handed to a client keeps its exact position in the
+ * sequence regardless of what happens to any row (including itself) after the cursor was minted.
+ *
+ * Deliberately built from `created_at_raw` (`ci.created_at::text`, selected alongside `ci.*` in
+ * every query below) rather than the `ci.*`-derived `created_at`, which `pg` parses into a JS
+ * `Date` — millisecond precision only. Postgres's own `timestamptz` carries MICROSECOND
+ * precision, so a boundary row whose true value is `...:28.847123+00` compares strictly GREATER
+ * than a cursor truncated to `...:28.847Z`, and gets handed back a second time on the very next
+ * page (reproduced live: `post-1` reappeared as the first item of page 2, a straight duplicate
+ * the "stable under concurrent publish" AC exists to catch). Round-tripping through Postgres's
+ * OWN text format instead of a JS Date avoids any precision loss in either direction.
  */
-function encodeCursor(row: { created_at: string; id: string }): string {
-  return Buffer.from(`${row.created_at}|${row.id}`, 'utf8').toString('base64url')
+function encodeCursor(row: { created_at_raw: string; id: string }): string {
+  return Buffer.from(`${row.created_at_raw}|${row.id}`, 'utf8').toString('base64url')
 }
 function decodeCursor(cursor: string): { createdAt: string; id: string } | null {
   try {
@@ -139,7 +150,7 @@ export async function getItem(args: GetItemArgs): Promise<{ id: string; envelope
 
     const fetchOne = async (locale: string): Promise<ContentRow | null> => {
       const { rows } = await client.query<ContentRow>(
-        `SELECT ci.*, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
+        `SELECT ci.*, ci.created_at::text AS created_at_raw, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
            FROM content_items ci
           WHERE ci.collection_id = $1 AND ci.locale = $2 AND ci.slug = $3
             AND ($4::boolean = false OR ${EFFECTIVE_PUBLISHED_SQL})`,
@@ -204,7 +215,7 @@ export async function listItems(args: ListItemsArgs): Promise<ListEnvelope> {
     params.push(args.limit + 1) // fetch one extra row to know hasMore without a second query
 
     const { rows } = await client.query<ContentRow>(
-      `SELECT ci.*, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
+      `SELECT ci.*, ci.created_at::text AS created_at_raw, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
          FROM content_items ci
         WHERE ci.collection_id = $1 AND ci.locale = $2
           AND ($3::boolean = false OR ${EFFECTIVE_PUBLISHED_SQL})
@@ -279,7 +290,7 @@ export async function searchItems(args: SearchItemsArgs): Promise<ListEnvelope> 
     params.push(args.limit + 1)
 
     const { rows } = await client.query<ContentRow & { collection_key: string }>(
-      `SELECT ci.*, c.key AS collection_key, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
+      `SELECT ci.*, ci.created_at::text AS created_at_raw, c.key AS collection_key, ${EFFECTIVE_PUBLISHED_SQL} AS effective_published
          FROM content_items ci
          JOIN collections c ON c.id = ci.collection_id
         WHERE c.site_id = $1 AND ci.locale = $2

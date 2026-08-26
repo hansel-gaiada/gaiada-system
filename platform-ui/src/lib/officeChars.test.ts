@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { hashId } from "./office";
 import {
-  AGENT_SPRITES, AUTOMATION_SPRITES, CHAR_PX, CHAR_DRAW_SCALE,
-  agentSpritePath, automationSpritePath, activeBobPx, walkBobPx,
+  AGENT_SPRITES, AUTOMATION_SPRITES, PEOPLE_PROP_SPRITES, CHAR_PX, CHAR_DRAW_SCALE,
+  agentSpritePath, automationSpritePath, personPropSpritePath, activeBobPx, walkBobPx,
 } from "./officeChars";
 
 describe("officeChars — sprite selection is deterministic, or an avatar changes identity on reload", () => {
@@ -44,6 +44,40 @@ describe("officeChars — sprite selection is deterministic, or an avatar change
     const dogs = AUTOMATION_SPRITES.filter((p) => p.includes("/dogs/"));
     expect(cats.length).toBe(6);
     expect(dogs.length).toBe(6);
+  });
+});
+
+describe("personPropSpritePath — a human's own desk item (owner feedback 2026-08-26: 'identical people')", () => {
+  it("returns the SAME item for the same id, every time", () => {
+    for (const id of ["person-1", "gede-ic", "a", ""]) {
+      expect(personPropSpritePath(id, hashId)).toBe(personPropSpritePath(id, hashId));
+    }
+  });
+
+  it("only ever returns a path from its own pool", () => {
+    for (let i = 0; i < 200; i++) {
+      expect(PEOPLE_PROP_SPRITES).toContain(personPropSpritePath(`person-${i}`, hashId));
+    }
+  });
+
+  it("spreads across the whole pool rather than collapsing onto one item", () => {
+    const seen = new Set(Array.from({ length: 400 }, (_, i) => personPropSpritePath(`person-${i}`, hashId)));
+    expect(seen.size).toBe(PEOPLE_PROP_SPRITES.length);
+  });
+
+  it("pools BOTH previously-unwired directories — 30 uniform + 6 skin, no duplicates", () => {
+    expect(new Set(PEOPLE_PROP_SPRITES).size).toBe(PEOPLE_PROP_SPRITES.length);
+    const uniform = PEOPLE_PROP_SPRITES.filter((p) => p.startsWith("/office-chars/people/uniform/"));
+    const skin = PEOPLE_PROP_SPRITES.filter((p) => p.startsWith("/office-chars/people/skin/"));
+    expect(uniform.length).toBe(30);
+    expect(skin.length).toBe(6);
+    expect(uniform.length + skin.length).toBe(PEOPLE_PROP_SPRITES.length);
+    for (const p of PEOPLE_PROP_SPRITES) expect(p.endsWith(".png")).toBe(true);
+  });
+
+  it("never collides with the agent/automation pools — a person's desk item never doubles as a body sprite", () => {
+    const overlap = PEOPLE_PROP_SPRITES.filter((p) => (AGENT_SPRITES as readonly string[]).includes(p) || (AUTOMATION_SPRITES as readonly string[]).includes(p));
+    expect(overlap).toEqual([]);
   });
 });
 

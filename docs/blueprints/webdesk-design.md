@@ -253,6 +253,23 @@ snapshot artifacts are unpacked as files into the generated repo; `npm install`/
 happens only in the repo's GitHub CI and on Zone B previews — a poisoned SDK can therefore attack
 the built site (caught by Submission review + conformance tests + CI), never the ERP process.
 
+### §03a · WSK-D26 collisions — what must be resolved before a frontend can ship (2026-08-26)
+
+WSK-D26 sends client frontends to `delphi` (staging) and `helios` (production). Two verified facts
+block that today. Neither is a design opinion; both were established by direct inspection.
+
+| # | Blocker | Evidence | What resolves it |
+|---|---|---|---|
+| 1 | **`delphi` and `helios` are OBSERVE-ONLY.** The owner's 2026-08-22 ruling says we may collect information FROM them and may **NOT install, configure, restart, or modify anything ON them**. Deploying a client frontend is, unavoidably, modifying them. | `docs/plans/2026-08-21-multi-server-observability.md` §12; `infra/runbooks/onboard-server.md` §0 — that runbook explicitly no longer applies to them | An owner ruling **lifting observe-only for deployment purposes** on these two hosts. Until then WSK-D26 cannot be executed, only planned. Note this is narrower than re-authorising the monitoring agent tier — the two can be decided separately |
+| 2 | **Neither host is reachable from the dev machine.** SSH (port 22) and HTTP both time out for `delphi` `72.61.142.88` and `helios` `187.77.116.133` — firewalled to specific sources, or tunnel-only. | Probed 2026-08-26; `~/.ssh/config` has entries for both, so access is *intended* to exist | A working deploy path: source-IP allowlist, the WireGuard tunnel, or a CI-side deploy identity. This is also what WSK-29's deploy tooling will need |
+
+**Also settled by the same inspection:** `gaiada.com` is a **WordPress site on Hostinger shared
+hosting** (`platform: hostinger`, `wp-json` discovery link; nameservers `dns-parking.com`). Under
+WSK-D26's routing rule it therefore **stays on the WP host** — which makes tenant zero a
+**headless-WordPress** case, i.e. Phase 6 (WSK-34/35) work, not the Astro/Node path Milestone 0
+assumed. Hostinger is shared hosting with no shell-access model, so nothing server-side is possible
+there either way.
+
 ### Dev-topology honesty (D-2)
 
 **➕ v1.1 — GDA-AI01 is NOT a candidate for the Zone B box.** A second server now exists in the
@@ -1006,6 +1023,9 @@ green-or-override), D-10 (tool-contract preservation), and its §13 OQ-5/OQ-6 de
 
 | WSK-D23 | **Storage stays fully self-hosted (MinIO) — owner-ruled 2026-08-26.** No new recurring cost is accepted at this stage. R2/S3/GCS remain a **config swap, not a rewrite**, protected by an abstraction test (WSK-07) so the option stays real. Cloudflare CDN in front is **mandatory, not optional**. Sequence: VPS disk now → Google Workspace as the offsite backup target when it lands at staging → local server + NAS as target-state. | Cost discipline at the stage where the platform has no revenue yet, and the swap cost later is genuinely a config change — so deferring is cheap and reversible, which is exactly when deferring is correct. Two things must be true for it to stay safe, and they are now ACs rather than assumptions: the CDN must absorb the read traffic (§11a), and the offsite copy must exist and be pull-model (§11). **Bonus the cloud option did not have:** data residency (WSK-D22) becomes trivially answerable — "your data is on our server, in this region, and nowhere else" — where R2's global distribution would have needed a jurisdiction configuration and a longer answer. |
 
+| WSK-D24 | **Payload is the EDITORIAL layer, not the read path — owner-ruled 2026-08-26.** `/v1` content reads are served by our own tenant-aware SQL path (`payload/collections/*` + `app/(payload)/v1/[...slug]/route.ts`); Payload owns the admin panel, authoring, and the schema. | Payload's REST dispatcher only consults `config.endpoints` under `routes.api` (`/api`), so `/v1` could only have been served as `/api/v1/...`; re-pointing `routes.api` at `/v1` would have put Payload's **unscoped automatic collection REST** on the public prefix — precisely the WSK-D20 leak. Serving reads ourselves closes that by construction and gives us byte-control of the frozen envelope. **Accepted costs:** we own the read side of localization/drafts/versions rather than inheriting Payload's, and the api-key hash algorithm is duplicated in two services (documented; must change in both). |
+| WSK-D25 | **Payload collections get their own app-layer tenant predicate — owner-ruled 2026-08-26.** WSK-04 proved WSK-D16's mutual independence on `webdesk/api` only; Payload's collections had the GUC and nothing else. | Defence in depth is only a guarantee where BOTH layers exist. On the Payload side a GUC gap was a **breach**, not a bug — the one remaining place where a single mechanism failing means client-data exposure. Cheapest to close while `payload.config.ts` is fresh. **⚠️ Closed only PARTIALLY, and the limit is structural:** Payload runs an `access` function only `if (!overrideAccess)`, and the **Local API defaults `overrideAccess: true`** (verified in `payload/dist/collections/operations/find.js`). So the predicate fires on **REST** (two walls) but is **skipped on the default Local API path** (RLS alone). Client-facing content reads are unaffected — WSK-D24 means `/v1` never traverses Payload at all — so the residue is staff/admin/seed code. **Required follow-up:** a lint or convention forcing project Local API callers to pass `overrideAccess: false`, or a future author silently reintroduces exactly the gap this decision closed. |
+| WSK-D26 | **SUPERSEDES WSK-D17 / R-2 — owner-ruled 2026-08-26 (later same day). Client frontends deploy to the EXISTING estate, NOT Cloudflare Pages.** Routing is by project type: **WordPress projects → the Hostinger WP host** · **non-WP STAGING → `delphi`** · **non-WP PRODUCTION → `helios`**. Cloudflare Pages is not used for hosting, and no domain's nameservers move. | "Respect the current" — the estate already has the hosts, and the earlier ruling was made believing FE hosting had to be built or bought. **This is a net WIN on procurement:** the FE side needs no new box at all, so OQ-W1/A-12 shrinks to the Zone B *backend* only. **But it reinstates work D17 had deleted** (see the reversal table) and it collides with two facts on the ground, both of which are now blockers rather than details — the observe-only ruling and reachability (§03a). |
 > **Standing:** WSK-D16 and D17 were ruled by the owner on 2026-08-26. D18, D19, D20, D22 were
 > adopted from the reassessment's recommendations on the same date with no counter-argument
 > raised; they are **open to overturn on cause** like any decision here, but WSK-D18's cost rises

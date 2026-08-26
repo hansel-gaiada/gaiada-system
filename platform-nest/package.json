@@ -42,7 +42,7 @@
     "import:nexus": "node dist/seed/nexus-import.js",
     "test": "vitest run",
     "test:perf": "vitest run --config vitest.perf.config.ts",
-  "test:mail-corpus": "vitest run src/mail",
+    "test:mail-corpus": "vitest run src/mail",
     "test:iam-chain-alignment": "vitest run src/rbac/cerbos-catalog-alignment.test.ts src/rbac/permission-groups-catalog-parity.test.ts src/rbac/iam-07b-chain-meta.test.ts",
     "mail:replay-inbound": "node scripts/replay-inbound.mjs",
     "typecheck": "tsc --noEmit",
@@ -50,7 +50,7 @@
     "lint:migration-rls": "node scripts/lint-migration-rls.mjs",
     "lint:migration-names": "node scripts/lint-migration-names.mjs",
     "lint:postiz-deps": "node scripts/lint-postiz-deps.mjs",
-  "check:shards": "node scripts/check-shards.mjs",
+    "check:shards": "node scripts/check-shards.mjs",
     "gen:role-bundles": "node scripts/generate-role-bundles.mjs",
     "gen:scope-constrained-roles": "node scripts/generate-scope-constrained-roles.mjs",
     "seed:hr-statutory-ratify": "node dist/seed/hr-statutory-ratify.js"
