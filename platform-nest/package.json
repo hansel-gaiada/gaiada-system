@@ -47,6 +47,8 @@
     "mail:replay-inbound": "node scripts/replay-inbound.mjs",
     "typecheck": "tsc --noEmit",
     "lint:withtenants": "node scripts/lint-withtenants.mjs",
+    "lint:migration-immutable": "node scripts/lint-migration-immutable.mjs",
+    "check:function-drift": "node scripts/check-function-drift.mjs",
     "lint:migration-rls": "node scripts/lint-migration-rls.mjs",
     "lint:migration-names": "node scripts/lint-migration-names.mjs",
     "lint:postiz-deps": "node scripts/lint-postiz-deps.mjs",

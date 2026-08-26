@@ -245,6 +245,22 @@ jobs:
       # 0051). Pure static analysis, no DB needed, so it fails at authoring/PR time rather than
       # only showing up as bad data after a real deploy. See scripts/lint-migration-rls.mjs.
       - run: npm run lint:migration-rls
+      # 2026-08-26 — migration IMMUTABILITY lint. Fails a change that EDITS a migration already on
+      # the deploy branch in a way that alters the SQL the database executes.
+      #
+      # Migrations run ONCE. Editing an applied one changes what a FRESH database gets and nothing
+      # about an estate that already ran it — so the correction reaches every test and every shard
+      # here, passes, and never reaches production. No other gate can see this, because the suites
+      # build their schema FROM the migration files and therefore exercise the fixed version.
+      #
+      # Two finance functions were found running pre-fix code live on 2026-08-26 for exactly this
+      # reason. One produced a permanently red tie-out (visible). The other eliminated against the
+      # WRONG counterparty in a consolidated trial balance — which still balanced, still looked
+      # finished, and was wrong in the one artefact that goes to a bank.
+      #
+      # Comment-only edits pass; the comparison strips comments. The database-side counterpart is
+      # `npm run check:function-drift`, which needs an estate and so cannot run here.
+      - run: npm run lint:migration-immutable
       # 2026-08-19 — migration FILENAME lint. The sequential `NNNN_` scheme collided four times
       # (`0114`, `0117`, `0118`, plus the historic `0003`/`0018`) because this is a shared checkout
       # with concurrent sessions: two sessions that both `ls | sort | tail` in the same window both
