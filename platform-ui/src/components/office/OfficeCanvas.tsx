@@ -12,10 +12,10 @@ import {
   buildWalkableGrid, roomToRoomPath, pointAlongPath, isGenuinelyWorking,
   restingRoomKey, buildReplaySteps, totalReplayMs, catToken, hashId,
   DOOR_WIDTH_TILES, CORRIDOR_W_TILES,
-  ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
+  ZOOM_LEVELS, fitScale, nearestZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
   resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_STATE_LABEL,
   type OfficeScene, type OfficeRoom, type OfficeRoomKind, type OfficeFloor, type OfficeAvatar, type ReplayStep,
-  type Camera, type ZoomLevel, type AutomationActivityState,
+  type Camera, type AutomationActivityState,
 } from "@/lib/office";
 import {
   LAYER_PATHS, LAYER_ORDER, POSE_FRAME, FRAME_PX, LIGHT_RAMP, SKIN_RAMPS,
@@ -25,6 +25,7 @@ import {
 import {
   CHAR_PX, CHAR_DRAW_SCALE, agentSpritePath, automationSpritePath, activeBobPx, walkBobPx,
 } from "@/lib/officeChars";
+import { OfficeCastStrip, type CastMember } from "./OfficeCastStrip";
 import "./office.css";
 
 // The Office canvas — hand-rolled Canvas 2D, no engine, no new dependency (platform-ui's four-dep
@@ -50,6 +51,14 @@ import "./office.css";
 //      both sources rather than one loop each, and it stops entirely (cleared) the moment neither
 //      is true. Paused by the SAME visibility/offscreen refs as the replay loop.
 
+type RailTab = "cast" | "detail" | "activity" | "legend";
+const RAIL_TABS: { key: RailTab; label: string }[] = [
+  { key: "cast", label: "Cast" },
+  { key: "detail", label: "Detail" },
+  { key: "activity", label: "Activity" },
+  { key: "legend", label: "Legend" },
+];
+
 interface TokenSet {
   page: string; card: string; raised: string; sunken: string;
   hairline: string; hairlineSoft: string; ink: string; ink60: string;
@@ -63,6 +72,13 @@ interface TokenSet {
    *  can hand back any of a settable token, a `catToken(deptId)`, or the fixed grey token, and
    *  doesn't need its own bespoke resolver for that). */
   resolveToken: (name: string) => string;
+}
+
+/** Zoom readout. An integer step reads as "2", never "2.0"; a fractional Fit scale reads to one
+ *  decimal ("0.9"), which is enough to tell someone the floor has been shrunk to fit without
+ *  implying a precision the value does not have. */
+function formatZoom(scale: number): string {
+  return Number.isInteger(scale) ? String(scale) : scale.toFixed(1);
 }
 
 function readTokens(el: HTMLElement): TokenSet {
@@ -102,23 +118,39 @@ interface Positioned {
  *  recomputed from the group's own order rather than trusting `avatar.deskIndex` in isolation, so
  *  an avatar that moved into a room it wasn't seeded in never overlaps a real occupant. */
 function steadyPositions(scene: OfficeScene, roomByKey: Map<string, OfficeRoom>, nowMs: number, exclude: Set<string>): Positioned[] {
-  const restRoomOf = new Map<string, string>();
-  for (const a of scene.avatars) restRoomOf.set(a.id, restingRoomKey(a, scene.events, nowMs));
-  const groups = new Map<string, string[]>();
+  // Keyed by avatar OBJECT, not id, for the same reason as `slotOf` below: with duplicate ids a
+  // Map keyed by id keeps only the LAST writer, so every avatar sharing an id inherited that one's
+  // resting room and was teleported out of its own department. On the live org structure that
+  // silently moved three people from Creatives / Web Dev into GM.
+  const restRoomOf = new Map<OfficeAvatar, string>();
+  for (const a of scene.avatars) restRoomOf.set(a, restingRoomKey(a, scene.events, nowMs));
+  // Slot is assigned by POSITION as each avatar joins its room's group, and remembered per avatar
+  // OBJECT. The previous form pushed ids and recovered the slot with `indexOf(a.id)`, which returns
+  // the FIRST match — so any two avatars sharing an id collapsed onto one desk and drew on top of
+  // each other, names and all, with no error anywhere.
+  //
+  // That is not hypothetical: the live org structure returns FOUR different people in GM sharing
+  // the node id `p-019fb652`, and the office silently rendered one desk for the four of them. The
+  // duplicate ids are a real backend defect and need fixing there, but this layer must not depend
+  // on their uniqueness to place people correctly — a floor that hides four employees because of an
+  // upstream id collision is a worse failure than the collision itself.
+  const groups = new Map<string, OfficeAvatar[]>();
+  const slotOf = new Map<OfficeAvatar, number>();
   for (const a of scene.avatars) {
     if (exclude.has(a.id)) continue;
-    const rk = restRoomOf.get(a.id) ?? a.homeRoomKey;
-    if (!groups.has(rk)) groups.set(rk, []);
-    groups.get(rk)!.push(a.id);
+    const rk = restRoomOf.get(a) ?? a.homeRoomKey;
+    let list = groups.get(rk);
+    if (!list) { list = []; groups.set(rk, list); }
+    slotOf.set(a, list.length);
+    list.push(a);
   }
   const out: Positioned[] = [];
   for (const a of scene.avatars) {
     if (exclude.has(a.id)) continue;
-    const rk = restRoomOf.get(a.id) ?? a.homeRoomKey;
+    const rk = restRoomOf.get(a) ?? a.homeRoomKey;
     const room = roomByKey.get(rk) ?? roomByKey.get(a.homeRoomKey);
     if (!room) continue;
-    const idx = groups.get(rk)!.indexOf(a.id);
-    out.push({ avatar: a, roomKey: rk, tile: deskSlotTile(room, idx), inTransit: false });
+    out.push({ avatar: a, roomKey: rk, tile: deskSlotTile(room, slotOf.get(a) ?? 0), inTransit: false });
   }
   return out;
 }
@@ -197,6 +229,12 @@ const FLOOR_TEXTURE: Record<OfficeRoomKind, string> = {
  *  texture contributes material and grain, the theme still contributes the colour. */
 const FLOOR_TEXTURE_ALPHA = 0.5;
 
+/** The BUILDING's own floor and outer wall — the surface every room sits on, distinct from any one
+ *  room's carpet. Neutral on purpose: it should read as circulation space, not compete with the
+ *  per-kind room floors that carry the actual meaning. */
+const BUILDING_FLOOR_TEXTURE = "/office-env/floors/floor_tile.png";
+const BUILDING_WALL_TEXTURE = "/office-env/walls/wall_03_gray.png";
+
 function drawFloor(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; w: number; h: number }, tokens: TokenSet, kind: OfficeRoomKind) {
   const wall = tilesToPx(WALL_TILES);
   const x = tilesToPx(rect.x) + wall, y = tilesToPx(rect.y) + wall;
@@ -237,12 +275,68 @@ function drawFloor(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; 
   ctx.restore();
 }
 
+/** Authored wall textures (same Waha pack as FLOOR_TEXTURE), one per room kind — the load-bearing
+ *  "walls read as shared partitions of one building" cue: every department shares the SAME wall
+ *  material, every utility room shares a different one, exactly the way FLOOR_TEXTURE already
+ *  varies floors by kind rather than by individual room. `unassigned` is never actually looked up
+ *  (that kind keeps its dashed-outline marker below, no load-bearing wall at all) but carries an
+ *  entry anyway so this stays a total map over OfficeRoomKind, same shape as FLOOR_TEXTURE. */
+const WALL_TEXTURE: Record<OfficeRoomKind, string> = {
+  lobby: "/office-env/walls/wall_01_cream.png",
+  agents: "/office-env/walls/wall_03_gray.png",
+  department: "/office-env/walls/wall_02_blue.png",
+  utility: "/office-env/walls/wall_06_brick.png",
+  unassigned: "/office-env/walls/wall_03_gray.png",
+};
+
+/** Same compositing trade-off as FLOOR_TEXTURE_ALPHA and for the same reason: the authored texture
+ *  is painted OVER the existing themed `color` fill (accent on hover, ink60 otherwise) rather than
+ *  replacing it, so the wall keeps reading in the app's own palette — and keeps its hover tint —
+ *  in both themes, with the pack contributing material grain on top. */
+/** Wall tiles draw at FULL strength. They were composited at 0.55 over the flat colour bar, which
+ *  averaged the texture back into the bar and left the walls reading as the same flat rectangles the
+ *  art pack was added to replace. The flat bar still paints first, so a tile that has not decoded
+ *  yet (or 404s) degrades to exactly the old appearance instead of a hole. */
+const WALL_TEXTURE_ALPHA = 1;
+
+/** One tiled wall segment: the existing solid fill first (so a missing/unloaded texture degrades
+ *  to EXACTLY the flat bar this canvas always drew — never a blank gap), then the material texture
+ *  tiled across it at `tile` px squares and clipped to the segment, same tiling technique drawFloor
+ *  already uses for its own texture. A no-op for a zero-size segment (the two doorway-side bars are
+ *  routinely zero-width when the door sits flush against a corner). */
+function drawWallBand(
+  ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
+  color: string, texImg: HTMLImageElement | null, tile: number,
+) {
+  if (w <= 0 || h <= 0) return;
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, h);
+  if (!texImg) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.globalAlpha = WALL_TEXTURE_ALPHA;
+  ctx.imageSmoothingEnabled = false;
+  const cols = Math.ceil(w / tile) + 1, rows = Math.ceil(h / tile) + 1;
+  for (let ty = 0; ty < rows; ty++) {
+    for (let tx = 0; tx < cols; tx++) ctx.drawImage(texImg, x + tx * tile, y + ty * tile, tile, tile);
+  }
+  ctx.restore();
+}
+
 /** Real walls with thickness, and a doorway gap on the wall that faces the corridor — the SOUTH
  *  (bottom) wall for a "north"-side room, the NORTH (top) wall for a "south"-side room. This is
  *  the one piece of rendering that had to change shape entirely for the corridor model: a room's
  *  door is no longer "always the bottom wall", it's whichever wall genuinely touches circulation
  *  space. `unassigned` (plan §4.3: "no department binding exists") keeps its dashed-outline
- *  honesty marker instead of a load-bearing wall. */
+ *  honesty marker instead of a load-bearing wall.
+ *
+ *  Geometry is UNCHANGED from the original flat-fill version — same wall thickness (WALL_TILES),
+ *  same doorway gap (doorX0/doorX1), same six band rects. Only what fills each band changed, via
+ *  `drawWallBand` above. `buildWalkableGrid`/`roomToRoomPath` (lib/office.ts) derive the corridor
+ *  network from `room.x/y/wTiles/hTiles/doorX` directly, never from anything drawn here, so no
+ *  pathfinding geometry moves when the wall's fill does. */
 function drawWalls(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: TokenSet, isHovered: boolean) {
   const rect = roomTileRect(room);
   const x = tilesToPx(rect.x), y = tilesToPx(rect.y), w = tilesToPx(rect.w), h = tilesToPx(rect.h);
@@ -264,17 +358,17 @@ function drawWalls(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens: Toke
   const doorX0 = doorCx - doorW / 2;
   const doorX1 = doorCx + doorW / 2;
   const corridorWallIsBottom = room.side === "north";
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, wall, h); // left
-  ctx.fillRect(x + w - wall, y, wall, h); // right
+  const wallImg = getRawImage(WALL_TEXTURE[room.kind]);
+  drawWallBand(ctx, x, y, wall, h, color, wallImg, wall); // left
+  drawWallBand(ctx, x + w - wall, y, wall, h, color, wallImg, wall); // right
   if (corridorWallIsBottom) {
-    ctx.fillRect(x, y, w, wall); // top — solid, away from the corridor
-    ctx.fillRect(x, y + h - wall, doorX0 - x, wall); // bottom, left of the doorway
-    ctx.fillRect(doorX1, y + h - wall, x + w - doorX1, wall); // bottom, right of the doorway
+    drawWallBand(ctx, x, y, w, wall, color, wallImg, wall); // top — solid, away from the corridor
+    drawWallBand(ctx, x, y + h - wall, doorX0 - x, wall, color, wallImg, wall); // bottom, left of the doorway
+    drawWallBand(ctx, doorX1, y + h - wall, x + w - doorX1, wall, color, wallImg, wall); // bottom, right of the doorway
   } else {
-    ctx.fillRect(x, y + h - wall, w, wall); // bottom — solid, away from the corridor
-    ctx.fillRect(x, y, doorX0 - x, wall); // top, left of the doorway
-    ctx.fillRect(doorX1, y, x + w - doorX1, wall); // top, right of the doorway
+    drawWallBand(ctx, x, y + h - wall, w, wall, color, wallImg, wall); // bottom — solid, away from the corridor
+    drawWallBand(ctx, x, y, doorX0 - x, wall, color, wallImg, wall); // top, left of the doorway
+    drawWallBand(ctx, doorX1, y, x + w - doorX1, wall, color, wallImg, wall); // top, right of the doorway
   }
   if (isHovered) {
     ctx.strokeStyle = tokens.accent;
@@ -320,6 +414,21 @@ function vacantDeskSlots(occupantCount: number, deskCols: number): number {
   return rem === 0 ? 0 : deskCols - rem;
 }
 
+/** Authored desk textures, one per room kind — the same "shared material per room kind" idea as
+ *  FLOOR_TEXTURE/WALL_TEXTURE, so a department's desks all read as the same furniture line rather
+ *  than each seat rolling its own. `lobby` is never actually looked up (the lobby draws waiting
+ *  chairs via drawWaitingChair, never a desk) but carries an entry anyway to keep this a total map,
+ *  same shape as FLOOR_TEXTURE. */
+const DESK_TEXTURE: Record<OfficeRoomKind, string> = {
+  lobby: "/office-env/furniture/desks/reception_desk.png",
+  agents: "/office-env/furniture/desks/desk_03_blue.png",
+  department: "/office-env/furniture/desks/desk_02_cream.png",
+  utility: "/office-env/furniture/desks/shared_workbench.png",
+  unassigned: "/office-env/furniture/desks/desk_01_wood.png",
+};
+const CHAIR_TEXTURE = "/office-env/furniture/seating/office_chair.png";
+const MONITOR_TEXTURE = "/office-env/office_equipment/desktop_monitor.png";
+
 /** A desk's monitor tint is the ONLY visual difference a working animation makes (req #5) — no new
  *  sprite, no invented gesture. Three honest states, never a fourth: no real run behind this desk
  *  at all (dim, unchanged from before); a run that is genuinely open but has gone quiet (a static
@@ -332,35 +441,87 @@ function vacantDeskSlots(occupantCount: number, deskCols: number): number {
  *  already bounds how long this shows, so the tint itself doesn't need to shout on top of that). */
 type DeskActivity = "none" | "quiet" | "working" | "failed";
 
-function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet, occupied: boolean, activity: DeskActivity = "none", pulseOn = false) {
+/** Real furniture (2026-08-26, art pack wire-up): a chair at the seat, a desk sprite keyed to the
+ *  room's kind, and a monitor sprite carrying the SAME activity colour this always drew — just as a
+ *  screen-glow composited over the sprite instead of a bare coloured rectangle. Every sprite lookup
+ *  degrades independently to its OLD procedural shape the instant it's null (still loading, or a
+ *  404), so a slow-decoding image can never leave a desk half-drawn or blank — matching the exact
+ *  fallback discipline drawFloor already established for the floor texture.
+ *
+ *  Anchor point and footprint are UNCHANGED: `tile` is still exactly what `deskSlotTile()` (lib/
+ *  office.ts) computed, and every new sprite is centred on the same (cx, cy) / deskY the old
+ *  fillRect plate used, so an occupant avatar (drawn later, in Pass 3, at this identical tile) still
+ *  lines up with its seat pixel-for-pixel. */
+function drawDesk(
+  ctx: CanvasRenderingContext2D, tile: { x: number; y: number }, tokens: TokenSet, occupied: boolean,
+  roomKind: OfficeRoomKind, activity: DeskActivity = "none", pulseOn = false,
+) {
   const cx = tilesToPx(tile.x), cy = tilesToPx(tile.y);
   const r = tilesToPx(0.62);
   ctx.fillStyle = tokens.hairlineSoft;
   ctx.beginPath();
   ctx.ellipse(cx, cy + r * 0.55, r * 1.05, r * 0.6, 0, 0, Math.PI * 2);
   ctx.fill();
-  const deskW = tilesToPx(1.9), deskH = tilesToPx(0.55);
-  const deskY = cy - r * 2.0 - deskH;
-  ctx.fillStyle = tokens.raised;
-  ctx.fillRect(cx - deskW / 2, deskY, deskW, deskH);
-  ctx.strokeStyle = tokens.hairline;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(cx - deskW / 2 + 0.5, deskY + 0.5, deskW - 1, deskH - 1);
-  const monW = tilesToPx(0.55), monH = tilesToPx(0.36);
+
+  // The chair sits AT the seat tile — drawn before the desk plate/monitor above it and before Pass
+  // 3 draws any occupant on top, so an occupied desk reads as "someone sitting in the chair" and a
+  // vacant one reads as an empty chair, without moving the seat anchor at all.
+  const chairImg = getRawImage(CHAIR_TEXTURE);
+  if (chairImg) {
+    const chairSize = tilesToPx(1.05);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(chairImg, cx - chairSize / 2, cy - chairSize * 0.5, chairSize, chairSize);
+  }
+
+  // The desk sprite is a 32x32 source. It was drawn into a 1.9 x 0.55 tile box, i.e. squashed to
+  // roughly 30x9px, which is why it read as a thin plank rather than furniture. Draw it on its own
+  // aspect ratio instead; the taller row pitch (DESK_ROW_TILES) is what makes the room for it.
+  const deskW = tilesToPx(1.9), deskH = tilesToPx(1.9);
+  // The desk's BOTTOM edge sits essentially on the seat tile, so the occupant (drawn later, in
+  // Pass 3) overlaps its lower edge and reads as sitting AT the desk. The previous r*1.5 offset
+  // left a visible gap that made everyone look like they were standing a pace behind their own
+  // workstation. Pass ordering is what makes the overlap read correctly: desk first, person on top.
+  const deskY = cy - r * 0.15 - deskH;
+  const deskImg = getRawImage(DESK_TEXTURE[roomKind]);
+  if (deskImg) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(deskImg, cx - deskW / 2, deskY, deskW, deskH);
+  } else {
+    // Unchanged fallback — exactly the flat plate this canvas always drew.
+    ctx.fillStyle = tokens.raised;
+    ctx.fillRect(cx - deskW / 2, deskY, deskW, deskH);
+    ctx.strokeStyle = tokens.hairline;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - deskW / 2 + 0.5, deskY + 0.5, deskW - 1, deskH - 1);
+  }
+
+  // Square, and standing ON the desk surface rather than floating above its top edge — the monitor
+  // is also a 32x32 source and was being flattened the same way the desk was.
+  const monW = tilesToPx(0.8), monH = tilesToPx(0.8);
+  const monY = deskY + deskH * 0.1;
+  const monitorImg = getRawImage(MONITOR_TEXTURE);
+  if (monitorImg) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(monitorImg, cx - monW / 2, monY, monW, monH);
+  }
   ctx.save();
   if (activity === "working") {
     ctx.fillStyle = tokens.accent;
-    ctx.globalAlpha = pulseOn ? 1 : 0.5;
+    ctx.globalAlpha = monitorImg ? (pulseOn ? 0.7 : 0.32) : (pulseOn ? 1 : 0.5);
   } else if (activity === "quiet") {
     ctx.fillStyle = tokens.warning;
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = monitorImg ? 0.6 : 0.85;
   } else if (activity === "failed") {
     ctx.fillStyle = tokens.danger;
+    ctx.globalAlpha = monitorImg ? 0.8 : 1;
+  } else if (!monitorImg) {
+    // No activity AND no monitor sprite yet — the original flat "is anyone sitting here" tint.
+    ctx.fillStyle = occupied ? tokens.ink60 : tokens.hairlineSoft;
     ctx.globalAlpha = 1;
   } else {
-    ctx.fillStyle = occupied ? tokens.ink60 : tokens.hairlineSoft;
+    ctx.globalAlpha = 0; // the monitor sprite alone reads fine idle; no extra tint needed
   }
-  ctx.fillRect(cx - monW / 2, deskY - monH, monW, monH);
+  if (ctx.globalAlpha > 0) ctx.fillRect(cx - monW / 2, monY, monW, monH);
   ctx.restore();
   if (!occupied) {
     ctx.fillStyle = tokens.ink60;
@@ -369,6 +530,34 @@ function drawDesk(ctx: CanvasRenderingContext2D, tile: { x: number; y: number },
     ctx.fillText("Vacant seat", cx, cy + r * 1.6);
     ctx.textAlign = "left";
   }
+}
+
+/** Small wall-mounted furniture set for rooms that have desks — a printer, whiteboard, filing
+ *  cabinet, bookshelf or notice board, one per room, picked and placed by a STABLE hash of the
+ *  room's own key (`hashId`, lib/office.ts — the same deterministic-identity helper the avatar
+ *  sprites already use for their own art variant) so the same room always earns the same prop in
+ *  the same spot on every render. Nothing here may read `nowMs`, avatar state, or draw order — a
+ *  jittering prop would be worse than none (req #4: "nothing jitters between frames or
+ *  re-renders").
+ *
+ *  Placed in the header band above the FIRST desk row — the same clear strip the department's own
+ *  back-corner plant (Pass 2 below) already uses on the OPPOSITE wall — so it can never land on a
+ *  desk slot regardless of how many occupants the room has or how many columns `deskCols` grew to. */
+const ROOM_DRESSING_PROPS = [
+  "/office-env/furniture/common/whiteboard.png",
+  "/office-env/furniture/common/printer_stand.png",
+  "/office-env/furniture/storage/filing_cabinet.png",
+  "/office-env/furniture/storage/bookshelf.png",
+  "/office-env/furniture/common/notice_board.png",
+] as const;
+
+function drawRoomDressing(ctx: CanvasRenderingContext2D, room: OfficeRoom) {
+  const img = getRawImage(ROOM_DRESSING_PROPS[hashId(room.key) % ROOM_DRESSING_PROPS.length]);
+  if (!img) return; // still loading, or 404'd — the room reads fine without it, no fallback shape needed
+  const backY = room.side === "north" ? room.y + 0.9 : room.y + room.hTiles - 0.7;
+  const propW = tilesToPx(0.85), propH = tilesToPx(0.85);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, tilesToPx(room.x + 0.55), tilesToPx(backY) - propH * 0.5, propW, propH);
 }
 
 /** The lobby is the airlock waiting area (plan §4.3), not a workspace — a simple chair, no desk,
@@ -502,6 +691,54 @@ function drawServerRack(ctx: CanvasRenderingContext2D, room: OfficeRoom, tokens:
  *  boxes. Drawn once per floor, behind everything else. */
 function drawOuterShell(ctx: CanvasRenderingContext2D, floor: OfficeFloor, tokens: TokenSet) {
   const w = tilesToPx(floor.widthTiles), h = tilesToPx(floor.heightTiles);
+
+  // The shell used to be a 3px strokeRect and NOTHING else, so every gap between rooms showed the
+  // PAGE background through it. That is why the floor read as detached room boxes floating on a
+  // void rather than one building: the rooms were the only thing with a floor. Filling the whole
+  // plate first makes the gaps read as the building's own circulation space, which is what they
+  // are — the corridor, doorways and room walls are then things sitting ON a floor rather than
+  // islands with a gap between them.
+  ctx.fillStyle = tokens.raised;
+  ctx.fillRect(0, 0, w, h);
+
+  const tile = tilesToPx(1);
+  const tex = getRawImage(BUILDING_FLOOR_TEXTURE);
+  if (tex) {
+    ctx.save();
+    ctx.globalAlpha = FLOOR_TEXTURE_ALPHA;
+    ctx.imageSmoothingEnabled = false;
+    const cols = Math.ceil(w / tile), rows = Math.ceil(h / tile);
+    for (let ty = 0; ty < rows; ty++) {
+      for (let tx = 0; tx < cols; tx++) ctx.drawImage(tex, tx * tile, ty * tile, tile, tile);
+    }
+    ctx.restore();
+  }
+
+  // Outer wall, tiled like the room walls so the building is bounded by the same material rather
+  // than a hairline. Falls back to the original stroke when the tile has not decoded.
+  const wallImg = getRawImage(BUILDING_WALL_TEXTURE);
+  const band = tilesToPx(0.75);
+  if (wallImg) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    const run = (bx: number, by: number, bw: number, bh: number) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bx, by, bw, bh);
+      ctx.clip();
+      const cols = Math.ceil(bw / band), rows = Math.ceil(bh / band);
+      for (let ty = 0; ty < rows; ty++) {
+        for (let tx = 0; tx < cols; tx++) ctx.drawImage(wallImg, bx + tx * band, by + ty * band, band, band);
+      }
+      ctx.restore();
+    };
+    run(0, 0, w, band);            // top
+    run(0, h - band, w, band);     // bottom
+    run(0, 0, band, h);            // left
+    run(w - band, 0, band, h);     // right
+    ctx.restore();
+  }
+
   ctx.strokeStyle = tokens.ink60;
   ctx.lineWidth = 3;
   ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
@@ -745,6 +982,57 @@ function getComposedSprite(gender: SpriteGender, pose: SpritePose, toneKey: stri
  *  "raised" tone every other kind uses, full opacity with no pulse-fade) — "an agent stuck waiting
  *  on a person is exactly what someone should spot across a room" (ticket). The caller is what
  *  guarantees this never renders for a human — see drawAvatar's own call site. */
+/** The delegation reason shown while an avatar is walking a replay step.
+ *
+ *  This used to be bare `ink60` italic text with no backing, drawn straight over the floor — so it
+ *  smeared across whatever happened to be behind it (desk captions, "Vacant seat", other avatars'
+ *  name labels) and was unreadable in exactly the moment it mattered. Every other floating overlay
+ *  on this canvas (the emote bubble, the corridor envelope) sits on its own plate; this one now
+ *  does too, for the same reason.
+ *
+ *  It also truncates by MEASUREMENT, like `fitLabel` does for names, rather than passing a
+ *  `maxWidth` to `fillText`. That argument does not truncate — it horizontally CONDENSES the glyphs
+ *  to fit, which is why a long reason rendered as a squashed unreadable line instead of an honest
+ *  ellipsis. The full reason is always in the detail panel's event list regardless. */
+function drawTransitLabel(
+  ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string, tokens: TokenSet, lane = 0,
+) {
+  const fontPx = Math.round(tilesToPx(0.5));
+  ctx.save();
+  ctx.font = `italic 400 ${fontPx}px ${tokens.fontBody}`;
+  const label = fitLabel(ctx, text, tilesToPx(9));
+  const padX = Math.round(tilesToPx(0.3));
+  const padY = Math.round(tilesToPx(0.18));
+  const w = ctx.measureText(label).width + padX * 2;
+  const h = fontPx + padY * 2;
+  const x = cx - w / 2;
+  // Lane 1 rides above lane 0 by a full plate plus a hairline gap, so stacked labels read as two
+  // separate lines rather than one smudge. The lane shifts the label's CENTRE — plate and text
+  // both derive from it, or the plate moves and the text stays behind on the floor.
+  const midY = cy - lane * (h + 3);
+  const y = midY - h / 2;
+  const radius = Math.min(h / 2, tilesToPx(0.25));
+
+  ctx.beginPath();
+  // `roundRect` is Canvas2D and present in every browser this app supports, but it is absent from
+  // the jsdom context the unit tests use — fall back rather than throw in a test render.
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, radius);
+  else ctx.rect(x, y, w, h);
+  ctx.fillStyle = tokens.raised;
+  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = tokens.hairline;
+  ctx.stroke();
+
+  // Full-strength ink on the plate, not ink60: the plate supplies the separation that the faded
+  // colour was previously (and unsuccessfully) trying to supply on its own.
+  ctx.fillStyle = tokens.ink;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, cx, midY);
+  ctx.restore();
+}
+
 function drawEmoteBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, kind: AgentRunEventKind, tokens: TokenSet, pulseOn: boolean) {
   const isAlert = kind === "approval_wait";
   const isError = kind === "error";
@@ -877,7 +1165,7 @@ function deskActivityFor(avatar: OfficeAvatar, workingIds: Set<string>, nowMs: n
 
 function drawAvatar(
   ctx: CanvasRenderingContext2D, pos: Positioned, tokens: TokenSet, isSelected: boolean, isHovered: boolean,
-  scale: ZoomLevel, emoteKind: AgentRunEventKind | null, pulseOn: boolean,
+  scale: number, emoteKind: AgentRunEventKind | null, pulseOn: boolean, transitLane = 0,
 ) {
   const cx = tilesToPx(pos.tile.x), cy = tilesToPx(pos.tile.y);
   const r = tilesToPx(0.62);
@@ -1011,13 +1299,7 @@ function drawAvatar(
     ctx.fillText(ASSURANCE_SHORT[tier], cx, belowY);
     ctx.textAlign = "left";
   }
-  if (pos.inTransit && pos.transitLabel) {
-    ctx.fillStyle = tokens.ink60;
-    ctx.font = `italic 400 ${Math.round(tilesToPx(0.5))}px ${tokens.fontBody}`;
-    ctx.textAlign = "center";
-    ctx.fillText(pos.transitLabel, cx, cy - r * 2.6, tilesToPx(6));
-    ctx.textAlign = "left";
-  }
+  if (pos.inTransit && pos.transitLabel) drawTransitLabel(ctx, cx, cy - r * 2.6, pos.transitLabel, tokens, transitLane);
   // The emote bubble (req #2) sits ABOVE the transit label's own y (r*2.6 up) so the rare overlap
   // of "in transit" + "genuinely working" never collides. `emoteKind` is null for every avatar
   // except a genuinely-working `agent` with a real event kind — see the Pass 3 call site for the
@@ -1083,13 +1365,24 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   const [center, setCenter] = useState<{ x: number; y: number }>(() => ({ x: cssW / 2, y: cssH / 2 }));
   const [followingId, setFollowingId] = useState<string | null>(null);
   const [followReleasedNotice, setFollowReleasedNotice] = useState(false);
+  // Which rail tab is showing. The rail used to stack legend + roster + detail in one long column,
+  // which pushed the detail panel below the fold on a real floor. Tabs are presentation only — no
+  // tab shows anything the page did not already have, and none implies a capability that is not
+  // built (the office plan §3 rules that out explicitly).
+  const [railTab, setRailTab] = useState<RailTab>("cast");
+  // Fullscreen is a CSS state, not the Fullscreen API: the app shell stays mounted (so the sidebar
+  // and its nav are still there on exit) and Escape returns. The browser API would take over the
+  // whole document and fight the shell's own focus management.
+  const [fullscreen, setFullscreen] = useState(false);
   const [, startZoomTransition] = useTransition();
   const followReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragRef = useRef<{ startVX: number; startVY: number; startCenter: { x: number; y: number }; moved: boolean } | null>(null);
 
-  const scale = useMemo<ZoomLevel>(() => {
+  // A pinned step is always the integer the person chose. Only "fit" may come back fractional, and
+  // only when no integer step can show the whole plate — see `fitScale`.
+  const scale = useMemo<number>(() => {
     const vw = viewportSize.w || cssW || 1, vh = viewportSize.h || cssH || 1;
-    return zoomPref === "fit" ? fitZoomLevel(cssW, cssH, vw, vh) : zoomPref;
+    return zoomPref === "fit" ? fitScale(cssW, cssH, vw, vh) : zoomPref;
   }, [zoomPref, cssW, cssH, viewportSize]);
 
   const camera = useMemo<Camera>(() => {
@@ -1144,7 +1437,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   }, [selectedFloorIndex]);
 
   const stepZoom = useCallback((delta: 1 | -1) => {
-    const idx = ZOOM_LEVELS.indexOf(scaleRef.current);
+    const idx = ZOOM_LEVELS.indexOf(nearestZoomLevel(scaleRef.current));
     const nextScale = ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + delta))];
     if (nextScale === scaleRef.current) return;
     const vw = viewportSizeRef.current.w || cssSizeRef.current.w || 1, vh = viewportSizeRef.current.h || cssSizeRef.current.h || 1;
@@ -1173,7 +1466,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const vx = e.clientX - rect.left, vy = e.clientY - rect.top;
-      const idx = ZOOM_LEVELS.indexOf(scaleRef.current);
+      const idx = ZOOM_LEVELS.indexOf(nearestZoomLevel(scaleRef.current));
       const dir = e.deltaY < 0 ? 1 : -1;
       const nextScale = ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + dir))];
       if (nextScale === scaleRef.current) return;
@@ -1372,12 +1665,18 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
         const backY = room.side === "north" ? room.y + 0.9 : room.y + room.hTiles - 0.7;
         drawPlant(ctx, tilesToPx(room.x + room.wTiles - 0.9), tilesToPx(backY), tokens);
       }
+      // A deterministic wall prop (whiteboard/printer/filing cabinet/bookshelf/notice board) for
+      // every room that has desks — mirrors the plant/server-rack corner above onto the OPPOSITE
+      // wall, so it never fights either. See drawRoomDressing's own doc for why this can't jitter.
+      if (room.kind === "department" || room.kind === "agents" || room.kind === "utility") {
+        drawRoomDressing(ctx, room);
+      }
       for (const p of occupants) {
         const activity = deskActivityFor(p.avatar, workingIds, nowMs);
-        drawDesk(ctx, p.tile, tokens, true, activity, pulseOnRef.current);
+        drawDesk(ctx, p.tile, tokens, true, room.kind, activity, pulseOnRef.current);
       }
       const vacant = vacantDeskSlots(occupants.length, room.deskCols);
-      for (let i = 0; i < vacant; i++) drawDesk(ctx, deskSlotTile(room, occupants.length + i), tokens, false);
+      for (let i = 0; i < vacant; i++) drawDesk(ctx, deskSlotTile(room, occupants.length + i), tokens, false, room.kind);
     }
 
     // Pass 3 — the people/agents/automations themselves, always on top of their own furniture.
@@ -1387,6 +1686,17 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       ...(elapsedMs !== null && replayRef.current ? replayPositions(scene, roomByKey, replayRef.current.steps, elapsedMs, getPath) : []),
     ].filter((p) => floorRoomKeys.has(p.roomKey));
     lastPositionsRef.current = positions;
+    // Transit-label lanes. Two avatars walking near each other produced two plates at the SAME
+    // height, and the second one painted over the first — the label was there but unreadable, which
+    // is the failure the plate was added to prevent. Ordering the in-transit avatars by x and
+    // alternating lanes guarantees any two neighbours sit at different heights, so they stack
+    // instead of occluding. Deterministic, so a label does not jitter between frames.
+    const transitLanes = new Map<string, number>();
+    positions
+      .filter((pp) => pp.inTransit && pp.transitLabel)
+      .sort((a, b) => a.tile.x - b.tile.x)
+      .forEach((pp, i) => transitLanes.set(pp.avatar.id, i % 2));
+
     for (const pos of positions) {
       // Two independent layers keep an emote bubble off a human, not one: office-data.ts only ever
       // sets `activeRunId`/`automationSignal` on an `agent`/`automation`-kind avatar respectively
@@ -1395,7 +1705,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
       // is the same 45s-freshness gate the desk monitor tint already uses for agents; automations
       // resolve their own freshness inside `resolveAutomationState` using that identical window.
       const emoteKind = emoteKindFor(pos.avatar, workingIds, emoteKinds, nowMs);
-      drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current);
+      drawAvatar(ctx, pos, tokens, pos.avatar.id === selectedIdRef.current, pos.avatar.id === hoveredIdRef.current, scale, emoteKind, pulseOnRef.current, transitLanes.get(pos.avatar.id) ?? 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, roomByKey, nowMs, cssW, cssH, floor, floorRoomKeys, getPath, workingIds, scale, emoteKinds]);
@@ -1626,6 +1936,16 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   }, []);
 
   const selected = scene.avatars.find((a) => a.id === selectedId) ?? null;
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    document.addEventListener("keydown", onKey);
+    // The page behind must not scroll while the floor is covering it.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [fullscreen]);
+
   const roster = useMemo(
     () => [...scene.avatars].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)),
     [scene.avatars],
@@ -1635,8 +1955,30 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
   const selectedLastHeard = selected ? lastHeardMs.get(selected.id) : undefined;
   const selectedIsWorking = selected ? workingIds.has(selected.id) : false;
 
+  /** Rows for the bottom cast strip. `emoteKindFor` is the single source of "is this thing
+   *  actually doing something", and it re-checks `kind` itself — a human can never reach a status,
+   *  which is the plan §3 rule (no comparable activity feed; a badge would be a surveillance
+   *  claim). Absence of a status is therefore never rendered as "idle": it claims nothing. */
+  const castMembers = useMemo<CastMember[]>(() => roster.map((a) => {
+    const kind = emoteKindFor(a, workingIds, emoteKinds, nowMs);
+    return {
+      id: a.id,
+      name: a.name,
+      kind: a.kind,
+      roomLabel: roomByKey.get(a.homeRoomKey)?.label ?? "—",
+      status: kind
+        ? {
+            label: EMOTE_LABEL[kind],
+            tone: kind === "approval_wait" ? "warning" as const
+              : kind === "error" ? "danger" as const
+              : "ok" as const,
+          }
+        : null,
+    };
+  }), [roster, workingIds, emoteKinds, nowMs, roomByKey]);
+
   return (
-    <div className="office">
+    <div className={`office${fullscreen ? " office--fullscreen" : ""}`}>
       <div className="office__toolbar">
         <span className="office__demo-badge" role="status">DEMO — not live</span>
         <p className="office__hint">
@@ -1645,9 +1987,9 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
           location tracking. Nobody is tracked and no position is stored.
         </p>
         <div className="office__zoom" role="group" aria-label="Camera zoom">
-          <button type="button" className="office__zoom-btn" onClick={() => stepZoom(-1)} disabled={scale === ZOOM_LEVELS[0]} aria-label="Zoom out">−</button>
-          <span className="office__zoom-level">{scale}×</span>
-          <button type="button" className="office__zoom-btn" onClick={() => stepZoom(1)} disabled={scale === ZOOM_LEVELS[ZOOM_LEVELS.length - 1]} aria-label="Zoom in">+</button>
+          <button type="button" className="office__zoom-btn" onClick={() => stepZoom(-1)} disabled={scale <= ZOOM_LEVELS[0]} aria-label="Zoom out">−</button>
+          <span className="office__zoom-level">{formatZoom(scale)}×</span>
+          <button type="button" className="office__zoom-btn" onClick={() => stepZoom(1)} disabled={scale >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]} aria-label="Zoom in">+</button>
           <button type="button" className={`office__zoom-fit${zoomPref === "fit" ? " office__zoom-fit--active" : ""}`} onClick={goToFit}>Fit</button>
         </div>
         {followingId && selected && (
@@ -1660,6 +2002,15 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
         <div aria-live="polite" className="office-sr-only">
           {followingId && selected ? `Following ${selected.name}.` : followReleasedNotice ? "Follow released." : ""}
         </div>
+        <button
+          type="button"
+          className="office__fs-btn"
+          onClick={() => setFullscreen((f) => !f)}
+          aria-pressed={fullscreen}
+          title={fullscreen ? "Leave fullscreen (Esc)" : "Expand the floor to fill the window"}
+        >
+          {fullscreen ? "Exit fullscreen" : "Fullscreen"}
+        </button>
         <button
           type="button"
           className="office__replay-btn"
@@ -1694,7 +2045,7 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
           className="office__viewport"
           tabIndex={0}
           role="img"
-          aria-label={`Office floor ${selectedFloorIndex + 1} plan, at ${scale}× zoom${followingId && selected ? `, following ${selected.name}` : ""}. Drag or use the arrow keys to pan; scroll or the +/− buttons to zoom. Use the roster list below to browse avatars by keyboard.`}
+          aria-label={`Office floor ${selectedFloorIndex + 1} plan, at ${formatZoom(scale)}× zoom${followingId && selected ? `, following ${selected.name}` : ""}. Drag or use the arrow keys to pan; scroll or the +/− buttons to zoom. Use the roster list below to browse avatars by keyboard.`}
           onPointerDown={onViewportPointerDown}
           onPointerMove={onViewportPointerMove}
           onPointerUp={onViewportPointerUp}
@@ -1709,6 +2060,30 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
         </div>
 
         <div className="office__side">
+          <div className="office__tabs" role="tablist" aria-label="Office panels">
+            {RAIL_TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                id={`office-tab-${t.key}`}
+                aria-selected={railTab === t.key}
+                aria-controls="office-rail-panel"
+                className={`office__tab${railTab === t.key ? " office__tab--active" : ""}`}
+                onClick={() => setRailTab(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            className="office__panel"
+            role="tabpanel"
+            id="office-rail-panel"
+            aria-labelledby={`office-tab-${railTab}`}
+          >
+          {railTab === "legend" && (<>
           <div className="office__legend" aria-hidden="true">
             <div><span className="office__legend-swatch office__legend-swatch--human" /> Human — warm, by person</div>
             <div><span className="office__legend-swatch office__legend-swatch--agent" /> Internal agent — steel, synthetic</div>
@@ -1722,7 +2097,9 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
               <div key={k} className={`office__legend-emote${k === "approval_wait" ? " office__legend-emote--alert" : ""}`}>{EMOTE_LABEL[k]}</div>
             ))}
           </div>
+          </>)}
 
+          {railTab === "cast" && (
           <div className="office__roster" role="listbox" aria-label="Everyone on the floor">
             {roster.length === 0 && <p className="office__empty">No avatars for this company yet.</p>}
             {roster.map((a) => (
@@ -1750,7 +2127,9 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
               </button>
             ))}
           </div>
+          )}
 
+          {railTab === "detail" && (
           <div className="office__detail" aria-live="polite">
             {!selected && <p className="office__empty">Select an avatar to see who or what it is, and the record it resolves to.</p>}
             {selected && (
@@ -1812,8 +2191,44 @@ export function OfficeCanvas({ scene, initialZoom }: { scene: OfficeScene; initi
               </>
             )}
           </div>
+          )}
+
+          {railTab === "activity" && (
+          <div className="office__activity">
+            {scene.events.length === 0 ? (
+              /* Empty is a CLAIM here, so it says WHY rather than rendering a bare blank panel.
+                 A snapshot and a tenant with no recorded handoffs both land here legitimately. */
+              <p className="office__empty">
+                No recorded movement for this company. Movement is derived from two people acting on
+                one record — it is never location tracking — so an empty list means the ERP has
+                logged no such handoff, not that nobody moved.
+              </p>
+            ) : (
+              <ul className="office__activity-list">
+                {scene.events.map((e) => {
+                  const who = scene.avatars.find((a) => a.id === e.avatarId);
+                  return (
+                    <li key={e.id}>
+                      <span className="office__activity-who">{who?.name ?? "Someone"}</span>
+                      <span className="office__activity-reason">{e.reason}</span>
+                      <time dateTime={e.at}>{formatDateTime(e.at)}</time>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+          )}
+          </div>
         </div>
       </div>
+
+      <OfficeCastStrip
+        members={castMembers}
+        selectedId={selectedId}
+        onSelect={selectAvatar}
+        onHover={setHoveredId}
+      />
 
       <p className="office__footnote">
         Generated {formatDateTime(scene.generatedAt)}. Character art is the Universal LPC

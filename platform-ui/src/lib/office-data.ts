@@ -15,6 +15,8 @@ import { getAgentGoals, getAgentGoal, type AgentGoal } from "./admin";
 import { listAutomationApprovals, type AutomationApproval } from "./automationApprovals";
 import {
   buildFloors,
+  groupAgentSeats,
+  describeAgentSeat,
   type OfficeRoomInput,
   type OfficeAvatar,
   type OfficeMoveEvent,
@@ -226,22 +228,28 @@ export async function getOfficeScene(u: string, t: string | null): Promise<Offic
     recordHref: "/agents",
     note: "The goal-tree orchestrator console. Agents are tenant-wide, not department-scoped, so it is housed in Operations by design — not a fallback, and not dependent on any department existing.",
   });
-  goals.forEach((g, i) => {
-    const activeRunId = activeRunByGoal.get(g.id);
+  // ONE desk per AGENT, not per goal. Per-goal desks were unbounded — the live agency tenant had
+  // 50 goals from a single agent, which rendered 51 Operations desks against 8 in the largest real
+  // department, all sharing one name, and growing with every goal ever run. `groupAgentSeats`
+  // (office.ts) carries the full reasoning; the short version is that an agent is the worker and a
+  // goal is the work, and humans are already modelled that way.
+  groupAgentSeats(goals, activeRunByGoal).forEach((seat, i) => {
     avatars.push({
-      id: `agent-goal-${g.id}`,
+      id: `agent-${seat.key}`,
       kind: "agent",
-      name: g.agent ?? g.goal.slice(0, 24),
+      name: seat.name,
       homeRoomKey: OFFICE_AGENTS_KEY,
       deskIndex: i + 1,
-      recordKind: "agent-goal",
-      recordId: g.id,
-      recordLabel: g.goal,
-      recordHref: `/agents/goals/${g.id}`,
-      note: activeRunId
-        ? `Real agent goal, status "${g.status}", with a run currently in flight. The desk's working animation reflects that run's OWN recent events (O4) — it stops the moment the run goes quiet.`
-        : `Real agent goal, status "${g.status}". Tenant-wide, not department-scoped, so it is housed in Operations by design.`,
-      ...(activeRunId ? { activeRunId } : {}),
+      recordKind: "agent",
+      recordId: seat.key,
+      recordLabel: describeAgentSeat(seat),
+      // Links at the in-flight goal when there is one, else any of this agent's goals — from
+      // there the goal tree is the readable place to see the rest.
+      recordHref: `/agents/goals/${seat.linkGoalId}`,
+      note: seat.activeRunId
+        ? `Real agent. ${describeAgentSeat(seat)}. One run is in flight now — the desk's working animation reflects that run's OWN recent events (O4) and stops the moment it goes quiet.`
+        : `Real agent. ${describeAgentSeat(seat)}. No run is in flight, so this desk is still — that means nothing is RUNNING, not that the agent is idle or broken.`,
+      ...(seat.activeRunId ? { activeRunId: seat.activeRunId } : {}),
     });
   });
 

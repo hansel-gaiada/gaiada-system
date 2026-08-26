@@ -1,5 +1,7 @@
 node_modules
 .next
+# Per-process build dirs from NEXT_DIST_DIR (see next.config.ts) — never committed.
+.next-*
 .env
 *.tsbuildinfo
 next-env.d.ts

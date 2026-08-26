@@ -7,9 +7,10 @@ import {
   isGenuinelyWorking, WORKING_RECENCY_MS,
   resolveAutomationState, automationColorToken, AUTOMATION_GREY_TOKEN, AUTOMATION_RECENCY_MS,
   CORRIDOR_W_TILES, MAX_FLOOR_WIDTH_TILES, ROOM_MIN_W_TILES, ROOM_MIN_H_TILES, DESK_TOP_TILES,
-  ZOOM_LEVELS, fitZoomLevel, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
+  ZOOM_LEVELS, fitZoomLevel, fitScale, nearestZoomLevel, MIN_FIT_SCALE, clampCamera, zoomCameraAtPoint, cssTransformForCamera, viewportToContentPoint,
+  groupAgentSeats, describeAgentSeat,
   type OfficeAvatar, type OfficeMoveEvent, type OfficeRoomInput, type OfficeRoom, type OfficeFloor, type Camera,
-  type AutomationSignal,
+  type AutomationSignal, type AgentSeatGoal, type AgentSeat,
 } from "./office";
 
 function room(key: string, kind: OfficeRoomInput["kind"], occupantCount: number, extra: Partial<OfficeRoomInput> = {}): OfficeRoomInput {
@@ -486,6 +487,62 @@ describe("Camera — zoom / pan / follow maths (req #1, pure functions per the t
     });
   });
 
+  describe("fitScale — \"Fit\" has to actually fit", () => {
+    it("returns the integer step when one genuinely fits, so the art stays pixel-exact", () => {
+      expect(fitScale(300, 200, 800, 600)).toBe(2);
+      expect(Number.isInteger(fitScale(300, 200, 800, 600))).toBe(true);
+    });
+
+    it("shrinks BELOW 1x when no integer step can show the whole plate", () => {
+      // The regression this exists for: fitZoomLevel floors at 1, which left a wide plate clipped
+      // inside an overflow-hidden viewport while the control still said "Fit".
+      expect(fitZoomLevel(1466, 838, 1250, 898)).toBe(1);
+      const s = fitScale(1466, 838, 1250, 898);
+      expect(s).toBeLessThan(1);
+      expect(1466 * s).toBeLessThanOrEqual(1250 + 0.001);
+      expect(838 * s).toBeLessThanOrEqual(898 + 0.001);
+    });
+
+    it("fits on whichever axis is the binding one", () => {
+      // Height binds here (0.5) while width alone would allow 2.5 — and 0.5 is still above
+      // MIN_FIT_SCALE, so the fit is exact rather than clamped.
+      const tall = fitScale(400, 1000, 1000, 500);
+      expect(tall).toBeCloseTo(0.5, 5);
+      expect(1000 * tall).toBeLessThanOrEqual(500 + 0.001);
+    });
+
+    it("never shrinks past MIN_FIT_SCALE, however extreme the plate", () => {
+      expect(fitScale(100_000, 100_000, 800, 600)).toBe(MIN_FIT_SCALE);
+    });
+
+    it("falls back to 1 on a degenerate size rather than 0 or NaN", () => {
+      expect(fitScale(0, 0, 800, 600)).toBe(1);
+      expect(fitScale(300, 200, 0, 0)).toBe(1);
+    });
+
+    it("is pure — the same inputs give the same scale", () => {
+      expect(fitScale(1466, 838, 1250, 898)).toBe(fitScale(1466, 838, 1250, 898));
+    });
+  });
+
+  describe("nearestZoomLevel — leaving a fractional Fit scale rejoins the integer ladder", () => {
+    it("snaps a fractional scale to the closest step", () => {
+      expect(nearestZoomLevel(0.85)).toBe(1);
+      expect(nearestZoomLevel(1.4)).toBe(1);
+      expect(nearestZoomLevel(1.6)).toBe(2);
+      expect(nearestZoomLevel(2.9)).toBe(3);
+    });
+
+    it("leaves an integer step exactly where it is", () => {
+      for (const z of ZOOM_LEVELS) expect(nearestZoomLevel(z)).toBe(z);
+    });
+
+    it("clamps outside the ladder instead of returning something off it", () => {
+      expect(nearestZoomLevel(0.1)).toBe(1);
+      expect(nearestZoomLevel(99)).toBe(3);
+    });
+  });
+
   describe("clampCamera — the plate can never be lost off-screen", () => {
     it("leaves an in-bounds centre untouched", () => {
       const c = clampCamera(camera1x, 2000, 1500, 800, 600);
@@ -560,6 +617,147 @@ describe("Camera — zoom / pan / follow maths (req #1, pure functions per the t
       const css = cssTransformForCamera(camera, 800, 600);
       expect(css).toContain("scale(3)");
       expect(css).toMatch(/^translate\(-?\d+(\.\d+)?px, -?\d+(\.\d+)?px\) scale\(3\)$/);
+    });
+  });
+});
+
+describe("groupAgentSeats / describeAgentSeat — one desk per AGENT, not per goal (req: 50-goal regression)", () => {
+  function goal(id: string, agent: string | undefined, status: string): AgentSeatGoal {
+    return { id, goal: `do ${id}`, status, agent };
+  }
+
+  it("collapses 50 goals from ONE agent into exactly one seat with goalCount 50 (the live-tenant regression)", () => {
+    const goals: AgentSeatGoal[] = Array.from({ length: 50 }, (_, i) => goal(`g${i}`, "pm-reporter", "ok"));
+    const seats = groupAgentSeats(goals, new Map());
+    expect(seats).toHaveLength(1);
+    expect(seats[0].name).toBe("pm-reporter");
+    expect(seats[0].goalCount).toBe(50);
+  });
+
+  it("gives distinct agents one seat each", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", "pm-reporter", "ok"),
+      goal("g2", "seo-auditor", "ok"),
+      goal("g3", "pm-reporter", "failed"),
+    ];
+    const seats = groupAgentSeats(goals, new Map());
+    expect(seats).toHaveLength(2);
+    expect(seats.map((s) => s.name).sort()).toEqual(["pm-reporter", "seo-auditor"]);
+  });
+
+  it("groups goals with an undefined, empty, or whitespace-only agent under one 'Unattributed' seat, without dropping any", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", undefined, "ok"),
+      goal("g2", "", "ok"),
+      goal("g3", "   ", "ok"),
+    ];
+    const seats = groupAgentSeats(goals, new Map());
+    expect(seats).toHaveLength(1);
+    expect(seats[0].name).toBe("Unattributed");
+    expect(seats[0].goalCount).toBe(3);
+  });
+
+  it("tallies statusCounts correctly, sorted by count descending then status ascending on ties", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", "a", "ok"),
+      goal("g2", "a", "ok"),
+      goal("g3", "a", "failed"),
+      goal("g4", "a", "queued"),
+      goal("g5", "a", "failed"),
+    ];
+    // ok:2, failed:2, queued:1 -> ok and failed tie at count 2, "failed" < "ok" alphabetically.
+    const seats = groupAgentSeats(goals, new Map());
+    expect(seats[0].statusCounts).toEqual([
+      { status: "failed", count: 2 },
+      { status: "ok", count: 2 },
+      { status: "queued", count: 1 },
+    ]);
+  });
+
+  it("orders seats by goalCount descending, ties broken by name ascending", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", "zeta", "ok"),
+      goal("g2", "alpha", "ok"),
+      goal("g3", "beta", "ok"),
+      goal("g4", "beta", "ok"),
+      goal("g5", "beta", "ok"),
+    ];
+    const seats = groupAgentSeats(goals, new Map());
+    expect(seats.map((s) => s.name)).toEqual(["beta", "alpha", "zeta"]);
+  });
+
+  it("sets activeRunId and switches linkGoalId to the in-flight goal when one of the agent's goals has an open run", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", "a", "ok"),
+      goal("g2", "a", "ok"),
+      goal("g3", "a", "ok"),
+    ];
+    const activeRunByGoal = new Map([["g2", "run-42"]]);
+    const [seat] = groupAgentSeats(goals, activeRunByGoal);
+    expect(seat.activeRunId).toBe("run-42");
+    expect(seat.linkGoalId).toBe("g2");
+  });
+
+  it("leaves activeRunId absent and linkGoalId at the first goal seen when nothing is in flight", () => {
+    const goals: AgentSeatGoal[] = [goal("g1", "a", "ok"), goal("g2", "a", "ok")];
+    const [seat] = groupAgentSeats(goals, new Map());
+    expect(seat.activeRunId).toBeUndefined();
+    expect(seat.linkGoalId).toBe("g1");
+  });
+
+  it("only the FIRST in-flight run wins — a later one does not overwrite it", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", "a", "ok"),
+      goal("g2", "a", "ok"),
+      goal("g3", "a", "ok"),
+    ];
+    const activeRunByGoal = new Map([
+      ["g2", "run-first"],
+      ["g3", "run-second"],
+    ]);
+    const [seat] = groupAgentSeats(goals, activeRunByGoal);
+    expect(seat.activeRunId).toBe("run-first");
+    expect(seat.linkGoalId).toBe("g2");
+  });
+
+  it("returns an empty array for empty input", () => {
+    expect(groupAgentSeats([], new Map())).toEqual([]);
+  });
+
+  it("is pure — same input twice gives deep-equal results and never mutates the input array", () => {
+    const goals: AgentSeatGoal[] = [
+      goal("g1", "a", "ok"),
+      goal("g2", "b", "failed"),
+    ];
+    const snapshot = JSON.parse(JSON.stringify(goals));
+    const a = groupAgentSeats(goals, new Map([["g2", "run-1"]]));
+    const b = groupAgentSeats(goals, new Map([["g2", "run-1"]]));
+    expect(a).toEqual(b);
+    expect(goals).toEqual(snapshot);
+  });
+
+  describe("describeAgentSeat", () => {
+    function seat(overrides: Partial<AgentSeat> = {}): AgentSeat {
+      return { key: "a", name: "a", goalCount: 1, statusCounts: [], linkGoalId: "g1", ...overrides };
+    }
+
+    it("uses singular 'goal' for a count of 1 and plural otherwise", () => {
+      expect(describeAgentSeat(seat({ goalCount: 1, statusCounts: [{ status: "ok", count: 1 }] })))
+        .toBe("1 goal — 1 ok");
+      expect(describeAgentSeat(seat({ goalCount: 2, statusCounts: [{ status: "ok", count: 2 }] })))
+        .toBe("2 goals — 2 ok");
+    });
+
+    it("joins multiple status counts in the order given", () => {
+      const s = seat({
+        goalCount: 12,
+        statusCounts: [{ status: "ok", count: 7 }, { status: "failed", count: 5 }],
+      });
+      expect(describeAgentSeat(s)).toBe("12 goals — 7 ok, 5 failed");
+    });
+
+    it("returns just the goal count when there are no statusCounts", () => {
+      expect(describeAgentSeat(seat({ goalCount: 3, statusCounts: [] }))).toBe("3 goals");
     });
   });
 });

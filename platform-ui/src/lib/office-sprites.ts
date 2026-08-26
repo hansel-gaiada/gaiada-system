@@ -27,13 +27,19 @@ export type SkinTone = "light" | "amber" | "olive" | "taupe" | "bronze" | "brown
  *  OfficeCanvas.tsx's drawAvatar() for why that particular integer was chosen over 2x/3x. */
 export const FRAME_PX = 64;
 
-/** Which cell to crop from each 9-col x 4-row (walk) / 3-col x 4-row (sit) sheet. Row 2 is "facing
- *  down" in every LPC sheet (verified by rendering and comparing against row 0/1/3) — the only
- *  direction this office ever needs, since avatars never turn. `sit` column 2 is the settled
- *  "seated, hands down" frame; `walk` column 0 is the neutral "feet together" stride frame, used
- *  only for the few seconds a replay has an avatar in transit between rooms. */
+/** Which cell to crop from each 9-col x 4-row (walk) / 3-col x 4-row (sit) sheet. LPC row order is
+ *  0 = facing away (up), 1 = left, 2 = facing the viewer (down), 3 = right.
+ *
+ *  `sit` faces AWAY, because the desk is drawn above the seat tile: a seated avatar on row 2 had
+ *  its back to its own monitor and stared out of the screen instead. Both poses used to be pinned
+ *  to row 2 on the reasoning that avatars never turn, which was true of the direction but wrong
+ *  about which direction a person at a desk should be facing.
+ *
+ *  `walk` stays on row 2. Transit is along the horizontal corridor, so neither up nor down is
+ *  "correct"; facing the viewer keeps the person readable during the few seconds a replay has them
+ *  in the corridor, which is exactly when someone is trying to see who is moving. */
 export const POSE_FRAME: Record<SpritePose, { col: number; row: number }> = {
-  sit: { col: 2, row: 2 },
+  sit: { col: 2, row: 0 },
   walk: { col: 0, row: 2 },
 };
 

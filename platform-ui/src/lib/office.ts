@@ -110,9 +110,25 @@ export const DESK_MARGIN_TILES = 1.6;
  *  mounted there (WALL_TILES + ~1.35 tiles of plate, in OfficeCanvas.tsx's drawNamePlate) PLUS the
  *  desk furniture's own header (a desk box sits visually above its seat tile, in the furniture
  *  pass) — 2.6 left the desk box overlapping the nameplate text on every room whose door faces
- *  south (nameplate stays up top); 3.6 was verified against a real render to clear it. */
-export const DESK_TOP_TILES = 3.6;
+ *  south (nameplate stays up top); 3.6 cleared it while the desk was a 0.55-tile plate.
+ *
+ *  Raised to 4.7 on 2026-08-26 when the desk began drawing on its real 32x32 aspect instead of
+ *  squashed: the sprite now reaches ~2.83 tiles above its seat rather than ~1.79, i.e. about one
+ *  tile higher, and at 3.6 the first row overlapped the room nameplate again. This number is a
+ *  function of the desk ART's height — change one and re-check the other against a real render. */
+export const DESK_TOP_TILES = 4.7;
 export const DESK_SPACING_TILES = 3.0;
+/** VERTICAL pitch between desk rows — deliberately larger than the horizontal `DESK_SPACING_TILES`
+ *  and deliberately a separate constant.
+ *
+ *  A desk cell has to stack three things that a column does not: the desk furniture, the person
+ *  standing at it, and that person's name label. At the shared 3.0 pitch there was not room for all
+ *  three, so every row's name label was painted across the desks of the row BELOW it. Flat grey
+ *  plates hid that; real desk sprites made it obvious.
+ *
+ *  Columns stay at 3.0 because a column only has to fit the label's WIDTH (`NAME_SLOT_TILES`), and
+ *  widening them would inflate every room's footprint for no legibility gain. */
+export const DESK_ROW_TILES = 4.6;
 /** The real, gutter-safe width a desk's name label may use before it risks touching its neighbour
  *  — DERIVED from `DESK_SPACING_TILES` (never an independent literal chosen by eye in the canvas
  *  file) so the two can never drift apart. 0.3 tiles of clearance either side of a label is enough
@@ -143,7 +159,7 @@ export function roomSizeTiles(occupantCount: number): { wTiles: number; hTiles: 
   const seats = Math.max(occupantCount, 1); // an empty room still draws one row of vacant desks
   const rows = Math.max(1, Math.ceil(seats / deskCols));
   const w = DESK_MARGIN_TILES * 2 + (deskCols - 1) * DESK_SPACING_TILES + 1.4;
-  const h = DESK_TOP_TILES + rows * DESK_SPACING_TILES + 1.0;
+  const h = DESK_TOP_TILES + rows * DESK_ROW_TILES + 1.0;
   return { wTiles: Math.max(ROOM_MIN_W_TILES, w), hTiles: Math.max(ROOM_MIN_H_TILES, h), deskCols };
 }
 
@@ -154,9 +170,17 @@ export function roomSizeTiles(occupantCount: number): { wTiles: number; hTiles: 
 // walking from one room to another means walking the corridor, because the corridor is the only
 // walkable path between rooms (see buildWalkableGrid/findPath below).
 export const CORRIDOR_W_TILES = 4;
-export const OUTER_MARGIN_TILES = 2;
+/** Border between the outermost room and the building's own outer wall. Kept tight (1) since the
+ *  shell began drawing a real floor: at 2 the surplus read as a band of unfinished interior rather
+ *  than as the edge of the building. */
+export const OUTER_MARGIN_TILES = 1;
 /** Gap between two adjacent rooms on the same side of the same corridor. */
-export const ROOM_GAP_TILES = 2;
+/** Gap between neighbouring rooms. ZERO on purpose: each room draws its own wall, so abutting
+ *  rooms produce a shared partition — which is what a real floor plan looks like. A positive gap
+ *  used to be invisible because the page background showed through it, but once `drawOuterShell`
+ *  began filling the plate with a real floor, every gap became a strip of empty interior between
+ *  rooms and the floor stopped reading as one building again. */
+export const ROOM_GAP_TILES = 0;
 /** When placing the next room would push a floor's corridor past this length, close the floor and
  *  start a new one (req #2: "if not enough make another screen"). Chosen so a small/medium
  *  tenant's real department count comfortably fits one floor, while a large one visibly splits. */
@@ -244,6 +268,81 @@ export function buildFloors(inputs: OfficeRoomInput[]): OfficeFloor[] {
   return floors;
 }
 
+/** The subset of an agent goal this grouping needs. Structural on purpose: `AgentGoal` lives in
+ *  the server-only `admin.ts`, and office.ts must stay client-safe (see platform-ui/CLAUDE.md's
+ *  module-trio rule), so the shape is restated rather than imported. */
+export interface AgentSeatGoal {
+  id: string;
+  goal: string;
+  status: string;
+  agent?: string;
+}
+
+/** One Operations desk — an AGENT, with the goals it has run folded into it. */
+export interface AgentSeat {
+  /** Stable per-agent key, used to build the avatar id. */
+  key: string;
+  /** The agent's name, as the backend reports it. */
+  name: string;
+  goalCount: number;
+  /** Goal statuses for this agent, highest count first — the note reports these verbatim rather
+   *  than collapsing them into a health verdict the office has no business inventing. */
+  statusCounts: { status: string; count: number }[];
+  /** A goal id to link the desk at — the in-flight one when there is one, else the first seen. */
+  linkGoalId: string;
+  /** Set only when one of this agent's goals genuinely has an open run right now. */
+  activeRunId?: string;
+}
+
+/** Folds a tenant's agent goals into ONE desk per agent.
+ *
+ *  It used to be one desk per GOAL. On real data that is unbounded and it swamps the floor: the
+ *  live agency tenant had 50 goals from a single agent (`pm-reporter`), so Operations rendered 51
+ *  desks against 8 in the largest real department, every one of them carrying the same name — and
+ *  it grows forever, because a goal is never retired from the list.
+ *
+ *  Grouping by agent is not merely a cap, it is the correct model: the office models the ORG (plan
+ *  §6), and in an org an agent is the worker while a goal is the work. Humans are already modelled
+ *  that way — a person gets a desk and their tasks do not — so this makes agents consistent with
+ *  them instead of special. Per-goal detail is not lost; it moves to the goal tree the desk links
+ *  to, which is where a list of 50 goals is actually readable.
+ *
+ *  Ordering is by goal count (descending) then name, so the busiest agent is leftmost and the
+ *  layout does not reshuffle just because a new goal arrived. */
+export function groupAgentSeats(
+  goals: AgentSeatGoal[], activeRunByGoal: Map<string, string>,
+): AgentSeat[] {
+  const byAgent = new Map<string, AgentSeat>();
+  for (const g of goals) {
+    // A goal with no `agent` is a real shape (older rows predate the field). It groups under one
+    // honest "Unattributed" desk rather than being dropped or given a fabricated agent name.
+    const name = g.agent?.trim() || "Unattributed";
+    let seat = byAgent.get(name);
+    if (!seat) {
+      seat = { key: name, name, goalCount: 0, statusCounts: [], linkGoalId: g.id };
+      byAgent.set(name, seat);
+    }
+    seat.goalCount += 1;
+    const found = seat.statusCounts.find((sc) => sc.status === g.status);
+    if (found) found.count += 1;
+    else seat.statusCounts.push({ status: g.status, count: 1 });
+    const runId = activeRunByGoal.get(g.id);
+    // An in-flight run wins the link and lights the desk — that is the goal worth looking at.
+    if (runId && !seat.activeRunId) { seat.activeRunId = runId; seat.linkGoalId = g.id; }
+  }
+  for (const seat of byAgent.values()) {
+    seat.statusCounts.sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
+  }
+  return [...byAgent.values()].sort((a, b) => b.goalCount - a.goalCount || a.name.localeCompare(b.name));
+}
+
+/** "12 goals — 7 ok, 5 failed", or "1 goal — 1 ok". Plain counts, no verdict. */
+export function describeAgentSeat(seat: AgentSeat): string {
+  const goals = `${seat.goalCount} goal${seat.goalCount === 1 ? "" : "s"}`;
+  if (seat.statusCounts.length === 0) return goals;
+  return `${goals} — ${seat.statusCounts.map((sc) => `${sc.count} ${sc.status}`).join(", ")}`;
+}
+
 export function allRooms(floors: OfficeFloor[]): OfficeRoom[] {
   return floors.flatMap((f) => f.rooms);
 }
@@ -273,8 +372,8 @@ export function deskSlotTile(room: OfficeRoom, index: number): { x: number; y: n
   const col = index % cols;
   const row = Math.floor(index / cols);
   const y = room.side === "north"
-    ? room.y + DESK_TOP_TILES + row * DESK_SPACING_TILES
-    : room.y + room.hTiles - DESK_TOP_TILES - row * DESK_SPACING_TILES;
+    ? room.y + DESK_TOP_TILES + row * DESK_ROW_TILES
+    : room.y + room.hTiles - DESK_TOP_TILES - row * DESK_ROW_TILES;
   return {
     x: room.x + DESK_MARGIN_TILES + col * DESK_SPACING_TILES,
     y,
@@ -465,7 +564,12 @@ export type ZoomLevel = 1 | 2 | 3;
 export const ZOOM_LEVELS: readonly ZoomLevel[] = [1, 2, 3];
 
 export interface Camera {
-  scale: ZoomLevel;
+  /** The rendered scale. INTEGER for every user-driven zoom step (`ZOOM_LEVELS`), which is what
+   *  keeps the sprite art pixel-exact per the note above. It is a free `number` rather than a
+   *  `ZoomLevel` for exactly one reason: "Fit" may need to shrink BELOW 1x to honour its own label
+   *  on a floor plate wider than the window (see `fitScale`). Nothing else may write a fractional
+   *  value here. */
+  scale: number;
   /** The content-space (css px, i.e. the SAME space `tilesToPx` already produces — pre-camera-
    *  scale) point currently centred in the viewport. */
   centerX: number;
@@ -482,6 +586,41 @@ export function fitZoomLevel(contentW: number, contentH: number, viewportW: numb
   let best: ZoomLevel = 1;
   for (const z of ZOOM_LEVELS) {
     if (contentW * z <= viewportW && contentH * z <= viewportH) best = z;
+  }
+  return best;
+}
+
+/** How far "Fit" is allowed to shrink. Below roughly this, a 16px tile is under 6px on screen and
+ *  the floor stops being readable as an office at all — at that point a clipped-but-legible plate
+ *  is the better answer than an unclipped smear, so the clamp holds and panning covers the rest,
+ *  exactly as it did before fractional fit existed. */
+export const MIN_FIT_SCALE = 0.45;
+
+/** The scale "Fit" actually renders at — the one that shows the WHOLE plate.
+ *
+ *  This is deliberately NOT `fitZoomLevel`. That function can only return 1, 2 or 3, so on any
+ *  floor plate wider than the window it returns 1 and leaves the plate clipped: a control labelled
+ *  "Fit" that does not fit. The integer-only rule above is still right for every zoom step a person
+ *  drives (it is what keeps the art pixel-exact), and this function preserves it — whenever an
+ *  integer step genuinely fits, that integer is what comes back and nothing is resampled. The
+ *  fractional path exists only for the case the integer ladder cannot express, and it is bounded by
+ *  `MIN_FIT_SCALE`. Owner decision, 2026-08-26. */
+export function fitScale(contentW: number, contentH: number, viewportW: number, viewportH: number): number {
+  if (contentW <= 0 || contentH <= 0 || viewportW <= 0 || viewportH <= 0) return 1;
+  const integer = fitZoomLevel(contentW, contentH, viewportW, viewportH);
+  // An integer step that really fits wins outright — crisp art, previous behaviour, no resampling.
+  if (contentW * integer <= viewportW && contentH * integer <= viewportH) return integer;
+  const exact = Math.min(viewportW / contentW, viewportH / contentH);
+  return Math.max(MIN_FIT_SCALE, Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length - 1], exact));
+}
+
+/** The nearest INTEGER step to an arbitrary current scale — how a +/- press or a wheel tick leaves
+ *  a fractional "Fit" scale and rejoins the integer ladder. Without this, `ZOOM_LEVELS.indexOf(0.85)`
+ *  is -1 and the first zoom press would jump to 1x regardless of direction. */
+export function nearestZoomLevel(scale: number): ZoomLevel {
+  let best: ZoomLevel = ZOOM_LEVELS[0];
+  for (const z of ZOOM_LEVELS) {
+    if (Math.abs(z - scale) < Math.abs(best - scale)) best = z;
   }
   return best;
 }
@@ -509,7 +648,7 @@ export function clampCamera(camera: Camera, contentW: number, contentH: number, 
  *  the same behaviour every pixel-editor/map app's scroll-zoom has. Pure: does not clamp its own
  *  result (callers run it through `clampCamera` after, same as any other camera mutation). */
 export function zoomCameraAtPoint(
-  camera: Camera, nextScale: ZoomLevel, pointerVX: number, pointerVY: number, viewportW: number, viewportH: number,
+  camera: Camera, nextScale: number, pointerVX: number, pointerVY: number, viewportW: number, viewportH: number,
 ): Camera {
   if (nextScale === camera.scale) return camera;
   const contentX = camera.centerX + (pointerVX - viewportW / 2) / camera.scale;
