@@ -22,6 +22,7 @@
 | `simulation/` | node | `gaiada-simulation` | `start` | yes | yes |
 | `sync-engine-go/` | go | `gaiada/sync-engine-go` | `cmd/sync · cmd/synccert` | yes | yes |
 | `wa-chat-bot/` | node | `gaiada-wa-bot` | `dev · start` | yes | yes |
+| `webdesk/` | node | `webdesk` | — | — | **missing** |
 
 Node scripts per component:
 
@@ -35,6 +36,7 @@ Node scripts per component:
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
+- `webdesk` — `check:rls`, `check:rls:selftest`, `lint:migrations`, `migrate`, `test`
 
 ## Compose
 
