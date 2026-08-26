@@ -43,6 +43,22 @@ new from the reassessment (Part G) and 13 design-close tasks (Part A).
 
 ---
 
+## Owner rulings — 2026-08-26
+
+Recorded here because both change what a ticket must DO, not merely when it runs.
+
+- **WSK-D24 · the `/v1` SQL bypass — ACCEPTED, CONDITIONALLY.** `/v1` reads may keep the hand-rolled
+  SQL router rather than going through Payload's query layer. The condition is not optional: the
+  Payload-side app-layer tenant predicate (WSK-04b / WSK-D25) **must cover the `/v1` router too**,
+  with the same mutual-independence proof WSK-04 ran on `api` — disable one layer, the other still
+  returns zero rows, plus a negative control that leaks.
+  ★ Why the condition carries the whole ruling: Payload's `access` functions never execute on the
+  router path, so without it RLS is the *only* wall on the one read path the public can reach. That
+  is precisely the single-wall posture WSK-04 exists to disprove, and a WSK-04b that covered only
+  the collections would report DONE while leaving `/v1` single-walled.
+
+- **A-12 · procurement — PROCURE NOW.** See the A-12 row.
+
 ## Part A · Close the design
 
 | Status | # | Task | Owner | Notes |
@@ -59,7 +75,7 @@ new from the reassessment (Part G) and 13 design-close tasks (Part A).
 | ✅ | A-13 | **Storage ruled — fully self-hosted** | owner | WSK-D23. MinIO primary, no new cost. R2/NAS kept as a config-only swap + abstraction test. Backups flip to **pull-model**; Workspace at staging, NAS target-state. New §11a preconditions. WSK-07 + WSK-28 rewritten |
 | ⬜ | A-10 | Write §15 · Cost & quotas | claude+owner | Needs real numbers only you have: today's web3forms + hosting spend, target per-client price. Then per-tenant cost · quotas/overage · break-even count — which is what actually answers A-12 |
 | ⬜ | A-11 | Payload governance + trademark check | owner | Ownership changed hands 2025; MIT is irrevocable for shipped versions, but rebranding touches trademark, which MIT does not license. ~1 hour |
-| ⬜ | A-12 | Procurement call (OQ-W1, now narrower) | owner | Under R-2 only the **backend** box is gated. Decide staging-box timing against Part B's real load |
+| ✅ | A-12 | Procurement call (OQ-W1, now narrower) | owner | **RULED 2026-08-26 — PROCURE NOW,** ahead of Part B load data. Unblocks WSK-M0 and all of Part D, which were waiting on a box. ⚠ Sizing is a JUDGEMENT, not a measurement: A-10's numbers do not exist, and §11a named disk + bandwidth as the sizing inputs. Buy for headroom; treat first Part-B traffic as the check, not the spec. Cross-ref B24 (Hermes tracker) ruled *move gaiada observability to its own box* the same day — confirm whether these are ONE procurement before ordering |
 
 ---
 

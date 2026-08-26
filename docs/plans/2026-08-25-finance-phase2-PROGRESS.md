@@ -28,7 +28,49 @@ Status vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED · DEV-VERIFIED`. Nothi
 
 ---
 
-## §A — BLOCKING QUESTIONS (the seed cannot start without these)
+## §A — ANSWERED 2026-08-26 (owner)
+
+The seed is **UNBLOCKED for one entity**. Ruling, and what each answer forecloses:
+
+| # | Question | Ruling |
+|---|---|---|
+| A1 | Scope | **Gaia Digital Agency ONLY.** D & A Syrowatka (holding) and Viceroy Bali get NO books yet |
+| A2 | Fiscal calendar | **January start — calendar year.** Monthly periods. **First open period: 1 January 2027** |
+| A3 | PKP status | **PKP.** CoA carries PPN Keluaran / PPN Masukan; invoices carry PPN; F7 stays as designed |
+| A3 | Withholdings | **PPh 21 (payroll) ONLY.** No PPh 23, no PPh 4(2) |
+| A4 | Existing books | **Start clean — NO opening balances.** ERP books begin at zero on 1 Jan 2027 |
+
+**What this changes in the build**
+
+- **F10 shrinks a lot but does not vanish.** No opening-balance import is needed, so the trial-balance
+  ingest path is out of scope for this entity. Year-end close is still required — and because 1 Jan
+  2027 is a fiscal-year boundary, FY2027 is a complete year with no stub-period special cases. That
+  was the point of the date.
+- **F9 consolidation cannot be exercised for real yet.** Consolidation needs a parent and at least one
+  subsidiary with books; only one entity has them. Build it against fixtures, but do NOT mark it
+  DEV-VERIFIED on live data until a second entity is seeded — a green consolidation over a single
+  set of books proves nothing.
+- **PPh 23 and PPh 4(2) accounts are NOT created.** ⚠ This is a claim about today, not a permanent
+  fact: the moment the agency withholds on a vendor service fee or on office rent, the obligation
+  exists whether or not the account does. Missing withholding on a live transaction is a filing
+  problem, not a bookkeeping one. Re-ask before the first vendor payment run.
+- **PKP is asserted, not verified.** The CoA is being cut on the owner's word; nobody has read a
+  PKP certificate. Worth one confirmation before 1 Jan 2027, since un-picking PPN accounts after
+  books open is a reversal exercise under D-F1.
+
+**STILL NEEDED before the seed can be written** (facts, not decisions):
+
+1. **Full legal name of the PT** — exactly as registered. The books of record carry it.
+2. **NPWP — does one exist?** Do not paste it here. Say yes/no and I wire the field for the
+   accountant to enter.
+
+**Timing note:** with a 1 Jan 2027 first period there is real runway. F10, F11 and the config UI
+(31 items) can all land before anything is live. Nothing about this seed is urgent — but items 1–2
+above should be captured while they are easy to get.
+
+---
+
+## §A — original blocking questions (superseded by the above, kept for the reasoning)
 
 The live estate is **3 companies**: `D & A Syrowatka` (holding, root) · `Gaia Digital Agency`
 (finance module already ON) · `Viceroy Bali`.
