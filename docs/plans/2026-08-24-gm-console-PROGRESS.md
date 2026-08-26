@@ -431,6 +431,30 @@ eliminated by inspection: `EmptyNote` callers, `StateScreen`/error-boundary bodi
 (its `<p>`/`<ul>` are correctly flushed as siblings), `ArtifactMarkdown`. Not converging by reading —
 it needs the real-data path re-stood to capture a component stack.
 
+**F34 — the invalid-`<p>`-nesting bug, found and fixed: `EnvelopeBanner`.** It wrapped its
+`<details>/<summary>/<ul>/<li>` disclosure in a **`<p>`**. `<p>` accepts only phrasing content, so the
+parser closes it at `<details>`, reparents everything after, and React reports a hydration mismatch —
+plus the inverse pairs (`<p>` inside `<ul>`, `<p>` inside `<summary>`) once the DOM has been
+restructured. Ten warnings per page load on the real backend.
+
+**Why it survived the entire build:** the banner renders ONLY when a read has actually failed
+(`excluded.length || partial.length`). In DEMO_MODE every fixture answers, so it never rendered once —
+0 occurrences across 38 routes and two identities. **The honest-failure surfaces are the ones fixtures
+exercise least, and they are exactly the surfaces that matter when something breaks.**
+
+Fixed to a `<div>` (`.sys-empty-note` is class-scoped, so the styling is byte-identical and
+`role="status"` is valid on either), and pinned by a test that asserts *structurally* — no block
+element inside a `<p>`, whatever the wrapper is called — plus a check that the disclosure is really
+present so the assertion cannot pass vacuously. **Verified against the real backend: 10 warnings → 0.**
+
+**F35 — F31 fixed rather than excused.** `pm.test.ts > getBurndown` measured
+634 · 1099 · 1381 · 3198 · 3233 · **5007** ms against vitest's default 5 s budget — so it failed six
+times across this session while passing in isolation every time. A 5 s budget on a 0.6–3.2 s fixture
+read has no headroom, and the failure it produces is **indistinguishable from a real regression**,
+which is worse than a slow test: it teaches people to re-run instead of investigate. Raised to 20 s
+(~6x the slowest honest measurement) with the measurements recorded in the test, so a future reader
+can tell a tuned budget from a guessed one.
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -526,3 +550,8 @@ it needs the real-data path re-stood to capture a component stack.
   consequence (a pending approval dropped from the queue) and is FIXED with a regression test (F32).
   The invalid-`<p>`-nesting half is **still open**: reproducible only against real-backend data, and my
   DOM-based search for it was invalid by construction (F33).
+- **2026-08-26** — **Both F8 halves now closed, and F31 with them.** The `<p>`-nesting half was
+  `EnvelopeBanner` (F34) — found by re-standing the real-backend path, since it cannot render in
+  DEMO_MODE at all. Verified 10 warnings → 0 against real data. `getBurndown`'s timeout given real
+  headroom (F35). Gates: `tsc` clean · **3416 tests / 177 files green** · `DEMO_MODE=1 next build`
+  clean.
