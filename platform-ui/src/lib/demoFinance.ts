@@ -298,6 +298,24 @@ function financePath(p: string): string | null {
  *  none of them and are correctly refused. */
 const FINANCE_READERS = new Set(["demo-hansel"]);
 
+const AR_CUSTOMERS = [
+  { id: "cust-1", code: "C-001", name: "PT Bali Beach Resort", paymentTermsDays: 30, isPkp: true },
+  { id: "cust-2", code: "C-002", name: "CV Nusantara Kopi", paymentTermsDays: 14, isPkp: true },
+];
+
+const AR_OPEN_INVOICES = [
+  {
+    id: "inv-1", invoiceNo: "INV-2026-001", invoiceDate: "2026-02-10", dueDate: "2026-03-12",
+    total: "66600000.0000", amountPaid: "20000000.0000", outstanding: "46600000.0000",
+    customerName: "PT Bali Beach Resort",
+  },
+  {
+    id: "inv-2", invoiceNo: "INV-2026-002", invoiceDate: "2026-03-20", dueDate: "2026-04-03",
+    total: "27750000.0000", amountPaid: "0.0000", outstanding: "27750000.0000",
+    customerName: "CV Nusantara Kopi",
+  },
+];
+
 export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string): DemoResult | null {
   const tail = financePath(p);
   if (tail == null) return null;
@@ -325,6 +343,11 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   const jd = /^journals\/([^/]+)$/.exec(tail);
   if (jd) return ok(JOURNAL_DETAIL[jd[1]] ?? null);
   if (tail === "ledger/verify") return ok(LEDGER_CLEAN);
+  // The two pickers the receivables write forms are built from. Without these the forms render
+  // with EMPTY dropdowns in demo mode and the build gate still passes — the page would look built
+  // and be unusable, which is the frontend-first drift this codebase keeps getting bitten by.
+  if (tail === "ar/customers") return ok(AR_CUSTOMERS);
+  if (tail === "ar/open-invoices") return ok(AR_OPEN_INVOICES);
   if (tail === "ar/aging") return ok(AR_AGING);
   if (tail === "ap/aging") return ok(AP_AGING);
   if (tail === "ar/reconcile") return ok(AR_RECONCILE);

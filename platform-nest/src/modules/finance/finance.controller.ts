@@ -15,7 +15,7 @@
 // empty list and looks like it worked. That silent-empty failure is the single most likely bug in
 // this file, so there is exactly one helper and nothing calls withTenants directly.
 import {
-  BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query, Req, UseGuards,
+  BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import type { PoolClient } from "pg";
@@ -49,6 +49,30 @@ interface PostJournalBody {
   sourceEventId?: string;
   description?: string;
   lines?: Array<{ accountCode?: string; side?: string; amount?: number | string; memo?: string }>;
+}
+
+interface ArInvoiceBody {
+  customerId?: string;
+  invoiceNo?: string;
+  invoiceDate?: string;
+  dueDate?: string;
+  currencyCode?: string;
+  lines?: Array<{
+    description?: string; quantity?: number | string; unitPrice?: number | string;
+    revenueAccountCode?: string; taxCode?: string; taxRate?: number | string;
+  }>;
+}
+
+interface ArReceiptBody {
+  customerId?: string;
+  receiptNo?: string;
+  receiptDate?: string;
+  currencyCode?: string;
+  amount?: number | string;
+  bankAccountCode?: string;
+  reference?: string;
+  /** Optional immediate allocation. Omit to leave the money ON ACCOUNT. */
+  allocations?: Array<{ invoiceId?: string; amount?: number | string }>;
 }
 
 interface OwnershipBody {
@@ -654,4 +678,220 @@ export class FinanceController {
       return { ok: true };
     });
   }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // RECEIVABLES — the write side (F4)
+  //
+  // ── EVERY WRITE GOES THROUGH THE SUBLEDGER FUNCTION, NEVER A HAND-WRITTEN JOURNAL ─────────────
+  // `finance_ar_issue_invoice` / `_record_receipt` / `_allocate` are what post to the ledger and
+  // move the AR control account. A manual journal to the control account is BARRED in the database,
+  // and that bar is the only reason the aging can be trusted to tie to the balance sheet. These
+  // handlers therefore assemble rows and call the function; they never compute a journal themselves.
+  //
+  // ── `issue` AND `receipt` ARE SEPARATE CERBOS ACTIONS, ON PURPOSE ─────────────────────────────
+  // The duty matrix seeds `ar_receipt_posting` + `ar_writeoff_approve` as a BLOCKING conflict —
+  // pocket the cash, then write off the debt. That is only enforceable if the actions are separately
+  // grantable, so raising an invoice and banking money against one authorize distinctly even though
+  // both live on the same resource kind.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Raise a customer invoice and ISSUE it in one call.
+   *
+   * Draft-then-issue is two steps in the database because an invoice may legitimately sit unissued.
+   * It is ONE call here because a draft with no UI to finish it is a row nobody can act on — a
+   * half-created invoice that never posts is worse than no invoice, since the aging then silently
+   * disagrees with what the customer was told. If a real draft workflow is wanted it should arrive
+   * as its own endpoint, not as a flag on this one.
+   */
+  @Post(":tenantId/finance/ar/invoices")
+  @HttpCode(201)
+  async createArInvoice(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: ArInvoiceBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "issue");
+
+    const invoiceDate = requiredIsoDate(body?.invoiceDate, "invoiceDate");
+    const dueDate = requiredIsoDate(body?.dueDate, "dueDate");
+    if (dueDate < invoiceDate) throw new BadRequestException("dueDate cannot be before invoiceDate");
+    const invoiceNo = body?.invoiceNo?.trim();
+    if (!invoiceNo) throw new BadRequestException("invoiceNo is required");
+    if (!body?.customerId) throw new BadRequestException("customerId is required");
+    if (!Array.isArray(body?.lines) || body.lines.length === 0) {
+      // A HEADER IS NOT AN INVOICE. finance_ar_issue_invoice raises FINANCE_AR_EMPTY_INVOICE on one
+      // with no lines. Refusing here turns a mid-transaction database exception into a field-level
+      // 400 the form can point at.
+      throw new BadRequestException("at least one line is required — an invoice with no lines cannot be issued");
+    }
+
+    const lines = body.lines.map((l, i) => {
+      const qty = Number(l?.quantity ?? 1);
+      const unit = Number(l?.unitPrice);
+      if (!l?.description?.trim()) throw new BadRequestException(`line ${i + 1}: description is required`);
+      if (!l?.revenueAccountCode) throw new BadRequestException(`line ${i + 1}: revenueAccountCode is required`);
+      if (!Number.isFinite(qty) || qty <= 0) throw new BadRequestException(`line ${i + 1}: quantity must be greater than zero`);
+      if (!Number.isFinite(unit) || unit < 0) throw new BadRequestException(`line ${i + 1}: unitPrice must be zero or more`);
+      const rate = l?.taxRate === undefined || l.taxRate === null ? null : Number(l.taxRate);
+      if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
+      }
+      const subtotal = qty * unit;
+      // Indonesian PPN is 12% applied to 11/12 of the base, not a flat 11%. Computed HERE rather
+      // than accepted from the caller so every invoice this API issues agrees with the ledger's own
+      // convention — a caller passing a pre-computed tax would be free to disagree with it.
+      const tax = rate === null ? 0 : Math.round(subtotal * (11 / 12) * (rate / 100));
+      return {
+        description: l.description.trim(), quantity: qty, unitPrice: unit, subtotal,
+        revenueAccountCode: l.revenueAccountCode, taxCode: l?.taxCode ?? null, taxRate: rate, tax,
+      };
+    });
+
+    const subtotal = lines.reduce((t, l) => t + l.subtotal, 0);
+    const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
+    if (subtotal + taxTotal <= 0) throw new BadRequestException("invoice total must be greater than zero");
+
+    return withFinance(tenantId, async (c) => {
+      const inv = await c.query<{ id: string }>(
+        `INSERT INTO finance_ar_invoices
+           (tenant_id, customer_id, invoice_no, invoice_date, due_date, currency_code,
+            subtotal, tax_total, total, amount_paid, status)
+         VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8,$9,0,'draft') RETURNING id`,
+        [tenantId, body.customerId, invoiceNo, invoiceDate, dueDate,
+         body?.currencyCode ?? "IDR", subtotal, taxTotal, subtotal + taxTotal],
+      );
+      const invoiceId = inv.rows[0].id;
+
+      let lineNo = 1;
+      for (const l of lines) {
+        const acct = await c.query<{ id: string }>(
+          `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+          [tenantId, l.revenueAccountCode],
+        );
+        if (!acct.rows[0]) throw new BadRequestException(`unknown revenue account ${l.revenueAccountCode}`);
+        await c.query(
+          `INSERT INTO finance_ar_invoice_lines
+             (tenant_id, invoice_id, line_no, description, quantity, unit_price, line_subtotal,
+              revenue_account_id, tax_code, tax_rate, tax_amount)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [tenantId, invoiceId, lineNo++, l.description, l.quantity, l.unitPrice, l.subtotal,
+           acct.rows[0].id, l.taxCode, l.taxRate, l.tax],
+        );
+      }
+
+      // This is what posts the journal and moves the control account.
+      await c.query(`SELECT finance_ar_issue_invoice($1,$2)`, [invoiceId, req.principal.userId]);
+      return { id: invoiceId, subtotal, taxTotal, total: subtotal + taxTotal };
+    });
+  }
+
+  /**
+   * Bank a customer receipt, optionally allocating it against invoices in the same call.
+   *
+   * Banking the money and deciding WHICH DEBT it settles are deliberately two acts:
+   * `finance_ar_allocate` posts nothing, it only records the match. `allocations` is optional
+   * precisely so money can be banked before anyone knows what it pays for — the normal case for a
+   * bare bank transfer — and the unallocated remainder then shows as `payments on account`, which
+   * is a different fact from the aging and is reported separately for that reason.
+   */
+  @Post(":tenantId/finance/ar/receipts")
+  @HttpCode(201)
+  async createArReceipt(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: ArReceiptBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "receipt");
+
+    const receiptDate = requiredIsoDate(body?.receiptDate, "receiptDate");
+    const receiptNo = body?.receiptNo?.trim();
+    if (!receiptNo) throw new BadRequestException("receiptNo is required");
+    if (!body?.customerId) throw new BadRequestException("customerId is required");
+    if (!body?.bankAccountCode) throw new BadRequestException("bankAccountCode is required");
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be greater than zero");
+
+    const allocations = (body?.allocations ?? []).map((a, i) => {
+      const amt = Number(a?.amount);
+      if (!a?.invoiceId) throw new BadRequestException(`allocation ${i + 1}: invoiceId is required`);
+      if (!Number.isFinite(amt) || amt <= 0) throw new BadRequestException(`allocation ${i + 1}: amount must be greater than zero`);
+      return { invoiceId: a.invoiceId, amount: amt };
+    });
+    const allocatedTotal = allocations.reduce((t, a) => t + a.amount, 0);
+    if (allocatedTotal > amount) {
+      // The database enforces this too (ck_finance_ar_receipts_allocated). Refusing here names both
+      // figures, which a raw constraint violation does not.
+      throw new BadRequestException(
+        `allocations total ${allocatedTotal} exceeds the receipt amount ${amount}`,
+      );
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const bank = await c.query<{ id: string }>(
+        `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+        [tenantId, body.bankAccountCode],
+      );
+      if (!bank.rows[0]) throw new BadRequestException(`unknown bank account ${body.bankAccountCode}`);
+
+      const rec = await c.query<{ id: string }>(
+        `INSERT INTO finance_ar_receipts
+           (tenant_id, customer_id, receipt_no, receipt_date, currency_code, amount, bank_account_id, reference)
+         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8) RETURNING id`,
+        [tenantId, body.customerId, receiptNo, receiptDate, body?.currencyCode ?? "IDR",
+         amount, bank.rows[0].id, body?.reference ?? null],
+      );
+      const receiptId = rec.rows[0].id;
+
+      await c.query(`SELECT finance_ar_record_receipt($1,$2)`, [receiptId, req.principal.userId]);
+      for (const a of allocations) {
+        await c.query(`SELECT finance_ar_allocate($1,$2,$3,$4)`,
+          [receiptId, a.invoiceId, a.amount, req.principal.userId]);
+      }
+      return { id: receiptId, amount, allocated: allocatedTotal, onAccount: amount - allocatedTotal };
+    });
+  }
+
+  /** The customer list, so a form can offer a picker instead of asking for a uuid. */
+  @Get(":tenantId/finance/ar/customers")
+  async listArCustomers(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT id, code, name, payment_terms_days AS "paymentTermsDays", is_pkp AS "isPkp"
+           FROM finance_ar_customers
+          WHERE tenant_id = $1 AND status = 'active'
+          ORDER BY code`,
+        [tenantId],
+      );
+      return r.rows;
+    });
+  }
+
+  /** Open invoices for a customer — what a receipt can be allocated against. */
+  @Get(":tenantId/finance/ar/open-invoices")
+  async listArOpenInvoices(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("customerId") customerId?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "read");
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT i.id, i.invoice_no AS "invoiceNo", i.invoice_date AS "invoiceDate",
+                i.due_date AS "dueDate", i.total, i.amount_paid AS "amountPaid",
+                (i.total - i.amount_paid) AS outstanding, cu.name AS "customerName"
+           FROM finance_ar_invoices i
+           JOIN finance_ar_customers cu ON cu.id = i.customer_id
+          WHERE i.tenant_id = $1
+            AND i.status IN ('issued','paid')
+            AND i.total > i.amount_paid
+            AND ($2::uuid IS NULL OR i.customer_id = $2::uuid)
+          ORDER BY i.due_date`,
+        [tenantId, customerId ?? null],
+      );
+      return r.rows;
+    });
+  }
+
 }

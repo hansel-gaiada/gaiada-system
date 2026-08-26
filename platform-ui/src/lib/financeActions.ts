@@ -127,3 +127,50 @@ export async function postJournalEntry(input: {
 export async function reverseJournalEntry(entryId: string, reason: string, date?: string): Promise<FinanceActionResult<{ id: string }>> {
   return send(`/finance/journals/${entryId}/reverse`, { reason, date });
 }
+
+// ── Receivables (F4) ────────────────────────────────────────────────────────────────────────────
+// Same posture as everything above: no rule is re-implemented here. The invoice total, the PPN base
+// (12% of 11/12, not a flat 12%), whether the revenue account exists, whether an allocation exceeds
+// its receipt — all of that is decided by the server and the database, and the message they give is
+// what the form shows. A form that pre-validated would be a second copy free to drift, and the copy
+// users see is always the one that drifts.
+
+export interface ArInvoiceLineInput {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  revenueAccountCode: string;
+  taxCode?: string;
+  /** Percent, e.g. 12. Omit for a line that carries no PPN. */
+  taxRate?: number | null;
+}
+
+export async function issueArInvoice(input: {
+  customerId: string; invoiceNo: string; invoiceDate: string; dueDate: string;
+  lines: ArInvoiceLineInput[];
+}): Promise<FinanceActionResult<{ id: string; total: number }>> {
+  const r = await send<{ id: string; subtotal: number; taxTotal: number; total: number }>(
+    "/finance/ar/invoices", input,
+  );
+  if (r.ok) {
+    revalidatePath("/finance/receivables");
+    revalidatePath("/finance");   // the overview carries the AR position and its tie-out
+  }
+  return r as FinanceActionResult<{ id: string; total: number }>;
+}
+
+export async function recordArReceipt(input: {
+  customerId: string; receiptNo: string; receiptDate: string; amount: number;
+  bankAccountCode: string; reference?: string;
+  /** Omit entirely to bank the money ON ACCOUNT — which is the normal case for a bare transfer. */
+  allocations?: Array<{ invoiceId: string; amount: number }>;
+}): Promise<FinanceActionResult<{ id: string; allocated: number; onAccount: number }>> {
+  const r = await send<{ id: string; amount: number; allocated: number; onAccount: number }>(
+    "/finance/ar/receipts", input,
+  );
+  if (r.ok) {
+    revalidatePath("/finance/receivables");
+    revalidatePath("/finance");
+  }
+  return r as FinanceActionResult<{ id: string; allocated: number; onAccount: number }>;
+}

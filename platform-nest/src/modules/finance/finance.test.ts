@@ -266,6 +266,161 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     });
   });
 
+
+  // ── The receivables WRITE path, driven over HTTP ───────────────────────────────────────────────
+  //
+  // These are the first finance endpoints that CREATE money records rather than read them, so the
+  // thing under test is not "does it return 201" — it is whether the subledger still ties to the
+  // general ledger afterwards. `finance_ar_reconcile` returning clean is the assertion that matters;
+  // a 201 with a broken tie-out would be a worse outcome than a 500.
+  describe("receivables — the write path", () => {
+    let customerId = "";
+    let invoiceId = "";
+
+    it("a customer can be listed, so a form need not ask for a uuid", async () => {
+      await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        await c.query(
+          `INSERT INTO finance_ar_customers (tenant_id, code, name, payment_terms_days, is_pkp)
+           VALUES ($1,'C-900','PT Uji Terima',30,true)`,
+          [tenant],
+        );
+      }, { modules: ["finance"] });
+
+      const r = await get(`/api/${tenant}/finance/ar/customers`, clerk);
+      expect(r.statusCode).toBe(200);
+      const rows = r.json() as Array<{ id: string; code: string }>;
+      customerId = rows.find((x) => x.code === "C-900")!.id;
+      expect(customerId).toBeTruthy();
+    });
+
+    it("REFUSES an invoice with no lines, rather than letting the database raise mid-transaction", async () => {
+      // finance_ar_issue_invoice raises FINANCE_AR_EMPTY_INVOICE on a header with no lines. Catching
+      // it here turns an opaque 500 into a field-level 400 a form can point at — and this case is
+      // real: the demo seed hit it on the live schema before this guard existed.
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-EMPTY", invoiceDate: "2026-03-01", dueDate: "2026-03-31",
+          lines: [],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+      expect(r.json()).toHaveProperty("error");
+    });
+
+    it("REFUSES a due date before the invoice date", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-BACKWARDS", invoiceDate: "2026-03-31", dueDate: "2026-03-01",
+          lines: [{ description: "x", unitPrice: 1000, revenueAccountCode: "4100" }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("issues an invoice, computing PPN as 12% of 11/12 of the base", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-900", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{
+            description: "Jasa konsultasi", quantity: 1, unitPrice: 60_000_000,
+            revenueAccountCode: "4100", taxCode: "PPN", taxRate: 12,
+          }],
+        },
+      });
+      expect(r.statusCode).toBe(201);
+      const body = r.json() as { id: string; subtotal: number; taxTotal: number; total: number };
+      invoiceId = body.id;
+      expect(body.subtotal).toBe(60_000_000);
+      // 60,000,000 x 11/12 x 12% = 6,600,000. NOT 7,200,000 (a flat 12%) and NOT 6,600,000 by
+      // accident — the 11/12 base is the whole point of the Indonesian rule.
+      expect(body.taxTotal).toBe(6_600_000);
+      expect(body.total).toBe(66_600_000);
+    });
+
+    it("an unknown revenue account is refused by CODE, not swallowed", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId, invoiceNo: "INV-BADACCT", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "x", unitPrice: 1000, revenueAccountCode: "9999" }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("the issued invoice appears in the aging AND the subledger still ties to the ledger", async () => {
+      const aging = (await get(`/api/${tenant}/finance/ar/aging?asOf=2026-03-31`, clerk)).json() as
+        Array<{ customerName: string; totalOutstanding: string }>;
+      expect(aging.some((a) => a.customerName === "PT Uji Terima")).toBe(true);
+
+      // ★ THE REAL ASSERTION. Issuing posted a journal and moved the control account; if those two
+      // disagreed, the aging and the balance sheet would answer "what are we owed" differently.
+      const rec = (await get(`/api/${tenant}/finance/ar/reconcile?asOf=2026-03-31`, clerk)).json() as
+        { clean: boolean; problems: unknown[] };
+      expect(rec.problems).toEqual([]);
+      expect(rec.clean).toBe(true);
+    });
+
+    it("banks a receipt and leaves the unallocated remainder ON ACCOUNT", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/receipts`, headers: asUser(clerk),
+        payload: {
+          customerId, receiptNo: "RCPT-900", receiptDate: "2026-03-20", amount: 30_000_000,
+          bankAccountCode: "1120", reference: "Transfer",
+          allocations: [{ invoiceId, amount: 20_000_000 }],
+        },
+      });
+      expect(r.statusCode).toBe(201);
+      const body = r.json() as { allocated: number; onAccount: number };
+      expect(body.allocated).toBe(20_000_000);
+      // The 10,000,000 remainder is the case the three-part position exists to surface: it lowers
+      // the net while the invoice it might have settled still sits in the aging.
+      expect(body.onAccount).toBe(10_000_000);
+
+      const rec = (await get(`/api/${tenant}/finance/ar/reconcile?asOf=2026-03-31`, clerk)).json() as
+        { clean: boolean; position: { paymentsOnAccount: string } };
+      expect(rec.clean).toBe(true);
+      expect(Number(rec.position.paymentsOnAccount)).toBe(10_000_000);
+    });
+
+    it("REFUSES allocations totalling more than the receipt", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/receipts`, headers: asUser(clerk),
+        payload: {
+          customerId, receiptNo: "RCPT-901", receiptDate: "2026-03-21", amount: 1_000_000,
+          bankAccountCode: "1120",
+          allocations: [{ invoiceId, amount: 5_000_000 }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("a plain member cannot issue an invoice or bank a receipt", async () => {
+      // Cerbos, not a UI check. `outsider` holds `member` and no finance role at all.
+      const inv = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(outsider),
+        payload: {
+          customerId, invoiceNo: "INV-NOPE", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "x", unitPrice: 1000, revenueAccountCode: "4100" }],
+        },
+      });
+      expect(inv.statusCode).toBe(403);
+
+      const rcpt = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/receipts`, headers: asUser(outsider),
+        payload: {
+          customerId, receiptNo: "RCPT-NOPE", receiptDate: "2026-03-20",
+          amount: 1000, bankAccountCode: "1120",
+        },
+      });
+      expect(rcpt.statusCode).toBe(403);
+    });
+  });
+
   // ── Cross-company isolation, over HTTP ────────────────────────────────────────────────────────
   it("another company's books are unreachable", async () => {
     const other = await createCompany("Other Co", ["finance"]);

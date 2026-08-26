@@ -376,3 +376,21 @@ export async function listOwnership(u: string, t: string, asOf?: string): Promis
 /** Settings. `null` when unreachable — a settings page with invented defaults is worse than none. */
 export const getFinanceSettings = (u: string, t: string) =>
   financeData(platformFetch<FinanceSettings | null>(`/api/${t}/finance/settings`, u), null);
+
+// ── Receivables, the write side (F4) ────────────────────────────────────────────────────────────
+export interface ArCustomer {
+  id: string; code: string; name: string; paymentTermsDays: number; isPkp: boolean | null;
+}
+export interface ArOpenInvoice {
+  id: string; invoiceNo: string; invoiceDate: string; dueDate: string;
+  total: string; amountPaid: string; outstanding: string; customerName: string;
+}
+
+export const listArCustomers = (u: string, t: string) =>
+  financeData(platformFetch<ArCustomer[]>(`/api/${t}/finance/ar/customers`, u), [] as ArCustomer[]);
+
+export const listArOpenInvoices = (u: string, t: string, customerId?: string) =>
+  financeData(
+    platformFetch<ArOpenInvoice[]>(`/api/${t}/finance/ar/open-invoices${qs({ customerId })}`, u),
+    [] as ArOpenInvoice[],
+  );

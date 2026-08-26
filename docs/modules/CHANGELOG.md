@@ -11,6 +11,45 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.40.0` + platform-ui `0.55.0` - receivables can be WRITTEN (2026-08-26) - DEV-VERIFIED
+
+**Added**
+- `POST /api/:t/finance/ar/invoices` - raises and ISSUES a customer invoice. Draft-then-issue is two
+  steps in the database; it is one call here because a draft with no UI to finish it is a row nobody
+  can act on, and an invoice that never posts makes the aging disagree with what the customer was
+  told.
+- `POST /api/:t/finance/ar/receipts` - banks a receipt, with OPTIONAL allocation. Banking money and
+  deciding which debt it settles are two acts (`finance_ar_allocate` posts nothing), so money can be
+  banked before anyone knows what it pays for and the remainder shows as `payments on account`.
+- `GET /api/:t/finance/ar/customers` and `.../ar/open-invoices` - so a form offers a picker instead
+  of asking for a uuid.
+- `components/finance/ArForms.tsx` + both forms wired into `/finance/receivables`.
+
+**Notes**
+- ★ Every write goes through the SUBLEDGER FUNCTION, never a hand-written journal. A manual journal
+  to the AR control account is barred in the database, and that bar is the only reason the aging can
+  be trusted to tie to the balance sheet. The handlers assemble rows and call the function.
+- `issue` and `receipt` authorize as SEPARATE Cerbos actions on the same kind, because
+  `ar_receipt_posting` + `ar_writeoff_approve` is a seeded BLOCKING conflict (take the cash, then
+  write off the debt) and that is only enforceable if the actions are separately grantable.
+- PPN is computed server-side as 12% of 11/12 of the base. The form shows a preview and SAYS the
+  server recomputes it - a form that quietly re-implemented Indonesian VAT would be a second copy
+  free to drift, and the copy users see is always the one that drifts.
+- The account pickers are built from the REAL chart, not hardcoded codes: which codes exist differs
+  per company, and offering one that does not exist fails at submit with an error nobody can act on.
+- 9 new tests drive the endpoints over real HTTP with real Cerbos. The assertion that matters is not
+  the 201 - it is that `finance_ar_reconcile` still returns CLEAN afterwards. A 201 with a broken
+  tie-out would be worse than a 500. Also pinned: an empty-lines invoice is a 400 not a
+  mid-transaction `FINANCE_AR_EMPTY_INVOICE`, over-allocation is refused by amount, and a plain
+  member gets 403 on both writes.
+- Demo fixtures added for both new GETs. Without them the forms render with EMPTY dropdowns in demo
+  mode and the build gate still passes - the page would look built and be unusable.
+
+**Still not built on this page**
+- Credit notes and write-offs (write-off is a separate grant, deliberately), and adding a customer.
+
+---
+
 ### platform-nest `0.39.2` - the finance seed counted calls, not writes (2026-08-26) - DEV-VERIFIED
 
 **Fixed**

@@ -2,10 +2,14 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getArAging, reconcileAr, listPeriods, money, type ArAgingRow } from "@/lib/finance";
+import {
+  getArAging, reconcileAr, listPeriods, listArCustomers, listArOpenInvoices, listAccounts,
+  money, type ArAgingRow,
+} from "@/lib/finance";
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
+import { IssueInvoiceForm, RecordReceiptForm } from "@/components/finance/ArForms";
 
 // Receivables — what customers owe, bucketed by age, and whether that agrees with the ledger.
 //
@@ -36,10 +40,25 @@ export default async function FinanceReceivablesPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [rows, rec] = await Promise.all([
+  const [rows, rec, customers, openInvoices, accounts] = await Promise.all([
     getArAging(userId, tenant, asOf),
     reconcileAr(userId, tenant, asOf),
+    listArCustomers(userId, tenant),
+    listArOpenInvoices(userId, tenant),
+    listAccounts(userId, tenant),
   ]);
+
+  // The pickers are built from the REAL chart, not a hardcoded list of codes. A form offering `4100`
+  // on a company whose chart does not carry it would fail at submit with an "unknown revenue
+  // account" the user cannot act on — and which codes exist genuinely differs per company, because
+  // the chart is instantiated from a template and then edited.
+  const revenueAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "revenue" && a.allowManualPosting && a.status === "active")
+    .map((a) => ({ code: a.code, name: a.name }));
+  const bankAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "asset" && a.allowManualPosting && a.status === "active"
+      && (a.code.startsWith("11") || /bank|kas/i.test(a.name)))
+    .map((a) => ({ code: a.code, name: a.name }));
 
   return (
     <div className="fin-page">
@@ -76,17 +95,25 @@ export default async function FinanceReceivablesPage({
         />
       </Card>
 
-      <Card title="Raising an invoice and recording a receipt" style={{ marginTop: 22 }}>
+      <div style={{ marginTop: 22, display: "grid", gap: 22 }}>
+        <IssueInvoiceForm customers={customers} revenueAccounts={revenueAccounts} />
+        <RecordReceiptForm
+          customers={customers}
+          openInvoices={openInvoices}
+          bankAccounts={bankAccounts}
+        />
+      </div>
+
+      <Card title="What is still not built here" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Both are <strong>not built here yet</strong>. The subledger behind this page is complete —
-          invoices, receipts, allocations and the reconciliation above are all implemented and
-          tested — but the write endpoints are not exposed to the UI, so there is no form to raise an
-          invoice or apply a payment from here.
+          Credit notes and write-offs are not built. A write-off is deliberately a separate grant
+          from banking a receipt — holding both is a seeded blocking conflict in the duty matrix
+          (take the cash, then write off the debt), so the two must never arrive as one screen.
         </p>
         <p className="fin-muted">
-          Client invoicing for the agency lives at <a href="/invoices">Invoices</a>, which is a
-          different thing: that module produces the document a client receives. This page is the
-          accounting position it creates.
+          Adding a customer is also not built; customer records currently come from the finance
+          seed. A customer is not a CRM client — it carries the NPWP, the PKP flag and the payment
+          terms that decide how an invoice is taxed and aged.
         </p>
       </Card>
     </div>
