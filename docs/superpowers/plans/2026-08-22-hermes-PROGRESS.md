@@ -24,14 +24,14 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
-| Platform prerequisites | 22 | 15 | 0 | 3 | **4** |
+| Platform prerequisites | 22 | 14 | 0 | 4 | **4** |
 | **Hermes runtime (H0–H9)** | 25 | 14 | 0 | **1** | **10** |  *(H3 dropped; H0/H1/H2 split)*
 | Agent seats | 15 | 0 | 0 | **15** | 0 |  *(seeded DISABLED — enablement is per-seat, after evals)*
 | Persona packs | 14 | 12 | 0 | **2** | 0 |  *(examples/ blocked on corpus privacy)*
 | Eval suites | 14 | 13 | 0 | **1** | 0 |  *(dept-pm authored; 13 seats still need one before they may be enabled)*
 | New tools | 25 | 25 | 0 | 0 | 0 |
 | RAG for the workforce (R1–R5) | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **120** | **83** | **0** | **22** | **15** |
+| **Total** | **120** | **82** | **0** | **23** | **15** |
 
 **Read this honestly: 14 of 120 are DEV-VERIFIED** (and see the 2026-08-26 correction — B2/B3 were
 already closed by other sessions, so the identity plumbing is further along than these counts imply). The session closed P0's data model and a
@@ -85,7 +85,7 @@ employee-facing.
 | 2 | Risk-tier schema (R0–R3) | **DEV-VERIFIED** | `risk_policy` in `202608221746`; `min_tier` DEFAULT `R2` asserted in-migration (fail closed) |
 | 3 | Environment registry | **DEV-VERIFIED** | **REUSED `infra_hosts`** rather than a second table; delphi/helios/hostinger-wp seeded, closing MSO-04 OQ-1 |
 | 4 | Risk computation fn | **DEV-VERIFIED** | `mcp-hub/src/risk.ts`, 16/16 tests, `tsc` clean. Both invariants pinned (floor; fail-closed) |
-| 5 | Attribution: `approved_by` + `executed_by` | PLANNED | explicit-absence rule; extends the shipped `actor_id`/`metadata.via` |
+| 5 | Attribution: `approved_by` + `executed_by` | **PROTOTYPED** | `202608261100`; + `approval_channel` with two CHECKs, both proven to reject. Ambient wiring is a follow-up |
 | 6 | Persona pack format frozen | **PROTOTYPED** | `persona/README.md` + two packs authored against it |
 | 7 | `x-act-for` envelope contract frozen | PLANNED | contract only; implementation is P3 |
 | 8 | Naming decision | **RESOLVED 2026-08-23** | `SOUL.md` says **Zedano**, identity is `zedano@gaiada.com` — two sources already agree. Standardise on **Zedano** |
@@ -316,6 +316,46 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 — approval attribution columns (P0 item 5) · PROTOTYPED
+
+`202608261100_activity_approval_attribution.sql`. Both lints pass; **applied to a scratch DB and both
+self-assertions fired**. This closes the one P0 item I had designed at length and never built — named
+as missing rather than left to be discovered.
+
+`activities` gains `approved_by` (FK users) · `approval_channel` · `executed_by`.
+
+**What it fixes: approval is not delegation.** The existing shape (`actor_id` = the human,
+`metadata.via` = the agent) models DELEGATION — "Alice's agent acted AS Alice". It cannot express
+APPROVAL — "Pantheon acted on its own authority and a human authorised THIS action". Recorded in the
+author/co-author shape that reads as *"the boss did it, co-authored by Pantheon"*, which is false: he
+did not do it, he permitted it. Ask *"what did the boss actually DO last month?"* and a
+delegation-shaped record returns 400 actions he merely clicked approve on.
+
+**Two constraints, both proven to reject:**
+- `approved_by IS NULL OR approval_channel IS NOT NULL` — an approval must say where it came from, or
+  the question that matters after a channel compromise ("which approvals arrived via Discord in the
+  last 30 days?") has no answer but *"all of them"*.
+- `approval_channel IN ('erp','discord','wa','telegram','api')` — a channel invented at a call site is
+  a channel no query will find.
+
+**Deliberate divergence from the `via` precedent: COLUMNS, not a metadata key.** `via` is
+authorization-neutral, so jsonb is fine for it. `approved_by` is the security-relevant half, and a
+jsonb key can hold a uuid referencing nobody — an audit row claiming approval by a nonexistent user
+manufactures accountability, which is worse than no row. A foreign key cannot lie that way.
+
+**`writeActivity` was NOT given three more parameters.** It has 263 call sites, and this estate
+already learned that threading an attribution field through them makes it OPT-IN — "the failure mode
+of an opt-in audit field is that the site somebody forgets is the site that mattered". These will be
+populated from request-scoped ambient context exactly as `via` is. **That wiring is a follow-up; the
+columns are useless-but-harmless until it lands**, and saying so here is cheaper than someone finding
+empty columns later and assuming they are broken.
+
+**A filename trap worth recording:** `date -u` read `202608260744` while the head was already
+`202608261030` from a concurrent session. A migration that sorts BEFORE an applied one **never runs on
+an existing database, silently**. Stamped `202608261100` instead — ordering is the property the naming
+rule exists to protect, and it wins over matching a clock that is behind. In a checkout that gained
+**52 migrations** while this session ran, the local clock is not a reliable source of "later".
 
 ### 2026-08-26 — `agents.*` verified against the LIVE Cerbos policy · DEV-VERIFIED
 
