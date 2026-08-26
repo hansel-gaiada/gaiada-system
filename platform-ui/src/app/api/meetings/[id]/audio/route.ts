@@ -9,9 +9,9 @@ import { getRecording } from "@/lib/meetings";
 // Why a route handler and not a server action: a Server Action buffers the whole body on this
 // server and is capped (1 MB by default — a 200 MB video died with "Body exceeded 1 MB limit"), and
 // the browser gets no progress events from it. Here the browser POSTs the multipart body itself
-// (XMLHttpRequest, so it can show progress) and this handler forwards the body as a STREAM to the
-// platform — same content-type (boundary intact), same length, auth added server-side. Nothing is
-// parsed or held here; the platform enforces the size/type caps and its 413/415 pass straight back.
+// (XMLHttpRequest, so it can show progress) and this handler forwards the body to the platform —
+// same content-type (boundary intact), auth added server-side. Nothing is parsed here; the platform
+// enforces the size/type caps and its 4xx pass straight back.
 // One of the few `app/api/*` handlers, for the reason platform-ui/CLAUDE.md allows them: the browser
 // itself must hit a URL.
 export const dynamic = "force-dynamic";
@@ -53,26 +53,43 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!pre.data) return NextResponse.json({ error: "This briefing no longer exists." }, { status: 404, headers: noStore });
 
   const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
-  // Content-type (with its multipart boundary) is forwarded; content-length deliberately is NOT.
-  // Forwarding it made undici police the byte count of the streamed body and a 170 MB upload died
-  // with UND_ERR_REQ_CONTENT_LENGTH_MISMATCH. Without it the hop is chunked, which @fastify/multipart
-  // (busboy) reads exactly the same way, and the platform's own size caps still apply.
+  // Content-type (with its multipart boundary) is forwarded verbatim. The body is read in full here
+  // and sent as one buffer — NOT piped as a stream. Piping `req.body` (duplex: "half") looked right
+  // and worked for small files, but through Next's request plumbing a 170 MB body reached the platform
+  // truncated: busboy failed within ~450 ms and the controller reported it as "exceeds cap". Reading
+  // it first costs memory equal to the file (the platform's video cap, 500 MB, bounds it — the same
+  // cost `platformUpload` already pays on the server-action path) and is verified end to end.
   const headers: Record<string, string> = { ...(await platformAuthHeaders(userId)), "content-type": contentType };
+  let body: ArrayBuffer;
+  try {
+    body = await req.arrayBuffer();
+    // A body shorter than the browser declared means something between the browser and here cut it
+    // (Next's `middlewareClientMaxBodySize`, a proxy limit). Refuse loudly rather than hand the
+    // platform a truncated multipart it can only report as "exceeds cap".
+    const declared = Number(req.headers.get("content-length") ?? NaN);
+    if (Number.isFinite(declared) && body.byteLength < declared) {
+      console.error(`[meetings/audio] body truncated: received ${body.byteLength} of ${declared} bytes`);
+      return NextResponse.json(
+        { error: `The upload arrived truncated (${body.byteLength} of ${declared} bytes) — a request-size limit between the browser and this server cut it. Check next.config.ts middlewareClientMaxBodySize / any proxy limit.` },
+        { status: 400, headers: noStore },
+      );
+    }
+  } catch (e) {
+    const err = e as { message?: string };
+    return NextResponse.json({ error: `The upload did not arrive in full (${err.message ?? "read error"}) — try again.` }, { status: 400, headers: noStore });
+  }
 
   let upstream: Response;
   try {
-    // `duplex: "half"` is what undici requires to send a ReadableStream body.
     upstream = await fetch(`${base}/api/${tenant}/meetings/recordings/${encodeURIComponent(id)}/audio`, {
       method: "POST",
       headers,
-      body: req.body,
+      body,
       cache: "no-store",
-      // @ts-expect-error — `duplex` is not in the DOM RequestInit type yet, but undici needs it for streamed bodies.
-      duplex: "half",
     });
   } catch (e) {
-    // Say WHAT failed — "could not be reached" hid a real cause once (a 170 MB upload). undici puts the
-    // socket-level reason on `cause`.
+    // Say WHAT failed — "could not be reached" hid a real cause once. undici puts the socket-level
+    // reason on `cause`.
     const err = e as { message?: string; cause?: { code?: string; message?: string } };
     const reason = err.cause?.code ?? err.cause?.message ?? err.message ?? "unknown error";
     console.error("[meetings/audio] upstream fetch failed:", reason, err);

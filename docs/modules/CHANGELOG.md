@@ -121,6 +121,16 @@ local stack). None of these mean "production-done".
   (`duplex: "half"`, no buffering, platform's 413/415 passed straight back) — and the card shows
   `43% · 86 MB of 200 MB` while it goes. `components/prd/uploadWithProgress.ts` (6 tests, XHR
   injected); DEMO_MODE branch in the route updates the demo store like the action does.
+  **Driven against the live host platform with a 170 MB video — three more walls fell on the way:**
+  (1) forwarding the browser's `content-length` on a streamed hop → `UND_ERR_REQ_CONTENT_LENGTH_MISMATCH`;
+  (2) piping `req.body` as a stream reached the platform truncated → the route now reads the body in
+  full and sends one buffer (memory = file size, bounded by the 500 MB cap, same as `platformUpload`);
+  (3) the real cut: **`experimental.middlewareClientMaxBodySize` defaults to 10 MB** — because the app
+  has a `middleware.ts`, Next buffers every request body for middleware and truncates it there; the
+  route received exactly 10,485,248 of 178,258,106 bytes and the platform's busboy error was reported
+  as "exceeds the 524288000-byte cap". Raised to 520 MB alongside `bodySizeLimit`. The route now also
+  refuses a body shorter than its `content-length` with a message naming that limit, instead of
+  handing the platform a truncated multipart. Verified: 5 MB and 170 MB → 202 via the route.
 
 **Known gap (frontend)**
 - Gate chips need `GET /pipeline/runs/:id` per active run (the LIST carries no gates) — capped at 12;

@@ -203,6 +203,12 @@ weights 500/600 stopped being browser-synthesised). A11y: skip link, `:focus-vis
   runtime ICU. Pin both locale and `timeZone` (see `charts/chartHover.ts::fmtDate`).
 - vitest aliases `@` → `src` and `server-only` → an empty module (vitest has no `react-server`
   export condition). That's why a bad `server-only` import passes tests and fails the build.
+- **Two request-body caps, both 1–10 MB by default, both silent.** Server Actions cap at 1 MB
+  (`serverActions.bodySizeLimit`), and because `src/middleware.ts` exists Next buffers EVERY request
+  body for middleware and truncates it at `experimental.middlewareClientMaxBodySize` (10 MB) — a route
+  handler then sees a short body and the platform reports a multipart error that looks like a size
+  cap. Both are set to 520 MB in `next.config.ts` (the platform's 500 MB video cap + overhead); if an
+  upload "exceeds cap" at a size that plainly doesn't, check these first.
 - `next.config.ts` pins `outputFileTracingRoot: __dirname` because a parent folder has its own
   lockfile; removing it nests `.next/standalone/server.js` several dirs deep.
 - Bring the backend up with **both** compose files (`docker-compose.vps.yml` +

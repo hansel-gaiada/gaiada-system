@@ -22,6 +22,12 @@ const nextConfig: NextConfig = {
       // it streams through `app/api/meetings/[id]/audio` so the browser can show progress.
       bodySizeLimit: "520mb",
     },
+    // Second body cap, and the one that actually bit: because this app has a `middleware.ts`, Next
+    // buffers every request body so middleware can read it, and cuts it at this size (default
+    // 10 MB). A 170 MB upload reached `api/meetings/[id]/audio` as exactly 10,485,248 bytes, the
+    // platform's multipart parser choked on the truncated body, and the controller reported
+    // "exceeds cap". Same ceiling as the server-action limit above, for the same reason.
+    middlewareClientMaxBodySize: 520 * 1024 * 1024,
   },
 };
 export default nextConfig;
