@@ -105,7 +105,12 @@ export async function ratifyStatutory(): Promise<{
         await c.query(
           `INSERT INTO hr_statutory_parameters (tenant_id, set_id, key, value_json, unit, note)
            VALUES ($1,$2,$3,$4::jsonb,'bands',$5)
-           ON CONFLICT (set_id, key) DO UPDATE
+           -- The unique index is on (tenant_id, set_id, key) — NOT (set_id, key). An ON CONFLICT
+           -- target must name a real unique constraint exactly, and the shorter tuple raised
+           -- 42P10 against the live database. Checking that "an index mentioning both columns
+           -- exists" was not the same question as "a unique index on exactly these columns
+           -- exists", and only the second one is what ON CONFLICT accepts.
+           ON CONFLICT (tenant_id, set_id, key) DO UPDATE
              SET value_json = EXCLUDED.value_json, note = EXCLUDED.note`,
           [
             co.id, found.id, `pph21.ter.${cat}`, JSON.stringify(bands),
