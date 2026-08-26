@@ -318,6 +318,28 @@ both while my own platform-nest and platform-ui dev servers were running alongsi
 work. Both passed cleanly the moment those servers were stopped. Third occurrence this session of the
 same lesson: **on a shared, loaded machine, check the machine before believing a red result.**
 
+**F26 — I duplicated 30 changelog entries and my own verification said it was clean.** Preparing
+`ad5c9f67` I rebuilt `CHANGELOG.md` from HEAD plus my entries, slicing each entry out with
+`text[index(startHeading):index(endHeading)]`. The GM-02b entry's start marker was
+``### platform-ui `0.52.0` `` — a version **another session had already used**, sorting earlier in the
+file — so the slice ran from their entry to the first `0.48.0` and swallowed ~30 entries (finance
+0.1.0-0.14.1, lms 0.1.0-0.7.0, lab-runner, hr 0.4.0, platform-nest 0.37.0/0.38.1). Inserting that
+block into a file that already contained it duplicated all thirty. **1173 lines.**
+
+I then ran `git diff --numstat`, saw **0 deletions**, and concluded I had only appended. True, and
+worthless: **a duplication IS pure insertion.** The repo's guidance (added the same day, for a
+different session's incident) prescribes exactly that check — it is necessary but not sufficient, and
+`CLAUDE.md` now carries the caveat plus the real invariant: verify every heading still appears exactly
+once, and never key a text slice on a version number, which is the one token another session may have
+claimed while you were not looking.
+
+Fixed in `6259b06c` by removing only byte-identical entry blocks, keeping the **last** copy of each —
+the duplicates were inserted at the TOP, so keeping the first would have stranded ~28 other sessions'
+entries out of chronological place. My two entries renumbered off the collision they caused
+(GM-02b -> 0.56.0, GM-09 -> 0.57.0). The same read-modify-write pattern touched three other docs;
+all three were checked and are clean, because only the changelog had markers that collided with
+another session's content.
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -393,3 +415,6 @@ same lesson: **on a shared, loaded machine, check the machine before believing a
 - **2026-08-26 (B4)** — Gates after the fix: `tsc` clean · **3222 tests / 177 files green** ·
   `DEMO_MODE=1 next build` clean. F21 (the GM has no company-grain grant) is an **owner decision**,
   not a code change, and is the one thing this work now waits on.
+- **2026-08-26** — Found and fixed my own CHANGELOG corruption (F26): 30 duplicated entries, 1173
+  lines, introduced in `ad5c9f67` and invisible to the numstat check I had trusted. `CLAUDE.md`'s new
+  append-only-doc trap gained the caveat that "0 deletions" cannot detect a duplication.
