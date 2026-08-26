@@ -11,6 +11,44 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.40.1` - one content-brief sweep, not two: the decision, recorded (2026-08-26) - PROTOTYPED
+
+**Decided**
+- Two implementations of the SMM-26 follow-up sweep existed. `content-brief-job.ts` - the one
+  `main.ts` has always wired - SURVIVES. `content-brief-sweep-job.ts` is retired.
+- The files themselves were already deleted by a concurrent session inside `0194f26b` (an otherwise
+  unrelated IAM commit), so this change adds no deletion. What it adds is the REASONING, in the
+  surviving file's header, because a removal with no recorded rationale invites the same design back
+  in six months with the same argument and nobody able to say why it lost the first time.
+
+**Why the per-tenant identity won**
+- The retired file MINTED its own automation principal and auto-granted it a membership in every
+  opted-in tenant, reconciling that set each tick. The surviving one LOOKS UP a per-tenant principal
+  an operator provisions via `seed:social-content-brief-automation`, and REFUSES - counted, never
+  silent - any opted-in tenant without one.
+- Owner decision: self-minting and self-granting is ambient authority, and this program states the
+  opposite rule plainly ("cross-service authority is never ambient - every scope grant is an
+  explicit, visible act"). The retired file's counter-argument was sound as far as it went - WS8's
+  second wall, the per-(tenant,client) ACL scope computed server-side, holds independently of the
+  tenant set - but it traded a BY-CONSTRUCTION guarantee for a defence that has to keep being true.
+
+**⚠ What was given up, and the orphan left behind**
+- Restart-safety. The retired file tracked `social_engagements.content_brief_last_run_at` so a
+  re-tick could not double-draft. The surviving sweep does NOT track its own last run, and a re-tick
+  CAN double-draft. Now stated in that file's header so nobody infers otherwise from the column's
+  existence.
+- Migration `202608231830` is APPLIED on the live estate and its column is now unused. Left in place
+  deliberately - an applied migration is not a file to delete - and it is the right storage if
+  anyone ports restart-safety onto the surviving job.
+
+**Context**
+- The feature is entirely dormant: zero principals provisioned, zero engagements opted in,
+  `SOCIAL_CONTENT_BRIEF_SWEEP_ENABLED` unset. Nothing changes behaviour today, which is what made
+  this the cheapest possible moment to choose.
+- 746 tests across 63 files green.
+
+---
+
 ### platform-nest `0.40.0` + platform-ui `0.55.0` - receivables can be WRITTEN (2026-08-26) - DEV-VERIFIED
 
 **Added**
