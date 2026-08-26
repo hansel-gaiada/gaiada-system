@@ -130,8 +130,10 @@ local stack). None of these mean "production-done".
   department's **code inventory**: every repository the delivery pipeline provisioned
   (`webdev_provisioned_sites`, read tenant-wide via `GET /modules/webdev/provisioned-sites` with no
   `runId` — the endpoint already behaves that way — then attributed run → project → department,
-  PRD Studio's rule; `lib/repoInventory.ts`, 6 tests). One row per repo: name → GitHub, client ·
-  project, status, staging URL, the PRD run it came from, last check. Problems first; a failed row
+  PRD Studio's rule; `lib/repoInventory.ts`, 6 tests). A `HairlineTable` (the same primitive the Projects,
+  admin and finance surfaces use), one row per repo: name → GitHub (framework underneath), client ·
+  project, status (with the failure reason under the badge), staging URL, the PRD run it came from,
+  last check, and an actions column. Problems first; a failed row
   carries the plain-language reason from `webdevProvisionedSites.ts` and offers "Check status now"
   (existing `reconcileSiteAction`) or a link to the run to re-provision. Empty state says where repos
   come from (a provisioned run), not "connect GitHub". A GitHub line states the viewer's connection

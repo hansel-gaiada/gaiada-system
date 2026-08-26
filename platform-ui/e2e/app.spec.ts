@@ -364,9 +364,9 @@ test("Repositories tab is the department's code inventory — repos from provisi
   await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
   // run-demo-1 (Web Dev project) has two provisioned sites in the demo store: one failed, one live.
   await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
-  const rows = page.locator(".repo-row");
+  const rows = page.locator(".repo-table .lux-table__row");
   await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toHaveClass(/repo-row--failed/); // problems first
+  await expect(rows.nth(0)).toContainText("Failed"); // problems first
   await expect(rows.nth(0).getByText(/that name belongs to someone else's site/i)).toBeVisible();
   await expect(rows.nth(0).getByRole("link", { name: /start a new provision/i })).toHaveAttribute("href", "/pipeline/run-demo-1");
   await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/Gaia-Digital-Agency\/northwind-site-redesign-kickoff/);
@@ -382,7 +382,7 @@ test("Repositories tab: ?preview=sample shows the layout with sample rows behind
   await switchToAgency(page);
   await page.goto("/departments/dept-1/repositories?preview=sample");
   await expect(page.getByRole("status")).toContainText(/sample data/i);
-  await expect(page.locator(".repo-row")).toHaveCount(5);
+  await expect(page.locator(".repo-table .lux-table__row")).toHaveCount(5);
   await expect(page.getByText("5 repos · 2 live · 1 on staging · 1 provisioning · 1 failed")).toBeVisible();
   await expect(page.getByRole("button", { name: /check status now/i })).toHaveCount(0); // samples offer no real actions
   await page.getByRole("link", { name: /back to real data/i }).click();

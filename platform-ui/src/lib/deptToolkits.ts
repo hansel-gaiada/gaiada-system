@@ -138,7 +138,7 @@ const WEB_DEV: DeptToolkit = {
         // MI-05 — maintenance intake triage queue over the MI-03 endpoints (webdev_change_requests):
         // decline, or convert into a mini pipeline run or a PM task.
         { key: "requests", label: "Requests", path: "requests", icon: "bell", blurb: "Triage client and internal maintenance requests." },
-        { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Every repository the pipeline has provisioned for this department — status, staging, lineage." },
+        { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Every repository the pipeline has provisioned for this department — status, staging, lineage.", fullBleed: true },
         { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
       ],
     },

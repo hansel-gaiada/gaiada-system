@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useState, useTransition } from "react";
-import { StatusBadge } from "@/components/ui";
+import { useState, useTransition, type ReactNode } from "react";
+import { HairlineTable, StatusBadge } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { STATUS_LABEL } from "@/lib/webdevProvisionedSites";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
@@ -9,16 +9,16 @@ import type { ConnectionStatus } from "@/lib/connections";
 import { repoCounts, type RepoRow } from "@/lib/repoInventory";
 import "./repositories.css";
 
-// The Web Dev department's code inventory. One row per repository the delivery pipeline provisioned,
-// with what a lead wants at a glance: name → GitHub, whose site it is (client · project), what state
-// it is in, where it runs, which PRD run it came from, and when the system last confirmed all that.
-// Problems come first (the rows arrive pre-sorted from lib/repoInventory.ts). A failed row says why
-// in plain words and offers the one action that helps — "Check status now" when a re-check can move
-// it, or a link to the run workspace when it needs a fresh provision (provisioning lives there).
+// The Web Dev department's code inventory, as a table — the same `HairlineTable` the Projects,
+// admin and finance surfaces use, so it reads like the rest of the app. One row per repository the
+// delivery pipeline provisioned: name → GitHub, whose site it is (client · project), what state it
+// is in (with the plain-language reason when it failed), where it runs, which PRD run it came from,
+// when the system last confirmed all that, and the one action that helps. Rows arrive problems-first
+// from lib/repoInventory.ts.
 //
 // What this tab does NOT show yet: commits, PRs, per-repo activity, repos created outside the
 // pipeline. All of that needs the GitHub App installed on the org (WD-21/WD-22 — an owner action), so
-// the GitHub line says exactly that instead of leaving an empty box.
+// the GitHub line says exactly that instead of leaving empty columns.
 export interface RepoInventoryActions {
   /** `reconcileSiteAction` — re-poll the provisioning service for one site. */
   reconcile: (formData: FormData) => Promise<SiteActionResult>;
@@ -30,6 +30,17 @@ export type RepoInventoryState =
   | { kind: "refused" };
 
 export interface GithubConnectionView { status: ConnectionStatus; account: string | null }
+
+const COLUMNS = [
+  { label: "Repository" },
+  { label: "Client · Project" },
+  { label: "Status" },
+  { label: "Staging" },
+  { label: "From run" },
+  { label: "Last checked" },
+  { label: "" },
+];
+const TCOLS = "2fr 1.6fr 1.5fr 1.6fr 1.6fr 1fr 1.3fr";
 
 export function RepoInventory({
   state,
@@ -106,11 +117,13 @@ export function RepoInventory({
           {previewOffer}
         </div>
       ) : (
-        <ul className="repo-list">
-          {rows.map((r) => (
-            <RepoRowItem key={r.id} row={r} mayReconcile={mayReconcile && !inSample} sample={inSample} onReconcile={actions.reconcile} />
-          ))}
-        </ul>
+        <div className="lux-table-scroll erp-scroll repo-table" style={{ ["--lux-table-min" as string]: "1040px" }}>
+          <HairlineTable
+            columns={COLUMNS}
+            tcols={TCOLS}
+            rows={rows.map((r) => repoCells(r, { mayReconcile: mayReconcile && !inSample, sample: inSample, onReconcile: actions.reconcile }))}
+          />
+        </div>
       )}
     </div>
   );
@@ -134,15 +147,47 @@ function stripScheme(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }
 
-function RepoRowItem({ row, mayReconcile, sample, onReconcile }: {
+function repoCells(row: RepoRow, opts: { mayReconcile: boolean; sample: boolean; onReconcile: (fd: FormData) => Promise<SiteActionResult> }): ReactNode[] {
+  const lineage = [row.clientName, row.projectName].filter(Boolean).join(" · ");
+  return [
+    // Repository — name → GitHub (plain text until the repo exists), framework underneath.
+    <span key="repo" className="repo-cell repo-cell--stack">
+      {row.repoUrl ? (
+        <a className="repo-cell__name" href={row.repoUrl} target="_blank" rel="noreferrer">{row.name}</a>
+      ) : (
+        <span className="repo-cell__name">{row.name}</span>
+      )}
+      <span className="repo-cell__sub">{row.frameworkLabel}</span>
+    </span>,
+    <span key="lineage" className="repo-cell">{lineage || <em className="repo-cell__muted">no client or project</em>}</span>,
+    // Status — the badge, and for a failure the reason in plain words right under it.
+    <span key="status" className="repo-cell repo-cell--stack">
+      <StatusBadge label={STATUS_LABEL[row.status]} />
+      {row.failure && (
+        <details className="repo-why">
+          <summary className="repo-why__summary">{row.failure.title}</summary>
+          <span className="repo-cell__why">{row.failure.body}</span>
+        </details>
+      )}
+    </span>,
+    <span key="staging" className="repo-cell">
+      {row.stagingUrl ? <a href={row.stagingUrl} target="_blank" rel="noreferrer">{stripScheme(row.stagingUrl)}</a> : <em className="repo-cell__muted">not available yet</em>}
+    </span>,
+    <span key="run" className="repo-cell"><Link href={`/pipeline/${row.run.id}`} className="repo-cell__run">{row.run.title} →</Link></span>,
+    <span key="checked" className="repo-cell">{row.lastCheckedAt ? formatDate(row.lastCheckedAt) : <em className="repo-cell__muted">not checked yet</em>}</span>,
+    <RowActions key="actions" row={row} {...opts} />,
+  ];
+}
+
+function RowActions({ row, mayReconcile, sample, onReconcile }: {
   row: RepoRow;
   mayReconcile: boolean;
-  /** Sample rows link nowhere real and offer no actions. */
-  sample?: boolean;
+  sample: boolean;
   onReconcile: (formData: FormData) => Promise<SiteActionResult>;
 }) {
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<SiteActionResult | null>(null);
+  if (sample || (!row.failure && row.status === "live")) return <span className="repo-cell repo-cell__muted">—</span>;
   const reconcile = () => {
     setResult(null);
     startTransition(async () => {
@@ -152,49 +197,17 @@ function RepoRowItem({ row, mayReconcile, sample, onReconcile }: {
       setResult(await onReconcile(fd));
     });
   };
-  const lineage = [row.clientName, row.projectName].filter(Boolean).join(" · ");
-
   return (
-    <li className={`repo-row${row.status === "failed" ? " repo-row--failed" : ""}`}>
-      <div className="repo-row__main">
-        <div className="repo-row__head">
-          {row.repoUrl ? (
-            <a className="repo-row__name" href={row.repoUrl} target="_blank" rel="noreferrer">{row.name}</a>
-          ) : (
-            <span className="repo-row__name">{row.name}</span>
-          )}
-          <StatusBadge label={STATUS_LABEL[row.status]} />
-          <span className="repo-row__framework">{row.frameworkLabel}</span>
-        </div>
-        <div className="repo-row__lineage">
-          {lineage && <span>{lineage}</span>}
-          <Link href={`/pipeline/${row.run.id}`} className="repo-row__run">from run: {row.run.title} →</Link>
-        </div>
-        <div className="repo-row__where">
-          <span>Repo: {row.repoUrl ? <a href={row.repoUrl} target="_blank" rel="noreferrer">{stripScheme(row.repoUrl)}</a> : <em>not available yet</em>}</span>
-          <span>Staging: {row.stagingUrl ? <a href={row.stagingUrl} target="_blank" rel="noreferrer">{stripScheme(row.stagingUrl)}</a> : <em>not available yet</em>}</span>
-        </div>
-        <p className="repo-row__meta">
-          Requested {formatDate(row.requestedAt)}{row.lastCheckedAt ? ` · last checked ${formatDate(row.lastCheckedAt)}` : " · not checked yet"}
-        </p>
-        {row.failure && (
-          <div className="repo-row__failure">
-            <strong>{row.failure.title}.</strong> {row.failure.body}
-          </div>
-        )}
-        {!sample && (row.failure || row.status !== "live") && (
-          <div className="repo-row__actions">
-            {mayReconcile && row.canReconcile && (
-              <button type="button" className="btn" onClick={reconcile} disabled={pending}>{pending ? "Checking…" : "Check status now"}</button>
-            )}
-            {row.failure?.remedy === "reprovision" && (
-              <Link href={`/pipeline/${row.run.id}`} className="btn">Start a new provision →</Link>
-            )}
-            {result && !result.ok && <span className="repo-note repo-note--error">{result.error}</span>}
-            {result?.ok && <span className="repo-note">Checked — status is now {STATUS_LABEL[result.site.status] ?? result.site.status}. Reload to see it in place.</span>}
-          </div>
-        )}
-      </div>
-    </li>
+    <span className="repo-cell repo-cell--stack">
+      {mayReconcile && row.canReconcile && (
+        <button type="button" className="btn" onClick={reconcile} disabled={pending}>{pending ? "Checking…" : "Check status now"}</button>
+      )}
+      {row.failure?.remedy === "reprovision" && (
+        <Link href={`/pipeline/${row.run.id}`} className="btn">Start a new provision →</Link>
+      )}
+      {!mayReconcile && !row.failure && <span className="repo-cell__muted">—</span>}
+      {result && !result.ok && <span className="repo-cell__why repo-cell__why--error">{result.error}</span>}
+      {result?.ok && <span className="repo-cell__sub">Now {STATUS_LABEL[result.site.status] ?? result.site.status} — reload to see it in place.</span>}
+    </span>
   );
 }
