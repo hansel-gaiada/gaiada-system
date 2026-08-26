@@ -8,6 +8,7 @@ import {
 } from "@/lib/finance";
 import { Card, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ClosePeriodActions } from "@/components/finance/ClosePeriodActions";
 
 // Period close — the checklist that decides whether a month can be locked.
 //
@@ -120,17 +121,29 @@ export default async function FinanceClosePage({
         />
       </Card>
 
-      <Card title="Signing off and locking" style={{ marginTop: 22 }}>
+      <Card title="Sign off and close" style={{ marginTop: 22 }}>
+        <ClosePeriodActions
+          periodId={selected.id}
+          periodName={selected.name}
+          state={selected.state}
+          signedOff={selected.signedOff}
+          ready={readiness?.ready ?? false}
+          blockerCount={readiness?.blockers.length ?? 0}
+          readinessUnknown={readiness == null}
+        />
+      </Card>
+
+      <Card title="Reopening, and what is still not built" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          The close ACTION is <strong>not built yet</strong>, and it is deliberately the most
-          cautious thing in this workspace to build: locking a period is terminal, and reopening one
-          is a separate permission that company administrators do not hold.
+          A soft-locked period can be reopened by someone holding the <code>reopen</code> grant,
+          which company administrators deliberately do not have. A hard lock is the audit boundary
+          and has no reopen path at all — that is what makes it worth a separate action rather than
+          a checkbox on this one.
         </p>
         <p className="fin-muted">
-          Everything on this page is live. The readiness checks above are the real gate — ledger
-          integrity, both subledger tie-outs, bank reconciliation, unrun depreciation and the
-          accountant sign-off — so a period showing green here is genuinely closeable; there is
-          simply no button yet to do it.
+          Reopening is not exposed here yet. Neither is editing the close checklist; the readiness
+          gate above computes it, and a hand-editable checklist beside a computed gate would give two
+          answers to the same question.
         </p>
       </Card>
     </div>

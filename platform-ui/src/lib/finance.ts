@@ -394,3 +394,146 @@ export const listArOpenInvoices = (u: string, t: string, customerId?: string) =>
     platformFetch<ArOpenInvoice[]>(`/api/${t}/finance/ar/open-invoices${qs({ customerId })}`, u),
     [] as ArOpenInvoice[],
   );
+
+// ── The four engines that had no door: F8 assets · F11 treasury · F9 consolidation · F10 cutover ─
+//
+// Every one of these was built in SQL and tested, and none had an endpoint or a page. The readers
+// below degrade the same way the rest of this file does — `financeData` for lists, `financeVerdict`
+// for tie-outs, so an unreadable check stays distinguishable from a passing one.
+
+export interface FixedAsset {
+  id: string; code: string; name: string; status: string;
+  acquisitionDate: string; inServiceDate: string | null;
+  cost: string; classCode: string; className: string;
+  bookMethod: string | null; bookLifeMonths: number | null; taxGolongan: string | null;
+  /** Book side comes from what was POSTED; tax side from the SCHEDULE. The asymmetry is deliberate
+   *  and is why both are shown — tax depreciation is never posted to the ledger. */
+  bookAccum: string | null; bookNbv: string | null;
+  taxAccum: string | null; taxNbv: string | null;
+}
+export interface DepreciationScheduleRow {
+  seq: number; periodStart: string;
+  bookCharge: string; bookAccum: string; bookNbv: string;
+  taxCharge: string; taxAccum: string; taxNbv: string;
+}
+export interface DepreciationRun {
+  id: string; periodId: string; periodName: string; periodStart: string;
+  journalId: string | null; runAt: string;
+  assetCount: number; bookTotal: string; taxTotal: string;
+}
+
+export interface Instrument {
+  id: string; code: string; name: string;
+  kind: "loan_payable" | "loan_receivable" | "bond_issued" | "lease" | string;
+  counterpartyName: string | null; currencyCode: string;
+  principal: string; nominalRate: string | null; effectiveRate: string | null;
+  startDate: string; maturityDate: string | null;
+  repaymentMethod: string | null; paymentMonths: number | null;
+}
+export interface InstrumentScheduleRow {
+  seq: number; dueDate: string; opening: string; interest: string; principal: string; closing: string;
+}
+export interface MaturityRow {
+  instrumentId: string; code: string; kind: string; outstanding: string;
+  currentPortion: string; nonCurrentPortion: string; maturityDate: string | null;
+}
+
+export interface ConsolidationRun {
+  id: string; asOf: string; label: string | null; createdAt: string; entryCount: number;
+}
+export interface ConsolidatedTrialBalance {
+  rows: Array<{ accountCode: string; accountName: string; accountType: string; debit: string; credit: string }>;
+  totalDebit: string; totalCredit: string; balanced: boolean;
+}
+export interface CompletenessNote { note: string; detail: string }
+
+export interface Cutover {
+  id: string; cutoverDate: string; status: string;
+  journalId: string | null; committedAt: string | null; notes: string | null; lineCount: number;
+}
+export interface OpeningBalances {
+  rows: Array<{ id: string; accountCode: string; accountName: string | null; debit: string; credit: string; memo: string | null }>;
+  totalDebit: string; totalCredit: string; balanced: boolean;
+}
+
+export const listAssets = (u: string, t: string, asOf?: string) =>
+  financeData(platformFetch<FixedAsset[]>(`/api/${t}/finance/assets${qs({ asOf })}`, u), [] as FixedAsset[]);
+
+export const getAssetSchedule = (u: string, t: string, assetId: string) =>
+  financeData(
+    platformFetch<DepreciationScheduleRow[]>(`/api/${t}/finance/assets/${assetId}/schedule`, u),
+    [] as DepreciationScheduleRow[],
+  );
+
+export const reconcileAssets = (u: string, t: string) =>
+  financeVerdict(platformFetch<{ problems: Problem[]; clean: boolean }>(`/api/${t}/finance/assets/reconcile`, u));
+
+export const listDepreciationRuns = (u: string, t: string) =>
+  financeData(platformFetch<DepreciationRun[]>(`/api/${t}/finance/depreciation-runs`, u), [] as DepreciationRun[]);
+
+export const listInstruments = (u: string, t: string) =>
+  financeData(platformFetch<Instrument[]>(`/api/${t}/finance/instruments`, u), [] as Instrument[]);
+
+export const getInstrumentSchedule = (u: string, t: string, instrumentId: string) =>
+  financeData(
+    platformFetch<InstrumentScheduleRow[]>(`/api/${t}/finance/instruments/${instrumentId}/schedule`, u),
+    [] as InstrumentScheduleRow[],
+  );
+
+export const getTreasuryMaturity = (u: string, t: string, asOf?: string) =>
+  financeData(platformFetch<MaturityRow[]>(`/api/${t}/finance/treasury/maturity${qs({ asOf })}`, u), [] as MaturityRow[]);
+
+export const reconcileTreasury = (u: string, t: string, asOf?: string) =>
+  financeVerdict(
+    platformFetch<{ problems: Problem[]; clean: boolean }>(`/api/${t}/finance/treasury/reconcile${qs({ asOf })}`, u),
+  );
+
+export const listConsolidationRuns = (u: string, t: string) =>
+  financeData(platformFetch<ConsolidationRun[]>(`/api/${t}/finance/consolidation/runs`, u), [] as ConsolidationRun[]);
+
+export const getConsolidatedTrialBalance = (u: string, t: string, runId: string) =>
+  financeData(
+    platformFetch<ConsolidatedTrialBalance>(`/api/${t}/finance/consolidation/runs/${runId}/trial-balance`, u),
+    null,
+  );
+
+export const getConsolidationCompleteness = (u: string, t: string, runId: string) =>
+  financeData(
+    platformFetch<{ notes: CompletenessNote[]; complete: boolean }>(
+      `/api/${t}/finance/consolidation/runs/${runId}/completeness`, u,
+    ),
+    null,
+  );
+
+export const listCutovers = (u: string, t: string) =>
+  financeData(platformFetch<Cutover[]>(`/api/${t}/finance/cutovers`, u), [] as Cutover[]);
+
+export const getCutoverReadiness = (u: string, t: string, cutoverId: string) =>
+  financeVerdict(
+    platformFetch<{ blockers: Array<{ blocker: string; detail: string }>; ready: boolean }>(
+      `/api/${t}/finance/cutovers/${cutoverId}/readiness`, u,
+    ),
+  );
+
+export const getOpeningBalances = (u: string, t: string, cutoverId: string) =>
+  financeData(
+    platformFetch<OpeningBalances>(`/api/${t}/finance/cutovers/${cutoverId}/opening-balances`, u),
+    null,
+  );
+
+/** Instrument kinds spelled out. `loan_payable` and `loan_receivable` run in OPPOSITE directions and
+ *  a reader must never have to infer which from a raw enum. */
+export const INSTRUMENT_KIND_LABEL: Record<string, string> = {
+  loan_payable: "Loan (we owe)",
+  loan_receivable: "Loan (owed to us)",
+  bond_issued: "Bond issued",
+  lease: "Lease",
+};
+
+export interface AssetClass {
+  id: string; code: string; name: string;
+  bookMethod: string | null; bookLifeMonths: number | null; taxGolongan: string | null;
+}
+
+export const listAssetClasses = (u: string, t: string) =>
+  financeData(platformFetch<AssetClass[]>(`/api/${t}/finance/asset-classes`, u), [] as AssetClass[]);
