@@ -1,9 +1,9 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { BriefingComposer } from "./BriefingComposer";
-import type { MeetingResult } from "@/lib/meetingsActions";
+import type { BriefingResult } from "@/lib/prdActions";
 
-type StartAction = (prev: MeetingResult | null, formData: FormData) => Promise<MeetingResult>;
+type StartAction = (prev: BriefingResult | null, formData: FormData) => Promise<BriefingResult>;
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
@@ -18,44 +18,69 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     render(<BriefingComposer clients={clients} projects={projects} action={vi.fn(async () => ({ ok: true, id: "rec-9" }))} />);
     expect(screen.getByLabelText(/what is this briefing about/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^client/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^project/i)).toBeRequired();
-    expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /new project/i })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /link an existing project/i })).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByRole("combobox", { name: /^project/i })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^audio$/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /audio \+ video/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create briefing/i })).toBeInTheDocument();
     expect(screen.getByText(/nothing records yet/i)).toBeInTheDocument();
   });
 
-  it("only offers the projects that belong to the chosen client", () => {
-    render(<BriefingComposer clients={clients} projects={projects} action={vi.fn(async () => ({ ok: true }))} />);
+  it("the default explains that a project is created with the briefing, named after it", () => {
+    render(<BriefingComposer clients={clients} projects={projects} departmentName="Web Dev" action={vi.fn(async () => ({ ok: true }))} />);
+    fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "Cedar — intake call" } });
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
-    const options = Array.from((screen.getByLabelText(/project/i) as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(screen.getByText(/a web dev project “cedar — intake call” is created for cedar group/i)).toBeInTheDocument();
+  });
+
+  it("link mode offers only the chosen client's projects in this department", () => {
+    render(<BriefingComposer clients={clients} projects={projects} action={vi.fn(async () => ({ ok: true }))} />);
+    fireEvent.click(screen.getByRole("radio", { name: /link an existing project/i }));
+    fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
+    const options = Array.from((screen.getByRole("combobox", { name: /^project/i }) as HTMLSelectElement).options).map((o) => o.textContent);
     expect(options).toContain("Cedar site");
     expect(options).not.toContain("Northwind SEO");
   });
 
   it("a client with no project in this department gets told where to make one, not a dead select", () => {
-    render(<BriefingComposer clients={clients} projects={[projects[0]]} departmentName="Web Dev" projectsHref="/departments/dept-1/projects" action={vi.fn(async () => ({ ok: true }))} />);
+    render(<BriefingComposer clients={clients} projects={[projects[0]]} departmentName="Web Dev" action={vi.fn(async () => ({ ok: true }))} />);
+    fireEvent.click(screen.getByRole("radio", { name: /link an existing project/i }));
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-2" } });
     expect(screen.getByText(/no web dev project for northwind yet/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /create one in project management/i })).toHaveAttribute("href", "/departments/dept-1/projects");
     expect(screen.getByRole("button", { name: /create briefing/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: /new project/i }));
+    expect(screen.getByRole("button", { name: /create briefing/i })).toBeEnabled();
   });
 
-  it("submits title, client, project and the chosen medium to the start action", async () => {
+  it("submits title, client, the project choice and the chosen medium to the action", async () => {
     const action = vi.fn<StartAction>(async () => ({ ok: true, id: "rec-9" }));
-    render(<BriefingComposer clients={clients} projects={projects} action={action} />);
+    render(<BriefingComposer clients={clients} projects={projects} departmentId="dept-1" action={action} />);
     fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "Cedar — intake call" } });
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
-    fireEvent.change(screen.getByLabelText(/project/i), { target: { value: "p-1" } });
     fireEvent.click(screen.getByRole("radio", { name: /audio \+ video/i }));
     fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
     const fd = action.mock.calls[0][1];
     expect(fd.get("title")).toBe("Cedar — intake call");
     expect(fd.get("clientId")).toBe("cl-1");
-    expect(fd.get("projectId")).toBe("p-1");
     expect(fd.get("kind")).toBe("video");
+    expect(fd.get("projectMode")).toBe("new");
+    expect(fd.get("departmentId")).toBe("dept-1");
+  });
+
+  it("link mode submits the chosen project id", async () => {
+    const action = vi.fn<StartAction>(async () => ({ ok: true, id: "rec-9" }));
+    render(<BriefingComposer clients={clients} projects={projects} departmentId="dept-1" action={action} />);
+    fireEvent.click(screen.getByRole("radio", { name: /link an existing project/i }));
+    fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "Follow-up" } });
+    fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /^project/i }), { target: { value: "p-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    const fd = action.mock.calls[0][1];
+    expect(fd.get("projectMode")).toBe("existing");
+    expect(fd.get("projectId")).toBe("p-1");
   });
 
   it("confirms creation and points at the next step", async () => {
@@ -63,7 +88,6 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     render(<BriefingComposer clients={clients} projects={projects} action={action} />);
     fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "Cedar — intake call" } });
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
-    fireEvent.change(screen.getByLabelText(/^project/i), { target: { value: "p-1" } });
     fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
     await waitFor(() => expect(screen.getByText(/briefing created/i)).toBeInTheDocument());
     expect(screen.getByText(/add its recording/i)).toBeInTheDocument();
@@ -74,7 +98,6 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     render(<BriefingComposer clients={clients} projects={projects} action={action} />);
     fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "X" } });
     fireEvent.change(screen.getByLabelText(/^client/i), { target: { value: "cl-1" } });
-    fireEvent.change(screen.getByLabelText(/^project/i), { target: { value: "p-1" } });
     fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
     await waitFor(() => expect(screen.getByText(/no active company selected/i)).toBeInTheDocument());
   });

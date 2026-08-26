@@ -10,7 +10,8 @@ import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
 import { getPipelineRun, listPipelineRuns, type PipelineGate, type PipelineRun } from "@/lib/pipeline";
 import { listRecordings, type MeetingRecording } from "@/lib/meetings";
 import { listClients, listProjects } from "@/lib/entities";
-import { ingestAction, retryAudioAction, startRecordingAction, uploadAudioAction } from "@/lib/meetingsActions";
+import { ingestAction, retryAudioAction, uploadAudioAction } from "@/lib/meetingsActions";
+import { createBriefingAction } from "@/lib/prdActions";
 import { decideGateAction } from "@/lib/pipelineActions";
 import { briefingPhase, flowCounts, scopeToDepartment } from "@/lib/prdFlow";
 import { PrdFlowHeader } from "@/components/prd/PrdFlowHeader";
@@ -133,9 +134,9 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
         <BriefingComposer
           clients={clients.map((c) => ({ id: c.id, name: c.name }))}
           projects={deptProjects.map((p) => ({ id: p.id, name: p.name, client_id: p.client_id }))}
+          departmentId={deptId}
           departmentName={dept.name}
-          projectsHref={`/departments/${deptId}/projects`}
-          action={startRecordingAction}
+          action={createBriefingAction}
         />
       </Card>
 

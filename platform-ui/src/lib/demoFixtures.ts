@@ -2264,7 +2264,20 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
 
   const projMatch = p.match(/^\/api\/([^/]+)\/projects$/);
   if (projMatch) {
-    if (m === "POST") return { status: 201, json: { id: `p-new-${Date.now()}` } };
+    if (m === "POST") {
+      // Mirror the real INSERT: the new project must show up in the LIST, with its client and
+      // department — PRD Studio scopes briefings through `projects.department_id`, and a fixture that
+      // returned an id without listing it made a freshly created briefing vanish from the tab.
+      const b = JSON.parse(body || "{}") as { name?: string; clientId?: string; departmentId?: string };
+      if (!b.name) return { status: 400, json: { error: "name required" } };
+      const id = `p-new-${Date.now()}`;
+      (PROJECTS[projMatch[1]] ??= []).push({
+        id, name: b.name, status: "active", client_id: b.clientId ?? null, is_internal: !b.clientId,
+        owner_id: userId, department_id: b.departmentId ?? null, due_date: null, custom_fields: {},
+        shortCode: b.name.replace(/[^A-Za-z]/g, "").slice(0, 4).toUpperCase() || "PROJ",
+      } as (typeof PROJECTS)[string][number]);
+      return { status: 201, json: { id } };
+    }
     // CC-1: mirror the backend facet, including the `internal` sentinel. A fixture that ignored the
     // parameter would make the client hub's Work tab show EVERY project in demo mode — which is
     // exactly the "demo fixtures hide frontend-first drift" trap this file's own header warns about.

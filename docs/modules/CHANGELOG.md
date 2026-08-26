@@ -92,10 +92,15 @@ local stack). None of these mean "production-done".
   department whose toolkit has no `prd` tab, and everything it lists is scoped through PROJECTS
   (`lib/prdFlow.ts::scopeToDepartment`): a briefing belongs iff its project is this department's;
   a run iff its own `project_id` is (WD-30) or, for pre-WD-30 rows, its source briefing's project is.
-  Consequence: **project is required** on the composer (it is the only recording→department link),
-  and a client with no Web Dev project is told to create one in Project Management first. Recordings
-  and runs are tenant-wide on the backend — the SEO scope call in the demo store no longer appears
-  as a Web Dev briefing, and the e2e asserts that.
+  Consequence: every briefing needs a project (it is the only recording→department link) — and since
+  in Reva's flow the project does not exist yet when the call happens, **the project is created WITH
+  the briefing**: `lib/prdActions.ts::createBriefingAction` does `POST /projects` (name = briefing
+  title, this client, this department) then `POST /recordings/start` under it, in one action; "Link
+  an existing project" is the optional alternative. If the second write fails the message names the
+  project that was created, so nothing is silently orphaned (6 action tests). Recordings and runs are
+  tenant-wide on the backend — the SEO scope call in the demo store no longer appears as a Web Dev
+  briefing, and the e2e asserts that. Demo `POST /projects` now adds the project to the list (it
+  used to return an id that nothing could see).
 
 **Fixed**
 - ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:

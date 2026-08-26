@@ -311,13 +311,16 @@ test("PRD Studio: creating a briefing puts it straight into the capture step", a
   await page.goto("/departments/dept-1/prd");
   await page.getByLabel(/what is this briefing about/i).fill("Playwright — kickoff briefing");
   await page.getByRole("combobox", { name: "Client" }).selectOption({ label: "Northwind Traders" });
-  await page.getByRole("combobox", { name: "Project" }).selectOption({ label: "Client site redesign" });
+  // Default: a Web Dev project is created WITH the briefing, named after it — no picking.
+  await expect(page.getByText(/a web dev project “playwright — kickoff briefing” is created for northwind traders/i)).toBeVisible();
   await page.getByRole("radio", { name: "Audio + video" }).click();
   await page.getByRole("button", { name: "Create briefing" }).click();
-  await expect(page.getByText(/briefing created — add its recording below/i)).toBeVisible();
+  await expect(page.getByText(/briefing created with its project — add its recording below/i)).toBeVisible();
   const card = page.getByRole("article", { name: "Playwright — kickoff briefing" });
   await expect(card.getByText("No recording yet")).toBeVisible();
   await expect(card.getByText(/audio \+ video/i)).toBeVisible();
+  // The new project shows on the card (it is now in the department's project list).
+  await expect(card.getByText(/· Playwright — kickoff briefing/)).toBeVisible();
 });
 
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {

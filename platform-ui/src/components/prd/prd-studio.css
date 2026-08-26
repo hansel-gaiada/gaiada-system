@@ -50,6 +50,7 @@
 /* ── Composer — step 1 ─────────────────────────────────────────────────────────────────────── */
 .prd-composer { display: grid; gap: 16px; }
 .prd-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.prd-fields--two { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 .prd-field {
   display: flex;
   flex-direction: column;
@@ -96,6 +97,9 @@
 .prd-composer__foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .prd-hint { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--ink-subtle); max-width: 62ch; }
+/* Prose inside a `.prd-field` wrapper must not inherit the label's uppercase/tracking. */
+.prd-field .prd-hint, .prd-field .prd-note { text-transform: none; letter-spacing: normal; font-weight: 400; }
+.prd-field .prd-note { color: var(--text-primary); }
 .prd-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); }
 .prd-note--error { color: var(--status-critical-fg); }
 .prd-note--ok { color: var(--status-ok-fg); }
