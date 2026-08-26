@@ -28,6 +28,8 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // Webhook ingest (§ step 4) — inbound lead/form -> a task in the intake project. LOW write.
   // Kept inert by the workflow's INGEST_ENABLED gate until legal Gate 1 + the day-one gate pass.
   "wf:inbound-lead-intake": ["tasks.create"],
+  // WSK-12: the Zone B signed-fact bridge.
+  "wf:webdesk-zoneb-intake": ["webdev.recordZoneBEvent", "notify"],
   // WS11 meeting-to-delivery pipeline. n8n opens gates + advances stages (all LOW writes) and
   // extracts artifacts; it NEVER decides a gate or records a signature (those are human/UI actions).
   // meeting.recordingContext (F-1): reads the meeting_recordings row's client/project context by

@@ -13,8 +13,14 @@ import { MediaModule } from "./media/media.module";
 import { MailModule } from "./mail/mail.module";
 // WSK-10 (wired by coordinator; the ticket reported this rather than editing a shared file).
 import { FormsModule } from "./forms/forms.module";
+// WSK-21 (wired by coordinator). NOT public-proxy-reachable until WSK-22 lands the real
+// mTLS + Keycloak + WS4 channel; webdesk/proxy/Caddyfile 404s /control/* on the public vhost.
+import { ControlModule } from "./control/control.module";
+// WSK-12 (wired by coordinator). Fail-soft by construction: a bridge outage must never
+// break a form submission, so every emit failure is caught and logged, never thrown.
+import { EventsModule } from "./events/events.module";
 
 @Module({
-  imports: [DbModule, RateLimitModule, TenantsModule, AuditModule, ApiKeysModule, AuthModule, ContentModule, MediaModule, MailModule, FormsModule],
+  imports: [DbModule, RateLimitModule, TenantsModule, AuditModule, ApiKeysModule, AuthModule, ContentModule, MediaModule, MailModule, FormsModule, ControlModule, EventsModule],
 })
 export class AppModule {}

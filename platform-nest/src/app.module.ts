@@ -108,6 +108,8 @@ import { ReportsController } from "./modules/reports/reports.controller";
 // webdev surface to be module-scoped rather than core, because `webdev_provisioned_sites` (0090)
 // carries the third RLS wall and the client portal never touches it.
 import { WebdevController } from "./modules/webdev/webdev.controller";
+// WSK-12: the Zone B signed-fact consumer.
+import { ZoneBEventsController } from "./modules/webdev/zoneb-events.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
@@ -172,6 +174,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchReportsController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
+    ZoneBEventsController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,

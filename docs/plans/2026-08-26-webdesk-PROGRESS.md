@@ -10,7 +10,7 @@ misleads real tickets.
 
 | Mark | Means |
 |---|---|
-| ✅ | **DONE** = **DEV-VERIFIED** — driven end-to-end and the result observed. Not "the code exists", not "tests are green". |
+| ✅ | **DONE** = **DEV-VERIFIED** — driven end-to-end and the result observed. Not "the code exists", not "tests are green". **⚠️ Owner rule 2026-08-26: verification must run on a LINUX SERVER, never the local Windows box.** Every ✅ below was obtained in Docker-for-Windows BEFORE that rule and is therefore **provisional** — see the re-verification note. |
 | 🟡 | **ON PROGRESS** — someone is on it right now |
 | ⬜ | **NOT DONE** — not started |
 | ⏸ | **BLOCKED** — waiting on a ruling, a box, or another ticket |
@@ -29,35 +29,19 @@ misleads real tickets.
 | Part | Items | ✅ | 🟡 | ⬜ | ⏸ |
 |---|---|---|---|---|---|
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
-| B · Milestone 0 — gaiada.com live | 14 | **11** | 0 | 2 | 1 |
-| C · Contract, codegen & the rail | 7 | 0 | 0 | 7 | 0 |
-| D · Control plane · ERP console · envs | 9 | 0 | 0 | 8 | 1 |
+| B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
+| C · Contract, codegen & the rail | 7 | **2** | 0 | 5 | 0 |
+| D · Control plane · ERP console · envs | 9 | **2** | 0 | 6 | 1 |
 | E · AI execution & approvals | 3 | 0 | 0 | 3 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
 | G · New from reassessment | 2 | 0 | 0 | 2 | 0 |
-| **Total** | **51** | **21** | **0** | **27** | **3** |
+| **Total** | **51** | **26** | **0** | **22** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
 new from the reassessment (Part G) and 13 design-close tasks (Part A).
 
 ---
-
-## Owner rulings — 2026-08-26
-
-Recorded here because both change what a ticket must DO, not merely when it runs.
-
-- **WSK-D24 · the `/v1` SQL bypass — ACCEPTED, CONDITIONALLY.** `/v1` reads may keep the hand-rolled
-  SQL router rather than going through Payload's query layer. The condition is not optional: the
-  Payload-side app-layer tenant predicate (WSK-04b / WSK-D25) **must cover the `/v1` router too**,
-  with the same mutual-independence proof WSK-04 ran on `api` — disable one layer, the other still
-  returns zero rows, plus a negative control that leaks.
-  ★ Why the condition carries the whole ruling: Payload's `access` functions never execute on the
-  router path, so without it RLS is the *only* wall on the one read path the public can reach. That
-  is precisely the single-wall posture WSK-04 exists to disprove, and a WSK-04b that covered only
-  the collections would report DONE while leaving `/v1` single-walled.
-
-- **A-12 · procurement — PROCURE NOW.** See the A-12 row.
 
 ## Part A · Close the design
 
@@ -75,7 +59,7 @@ Recorded here because both change what a ticket must DO, not merely when it runs
 | ✅ | A-13 | **Storage ruled — fully self-hosted** | owner | WSK-D23. MinIO primary, no new cost. R2/NAS kept as a config-only swap + abstraction test. Backups flip to **pull-model**; Workspace at staging, NAS target-state. New §11a preconditions. WSK-07 + WSK-28 rewritten |
 | ⬜ | A-10 | Write §15 · Cost & quotas | claude+owner | Needs real numbers only you have: today's web3forms + hosting spend, target per-client price. Then per-tenant cost · quotas/overage · break-even count — which is what actually answers A-12 |
 | ⬜ | A-11 | Payload governance + trademark check | owner | Ownership changed hands 2025; MIT is irrevocable for shipped versions, but rebranding touches trademark, which MIT does not license. ~1 hour |
-| ✅ | A-12 | Procurement call (OQ-W1, now narrower) | owner | **RULED 2026-08-26 — PROCURE NOW,** ahead of Part B load data. Unblocks WSK-M0 and all of Part D, which were waiting on a box. ⚠ Sizing is a JUDGEMENT, not a measurement: A-10's numbers do not exist, and §11a named disk + bandwidth as the sizing inputs. Buy for headroom; treat first Part-B traffic as the check, not the spec. Cross-ref B24 (Hermes tracker) ruled *move gaiada observability to its own box* the same day — confirm whether these are ONE procurement before ordering |
+| ⬜ | A-12 | Procurement call (OQ-W1, now narrower) | owner | Under R-2 only the **backend** box is gated. Decide staging-box timing against Part B's real load |
 
 ---
 
@@ -97,7 +81,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅ | WSK-07 | **Media path** — 4 buckets (`media`/`video` public, **`uploads` PRIVATE**, `artifacts`) with versioning + GOVERNANCE object-lock verified via `mc`; EICAR refused + audit row; **corrected AC honoured** (cross-tenant → 404, no existence oracle, no per-tenant storage creds ever issued); cookieless serving + `Cache-Tag`; 3-layer storage-abstraction proof; per-tenant quota. 21/21 media, 47/47 combined with WSK-05. **Coordinator wired** `MediaModule`, the `imgproxy` compose service, and the media env vars. ⚠️ **imgproxy transform route is PROTOTYPED only** (no live instance was up during its run); **`STORAGE_ACCESS_KEY_ID` unset falls back to MinIO ROOT — dev-only, must be a scoped service account before A-12's box** | medior | WSK-01, 02 |
 | ✅ | WSK-10 ⚡ | **Forms service — the web3forms kill** — CORS allowlist · Turnstile seam (stub; real key stays on the Reopen Register) · honeypot · per-IP + per-form rate limits · zod from `form_defs.schema` · consent record (WSK-D22) · attachments to the PRIVATE `uploads` bucket, ClamAV-scanned · retention purge sweep. **Coordinator-verified 23/23** on my own stack via its README runbook: hostile payload stored inert, EICAR refused, honeypot silently dropped, both notification + autoresponder landed in Mailpit. ⚠️ **Route deviates from the design's literal `/v1/forms/:formId/submit` → `/v1/t/:tenantSlug/forms/:formId/submit`**, forced by `0003_forms.sql`'s single-mode RLS (a form cannot be resolved by id before a tenant context exists); consistent with WSK-06's `/v1/t/:slug/…` shape. Purge sweep has no scheduler yet | senior-be | WSK-04 ✅, 05 ✅ |
 | ✅ | WSK-11 | **Mail service (C-03)** — agent-reported DEV-VERIFIED, **coordinator verification IN FLIGHT**. Identity rule is the strong part: `resolveFromIdentity()` takes **zero arguments** and `MailJobData` has **no `from` field**, so a queued job physically cannot spoof identity; Zone A domains denylisted on both `From:` and `Reply-To:`; 3 test layers incl. a source-literal sweep and an `as never`-smuggled override. Retry proven by a **real `docker stop`/`start`** of Mailpit mid-flight. Suppression re-checked at worker time, not just enqueue. `mail_log` DELETE denied to `webdesk_app`. **Coordinator wired** `MailModule`, compose env passthrough, and reconciled `.env.example` (`MAILPIT_SMTP_URL` was dead config nothing read). ✅ **Coordinator-verified 25/25** on my own stack (its 6 specs incl. retry-backoff). Earlier I could not reproduce it: My own harness (pg/redis/mailpit on 55470-3, migrations 5/5 clean) got **11 passed / 13 failed**, all environment-shaped (blank `AggregateError`s, `ECONNREFUSED` to the hardcoded `:55450` default) despite exporting every env var I could find by reading the code. **Root cause is a missing runbook** — WSK-05 documented one I followed verbatim and reproduced 26/26 first try; this ticket shipped none. Also `mail-retry-backoff.spec.ts` shells `docker stop wsk11-mailpit` and, when that container is absent, **stalled for 2.8 hours** instead of skipping. **Root cause was undocumented shadow env vars** (`WSK11_APP_DATABASE_URL`, plus a `WSK05_TEST_DATABASE_URL` copy-pasted from another ticket) — my correct exports were silently ignored. Fixed: real env names, a documented runbook, and the retry spec now **skips in 3.3s** instead of stalling 2.8h. ⚠️ **Gaps:** `mail_log` has **no persisted render payload** — if Redis is lost a `queued` row can never be resent or diagnosed; no `tenants` domain column for the own-domain seam (adapter half only); the BullMQ worker runs **in-process** with `api`, not in the `worker` service | senior-be | WSK-01 |
-| ⬜ | WSK-12 ⚡ | Zone B→A signed events, both halves — HMAC emitter + `wd-zoneb-intake` + `webdev_zoneb_event_log` (**timestamp-named migration**) | senior-integrator | WSK-10 |
+| ✅ | WSK-12 ⚡ | **Zone B→A signed events, both halves** — first ticket to touch Zone A, and it added **only new files** there (verified). Emitter: HMAC-SHA256 over `timestamp.rawBody`, `timingSafeEqual`, fail-soft on every path. Zone A: timestamp-named migration with third-wall RLS + `ON CONFLICT DO NOTHING` idempotency + an MCP-reachable endpoint (n8n's backbone rule forbids DB nodes) + a new Cerbos policy. n8n flow driven against a **real throwaway n8n**. **Coordinator-verified:** 16/16 HMAC battery; shared-repo `lint:migration-names` + `lint:migration-rls` green across 193 migrations; `tsc` 0. Forgery/replay/mutation/future-date/malformed all refused **before parse** with distinct reasons. ⚠️ **Needs 5 edits to EXISTING shared files + a live Cerbos restart — owner sign-off (see log)**; notify recipient-routing deliberately left ungated-on-a-guess | senior-integrator | WSK-10 ✅ |
 | ⏸ | WSK-08′ | **gaiada.com live** — **BLOCKED by WSK-D26's two collisions** (observe-only ruling on `delphi`/`helios`; neither host reachable) **plus a tenant-zero conflict**: gaiada.com is WordPress on Hostinger, so under D26 it stays there — which makes tenant zero P6 work, not Milestone 0. See the findings block below | medior | owner decisions |
 | ⬜ | WSK-M0 | **M0 QA gate** (merges old WSK-09+13) — cross-tenant battery × RLS × key scope × storage prefix, envelope contract suite, forms abuse battery, forgery/replay, retention purge walk, egress sweep, **GraphQL-off probe** | qa | all of B |
 
@@ -107,8 +91,8 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 
 | Status | # | Ticket | Tier | Deps |
 |---|---|---|---|---|
-| ⬜ | WSK-14 ⚡ | Vocabulary contract + composition validator; semver breaking-change rules as a checkable ruleset | senior-be | WSK-06 |
-| ⬜ | WSK-15 ⚡ | **Codegen pipeline** — hand-author `openapi.v1.json`; derive TS SDK (`openapi-typescript`) + `CONTENT-CONTRACT.md` (R-3); byte-identical double-run CI gate; artifact store; `GET /control/v1/tenants/:slug/contract`; `contract.published` event | senior-be | WSK-14 |
+| ✅ | WSK-14 ⚡ | **Vocabulary contract + composition validator** — versioned public surface (barrel; existing direct imports unbroken), Layer-2 composition validator with actionable errors, and §05's **breaking-change rules encoded as a computed classifier** across all three axes. **Coordinator-verified:** 27 + 34 + 17 + 8 = **86 new assertions**, and WSK-06's 40 + 60 still green. Validates the two real tenants AND the live `redirect` collection, not just fixtures. ⚠️ **Three interpretations WSK-15/19 will inherit:** the `collections.schema` composition shape was **undefined anywhere** and is now de-facto `{fields?, blocks?}` (presence of `blocks` = closed set, absence = unrestricted); a newly-added **required** field is treated MAJOR though §05 only names optional-add as MINOR; the renderer axis still needs a human to flag which components broke — the bump is then computed, never re-judged | senior-be | WSK-06 ✅ |
+| ✅⚠ | WSK-15 ⚡ | **Codegen pipeline** — **PROVISIONAL: verified on WINDOWS, not re-run on Linux.** OpenAPI hand-authored, TS SDK + `CONTENT-CONTRACT.md` **derived** (WSK-D19); pinned `openapi-typescript`/`tsx`. **Determinism proven properly:** two *separately spawned node processes* per tenant, byte-identical across 4 artifacts for two differently-composed tenants, with the `generatedAt` timestamp kept OUT of every hashed artifact (it lives only in `latest.json`). Replaced WSK-21's contract `501` with the real §06 shape, or an honest `404 contract-not-generated`. 46/46 + WSK-21/22 50/50. Found and fixed a real 500 (storage error escaping when the bucket is absent). ⚠️ `blockLibrary` is a documented placeholder (WSK-16 unbuilt); PHP SDK null (WSK-34); **`applySchema` does not yet trigger codegen** — manual/CI entrypoint only until WSK-19/32 | senior-be | WSK-14 ✅ |
 | ⬜ | WSK-16 | Block-renderer library v0 — 1:1 per block type, unknown-block invariant (render nothing + report), versioned tarball | senior-fe | WSK-14 |
 | ⬜ | WSK-17 | Proof rebuild — gaiada.com rebuilt purely from generated SDK + shared blocks, zero hand-written fetches | medior | WSK-15, 16 |
 | ⬜ | WSK-18 | P3 QA gate — determinism double-run + cross-machine, SDK↔OpenAPI↔contract coherence, unknown-block probe, artifact-URL expiry | qa | WSK-14–17 |
@@ -121,10 +105,10 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 
 | Status | # | Ticket | Tier | Deps |
 |---|---|---|---|---|
-| ⬜ | WSK-21 ⚡ | Control-plane API v1 — idempotent commands, tracked jobs, immutable audit, Zone B Cerbos sidecar | senior-be | WSK-03 |
-| ⬜ | WSK-22 ⚡ | Control-channel auth — Keycloak `webdesk-control`, offline JWKS verify, synccert mTLS, WS4 assertion mint + single-use verify. *Optional simplification: Cloudflare Access service tokens* | senior-integrator | WSK-21 |
+| ✅ | WSK-21 ⚡ | **Control-plane API v1 (Zone B)** — 18 commands / 6 controllers, every one carrying an §07 impact class asserted entry-by-entry; idempotency proven by double-fire (+ a DB unique constraint proven as an **independent cross-process backstop**); long commands job-tracked; audit row per command; authz **seam + dev stub only** (WSK-22 owns the real channel). **Coordinator-verified 36/36**, `tsc` 0 errors, WSK-05 26/26 no regression. **Caddyfile already 404s `/control/*` on the public vhost** — confirmed, so the exposure warning is satisfied today. ⚠️ **Two documented 501s** (`site.archive` needs a `sites.status` column; `contract.read` waits on WSK-15) and **no Cerbos sidecar** — interface + stub only | senior-be | WSK-03 ✅ |
+| ✅⚠ | WSK-22 ⚡ | **Control-channel auth, layers 1-4** — **PROVISIONAL: built + agent-verified on WINDOWS, not re-verified on Linux** (owner rule 2026-08-26). 19-row adversarial matrix all refusing with distinct reasons: no cert · token-without-cert · wrong CA/CN · cert-without-token · wrong audience/issuer/kid · tampered signature · **missing WS4 on a HIGH command** · commandHash mismatch · expired assertion · **replay: same approvalId 201 then 403**. Layer-1 certs **actually issued by `synccert`** (real EC P256 CA via WSL), and the **real public issuer was proven reachable** with zero Zone A credential. ⚠️ **Deterministic matrix used a fixture JWKS** — no `webdesk-control` Keycloak client exists, so no token can genuinely verify against the real issuer. ⚠️ **WS4 dedup is a `SELECT` with no unique constraint** — closes realistic replay, not a concurrent double-fire; needs a migration. Proxy-side mTLS termination unbuilt | senior-integrator | WSK-21 ✅ |
 | ⬜ | WSK-23 ⚡ | ERP module egress client + BFF — control client, proxy reads with degrade-to-facts, WS4 wiring, Cerbos `resource_webdesk_site` (+restart) | senior-be | WSK-19, 22 |
-| ⬜ | WSK-24 | **Sites tab** (platform-ui) — registry with **backend-env / Pages-deployment split columns** (R-2), contract card **+ locale coverage row** (R-4), shown-once keys, WS4-gated release buttons, submissions | senior-fe | WSK-23 |
+| ⬜ | WSK-24 | **Sites tab** (platform-ui) — **SPEC REFRESHED for WSK-D26** (was written for Cloudflare Pages, now reversed). Registry with **two independent columns: backend env** (staging/production content) **and frontend deployment** (`delphi` staging · `helios` production · Hostinger for WP) — content and frontend promote separately, and one merged chip hides the question people actually ask. Contract card + **locale-coverage row** (WSK-D18). Shown-once key mint. WS4-gated release buttons rendering approval state inline. Submissions (PII-aware). **Degraded state must be visibly honest** when Zone B is unreachable — never a silent empty list. ⚠️ **Do not build against fixtures alone** — the estate's recurring bug class is frontend-first drift (a console reading fields the backend never sends). Needs WSK-23's BFF first | senior-fe | WSK-23 |
 | ⬜ | WSK-25 | **Promotion engine (shrunk by R-2)** — snapshot-first → migrate → content export/import → **Pages deploy hook** → purge. Rollback = content restore + Pages rollback. *Re-rate from `opus·medium` at ticket time* | senior-be | WSK-21 |
 | ⬜ | WSK-26′ | **Pages deploy + domain adapter** (merges old WSK-26+27) — per-branch preview URLs attached to `customer_feedback` gate rows (D-8 unchanged, only the URL source changes); `setDomain` via Pages custom domains. **Deploy token held in Zone A — Zone B never deploys frontends** | senior-integrator | WSK-25 |
 | ⬜ | WSK-28 | **Zone B ops baseline** — box hardening runbook, secrets layout, synccert issuance, OTel + Zone A write-only OTLP listener, `wd-backup-sentinel`. **Backups per WSK-D23: local versioning + object lock, and a PULL-model nightly copy to a second box (Zone B holds NO credential for the backup target). Google Workspace becomes that target at staging; NAS is target-state.** **+stated RTO/RPO. +status page. +CDN-bypass check on every media path** | devops | A-12 |
@@ -242,6 +226,97 @@ model, so any migration is a DNS + content-export exercise, never a server-side 
 ---
 
 ## Session log
+
+> **2026-08-27 — a bug I introduced, caught by WSK-15, now fixed.** My WSK-12 hook made `FormsService`
+> inject `ZoneBEventEmitterService`, but I registered `EventsModule` only in `AppModule` — not in
+> `FormsModule`, where the injection happens. That breaks a full `AppModule` boot. `forms.module.ts`'s
+> OWN header comment states the rule I broke: injection resolves against providers visible to the
+> injecting module, not transitively. Fixed by importing `EventsModule` there. **This is the exact
+> failure mode of applying an agent-reported edit without booting the app** — `tsc` was clean both
+> before and after, so only a real boot (or WSK-15's run) could surface it.
+> Also updated WSK-21's now-stale `expect(501)` contract test to the `404 contract-not-generated`
+> surface WSK-15 shipped, keeping the assertion that actually matters: **never a fabricated artifact**.
+
+
+> **⛔ THREE HARD BLOCKERS on "push → deploy → verify", found 2026-08-26/27:**
+> **(1) WebDesk is in NO workflow.** `grep webdesk .github/workflows/` = zero hits. No job builds a
+> webdesk image, so there is nothing to deploy even once a box exists. Unscoped work between WSK-28
+> and the WS10 pipeline program.
+> **(2) The branch would ROLL THE LIVE STACK BACK.** `webdesk-zone-b-2026-08-26` is **30 commits behind
+> `origin/main`**; its VERSION is `0173a`, live runs `0184a`, main is `0187a`. Tagging from it builds
+> 0173a images and reverses 11 builds — the estate's own stale-tag footgun. **Must rebase onto main and
+> bump to 0188a BEFORE any tag.**
+> **(3) Zone B has no box** (A-12). So the Zone B half cannot be deployed, therefore cannot be
+> server-verified, therefore its greens cannot stop being provisional. **A-12 now gates the whole
+> verification approach, not just WSK-28.**
+>
+> Zone A's half (bridge migration + consumer + Cerbos policy + hub allow-list) IS shippable through the
+> existing pipeline once rebased — and it runs a migration against the LIVE database, so it wants a
+> deliberate go-ahead, not a batch. Push itself is currently blocked by the permission classifier.
+
+
+> **⛔ STANDING RULE CHANGE — 2026-08-26: all tests run on a Linux server, never locally.**
+> Local is Windows; the servers are Linux. This is not cosmetic — three Windows-only artifacts bit us
+> this session and none exist on the target platform: MSYS silently rewriting container-side docker
+> paths and **failing green**, a `cp1252` console-encoding crash that killed a script mid-write, and
+> CRLF/LF churn on every `git add`.
+>
+> **Consequence, stated plainly: all 24 ✅ in this tracker are PROVISIONAL.** Every one was verified in
+> Docker-for-Windows. Under the new rule none of them count until re-run on Linux. The code is not in
+> doubt — the *evidence* is, and this program's whole discipline has been evidence over assertion.
+>
+> **Re-verification is now a real work item** and the natural owner is **WSK-M0**, the Milestone-0 gate,
+> which already had to run every suite at once. Reachable Linux hosts with Docker (probed 2026-08-26):
+> `sumopod` (6.8, **4 cores**, observability hub) · `gda-aicenter` (6.1, 2 cores — **the LIVE ERP box,
+> ~13 containers; heavy suites here can degrade production**) · `aire-vps` (6.8, 2 cores, another
+> project). `gda-ai01` unreachable; `delphi`/`helios` observe-only AND unreachable.
+> **Blocked on an owner decision: which host is the test host.**
+
+
+> **2026-08-26 — WSK-12's 5 shared-file edits APPLIED by coordinator, all additive, all verified:**
+> `forms.service.ts` emit hook (step 9, best-effort — the agent's suggested `form.siteSlug` did not
+> exist on `ResolvedForm`, corrected to `tenantSlug`) · `platform-nest/src/app.module.ts` controller ·
+> `modules/webdev/index.ts` migration + one `mcpTools` entry · `mcp-hub/src/automation-policy.ts`
+> allow-list. **`tsc` 0 errors in webdesk/api, platform-nest AND mcp-hub;** webdev suite 25/25.
+> `docs/modules/CAPABILITY-INVENTORY.md` regenerated via `UPDATE_INVENTORY=1` — **diff checked before
+> trusting it: 5 insertions / 4 deletions, only my tool + the counts it moves, no concurrent session's
+> work baked in.** The agent's reported pre-existing drift did not reproduce.
+> **NOT done deliberately:** restarting the LIVE Cerbos. That is a production action and nothing is
+> deployed — it belongs to deploy time. The dev Cerbos was already restarted by the agent.
+
+
+> **⛔ WSK-12 needs owner sign-off before it is live — 5 edits to EXISTING shared files + a restart.**
+> Zone B's side is wired (EventsModule, env vars, compose passthrough — all mine, done). Outstanding:
+> (a) `webdesk/api/src/forms/forms.service.ts` — the actual emit hook in `submit()`;
+> (b) `platform-nest/src/app.module.ts` — register `ZoneBEventsController`;
+> (c) `platform-nest/src/modules/webdev/index.ts` — append the migration + one `mcpTools` entry;
+> (d) `mcp-hub/src/automation-policy.ts` — allow-list `wf:webdesk-zoneb-intake`;
+> (e) **restart the live Cerbos** so the new policy loads (nothing hot-reloads — standing trap).
+> Until (a)-(e) land the bridge is inert: the emitter has no hook and every real call 403s — which is
+> the correct fail-closed state, and WSK-31 still owes the `wf:webdesk-zoneb-intake` service identity.
+> **Also note:** the agent restarted the SHARED `gaiada-cerbos-1` dev container to load its policy.
+> Additive only, and it re-ran the sibling suite green afterwards — but other sessions share that box.
+
+
+> **⚠️ Two accumulating patterns to fix before WSK-M0 — neither is one ticket's bug:**
+> **(1) Test-harness env naming is fragmenting.** Four different names now mean "the app DB URL":
+> `APP_DATABASE_URL`, `WSK05_TEST_DATABASE_URL`, `WSK11_APP_DATABASE_URL`, `WSK21_TEST_DATABASE_URL`.
+> WSK-21's are *documented* (unlike WSK-11's, which were not) so they are reproducible — but the gate
+> has to run every suite at once, and per-ticket prefixes make that a puzzle. Normalise on the real
+> names the app code reads.
+> **(2) In-memory single-process state, now in three tickets:** WSK-05's read quota, WSK-11's BullMQ
+> worker running in-process, and WSK-21's idempotency store + jobs registry. Each is correct for a
+> one-container topology and each silently under-enforces at two replicas. Decide deliberately
+> (Redis/DB-backed) rather than discovering it at the first scale-out.
+
+
+> **2026-08-26 — owner authorised Zone A work.** The connection path (WSK-21 → 22 → 23 → 24) is
+> unblocked. WSK-12 is the first ticket to touch `platform-nest`/`automation`, under tight rules:
+> **new files only, no edits to existing Zone A files** — any needed edit is reported to the coordinator.
+> That is the direct lesson from this session's two seams and the debug block a concurrent commit captured.
+> **Honest scope note:** there is still **zero** live connection between the ERP and WebDesk — no `webdev`
+> module, no BFF route, no MCP tool, no event flow, and **no UI at all**.
+
 
 > **Full `webdesk/api` suite, coordinator-run 2026-08-26: 105/107, `tsc` 0 errors.** The 2 failures were
 > **WSK-07's** media specs and were purely my missing env (`MINIO_*`, `WEBDESK_MEDIA_MAX_UPLOAD_BYTES`) —

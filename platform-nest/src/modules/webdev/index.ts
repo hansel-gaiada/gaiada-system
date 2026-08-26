@@ -34,7 +34,9 @@ import type { ModuleContract } from "../contract";
 
 export const webdevModule: ModuleContract = {
   key: "webdev",
-  migrations: ["0090_webdev_provisioned_sites.sql"],
+  migrations: [
+    // WSK-12
+    "202608261440_webdev_zoneb_event_log.sql","0090_webdev_provisioned_sites.sql"],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
   permissions: [
@@ -44,6 +46,25 @@ export const webdevModule: ModuleContract = {
   ],
   customFieldTargets: [],
   mcpTools: [
+    // WSK-12: the wd-zoneb-intake bridge consumer. n8n may not touch a database directly
+    // (automation backbone rule), so the dedup insert is reachable only as an MCP tool.
+    {
+      name: "webdev.recordZoneBEvent",
+      description: "Idempotent record of a Zone B (WebDesk) signed fact - the wd-zoneb-intake bridge consumer.",
+      minAssurance: "low",
+      write: true,
+      impact: "low",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/zoneb-events",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string" }, eventId: { type: "string" }, kind: { type: "string" },
+          originSite: { type: "string" }, occurredAt: { type: "string" }, data: { type: "object" },
+        },
+        required: ["tenantId", "eventId", "kind", "originSite", "occurredAt", "data"],
+      },
+    },
     {
       name: "webdev.provisionSite",
       description:
