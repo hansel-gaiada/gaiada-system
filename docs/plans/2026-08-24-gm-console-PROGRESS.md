@@ -340,6 +340,28 @@ entries out of chronological place. My two entries renumbered off the collision 
 all three were checked and are clean, because only the changelog had markers that collided with
 another session's content.
 
+**F27 — F17 closed, and `owner` was the real damage.** The three roles Cerbos grants that `rbac.ts`
+never named are now mirrored. Capability sets were **derived**, not authored: for each role, the set is
+exactly the capabilities whose `CAPABILITY_MAP` entry its bundle satisfies, so
+`rbac-capability-parity.test.ts`'s biconditional holds by construction (1343 pairs green).
+
+  | Role | Caps | Note |
+  |---|---|---|
+  | `finance_staff` | 2 | `finance.statement.view`, `finance.ar.view` |
+  | `finance_manager` | 2 | identical today — its extra reach (post, reverse, close, approve, write-off) is real in Cerbos but no UI reads it yet |
+  | **`owner`** | **61** | previously **zero**: no Settings, no company management, no reports, no HR — while Cerbos would have authorized all of it |
+
+**`owner` also exposed a category the role-axis guard did not model.**
+`rbac-cerbos-parity.test.ts` asserts every mirrored role is granted in `derived_roles.yaml`, and
+flagged `owner` as STALE. It is the opposite of stale: `generate-role-bundles.mjs` declares it
+**permission-native** — *"Roles with NO Cerbos rules, whose reach is their bundle alone (IAM-04c §3).
+`owner` is the first."* — and emits 330 permissions for it. So it never appears as a
+`g.role == "owner"` literal and never will. The guard gained a `PERMISSION_NATIVE_ROLES` hook, third
+alongside literal grants and string-composed module roles, with the rule that every entry must be
+citable in the generator's own list — *an entry not named there is drift wearing an exemption*. The
+file had already been extended once for the same class of gap (HIER-3, module roles), so this
+completes its model rather than silencing it.
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -418,3 +440,8 @@ another session's content.
 - **2026-08-26** — Found and fixed my own CHANGELOG corruption (F26): 30 duplicated entries, 1173
   lines, introduced in `ad5c9f67` and invisible to the numstat check I had trusted. `CLAUDE.md`'s new
   append-only-doc trap gained the caveat that "0 deletions" cannot detect a duplication.
+- **2026-08-26** — **F17 closed.** `finance_staff`, `finance_manager` and `owner` mirrored into
+  `Role`/`ROLE_CAPS` with derived capability sets; the role-axis guard taught about permission-native
+  roles. Gates: `tsc` clean · **3414 tests / 177 files green** · `DEMO_MODE=1 next build` clean.
+  Remaining open: **F21** (the GM holds no company-grain grant — owner ruling), **B3** (monitoring has
+  no backend), and the pre-existing shell key/hydration warnings (F8).

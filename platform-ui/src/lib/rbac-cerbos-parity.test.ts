@@ -79,6 +79,21 @@ describe("Role mirrors every raw role Cerbos actually grants (drift-proof, not a
   // the backend.
   const MODULE_ROLE_SUFFIXES = ["_staff", "_manager", "_approver"];
 
+  // ── PERMISSION-NATIVE ROLES, added 2026-08-26 (F17) ───────────────────────────────────────────
+  //
+  // A THIRD legitimate shape this check did not model, and the same class of gap the module-suffix
+  // note above describes: a role whose reach is its BUNDLE ALONE, with no Cerbos rules at all.
+  // `platform-nest/scripts/generate-role-bundles.mjs` declares them by name and says so outright —
+  // "Roles with NO Cerbos rules, whose reach is their bundle alone (IAM-04c §3). `owner` is the
+  // first." — and emits 330 permissions for `owner` accordingly.
+  //
+  // So `owner` never appears as a `g.role == "..."` literal in derived_roles.yaml and never will,
+  // and the reverse check flagged it as STALE the moment it was mirrored. It is the opposite of
+  // stale: it is a role Cerbos honours through the permission catalog rather than through a derived
+  // role. This list must stay tiny and each entry must be citable in the generator's own
+  // `PERMISSION_NATIVE_ROLES` — an entry that is not named there is drift wearing an exemption.
+  const PERMISSION_NATIVE_ROLES = new Set(["owner"]);
+
   it("every Role/ROLE_CAPS entry is still a role Cerbos grants — no STALE mirror entries", () => {
     const policy = read(DERIVED_ROLES_POLICY_PATH);
     const rawRoles = new Set(rawRolesGrantedByCerbos(policy));
@@ -86,6 +101,7 @@ describe("Role mirrors every raw role Cerbos actually grants (drift-proof, not a
     const stale = Object.keys(ROLE_CAPS).filter((role) => {
       if (rawRoles.has(role)) return false;                                    // a literal Cerbos grant
       if (MODULE_ROLE_SUFFIXES.some((s) => role.endsWith(s))) return false;    // string-composed
+      if (PERMISSION_NATIVE_ROLES.has(role)) return false;                     // bundle-only, no rules
       return true;
     });
 
