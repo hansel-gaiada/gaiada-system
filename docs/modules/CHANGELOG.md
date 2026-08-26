@@ -11,6 +11,56 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.58.0` - The Office: one building, the art actually used, and two tiers of movement (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- ★ **The floor reads as one building.** `drawOuterShell` was a 3px `strokeRect` and nothing else,
+  so the PAGE background showed between rooms and the plate read as detached islands. It now fills
+  the plate with a tiled building floor and outer wall; `ROOM_GAP_TILES` 2 -> 0 and
+  `OUTER_MARGIN_TILES` 2 -> 1 so rooms abut into shared partitions instead of leaving strips of
+  empty interior.
+- ★ **The art pack is actually used.** ~70 of the 75 assets in `public/office-env/` were never
+  loaded - only the 5 floor textures. Walls, desks, chairs, monitors and per-room dressing now draw
+  from it. Wall texture alpha 0.55 -> 1 (at 0.55 the tile averaged back into the flat bar it was
+  meant to replace). The desk sprite is a 32x32 source that was being squashed into ~30x9px, which
+  is why it read as a plank; it now draws on its own aspect with the monitor standing on it.
+- **Seated avatars face their desk** (LPC row 0, away) instead of the viewer. The desk is drawn
+  above the seat, so a row-2 avatar had its back to its own monitor.
+- **Geometry**: `DESK_ROW_TILES` splits the vertical row pitch from the horizontal
+  `DESK_SPACING_TILES` - at a shared 3.0 pitch a row's name labels painted across the desks of the
+  row below. `DESK_TOP_TILES` 3.6 -> 4.7 to clear the nameplate now the desk art is taller.
+- **The side rail is tabbed** (Cast / Detail / Activity / Legend); stacked, the detail panel fell
+  below the fold so selecting an avatar looked inert. **Fullscreen** is a CSS state, not the
+  Fullscreen API, so the app shell stays mounted and Escape returns you where you were.
+
+**Added**
+- `OfficeCastStrip` - a bottom strip, one card per person/agent/automation. ⚠ A human card never
+  carries a working/idle badge: people have no activity feed comparable to an agent run, so a badge
+  would be a presence claim the data cannot support. Absence of status is never rendered as "idle".
+- ★ **Movement now has two tiers** (owner decision 2026-08-26). Room-to-room stays DERIVED from
+  recorded handovers. Movement WITHIN a room is ambient and means nothing about the person. What
+  makes that honest is that drift is **unconditional** - `ambientDriftOffset(avatarId, nowMs)` has
+  no parameter through which `activeRunId`/`busyUntil`/`automationSignal` could enter, and a test
+  pins its arity so a future change threading one in fails loudly rather than quietly turning
+  decoration into surveillance. Speech lines come from a fixed curated bank, never generative
+  (plan §6). `prefers-reduced-motion` kills it outright. The toolbar hint states both tiers, because
+  the old text promised ALL movement was derived.
+- Dev-only: `office-fixture.ts`, `office-snapshot.ts` and `/office-lab` (404s in production) - a
+  harness for the renderer with no backend, able to render a snapshot captured from the live server.
+  `next.config.ts` honours `NEXT_DIST_DIR`; several dev servers share this working copy and all
+  wrote the same `.next`, serving 500s whenever one recompiled.
+
+**Notes**
+- ⚠ Open, belongs to platform-nest: the live org structure returns DUPLICATE person ids (four people
+  in GM share `p-019fb652`). `steadyPositions` no longer depends on their uniqueness - an id-keyed
+  lookup was stacking four people on one desk and teleporting others cross-department - but the data
+  is still wrong.
+- Verified: `tsc --noEmit` clean; `vitest run` 177 files / 3427 tests; `DEMO_MODE=1 npm run build`
+  green; driven in a browser against a live-server snapshot in both themes, with drift observed
+  across three differing frame checksums.
+
+---
+
 ### platform-ui - finance UI: zero axe violations across all 11 routes (2026-08-26) - DEV-VERIFIED
 
 **Method**
