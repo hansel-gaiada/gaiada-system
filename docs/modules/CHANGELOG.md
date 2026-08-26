@@ -136,7 +136,11 @@ local stack). None of these mean "production-done".
   (existing `reconcileSiteAction`) or a link to the run to re-provision. Empty state says where repos
   come from (a provisioned run), not "connect GitHub". A GitHub line states the viewer's connection
   and that commit/PR activity needs the App. Module-off and refused reads are stated, not blanked.
-  `components/repositories/RepoInventory` (6 tests); e2e drives the demo store's failed + live pair.
+  `components/repositories/RepoInventory` (7 tests); e2e drives the demo store's failed + live pair.
+  **`?preview=sample`** renders five sample rows (every status) behind a loud "Sample data — nothing
+  here is from your platform" banner, offered from the empty and module-off states so the layout can
+  be reviewed on a platform where nothing has been provisioned; real reads are skipped in preview so
+  sample and real rows can never mix, and sample rows offer no actions.
 
 **Fixed**
 - **61 unstyled buttons.** `className="btn"` / `"btn btn-primary"` is used in 27 components (pipeline

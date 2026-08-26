@@ -37,6 +37,8 @@ export function RepoInventory({
   mayReconcile,
   actions,
   pipelineHref,
+  previewHref,
+  sample,
 }: {
   state: RepoInventoryState;
   /** The viewer's own GitHub connection, if any (Connections tab). */
@@ -44,15 +46,31 @@ export function RepoInventory({
   mayReconcile: boolean;
   actions: RepoInventoryActions;
   pipelineHref: string;
+  /** Where "Preview with sample data" goes (offered only when there is nothing real to show). */
+  previewHref?: string;
+  /** Set when `state.rows` are SAMPLES: renders the banner and disables every real action. */
+  sample?: { exitHref: string };
 }) {
+  const previewOffer = previewHref ? (
+    <p className="repo-note">
+      Want to see the layout with repositories in it? <Link href={previewHref}>Preview with sample data →</Link>
+    </p>
+  ) : null;
+
   if (state.kind === "not_enabled") {
-    return <p className="repo-note">Site &amp; repo provisioning isn&rsquo;t turned on for this company yet, so there are no repositories to list.</p>;
+    return (
+      <div className="repo-inventory">
+        <p className="repo-note">Site &amp; repo provisioning isn&rsquo;t turned on for this company yet, so there are no repositories to list.</p>
+        {previewOffer}
+      </div>
+    );
   }
   if (state.kind === "refused") {
     return <p className="repo-note">You don&rsquo;t have access to view this department&rsquo;s repositories (ask an admin if you need it).</p>;
   }
 
   const { rows } = state;
+  const inSample = !!sample;
   const c = repoCounts(rows);
   const summary = rows.length === 0
     ? null
@@ -66,6 +84,12 @@ export function RepoInventory({
 
   return (
     <div className="repo-inventory">
+      {sample && (
+        <div className="repo-sample" role="status">
+          <strong>Sample data.</strong> This is what the tab looks like once runs have been provisioned — nothing here is from your platform, and the links are not real.{" "}
+          <Link href={sample.exitHref}>Back to real data →</Link>
+        </div>
+      )}
       <div className="repo-inventory__head">
         {summary ? <span className="repo-inventory__summary">{summary}</span> : <span />}
         <GithubLine github={github} />
@@ -79,11 +103,12 @@ export function RepoInventory({
             A repository is created when a PRD run is provisioned — in the run workspace, under &ldquo;Site &amp; repo&rdquo;. It shows up here with its client, project and status.
           </span>
           <Link href={pipelineHref} className="lux-btn lux-btn--ghost lux-btn--sm">Open the pipeline →</Link>
+          {previewOffer}
         </div>
       ) : (
         <ul className="repo-list">
           {rows.map((r) => (
-            <RepoRowItem key={r.id} row={r} mayReconcile={mayReconcile} onReconcile={actions.reconcile} />
+            <RepoRowItem key={r.id} row={r} mayReconcile={mayReconcile && !inSample} sample={inSample} onReconcile={actions.reconcile} />
           ))}
         </ul>
       )}
@@ -109,9 +134,11 @@ function stripScheme(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }
 
-function RepoRowItem({ row, mayReconcile, onReconcile }: {
+function RepoRowItem({ row, mayReconcile, sample, onReconcile }: {
   row: RepoRow;
   mayReconcile: boolean;
+  /** Sample rows link nowhere real and offer no actions. */
+  sample?: boolean;
   onReconcile: (formData: FormData) => Promise<SiteActionResult>;
 }) {
   const [pending, startTransition] = useTransition();
@@ -155,7 +182,7 @@ function RepoRowItem({ row, mayReconcile, onReconcile }: {
             <strong>{row.failure.title}.</strong> {row.failure.body}
           </div>
         )}
-        {(row.failure || row.status !== "live") && (
+        {!sample && (row.failure || row.status !== "live") && (
           <div className="repo-row__actions">
             {mayReconcile && row.canReconcile && (
               <button type="button" className="btn" onClick={reconcile} disabled={pending}>{pending ? "Checking…" : "Check status now"}</button>

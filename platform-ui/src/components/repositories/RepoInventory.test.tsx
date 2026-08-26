@@ -23,6 +23,21 @@ const actions = (over: Partial<RepoInventoryActions> = {}): RepoInventoryActions
 });
 const github = { status: "pending" as const, account: "hansel-gh" };
 
+describe("RepoInventory — preview with sample data is unmistakable", () => {
+  it("empty and module-off states offer the preview; preview shows a banner and an exit", () => {
+    const { rerender } = render(<RepoInventory state={{ kind: "ok", rows: [] }} github={null} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" previewHref="?preview=sample" />);
+    expect(screen.getByRole("link", { name: /preview with sample data/i })).toHaveAttribute("href", "?preview=sample");
+    rerender(<RepoInventory state={{ kind: "not_enabled" }} github={null} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" previewHref="?preview=sample" />);
+    expect(screen.getByRole("link", { name: /preview with sample data/i })).toBeInTheDocument();
+    rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={null} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" sample={{ exitHref: "/departments/dept-1/repositories" }} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/sample data/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/nothing here is from your platform/i);
+    expect(screen.getByRole("link", { name: /back to real data/i })).toHaveAttribute("href", "/departments/dept-1/repositories");
+    // Sample rows never offer real actions.
+    expect(screen.queryByRole("button", { name: /check status now/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("RepoInventory — the department's code, one row per repo", () => {
   it("summarises the inventory in one line and lists each repo with its links and lineage", () => {
     render(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);

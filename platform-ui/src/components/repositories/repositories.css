@@ -6,6 +6,15 @@
 .repo-github__label { font: 600 12px var(--font-body); color: var(--text-primary); }
 .repo-github__hint { font: 400 12px/1.4 var(--font-body); color: var(--ink-subtle); }
 .repo-note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); }
+.repo-note a { color: var(--erp-accent); }
+/* Sample-data banner: loud on purpose — nothing under it is real. */
+.repo-sample {
+  padding: 10px 14px; border-radius: var(--radius-8);
+  background: color-mix(in srgb, var(--status-warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent);
+  font: 400 13px/1.5 var(--font-body); color: var(--text-primary);
+}
+.repo-sample a { color: var(--text-primary); font-weight: 600; }
 .repo-note--error { color: var(--status-critical-fg); }
 
 .repo-list { list-style: none; margin: 0; padding: 0; display: grid; }

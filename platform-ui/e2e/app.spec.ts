@@ -378,6 +378,18 @@ test("Repositories tab is the department's code inventory — repos from provisi
   await expect(page.getByText(/commit and pr activity appears once the github app is connected/i)).toBeVisible();
 });
 
+test("Repositories tab: ?preview=sample shows the layout with sample rows behind a banner", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories?preview=sample");
+  await expect(page.getByRole("status")).toContainText(/sample data/i);
+  await expect(page.locator(".repo-row")).toHaveCount(5);
+  await expect(page.getByText("5 repos · 2 live · 1 on staging · 1 provisioning · 1 failed")).toBeVisible();
+  await expect(page.getByRole("button", { name: /check status now/i })).toHaveCount(0); // samples offer no real actions
+  await page.getByRole("link", { name: /back to real data/i }).click();
+  await page.waitForURL(/\/departments\/dept-1\/repositories$/);
+  await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
+});
+
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {
   await page.goto("/meetings/rec-demo-1");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);

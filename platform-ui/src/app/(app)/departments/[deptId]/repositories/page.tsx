@@ -11,11 +11,13 @@ import { listConnections } from "@/lib/connections";
 import { listProvisionedSites } from "@/lib/webdevProvisionedSites-data";
 import { reconcileSiteAction } from "@/lib/webdevProvisionedSitesActions";
 import { buildRepoInventory } from "@/lib/repoInventory";
+import { SAMPLE_REPO_ROWS } from "@/lib/repoInventory.sample";
 import { RepoInventory, type RepoInventoryState } from "@/components/repositories/RepoInventory";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 
 type Params = Promise<{ deptId: string }>;
+type Search = Promise<{ preview?: string | string[] }>;
 
 // Repositories — the department's code inventory: every repository the delivery pipeline has
 // provisioned for this department's projects (`webdev_provisioned_sites`, read tenant-wide, then
@@ -24,17 +26,38 @@ type Params = Promise<{ deptId: string }>;
 // why and offer the one action that helps. What it cannot show yet — commits, PRs, repos created
 // outside the pipeline — needs the GitHub App on the org (WD-21/22, owner action), and the page says
 // so rather than pretending.
-export default async function DepartmentRepositoriesPage({ params }: { params: Params }) {
+export default async function DepartmentRepositoriesPage({ params, searchParams }: { params: Params; searchParams: Search }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   const { deptId } = await params;
+  const { preview } = await searchParams;
   if (!tenant) notFound();
 
   const dept = await getDepartment(userId, tenant, deptId);
   if (!dept) notFound();
   if (!deptTabs(toolkitFor(dept.name)).some((t) => t.key === "repositories")) notFound();
+
+  const basePath = `/departments/${deptId}/repositories`;
+  // `?preview=sample` — the layout with sample rows behind an unmistakable banner, for a platform
+  // where nothing has been provisioned yet. Real reads are skipped entirely so the two can never mix.
+  if (preview === "sample") {
+    const connections = await listConnections(userId, tenant, { owner: "me", provider: "github" });
+    const gh = connections.rows.find((r) => r.provider === "github") ?? null;
+    return (
+      <Card title="Repositories">
+        <RepoInventory
+          state={{ kind: "ok", rows: SAMPLE_REPO_ROWS }}
+          github={gh ? { status: gh.status, account: gh.externalAccount } : null}
+          mayReconcile={false}
+          actions={{ reconcile: reconcileSiteAction }}
+          pipelineHref="/pipeline"
+          sample={{ exitHref: basePath }}
+        />
+      </Card>
+    );
+  }
 
   // AGN-3: the run list is what attributes repos to this department — a refusal is stated, not
   // rendered as "no repositories".
@@ -68,7 +91,14 @@ export default async function DepartmentRepositoriesPage({ params }: { params: P
 
   return (
     <Card title="Repositories">
-      <RepoInventory state={state} github={github} mayReconcile={mayReconcile} actions={{ reconcile: reconcileSiteAction }} pipelineHref="/pipeline" />
+      <RepoInventory
+        state={state}
+        github={github}
+        mayReconcile={mayReconcile}
+        actions={{ reconcile: reconcileSiteAction }}
+        pipelineHref="/pipeline"
+        previewHref={`${basePath}?preview=sample`}
+      />
     </Card>
   );
 }
