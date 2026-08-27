@@ -63,6 +63,17 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   "wf:wd-digests": ["workActivity.feed", "projects.get", "llm.summarize", "notify", "workActivity.relink"],
   // WD-26: stale-task nag (no work_activity in N=5 days -> assignee; >=2N -> also project owner).
   "wf:wd-stale-nag": ["workActivity.staleTasks", "notify"],
+  // WSK-29 — wd-contract-watch (automation/workflows/wd-contract-watch.json): surfaces a "site
+  // pinned older contract" console notice per site whenever a WebDesk (Zone B) tenant publishes a
+  // new /v1 contract snapshot (webdev D-5: never auto-upgrades). Pre-registered BEFORE
+  // `webdev.listPendingContractNotices` exists — same precedent WSK-12 set for
+  // `wf:webdesk-zoneb-intake` -> `webdev.recordZoneBEvent` (added here before WSK-19/31 built the
+  // tool). Deny-by-default already protects this: the workflow's own gate + this allow-list
+  // together mean a call to a tool that doesn't exist yet 404s, never silently succeeds. The read
+  // tool itself is a platform-nest (webdev module) registration this ticket flagged, not built —
+  // see the workflow file's own "MCP webdev.listPendingContractNotices" node `notes` for the
+  // contract it must satisfy.
+  "wf:wd-contract-watch": ["webdev.listPendingContractNotices", "notify"],
   // TR-11: the three reports/check-in flows. All three call platform-nest's checkin service reads
   // (pending-reminders / missed-yesterday) and `facts/recompute` DIRECTLY with the platform's own
   // service token (never through the hub — recompute is deliberately not an MCP tool, §9.2), so

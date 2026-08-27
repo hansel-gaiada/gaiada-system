@@ -31,11 +31,11 @@ misleads real tickets.
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
 | C · Contract, codegen & the rail | 7 | **7** | 0 | 0 | 0 |
-| D · Control plane · ERP console · envs | 9 | **5** | 0 | 3 | 1 |
+| D · Control plane · ERP console · envs | 9 | **6** | 0 | 2 | 1 |
 | E · AI execution & approvals | 3 | **2** | 0 | 1 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
 | G · New from reassessment | 2 | **2** | 0 | 0 | 0 |
-| **Total** | **51** | **38** | **0** | **10** | **3** |
+| **Total** | **51** | **39** | **0** | **9** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -112,7 +112,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ⬜ | WSK-25 | **Promotion engine (shrunk by R-2)** — snapshot-first → migrate → content export/import → **Pages deploy hook** → purge. Rollback = content restore + Pages rollback. *Re-rate from `opus·medium` at ticket time* | senior-be | WSK-21 |
 | ⬜ | WSK-26′ | **Pages deploy + domain adapter** (merges old WSK-26+27) — per-branch preview URLs attached to `customer_feedback` gate rows (D-8 unchanged, only the URL source changes); `setDomain` via Pages custom domains. **Deploy token held in Zone A — Zone B never deploys frontends** | senior-integrator | WSK-25 |
 | ✅⚠ | WSK-28 | **Zone B ops baseline — authored, and honest that the box does not exist.** 9 deliverables: hardening runbook, secrets layout (zero secret values), synccert issuance written from `sync-engine-go/cmd/synccert`'s REAL flags, OTel + a **write-only** Zone A OTLP proposal, `wd-backup-sentinel`, WSK-D23 backups (local versioning + object lock, **pull-model** offsite so Zone B holds NO target credential — an `authorized_keys` forced-command, target initiates), stated RTO/RPO, status page, CDN-bypass check. **Two security properties are asserted by a check that FAILS in the wrong direction**, verified independently: `check-otlp-write-only` rejects a config carrying a `zpages` extension, and `check-cdn-bypass` flags a bypassable origin. Compose verified on **exit code** (`config` exit 0, dev and dev+ops), 12 env vars each wired into an `environment:` block. Caddy CDN gate driven live: unset→200, set+no/wrong header→403, set+correct→200. ⚠ **Coordinator addition — the gate was fail-OPEN:** the Caddy matcher is false when the secret is unset, so production with a missing var served `/media/*` unguarded and **no check complained** (`--probe` can't tell it from a dev box). Added `--assert-configured`; selftest 7/7 and all four directions driven. ⚠ Nothing past PLANNED until **A-12**; the Zone A OTLP listener needs `infra/observability/` (not owned); status page adds a new public `/status/*` route | devops | A-12 ⏸ |
-| ⬜ | WSK-29 ⚡ | Deploy-tool wiring (Zone A) — `deploy.staging`/`deploy.production` at the control plane; `wd-contract-watch` live | senior-integrator | WSK-21–23 |
+| ✅⚠ | WSK-29 ⚡ | **Deploy-tool wiring — and the "WebDesk is in NO workflow" gap is CLOSED.** `grep -rn webdesk .github/workflows/` was **zero hits**; ci.yml now has **5 real jobs** (`webdesk-root`, `webdesk-blocks`, `webdesk-api` with Postgres+Redis+MinIO, `webdesk-payload`, `webdesk-deploy`) and release.yml builds/cosign-signs/SBOMs **`webdesk-api`**. All 4 workflow files re-parsed clean (14 jobs in ci.yml) and I **built the image myself from release.yml's own resolved context** — because a red matrix leg would skip `deploy` for EVERY component in the estate, not just WebDesk. `webdesk-payload` deliberately **excluded** from release.yml: its `next build` type-check is red today (TS2578 unused `@ts-expect-error`, 4 files) and `fail-fast:false` stops sibling *cancellation*, not job failure. New `webdesk/deploy/` driver seam (real SSH+rsync, injected exec) **24/24** and mcp-hub **356/356** (24 skipped, no live Cerbos), both on Linux. The hub tool is **read-only on purpose** (`webdesk.deploy.probeReachability`) — the mutating `deploy()` has NO network path, because a service with no Cerbos client and no principal model must never be what a caller invokes to change a live host. ⚠ `wd-contract-watch` is **PROTOTYPED, not live**: it calls `webdev.listPendingContractNotices`, which **does not exist anywhere in the repo** | senior-integrator | WSK-21–23 ✅ |
 | ⏸ | WSK-30 ⚡ | **P4 QA gate (the boundary gate)** — full ERP-click walk on the **real box**: provision → deploy → promote → rollback; §03 adversarial matrix; boundary sweep (no Zone A creds/routes in Zone B); backup/restore evidence | qa | all of D + **the box** |
 
 ---
@@ -211,7 +211,7 @@ Zone B *backend* only.
 | # | Blocker | Why it is hard |
 |---|---|---|
 | 1 | **`delphi`/`helios` are OBSERVE-ONLY** (owner ruling 2026-08-22: collect FROM, never modify ON) | Deploying a frontend *is* modifying them. Needs an explicit ruling lifting observe-only **for deployment**, which is a narrower question than re-authorising the monitoring agent tier |
-| 2 | **Neither host is reachable from the dev machine** — SSH and HTTP both time out (`delphi` 72.61.142.88, `helios` 187.77.116.133) | Access is clearly *intended* (both are in `~/.ssh/config`), so this is an allowlist / tunnel / CI-identity question. WSK-29's deploy tooling needs the same answer |
+| 2 | ~~Neither host is reachable~~ **CORRECTED 2026-08-27 — this finding was WRONG.** Both hosts are reachable and I logged in to each read-only: `root@delphi` (72.61.142.88, Ubuntu 24.04.4, up 4wk) and `root@helios` (187.77.116.133, up 5wk), using the keys already in `~/.ssh/config`. HTTP to the bare IPs gives *empty reply / TLS handshake failure*, **not** a timeout — which is what the original probe most likely misread. **There is no SSH allowlist / tunnel / CI-identity problem.** | The REAL blocker is narrower and entirely non-technical: (a) the owner ruling lifting **observe-only for deploys** is still not recorded, and (b) nobody has decided which vhost/docroot our own frontends occupy. Both boxes carry **real third-party customer sites** (24 on delphi, 23 on helios, counted — not enumerated), so there is no path we own by default. ⚠ Also **corrected from WSK-29's own report**: it described them as "cPanel/WHM shared hosting". They are not — `/usr/local/cpanel` is **absent** on both, there is **no control panel at all**, and they are plain Ubuntu + `nginx` vhosts. **And Docker 29.7.2 is installed on both with ZERO containers running** — 43G free on delphi, 262G on helios. That materially widens the options (containers, not just a static docroot) and bears on **A-12**: the Zone B box may not need new procurement. The counter-argument is blast radius, not capacity — co-locating an internet-facing multi-tenant Zone B with 23–24 live customer sites is an owner security call, not a default |
 
 ### Tenant zero, under the new rule
 
@@ -531,3 +531,40 @@ is not needed.
 > because no hub tool can read a contract snapshot by id, download artifact bytes, or resolve a
 > `pipeline_stages.artifact_ref`. §08's site registry **cannot** go live until control-plane read
 > commands exist. And `webdesk` still appears in **zero** CI/deploy workflows.
+
+> **WSK-29 pushed — and it overturned a recorded fact, which is worth more than the ticket.**
+>
+> **`delphi` and `helios` ARE reachable.** The tracker said "SSH and HTTP both time out" and I repeated
+> that to the owner. It is wrong. I logged in to each myself, read-only: `root@delphi` and `root@helios`,
+> on keys already in `~/.ssh/config`. HTTP to the bare IPs returns *empty reply / TLS handshake failure*,
+> not a timeout — almost certainly what the original probe misread. **There was never an allowlist,
+> tunnel or CI-identity problem to solve.** A blocker that does not exist still costs real time: it sat
+> in this file shaping three tickets (WSK-25, WSK-26′, WSK-29).
+>
+> **I also corrected WSK-29's own correction.** It reported both boxes as "live cPanel/WHM shared
+> hosting". They are not: `/usr/local/cpanel` is absent, there is **no control panel at all**, and they
+> are plain Ubuntu 24.04 + `nginx`. **Docker 29.7.2 is installed on both and running ZERO containers**,
+> with 43G free on delphi and 262G on helios. Two agents in a row got the nature of these boxes wrong in
+> opposite directions, which is the argument for checking a host rather than inheriting a description.
+>
+> **What this changes:** deployment options widen from "static files into a docroot" to "containers", and
+> **A-12 may not need new procurement at all** — helios has 262G free and an idle Docker daemon. The
+> counter-argument is blast radius, not capacity: co-locating an internet-facing multi-tenant Zone B with
+> 23–24 live third-party customer sites is an owner security call and I am not treating it as a default.
+> Accounts were **counted, not enumerated**; I did not look at any customer's data.
+>
+> **The real remaining blocker is non-technical and unchanged in size, only in kind:** the observe-only
+> ruling still has to be lifted *for deploys specifically*, and someone has to decide which vhost/docroot
+> our frontends occupy. No amount of tooling substitutes for either.
+>
+> **A near-miss worth recording.** `mcp-hub/src/webdesk-always-ws4.test.ts` — 190 lines of WS4 gating
+> tests — showed up in this shared checkout as `??` untracked, so `git diff origin/main` reported it as a
+> **190-line deletion**. Its content is byte-identical to main, so nothing was lost; a concurrent session
+> had dropped it from the index. But a `git add -A` here would have committed the deletion of a security
+> test with a clean-looking diffstat. This is exactly why generated files and commits go through a clean
+> detached worktree in this program, and why `git add <file>` is never safe in this checkout.
+>
+> **Not fixed, and not mine:** `webdesk/payload`'s `next build` is red (TS2578 in 4 files), which is why
+> it stays out of release.yml; `webdev.listPendingContractNotices` does not exist, so `wd-contract-watch`
+> is inert; and the Zone A→B **command** channel is still absent, so WSK-31's control tools still answer
+> `501 webdesk_control_plane_not_wired`.

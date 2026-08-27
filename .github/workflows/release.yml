@@ -46,6 +46,18 @@ jobs:
           - platform-nest
           - platform-ui
           - report-renderer
+          # WSK-29 — webdesk/api (Zone B NestJS service) only. Its Dockerfile builds cleanly
+          # (verified 2026-08-27 — see docs/plans/2026-08-26-webdesk-PROGRESS.md's WSK-29 report).
+          # `webdesk-payload` is DELIBERATELY NOT in this matrix yet: its own Dockerfile exists
+          # (webdesk/payload/Dockerfile) but `next build`'s type-check is red today (TS2578, 4
+          # files — reported, not fixed, outside this ticket's file ownership) and `needs: build-sign`
+          # below waits for EVERY matrix leg — one broken leg fails the WHOLE job and skips `deploy`
+          # for every other component too (`fail-fast: false` only stops CANCELLATION of siblings, it
+          # does not make the job overall succeed). Add it only once that build is green.
+          # Neither webdesk component is in deploy.yml's COMPONENTS list or any compose file — there
+          # is no Zone B box yet (A-12), so this closes "nothing builds a webdesk image" without
+          # inventing a deploy path nothing can serve.
+          - webdesk-api
           # MON-09f. Unlike every other entry this does NOT live at ./<component> - see the
           # `context:` expression below. It is here because deploy.yml runs `up -d --no-build`:
           # a service that exists only as a local `build:` has no image to start, so the deploy
@@ -72,11 +84,14 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          # Every component is a top-level directory EXCEPT synthetic-prober, which belongs to the
-          # observability stack and lives under infra/. Handled with an expression rather than by
-          # turning `component` into an object, because `matrix.component` must stay a flat string:
-          # the GHCR prune step below builds `package-name: gaiada-${{ matrix.component }}` from it.
-          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || format('./{0}', matrix.component) }}
+          # Every component is a top-level directory EXCEPT synthetic-prober (observability stack,
+          # under infra/) and webdesk-api (WSK-29 — webdesk/api/, a subdirectory of the webdesk/
+          # Zone B project skeleton, not a top-level dir of its own). Handled with an expression
+          # rather than by turning `component` into an object, because `matrix.component` must stay
+          # a flat string: the GHCR prune step below builds `package-name: gaiada-${{ matrix.component }}`
+          # from it, and the image name (`gaiada-webdesk-api`) is deliberately hyphenated even though
+          # the source path (`webdesk/api`) is not — same convention synthetic-prober already sets.
+          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || matrix.component == 'webdesk-api' && './webdesk/api' || format('./{0}', matrix.component) }}
           push: true
           tags: ${{ env.IMAGE }}:${{ env.TAG }}
           provenance: false # we attach a richer SLSA attestation below

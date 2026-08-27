@@ -531,9 +531,11 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 | `stale-approval-chaser.json` | — | stale-approval-chaser (CRON) |
 | `summarize-via-mcp.json` | — | summarize-via-mcp (template) |
 | `task-sla.json` | — | task-sla (CRON) |
+| `wd-contract-watch.json` | `wswdcontractwatch1` | wd-contract-watch (CRON) — 'site pinned older contract' notice |
 | `wd-digests.json` | `wswddigests00001` | wd-digests (CRON) |
 | `wd-provision.json` | `wswdprovision0001` | Subworkflow: webdev.provisionSite (PRV-03 provision<->ERP seam) |
 | `wd-stale-nag.json` | `wswdstalenag0001` | wd-stale-nag (CRON) |
+| `wd-zoneb-intake.json` | `wswdzonebintake1` | wd-zoneb-intake -> webdev_zoneb_event_log (WEBHOOK ingest, HMAC-gated) |
 
 ## Docs, runbooks, guides
 

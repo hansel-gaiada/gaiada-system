@@ -245,21 +245,22 @@ jobs:
       # 0051). Pure static analysis, no DB needed, so it fails at authoring/PR time rather than
       # only showing up as bad data after a real deploy. See scripts/lint-migration-rls.mjs.
       - run: npm run lint:migration-rls
-      # 2026-08-26 — migration IMMUTABILITY lint. Fails a change that EDITS a migration already on
-      # the deploy branch in a way that alters the SQL the database executes.
+      # 2026-08-26 — migration IMMUTABILITY lint. Fails a change that EDITS a migration already
+      # present on the deploy branch in a way that alters the SQL the database executes.
       #
-      # Migrations run ONCE. Editing an applied one changes what a FRESH database gets and nothing
-      # about an estate that already ran it — so the correction reaches every test and every shard
-      # here, passes, and never reaches production. No other gate can see this, because the suites
-      # build their schema FROM the migration files and therefore exercise the fixed version.
+      # Migrations run ONCE. Editing an applied one changes what a FRESH database gets and changes
+      # nothing about an estate that already ran it — so the correction reaches every test and every
+      # shard here, passes, and never reaches production. No other gate can see this, because the
+      # suites build their schema FROM the migration files and therefore exercise the fixed version.
       #
-      # Two finance functions were found running pre-fix code live on 2026-08-26 for exactly this
-      # reason. One produced a permanently red tie-out (visible). The other eliminated against the
-      # WRONG counterparty in a consolidated trial balance — which still balanced, still looked
-      # finished, and was wrong in the one artefact that goes to a bank.
+      # Two finance functions were found running pre-fix code on the live estate on 2026-08-26 for
+      # exactly this reason. One produced a permanently red tie-out (visible, annoying). The other
+      # eliminated against the WRONG counterparty in a consolidated trial balance — which still
+      # balanced, still looked finished, and was simply wrong in the artefact that goes to a bank.
       #
-      # Comment-only edits pass; the comparison strips comments. The database-side counterpart is
-      # `npm run check:function-drift`, which needs an estate and so cannot run here.
+      # Comment-only edits pass; the comparison strips comments. See scripts/lint-migration-immutable.mjs.
+      # The database-side counterpart is `npm run check:function-drift`, which needs an estate and so
+      # cannot run here.
       - run: npm run lint:migration-immutable
       # 2026-08-19 — migration FILENAME lint. The sequential `NNNN_` scheme collided four times
       # (`0114`, `0117`, `0118`, plus the historic `0003`/`0018`) because this is a shared checkout
@@ -453,6 +454,213 @@ jobs:
           DATABASE_URL_CENTRAL: postgres://sync_app:test@localhost:5432/gaiada_sync_central
           DATABASE_URL_SITE_A: postgres://sync_app:test@localhost:5432/gaiada_sync_test
         run: go test ./...
+
+  # ── WSK-29 — WebDesk (Zone B) CI wiring ──────────────────────────────────────────────────────
+  # Before this, `grep -rn webdesk .github/workflows/` returned ZERO hits: WebDesk appeared in no
+  # CI job and no release job, so nothing built a webdesk image and there was nothing to deploy
+  # even once the Zone B box (A-12) exists. These four jobs close the CI half of that gap,
+  # matching the house pattern (own working-directory, own services, `npm ci && typecheck && test`)
+  # rather than inventing a new one. They do NOT touch `webdesk/docker-compose*.yml` (a concurrent
+  # ticket's file) or deploy anything — see release.yml for the image-build half and this ticket's
+  # report for exactly what a real Zone B deploy still needs (A-12, plus the two WSK-D26 blockers on
+  # `delphi`/`helios` for the FRONTEND half, unrelated to this backend).
+
+  # webdesk/ itself (WSK-01/04) — the project-skeleton root: its OWN package.json (a `pg`
+  # dependency + the migration runner other jobs below reuse) and its OWN gates: the migration
+  # RLS-backfill lint (ported from platform-nest, per WSK-01) and the RLS-integrity selftest that
+  # is WSK-04's condition-1 CI gate ("stops a routine migration from silently disarming RLS" —
+  # PROGRESS.md's "what's next, in order" list). Neither needs a database — the selftest exercises
+  # `check-rls-integrity.mjs`'s OWN classification logic against fixtures, not a live cluster.
+  # Verified on a real Linux checkout before landing this: lint OK on 7 migrations, selftest 6/6.
+  webdesk-root:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webdesk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webdesk/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  # webdesk/blocks (WSK-16) — the lightest of the three: no database, no external service. Its own
+  # `npm run build` already IS the gate (vendor-drift check against ../payload/vocabulary + the unit
+  # suite + `astro check`), so this job is a thin wrapper, not a hand-rolled substitute. Verified on
+  # a real Linux checkout before landing this (26/26 unit tests, astro check 0 errors/warnings) —
+  # see this ticket's report.
+  webdesk-blocks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webdesk/blocks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webdesk/blocks/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  # webdesk/api (Zone B NestJS service — WSK-05/07/10/11/12/21/37/38/schema-draft/privacy/control).
+  # Postgres gets the SAME role bootstrap (init-roles.sh: owner/migrator/app, all NOBYPASSRLS) the
+  # project's own verification runbooks use (webdesk/api/README.md) — a superuser test role would
+  # test nothing, same reasoning platform-nest's job above gives. MinIO is included (WSK-07/38 read
+  # real objects); Redis backs BullMQ (WSK-11 mail) and the WSK-37 webhook queue.
+  #
+  # ⚠ HONEST STATE, recorded 2026-08-27 (see this ticket's report for the full breakdown): run
+  # against a real Linux checkout with exactly this Postgres+Redis+MinIO trio, `npm run typecheck`
+  # is clean but `npm test` is NOT fully green today — 130/274 passed in this session's run. The
+  # dominant cause was NOT missing infra: most failures traced to a `SchemaDraftModule` DI wiring
+  # gap (`ControlAuthGuard` needs `CONTROL_CHANNEL_AUTHENTICATOR`, not provided in that module's own
+  # `imports`) surfaced against this session's shared, uncommitted working tree — outside this
+  # ticket's file ownership (`webdesk/api/src/schema-draft/` is a concurrent ticket's), reported
+  # rather than fixed. A smaller, separate cluster needs ClamAV (WSK-07 EICAR/scan specs) and
+  # Mailpit (WSK-11 delivery specs) — known gaps WSK-07/WSK-11 already flagged as needing their own
+  # verification runbook (PROGRESS.md). This job is left as a REAL (non-`continue-on-error`) gate
+  # regardless: CI failing here does not block `git push --tags` (release.yml is a separate,
+  # independently-triggered workflow), so a red result costs nothing but is honest, visible signal
+  # that a fully-green webdesk-api suite in CI does not exist yet — strictly better than the
+  # previous zero signal.
+  webdesk-api:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      minio:
+        image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+        # The upstream image's ENTRYPOINT is the `minio` binary itself, so a `services:` container
+        # (which cannot pass a custom `command:`, same limitation the platform-nest job's own
+        # comment on Postgres/Cerbos explains) needs the server subcommand baked into `ENTRYPOINT`
+        # or supplied via `options` — `options` reaches `docker create`'s flags, not the image's
+        # own args, so the working form here is the env-only server-default invocation.
+        env:
+          MINIO_ROOT_USER: webdesk_minio
+          MINIO_ROOT_PASSWORD: changeme_minio_password
+        ports: ["9000:9000"]
+        # No curl/wget/mc in this image (verified 2026-08-27: RHEL-minimal base, coreutils + bash
+        # only) — a curl-based healthcheck would never pass and hang the job until timeout. bash's
+        # own /dev/tcp is guaranteed present and proves the same thing a curl probe would (the port
+        # is accepting connections), same technique this ticket's own live delphi/helios probe used.
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: webdesk/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webdesk/api/package-lock.json
+      - name: Start Postgres with the project's own role bootstrap (owner/migrator/app, NOBYPASSRLS)
+        run: |
+          docker run -d --name webdesk-postgres -p 5432:5432 \
+            -e POSTGRES_PASSWORD=throwaway_superuser -e POSTGRES_DB=webdesk \
+            -e POSTGRES_OWNER_USER=webdesk_owner -e POSTGRES_OWNER_PASSWORD=throwaway_owner \
+            -e POSTGRES_MIGRATOR_USER=webdesk_migrator -e POSTGRES_MIGRATOR_PASSWORD=throwaway_migrator \
+            -e POSTGRES_APP_USER=webdesk_app -e POSTGRES_APP_PASSWORD=throwaway_app \
+            -v "$GITHUB_WORKSPACE/webdesk/postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro" \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            docker exec webdesk-postgres pg_isready -U webdesk_owner -d webdesk && break || sleep 1
+          done
+      - name: Create the 4 MinIO buckets the storage adapter expects (media/video/uploads/artifacts)
+        run: |
+          docker run --rm --network host --entrypoint sh minio/mc:latest -c "
+            mc alias set local http://localhost:9000 webdesk_minio changeme_minio_password &&
+            mc mb -p local/media local/video local/uploads local/artifacts"
+      - run: npm ci
+      - name: Apply Zone B migrations with the project's own runner (migrations/migrate.mjs)
+        # `webdesk/` (the PARENT of `webdesk/api`) is a separate npm project (its own package.json,
+        # `pg` dependency, own `migrate` script — see the webdesk-root job below) — migrate.mjs
+        # resolves `pg` from ITS OWN node_modules, not webdesk/api's, so this step installs and runs
+        # there rather than assuming node's directory walk-up finds a sibling's dependency.
+        working-directory: webdesk
+        run: |
+          npm ci
+          MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk" npm run migrate
+      - run: npm run typecheck
+      - run: npm test
+        env:
+          APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK05_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          REDIS_URL: redis://localhost:6379
+          API_KEY_PEPPER: ci-throwaway-pepper
+          MINIO_ENDPOINT: http://localhost:9000
+          STORAGE_ENDPOINT: http://localhost:9000
+          MINIO_ROOT_USER: webdesk_minio
+          MINIO_ROOT_PASSWORD: changeme_minio_password
+
+  # webdesk/payload (Zone B Payload 3 app — WSK-00/02/04/04b/06). Deliberately NOT running the full
+  # WSK-00/02 spike-style verification here (dual internal/public listeners, dev-push guard, a
+  # setup-schema push) — that needs a much heavier fixture and is a WSK-M0-gate-shaped effort, not
+  # a CI-wiring one. What IS wired: the same build gate platform-ui's own job above already uses
+  # for the identical reason ("`tsc` + vitest alone once passed while `next build` broke") — `next
+  # build`'s own type-checker, which reads this project's `.ts`-extension-import tsconfig correctly
+  # where a bare `tsc --noEmit` invocation (tried first) did not.
+  #
+  # ⚠ HONEST STATE, recorded 2026-08-27: this build is RED today. `next build`'s type-check fails
+  # with TS2578 "Unused '@ts-expect-error' directive" in 4 files (app/(payload)/admin/
+  # [[...segments]]/page.tsx:7, app/(payload)/api/[...slug]/route.ts:11, collections/db.ts:13,
+  # payload.config.ts:12+18) — a mechanical drift (the suppression comments predate a TypeScript
+  # version where the `.mjs` import they guard no longer errors) that this ticket did NOT fix:
+  # `webdesk/payload/` is outside this ticket's file ownership (`.github/workflows/`, `mcp-hub/`,
+  # `webdesk/deploy/`). Reported per this ticket's own "need a change outside your area? STOP and
+  # report it" rule, not silently patched. Left wired anyway — same "red here costs nothing, silence
+  # costs more" reasoning as webdesk-api above.
+  webdesk-payload:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webdesk/payload
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webdesk/payload/package-lock.json
+      - run: npm ci
+      - run: npm run build
+        env:
+          # A throwaway value satisfying Payload's own boot-time shape checks — this job never talks
+          # to a real Postgres (no `services:` entry above); it exists so `next build`'s import-time
+          # evaluation of `payload.config.ts` doesn't die on a missing var before ever reaching the
+          # type-check phase that is the actual point of this step.
+          DATABASE_URI: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          PAYLOAD_SECRET: ci-throwaway-secret-32-characters-min
+
+  # webdesk/deploy (WSK-29, THIS ticket) — the Zone A frontend-deploy driver seam. No database, no
+  # external service: every test injects a fake exec/driver (see ssh-rsync-driver.test.ts's own
+  # header — grep -L real-exec confirms no test spawns a process). Verified on a real Linux
+  # checkout: 24/24 (config 6, driver 9, HTTP server 9).
+  webdesk-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webdesk/deploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webdesk/deploy/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
   # P3-12: platform-ui build gate. `tsc` + vitest alone once passed while `next build` broke
   # (a `server-only` import reached a client component) and routes 500'd — `npm run build` here

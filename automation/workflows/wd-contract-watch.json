@@ -1,0 +1,102 @@
+{
+  "id": "wswdcontractwatch1",
+  "name": "wd-contract-watch (CRON) — 'site pinned older contract' notice",
+  "meta": {
+    "description": "WSK-29 (docs/plans/2026-08-26-webdesk-PROGRESS.md's own line for this ticket; design docs/blueprints/webdesk-design.md ll.580/748/933 + docs/blueprints/webdev-design.md l.693 — 'wd-contract-watch NEW'). Job: when a WebDesk (Zone B) tenant publishes a new /v1 contract snapshot (kind='contract.published', already accepted end-to-end by WSK-12's bridge -> webdev_zoneb_event_log -- see wd-zoneb-intake.json's own KINDS list, unmodified by this ticket), surface a 'site pinned older contract' console notice per AFFECTED SITE (one still pinned to an earlier snapshotId). NEVER auto-upgrades a site's pin (webdev D-5) -- this flow only notifies. Read -> notify, no logic of its own, same shape wd-stale-nag.json already uses. Scoped identity wf:wd-contract-watch -> [webdev.listPendingContractNotices, notify]. Env: HUB_SERVICE_TOKEN, WD_CONTRACT_WATCH_ENABLED. GATED like wd-zoneb-intake.json's own INGEST_ENABLED doctrine: inert until WD_CONTRACT_WATCH_ENABLED=1 AND the read tool this flow calls actually exists -- see the Gate node's own comment. HONEST STATUS (recorded by WSK-29, 2026-08-27): PROTOTYPED, NOT live. `webdev.listPendingContractNotices` does not exist anywhere in this repo today -- registering it is a platform-nest (webdev module) change outside WSK-29's file ownership (.github/workflows/, mcp-hub/, webdesk/deploy/), reported rather than built. The CONTRACT this flow expects from that tool is documented in the 'MCP webdev.listPendingContractNotices' node's own `notes` field so whoever builds it has a concrete shape to build against."
+  },
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }] } },
+      "name": "Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WSK-29 -- the gate, same doctrine wd-zoneb-intake.json's own 'Gate + build MCP call' node uses\n// (that ticket's own comment: 'inert until explicitly enabled ... enabling this flag before those\n// land means every call 403s at the hub, which is the correct fail-closed outcome, not a workflow\n// bug'). This flow adds a SECOND, stronger reason to stay gated: unlike that ticket, the tool this\n// flow calls (webdev.listPendingContractNotices) does not exist ANYWHERE in this repo yet -- there\n// is no ticket number to point at for 'lands with #N', because none has been scoped. Flip\n// WD_CONTRACT_WATCH_ENABLED=1 only once that tool is registered AND the wf:wd-contract-watch\n// automation-policy.ts entry (already pre-added, see this workflow's meta.description) resolves to\n// a real tool name instead of a 404.\nif ($env.WD_CONTRACT_WATCH_ENABLED !== '1') {\n  throw new Error('wd-contract-watch: disabled (WD_CONTRACT_WATCH_ENABLED != 1) -- gated until webdev.listPendingContractNotices is registered (platform-nest webdev module); see this workflow node\\'s own comment for the contract it expects');\n}\nreturn [{ json: {} }];"
+      },
+      "name": "Gate (WD_CONTRACT_WATCH_ENABLED)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-contract-watch" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 1, method: \"tools/call\", params: { name: \"webdev.listPendingContractNotices\", arguments: {} } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP webdev.listPendingContractNotices",
+      "notes": "WSK-29 — the CONTRACT this NOT-YET-BUILT read tool must satisfy: given the calling principal's reach (no arguments needed — the platform resolves tenant scope from the OBO envelope, same as every other hub-aggregated read), return one row per WebDesk site CURRENTLY PINNED OLDER than the latest contract.published snapshot recorded for its tenant/slug (webdev_contract_snapshots, WSK-19): { tenantId, siteId, siteSlug, pinnedSnapshotId, latestSnapshotId, recipientId }. `recipientId` may be null/absent (no owner resolved yet) — the next node still processes the row and simply raises no notification for it, the same 'fact lands, notice is best-effort' doctrine wd-zoneb-intake.json already uses for form.received. Registering this as a platform-nest `webdev` module `mcpTools` GET entry (impact: none — it's a read) is outside WSK-29's file ownership; reported, not built.",
+      "notesInFlow": true,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'webdev.listPendingContractNotices error');\nconst rows = JSON.parse(rpc.result?.content?.[0]?.text ?? '[]');\nconst notices = (Array.isArray(rows) ? rows : []).filter((r) => r && r.recipientId);\nif (notices.length === 0) return []; // nothing to notify -> stop (a stale pin with no recipient still exists; this flow just raises no notice for it)\nreturn notices.map((n) => ({ json: n }));"
+      },
+      "name": "Build notice list (skip if none)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:wd-contract-watch" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.tenantId, recipientId: $json.recipientId, type: \"wd_contract_stale_pin\", payload: { siteId: $json.siteId, siteSlug: $json.siteSlug, pinnedSnapshotId: $json.pinnedSnapshotId, latestSnapshotId: $json.latestSnapshotId } } } }) }}",
+        "options": { "response": { "response": { "responseFormat": "text" } } }
+      },
+      "name": "MCP notify (LOW write — never auto-upgrades, webdev D-5)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.data ?? $input.first().json.body ?? '';\nconst line = String(raw).split('\\n').find((l) => l.startsWith('data:')) ?? '';\nconst rpc = JSON.parse(line.slice(5).trim());\nif (rpc.result?.isError) throw new Error(rpc.result.content?.[0]?.text ?? 'notify failed');\nreturn [{ json: { ok: true } }];"
+      },
+      "name": "Parse notify result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    }
+  ],
+  "connections": {
+    "Hourly": { "main": [[{ "node": "Gate (WD_CONTRACT_WATCH_ENABLED)", "type": "main", "index": 0 }]] },
+    "Gate (WD_CONTRACT_WATCH_ENABLED)": { "main": [[{ "node": "MCP webdev.listPendingContractNotices", "type": "main", "index": 0 }]] },
+    "MCP webdev.listPendingContractNotices": { "main": [[{ "node": "Build notice list (skip if none)", "type": "main", "index": 0 }]] },
+    "Build notice list (skip if none)": { "main": [[{ "node": "MCP notify (LOW write — never auto-upgrades, webdev D-5)", "type": "main", "index": 0 }]] },
+    "MCP notify (LOW write — never auto-upgrades, webdev D-5)": { "main": [[{ "node": "Parse notify result", "type": "main", "index": 0 }]] }
+  },
+  "settings": {},
+  "pinData": {}
+}

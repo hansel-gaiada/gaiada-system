@@ -1,0 +1,245 @@
+{
+  "id": "wswdzonebintake1",
+  "name": "wd-zoneb-intake -> webdev_zoneb_event_log (WEBHOOK ingest, HMAC-gated)",
+  "meta": {
+    "description": "WSK-12 (docs/blueprints/webdesk-design.md §03/§10). Zone B (WebDesk) signed fact webhook -> HMAC verify on the RAW BYTES BEFORE any JSON parse -> schema-check -> dedup via mcp-hub's webdev.recordZoneBEvent tool (webdev_zoneb_event_log's UNIQUE(tenant_id,event_id)) -> route: form.received -> optional notify. THE SECURITY INVARIANT (§03): a forged/replayed/mutated/wrong-timestamp payload is refused BEFORE parse and can cause at most a notification + a log row, never a privileged transition. Scoped identity wf:webdesk-zoneb-intake -> [webdev.recordZoneBEvent, notify] (mcp-hub automation-policy.ts allow-list entry -- reported in the WSK-12 ticket output, not made here). GATED: the MCP dedup call is inert unless WEBDEV_ZONEB_INTAKE_ENABLED=1, same doctrine as on-inbound-lead.json's INGEST_ENABLED gate -- do not enable until the webdev.recordZoneBEvent tool + wf:webdesk-zoneb-intake account genuinely exist (WSK-19/31, not this ticket). Env: WEBDESK_EVENT_SECRET, WEBDEV_ZONEB_EVENT_TOLERANCE_MS, WEBDEV_ZONEB_INTAKE_ENABLED, HUB_SERVICE_TOKEN, WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID (optional)."
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wd-zoneb-intake",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "name": "Webhook: POST /webhook/wd-zoneb-intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "f0eaf2da-4537-4b5b-b991-8dd4717cddd9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// WSK-12 -- STEP 1, and the one the whole ticket exists to get right: verify the HMAC on the\n// RAW REQUEST BYTES, BEFORE any JSON.parse. `options.rawBody: true` on the Webhook node above\n// puts the exact wire bytes (base64) at `binary.data.data`; `json.body` is n8n's OWN pre-parsed\n// copy and is NEVER read by this node -- reading it here would defeat the entire point (the\n// ticket's own words: \"verify the MAC on raw bytes before JSON parsing, or the signature is\n// meaningless\"). Mirrors webdesk/api/src/events/zoneb-event-signature.ts's `verifySignature()`\n// byte-for-byte (that file is the reference implementation this Code node hand-transliterates --\n// see its header for why the two cannot share an import across the zone boundary). Returns a\n// verdict object; the NEXT node (an IF) branches on it -- this Code node never throws, per the\n// estate's own doctrine that a 4xx-shaped refusal is an expected outcome routed with IF, not an\n// error-output path (root n8n-error-handling convention).\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst timestampHeader = headers['x-webdesk-timestamp'];\nconst signatureHeader = headers['x-webdesk-signature'];\nconst secret = $env.WEBDESK_EVENT_SECRET;\n\nconst rawBase64 = item.binary && item.binary.data && item.binary.data.data;\nif (!rawBase64) {\n  return [{ json: { valid: false, reason: 'raw body missing -- rawBody option not enabled or empty body' } }];\n}\nconst rawBody = Buffer.from(rawBase64, 'base64').toString('utf8');\n\nif (!secret) {\n  return [{ json: { valid: false, reason: 'WEBDESK_EVENT_SECRET is not configured on this n8n instance' } }];\n}\n\nif (!timestampHeader || !/^\\d+$/.test(timestampHeader)) {\n  return [{ json: { valid: false, reason: 'missing or malformed timestamp header' } }];\n}\nconst ts = Number(timestampHeader);\nconst toleranceMs = Number($env.WEBDEV_ZONEB_EVENT_TOLERANCE_MS || 300000);\nif (Math.abs(Date.now() - ts) > toleranceMs) {\n  return [{ json: { valid: false, reason: 'stale timestamp -- outside the replay-tolerance window' } }];\n}\n\nif (!signatureHeader || !signatureHeader.startsWith('sha256=')) {\n  return [{ json: { valid: false, reason: 'malformed signature header' } }];\n}\nconst providedHex = signatureHeader.slice('sha256='.length);\nif (!/^[0-9a-f]+$/i.test(providedHex)) {\n  return [{ json: { valid: false, reason: 'malformed signature header' } }];\n}\n\nconst crypto = require('crypto');\nconst expectedHex = crypto.createHmac('sha256', secret).update(`${timestampHeader}.${rawBody}`, 'utf8').digest('hex');\nconst providedBuf = Buffer.from(providedHex, 'hex');\nconst expectedBuf = Buffer.from(expectedHex, 'hex');\nif (providedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(providedBuf, expectedBuf)) {\n  return [{ json: { valid: false, reason: 'signature mismatch' } }];\n}\n\nreturn [{ json: { valid: true, rawBody } }];"
+      },
+      "name": "Verify HMAC (raw bytes, BEFORE parse)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.valid) }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "HMAC valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'unauthorized', message: $json.reason }) }}",
+        "options": { "responseCode": 401 }
+      },
+      "name": "Respond 401 (HMAC refused)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WSK-12 -- STEP 2: NOW it is safe to JSON.parse (HMAC already verified on the raw bytes by the\n// previous node). Mirrors platform-nest's `validateZoneBEvent()`\n// (platform-nest/src/modules/webdev/zoneb-event-schema.ts) byte-for-byte -- that file is the\n// reference implementation this Code node hand-transliterates, same duplication-across-the-zone-\n// boundary reasoning as the HMAC step. Zone A ALSO re-validates server-side (defense in depth) --\n// this is not the only wall, it is the first one, cheap enough to reject obviously-malformed\n// traffic before ever spending an mcp-hub round trip.\nconst KINDS = ['form.received', 'deploy.done', 'promote.done', 'rollback.done', 'contract.published', 'alert.raised'];\n\nlet envelope;\ntry {\n  envelope = JSON.parse($json.rawBody);\n} catch (e) {\n  return [{ json: { valid: false, reason: 'body is not valid JSON' } }];\n}\nif (typeof envelope !== 'object' || envelope === null || Array.isArray(envelope)) {\n  return [{ json: { valid: false, reason: 'body must be a JSON object' } }];\n}\nif (!envelope.eventId || typeof envelope.eventId !== 'string') {\n  return [{ json: { valid: false, reason: 'eventId is required' } }];\n}\nif (!KINDS.includes(envelope.kind)) {\n  return [{ json: { valid: false, reason: `kind must be one of: ${KINDS.join(', ')}` } }];\n}\nif (!envelope.tenantId || typeof envelope.tenantId !== 'string') {\n  return [{ json: { valid: false, reason: 'tenantId is required' } }];\n}\nif (!envelope.originSite || typeof envelope.originSite !== 'string') {\n  return [{ json: { valid: false, reason: 'originSite is required' } }];\n}\nif (!envelope.occurredAt || isNaN(Date.parse(envelope.occurredAt))) {\n  return [{ json: { valid: false, reason: 'occurredAt must be a parseable ISO timestamp' } }];\n}\nif (typeof envelope.data !== 'object' || envelope.data === null || Array.isArray(envelope.data)) {\n  return [{ json: { valid: false, reason: 'data must be a JSON object' } }];\n}\nif (envelope.kind === 'form.received') {\n  const d = envelope.data;\n  if (!d.siteSlug || !d.formId || !d.submissionId || typeof d.hasAttachments !== 'boolean') {\n    return [{ json: { valid: false, reason: 'form.received data must carry siteSlug, formId, submissionId, hasAttachments' } }];\n  }\n}\n\nreturn [{ json: { valid: true, envelope } }];"
+      },
+      "name": "Parse + schema-check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.valid) }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Schema valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'validation_error', message: $json.reason }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "name": "Respond 400 (schema refused)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1100, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WSK-12 -- STEP 3, the gate. Day-one gate mirroring on-inbound-lead.json's own INGEST_ENABLED\n// doctrine exactly: inert until explicitly enabled, because the tool this step calls\n// (`webdev.recordZoneBEvent`) and the automation identity that calls it (`wf:webdesk-zoneb-intake`)\n// are WSK-19/31's build, not this ticket's -- see the WSK-12 report for the exact\n// `mcp-hub/src/automation-policy.ts` allow-list entry and `webdevModule.mcpTools` addition that\n// make this call reachable. Enabling this flag before those land means every call 403s at the hub\n// (scoped-identity denial), which is the correct fail-closed outcome, not a workflow bug.\nif ($env.WEBDEV_ZONEB_INTAKE_ENABLED !== '1') {\n  throw new Error('wd-zoneb-intake: MCP dedup call disabled (WEBDEV_ZONEB_INTAKE_ENABLED != 1) -- gated until WSK-19/31 land webdev.recordZoneBEvent + the wf:webdesk-zoneb-intake account');\n}\nconst envelope = $json.envelope;\nreturn [{\n  json: {\n    envelope,\n    mcpBody: JSON.stringify({\n      jsonrpc: '2.0',\n      id: 1,\n      method: 'tools/call',\n      params: {\n        name: 'webdev.recordZoneBEvent',\n        arguments: {\n          tenantId: envelope.tenantId,\n          eventId: envelope.eventId,\n          kind: envelope.kind,\n          originSite: envelope.originSite,\n          occurredAt: envelope.occurredAt,\n          data: envelope.data,\n        },\n      },\n    }),\n  },\n}];"
+      },
+      "name": "Gate + build MCP call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:webdesk-zoneb-intake" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.mcpBody }}",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "name": "MCP webdev.recordZoneBEvent (dedup insert, LOW write)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WSK-12 -- STEP 4: route on the dedup outcome (§10: \"form.received -> notification\"). Parses\n// mcp-hub's tools/call response (an MCP content envelope, same shape wd-digests.json's own\n// \"Parse notify result\" node already unwraps) and decides whether a notify call is warranted.\n// Deliberately narrow: only form.received facts that were a GENUINE new insert (never a\n// deduped replay) are candidates, and only when a recipient has actually been configured --\n// there is no per-tenant recipient-routing design yet (WSK-24's Sites tab is unbuilt), so this\n// flow does not invent one. Absent WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID, the fact still lands in\n// webdev_zoneb_event_log (the durable, always-true outcome) and simply raises no notification --\n// never a silent drop of the fact itself, only of the best-effort notice on top of it.\nlet parsed;\ntry {\n  const raw = $json.data || $json.body || $json;\n  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);\n  const outer = JSON.parse(text);\n  const contentText = outer.result && outer.result.content && outer.result.content[0] && outer.result.content[0].text;\n  parsed = contentText ? JSON.parse(contentText) : outer.result;\n} catch (e) {\n  parsed = { inserted: false, id: null, parseError: String(e) };\n}\n\nconst envelope = $('Gate + build MCP call').first().json.envelope;\nconst shouldNotify = envelope.kind === 'form.received' && parsed && parsed.inserted === true && !!$env.WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID;\n\nreturn [{ json: { envelope, outcome: parsed, shouldNotify } }];"
+      },
+      "name": "Parse dedup result + decide routing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.shouldNotify) }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Notify configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1760, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mcp-hub:3003/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.HUB_SERVICE_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "x-obo-provider", "value": "n8n" },
+            { "name": "x-obo-external-id", "value": "wf:webdesk-zoneb-intake" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: \"2.0\", id: 2, method: \"tools/call\", params: { name: \"notify\", arguments: { tenantId: $json.envelope.tenantId, recipientId: $env.WEBDEV_ZONEB_NOTIFY_RECIPIENT_ID, type: \"wd_zoneb_form_received\", payload: { siteSlug: $json.envelope.data.siteSlug, formId: $json.envelope.data.formId, submissionId: $json.envelope.data.submissionId } } } }) }}",
+        "options": {
+          "response": { "response": { "responseFormat": "text" } }
+        }
+      },
+      "name": "MCP notify (LOW write)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, -80]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": { "responseCode": 200 }
+      },
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2200, 0]
+    }
+  ],
+  "connections": {
+    "Webhook: POST /webhook/wd-zoneb-intake": {
+      "main": [[{ "node": "Verify HMAC (raw bytes, BEFORE parse)", "type": "main", "index": 0 }]]
+    },
+    "Verify HMAC (raw bytes, BEFORE parse)": {
+      "main": [[{ "node": "HMAC valid?", "type": "main", "index": 0 }]]
+    },
+    "HMAC valid?": {
+      "main": [
+        [{ "node": "Parse + schema-check", "type": "main", "index": 0 }],
+        [{ "node": "Respond 401 (HMAC refused)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse + schema-check": {
+      "main": [[{ "node": "Schema valid?", "type": "main", "index": 0 }]]
+    },
+    "Schema valid?": {
+      "main": [
+        [{ "node": "Gate + build MCP call", "type": "main", "index": 0 }],
+        [{ "node": "Respond 400 (schema refused)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gate + build MCP call": {
+      "main": [[{ "node": "MCP webdev.recordZoneBEvent (dedup insert, LOW write)", "type": "main", "index": 0 }]]
+    },
+    "MCP webdev.recordZoneBEvent (dedup insert, LOW write)": {
+      "main": [[{ "node": "Parse dedup result + decide routing", "type": "main", "index": 0 }]]
+    },
+    "Parse dedup result + decide routing": {
+      "main": [[{ "node": "Notify configured?", "type": "main", "index": 0 }]]
+    },
+    "Notify configured?": {
+      "main": [
+        [{ "node": "MCP notify (LOW write)", "type": "main", "index": 0 }],
+        [{ "node": "Respond 200", "type": "main", "index": 0 }]
+      ]
+    },
+    "MCP notify (LOW write)": {
+      "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}
