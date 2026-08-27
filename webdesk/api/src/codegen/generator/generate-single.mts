@@ -53,9 +53,10 @@ async function main() {
     mkdirSync(out, { recursive: true });
     writeFileSync(join(out, "openapi.v1.json"), built.openapiJson);
     writeFileSync(join(out, "sdk.d.ts"), built.sdkTs);
+    writeFileSync(join(out, "sdk.php"), built.sdkPhp);
     writeFileSync(join(out, "CONTENT-CONTRACT.md"), built.contractMd);
     writeFileSync(join(out, "hash-manifest.json"), built.hashManifestJson);
-    console.log(`wrote 4 artifacts to ${out} (contentHash ${built.contentHash})`);
+    console.log(`wrote 5 artifacts to ${out} (contentHash ${built.contentHash})`);
   } finally {
     await pool.end();
   }

@@ -64,12 +64,16 @@ export async function publishArtifacts(
   const keys = {
     openapiJson: artifactKey(tenantSlug, built.contractVersion, "openapiJson"),
     sdkTs: artifactKey(tenantSlug, built.contractVersion, "sdkTs"),
+    sdkPhp: artifactKey(tenantSlug, built.contractVersion, "sdkPhp"),
     contractMd: artifactKey(tenantSlug, built.contractVersion, "contractMd"),
   };
 
   await Promise.all([
     storage.putObject(bucket, keys.openapiJson, Buffer.from(built.openapiJson, "utf8"), "application/json"),
     storage.putObject(bucket, keys.sdkTs, Buffer.from(built.sdkTs, "utf8"), "application/typescript"),
+    // WSK-34 — application/x-httpd-php is the conventional MIME for a .php source file served as a
+    // downloadable artifact (never executed server-side here; this bucket only ever serves bytes).
+    storage.putObject(bucket, keys.sdkPhp, Buffer.from(built.sdkPhp, "utf8"), "application/x-httpd-php"),
     storage.putObject(bucket, keys.contractMd, Buffer.from(built.contractMd, "utf8"), "text/markdown"),
   ]);
 

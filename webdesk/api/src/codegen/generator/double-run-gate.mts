@@ -12,7 +12,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const GENERATE_SINGLE = fileURLToPath(new URL("./generate-single.mts", import.meta.url));
-const ARTIFACT_FILES = ["openapi.v1.json", "sdk.d.ts", "CONTENT-CONTRACT.md", "hash-manifest.json"];
+// "sdk.php" added by WSK-34 — joins this SAME gate rather than a second one (see webdesk/wordpress's
+// own report for why: sdk-php.mts is derived from the identical openApiDoc sdk.d.ts comes from, so
+// it is exactly as determinism-checked as the other three, and belongs in the same byte-compare).
+const ARTIFACT_FILES = ["openapi.v1.json", "sdk.d.ts", "sdk.php", "CONTENT-CONTRACT.md", "hash-manifest.json"];
 
 function parseArgs(argv: string[]): { tenants: string[] } {
   let tenantsArg: string | undefined;

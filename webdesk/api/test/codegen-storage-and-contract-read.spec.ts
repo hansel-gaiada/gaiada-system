@@ -126,7 +126,8 @@ describe("codegen — live DB + MinIO integration", () => {
     expect(response!.version).toBe("1.0.0");
     expect(response!.vocabularyVersion).toBe("1.0.0");
     expect(response!.contentHash).toBe(built.contentHash);
-    expect(response!.artifacts.sdkPhpUrl).toBeNull();
+    // WSK-34 — sdkPhpUrl now fills in for a freshly-generated tenant (was `null` pre-WSK-34).
+    expect(response!.artifacts.sdkPhpUrl).toContain("X-Amz-Signature");
     expect(response!.artifacts.openapiUrl).toContain("X-Amz-Signature");
 
     // The presigned URL is a REAL, fetchable link to the REAL bytes just published.

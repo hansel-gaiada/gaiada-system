@@ -34,6 +34,8 @@ export interface BlockLibraryRef {
 export interface ArtifactHashManifest {
   openapiJson: string;
   sdkTs: string;
+  /** WSK-34 — the PHP SDK's hash, alongside the TS one. See `generator/sdk-php.mts`. */
+  sdkPhp: string;
   contractMd: string;
 }
 
@@ -42,6 +44,8 @@ export interface ArtifactHashManifest {
 export interface ArtifactObjectKeys {
   openapiJson: string;
   sdkTs: string;
+  /** WSK-34 — the PHP SDK's MinIO object key, alongside the TS one. */
+  sdkPhp: string;
   contractMd: string;
 }
 
@@ -81,7 +85,10 @@ export interface ContractReadResponse {
   blockLibrary: BlockLibraryRef;
   artifacts: {
     sdkTsUrl: string;
-    sdkPhpUrl: null; // P6/WSK-34, per WSK-D11 — never fabricated here.
+    /** WSK-34 — fills in now that the PHP SDK is generated alongside the TS one. Still `null` for
+     *  any tenant whose `latest.json` pointer predates this ticket (an old pointer's `artifactKeys`
+     *  has no `sdkPhp` entry) — ContractReadService below treats that as absent, never fabricated. */
+    sdkPhpUrl: string | null;
     openapiUrl: string;
     contractMdUrl: string;
   };

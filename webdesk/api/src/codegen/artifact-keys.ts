@@ -4,11 +4,14 @@
 // both sides of the module-system split this ticket straddles — see
 // `contract-manifest.types.ts`'s header for the full reasoning — without either side needing its
 // own independently-maintained copy of the naming rule.
-export type ArtifactName = "openapiJson" | "sdkTs" | "contractMd";
+// WSK-34 — added "sdkPhp" alongside the existing three (additive; every existing ArtifactName
+// value and filename is unchanged).
+export type ArtifactName = "openapiJson" | "sdkTs" | "sdkPhp" | "contractMd";
 
 const ARTIFACT_FILENAMES: Record<ArtifactName, string> = {
   openapiJson: "openapi.v1.json",
   sdkTs: "sdk.d.ts",
+  sdkPhp: "sdk.php",
   contractMd: "CONTENT-CONTRACT.md",
 };
 

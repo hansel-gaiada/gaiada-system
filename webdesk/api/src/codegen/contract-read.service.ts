@@ -54,9 +54,15 @@ export class ContractReadService {
 
     try {
       const ttl = storageConfig.presignedGetTtlSeconds;
-      const [openapiUrl, sdkTsUrl, contractMdUrl] = await Promise.all([
+      // WSK-34 — `pointer.artifactKeys.sdkPhp` is `undefined` for any `latest.json` written before
+      // this ticket (an old pointer object literally has no such property; JSON never invents one).
+      // Presigning is skipped in that case rather than presigning a key that was never uploaded —
+      // the honest "no PHP SDK for this generation" state stays `null`, never a broken URL.
+      const sdkPhpKey = pointer.artifactKeys.sdkPhp as string | undefined;
+      const [openapiUrl, sdkTsUrl, sdkPhpUrl, contractMdUrl] = await Promise.all([
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "openapiJson"), ttl),
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "sdkTs"), ttl),
+        sdkPhpKey ? this.storage.presignGetObject(bucket, sdkPhpKey, ttl) : Promise.resolve(null),
         this.storage.presignGetObject(bucket, artifactKey(tenantSlug, pointer.contractVersion, "contractMd"), ttl),
       ]);
 
@@ -66,7 +72,7 @@ export class ContractReadService {
         blockLibrary: pointer.blockLibrary,
         artifacts: {
           sdkTsUrl,
-          sdkPhpUrl: null, // P6/WSK-34 (WSK-D11) — never fabricated.
+          sdkPhpUrl,
           openapiUrl,
           contractMdUrl,
         },

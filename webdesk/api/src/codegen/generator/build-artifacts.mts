@@ -9,6 +9,7 @@ import type { TenantContractSnapshot } from "../../../../payload/vocabulary/brea
 import { buildOpenApiDocument } from "./openapi-builder.mts";
 import { renderContentContractMd } from "./content-contract-md.mts";
 import { generateTsSdk } from "./sdk-ts.mts";
+import { generatePhpSdk } from "./sdk-php.mts";
 import { computeNextContractVersion, toContractSnapshot } from "./versioning.mts";
 import { stableStringify, sha256Hex } from "./canonical-json.mts";
 import type { ArtifactHashManifest, BlockLibraryRef } from "../contract-manifest.types.ts";
@@ -26,6 +27,8 @@ export interface BuildArtifactsInput {
 export interface BuiltArtifacts {
   openapiJson: string;
   sdkTs: string;
+  /** WSK-34 — derived from the same OpenAPI document sdkTs comes from; see sdk-php.mts. */
+  sdkPhp: string;
   contractMd: string;
   hashManifestJson: string;
   contentHash: string;
@@ -67,6 +70,9 @@ export async function buildContractArtifacts(input: BuildArtifactsInput): Promis
 
   const openapiJson = stableStringify(openApiDoc);
   const sdkTs = await generateTsSdk(openApiDoc);
+  // WSK-34: derived from the SAME already-built openApiDoc sdkTs used above — never a second,
+  // independently-composed input, so it cannot drift from the OpenAPI document by construction.
+  const sdkPhp = generatePhpSdk(openApiDoc as never);
   const contractMd = renderContentContractMd({
     tenantSlug: input.tenantSlug,
     contractVersion,
@@ -79,6 +85,7 @@ export async function buildContractArtifacts(input: BuildArtifactsInput): Promis
   const hashes: ArtifactHashManifest = {
     openapiJson: sha256Hex(openapiJson),
     sdkTs: sha256Hex(sdkTs),
+    sdkPhp: sha256Hex(sdkPhp),
     contractMd: sha256Hex(contractMd),
   };
   const hashManifestJson = stableStringify(hashes);
@@ -87,6 +94,7 @@ export async function buildContractArtifacts(input: BuildArtifactsInput): Promis
   return {
     openapiJson,
     sdkTs,
+    sdkPhp,
     contractMd,
     hashManifestJson,
     contentHash,

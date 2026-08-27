@@ -33,9 +33,9 @@ misleads real tickets.
 | C · Contract, codegen & the rail | 7 | **7** | 0 | 0 | 0 |
 | D · Control plane · ERP console · envs | 9 | **6** | 0 | 2 | 1 |
 | E · AI execution & approvals | 3 | **3** | 0 | 0 | 0 |
-| F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
+| F · WordPress headless | 3 | **2** | 0 | 1 | 0 |
 | G · New from reassessment | 2 | **2** | 0 | 0 | 0 |
-| **Total** | **51** | **40** | **0** | **8** | **3** |
+| **Total** | **51** | **42** | **0** | **6** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -131,8 +131,8 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 
 | Status | # | Ticket | Tier | Deps |
 |---|---|---|---|---|
-| ⬜ | WSK-34 | PHP SDK — **generated from `openapi.v1.json`** (R-3 makes this near-free); joins the determinism gate; `artifacts.sdkPhp` fills in | senior-be | WSK-15 |
-| ⬜ | WSK-35 | Headless WP theme pattern — consumes the PHP SDK; `siteKind:"wp"` scaffold template joins WSK-20 | senior-fe | WSK-16, 34 |
+| ✅ | WSK-34 | **PHP SDK — generated, and provably so.** `codegen/generator/sdk-php.mts` derives `sdk.php` from the **same already-built OpenAPI document** the TS SDK comes from, so it cannot drift from the contract; header says `GENERATED — DO NOT HAND-EDIT`. **It joined WSK-15's OWN double-run gate** (`sdk.php` added to `ARTIFACT_FILES`) rather than growing a third determinism harness, and `artifacts.sdkPhp` / `sdkPhpUrl` now fill in. Determinism verified by me on Linux: **byte-identical across two separately spawned processes** for both fixture tenants, matching hashes. The 8 edits under the shared, contract-critical `codegen/` are **purely additive** (verified in a clean worktree: `+4 -1`, `+8 -1`, `+8 -2`, `+8 -0`, `+4 -1`, `+2 -1`, `+227 -0`, `+4 -0`, **zero deletions**), and the two touched existing specs were **strengthened, not relaxed** — `expect(sdkPhpUrl).toBeNull()` became an assertion on the real artifact path and on `X-Amz-Signature`. Codegen suite **46/46** with real Postgres + MinIO; `tsc` clean | senior-be | WSK-15 ✅ |
+| ✅⚠ | WSK-35 | **Headless WP theme pattern — and the render-time asymmetry is respected.** `inc/block-renderer.php` mirrors WSK-16's resolve/report exactly: **skip-and-report, never reject, never silent-drop** (authoring rejects; render-time does not — design §05 hard rule 2, the easiest thing to get backwards). Probe **12/12** on `php:8.3-cli`, driven by me, including a real **NEGATIVE CONTROL**: with the vocabulary forced empty, a normally-known `hero` IS classified unknown — proving the branch is a genuine vocabulary lookup and not a hardcoded `true`. Unknown type and its props appear **zero** times in the output; the report carries the verbatim type and its **original pre-skip index**. Vocabulary vendored (PHP cannot import a `.ts`) with a drift check I proved **can fail**: renaming one vendored type ⇒ `DRIFT`, exit 1; restored ⇒ `OK`, exit 0. `siteKind:"wp"` template implements the branch WSK-20 currently refuses. **🐞 A real bug only Linux could find:** `function_exists('gaiada_render_block_'.$type)` resolved against PHP's **global** namespace, silently matching nothing and throwing on the first known block — `php -l` is blind to it. ⚠ Never activated in a real WP install; Astro↔WP parity is WSK-36's; the determinism gate needs `webdesk/api`'s `node_modules` for `tsx`, so it cannot run from its own directory and **is in no CI job yet** | senior-fe | WSK-16, 34 ✅ |
 | ⬜ | WSK-36 | P6 QA gate — WP renders entirely from the central API; Astro↔WP parity; unknown-block behaviour PHP-side | qa | all of F |
 
 ---
@@ -597,3 +597,31 @@ is not needed.
 > **And I checked the gate could fail before trusting it green:** neutering the block validator inside
 > the container turned it **6 tests red**, and it returned to 46/46 on a byte-identical restore. A
 > green security gate that cannot fail is worse than no gate.
+
+> **WSK-34 + WSK-35 pushed. Tenant zero's actual path now has code behind it.**
+>
+> Worth stating why this stopped being "Phase 6, later": WSK-D26 keeps `gaiada.com` — **tenant
+> zero** — on WordPress at Hostinger. So the headless-WP path is the one our own site takes, not a
+> future vertical. Hostinger is shared hosting with no shell model, so this had to be a theme +
+> DNS/content exercise, and it is.
+>
+> **The bug that justifies the Linux-only rule, again.** `function_exists('gaiada_render_block_'.$type)`
+> with a bare name resolves against PHP's **global** namespace, not the caller's — so it silently
+> matched nothing and threw on the very first *known* block. `php -l` passes it happily. Only running
+> the thing found it. That is now three separate defects this session that a syntax check or a local
+> green would have waved through.
+>
+> **What I checked rather than accepted**, because these edits were in the contract-critical
+> `codegen/` directory: the diff is **purely additive with zero deletions** (confirmed in a clean
+> worktree, since this shared checkout had the whole `codegen/` directory dropped from its index and
+> `git diff` therefore reported all 19 files as deletions — the second time today that trap appeared).
+> And the two pre-existing specs it touched were **strengthened**: `expect(sdkPhpUrl).toBeNull()`
+> became an assertion on the real artifact path and on `X-Amz-Signature`. A relaxed assertion
+> disguised as an update is exactly what I was looking for and it is not what happened.
+>
+> **The right instinct on determinism:** it added `sdk.php` to **WSK-15's existing** double-run gate
+> instead of writing a third harness. Verified byte-identical across two separately spawned processes.
+>
+> **Open:** the PHP determinism gate resolves `tsx` from `webdesk/api`'s `node_modules`, so it cannot
+> run from its own directory and **no CI job runs it** — WSK-29 added five webdesk jobs but not a
+> WordPress one. WSK-36 (Astro↔WP parity) is now unblocked.

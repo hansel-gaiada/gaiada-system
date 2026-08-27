@@ -131,7 +131,8 @@ describe("GET /control/v1/tenants/:slug/contract (WSK-15 replacing WSK-21's 501)
     expect(body.blockLibrary).toEqual({ package: "@gaiada/webdesk-blocks", version: "0.0.0-pending-wsk16", range: "^0.0.0-pending-wsk16" });
     expect(body.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(typeof body.generatedAt).toBe("string");
-    expect(body.artifacts.sdkPhpUrl).toBeNull();
+    // WSK-34 — sdkPhpUrl now fills in for a freshly-generated tenant (was `null` pre-WSK-34).
+    expect(body.artifacts.sdkPhpUrl).toContain(`contracts/${generatedSlug}/1.0.0/sdk.php`);
     expect(body.artifacts.openapiUrl).toContain(`contracts/${generatedSlug}/1.0.0/openapi.v1.json`);
     expect(body.artifacts.sdkTsUrl).toContain(`contracts/${generatedSlug}/1.0.0/sdk.d.ts`);
     expect(body.artifacts.contractMdUrl).toContain(`contracts/${generatedSlug}/1.0.0/CONTENT-CONTRACT.md`);
