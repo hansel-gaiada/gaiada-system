@@ -230,6 +230,13 @@ interface DemoChangeRequest {
   pipelineRunId: string | null; pmTaskId: string | null;
   declinedReason: string | null; requestedBy: string;
   createdAt: string; updatedAt: string;
+  // Bug detail (BFF contract §16f). Carried here so demo mode cannot quietly serve a SHORTER row
+  // than the real backend — a field the fixture omits is indistinguishable, at the reader, from one
+  // the backend never sends, which is the frontend-drift bug class this file otherwise guards well.
+  // `severity` is always null on the intake path: it is set at triage, never by the reporter.
+  severity: string | null;
+  reproSteps: string | null; environment: string | null;
+  seenOnVersion: string | null; affectedUrl: string | null;
 }
 // ── WHY THIS STORE IS PINNED TO globalThis (found by a clean e2e run, 2026-08-08) ────────────────
 // A plain module-level array does NOT work here. Next bundles the `"use server"` action graph and the
@@ -256,6 +263,8 @@ const WEBDEV_CRS: DemoChangeRequest[] = ((globalThis as Record<symbol, unknown>)
     projectId: "proj-nw-site", projectName: "Website relaunch",
     pipelineRunId: "run-demo-1", pmTaskId: null, declinedReason: null,
     requestedBy: DEMO_CLIENT_USER, createdAt: stamp(-6), updatedAt: stamp(-5),
+    // Not a bug — every bug-detail column is honestly null, which is what the backend returns.
+    severity: null, reproSteps: null, environment: null, seenOnVersion: null, affectedUrl: null,
   },
   // declined + a reason — the one branch nothing else in this fixture set exercises.
   {
@@ -265,6 +274,7 @@ const WEBDEV_CRS: DemoChangeRequest[] = ((globalThis as Record<symbol, unknown>)
     pipelineRunId: null, pmTaskId: null,
     declinedReason: "This is a footer edit our team can make directly — done as of today, no need to track it as a request.",
     requestedBy: DEMO_CLIENT_USER, createdAt: stamp(-10), updatedAt: stamp(-9),
+    severity: null, reproSteps: null, environment: null, seenOnVersion: null, affectedUrl: null,
   },
   // untouched `new` — the triage queue's own state, so the portal side shows what "just submitted,
   // nobody's looked at it yet" looks like without requiring a fresh POST first.
@@ -274,6 +284,14 @@ const WEBDEV_CRS: DemoChangeRequest[] = ((globalThis as Record<symbol, unknown>)
     projectId: "proj-nw-site", projectName: "Website relaunch",
     pipelineRunId: null, pmTaskId: null, declinedReason: null,
     requestedBy: DEMO_CLIENT_USER, createdAt: stamp(-1), updatedAt: stamp(-1),
+    // The one seed that exercises bug detail end to end. `severity` is null and MUST be: this row is
+    // `status: "new"`, i.e. pre-triage, and `wcr_bug_has_severity` only obliges a severity once a bug
+    // leaves triage. A fixture that pre-ranked it would model a row the database cannot hold.
+    severity: null,
+    reproSteps: "1. Add anything to the basket\n2. Open the basket on an iPhone\n3. Tap Checkout — nothing happens",
+    environment: "the live site",
+    seenOnVersion: null,
+    affectedUrl: "https://example.test/checkout",
   },
 ]) as DemoChangeRequest[];
 
@@ -612,6 +630,15 @@ export function portalDashboardDemo(method: string, p: string, userId: string, b
       status: "new", route: null, clientId: CLIENT_ID, projectId, projectName,
       pipelineRunId: null, pmTaskId: null, declinedReason: null, requestedBy: DEMO_CLIENT_USER,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      // Accepted for any kind, exactly like the real controller — the FORM only offers them for
+      // `bug`, so they simply arrive absent for other kinds rather than being refused here.
+      // `severity` is NOT read from `parsed`, deliberately: a body-supplied severity is ignored, the
+      // same way status/clientId are, which is what the real endpoint does.
+      severity: null,
+      reproSteps: parsed.reproSteps ? String(parsed.reproSteps) : null,
+      environment: parsed.environment ? String(parsed.environment) : null,
+      seenOnVersion: parsed.seenOnVersion ? String(parsed.seenOnVersion) : null,
+      affectedUrl: parsed.affectedUrl ? String(parsed.affectedUrl) : null,
     };
     WEBDEV_CRS.push(row);
     return created({ id, status: "new" });

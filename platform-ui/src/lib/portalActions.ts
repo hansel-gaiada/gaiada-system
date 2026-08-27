@@ -247,6 +247,14 @@ export async function portalSubmitChangeRequest(_prev: PortalActionResult | null
   const title = String(formData.get("title") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
   const projectId = String(formData.get("projectId") ?? "").trim();
+  // Bug detail (BFF contract §16f). The form only renders these for `kind==='bug'`, so for every
+  // other kind they are simply absent from the FormData and resolve to "" -> undefined. No severity:
+  // it is not on the intake contract at all — a client cannot rank their own bug (see the migration
+  // 202608271000 §3 note). Lengths are enforced server-side too; these are the honest UX half.
+  const reproSteps = String(formData.get("reproSteps") ?? "").trim();
+  const environment = String(formData.get("environment") ?? "").trim();
+  const seenOnVersion = String(formData.get("seenOnVersion") ?? "").trim();
+  const affectedUrl = String(formData.get("affectedUrl") ?? "").trim();
   if (!CHANGE_REQUEST_KINDS.has(kind)) {
     return { ok: false, error: "Choose what kind of request this is.", field: "kind" };
   }
@@ -256,7 +264,13 @@ export async function portalSubmitChangeRequest(_prev: PortalActionResult | null
       `/api/${c.tenant}/portal/change-requests`, c.userId,
       {
         method: "POST",
-        body: JSON.stringify({ kind, title, body: body || undefined, projectId: projectId || undefined }),
+        body: JSON.stringify({
+          kind, title, body: body || undefined, projectId: projectId || undefined,
+          reproSteps: reproSteps || undefined,
+          environment: environment || undefined,
+          seenOnVersion: seenOnVersion || undefined,
+          affectedUrl: affectedUrl || undefined,
+        }),
       },
     );
     revalidatePortal();

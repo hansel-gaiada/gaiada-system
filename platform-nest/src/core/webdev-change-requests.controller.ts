@@ -39,6 +39,11 @@ import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.control
 const KINDS = new Set(["content", "design", "feature", "bug"]);
 const ROUTES = new Set(["control_plane", "mini_run", "pm_task"]);
 const TRIAGE_ACTIONS = new Set(["decline", "convert"]);
+// Severity is a TRIAGE OUTPUT, not an intake field — see migration 202608271000's §3 header. The
+// portal deliberately cannot set it: asking a client to rank their own bug against everyone else's
+// reliably yields "critical". `wcr_bug_has_severity` enforces the same rule structurally, so a bug
+// converted without one is refused by the database rather than by this check alone.
+const SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 
 // §2.3's routing table. This is the DEFAULT the drawer renders as a suggestion when the PM does not
 // name a route — "the PM's triage decision is the record" (blueprint §07), so an explicit
@@ -54,6 +59,13 @@ const DEFAULT_ROUTE_BY_KIND: Record<string, string> = {
 const TITLE_CAP = 300;
 const BODY_CAP = 5000;
 const REASON_CAP = 1000;
+// Bug-detail caps — same values as the portal controller's MAX_* block, deliberately. Two intake
+// paths that truncate the same field at different lengths is a difference nobody discovers until a
+// repro step is silently shorter depending on who filed it.
+const REPRO_CAP = 5_000;
+const ENVIRONMENT_CAP = 200;
+const SEEN_ON_VERSION_CAP = 100;
+const AFFECTED_URL_CAP = 2_000;
 
 interface CrRow {
   id: string;
@@ -210,7 +222,10 @@ export class WebdevChangeRequestsController {
   async createInternal(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { kind?: string; title?: string; body?: string; clientId?: string; projectId?: string },
+    @Body() body: {
+      kind?: string; title?: string; body?: string; clientId?: string; projectId?: string;
+      reproSteps?: string; environment?: string; seenOnVersion?: string; affectedUrl?: string;
+    },
   ) {
     const { kind, clientId, projectId } = body ?? {};
     const rawTitle = body?.title?.trim();
@@ -224,9 +239,22 @@ export class WebdevChangeRequestsController {
       await withTenants([tenantId], async (c) => {
         await c.query(
           `INSERT INTO webdev_change_requests
-             (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site)
-           VALUES ($1, $2, $3, $4, 'internal', $5, $6, $7, 'new', $8, $9)`,
-          [id, tenantId, clientId ?? null, projectId ?? null, kind, title, bodyText, req.principal.userId, config.originSite],
+             (id, tenant_id, client_id, project_id, source, kind, title, body, status, requested_by, origin_site,
+              repro_steps, environment, seen_on_version, affected_url)
+           VALUES ($1, $2, $3, $4, 'internal', $5, $6, $7, 'new', $8, $9, $10, $11, $12, $13)`,
+          // Same four reporter-supplied fields the portal accepts. Parity is the point: this is the
+          // path a QA engineer, an n8n flow and (later) the D-9 CI receiver all file through, and a
+          // capability that only carries full detail on the portal path is the "UI as the definition"
+          // failure the agentic-native bar names.
+          // Severity is absent here too — internal or not, it is set at triage.
+          [
+            id, tenantId, clientId ?? null, projectId ?? null, kind, title, bodyText,
+            req.principal.userId, config.originSite,
+            body?.reproSteps ? scrubText(body.reproSteps).text.slice(0, REPRO_CAP) : null,
+            body?.environment ? scrubText(body.environment).text.slice(0, ENVIRONMENT_CAP) : null,
+            body?.seenOnVersion ? scrubText(body.seenOnVersion).text.slice(0, SEEN_ON_VERSION_CAP) : null,
+            body?.affectedUrl ? scrubText(body.affectedUrl).text.slice(0, AFFECTED_URL_CAP) : null,
+          ],
         );
         await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.created", {
           source: "internal", kind, clientId: clientId ?? null, projectId: projectId ?? null, actorId: req.principal.userId,
@@ -266,12 +294,15 @@ export class WebdevChangeRequestsController {
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
     @Param("id") id: string,
-    @Body() body: { action?: string; route?: string; reason?: string; kindOverride?: string },
+    @Body() body: { action?: string; route?: string; reason?: string; kindOverride?: string; severity?: string },
   ) {
-    const { action, route: requestedRoute, kindOverride } = body ?? {};
+    const { action, route: requestedRoute, kindOverride, severity } = body ?? {};
     if (!action || !TRIAGE_ACTIONS.has(action)) throw new BadRequestException("action must be decline|convert");
     if (kindOverride !== undefined && !KINDS.has(kindOverride)) {
       throw new BadRequestException("kindOverride must be content|design|feature|bug");
+    }
+    if (severity !== undefined && !SEVERITIES.has(severity)) {
+      throw new BadRequestException("severity must be critical|high|medium|low");
     }
     if (requestedRoute !== undefined && !ROUTES.has(requestedRoute)) {
       throw new BadRequestException("route must be control_plane|mini_run|pm_task");
@@ -319,6 +350,18 @@ export class WebdevChangeRequestsController {
       }
 
       const kind = kindOverride ?? cr.kind;
+
+      // A bug leaving triage must carry a severity. Resolved HERE, under the lock and after
+      // `kindOverride` is applied, because a PM re-kinding `feature -> bug` at triage creates the
+      // obligation that did not exist when the row was filed. Declines are exempt: `declined` is a
+      // pre-triage terminal state in `wcr_bug_has_severity`, and ranking something you are throwing
+      // away is busywork. A typed 400 rather than letting the CHECK surface as a 500 (agentic-native
+      // criterion 2: refusals are typed, not incidental).
+      if (action === "convert" && kind === "bug" && !severity) {
+        throw new BadRequestException("severity required when converting a bug: critical|high|medium|low");
+      }
+      // Non-bug kinds carry NULL, per `wcr_severity_vocab`.
+      const severityToWrite = kind === "bug" ? severity ?? null : null;
 
       if (action === "decline") {
         // `declined` carries no route — the CHECK enforces `(route IS NULL) = (status IN ('new','declined'))`.
@@ -370,9 +413,10 @@ export class WebdevChangeRequestsController {
         await c.query(
           `UPDATE webdev_change_requests
               SET status = 'in_progress', route = 'pm_task', pm_task_id = $2, kind = $4,
+                  severity = $5,
                   triaged_by = $3, triaged_at = now(), updated_at = now()
             WHERE id = $1 AND status = 'new' AND deleted_at IS NULL`,
-          [id, task.id, req.principal.userId, kind],
+          [id, task.id, req.principal.userId, kind, severityToWrite],
         );
         await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
           status: "in_progress", route: "pm_task", pmTaskId: task.id, kind, actorId: req.principal.userId,
@@ -433,9 +477,10 @@ export class WebdevChangeRequestsController {
       await c.query(
         `UPDATE webdev_change_requests
             SET status = 'in_progress', route = 'mini_run', pipeline_run_id = $2, kind = $4,
+                severity = $5,
                 triaged_by = $3, triaged_at = now(), updated_at = now()
           WHERE id = $1 AND status = 'new' AND deleted_at IS NULL`,
-        [id, runId, req.principal.userId, kind],
+        [id, runId, req.principal.userId, kind, severityToWrite],
       );
       // ⚠ THE ZERO-SPECIAL-CASING LINE (§3.1 step 5). The shipped `pipeline-fanout` n8n workflow
       // triggers on exactly this event (automation/workflows/pipeline-fanout.json:11) and opens the

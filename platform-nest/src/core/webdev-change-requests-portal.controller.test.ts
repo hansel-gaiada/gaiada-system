@@ -143,6 +143,58 @@ describe.skipIf(!TEST_URL)("MI-02: portal change-request submission (webdev main
     });
   });
 
+  it("bug detail fields round-trip submit -> read-back, and the portal cannot set its own severity", async () => {
+    const r = await app.inject({
+      method: "POST",
+      url: `/api/${co}/portal/change-requests`,
+      headers: asUser(viewerWide),
+      payload: {
+        kind: "bug",
+        title: "Checkout total is wrong on mobile",
+        reproSteps: "1. add two items\n2. open cart on iOS Safari\n3. total shows one item",
+        environment: "production",
+        seenOnVersion: "Alpha 01.071.0173a",
+        affectedUrl: "https://example.test/cart",
+        // A client naming their own severity must be IGNORED, not honoured and not 400 — the field
+        // simply is not part of this contract (migration 202608271000 §3).
+        severity: "critical",
+      },
+    });
+    expect(r.statusCode).toBe(201);
+    const body = r.json() as { id: string };
+
+    const row = await adminPool().query(
+      `SELECT repro_steps, environment, seen_on_version, affected_url, severity, status
+         FROM webdev_change_requests WHERE id = $1`,
+      [body.id],
+    );
+    expect(row.rows[0]).toMatchObject({
+      environment: "production",
+      seen_on_version: "Alpha 01.071.0173a",
+      affected_url: "https://example.test/cart",
+      status: "new",
+      // The whole point: the client asked for 'critical' and did not get it. Severity arrives at
+      // triage or not at all.
+      severity: null,
+    });
+    expect(String(row.rows[0].repro_steps)).toContain("iOS Safari");
+
+    // And the detail read gives the client back what they actually submitted — a field the SELECT
+    // list forgot would be indistinguishable from one they never typed.
+    const detail = await app.inject({
+      method: "GET",
+      url: `/api/${co}/portal/change-requests/${body.id}`,
+      headers: asUser(viewerWide),
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      environment: "production",
+      seenOnVersion: "Alpha 01.071.0173a",
+      affectedUrl: "https://example.test/cart",
+      severity: null,
+    });
+  });
+
   it("an active SIGNER (project-scoped) submits successfully", async () => {
     const r = await app.inject({
       method: "POST",

@@ -1,5 +1,5 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { portalSubmitChangeRequest, type PortalActionResult } from "@/lib/portalActions";
 import type { PortalProjectOption } from "@/lib/portal";
 
@@ -61,34 +61,7 @@ export function PortalChangeRequestForm({ allowClientWide, projects }: {
           <div className="cp-form__error" role="alert">{state.error}</div>
         )}
 
-        <div className="cp-field">
-          <label className="cp-field__label" htmlFor="cr-kind">What kind of request is this?</label>
-          <select
-            id="cr-kind" className="cp-select" name="kind" defaultValue="feature"
-            disabled={pending || noProjectToPick} required
-          >
-            {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-          </select>
-        </div>
-
-        <div className="cp-field">
-          <label className="cp-field__label" htmlFor="cr-title">In a few words</label>
-          <input
-            id="cr-title" className="cp-input" name="title" type="text" maxLength={300} required
-            disabled={pending || noProjectToPick} aria-describedby="cr-title-hint"
-          />
-          <span className="cp-field__hint" id="cr-title-hint">
-            e.g. &quot;Update the homepage phone number&quot;
-          </span>
-        </div>
-
-        <div className="cp-field">
-          <label className="cp-field__label" htmlFor="cr-body">Details (optional)</label>
-          <textarea
-            id="cr-body" className="cp-textarea" name="body" maxLength={10_000}
-            disabled={pending || noProjectToPick}
-          />
-        </div>
+        <KindAndDetail pending={pending} noProjectToPick={noProjectToPick} />
 
         {noProjectToPick ? (
           <p className="cp-field__hint">
@@ -117,6 +90,107 @@ export function PortalChangeRequestForm({ allowClientWide, projects }: {
           </button>
         </div>
       </form>
+    </>
+  );
+}
+
+// Kind + the fields whose VISIBILITY depends on it.
+//
+// ── WHY THIS IS A SEPARATE COMPONENT AND NOT `useState` IN THE PARENT ─────────────────────────────
+// The parent keys the <form> on the last successful submission id so an uncontrolled form remounts
+// with cleared fields. Component state does NOT reset that way — state lives in the component, not
+// the DOM node — so a `kind` held in the PARENT would survive a successful submit while the <select>
+// itself reset to "feature", leaving the two disagreeing: the bug fields would stay on screen for a
+// form that now says "Feature request". Holding it in a child of the keyed <form> makes the key
+// change unmount this component too, so the state and the DOM reset together.
+function KindAndDetail({ pending, noProjectToPick }: { pending: boolean; noProjectToPick: boolean }) {
+  const [kind, setKind] = useState("feature");
+  const disabled = pending || noProjectToPick;
+
+  return (
+    <>
+      <div className="cp-field">
+        <label className="cp-field__label" htmlFor="cr-kind">What kind of request is this?</label>
+        <select
+          id="cr-kind" className="cp-select" name="kind" value={kind}
+          onChange={(e) => setKind(e.target.value)}
+          disabled={disabled} required
+        >
+          {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+        </select>
+      </div>
+
+      <div className="cp-field">
+        <label className="cp-field__label" htmlFor="cr-title">In a few words</label>
+        <input
+          id="cr-title" className="cp-input" name="title" type="text" maxLength={300} required
+          disabled={disabled} aria-describedby="cr-title-hint"
+        />
+        <span className="cp-field__hint" id="cr-title-hint">
+          {kind === "bug"
+            ? "e.g. “Checkout total is wrong on mobile”"
+            : "e.g. “Update the homepage phone number”"}
+        </span>
+      </div>
+
+      <div className="cp-field">
+        <label className="cp-field__label" htmlFor="cr-body">
+          {kind === "bug" ? "What went wrong? (optional)" : "Details (optional)"}
+        </label>
+        <textarea
+          id="cr-body" className="cp-textarea" name="body" maxLength={10_000}
+          disabled={disabled}
+        />
+      </div>
+
+      {/* Bug detail — rendered ONLY for `bug`, so for every other kind these names are absent from the
+          FormData entirely rather than submitted empty. Asking someone requesting a content edit for
+          reproduction steps is how a form teaches people to ignore it.
+          maxLength mirrors the server caps exactly (5000/200/100/2000, BFF contract §16f) so the
+          browser stops the caller before a silent server-side truncation does.
+          There is deliberately NO severity control: severity is set by us at triage, never by the
+          reporter. */}
+      {kind === "bug" && (
+        <>
+          <div className="cp-field">
+            <label className="cp-field__label" htmlFor="cr-repro">How can we see it happen? (optional)</label>
+            <textarea
+              id="cr-repro" className="cp-textarea" name="reproSteps" maxLength={5_000}
+              disabled={disabled} aria-describedby="cr-repro-hint"
+            />
+            <span className="cp-field__hint" id="cr-repro-hint">
+              Step by step, if you can — the quickest fixes start from steps we can follow.
+            </span>
+          </div>
+
+          <div className="cp-field">
+            <label className="cp-field__label" htmlFor="cr-url">Which page? (optional)</label>
+            <input
+              id="cr-url" className="cp-input" name="affectedUrl" type="text" maxLength={2_000}
+              disabled={disabled} placeholder="https://…"
+            />
+          </div>
+
+          <div className="cp-field">
+            <label className="cp-field__label" htmlFor="cr-env">Where did you see it? (optional)</label>
+            <input
+              id="cr-env" className="cp-input" name="environment" type="text" maxLength={200}
+              disabled={disabled} aria-describedby="cr-env-hint"
+            />
+            <span className="cp-field__hint" id="cr-env-hint">
+              e.g. the live site, or a preview link we sent you.
+            </span>
+          </div>
+
+          <div className="cp-field">
+            <label className="cp-field__label" htmlFor="cr-version">Version, if you know it (optional)</label>
+            <input
+              id="cr-version" className="cp-input" name="seenOnVersion" type="text" maxLength={100}
+              disabled={disabled}
+            />
+          </div>
+        </>
+      )}
     </>
   );
 }

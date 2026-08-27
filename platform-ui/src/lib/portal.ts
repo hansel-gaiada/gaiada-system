@@ -337,6 +337,15 @@ export interface PortalChangeRequest {
   requestedBy: string | null;
   createdAt: string;
   updatedAt: string;
+  // Bug detail (BFF contract §16f). Present on every row, `null` for non-bug kinds — the backend
+  // selects these columns unconditionally, so a row that omitted them here would make a stored repro
+  // step indistinguishable from one the client never typed.
+  // `severity` is READ-only: set by us at triage, never submitted by the reporter.
+  severity: "critical" | "high" | "medium" | "low" | null;
+  reproSteps: string | null;
+  environment: string | null;
+  seenOnVersion: string | null;
+  affectedUrl: string | null;
 }
 
 // ── Pure helpers (used on BOTH sides of the network) ──────────────────────────────────────────────
