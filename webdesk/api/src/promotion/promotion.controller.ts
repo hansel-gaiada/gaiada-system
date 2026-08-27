@@ -12,23 +12,30 @@ import { Body, Controller, Headers, Param, Post, Req, UseGuards } from "@nestjs/
 import { PromotionCommandService } from "./promotion-command.service";
 import { ControlAuthGuard } from "../control/auth/control-auth.guard";
 import { requireControlContext, type ControlRequest } from "../control/auth/control-request";
-import { assertPromotionCommandAuthorized } from "./promotion-authorization";
+// WSK-25 unification (owner ruling 2026-08-27) — replaces this module's own
+// assertPromotionCommandAuthorized() with the SAME registry-driven Layer-3 guard every other
+// control command uses, so these three routes are covered by COMMAND_REGISTRY's exhaustive type
+// check. Enforcement is unchanged: export needs webdesk:read; promote/rollback need
+// webdesk:promote AND always a WS4 assertion (impactClass "high").
+import { CommandAuthorizationGuard } from "../control/policy/command-authorization.guard";
+import { Command } from "../control/command.decorator";
 import { assertUuid, assertTenantSlug, assertIdempotencyKey, assertOptionalVersion, assertContentBundle } from "./dto";
 
 @Controller("control/v1/tenants")
-@UseGuards(ControlAuthGuard)
+@UseGuards(ControlAuthGuard, CommandAuthorizationGuard)
 export class PromotionController {
   constructor(private readonly promotion: PromotionCommandService) {}
 
+  @Command("content.export")
   @Post(":tenantSlug/sites/:siteId/content-export")
   async exportContent(@Req() req: ControlRequest, @Param("tenantSlug") tenantSlugRaw: string, @Param("siteId") siteIdRaw: string) {
     const ctx = requireControlContext(req);
-    assertPromotionCommandAuthorized(ctx, "content.export");
     const tenantSlug = assertTenantSlug(tenantSlugRaw);
     const siteId = assertUuid(siteIdRaw, "siteId");
     return this.promotion.exportContent({ tenantSlug, siteId, actor: ctx.principal.subject });
   }
 
+  @Command("content.promote")
   @Post(":tenantSlug/sites/:siteId/environments/:envId/content-promote")
   async promote(
     @Req() req: ControlRequest,
@@ -39,7 +46,6 @@ export class PromotionController {
     @Body() body: { version?: string; sourceEnvId?: string; bundle?: unknown },
   ) {
     const ctx = requireControlContext(req);
-    assertPromotionCommandAuthorized(ctx, "content.promote");
     const tenantSlug = assertTenantSlug(tenantSlugRaw);
     const siteId = assertUuid(siteIdRaw, "siteId");
     const targetEnvId = assertUuid(envIdRaw, "envId");
@@ -60,6 +66,7 @@ export class PromotionController {
     });
   }
 
+  @Command("content.rollback")
   @Post(":tenantSlug/sites/:siteId/environments/:envId/content-rollback")
   async rollback(
     @Req() req: ControlRequest,
@@ -70,7 +77,6 @@ export class PromotionController {
     @Body() body: { version?: string },
   ) {
     const ctx = requireControlContext(req);
-    assertPromotionCommandAuthorized(ctx, "content.rollback");
     const tenantSlug = assertTenantSlug(tenantSlugRaw);
     const siteId = assertUuid(siteIdRaw, "siteId");
     const targetEnvId = assertUuid(envIdRaw, "envId");

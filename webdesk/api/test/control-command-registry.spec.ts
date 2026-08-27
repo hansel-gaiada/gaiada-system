@@ -21,6 +21,11 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   // schema and spend LLM budget, so it must still be scoped.
   "schema.aiDraft": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "schema.apply": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  // WSK-25 unification — promote/rollback are "high" specifically because that is what makes the
+  // PolicyDecisionPoint demand a WS4 assertion, matching the old imperative `requireWs4: true`.
+  "content.export": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "content.promote": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  "content.rollback": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "key.mint": { impactClass: "high", scope: "webdesk:keys", jobTracked: false },
   "key.rotate": { impactClass: "high", scope: "webdesk:keys", jobTracked: false },
   "key.revoke": { impactClass: "high", scope: "webdesk:keys", jobTracked: false },

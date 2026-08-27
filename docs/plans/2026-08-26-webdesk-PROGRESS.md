@@ -59,7 +59,7 @@ new from the reassessment (Part G) and 13 design-close tasks (Part A).
 | ✅ | A-13 | **Storage ruled — fully self-hosted** | owner | WSK-D23. MinIO primary, no new cost. R2/NAS kept as a config-only swap + abstraction test. Backups flip to **pull-model**; Workspace at staging, NAS target-state. New §11a preconditions. WSK-07 + WSK-28 rewritten |
 | ⬜ | A-10 | Write §15 · Cost & quotas | claude+owner | Needs real numbers only you have: today's web3forms + hosting spend, target per-client price. Then per-tenant cost · quotas/overage · break-even count — which is what actually answers A-12 |
 | ⬜ | A-11 | Payload governance + trademark check | owner | Ownership changed hands 2025; MIT is irrevocable for shipped versions, but rebranding touches trademark, which MIT does not license. ~1 hour |
-| ⬜ | A-12 | Procurement call (OQ-W1, now narrower) | owner | Under R-2 only the **backend** box is gated. Decide staging-box timing against Part B's real load |
+| RULED | A-12 | **Zone B box ruled: `helios`** | owner | **Owner ruling 2026-08-27.** No new procurement. `helios` has **262G free** and **Docker 29.7.2 installed with ZERO containers running** (probed read-only), so Zone B goes there. **This unblocks the whole verification approach** — until now every green in this program was provisional because no Zone B box existed. WARN **The accepted risk, stated so it is auditable:** helios also serves **23 live third-party client sites** from `/home`, so an internet-facing multi-tenant Zone B now shares a host and Docker daemon with paying clients. Isolation is a deliberate trade, not an oversight; I put the separate-box option first and the owner chose helios |
 
 ---
 
@@ -210,7 +210,7 @@ Zone B *backend* only.
 
 | # | Blocker | Why it is hard |
 |---|---|---|
-| 1 | **`delphi`/`helios` are OBSERVE-ONLY** (owner ruling 2026-08-22: collect FROM, never modify ON) | Deploying a frontend *is* modifying them. Needs an explicit ruling lifting observe-only **for deployment**, which is a narrower question than re-authorising the monitoring agent tier |
+| 1 | ~~OBSERVE-ONLY~~ **LIFTED FULLY — owner ruling 2026-08-27.** Deploys **and** the monitoring agent tier may write to `delphi` and `helios`. I offered a narrower carve-out (our vhost/docroot only, client `/home` dirs barred) and the owner confirmed the full lift deliberately. | **WSK-26′ is unblocked.** WARN Recorded so it is auditable: this puts **47 live third-party client sites** (24 on delphi, 23 on helios) in write reach of automation. Nothing in this program requires touching a client directory, and no ticket should |
 | 2 | ~~Neither host is reachable~~ **CORRECTED 2026-08-27 — this finding was WRONG.** Both hosts are reachable and I logged in to each read-only: `root@delphi` (72.61.142.88, Ubuntu 24.04.4, up 4wk) and `root@helios` (187.77.116.133, up 5wk), using the keys already in `~/.ssh/config`. HTTP to the bare IPs gives *empty reply / TLS handshake failure*, **not** a timeout — which is what the original probe most likely misread. **There is no SSH allowlist / tunnel / CI-identity problem.** | The REAL blocker is narrower and entirely non-technical: (a) the owner ruling lifting **observe-only for deploys** is still not recorded, and (b) nobody has decided which vhost/docroot our own frontends occupy. Both boxes carry **real third-party customer sites** (24 on delphi, 23 on helios, counted — not enumerated), so there is no path we own by default. ⚠ Also **corrected from WSK-29's own report**: it described them as "cPanel/WHM shared hosting". They are not — `/usr/local/cpanel` is **absent** on both, there is **no control panel at all**, and they are plain Ubuntu + `nginx` vhosts. **And Docker 29.7.2 is installed on both with ZERO containers running** — 43G free on delphi, 262G on helios. That materially widens the options (containers, not just a static docroot) and bears on **A-12**: the Zone B box may not need new procurement. The counter-argument is blast radius, not capacity — co-locating an internet-facing multi-tenant Zone B with 23–24 live customer sites is an owner security call, not a default |
 
 ### Tenant zero, under the new rule
@@ -698,3 +698,40 @@ is not needed.
 > `content.export`/`promote`/`rollback` are **invisible to the registry's exhaustive
 > `Record<CommandName, ...>`**, which is precisely the type that caught the last missing
 > classification. Two authorization systems is one more than this estate should have.
+
+> **FOUR OWNER RULINGS — 2026-08-27. Two unblock the program; two are accepted risk.**
+>
+> | # | Ruling | Effect |
+> |---|---|---|
+> | 1 | **Zone B goes on `helios`** | **A-12 CLOSED.** No procurement. Every provisional green here can finally become server-verified |
+> | 2 | **Observe-only LIFTED FULLY** on delphi + helios (deploys *and* monitoring writes) | **WSK-26′ unblocked** |
+> | 3 | **Unify authorization onto `COMMAND_REGISTRY` now** | Done in this commit |
+> | 4 | **`gaiada.com` stays WordPress, onboards at P6** | **WSK-36 becomes GATING**, not optional |
+>
+> **What I asked before recording 1 and 2, because both carry real risk.** I put the separate-box option
+> first, with the reasoning stated: Zone B is the part strangers can reach, and helios serves 23 paying
+> clients. The owner chose helios. I then re-asked the observe-only scope, offering a narrower carve-out
+> that barred client `/home` directories, and the owner confirmed the full lift deliberately. Both are
+> recorded with the exposure named — **47 live third-party client sites now in write reach of
+> automation** — so the decision is auditable later rather than inferred from a diff. It is the owner's
+> call; the job was to make sure it was made with the number in front of them.
+>
+> **Consequence of ruling 4 that is easy to miss:** Milestone 0 is *"gaiada.com live"*, and gaiada.com is
+> now definitively a **headless-WordPress** case on Hostinger shared hosting. That makes **WSK-36
+> (Astro-vs-WP parity + PHP-side unknown-block behaviour) a gate on M0**, not a Phase-6 nicety — and it
+> is the only remaining open ticket that is purely ours to build.
+>
+> **Ruling 3, implemented and verified.** `content.export`/`promote`/`rollback` are now first-class
+> `COMMAND_REGISTRY` commands and `promotion-authorization.ts` is **deleted** — one authorization system,
+> one exhaustive `Record<CommandName, ...>`. The classifications reproduce the imperative behaviour
+> exactly: export `read`/`webdesk:read`; promote and rollback `high`/`webdesk:promote`, where **`high` is
+> precisely what makes the PolicyDecisionPoint demand a WS4 assertion**. Nothing was loosened to fit the
+> registry's shape.
+>
+> **And I did not trust the green.** The existing promotion suites always send a valid scope *and* a valid
+> WS4, so they would pass with the guard fully disarmed — the exact blindness that hid the `schema.aiDraft`
+> hole. New `test/promotion-authz.spec.ts` is **five refusals plus three positive controls**: promote
+> without WS4 -> 403, rollback without WS4 -> 403, promote with a read-only scope even *with* WS4 -> 403,
+> export with zero scopes -> 403, all three routes asserted to still carry `@Command` metadata (missing
+> metadata **disarms** the guard rather than removing it), and the registry classifications pinned so
+> nobody can downgrade `promote` to `medium` and silently delete the WS4 requirement. **201/201 on Linux.**

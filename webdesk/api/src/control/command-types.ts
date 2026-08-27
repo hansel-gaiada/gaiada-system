@@ -23,6 +23,9 @@ export type CommandName =
   | "schema.propose"
   | "schema.aiDraft"
   | "schema.apply"
+  | "content.export"
+  | "content.promote"
+  | "content.rollback"
   | "key.mint"
   | "key.rotate"
   | "key.revoke"
@@ -77,6 +80,20 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   // scope-gated, because it reads a tenant's current collection schema and spends real LLM budget.
   "schema.aiDraft": { command: "schema.aiDraft", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "schema.apply": { command: "schema.apply", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
+  // WSK-25 unification (owner ruling 2026-08-27) — these three shipped with their OWN imperative
+  // scope/WS4 check in promotion-authorization.ts. That check worked and was immune to the
+  // disarmed-guard trap, but it left three control commands INVISIBLE to this registry's
+  // exhaustive `Record<CommandName, ...>` in test/control-command-registry.spec.ts — the type that
+  // caught the `schema.aiDraft` omission at compile time. Two authorization systems means a fourth
+  // promotion command can ship unclassified and nothing complains. One source now.
+  //
+  // The classifications reproduce the imperative behaviour EXACTLY: export was `webdesk:read` with
+  // no WS4; promote/rollback were `webdesk:promote` and ALWAYS required a WS4 assertion — which is
+  // precisely what impactClass "high" means to the PolicyDecisionPoint (`high` && !ws4ApprovalId
+  // => refuse). Nothing was loosened to fit the registry's shape.
+  "content.export": { command: "content.export", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  "content.promote": { command: "content.promote", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+  "content.rollback": { command: "content.rollback", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "key.mint": { command: "key.mint", impactClass: "high", scope: "webdesk:keys", jobTracked: false },
   "key.rotate": { command: "key.rotate", impactClass: "high", scope: "webdesk:keys", jobTracked: false },
   "key.revoke": { command: "key.revoke", impactClass: "high", scope: "webdesk:keys", jobTracked: false },
