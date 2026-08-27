@@ -51,11 +51,27 @@ Each inference is a frontend-first drift waiting to happen. This spec makes them
 - Frontend: PRD Studio, the project's Meetings tab and the Repositories inventory use it; the
   12-run cap and the per-run detail reads go away.
 
+### 4. A project belongs to a client (approved 2026-08-27)
+
+- Rule: `POST /projects` requires `clientId`. The one sanctioned client-less shape is the company's
+  OWN work, declared explicitly with `isInternal: true` (the existing `projects.is_internal` column
+  and the CC-1 `?clientId=internal` facet already mean exactly this). Both at once is a 400; an
+  omitted client is a 400 on field `clientId` — never a silent NULL. The client must exist in the
+  caller's tenant (400 `clientId`, not a 500 on a uuid cast).
+- `PATCH /projects/:id`: `clientId: null` (detach) is a 400 — it used to be swallowed by `COALESCE`
+  and look like success. Setting a client on an internal project converts it (`is_internal → false`).
+- Existing client-less rows (8 of 17 locally, 9 on the live estate per `client-filter.ts`) are left
+  as they are: nothing can invent their client, and a `NOT NULL` would block archiving them. The
+  UI's edit form already requires a client, so they get one when someone next touches them. Tracked
+  as a data gap, not a schema one — no migration.
+- Same rule under every actor (agentic-native bar): the UI form (Client picker already required),
+  the hub's `projects.create` (gains `isInternal`; the platform stays the authority), n8n's
+  `on-client-created-seed` (already passes `clientId`).
+
 ## Not in this spec
 
-Project ↔ client enforcement (`clientId` required on `POST/PATCH /projects`) — owner decision
-pending on how to treat existing client-less rows. Whisper `verbose_json` paragraphs. The n8n / LLM
-pipeline itself.
+Whisper `verbose_json` paragraphs. The n8n / LLM pipeline itself. A `NOT NULL` on
+`projects.client_id` — needs the legacy rows resolved first.
 
 ## Verification
 

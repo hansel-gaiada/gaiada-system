@@ -85,7 +85,7 @@ describe.skipIf(!TEST_URL)("WSUX-12 cross-tenant security gate (adversarial)", (
     app = await buildApp();
 
     // ---- Seed REAL, secret data inside company C (as the legitimate victim admin) ----
-    const proj = await app.inject({ method: "POST", url: `/api/${coC}/projects`, headers: asUser(victim), payload: { name: "C secret project" } });
+    const proj = await app.inject({ method: "POST", url: `/api/${coC}/projects`, headers: asUser(victim), payload: { isInternal: true, name: "C secret project" } });
     const campaign = await app.inject({
       method: "POST", url: `/api/${coC}/modules/agency/campaigns`, headers: asUser(victim),
       payload: { name: "C secret campaign", projectId: proj.json().id },
@@ -181,7 +181,7 @@ describe.skipIf(!TEST_URL)("WSUX-12 cross-tenant security gate (adversarial)", (
 
   it("APPROVALS positive control: attacker DOES see their own A approvals — proving the C-empty result is real isolation, not a blanket-empty bug", async () => {
     // Seed one approval in A so we know the endpoint is live for attacker.
-    const proj = await app.inject({ method: "POST", url: `/api/${coA}/projects`, headers: asUser(attacker), payload: { name: "A proj" } });
+    const proj = await app.inject({ method: "POST", url: `/api/${coA}/projects`, headers: asUser(attacker), payload: { isInternal: true, name: "A proj" } });
     const camp = await app.inject({ method: "POST", url: `/api/${coA}/modules/agency/campaigns`, headers: asUser(attacker), payload: { name: "A camp", projectId: proj.json().id } });
     await app.inject({ method: "POST", url: `/api/${coA}/modules/agency/approvals`, headers: asUser(attacker), payload: { campaignId: camp.json().id, subject: "A visible asset" } });
     const r = await app.inject({ method: "GET", url: `/api/approvals?scope=${coA}`, headers: asUser(attacker) });

@@ -11,6 +11,30 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.43.0` - a project belongs to a client (2026-08-27) - DEV-VERIFIED
+
+**Changed**
+- `POST /api/:t/projects` requires `clientId`. The one client-less shape is the company's own work,
+  declared with `isInternal: true` (sets the existing `projects.is_internal`, which the CC-1
+  `?clientId=internal` facet and the money page already read). Neither → 400 `{error, field:"clientId"}`;
+  both → 400 on `isInternal`; a client outside the caller's tenant or a malformed id → 400 on
+  `clientId` (checked on the tenant-scoped connection, compared as text — never a 500 on a uuid cast).
+- `PATCH /api/:t/projects/:id` with `clientId: null` is a 400 — it used to fall into `COALESCE` and
+  look like success. Setting a client on an internal project converts it (`is_internal → false`).
+  A PATCH that does not mention the client is unchanged, so legacy client-less rows can still be
+  archived.
+- Why: `client_id IS NULL` meant two things on the live estate (9 clientless rows, 7 flagged internal —
+  `client-filter.ts`). Owner decision 2026-08-27: a project is a client's; spec
+  `2026-08-26-webdev-lineage-fields-design.md` §4. No migration — the 8 local / 9 live legacy rows
+  are a data gap (the UI edit form requires a client, so they get one when next touched), and a
+  `NOT NULL` would block archiving them.
+- Every actor, same rule: UI `ProjectForm` (Client required since 0.55.0), hub `projects.create`
+  (forwards `isInternal`; the platform stays the authority), n8n `on-client-created-seed` (already
+  passes `clientId`). 15 test scaffolding projects across 9 suites now say `isInternal: true`.
+- Tests: new `core/projects-client.test.ts` (10: refuse orphan, store client, internal flagged, both
+  refused, foreign client, malformed id, PATCH detach refused, PATCH converts internal, PATCH foreign
+  refused, PATCH without client untouched).
+
 ### platform-nest `0.42.0` - the runs list can carry its gates (2026-08-27) - DEV-VERIFIED
 
 **Added**
@@ -267,6 +291,10 @@ local stack). None of these mean "production-done".
   `lib/pipeline.ts::listPipelineRunsWithGates` — one request, no cap, no per-run detail reads
   (`GATE_DETAIL_CAP` deleted). `RunApprovalRow` keeps its `gates: null` rendering for a refused read.
   Demo fixture honours the parameter (`demoPipeline.test.ts` +2).
+- **2026-08-27, lineage spec 4/4:** a project belongs to a client on the backend too (platform-nest
+  `0.43.0`). The UI already required it (`ProjectForm` Client picker, PRD Studio's composer); the demo
+  `POST /projects` fixture now mirrors the 400 `{error, field:"clientId"}` and `isInternal`, so demo
+  mode cannot create the orphan the platform refuses.
 
 ### platform-ui `0.54.0` - the five remaining finance tabs are real pages (2026-08-26) - PROTOTYPED
 

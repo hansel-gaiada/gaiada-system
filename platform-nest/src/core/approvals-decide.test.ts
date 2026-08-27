@@ -76,7 +76,7 @@ describe.skipIf(!TEST_URL)("POST /api/:tenantId/approvals/:id/decide — unified
   });
 
   it("agency: façade decide == native decide (same row transition + same authz denial for a member)", async () => {
-    const project = await app.inject({ method: "POST", url: `/api/${co}/projects`, headers: asUser(admin), payload: { name: "WSUX2 Project" } });
+    const project = await app.inject({ method: "POST", url: `/api/${co}/projects`, headers: asUser(admin), payload: { isInternal: true, name: "WSUX2 Project" } });
     const campaign = await app.inject({
       method: "POST", url: `/api/${co}/modules/agency/campaigns`, headers: asUser(admin),
       payload: { name: "WSUX2 Campaign", projectId: project.json().id },
