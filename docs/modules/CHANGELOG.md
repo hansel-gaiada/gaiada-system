@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.15.1` / platform-nest — IAM: zoneb_event.record must be ui_grantable (2026-08-27) - PROTOTYPED
+
+`202608271400` inserted `webdev.zoneb_event.record` with `ui_grantable = false` AND bundled it onto
+`manager` and `company_admin`. Both cannot stand: `position_roles_guard()` clause (b) refuses to
+attach a role carrying a non-ui_grantable permission to a position, so `seedPositions()` threw and
+took NINE files red on `main` — four seed suites, the positions controller, the IAM guard, two
+catalog pins and the permission-chain sweep. One flag; eight files that never mention it.
+Reproduced on a clean `origin/main` checkout before the fix, so it was not a merge artifact.
+
+`true` is the correct side. `ui_grantable = false` is a narrow carve-out with a pinned composition —
+"exactly 22 rows (15 relationship + 7 `portal.*`)", documented as "everything else true". `record` is
+grantable-class and not `portal.*`, and its sibling `.read` is true. The alternative (dropping it
+from the bundles) was rejected: the policy grants it to those roles deliberately, as the
+`wd-zoneb-intake` intake endpoint pinned `impact: "low"`. Fixed in a NEW migration (`202608271600`)
+rather than by editing an already-deployed one, and it ASSERTS — failing loudly if the key is absent,
+if the update matches no row, or if any non-relationship non-portal key is still false.
+
+Also regenerated `CAPABILITY-INVENTORY.md`, stale from WSK-12's new mcpTool (+1 low-impact write).
+
+⚠ Two of the nine were NOT that defect: the zoneb HTTP suite and the permission-chain sweep failed
+against a Cerbos container started *before* the merge added the policy file. Cerbos does not reliably
+hot-reload; restarting fixed both with no code change. Recorded so nobody re-chases it.
+
 ### platform-ui `0.59.0` - finance write surfaces: credit notes, write-offs, and five wire-ups (2026-08-27) - PROTOTYPED
 
 Six finance surfaces whose backends existed and which nothing could reach: consolidation runs +
