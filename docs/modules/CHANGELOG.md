@@ -11,6 +11,31 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.59.1` - every table with more than 4 columns was wrapping (2026-08-27) - DEV-VERIFIED
+
+`.lux-table__head/__row` fall back to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — FOUR tracks — and
+`HairlineTable` set that variable only when a caller passed `tcols`. Any table with more columns put
+N grid items into 4 tracks, so every row wrapped onto extra lines and the columns rendered out of
+visual order.
+
+On the **live** receivables aging the header read `61–90 / Current 90+ / 1–30 Total / 31–60`, with
+each customer's figures split across two rows. That is the schedule that has to tie to the control
+account, and it was unreadable in production.
+
+A scan found **62** such tables — finance, HR, IT, learning, monitoring, PM, search, meetings. Not a
+finance bug, an app-wide one, so the fix is in the primitive rather than at 62 call sites (which
+would still leave the 63rd broken the day someone adds it): the template is now DERIVED from
+`columns.length` when the caller gives none. Callers passing `tcols` are unaffected, 4-column tables
+render identically, and 2–3 column tables stop emitting phantom empty tracks.
+
+⚠ **Nothing in the pipeline could see this.** The markup is correct and every cell is present in DOM
+order, so `tsc`, vitest, `next build` and the axe sweep all pass — wrapping is neither a type error
+nor a contrast failure. It reached production and was found by opening the page. That is the case for
+a browser pass before calling a surface delivered.
+
+DEV-VERIFIED against a local DEMO_MODE render: the aging head reports 7 grid tracks for 7 header
+cells on ONE visual row, labels in order. Before: 4 tracks, two rows, scrambled.
+
 ### finance `0.15.1` / platform-nest — IAM: zoneb_event.record must be ui_grantable (2026-08-27) - PROTOTYPED
 
 `202608271400` inserted `webdev.zoneb_event.record` with `ui_grantable = false` AND bundled it onto
