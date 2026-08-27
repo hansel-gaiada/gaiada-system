@@ -15,10 +15,10 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1639,
+      "totalPairs": 1643,
       "perRole": {
-        "platform_admin": 363,
-        "company_admin": 330,
+        "platform_admin": 364,
+        "company_admin": 331,
         "manager": 152,
         "member": 82,
         "viewer": 29,
@@ -41,10 +41,10 @@
         "monitoring_staff": 10,
         "monitoring_manager": 15,
         "finance_staff": 21,
-        "finance_manager": 40,
+        "finance_manager": 41,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 330
+        "owner": 331
       },
       "selfScopedPairs": 28
     }
@@ -183,6 +183,7 @@
       "finance.ap.read",
       "finance.ap.reconcile",
       "finance.ap.vendor_master",
+      "finance.ar.credit_note",
       "finance.ar.issue",
       "finance.ar.manage",
       "finance.ar.read",
@@ -544,6 +545,7 @@
       "finance.ap.read",
       "finance.ap.reconcile",
       "finance.ap.vendor_master",
+      "finance.ar.credit_note",
       "finance.ar.manage",
       "finance.ar.read",
       "finance.ar.reconcile",
@@ -1361,6 +1363,7 @@
       "finance.ap.read",
       "finance.ap.reconcile",
       "finance.ap.vendor_master",
+      "finance.ar.credit_note",
       "finance.ar.issue",
       "finance.ar.manage",
       "finance.ar.read",
@@ -1542,6 +1545,7 @@
       "finance.ap.read",
       "finance.ap.reconcile",
       "finance.ap.vendor_master",
+      "finance.ar.credit_note",
       "finance.ar.manage",
       "finance.ar.read",
       "finance.ar.reconcile",

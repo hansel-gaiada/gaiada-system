@@ -11,6 +11,79 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.15.0` - AR credit notes and write-offs, and the tax return lifecycle (2026-08-27) - PROTOTYPED
+
+Two ways a receivable legitimately shrinks with no cash arriving. They were deferred from F4 on
+purpose — `finance_ar_invoices` still carries the comment "(Credit balances are deferred with credit
+memos.)" — and everything except the accounting already existed: the Cerbos `write_off` action, the
+`finance.ar.write_off` catalog key, and the seeded SoD duty `ar_writeoff_approve`, whose name has
+read "AR credit note / write-off approval" since 202608241013.
+
+**The distinction the whole design turns on, because it is money:**
+
+| | ledger posting | output VAT |
+|---|---|---|
+| Credit note (nota retur) | DR contra-revenue (4300/4200) + DR 2140 PPN Keluaran, CR AR control | **reversed** |
+| Write-off (piutang tak tertagih) | DR 6950 or 1131, CR AR control | **NOT reversed** |
+
+Indonesian PPN gives no relief for a bad debt. Treating a write-off like a credit note reclaims VAT
+the company is not entitled to, understates tax payable, and surfaces in a Coretax reconciliation as
+a difference DJP will ask about. So they are separate documents, separate tables, separate postings
+and separate rights — not two `reason` values on one adjustment table, which is how this normally
+gets built and is precisely how the VAT ends up wrong.
+
+- `202608270900` — `finance_ar_credit_notes` (+ lines, + a SEPARATE `finance_ar_credit_applications`
+  table, because putting credit applications into `finance_ar_allocations` would break
+  `finance_ar_reconcile`'s `amount_paid = sum(allocations)` check on every invoice that ever receives
+  a credit); `finance_ar_writeoffs`; `finance_ar_issue_credit_note` / `finance_ar_apply_credit` /
+  `finance_ar_write_off`; `amount_credited` + `amount_written_off` on the invoice; a
+  `bad_debt_method` company setting (`direct` | `allowance`, default `direct`); and account
+  **6950 Beban Kerugian Piutang**, added to the CoA template AND backfilled into every existing
+  chart — the template shipped the allowance (1131) but never a bad-debt expense.
+- `finance_ar_aging` / `finance_ar_reconcile` / `finance_ar_position` are **re-defined in the new
+  migration, not edited in place** — 202608241019 is applied on every estate, and editing it would
+  reach fresh databases only. The reconciliation identity grows a third term: an unapplied credit
+  note credits the AR control account exactly as an unallocated receipt does, so
+  `control = open invoices - payments on account - unapplied credit notes`. Omitting that term would
+  report a permanent mismatch for as long as any credit note sits unapplied, which is its normal
+  state. `position()` gains a fourth number and is therefore DROPped first (OUT params changed).
+- `202608270910` — one grantable key, `finance.ar.credit_note`, on the existing `finance_ar` kind.
+  A separate ACTION from `write_off` but the SAME duty: the control is unchanged, only the capability
+  splits, because `write_off` demands `assurance == "high"` and a sales return is routine traffic.
+  A step-up in front of every return gets `write_off` granted permanently, which destroys the control
+  for the case that needs it. Frequency is the argument, not risk. Not held by `finance_staff`.
+- `202608271230` — the tax return lifecycle: `finance_tax_prepare_return` / `file_return` /
+  `amend_return` / `return_figures` / `return_period`, plus **`finance_tax_return_drift`**. F7 already
+  had the data (`finance_tax_returns`, the PPN/PPh summaries, Coretax reconciliation) and lacked only
+  the lifecycle. Filed figures are SNAPSHOTTED at filing and never recomputed — the gap between "what
+  we filed on the 20th" and "what the data says now" is exactly what an auditor asks about, and
+  `finance_tax_return_drift` is what measures it: one row per filed return the ledger no longer
+  agrees with, meaning a journal was posted into a period already declared to DJP. Same problem-list
+  shape as `finance_ar_reconcile`. Filing requires a `filingReference` (the ASP/PJAP NTPN) — a return
+  marked filed with no receipt cannot be told apart from one nobody sent. Still does not transmit
+  (ruling D-F2). Endpoints: `GET/POST /finance/tax/returns`, `POST .../:id/file`,
+  `GET /finance/tax/returns/drift`.
+
+  ⚠ **This migration was written by a CONCURRENT session** that was handed this session's
+  continuation summary at a context boundary and built the same work before noticing. Its AR half
+  was discarded (it sorted after 202608270900 and re-defined the same three tie-out functions, so it
+  would have silently overwritten them); its tax half was better than the controller-side TypeScript
+  this session had written — the lifecycle belongs in SQL where automation and agents reach it, and
+  the drift check did not exist here at all — so it was adopted unchanged and the endpoints rewired
+  onto it.
+
+**Verification is not uniform across this entry, and the halves differ.** The AR half is
+DEV-VERIFIED: replayed against the LIVE schema in a rolled-back transaction, posting a real credit
+note and a real write-off against real data — the credit note produced a 2140 debit, the write-off
+produced none, and `finance_ar_reconcile` returned zero problems at every step. 7 new tests cover
+both VAT assertions, both tier denials, the confirmation gate and the tie-out; `finance.test.ts` is
+66/66 and the finance+rbac suites are 857/857 together. The TAX half is PROTOTYPED only: endpoints
+typecheck and have no tests and no UI yet.
+
+Also fixed: `accounts?q=` was pinned to assert every "Piutang" match sits in 11xx/12xx, which encoded
+a chart-layout assumption rather than a filter property; 6950 is a correct counter-example. It now
+asserts the filter's real contract — every row matches the query — and that it still narrows.
+
 ### webdesk `0.1.0` - Zone B exists: a contained content engine with its own RLS ledger (2026-08-26) - DEV-VERIFIED
 
 **Added**

@@ -4088,6 +4088,17 @@ client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
 | GET | `/finance/ledger/verify` | `{ problems, clean }` | `finance_ledger:verify` |
 | GET | `/finance/ar/aging?asOf=` · `/finance/ap/aging?asOf=` | aging rows | `finance_ar\|ap:read` |
 | GET | `/finance/ar/reconcile` · `/finance/ap/reconcile` | `{ position, problems, clean }` | `…:reconcile` |
+| GET | `/finance/ar/credit-notes?status=` | credit-note rows (incl. `unapplied`) | `finance_ar:read` |
+| POST | `/finance/ar/credit-notes` | `{ id, creditNoteNo, subtotal, taxTotal, total }` — raises AND posts | `finance_ar:credit_note` |
+| POST | `/finance/ar/credit-notes/:noteId/apply` | `{ applicationId, amount }` — subledger only, posts nothing | `finance_ar:credit_note` |
+| POST | `/finance/ar/invoices/:invoiceId/write-off` | `{ writeOffId, invoiceNo, amount }` — `confirm` must equal the invoice number | `finance_ar:write_off` |
+| | | ⚠ **A credit note and a write-off are NOT two flavours of one adjustment, and a consumer that presents them as one will cause a real tax error.** A CREDIT NOTE means the customer never owed it (return, over-bill, agreed discount): it debits contra-revenue AND **reverses output VAT** (a 2140 debit). A WRITE-OFF means they owed it and will not pay: it debits bad-debt expense (6950) or the allowance (1131) per `finance_company_settings.bad_debt_method`, and posts **NO VAT line at all** — Indonesian PPN gives no relief for a bad debt, so reversing it reclaims tax the company is not entitled to and shows up in a Coretax reconciliation. They also carry different rights (`credit_note` vs the step-up-gated `write_off`), though both bind to the same SoD duty `ar_writeoff_approve`. | |
+| | | ⚠ `/finance/ar/reconcile`'s `position` gained a FOURTH field, `unappliedCredits`. The identity is `open invoices - payments on account - unapplied credit notes = the AR control balance`: an unapplied credit note credits the control account exactly as an unallocated receipt does. A consumer that still computes `open - onAccount` will disagree with the ledger the moment any credit note is issued and not yet applied — which is its normal state. | |
+| GET | `/finance/tax/returns?year=&kind=` | filed/draft return rows | `finance_tax:read` |
+| POST | `/finance/tax/returns` | `{ id, status, computed:{output,input,net} }` — idempotent per period | `finance_tax:prepare` |
+| POST | `/finance/tax/returns/:returnId/file` | `{ id, status, filed:{…} }` — needs `filingReference` + `confirm`; `amend:true` to re-file | `finance_tax:file` |
+| GET | `/finance/tax/returns/drift` | `{ problems, clean }` — filed returns the ledger no longer agrees with | `finance_tax:read` |
+| | | ⚠ Filed figures are a SNAPSHOT taken at filing and are never recomputed. `filed*` is what was told to DJP; the summary endpoints are what the data says today. They diverge the moment a journal lands in a filed period, and `/drift` is the endpoint that measures it — do not "helpfully" refresh `filed*` from the live summary, that destroys the only evidence of the gap. | |
 | GET | `/finance/tax/ppn?from=&to=` | PPN summary | `finance_tax:read` |
 | GET | `/finance/tax/efaktur-exceptions?from=&to=` | exception rows | `finance_tax:read` |
 | GET | `/finance/periods/:periodId/close-readiness` | `{ blockers, ready }` | `finance_bank:reconcile` |

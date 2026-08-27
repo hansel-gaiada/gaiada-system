@@ -89,9 +89,18 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     });
 
     it("filters by query", async () => {
-      const rows = (await get(`/api/${tenant}/finance/accounts?q=Piutang`, clerk)).json() as Array<{ code: string }>;
+      const rows = (await get(`/api/${tenant}/finance/accounts?q=Piutang`, clerk))
+        .json() as Array<{ code: string; name: string }>;
       expect(rows.length).toBeGreaterThan(0);
-      expect(rows.every((a) => a.code.startsWith("11") || a.code.startsWith("12"))).toBe(true);
+      // Asserts the filter's ACTUAL contract — every row matches the query — rather than that the
+      // matches fall in a code range. The range version said `11`/`12` only, which encoded a
+      // layout assumption rather than a filter property: 202608270900 added 6950 "Beban Kerugian
+      // Piutang", a bad-debt EXPENSE that legitimately contains the word and legitimately sits in
+      // the 6xxx block, and the old assertion failed on a correct chart.
+      const q = "piutang";
+      expect(rows.every((a) => a.name.toLowerCase().includes(q) || a.code.toLowerCase().includes(q))).toBe(true);
+      // ...and it is still filtering, not returning the whole chart.
+      expect(rows.length).toBeLessThan(20);
     });
   });
 
@@ -846,6 +855,279 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
       headers: asUser(controller),
     });
     expect(back.statusCode).toBe(200);
+  });
+
+  // ── F4b: CREDIT NOTES AND WRITE-OFFS ──────────────────────────────────────────────────────────
+  //
+  // The whole point of these two being separate documents is the VAT treatment, and that is a
+  // difference no type system and no typecheck can catch — it only shows up in the posted journal.
+  // So the two central assertions here are literally "is there a 2140 line" and "is there not".
+  describe("credit notes and write-offs (F4b)", () => {
+    let cust = "";
+    let invoiceId = "";
+
+    beforeAll(async () => {
+      await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        await c.query(
+          `INSERT INTO finance_ar_customers (tenant_id, code, name, payment_terms_days, is_pkp)
+           VALUES ($1,'C-950','Credit Note Co',30,true)
+           ON CONFLICT DO NOTHING`, [tenant]);
+        const r = await c.query<{ id: string }>(
+          `SELECT id FROM finance_ar_customers WHERE tenant_id = $1 AND code = 'C-950'`, [tenant]);
+        cust = r.rows[0].id;
+      });
+
+      const inv = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId: cust, invoiceNo: "INV-950", invoiceDate: "2026-03-05", dueDate: "2026-04-04",
+          lines: [{ description: "Services", quantity: 1, unitPrice: 1000000, revenueAccountCode: "4100", taxRate: 12 }],
+        },
+      });
+      expect(inv.statusCode).toBe(201);
+      invoiceId = (inv.json() as { id: string }).id;
+    });
+
+    // ── TIER: the AR clerk banks receipts, so must hold neither of these ────────────────────────
+    it("★ finance_staff cannot issue a credit note — the other half of the lapping pair", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/credit-notes`, headers: asUser(clerk),
+        payload: {
+          customerId: cust, creditNoteNo: "CN-DENIED", creditNoteDate: "2026-03-10",
+          reasonCode: "return", reason: "should not be allowed",
+          lines: [{ description: "x", amount: 1000, creditAccountCode: "4300" }],
+        },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("★ finance_staff cannot write off a receivable", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices/${invoiceId}/write-off`,
+        headers: asUser(clerk),
+        payload: { amount: 1000, writeOffDate: "2026-03-10", reasonCode: "uncollectible", reason: "x", confirm: "INV-950" },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("a credit note with no recorded reason is refused", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/credit-notes`, headers: asUser(controller),
+        payload: {
+          customerId: cust, creditNoteNo: "CN-NOREASON", creditNoteDate: "2026-03-10",
+          reasonCode: "return",
+          lines: [{ description: "x", amount: 1000, creditAccountCode: "4300" }],
+        },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("★★ a credit note REVERSES output VAT — there is a 2140 debit", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/credit-notes`, headers: asUser(controller),
+        payload: {
+          customerId: cust, creditNoteNo: "CN-950", creditNoteDate: "2026-03-10",
+          reasonCode: "return", reason: "Client returned part of the engagement",
+          originalInvoiceId: invoiceId,
+          lines: [{ description: "Returned services", amount: 200000, creditAccountCode: "4300", taxRate: 12 }],
+        },
+      });
+      expect(r.statusCode).toBe(201);
+      const body = r.json() as { id: string; taxTotal: number };
+      // 12% applied to 11/12 of the base — the same convention the invoice used.
+      expect(body.taxTotal).toBe(Math.round(200000 * (11 / 12) * 0.12));
+
+      const lines = await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        const q = await c.query<{ code: string; side: string; amount: string }>(
+          `SELECT a.code, l.side, l.amount::text
+             FROM finance_ar_credit_notes n
+             JOIN finance_journal_lines l ON l.entry_id = n.journal_entry_id
+             JOIN finance_accounts a ON a.id = l.account_id
+            WHERE n.id = $1 ORDER BY a.code`, [body.id]);
+        return q.rows;
+      }, { modules: ["finance"] });
+
+      const vat = lines.find((l) => l.code === "2140");
+      expect(vat, "a credit note must reverse output VAT").toBeTruthy();
+      expect(vat!.side).toBe("debit");
+      // Contra-revenue, NOT the original revenue account — netting them hides the return rate.
+      expect(lines.some((l) => l.code === "4300" && l.side === "debit")).toBe(true);
+    });
+
+    it("a write-off refuses a confirmation that does not match the invoice number", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices/${invoiceId}/write-off`,
+        headers: asUser(controller),
+        payload: { amount: 300000, writeOffDate: "2026-03-12", reasonCode: "uncollectible", reason: "gone", confirm: "INV-951" },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("★★ a write-off does NOT reverse output VAT — there is no 2140 line", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices/${invoiceId}/write-off`,
+        headers: asUser(controller),
+        payload: {
+          amount: 300000, writeOffDate: "2026-03-12", reasonCode: "customer_insolvent",
+          reason: "Customer entered liquidation", confirm: "INV-950",
+        },
+      });
+      expect(r.statusCode).toBe(201);
+
+      const lines = await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        const q = await c.query<{ code: string; side: string }>(
+          `SELECT a.code, l.side
+             FROM finance_ar_writeoffs w
+             JOIN finance_journal_lines l ON l.entry_id = w.journal_entry_id
+             JOIN finance_accounts a ON a.id = l.account_id
+            WHERE w.invoice_id = $1 ORDER BY a.code`, [invoiceId]);
+        return q.rows;
+      }, { modules: ["finance"] });
+
+      // THE assertion. Indonesian PPN gives no relief for a bad debt; a 2140 line here would
+      // reclaim VAT the company is not entitled to and understate tax payable.
+      expect(lines.some((l) => l.code === "2140"), "a write-off must NOT reverse VAT").toBe(false);
+      expect(lines.some((l) => l.code === "6950" && l.side === "debit")).toBe(true);
+    });
+
+    it("★★ the subledger still ties to the general ledger after both", async () => {
+      const r = await get(`/api/${tenant}/finance/ar/reconcile`, controller);
+      expect(r.statusCode).toBe(200);
+      const rec = r.json() as { clean: boolean; problems?: unknown[] };
+      // If this fails, the aging/reconcile re-definitions in 202608270900 did not learn about
+      // credits or write-offs — which is the failure that whole migration exists to avoid.
+      expect(rec.problems ?? [], "credits and write-offs must not break the tie-out").toEqual([]);
+      expect(rec.clean).toBe(true);
+    });
+  });
+
+  // ── F7b: THE TAX RETURN LIFECYCLE ─────────────────────────────────────────────────────────────
+  //
+  // The lifecycle lives in SQL (202608271230). What matters here is the property the whole design
+  // exists for: a FILED return is a snapshot of what was told to DJP, and it must stop tracking the
+  // ledger. The last test posts into a filed period and asserts the drift check notices — if filed
+  // figures were being recomputed, that test would pass silently and the snapshot would be a lie.
+  describe("tax return lifecycle (F7b)", () => {
+    let returnId = "";
+    let cust2 = "";
+
+    beforeAll(async () => {
+      await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        await c.query(
+          `INSERT INTO finance_ar_customers (tenant_id, code, name, payment_terms_days, is_pkp)
+           VALUES ($1,'C-960','Late Billing Co',30,true) ON CONFLICT DO NOTHING`, [tenant]);
+        const r = await c.query<{ id: string }>(
+          `SELECT id FROM finance_ar_customers WHERE tenant_id = $1 AND code = 'C-960'`, [tenant]);
+        cust2 = r.rows[0].id;
+      }, { modules: ["finance"] });
+    });
+
+    it("refuses a monthly return with no month, and an annual one with a month", async () => {
+      const noMonth = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns`, headers: asUser(controller),
+        payload: { kind: "ppn", periodYear: 2026 },
+      });
+      expect(noMonth.statusCode).toBe(400);
+
+      const badanWithMonth = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns`, headers: asUser(controller),
+        payload: { kind: "pph_badan", periodYear: 2026, periodMonth: 3 },
+      });
+      expect(badanWithMonth.statusCode).toBe(400);
+    });
+
+    it("prepares a PPN return and is idempotent for the same period", async () => {
+      const first = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns`, headers: asUser(controller),
+        payload: { kind: "ppn", periodYear: 2026, periodMonth: 3 },
+      });
+      expect(first.statusCode).toBe(201);
+      const a = first.json() as { id: string; status: string; computed: { output: number; net: number } };
+      expect(a.status).toBe("draft");
+      returnId = a.id;
+
+      // UNIQUE (tenant, kind, year, month) — preparing twice is the same document, not a second one.
+      const second = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns`, headers: asUser(controller),
+        payload: { kind: "ppn", periodYear: 2026, periodMonth: 3 },
+      });
+      expect(second.statusCode).toBe(201);
+      expect((second.json() as { id: string }).id).toBe(returnId);
+    });
+
+    it("filing refuses without a filingReference, and without a matching confirmation", async () => {
+      const noRef = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns/${returnId}/file`,
+        headers: asUser(controller), payload: { confirm: "PPN 2026-03" },
+      });
+      expect(noRef.statusCode).toBe(400);
+
+      const badConfirm = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns/${returnId}/file`,
+        headers: asUser(controller), payload: { filingReference: "NTPN-TEST-1", confirm: "PPN 2026-04" },
+      });
+      expect(badConfirm.statusCode).toBe(400);
+    });
+
+    it("★★ filing SNAPSHOTS the figures, and drift is clean immediately after", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns/${returnId}/file`,
+        headers: asUser(controller),
+        payload: { filingReference: "NTPN-TEST-1", confirm: "PPN 2026-03" },
+      });
+      expect(r.statusCode).toBe(200);
+      const filed = r.json() as { status: string; filed: { output: number; net: number } };
+      expect(filed.status).toBe("filed");
+
+      const drift = await get(`/api/${tenant}/finance/tax/returns/drift`, controller);
+      expect(drift.statusCode).toBe(200);
+      expect((drift.json() as { clean: boolean }).clean).toBe(true);
+    });
+
+    it("★★ a journal posted into a FILED period shows up as drift", async () => {
+      // A late invoice in an already-declared month. This is a real event, not an error — but it
+      // means the figure of record no longer matches the ledger, and somebody has to decide whether
+      // to amend. The whole point of snapshotting is that this is DETECTABLE.
+      const late = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ar/invoices`, headers: asUser(clerk),
+        payload: {
+          customerId: cust2, invoiceNo: "INV-LATE-950", invoiceDate: "2026-03-28", dueDate: "2026-04-27",
+          lines: [{ description: "Late billing", quantity: 1, unitPrice: 5000000, revenueAccountCode: "4100", taxRate: 12 }],
+        },
+      });
+      expect(late.statusCode).toBe(201);
+
+      const drift = await get(`/api/${tenant}/finance/tax/returns/drift`, controller);
+      expect(drift.statusCode).toBe(200);
+      const d = drift.json() as { clean: boolean; problems: Array<{ problem: string; detail: string }> };
+      expect(d.clean, "a journal in a filed tax period must be detectable").toBe(false);
+      expect(d.problems.some((p) => p.problem === "TAX_RETURN_LEDGER_DRIFT")).toBe(true);
+    });
+
+    it("re-filing a filed return requires amend:true, and records it as amended", async () => {
+      const plain = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns/${returnId}/file`,
+        headers: asUser(controller),
+        payload: { filingReference: "NTPN-TEST-2", confirm: "PPN 2026-03" },
+      });
+      expect(plain.statusCode).toBe(400);
+
+      const amended = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/tax/returns/${returnId}/file`,
+        headers: asUser(controller),
+        payload: { filingReference: "NTPN-TEST-2", confirm: "PPN 2026-03", amend: true },
+      });
+      expect(amended.statusCode).toBe(200);
+      expect((amended.json() as { status: string }).status).toBe("amended");
+
+      // Amending re-snapshots, so the drift it was filed against is resolved.
+      const drift = await get(`/api/${tenant}/finance/tax/returns/drift`, controller);
+      expect((drift.json() as { clean: boolean }).clean).toBe(true);
+    });
   });
 
 });

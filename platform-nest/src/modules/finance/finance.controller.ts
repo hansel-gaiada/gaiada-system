@@ -80,6 +80,36 @@ interface ArInvoiceBody {
   }>;
 }
 
+/**
+ * The return kinds `finance_tax_returns.kind` accepts (202608241025).
+ *
+ * Kept in step with that CHECK constraint by hand — a value here the constraint rejects becomes a
+ * 500 at INSERT instead of the field-level 400 this list exists to produce.
+ * `pph_badan` is the only annual one (SPT Tahunan); the rest are monthly (SPT Masa).
+ */
+const TAX_RETURN_KINDS = ["ppn", "pph21", "pph23", "pph42", "pph_badan"];
+
+interface ArCreditNoteBody {
+  customerId?: string;
+  creditNoteNo?: string;
+  creditNoteDate?: string;
+  currencyCode?: string;
+  /** Why the credit exists. A code, so a revenue-leakage report can group by it. */
+  reasonCode?: string;
+  reason?: string;
+  /** The invoice this credit RELATES to. Records intent; does not apply it. */
+  originalInvoiceId?: string;
+  /** Optional immediate application. Omit to leave the credit ON ACCOUNT. */
+  applyToInvoiceId?: string;
+  applyAmount?: number | string;
+  lines?: Array<{
+    description?: string; amount?: number | string;
+    /** Contra-revenue (4300 Retur Penjualan / 4200 Potongan Penjualan), not the original revenue
+     *  account — netting them hides a deteriorating return rate entirely. */
+    creditAccountCode?: string; taxRate?: number | string;
+  }>;
+}
+
 interface ArReceiptBody {
   customerId?: string;
   receiptNo?: string;
@@ -433,12 +463,14 @@ export class FinanceController {
       ]);
       const pos = await c.query(
         `SELECT open_invoices AS "openInvoices", payments_on_account AS "paymentsOnAccount",
-                net_receivable AS "netReceivable"
+                unapplied_credits AS "unappliedCredits", net_receivable AS "netReceivable"
            FROM finance_ar_position($1, $2::date)`,
         [tenantId, isoDate(asOf, "asOf")],
       );
-      // Both numbers, because they are NOT the same and a caller that assumes they are will
-      // report a mismatch on every customer prepayment.
+      // ALL FOUR numbers, because they are NOT the same and a caller that assumes they are will
+      // report a mismatch on every customer prepayment — and, since 202608270900, on every credit
+      // note that is issued and not yet applied, which is a credit note's normal state. The
+      // identity is open - onAccount - unappliedCredits = the AR control balance.
       return { position: pos.rows[0], problems: problems.rows, clean: problems.rows.length === 0 };
     });
   }
@@ -512,6 +544,221 @@ export class FinanceController {
       ),
     );
     return rows.rows;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // TAX RETURN LIFECYCLE (F7)
+  //
+  // 202608241025 built the DATA — finance_tax_returns, the PPN and PPh summaries, the e-Faktur
+  // exception list and the Coretax reconciliation. What it left unbuilt is the lifecycle: turning a
+  // live summary into a filed DOCUMENT.
+  //
+  // ── WHY THE FILED FIGURES ARE SNAPSHOTTED AND NEVER RECOMPUTED ────────────────────────────────
+  // `finance_tax_ppn_summary()` answers "what does the data say TODAY". A return answers "what did
+  // we tell DJP on the 20th". Those diverge the moment a late invoice is booked against a filed
+  // period — and the gap between them is exactly what an auditor asks about, so it must be
+  // preserved rather than smoothed away. filed_output / filed_input / filed_net are written ONCE,
+  // at filing, and the live summary is shown alongside them afterwards so the drift is visible.
+  //
+  // ⚠ This does NOT transmit anything. Blueprint §6 / ruling D-F2: e-Faktur and e-Bupot go through a
+  // licensed ASP/PJAP. `filingReference` records the NTPN/receipt that channel returned — evidence
+  // the return was lodged, captured here rather than produced here.
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Get(":tenantId/finance/tax/returns")
+  async listTaxReturns(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("year") year?: string,
+    @Query("kind") kind?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "read");
+    const y = year === undefined ? null : Number(year);
+    if (y !== null && (!Number.isInteger(y) || y < 2000 || y > 2100)) {
+      throw new BadRequestException("year must be between 2000 and 2100");
+    }
+    if (kind && !TAX_RETURN_KINDS.includes(kind)) {
+      throw new BadRequestException(`kind must be one of ${TAX_RETURN_KINDS.join(", ")}`);
+    }
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT id, kind, period_year AS "periodYear", period_month AS "periodMonth",
+                period_start::text AS "periodStart", period_end::text AS "periodEnd", status,
+                filed_output AS "filedOutput", filed_input AS "filedInput", filed_net AS "filedNet",
+                filed_at AS "filedAt", filing_reference AS "filingReference", notes
+           FROM finance_tax_returns
+          WHERE tenant_id = $1
+            AND ($2::int  IS NULL OR period_year = $2)
+            AND ($3::text IS NULL OR kind = $3)
+          ORDER BY period_year DESC, period_month DESC NULLS LAST, kind`,
+        [tenantId, y, kind ?? null],
+      );
+      return r.rows;
+    });
+  }
+
+  /**
+   * Prepare (or re-open the figures for) a return for one tax period.
+   *
+   * Idempotent: the table carries UNIQUE (tenant, kind, year, month), so preparing twice returns
+   * the same draft rather than creating a second one. The COMPUTED figures come back every time,
+   * because for a draft they are simply the live answer — there is nothing to snapshot yet.
+   */
+  /**
+   * Prepare (or re-open the figures for) a return for one tax period.
+   *
+   * The lifecycle lives in SQL (`202608271230`), not here, for the same reason every other finance
+   * capability does: automation and agents reach the functions directly, and a second copy of the
+   * period arithmetic in TypeScript is a second place for it to be wrong. This handler validates
+   * shape and authorizes; the accounting is the function's.
+   */
+  @Post(":tenantId/finance/tax/returns")
+  @HttpCode(201)
+  async prepareTaxReturn(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { kind?: string; periodYear?: number; periodMonth?: number },
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "prepare");
+
+    const kind = body?.kind;
+    if (!kind || !TAX_RETURN_KINDS.includes(kind)) {
+      throw new BadRequestException(`kind must be one of ${TAX_RETURN_KINDS.join(", ")}`);
+    }
+    const year = Number(body?.periodYear);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      throw new BadRequestException("periodYear must be between 2000 and 2100");
+    }
+    // NULL month = an ANNUAL return (SPT Tahunan Badan). The function enforces the pairing too and
+    // raises FINANCE_TAX_BADAN_IS_ANNUAL / FINANCE_TAX_PERIODIC_NEEDS_MONTH; checking here first
+    // turns those into a field-level 400 instead of a 500 from a mid-statement exception.
+    const monthGiven = body?.periodMonth !== undefined && body.periodMonth !== null;
+    const month = monthGiven ? Number(body.periodMonth) : null;
+    if (month !== null && (!Number.isInteger(month) || month < 1 || month > 12)) {
+      throw new BadRequestException("periodMonth must be between 1 and 12, or omitted for an annual return");
+    }
+    if (kind === "pph_badan" && month !== null) {
+      throw new BadRequestException("pph_badan is the ANNUAL return (SPT Tahunan Badan) — omit periodMonth");
+    }
+    if (kind !== "pph_badan" && month === null) {
+      throw new BadRequestException(`${kind} is a monthly return (SPT Masa) — periodMonth is required`);
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_tax_prepare_return($1,$2,$3,$4,$5) AS id`,
+        [tenantId, kind, year, month, req.principal.userId],
+      );
+      const id = r.rows[0].id;
+      const fig = await c.query<{ output_amount: string; input_amount: string; net_amount: string }>(
+        `SELECT output_amount, input_amount, net_amount
+           FROM finance_tax_return_figures($1,$2,$3,$4)`,
+        [tenantId, kind, year, month],
+      );
+      const row = await c.query<{ status: string; period_start: string; period_end: string }>(
+        `SELECT status, period_start::text AS period_start, period_end::text AS period_end
+           FROM finance_tax_returns WHERE id = $1`, [id],
+      );
+      const f = fig.rows[0] ?? { output_amount: "0", input_amount: "0", net_amount: "0" };
+      return {
+        id, kind, periodYear: year, periodMonth: month,
+        periodStart: row.rows[0]?.period_start, periodEnd: row.rows[0]?.period_end,
+        status: row.rows[0]?.status,
+        computed: {
+          output: Number(f.output_amount), input: Number(f.input_amount), net: Number(f.net_amount),
+        },
+      };
+    });
+  }
+
+  /**
+   * File a prepared return, or amend a filed one: snapshot the figures AS FILED.
+   *
+   * Confirmation-gated on the period label, like closing a fiscal period. Filing is a statement to
+   * the STATE, and the figures stop tracking the ledger the moment it happens — which is the point,
+   * and is what `finance_tax_return_drift` later measures.
+   */
+  @Post(":tenantId/finance/tax/returns/:returnId/file")
+  @HttpCode(200)
+  async fileTaxReturn(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("returnId") returnId: string,
+    @Body() body: { filingReference?: string; confirm?: string; amend?: boolean },
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "file");
+
+    const reference = body?.filingReference?.trim();
+    if (!reference) {
+      throw new BadRequestException(
+        "filingReference is required — the NTPN or receipt from the ASP/PJAP is the evidence the return was actually lodged. "
+        + "A return marked filed with no receipt cannot be told apart from one nobody sent.",
+      );
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query<{
+        kind: string; period_year: number; period_month: number | null; status: string;
+      }>(
+        `SELECT kind, period_year, period_month, status
+           FROM finance_tax_returns WHERE id = $1 AND tenant_id = $2`,
+        [returnId, tenantId],
+      );
+      const ret = r.rows[0];
+      if (!ret) throw new NotFoundException("no such tax return in this company");
+
+      const label = ret.period_month === null
+        ? `${ret.kind.toUpperCase()} ${ret.period_year}`
+        : `${ret.kind.toUpperCase()} ${ret.period_year}-${String(ret.period_month).padStart(2, "0")}`;
+      requireConfirmation(body?.confirm, label, "period");
+
+      const amending = ret.status !== "draft";
+      if (amending && !body?.amend) {
+        throw new BadRequestException(
+          `${label} is already ${ret.status}. Re-filing replaces the figures of record — pass amend:true to file an `
+          + `AMENDMENT, which is a different statement to DJP and is recorded as such.`,
+        );
+      }
+
+      await c.query(
+        amending
+          ? `SELECT finance_tax_amend_return($1,$2,$3)`
+          : `SELECT finance_tax_file_return($1,$2,$3)`,
+        [returnId, reference, req.principal.userId],
+      );
+
+      const after = await c.query<{
+        status: string; filed_output: string; filed_input: string; filed_net: string;
+      }>(
+        `SELECT status, filed_output::text, filed_input::text, filed_net::text
+           FROM finance_tax_returns WHERE id = $1`, [returnId],
+      );
+      const a = after.rows[0];
+      return {
+        id: returnId, status: a?.status, period: label, filingReference: reference,
+        filed: { output: Number(a?.filed_output ?? 0), input: Number(a?.filed_input ?? 0), net: Number(a?.filed_net ?? 0) },
+      };
+    });
+  }
+
+  /**
+   * Where a FILED return no longer agrees with the ledger.
+   *
+   * One row per problem, empty means clean — the same shape as finance_ar_reconcile and
+   * finance_verify_ledger_chain, and for the same reason. A non-empty answer means a journal was
+   * posted into a period that has already been declared to DJP, which is not automatically wrong
+   * (a late invoice is a real event) but always needs a decision: amend, or carry it forward.
+   */
+  @Get(":tenantId/finance/tax/returns/drift")
+  async taxReturnDrift(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "read");
+    const rows = await withFinance(tenantId, (c) =>
+      c.query(`SELECT problem, detail FROM finance_tax_return_drift($1)`, [tenantId]),
+    );
+    return { problems: rows.rows, clean: rows.rows.length === 0 };
   }
 
   // ── The close ─────────────────────────────────────────────────────────────────────────────────
@@ -1919,6 +2166,232 @@ export class FinanceController {
         [tenantId, code, name, body?.npwp?.trim() || null, body?.isPkp ?? null, terms],
       );
       return { id: r.rows[0].id, code, name };
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // AR CREDIT NOTES AND WRITE-OFFS (F4b, migration 202608270900)
+  //
+  // The two ways a receivable shrinks with no cash arriving. They are separate endpoints under
+  // separate rights because they differ on VAT, and VAT is cash:
+  //
+  //   credit note — the customer never owed it. Output VAT IS reversed (nota retur).
+  //   write-off   — the customer owed it and will not pay. Output VAT is NOT reversed; the PPN was
+  //                 properly due and has been remitted.
+  //
+  // Both bind to the SAME segregation-of-duties duty (`ar_writeoff_approve`, seeded 202608241013 as
+  // "AR credit note / write-off approval") and both are the far half of the seeded blocking pair
+  // with `ar_receipt_posting` — "pocket the cash, then write off the debt".
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Get(":tenantId/finance/ar/credit-notes")
+  async listArCreditNotes(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("status") status?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "read");
+    const STATUSES = ["draft", "issued", "applied", "void"];
+    if (status && !STATUSES.includes(status)) {
+      throw new BadRequestException(`status must be one of ${STATUSES.join(", ")}`);
+    }
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT n.id, n.credit_note_no AS "creditNoteNo", n.credit_note_date::text AS "creditNoteDate",
+                n.customer_id AS "customerId", cu.code AS "customerCode", cu.name AS "customerName",
+                n.subtotal, n.tax_total AS "taxTotal", n.total, n.amount_applied AS "amountApplied",
+                (n.total - n.amount_applied) AS "unapplied",
+                n.reason_code AS "reasonCode", n.reason, n.status,
+                n.original_invoice_id AS "originalInvoiceId", i.invoice_no AS "originalInvoiceNo"
+           FROM finance_ar_credit_notes n
+           JOIN finance_ar_customers cu ON cu.id = n.customer_id
+           LEFT JOIN finance_ar_invoices i ON i.id = n.original_invoice_id
+          WHERE n.tenant_id = $1 AND ($2::text IS NULL OR n.status = $2)
+          ORDER BY n.credit_note_date DESC, n.credit_note_no DESC`,
+        [tenantId, status ?? null],
+      );
+      return r.rows;
+    });
+  }
+
+  /**
+   * Raise a credit note and post it in one call.
+   *
+   * Mirrors createArInvoice: the draft + lines + `finance_ar_issue_credit_note` happen inside one
+   * transaction, so a credit note never exists in a half-posted state. The VAT is computed HERE on
+   * the same 12%-of-11/12 convention the invoice path uses, rather than accepted from the caller —
+   * a credit note whose VAT disagrees with the invoice it reverses is precisely the difference a
+   * Coretax reconciliation surfaces months later.
+   */
+  @Post(":tenantId/finance/ar/credit-notes")
+  @HttpCode(201)
+  async createArCreditNote(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: ArCreditNoteBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "credit_note");
+
+    const noteDate = requiredIsoDate(body?.creditNoteDate, "creditNoteDate");
+    const creditNoteNo = body?.creditNoteNo?.trim();
+    if (!creditNoteNo) throw new BadRequestException("creditNoteNo is required");
+    if (!body?.customerId) throw new BadRequestException("customerId is required");
+
+    const REASONS = ["return", "overbilling", "discount", "service_failure", "price_correction", "other"];
+    if (!body?.reasonCode || !REASONS.includes(body.reasonCode)) {
+      throw new BadRequestException(`reasonCode must be one of ${REASONS.join(", ")}`);
+    }
+    // A credit note with no stated cause is indistinguishable from a concealed write-off. The DB
+    // enforces NOT NULL; this turns that into a field-level 400 the form can point at.
+    if (!body?.reason?.trim()) {
+      throw new BadRequestException("reason is required — a credit with no recorded cause is indistinguishable from a concealed write-off");
+    }
+    // Hoisted: TypeScript cannot carry the narrowing above into the withFinance closure.
+    const reason = body.reason.trim();
+    if (!Array.isArray(body?.lines) || body.lines.length === 0) {
+      throw new BadRequestException("at least one line is required — a credit note with no lines cannot be issued");
+    }
+
+    const lines = body.lines.map((l, i) => {
+      const amount = Number(l?.amount);
+      if (!l?.description?.trim()) throw new BadRequestException(`line ${i + 1}: description is required`);
+      if (!l?.creditAccountCode) throw new BadRequestException(`line ${i + 1}: creditAccountCode is required`);
+      if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException(`line ${i + 1}: amount must be greater than zero`);
+      const rate = l?.taxRate === undefined || l.taxRate === null ? null : Number(l.taxRate);
+      if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
+      }
+      const tax = rate === null ? 0 : Math.round(amount * (11 / 12) * (rate / 100));
+      return { description: l.description.trim(), amount, creditAccountCode: l.creditAccountCode, tax };
+    });
+
+    const subtotal = lines.reduce((t, l) => t + l.amount, 0);
+    const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
+    if (subtotal + taxTotal <= 0) throw new BadRequestException("credit note total must be greater than zero");
+
+    return withFinance(tenantId, async (c) => {
+      const dup = await c.query(
+        `SELECT 1 FROM finance_ar_credit_notes WHERE tenant_id = $1 AND credit_note_no = $2`,
+        [tenantId, creditNoteNo],
+      );
+      if (dup.rowCount) throw new BadRequestException(`a credit note numbered ${creditNoteNo} already exists`);
+
+      const cn = await c.query<{ id: string }>(
+        `INSERT INTO finance_ar_credit_notes
+           (tenant_id, customer_id, credit_note_no, credit_note_date, currency_code,
+            subtotal, tax_total, total, reason_code, reason, original_invoice_id, status)
+         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,'draft') RETURNING id`,
+        [tenantId, body.customerId, creditNoteNo, noteDate, body?.currencyCode ?? "IDR",
+         subtotal, taxTotal, subtotal + taxTotal, body.reasonCode, reason,
+         body?.originalInvoiceId ?? null],
+      );
+      const noteId = cn.rows[0].id;
+
+      let sort = 0;
+      for (const l of lines) {
+        const acct = await c.query<{ id: string }>(
+          `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+          [tenantId, l.creditAccountCode],
+        );
+        if (!acct.rows[0]) throw new BadRequestException(`unknown account ${l.creditAccountCode}`);
+        await c.query(
+          `INSERT INTO finance_ar_credit_note_lines
+             (tenant_id, credit_note_id, description, line_subtotal, credit_account_id, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [tenantId, noteId, l.description, l.amount, acct.rows[0].id, sort++],
+        );
+      }
+
+      // Posts the journal: DR contra-revenue + DR output VAT, CR AR control.
+      await c.query(`SELECT finance_ar_issue_credit_note($1,$2)`, [noteId, req.principal.userId]);
+
+      // Apply straight to the named invoice when the caller asked for it. Convenience only — the
+      // credit is valid and already on the control account whether or not this succeeds, which is
+      // why it is a separate statement rather than folded into issuing.
+      if (body?.applyToInvoiceId) {
+        await c.query(`SELECT finance_ar_apply_credit($1,$2,$3,$4)`, [
+          noteId, body.applyToInvoiceId, Math.min(subtotal + taxTotal, Number(body?.applyAmount ?? subtotal + taxTotal)),
+          req.principal.userId,
+        ]);
+      }
+      return { id: noteId, creditNoteNo, subtotal, taxTotal, total: subtotal + taxTotal };
+    });
+  }
+
+  /** Apply an already-issued credit note to an invoice. Subledger only — posts nothing. */
+  @Post(":tenantId/finance/ar/credit-notes/:noteId/apply")
+  @HttpCode(200)
+  async applyArCreditNote(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("noteId") noteId: string,
+    @Body() body: { invoiceId?: string; amount?: number },
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "credit_note");
+    if (!body?.invoiceId) throw new BadRequestException("invoiceId is required");
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be greater than zero");
+
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(
+        `SELECT 1 FROM finance_ar_credit_notes WHERE id = $1 AND tenant_id = $2`, [noteId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such credit note in this company");
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_ar_apply_credit($1,$2,$3,$4) AS id`,
+        [noteId, body.invoiceId, amount, req.principal.userId],
+      );
+      return { applicationId: r.rows[0].id, amount };
+    });
+  }
+
+  /**
+   * Write off an uncollectible receivable.
+   *
+   * Confirmation-gated on the INVOICE NUMBER, like closing a period. A write-off is corrected only
+   * by a reversal, and the amount is chosen by the caller rather than implied — so a slip here is
+   * not a wrong button, it is a wrong number, and re-typing the invoice is the cheapest guard
+   * against writing off the wrong one.
+   *
+   * ⚠ Posts NO VAT line. See migration 202608270900 — Indonesian PPN gives no relief for a bad debt.
+   */
+  @Post(":tenantId/finance/ar/invoices/:invoiceId/write-off")
+  @HttpCode(201)
+  async writeOffArInvoice(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("invoiceId") invoiceId: string,
+    @Body() body: { amount?: number; writeOffDate?: string; reasonCode?: string; reason?: string; confirm?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_ar", tenantId, module: "finance" }, "write_off");
+
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be greater than zero");
+    const date = requiredIsoDate(body?.writeOffDate, "writeOffDate");
+    const REASONS = ["uncollectible", "customer_insolvent", "disputed_abandoned", "below_recovery_cost", "statute_barred", "other"];
+    if (!body?.reasonCode || !REASONS.includes(body.reasonCode)) {
+      throw new BadRequestException(`reasonCode must be one of ${REASONS.join(", ")}`);
+    }
+    if (!body?.reason?.trim()) {
+      throw new BadRequestException("reason is required — a write-off with no recorded reason is indistinguishable from a mistake");
+    }
+    const reason = body.reason.trim();
+
+    return withFinance(tenantId, async (c) => {
+      const inv = await c.query<{ invoice_no: string; outstanding: string }>(
+        `SELECT invoice_no,
+                (total - amount_paid - amount_credited - amount_written_off)::text AS outstanding
+           FROM finance_ar_invoices WHERE id = $1 AND tenant_id = $2`,
+        [invoiceId, tenantId],
+      );
+      const row = inv.rows[0];
+      if (!row) throw new NotFoundException("no such invoice in this company");
+      requireConfirmation(body?.confirm, row.invoice_no, "invoice number");
+
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_ar_write_off($1,$2,$3::date,$4,$5,$6) AS id`,
+        [invoiceId, amount, date, body.reasonCode, reason, req.principal.userId],
+      );
+      return { writeOffId: r.rows[0].id, invoiceNo: row.invoice_no, amount };
     });
   }
 

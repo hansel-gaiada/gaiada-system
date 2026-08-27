@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (330 grantable permissions, LMS-L1 2026-08-24)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 140,
-      "grantablePermissionsInCatalog": 363,
-      "permissionsCoveredByGroups": 338,
+      "groups": 141,
+      "grantablePermissionsInCatalog": 364,
+      "permissionsCoveredByGroups": 339,
       "permissionsAdvancedOnly": 25,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 96
+      "sensitiveGroups": 97
     }
   },
   "groups": [
@@ -1450,6 +1450,16 @@
         "finance.ar.manage",
         "finance.ar.issue",
         "finance.ar.receipt"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ar_credit_note",
+      "name": "Issue Credit Notes",
+      "domain": "finance",
+      "description": "Raise and issue AR credit notes — a sales return, an over-billing or an agreed discount. Reduces the receivable AND reverses the output VAT previously declared, which is what separates it from a write-off. Held apart from receipt posting for the same reason as writing off: holding both is a blocking segregation-of-duties conflict, and both bind to the ar_writeoff_approve duty. Kept separate from Write Off Receivables so a controller can issue routine credit notes without holding the step-up-gated power to forgive a debt.",
+      "permissions": [
+        "finance.ar.credit_note"
       ],
       "sensitive": true
     },
