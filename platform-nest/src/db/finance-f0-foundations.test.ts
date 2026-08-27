@@ -469,11 +469,36 @@ describe.skipIf(!TEST_URL)("Finance F0 — foundations (202608241010..1013)", ()
       expect(conflicts).toHaveLength(0);
     });
 
-    it("seeds all six blueprint pairs, canonically ordered", async () => {
-      const n = await withGlobal(async (c) =>
-        Number((await c.query("SELECT count(*) AS n FROM finance_sod_conflicts WHERE severity='blocking'")).rows[0].n),
+    it("seeds all six blueprint pairs, canonically ordered — and any later pair is deliberate", async () => {
+      // Two assertions, because a bare count guards less than it looks like it does.
+      //
+      // The count alone would pass if somebody DELETED a blueprint pair and added an unrelated one,
+      // which is the failure that actually matters — a conflict silently disappearing is how one
+      // person ends up holding both halves of a fraud pair. So the six are pinned BY KEY.
+      //
+      // The total is still pinned separately so a new pair cannot appear unnoticed. It moved 6 -> 8
+      // on 2026-08-27 when F5b (202608272010) added the AP duty `ap_credit_writeoff_approve`, which
+      // the blueprint matrix never covered because the AP side had no credit/write-off concept:
+      //     ap_bill_entry + ap_credit_writeoff_approve        enter a bill, then credit it away
+      //     ap_credit_writeoff_approve + ap_payment_release   divert the payment, then write it off
+      const rows = await withGlobal(async (c) =>
+        (await c.query<{ duty_a: string; duty_b: string }>(
+          "SELECT duty_a, duty_b FROM finance_sod_conflicts WHERE severity='blocking'",
+        )).rows,
       );
-      expect(n).toBe(6);
+      const pairs = new Set(rows.map((r) => `${r.duty_a}+${r.duty_b}`));
+
+      for (const p of [
+        "ap_payment_release+vendor_master",
+        "ap_bill_entry+ap_payment_approve",
+        "bank_reconcile+cash_custody",
+        "ar_receipt_posting+ar_writeoff_approve",
+        "journal_post+period_close",
+        "payroll_master+payroll_release",
+      ]) {
+        expect(pairs, `blueprint 2.2 pair ${p} must not disappear`).toContain(p);
+      }
+      expect(rows.length).toBe(8);
     });
   });
 

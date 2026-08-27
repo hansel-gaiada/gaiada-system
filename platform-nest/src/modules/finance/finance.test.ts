@@ -1023,6 +1023,210 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     });
   });
 
+  // ── F5b: AP VENDOR CREDITS AND WRITE-OFFS ─────────────────────────────────────────────────────
+  //
+  // The payables mirror, and the tests exist because it is NOT a sign flip. Three assertions carry
+  // the whole design: the credit touches INPUT VAT (1170) and never output VAT; the write-off
+  // credits INCOME and never an expense or a VAT account; and unwinding withholding raises a bukti
+  // potong flag instead of blocking or silently amending a filing.
+  describe("AP vendor credits and write-offs (F5b)", () => {
+    let vend = "";
+    let billId = "";
+    let creditId = "";
+
+    beforeAll(async () => {
+      await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        await c.query(
+          `INSERT INTO finance_ap_vendors (tenant_id, code, name, npwp, is_pkp, payment_terms_days)
+           VALUES ($1,'V-950','Vendor Credit Co','01.234.567.8-901.000',true,30)
+           ON CONFLICT DO NOTHING`, [tenant]);
+        const r = await c.query<{ id: string }>(
+          `SELECT id FROM finance_ap_vendors WHERE tenant_id = $1 AND code = 'V-950'`, [tenant]);
+        vend = r.rows[0].id;
+      }, { modules: ["finance"] });
+
+      // 10,000,000 + 1,100,000 PPN Masukan, less 2% PPh 23 = 200,000 withheld.
+      // amount_payable therefore 10,900,000 — the company never owed the vendor the withheld part.
+      const bill = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills`, headers: asUser(clerk),
+        payload: {
+          vendorId: vend, billNo: "BILL-950", billDate: "2026-03-05", dueDate: "2026-04-04",
+          withholdingCode: "PPH23", withholdingRate: 0.02, withholdingAccountCode: "2151",
+          lines: [{ description: "Consulting", quantity: 1, unitPrice: 10000000, expenseAccountCode: "6600", taxRate: 12 }],
+        },
+      });
+      expect(bill.statusCode).toBe(201);
+      billId = (bill.json() as { id: string }).id;
+      // A draft bill is not on the books; approving is what posts it.
+      const ok = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/approve`, headers: asUser(controller),
+        payload: {},
+      });
+      expect(ok.statusCode).toBeLessThan(300);
+    });
+
+    it("★ finance_staff can enter a bill but cannot credit it away", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendor-credits`, headers: asUser(clerk),
+        payload: {
+          vendorId: vend, creditNo: "VC-DENIED", creditDate: "2026-03-10",
+          reasonCode: "return", reason: "should not be allowed",
+          lines: [{ description: "x", amount: 1000, creditAccountCode: "6600" }],
+        },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("★ finance_staff cannot write off a payable", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/write-off`, headers: asUser(clerk),
+        payload: { amount: 1000, writeOffDate: "2026-03-10", reasonCode: "unclaimed", reason: "x", confirm: "BILL-950" },
+      });
+      expect(r.statusCode).toBe(403);
+    });
+
+    it("★★ a vendor credit reverses INPUT VAT (1170) and never output VAT, and unwinds withholding", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendor-credits`, headers: asUser(controller),
+        payload: {
+          vendorId: vend, creditNo: "VC-950", creditDate: "2026-03-10",
+          reasonCode: "return", reason: "Returned part of the engagement",
+          originalBillId: billId, notaReturNo: "NR-950",
+          withholdingCode: "PPH23", withholdingRate: 0.02, withholdingAmount: 40000,
+          lines: [{ description: "Returned consulting", amount: 2000000, creditAccountCode: "6600", taxRate: 12 }],
+        },
+      });
+      expect(r.statusCode).toBe(201);
+      const body = r.json() as { id: string; taxTotal: number; amountPayable: number; requiresBupotAmendment: boolean };
+      creditId = body.id;
+      expect(body.taxTotal).toBe(Math.round(2000000 * (11 / 12) * 0.12));
+      // total 2,220,000 less 40,000 withheld
+      expect(body.amountPayable).toBe(2000000 + body.taxTotal - 40000);
+      expect(body.requiresBupotAmendment).toBe(true);
+
+      const lines = await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        const q = await c.query<{ code: string; side: string; amount: string }>(
+          `SELECT a.code, l.side, l.amount::text
+             FROM finance_ap_vendor_credits vc
+             JOIN finance_journal_lines l ON l.entry_id = vc.journal_entry_id
+             JOIN finance_accounts a ON a.id = l.account_id
+            WHERE vc.id = $1 ORDER BY a.code`, [body.id]);
+        return q.rows;
+      }, { modules: ["finance"] });
+
+      // THE assertion pair. Input VAT is an asset we CLAIMED; crediting gives the claim back.
+      expect(lines.some((l) => l.code === "1170" && l.side === "credit"),
+        "a vendor credit must reverse INPUT VAT").toBe(true);
+      expect(lines.some((l) => l.code === "2140"),
+        "a vendor credit must NOT touch output VAT — that is the AR side").toBe(false);
+      // The withholding leg, without which the journal cannot balance.
+      expect(lines.some((l) => l.code === "2151" && l.side === "debit")).toBe(true);
+      // AP is debited by amount_payable, NOT the gross total.
+      const ap = lines.find((l) => l.code === "2110" && l.side === "debit");
+      expect(ap, "AP control must be debited").toBeTruthy();
+      expect(Number(ap!.amount)).toBe(body.amountPayable);
+    });
+
+    it("★★ the bukti potong exposure is FLAGGED, not blocked and not auto-amended", async () => {
+      // Ruling (c): the credit above already posted — that is the "not blocked" half.
+      const ex = await get(`/api/${tenant}/finance/ap/bupot-exceptions`, controller);
+      expect(ex.statusCode).toBe(200);
+      const rows = ex.json() as Array<{ creditNo: string; withholdingReversed: string }>;
+      expect(rows.some((x) => x.creditNo === "VC-950")).toBe(true);
+
+      // ...and it surfaces on the reconciliation, which is the screen somebody reads at close.
+      const rec = await get(`/api/${tenant}/finance/ap/reconcile`, controller);
+      const problems = (rec.json() as { problems: Array<{ problem: string }> }).problems;
+      expect(problems.some((p) => p.problem === "AP_BUPOT_AMENDMENT_PENDING")).toBe(true);
+      // Crucially it is the ONLY complaint: the ledger itself ties out.
+      expect(problems.filter((p) => p.problem !== "AP_BUPOT_AMENDMENT_PENDING")).toEqual([]);
+    });
+
+    it("recording the amended bukti potong clears the flag, and needs a reference", async () => {
+      const noRef = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendor-credits/${creditId}/bupot-amended`,
+        headers: asUser(controller), payload: {},
+      });
+      expect(noRef.statusCode).toBe(400);
+
+      const ok = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/vendor-credits/${creditId}/bupot-amended`,
+        headers: asUser(controller), payload: { amendmentRef: "BP-AMEND-950" },
+      });
+      expect(ok.statusCode).toBe(200);
+
+      const rec = await get(`/api/${tenant}/finance/ap/reconcile`, controller);
+      expect((rec.json() as { problems: unknown[] }).problems).toEqual([]);
+    });
+
+    it("a write-off refuses a confirmation that does not match the bill number", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/write-off`, headers: asUser(controller),
+        payload: { amount: 500000, writeOffDate: "2026-03-12", reasonCode: "unclaimed", reason: "x", confirm: "BILL-951" },
+      });
+      expect(r.statusCode).toBe(400);
+    });
+
+    it("★★ an AP write-off credits INCOME, not an expense, and posts no VAT leg", async () => {
+      const r = await app.inject({
+        method: "POST", url: `/api/${tenant}/finance/ap/bills/${billId}/write-off`, headers: asUser(controller),
+        payload: {
+          amount: 500000, writeOffDate: "2026-03-12", reasonCode: "vendor_dissolved",
+          reason: "Supplier struck off the register", confirm: "BILL-950",
+        },
+      });
+      expect(r.statusCode).toBe(201);
+
+      const lines = await withTenants([tenant], async (c) => {
+        await c.query("SELECT set_config('app.scopes','finance',true)");
+        const q = await c.query<{ code: string; account_type: string; side: string }>(
+          `SELECT a.code, a.account_type, l.side
+             FROM finance_ap_writeoffs w
+             JOIN finance_journal_lines l ON l.entry_id = w.journal_entry_id
+             JOIN finance_accounts a ON a.id = l.account_id
+            WHERE w.bill_id = $1`, [billId]);
+        return q.rows;
+      }, { modules: ["finance"] });
+
+      // Released debt is taxable INCOME (pembebasan utang). Crediting the original expense account
+      // would understate taxable profit and bury the event in a cost centre.
+      const credit = lines.find((l) => l.side === "credit");
+      expect(credit, "the write-off must credit something").toBeTruthy();
+      expect(credit!.account_type, "released debt is INCOME, not a negative expense").toBe("revenue");
+      expect(credit!.code).toBe("7300");
+      // The input VAT was validly claimed when the supply happened; not paying does not undo that.
+      expect(lines.some((l) => l.code === "1170"),
+        "an AP write-off must NOT claw back input VAT").toBe(false);
+    });
+
+    it("★★ the payables subledger still ties to the general ledger after both", async () => {
+      const r = await get(`/api/${tenant}/finance/ap/reconcile`, controller);
+      expect(r.statusCode).toBe(200);
+      const rec = r.json() as {
+        clean: boolean; problems?: unknown[];
+        position: { openBills: string; paymentsOnAccount: string; unappliedCredits: string; netPayable: string };
+      };
+      expect(rec.problems ?? [], "vendor credits and write-offs must not break the AP tie-out").toEqual([]);
+      expect(rec.clean).toBe(true);
+
+      // ★ The WIRE payload, not just the SQL. finance_ap_position() gained unapplied_credits in
+      // 202608272000 and the handler's SELECT list did not name it — the function computed the
+      // number and the handler threw it away. tsc cannot see that (the SQL is a string, the return
+      // type is inferred from nothing), the reconciliation still passed, and the console rendered
+      // undefined. Caught in review, not by a test, which is why this assertion exists.
+      expect(rec.position, "the reconcile payload must carry the position").toBeTruthy();
+      for (const k of ["openBills", "paymentsOnAccount", "unappliedCredits", "netPayable"] as const) {
+        expect(rec.position[k], `position.${k} must be on the wire, not just in the function`).toBeDefined();
+      }
+      // And the identity the third term exists to preserve.
+      const n = (v: string) => Number(v);
+      expect(n(rec.position.netPayable)).toBeCloseTo(
+        n(rec.position.openBills) - n(rec.position.paymentsOnAccount) - n(rec.position.unappliedCredits), 4);
+    });
+  });
+
   // ── F7b: THE TAX RETURN LIFECYCLE ─────────────────────────────────────────────────────────────
   //
   // The lifecycle lives in SQL (202608271230). What matters here is the property the whole design

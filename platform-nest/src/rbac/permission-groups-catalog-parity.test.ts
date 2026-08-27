@@ -95,7 +95,7 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // WSK-31 (2026-08-27): +2 grantable — webdev.provisioned_site.{operate,promote} (the §07 WebDesk
     // control-plane MCP tool set's Zone A authz, on the EXISTING webdev_provisioned_site kind — no
     // new authoring group; both advancedOnly, same reasoning webdev.zoneb_event.record used), 367 -> 369.
-    expect(grantable.length).toBe(369);
+    expect(grantable.length).toBe(372);
     expect(relationshipKeys.size).toBe(15);
   });
 

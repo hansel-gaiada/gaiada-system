@@ -115,7 +115,7 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // the §07 WebDesk control-plane MCP tool set's Zone A authz] -- no new kind, 382 -> 384 pairs,
     // 96 kinds unchanged. Both deliberately NOT uiGrantable (see permission-groups.json's
     // advancedOnly note) -- the controller behind them is an honest 501 stub pending WSK-23.
-    expect(catalog.length).toBe(384);
+    expect(catalog.length).toBe(387);
     expect(catalogKindSet.size).toBe(96);
   });
 

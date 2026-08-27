@@ -11,6 +11,66 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### finance `0.16.0` - AP vendor credits and write-offs (2026-08-27) - PROTOTYPED
+
+The payables mirror of F4b, and deliberately NOT a sign flip. Three differences each carry money:
+
+| | AR (F4b) | AP (F5b) |
+|---|---|---|
+| credit reverses | output VAT — `2140`, a liability we owed | **input VAT — `1170`, an asset we CLAIMED** |
+| validated by | our own faktur | a **nota retur the BUYER issues** (PMK 65/2010) |
+| withholding | no analogue | **unwound**, which can invalidate an issued bukti potong |
+| write-off posts | DR bad-debt expense `6950` → reduces profit | **CR other income `7300` → INCREASES taxable profit** |
+
+That last row is the one a mirror-image implementation gets wrong. Released debt (*pembebasan utang*)
+is taxable income under UU PPh; booking it as a negative expense understates taxable profit — the
+same class of error as reclaiming VAT on a bad debt, in the opposite direction.
+
+The withholding arithmetic is not optional either. `finance_ap_approve_bill` credits AP with
+`amount_payable` (= total − withholding) and the PPh liability separately, because the company never
+owed the vendor the withheld part. A credit must unwind BOTH legs or the journal does not balance:
+
+```
+DR AP control            credit.amount_payable
+DR withholding account   credit.withholding_amount
+    CR expense           credit.subtotal
+    CR 1170 PPN Masukan  credit.tax_total
+```
+
+**Owner ruling (c), 2026-08-27 — the ledger is corrected here; the FILING is not.** If a bukti potong
+was already issued, the credit makes it overstate what was withheld, and fixing that is an amended
+e-Bupot — a statement to DJP. Auto-amending would have this system silently restate a filing;
+blocking would make a routine purchase return impossible until a tax officer acted. So the credit
+posts, `requires_bupot_amendment` is set, `finance_ap_bupot_amendment_exceptions()` is the chase
+list, and `AP_BUPOT_AMENDMENT_PENDING` surfaces on the reconciliation — the one screen somebody reads
+every close. `POST .../vendor-credits/:id/bupot-amended` records the resolution, and demands a
+reference: marking it resolved with none cannot be told apart from nobody having filed it.
+
+- `202608272000` — `finance_ap_vendor_credits` (+ lines, + a SEPARATE applications table, or
+  `finance_ap_reconcile`'s `amount_paid = sum(allocations)` check breaks on every credited bill),
+  `finance_ap_writeoffs`, three posting functions, `amount_credited`/`amount_written_off` on the
+  bill (measured against `amount_payable`, never `total`), and the tie-outs re-defined — an unapplied
+  vendor credit DEBITS the AP control account exactly as an unallocated payment does, so
+  `control = open bills − payments on account − unapplied vendor credits`.
+- `202608272010` — `finance.ap.credit_note` + `finance.ap.write_off`, and a NEW duty
+  `ap_credit_writeoff_approve` with two blocking pairs: *enter a bill then credit it away*, and
+  *divert the payment then write off the debt*. AR needed no new duty because `ar_writeoff_approve`
+  was seeded already naming credit notes; the AP side was never anticipated. Not held by
+  `finance_staff` — the clerk who enters bills must not be able to cancel them.
+
+DEV-VERIFIED by replay against the LIVE schema in a rolled-back transaction on a real bill carrying
+both PPN Masukan and PPh 23: the credit produced `CR 1170` with no `2140` and `DR AP` equal to
+`amount_payable` not the gross; the write-off produced `CR 7300` (revenue) with no VAT leg; the
+bukti potong flag fired; aging netted 38,150,000 − 3,815,000 − 1,000,000 = 33,335,000. 8 new tests
+cover both VAT assertions, the income assertion, both tier denials, the confirmation gate, the flag
+lifecycle and the tie-out. finance.test.ts 81/81.
+
+⚠ Also restored `finance.ar.credit_note`, which commit `f6a29bbf` deleted from BOTH
+`permission-catalog.json` and `permission-groups.json` while `202608270910` still inserts it into the
+database — artifact and DB disagreeing, 13 suites red on `main`. Recovered verbatim from the commit
+that introduced it. This is the third time in one day a concurrent wave has broken `main` through
+these six hand-maintained IAM artifacts; the pattern is structural, not bad luck.
+
 ### platform-ui `0.59.1` - every table with more than 4 columns was wrapping (2026-08-27) - DEV-VERIFIED
 
 `.lux-table__head/__row` fall back to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — FOUR tracks — and

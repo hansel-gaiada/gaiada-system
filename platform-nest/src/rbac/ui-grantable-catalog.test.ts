@@ -72,8 +72,8 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // 380 -> 382 / 365 -> 367.
     // WSK-31 (2026-08-27): +2 grantable / +2 total, on the EXISTING webdev_provisioned_site kind
     // (operate, promote — the §07 WebDesk control-plane MCP tool set's Zone A authz), 382 -> 384 / 367 -> 369.
-    expect(permissions.length).toBe(384);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(369);
+    expect(permissions.length).toBe(387);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(372);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

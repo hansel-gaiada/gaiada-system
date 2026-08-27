@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 141,
-      "grantablePermissionsInCatalog": 369,
-      "permissionsCoveredByGroups": 341,
+      "groups": 144,
+      "grantablePermissionsInCatalog": 372,
+      "permissionsCoveredByGroups": 344,
       "permissionsAdvancedOnly": 28,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 97
+      "sensitiveGroups": 100
     }
   },
   "groups": [
@@ -1466,6 +1466,16 @@
       "sensitive": true
     },
     {
+      "key": "finance_ar_credit_note",
+      "name": "Issue Credit Notes",
+      "domain": "finance",
+      "description": "Raise and issue AR credit notes — a sales return, an over-billing or an agreed discount. Reduces the receivable AND reverses the output VAT previously declared, which is what separates it from a write-off. Held apart from receipt posting for the same reason as writing off: holding both is a blocking segregation-of-duties conflict, and both bind to the ar_writeoff_approve duty. Kept separate from Write Off Receivables so a controller can issue routine credit notes without holding the step-up-gated power to forgive a debt.",
+      "permissions": [
+        "finance.ar.credit_note"
+      ],
+      "sensitive": true
+    },
+    {
       "key": "finance_ar_write_off",
       "name": "Write Off Receivables",
       "domain": "finance",
@@ -1523,6 +1533,26 @@
       "description": "Release payment to a vendor — the moment money irreversibly leaves the company. The narrowest grant in the finance module: not held by AP clerks who enter bills, and not by company administrators. Requires step-up verification.",
       "permissions": [
         "finance.ap.payment_release"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_credit_note",
+      "name": "Issue Vendor Credits",
+      "domain": "finance",
+      "description": "Raise and issue AP vendor credits — a purchase return, an over-billing or an agreed discount. Reduces the payable, reverses the INPUT VAT previously claimed, and unwinds any withholding, which makes an amended bukti potong necessary. Held apart from bill entry: entering a bill and cancelling it are a blocking segregation-of-duties conflict.",
+      "permissions": [
+        "finance.ap.credit_note"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "finance_ap_write_off",
+      "name": "Write Off Payables",
+      "domain": "finance",
+      "description": "Cancel a payable the company will not pay. Credits OTHER INCOME, not an expense — released debt is taxable income. Requires step-up verification and is a blocking conflict with payment release: diverting a payment and then writing off the debt leaves nothing outstanding to chase.",
+      "permissions": [
+        "finance.ap.write_off"
       ],
       "sensitive": true
     },

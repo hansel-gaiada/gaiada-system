@@ -54,7 +54,7 @@ versions below; the running build reports it at `GET /health`.
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
-| finance | `0.15.0` | PROTOTYPED | Finance & Accounting | 2026-08-27 |
+| finance | `0.16.0` | PROTOTYPED | Finance & Accounting | 2026-08-27 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.2` | PROTOTYPED | Cross-cutting | 2026-08-23 |

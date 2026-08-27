@@ -122,6 +122,33 @@ interface ArReceiptBody {
   allocations?: Array<{ invoiceId?: string; amount?: number | string }>;
 }
 
+interface ApVendorCreditBody {
+  vendorId?: string;
+  creditNo?: string;
+  creditDate?: string;
+  currencyCode?: string;
+  reasonCode?: string;
+  reason?: string;
+  /** The bill this credit relates to. STRONGLY preferred when withholding is unwound: it is how the
+   *  reversal lands in the same liability account the bill credited. */
+  originalBillId?: string;
+  /** The buyer-issued nota retur that validates the input-VAT reversal (PMK 65/2010). */
+  notaReturNo?: string;
+  /** Copied from the bill, never re-derived — the rate in force then is the rate to unwind. */
+  withholdingCode?: string;
+  withholdingRate?: number | string;
+  withholdingAmount?: number | string;
+  /** Fallback when no originalBillId is given. */
+  withholdingAccountCode?: string;
+  applyToBillId?: string;
+  applyAmount?: number | string;
+  lines?: Array<{
+    description?: string; amount?: number | string;
+    /** The expense being reversed. */
+    creditAccountCode?: string; taxRate?: number | string;
+  }>;
+}
+
 interface ApBillBody {
   vendorId?: string;
   billNo?: string;
@@ -530,8 +557,13 @@ export class FinanceController {
         tenantId, isoDate(asOf, "asOf"),
       ]);
       const pos = await c.query(
+        // ALL FOUR columns. finance_ap_position() gained `unapplied_credits` in 202608272000, and a
+        // SELECT list that does not name it drops the number silently — the function computes it,
+        // the handler discards it, and the console renders undefined. Exactly the frontend-first
+        // drift this repo keeps hitting, in the one direction tsc cannot see: the SQL is correct and
+        // the type is correct, and the wire payload is missing a field.
         `SELECT open_bills AS "openBills", payments_on_account AS "paymentsOnAccount",
-                net_payable AS "netPayable"
+                unapplied_credits AS "unappliedCredits", net_payable AS "netPayable"
            FROM finance_ap_position($1, $2::date)`,
         [tenantId, isoDate(asOf, "asOf")],
       );
@@ -2424,6 +2456,309 @@ export class FinanceController {
         [invoiceId, amount, date, body.reasonCode, reason, req.principal.userId],
       );
       return { writeOffId: r.rows[0].id, invoiceNo: row.invoice_no, amount };
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // AP VENDOR CREDITS AND WRITE-OFFS (F5b, migration 202608272000)
+  //
+  // The payables mirror of the AR pair, and NOT a sign flip. Three differences carry money:
+  //   · a credit reverses INPUT VAT (1170), not output VAT — and needs a buyer-issued nota retur
+  //   · it unwinds WITHHOLDING, which can make an already-issued bukti potong overstate what was
+  //     withheld. Owner ruling (c): post, record, FLAG — never auto-amend a filing, never block
+  //   · a write-off credits OTHER INCOME, not an expense: released debt is taxable income
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  @Get(":tenantId/finance/ap/vendor-credits")
+  async listApVendorCredits(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Query("status") status?: string,
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "read");
+    const STATUSES = ["draft", "issued", "applied", "void"];
+    if (status && !STATUSES.includes(status)) {
+      throw new BadRequestException(`status must be one of ${STATUSES.join(", ")}`);
+    }
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT vc.id, vc.credit_no AS "creditNo", vc.credit_date::text AS "creditDate",
+                vc.vendor_id AS "vendorId", v.code AS "vendorCode", v.name AS "vendorName",
+                vc.subtotal, vc.tax_total AS "taxTotal", vc.total,
+                vc.withholding_code AS "withholdingCode", vc.withholding_amount AS "withholdingAmount",
+                vc.amount_payable AS "amountPayable", vc.amount_applied AS "amountApplied",
+                (vc.amount_payable - vc.amount_applied) AS "unapplied",
+                vc.reason_code AS "reasonCode", vc.reason, vc.status,
+                vc.nota_retur_no AS "notaReturNo",
+                vc.requires_bupot_amendment AS "requiresBupotAmendment",
+                vc.bupot_amendment_ref AS "bupotAmendmentRef",
+                vc.bupot_amended_at AS "bupotAmendedAt",
+                vc.original_bill_id AS "originalBillId", b.bill_no AS "originalBillNo"
+           FROM finance_ap_vendor_credits vc
+           JOIN finance_ap_vendors v ON v.id = vc.vendor_id
+           LEFT JOIN finance_ap_bills b ON b.id = vc.original_bill_id
+          WHERE vc.tenant_id = $1 AND ($2::text IS NULL OR vc.status = $2)
+          ORDER BY vc.credit_date DESC, vc.credit_no DESC`,
+        [tenantId, status ?? null],
+      );
+      return r.rows;
+    });
+  }
+
+  /** Bukti potong amendments a vendor credit has made necessary. The chase list for ruling (c). */
+  @Get(":tenantId/finance/ap/bupot-exceptions")
+  async apBupotExceptions(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "read");
+    const rows = await withFinance(tenantId, (c) =>
+      c.query(
+        `SELECT credit_no AS "creditNo", credit_date::text AS "creditDate",
+                vendor_code AS "vendorCode", vendor_name AS "vendorName", npwp,
+                withholding_code AS "withholdingCode",
+                withholding_reversed AS "withholdingReversed",
+                original_bill_no AS "originalBillNo", detail
+           FROM finance_ap_bupot_amendment_exceptions($1)`,
+        [tenantId],
+      ),
+    );
+    return rows.rows;
+  }
+
+  /**
+   * Raise a vendor credit and post it in one call.
+   *
+   * ⚠ The withholding is COPIED FROM THE BILL, not re-derived from the current tax code. The rate in
+   * force when the bill was approved is the rate that must be unwound; re-deriving would silently
+   * use today's rate and leave the PPh liability wrong by the difference.
+   */
+  @Post(":tenantId/finance/ap/vendor-credits")
+  @HttpCode(201)
+  async createApVendorCredit(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: ApVendorCreditBody,
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "credit_note");
+
+    const creditDate = requiredIsoDate(body?.creditDate, "creditDate");
+    const creditNo = body?.creditNo?.trim();
+    if (!creditNo) throw new BadRequestException("creditNo is required");
+    if (!body?.vendorId) throw new BadRequestException("vendorId is required");
+    const REASONS = ["return", "overbilling", "discount", "service_failure", "price_correction", "other"];
+    if (!body?.reasonCode || !REASONS.includes(body.reasonCode)) {
+      throw new BadRequestException(`reasonCode must be one of ${REASONS.join(", ")}`);
+    }
+    if (!body?.reason?.trim()) {
+      throw new BadRequestException("reason is required — a credit with no recorded cause is indistinguishable from a concealed write-off");
+    }
+    const reason = body.reason.trim();
+    if (!Array.isArray(body?.lines) || body.lines.length === 0) {
+      throw new BadRequestException("at least one line is required — a vendor credit with no lines cannot be issued");
+    }
+
+    const lines = body.lines.map((l, i) => {
+      const amount = Number(l?.amount);
+      if (!l?.description?.trim()) throw new BadRequestException(`line ${i + 1}: description is required`);
+      if (!l?.creditAccountCode) throw new BadRequestException(`line ${i + 1}: creditAccountCode is required`);
+      if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException(`line ${i + 1}: amount must be greater than zero`);
+      const rate = l?.taxRate === undefined || l.taxRate === null ? null : Number(l.taxRate);
+      if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        throw new BadRequestException(`line ${i + 1}: taxRate must be between 0 and 100`);
+      }
+      // Same 12%-of-11/12 convention the bill used. A credit whose VAT disagrees with the bill it
+      // reverses is the difference a Coretax reconciliation surfaces months later.
+      const tax = rate === null ? 0 : Math.round(amount * (11 / 12) * (rate / 100));
+      return { description: l.description.trim(), amount, creditAccountCode: l.creditAccountCode, tax };
+    });
+
+    const subtotal = lines.reduce((t, l) => t + l.amount, 0);
+    const taxTotal = lines.reduce((t, l) => t + l.tax, 0);
+    const total = subtotal + taxTotal;
+    if (total <= 0) throw new BadRequestException("vendor credit total must be greater than zero");
+
+    const whtAmount = Number(body?.withholdingAmount ?? 0);
+    if (!Number.isFinite(whtAmount) || whtAmount < 0) throw new BadRequestException("withholdingAmount must be zero or more");
+    if (whtAmount > total) throw new BadRequestException("withholdingAmount cannot exceed the credit total");
+    if (whtAmount > 0 && !body?.withholdingCode) {
+      throw new BadRequestException("withholdingCode is required when withholdingAmount is greater than zero");
+    }
+
+    return withFinance(tenantId, async (c) => {
+      const dup = await c.query(
+        `SELECT 1 FROM finance_ap_vendor_credits WHERE tenant_id = $1 AND credit_no = $2`, [tenantId, creditNo]);
+      if (dup.rowCount) throw new BadRequestException(`a vendor credit numbered ${creditNo} already exists`);
+
+      // Resolve the withholding liability account from the ORIGINAL BILL when one is named, so the
+      // reversal lands in the same account the bill credited (Utang PPh 21 / 23 / 4(2)).
+      let whtAccountId: string | null = null;
+      if (whtAmount > 0) {
+        if (body?.originalBillId) {
+          const b = await c.query<{ withholding_account_id: string | null }>(
+            `SELECT withholding_account_id FROM finance_ap_bills WHERE id = $1 AND tenant_id = $2`,
+            [body.originalBillId, tenantId],
+          );
+          if (b.rowCount === 0) throw new NotFoundException("no such bill in this company");
+          whtAccountId = b.rows[0].withholding_account_id;
+        }
+        if (!whtAccountId && body?.withholdingAccountCode) {
+          const a = await c.query<{ id: string }>(
+            `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`,
+            [tenantId, body.withholdingAccountCode],
+          );
+          if (!a.rows[0]) throw new BadRequestException(`unknown withholding account ${body.withholdingAccountCode}`);
+          whtAccountId = a.rows[0].id;
+        }
+        if (!whtAccountId) {
+          throw new BadRequestException(
+            "cannot tell which withholding liability to unwind — name the originalBillId (preferred, so the reversal "
+            + "lands where the bill put it) or pass withholdingAccountCode",
+          );
+        }
+      }
+
+      const ins = await c.query<{ id: string }>(
+        `INSERT INTO finance_ap_vendor_credits
+           (tenant_id, vendor_id, credit_no, credit_date, currency_code,
+            subtotal, tax_total, total,
+            withholding_code, withholding_rate, withholding_amount, withholding_account_id,
+            amount_payable, reason_code, reason, original_bill_id, nota_retur_no, status)
+         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'draft') RETURNING id`,
+        [tenantId, body.vendorId, creditNo, creditDate, body?.currencyCode ?? "IDR",
+         subtotal, taxTotal, total,
+         whtAmount > 0 ? body.withholdingCode : null,
+         body?.withholdingRate === undefined || body.withholdingRate === null ? null : Number(body.withholdingRate),
+         whtAmount, whtAccountId,
+         total - whtAmount, body.reasonCode, reason,
+         body?.originalBillId ?? null, body?.notaReturNo?.trim() || null],
+      );
+      const creditId = ins.rows[0].id;
+
+      let sort = 0;
+      for (const l of lines) {
+        const acct = await c.query<{ id: string }>(
+          `SELECT id FROM finance_accounts WHERE tenant_id = $1 AND code = $2`, [tenantId, l.creditAccountCode]);
+        if (!acct.rows[0]) throw new BadRequestException(`unknown account ${l.creditAccountCode}`);
+        await c.query(
+          `INSERT INTO finance_ap_vendor_credit_lines
+             (tenant_id, credit_id, description, line_subtotal, credit_account_id, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [tenantId, creditId, l.description, l.amount, acct.rows[0].id, sort++],
+        );
+      }
+
+      await c.query(`SELECT finance_ap_issue_vendor_credit($1,$2)`, [creditId, req.principal.userId]);
+
+      if (body?.applyToBillId) {
+        await c.query(`SELECT finance_ap_apply_vendor_credit($1,$2,$3,$4)`, [
+          creditId, body.applyToBillId,
+          Math.min(total - whtAmount, Number(body?.applyAmount ?? total - whtAmount)),
+          req.principal.userId,
+        ]);
+      }
+      return {
+        id: creditId, creditNo, subtotal, taxTotal, total,
+        amountPayable: total - whtAmount,
+        requiresBupotAmendment: whtAmount > 0,
+      };
+    });
+  }
+
+  @Post(":tenantId/finance/ap/vendor-credits/:creditId/apply")
+  @HttpCode(200)
+  async applyApVendorCredit(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("creditId") creditId: string,
+    @Body() body: { billId?: string; amount?: number },
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "credit_note");
+    if (!body?.billId) throw new BadRequestException("billId is required");
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be greater than zero");
+    return withFinance(tenantId, async (c) => {
+      const owned = await c.query(
+        `SELECT 1 FROM finance_ap_vendor_credits WHERE id = $1 AND tenant_id = $2`, [creditId, tenantId]);
+      if (owned.rowCount === 0) throw new NotFoundException("no such vendor credit in this company");
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_ap_apply_vendor_credit($1,$2,$3,$4) AS id`,
+        [creditId, body.billId, amount, req.principal.userId],
+      );
+      return { applicationId: r.rows[0].id, amount };
+    });
+  }
+
+  /** Record that the amended bukti potong has been filed — the resolution half of ruling (c). */
+  @Post(":tenantId/finance/ap/vendor-credits/:creditId/bupot-amended")
+  @HttpCode(200)
+  async recordBupotAmendment(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("creditId") creditId: string,
+    @Body() body: { amendmentRef?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_tax", tenantId, module: "finance" }, "file");
+    const ref = body?.amendmentRef?.trim();
+    if (!ref) {
+      throw new BadRequestException(
+        "amendmentRef is required — the reference of the amended bukti potong. Marking it resolved with no "
+        + "reference cannot be told apart from nobody having filed it.",
+      );
+    }
+    return withFinance(tenantId, async (c) => {
+      const r = await c.query(
+        `UPDATE finance_ap_vendor_credits
+            SET bupot_amendment_ref = $3, bupot_amended_at = now(), bupot_amended_by = $4, updated_at = now()
+          WHERE id = $1 AND tenant_id = $2 AND requires_bupot_amendment
+          RETURNING credit_no`,
+        [creditId, tenantId, ref, req.principal.userId],
+      );
+      if (r.rowCount === 0) {
+        throw new NotFoundException("no such vendor credit in this company, or it needs no bukti potong amendment");
+      }
+      return { ok: true, creditNo: (r.rows[0] as { credit_no: string }).credit_no, amendmentRef: ref };
+    });
+  }
+
+  /**
+   * Write off a payable the company will not pay.
+   *
+   * Confirmation-gated on the BILL NUMBER, like the AR side. ⚠ Credits OTHER INCOME — released debt
+   * is taxable income (pembebasan utang), not a negative expense — and posts NO VAT leg, because the
+   * input VAT was validly claimed when the supply happened.
+   */
+  @Post(":tenantId/finance/ap/bills/:billId/write-off")
+  @HttpCode(201)
+  async writeOffApBill(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("billId") billId: string,
+    @Body() body: { amount?: number; writeOffDate?: string; reasonCode?: string; reason?: string; confirm?: string; incomeAccountCode?: string },
+  ) {
+    await authorize(req.principal, { kind: "finance_ap", tenantId, module: "finance" }, "write_off");
+    const amount = Number(body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("amount must be greater than zero");
+    const date = requiredIsoDate(body?.writeOffDate, "writeOffDate");
+    const REASONS = ["vendor_dissolved", "statute_barred", "disputed_abandoned", "unclaimed", "other"];
+    if (!body?.reasonCode || !REASONS.includes(body.reasonCode)) {
+      throw new BadRequestException(`reasonCode must be one of ${REASONS.join(", ")}`);
+    }
+    if (!body?.reason?.trim()) {
+      throw new BadRequestException("reason is required — a write-off with no recorded reason is indistinguishable from a mistake");
+    }
+    const reason = body.reason.trim();
+
+    return withFinance(tenantId, async (c) => {
+      const b = await c.query<{ bill_no: string }>(
+        `SELECT bill_no FROM finance_ap_bills WHERE id = $1 AND tenant_id = $2`, [billId, tenantId]);
+      const row = b.rows[0];
+      if (!row) throw new NotFoundException("no such bill in this company");
+      requireConfirmation(body?.confirm, row.bill_no, "bill number");
+
+      const r = await c.query<{ id: string }>(
+        `SELECT finance_ap_write_off($1,$2,$3::date,$4,$5,$6,$7) AS id`,
+        [billId, amount, date, body.reasonCode, reason, req.principal.userId,
+         body?.incomeAccountCode?.trim() || "7300"],
+      );
+      return { writeOffId: r.rows[0].id, billNo: row.bill_no, amount };
     });
   }
 
