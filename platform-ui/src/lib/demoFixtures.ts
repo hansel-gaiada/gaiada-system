@@ -2268,11 +2268,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       // Mirror the real INSERT: the new project must show up in the LIST, with its client and
       // department — PRD Studio scopes briefings through `projects.department_id`, and a fixture that
       // returned an id without listing it made a freshly created briefing vanish from the tab.
-      const b = JSON.parse(body || "{}") as { name?: string; clientId?: string; departmentId?: string };
+      const b = JSON.parse(body || "{}") as { name?: string; clientId?: string | null; isInternal?: boolean; departmentId?: string };
       if (!b.name) return { status: 400, json: { error: "name required" } };
+      // Lineage spec 4/4 — mirror the platform: a project belongs to a client unless declared internal.
+      if (!b.clientId && b.isInternal !== true) {
+        return { status: 400, json: { error: "clientId required — every project belongs to a client (pass isInternal: true for the company's own internal work)", field: "clientId" } };
+      }
       const id = `p-new-${Date.now()}`;
       (PROJECTS[projMatch[1]] ??= []).push({
-        id, name: b.name, status: "active", client_id: b.clientId ?? null, is_internal: !b.clientId,
+        id, name: b.name, status: "active", client_id: b.clientId ?? null, is_internal: b.isInternal === true,
         owner_id: userId, department_id: b.departmentId ?? null, due_date: null, custom_fields: {},
         shortCode: b.name.replace(/[^A-Za-z]/g, "").slice(0, 4).toUpperCase() || "PROJ",
       } as (typeof PROJECTS)[string][number]);
