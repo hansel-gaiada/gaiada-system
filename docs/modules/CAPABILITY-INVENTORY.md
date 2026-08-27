@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **114** capabilities across **16** owners
-- **56** writes · 58 reads
-- Writes by impact: **high 11** · medium 16 · low 29
+- **115** capabilities across **16** owners
+- **57** writes · 58 reads
+- Writes by impact: **high 11** · medium 16 · low 30
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 4 |
+| webdev | `webdev` | 5 |
 
 ## Capabilities
 
@@ -174,3 +174,4 @@ unfalsifiable after.
 | social | `social.validateVariant` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/validation` | read | — |
 | social | `social.withdrawClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review/withdraw` | write | `low` |
 | webdev | `webdev.provisionSite` | `POST` | `/api/:tenantId/modules/webdev/provision` | write | `medium` |
+| webdev | `webdev.recordZoneBEvent` | `POST` | `/api/:tenantId/modules/webdev/zoneb-events` | write | `low` |
