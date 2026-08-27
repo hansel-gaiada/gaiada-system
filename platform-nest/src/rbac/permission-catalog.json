@@ -4587,7 +4587,7 @@
       "cerbosAction": "operate",
       "class": "grantable",
       "sensitive": true,
-      "uiGrantable": false
+      "uiGrantable": true
     },
     {
       "key": "webdev.provisioned_site.promote",
@@ -4599,7 +4599,7 @@
       "cerbosAction": "promote",
       "class": "grantable",
       "sensitive": true,
-      "uiGrantable": false
+      "uiGrantable": true
     },
     {
       "key": "webdev.zoneb_event.read",
@@ -4623,7 +4623,7 @@
       "cerbosAction": "record",
       "class": "grantable",
       "sensitive": true,
-      "uiGrantable": false
+      "uiGrantable": true
     },
     {
       "key": "webdev.contract_snapshot.read",
