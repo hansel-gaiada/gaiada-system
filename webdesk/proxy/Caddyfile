@@ -38,54 +38,92 @@
 }
 
 :80 {
-	respond /healthz 200 {
-		body "webdesk proxy ok"
+	# =========================================================================================
+	# EVERY ROUTE IS INSIDE A `handle` BLOCK, AND THAT IS THE POINT.
+	# =========================================================================================
+	# This file previously used bare `respond` + `reverse_proxy` directives side by side. Caddy
+	# does NOT execute Caddyfile directives in written order — it sorts them by its own directive
+	# order, and `respond` sorts BEFORE `reverse_proxy`. The final catch-all `respond "webdesk"
+	# 404` has no matcher, so it matched every request and terminated it before any proxy ran.
+	#
+	# Net effect, found 2026-08-27 by actually booting the stack: /v1, /forms and /media were
+	# NEVER routed. The public content surface did not work at all. `caddy validate` passed,
+	# `caddy adapt` showed the bare static_response ordered ahead of all three reverse_proxy
+	# handlers, and — the reason this survived — every SECURITY probe still passed. /admin,
+	# /api/graphql, /api/users/login and /control/* all returned 404, because nothing was routed
+	# anywhere. A perfect-looking lockdown produced by a completely broken proxy.
+	#
+	# `handle` blocks are mutually exclusive and evaluated by matcher specificity, so ordering
+	# becomes explicit and local instead of implicit and global. Do not reintroduce a bare
+	# `respond` or `reverse_proxy` at this level.
+	#
+	# The invariant this file must preserve (WSK-D20 / design D-5):
+	#   /v1 is the ONLY content contract a client site ever sees.
+	#   Payload's admin, its GraphQL, and its unscoped/raw collection REST are NEVER routed here.
+
+	# --- health -------------------------------------------------------------------------------
+	handle /healthz {
+		respond "webdesk proxy ok" 200
 	}
 
-	# --- Public status page (WSK-28) --------------------------------------------
+	# --- public status page (WSK-28) ----------------------------------------------------------
 	# Own service health only. Never a Zone A view (see infra/runbooks/webdesk-zoneb-otel.md §1 —
-	# same boundary, opposite direction: Zone B cannot show what it cannot read).
+	# same boundary, opposite direction: Zone B cannot show what it cannot read). Serves an empty
+	# volume (404) until the status-page service is deployed.
 	handle_path /status/* {
 		root * /srv/status
 		file_server
 	}
 
-	# --- CDN-bypass gate on media (WSK-28 / design §11a) ------------------------
-	# A request whose X-Webdesk-Edge-Verify header does not match the shared secret Cloudflare
-	# injects did not come through Cloudflare — refuse it before it reaches the api service.
-	# The leading `"{$WEBDESK_EDGE_VERIFY_SECRET}" != ""` clause is the dev fail-soft escape
-	# hatch: unset (dev default, no Cloudflare in front) means the whole matcher is false and
-	# nothing is blocked, so WSK-07's existing dev media tests are unaffected. DEV-VERIFIED
-	# 2026-08-27: `caddy validate` passes this exact expression, and a live container proved
-	# unset-secret → 200 (no header needed), set-secret + no/wrong header → 403, set-secret +
-	# correct header → 200 — see infra/runbooks/webdesk-zoneb-status-page.md's sibling ticket
-	# report for the full command transcript.
-	@missing_edge_verify {
-		path /media/*
-		expression `"{$WEBDESK_EDGE_VERIFY_SECRET}" != "" && {http.request.header.X-Webdesk-Edge-Verify} != "{$WEBDESK_EDGE_VERIFY_SECRET}"`
+	# --- EXPLICIT DENIALS — declared BEFORE the proxied surface, and enforced by being their own
+	# --- `handle` blocks rather than relying on directive order (WSK-D20 / D-5) ----------------
+	#   /admin*            -> internal listener only; reachable on the private docker network only
+	#   /api/graphql*      -> disabled in config AND unwired; must never be reachable
+	#   /api/*  (raw REST) -> Payload's unscoped collection REST bypasses the /v1 contract
+	#   /control/*         -> the control plane: mTLS + Keycloak + WS4 (WSK-21/22), never public
+	handle /admin* {
+		respond 404
 	}
-	respond @missing_edge_verify 403 {
-		body "direct origin access is not permitted — this path is served through the CDN only"
+	handle /api/* {
+		respond 404
+	}
+	handle /control/* {
+		respond 404
 	}
 
-	# --- PUBLIC content surface -------------------------------------------------
-	# The frozen /v1 envelope (WSK-06 builds it). Routed to the Payload public
-	# GATEWAY, never to the internal listener directly.
-	reverse_proxy /v1/* payload-gateway:3000
+	# --- PUBLIC content surface ---------------------------------------------------------------
+	# The frozen /v1 envelope (WSK-06). Routed to the Payload public GATEWAY — a process that
+	# imports neither next nor payload and carries its own hardcoded denylist — never to the
+	# internal listener.
+	handle /v1/* {
+		reverse_proxy payload-gateway:3000
+	}
 
-	# Public form submission (WSK-10) + public media serving (WSK-07) live on the api
-	# service. Scoped per-tenant by API key; never the control plane.
-	reverse_proxy /forms/* api:3000
-	reverse_proxy /media/* api:3000
+	# Public form submission (WSK-10). Scoped per-tenant by API key; never the control plane.
+	handle /forms/* {
+		reverse_proxy api:3000
+	}
 
-	# --- EXPLICITLY NOT ROUTED HERE (WSK-D20 / D-5) ----------------------------
-	# /admin*            -> internal listener only, proxy-allowlisted (WSK-28)
-	# /api/graphql*      -> disabled in config AND unwired; must never be reachable
-	# /api/*  (raw REST) -> Payload's unscoped collection REST bypasses the contract
-	# /control/*         -> the control vhost, mTLS + Keycloak + WS4 (WSK-21/22)
-	# A request to any of these falls through to the 404 below.
-	@denied path /admin*, /api/*, /control/*
-	respond @denied 404
+	# Public media (WSK-07), behind the CDN-bypass gate.
+	handle /media/* {
+		# A request whose X-Webdesk-Edge-Verify header does not match the shared secret Cloudflare
+		# injects did not come through Cloudflare — refuse it before it reaches the api service.
+		# The leading `!= ""` clause is the dev fail-soft escape hatch: unset (dev default, no CDN
+		# in front) makes the matcher false and nothing is blocked, so WSK-07's dev media tests are
+		# unaffected. That also makes it fail-OPEN in production, which is why
+		# `ops/scripts/check-cdn-bypass.mjs --assert-configured` exists — run it on the box.
+		#
+		# Inside a `handle` block the local order IS what you want: the matched `respond` answers
+		# first, and anything not matched falls through to the proxy below.
+		@missing_edge_verify expression `"{$WEBDESK_EDGE_VERIFY_SECRET}" != "" && {http.request.header.X-Webdesk-Edge-Verify} != "{$WEBDESK_EDGE_VERIFY_SECRET}"`
+		respond @missing_edge_verify 403 {
+			body "direct origin access is not permitted — this path is served through the CDN only"
+		}
+		reverse_proxy api:3000
+	}
 
-	respond "webdesk" 404
+	# --- everything else ----------------------------------------------------------------------
+	handle {
+		respond "webdesk" 404
+	}
 }
