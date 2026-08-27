@@ -625,3 +625,42 @@ is not needed.
 > **Open:** the PHP determinism gate resolves `tsx` from `webdesk/api`'s `node_modules`, so it cannot
 > run from its own directory and **no CI job runs it** — WSK-29 added five webdesk jobs but not a
 > WordPress one. WSK-36 (Astro↔WP parity) is now unblocked.
+
+> **🔴 I PUT A NON-BOOTING APP ON MAIN, and 135 passing tests told me it was fine.**
+>
+> My WSK-33 authorization fix exported the guard **classes** from `ControlModule`. That is not
+> enough. `@UseGuards(SomeGuard)` in a consuming module makes Nest **instantiate** that guard in
+> **that module's** injector, so the guard's own constructor dependencies must be resolvable there.
+> `webdesk/api` could not start at all:
+>
+> ```
+> Nest can't resolve dependencies of the ControlAuthGuard (?). Please make sure that the argument
+> Symbol(CONTROL_CHANNEL_AUTHENTICATOR) at index [0] is available in the SchemaDraftModule context.
+> ```
+>
+> **Why every check I ran missed it.** `tsc --noEmit` was clean — DI is invisible to it. And all 135
+> tests passed because **every suite touching those controllers builds its own
+> `Test.createTestingModule()` and binds the guards and their collaborators BY HAND.** That is
+> reasonable for testing a handler and **blind to module wiring by construction**: not one test
+> instantiated `SchemaDraftModule` as it actually ships. I verified a handler and reported an
+> application.
+>
+> This estate had already written the lesson down — *"a missing module import is invisible to `tsc`"*,
+> *"`tsc` clean is not a working app"* — after `FormsService` injected a provider whose module was
+> only registered in `AppModule`. **It happened again anyway, because no test ever asked the one
+> question: does the application start?**
+>
+> **What found it: WSK-25.** Its promotion suite is the first in this project to boot a real module
+> instead of hand-binding providers, so it hit the wall immediately. A ticket about content promotion
+> surfaced a defect in a ticket about authorization — the value came from the *method*, not the scope.
+>
+> **Fixed, and made unrepeatable:** `ControlModule` now exports `CONTROL_CHANNEL_AUTHENTICATOR` and
+> `POLICY_DECISION_POINT` (exported, **not re-bound** — the environment-conditional real-vs-stub
+> choice stays the single source of that decision, so a consuming module cannot accidentally bind the
+> dev-mode stub in production). And `test/zz-real-boot.spec.ts` now boots `AppModule` with **no
+> overrides and no hand-bound guards**. Proven both directions on clean main: the boot test **fails**
+> with classes-only exports and **passes** with the tokens exported. 182/182 across boot + p5-gate +
+> schema-draft + control + codegen.
+>
+> **The lesson worth keeping is not "export your tokens".** It is that a test suite made entirely of
+> hand-assembled modules can be large, green, and structurally incapable of noticing the app is dead.

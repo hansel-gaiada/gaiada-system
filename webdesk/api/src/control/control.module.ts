@@ -98,10 +98,45 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
   // own routes with the REAL control-channel authenticator instead of standing up a second,
   // weaker one. WSK-32 shipped its own `SchemaDraftAuthGuard` precisely because this array held
   // only `JobsService`; that stub accepted ANY non-empty `x-webdesk-control-principal` value and
-  // then wrote it into an audit row, so the audit trail was caller-controlled. Exporting the
-  // guard (not the `CONTROL_CHANNEL_AUTHENTICATOR` token) is the narrow fix: the guard's own
-  // dependency still resolves inside THIS module, so the environment-conditional binding above
-  // — real authenticator everywhere except NODE_ENV=test — keeps applying to every consumer.
-  exports: [JobsService, ControlAuthGuard, CommandAuthorizationGuard],
+  // then wrote it into an audit row, so the audit trail was caller-controlled.
+  //
+  // WSK-25 (additive correction) — the comment above claimed "the guard's own dependency still
+  // resolves inside THIS module", but that was never actually runtime-proven (WSK-32's own suite
+  // is fakes-only, per its ticket report — it never boots a real Nest app with ControlModule +
+  // a sibling module together). Building PromotionModule as that SAME sibling pattern and
+  // actually booting it (Test.createTestingModule({imports:[ControlModule, PromotionModule]}))
+  // surfaced a real DI error: "Nest can't resolve dependencies of the ControlAuthGuard (?)...
+  // Symbol(CONTROL_CHANNEL_AUTHENTICATOR) at index [0] is not available in the PromotionModule
+  // context." Cross-module class-reference `@UseGuards(ControlAuthGuard)` resolution needs
+  // ControlAuthGuard's OWN constructor dependency reachable from the CONSUMING module's import
+  // graph too — exporting the guard class alone was not sufficient. Exporting the token it
+  // depends on closes the actual gap (this fixes the SAME latent issue for SchemaDraftModule,
+  // not just PromotionModule — neither had ever been proven to boot).
+  // WSK-33/25 — exporting the GUARD CLASSES alone is NOT enough, and believing it was put a
+  // non-booting app on main. `@UseGuards(SomeGuard)` in a consuming module makes Nest INSTANTIATE
+  // that guard in THAT module's injector, so the guard's own constructor dependencies must be
+  // resolvable there. With only the classes exported, AppModule died at boot with:
+  //
+  //   Nest can't resolve dependencies of the ControlAuthGuard (?). Please make sure that the
+  //   argument Symbol(CONTROL_CHANNEL_AUTHENTICATOR) at index [0] is available in the
+  //   SchemaDraftModule context.
+  //
+  // `tsc` was clean and 135 tests passed, because every one of those suites bound its guards
+  // ad-hoc inside a Test.createTestingModule() and NONE booted the real module.
+  // test/zz-real-boot.spec.ts now exists so that cannot be true again.
+  //
+  // POLICY_DECISION_POINT is here for the same reason as CONTROL_CHANNEL_AUTHENTICATOR:
+  // CommandAuthorizationGuard needs it, and SchemaDraftModule uses that guard.
+  //
+  // These are exported, NOT re-bound. The environment-conditional choice above (real
+  // authenticator/PDP everywhere except NODE_ENV=test) stays the single source of that decision, so
+  // a consuming module cannot accidentally bind the dev-mode stub in production.
+  exports: [
+    JobsService,
+    ControlAuthGuard,
+    CommandAuthorizationGuard,
+    CONTROL_CHANNEL_AUTHENTICATOR,
+    POLICY_DECISION_POINT,
+  ],
 })
 export class ControlModule {}
