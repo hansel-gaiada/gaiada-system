@@ -141,6 +141,17 @@ describe("platform write-tools", () => {
     expect(JSON.parse(init.body).status).toBe("done");
   });
 
+  it("projects.create forwards clientId and isInternal verbatim — the platform, not the hub, decides (lineage spec 4/4)", async () => {
+    const spy = mockFetch(201, { id: "p-1" });
+    vi.stubGlobal("fetch", spy);
+    await getTool("projects.create")!.handler({ tenantId: "co-1", name: "Office move", isInternal: true }, principal);
+    const init = (spy as any).mock.calls[0][1];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ name: "Office move", isInternal: true });
+    await getTool("projects.create")!.handler({ tenantId: "co-1", name: "Relaunch", clientId: "cl-1" }, principal);
+    expect(JSON.parse((spy as any).mock.calls[1][1].body)).toEqual({ name: "Relaunch", clientId: "cl-1" });
+  });
+
   it("maps a platform 403 to a thrown denial (so the surface shows step-up/deny)", async () => {
     vi.stubGlobal("fetch", mockFetch(403, { error: "not authorized: cerbos denied" }));
     await expect(
