@@ -146,22 +146,24 @@ export function flowCounts(
 }
 
 // ── Department scoping ────────────────────────────────────────────────────────────────────────────
-// PRD Studio is a Web Dev tab; recordings and runs are tenant-wide. The only link from either to a
-// department is the PROJECT (`projects.department_id`), so: a briefing belongs here iff its project
-// is one of this department's; a run belongs here iff its own project is (WD-30 populates it) or,
-// failing that, its source briefing's project is (rows written before WD-30 carry no project).
-// Project-less briefings cannot be attributed and are left to /meetings — which is also why the
-// composer requires a project.
+// PRD Studio is a department tab; recordings and runs are tenant-wide. Since 2026-08-27 both carry
+// `department_id` (set at creation, derived onto the run) — that field decides. Rows that pre-date it
+// (NULL) fall back to the old inference: the project's department, and for a run without a project,
+// its source briefing's. Rows with none of those cannot be attributed and are left to /meetings.
 export function scopeToDepartment<
-  R extends { project_id: string | null; meeting_id: string },
-  U extends { project_id?: string | null; source_meeting_id: string | null },
->(deptProjectIds: Set<string>, recordings: R[], runs: U[]): { recordings: R[]; runs: U[] } {
-  const projectByMeeting = new Map(recordings.map((r) => [r.meeting_id, r.project_id]));
-  const inDept = (projectId: string | null | undefined) => !!projectId && deptProjectIds.has(projectId);
-  return {
-    recordings: recordings.filter((r) => inDept(r.project_id)),
-    runs: runs.filter((run) => inDept(run.project_id) || (run.source_meeting_id ? inDept(projectByMeeting.get(run.source_meeting_id)) : false)),
+  R extends { project_id: string | null; department_id?: string | null; meeting_id: string },
+  U extends { project_id?: string | null; department_id?: string | null; source_meeting_id: string | null },
+>(deptId: string, deptProjectIds: Set<string>, recordings: R[], runs: U[]): { recordings: R[]; runs: U[] } {
+  const inDeptByProject = (projectId: string | null | undefined) => !!projectId && deptProjectIds.has(projectId);
+  const recIn = (r: R) => (r.department_id ? r.department_id === deptId : inDeptByProject(r.project_id));
+  const recById = new Map(recordings.map((r) => [r.meeting_id, r]));
+  const runIn = (run: U) => {
+    if (run.department_id) return run.department_id === deptId;
+    if (inDeptByProject(run.project_id)) return true;
+    const src = run.source_meeting_id ? recById.get(run.source_meeting_id) : undefined;
+    return src ? recIn(src) : false;
   };
+  return { recordings: recordings.filter(recIn), runs: runs.filter(runIn) };
 }
 
 // ── Ordering the briefing list ────────────────────────────────────────────────────────────────────

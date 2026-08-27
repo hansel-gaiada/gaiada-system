@@ -153,34 +153,39 @@ describe("flowCounts — the numbers the flow header shows", () => {
   });
 });
 
-describe("scopeToDepartment — PRD Studio is a Web Dev tab, so it shows Web Dev work only", () => {
+describe("scopeToDepartment — a department tab shows the department's work only", () => {
   const webDev = new Set(["p-web-1", "p-web-2"]);
-  const rec = (id: string, project_id: string | null, meeting_id = `mtg-${id}`) => ({ id, project_id, meeting_id, status: "transcribed" as const });
-  const run = (id: string, project_id: string | null | undefined, source_meeting_id: string | null) => ({ id, project_id, source_meeting_id });
+  const rec = (id: string, project_id: string | null, department_id: string | null = null, meeting_id = `mtg-${id}`) => ({ id, project_id, department_id, meeting_id, status: "transcribed" as const });
+  const run = (id: string, project_id: string | null | undefined, source_meeting_id: string | null, department_id: string | null = null) => ({ id, project_id, department_id, source_meeting_id });
 
-  it("keeps briefings whose project belongs to the department, drops the rest — including project-less ones", () => {
-    const out = scopeToDepartment(webDev, [rec("a", "p-web-1"), rec("b", "p-seo-1"), rec("c", null)], []);
-    expect(out.recordings.map((r) => r.id)).toEqual(["a"]);
+  it("the stored department_id decides first", () => {
+    const { recordings, runs } = scopeToDepartment("dept-1", webDev, [
+      rec("a", null, "dept-1"),            // no project, but stored as Web Dev → in
+      rec("b", "p-web-1", "dept-3"),       // Web Dev project but stored as SEO → out (the field wins)
+    ], [
+      run("r1", null, null, "dept-1"),     // in
+      run("r2", "p-web-1", null, "dept-3"),// out
+    ]);
+    expect(recordings.map((r) => r.id)).toEqual(["a"]);
+    expect(runs.map((r) => r.id)).toEqual(["r1"]);
   });
 
-  it("keeps a run whose own project is in the department", () => {
-    const out = scopeToDepartment(webDev, [], [run("r1", "p-web-2", null), run("r2", "p-seo-1", null)]);
-    expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
-  });
-
-  it("falls back to the source briefing's project when the run carries none (pre-WD-30 rows)", () => {
-    const recordings = [rec("a", "p-web-1", "mtg-a"), rec("b", "p-seo-1", "mtg-b")];
-    const out = scopeToDepartment(webDev, recordings, [run("r1", null, "mtg-a"), run("r2", undefined, "mtg-b"), run("r3", null, null)]);
-    expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
-  });
-
-  it("the fallback looks at ALL recordings, not just the department's own", () => {
-    // A run's project wins over its briefing's project when both exist.
-    const out = scopeToDepartment(webDev, [rec("a", "p-seo-1", "mtg-a")], [run("r1", "p-web-1", "mtg-a")]);
-    expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
-    expect(out.recordings).toEqual([]);
+  it("rows that pre-date the field (department_id null) fall back to the project, then the source briefing", () => {
+    const { recordings, runs } = scopeToDepartment("dept-1", webDev, [
+      rec("a", "p-web-1"),                 // in via project
+      rec("b", "p-seo-1"),                 // out
+      rec("c", null),                      // unattributable → out
+    ], [
+      run("r1", "p-web-1", null),          // in via project
+      run("r2", null, "mtg-a"),            // in via briefing a's project
+      run("r3", null, "mtg-c"),            // out
+      run("r4", null, null),               // out
+    ]);
+    expect(recordings.map((r) => r.id)).toEqual(["a"]);
+    expect(runs.map((r) => r.id)).toEqual(["r1", "r2"]);
   });
 });
+
 
 describe("orderBriefings — what a person must act on first, and converted ones linger briefly", () => {
   const now = Date.parse("2026-08-26T12:00:00Z");

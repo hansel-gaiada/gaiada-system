@@ -81,6 +81,7 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
           sitesResult.sites,
           runsResult.data,
           { clients: new Map(clients.map((c) => [c.id, c.name])), projects: new Map(projects.map((p) => [p.id, p.name])) },
+          deptId,
           deptProjectIds,
         ),
       };
@@ -92,7 +93,7 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
   // "Create repository" = provision a site for one of this department's runs that has none yet.
   // Offered only when the person may provision AND the webdev module answers (a module that is off
   // cannot provision either).
-  const deptRuns = runsResult.data.filter((r) => r.project_id && deptProjectIds.has(r.project_id));
+  const deptRuns = runsResult.data.filter((r) => (r.department_id ? r.department_id === deptId : !!r.project_id && deptProjectIds.has(r.project_id)));
   const create = mayProvision && sitesResult.ok
     ? {
         runs: runsEligibleForRepo(deptRuns, sitesResult.sites, new Map(clients.map((c) => [c.id, c.name]))),

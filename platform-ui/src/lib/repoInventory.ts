@@ -55,15 +55,19 @@ export function buildRepoInventory(
   sites: ProvisionedSite[],
   runs: PipelineRun[],
   names: NameLookups,
+  deptId: string,
   deptProjectIds: Set<string>,
 ): RepoRow[] {
   const runById = new Map(runs.map((r) => [r.id, r]));
+  // The run's stored department_id decides; the project is the fallback for runs that pre-date it.
+  const runInDept = (run: PipelineRun) =>
+    run.department_id ? run.department_id === deptId : !!run.project_id && deptProjectIds.has(run.project_id);
   const rows: RepoRow[] = [];
   for (const s of sites) {
     // Standalone (off-pipeline) repos carry no run and so no client/project. The webdev module owns
     // them and only Web Dev has this tab, so they are listed here, marked as unlinked.
     const run = s.pipelineRunId ? runById.get(s.pipelineRunId) : null;
-    if (s.pipelineRunId && (!run || !run.project_id || !deptProjectIds.has(run.project_id))) continue;
+    if (s.pipelineRunId && (!run || !runInDept(run))) continue;
     rows.push({
       id: s.id,
       name: s.slug,

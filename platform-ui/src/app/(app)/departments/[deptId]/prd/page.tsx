@@ -68,7 +68,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
 
   // Web Dev only: this department's projects decide what belongs on this tab.
   const deptProjects = projects.filter((p) => p.department_id === deptId);
-  const { recordings, runs } = scopeToDepartment(new Set(deptProjects.map((p) => p.id)), allRecordings, allRuns);
+  const { recordings, runs } = scopeToDepartment(deptId, new Set(deptProjects.map((p) => p.id)), allRecordings, allRuns);
 
   // Gates for the active runs — the approval chips need them; the list read does not carry them.
   const activeRuns = runs.filter((r) => r.status !== "complete");

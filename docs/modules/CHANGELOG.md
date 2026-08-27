@@ -108,9 +108,13 @@ local stack). None of these mean "production-done".
   attribute mismatch under `(app)/layout`'s `<link>`.
 
 - **Web Dev only.** The route is the generic `/departments/[deptId]/prd`, so the page now 404s for any
-  department whose toolkit has no `prd` tab, and everything it lists is scoped through PROJECTS
-  (`lib/prdFlow.ts::scopeToDepartment`): a briefing belongs iff its project is this department's;
-  a run iff its own `project_id` is (WD-30) or, for pre-WD-30 rows, its source briefing's project is.
+  department whose toolkit has no `prd` tab, and everything it lists is scoped
+  (`lib/prdFlow.ts::scopeToDepartment`). **2026-08-27:** the stored `department_id` (platform-nest
+  `0.40.0`) decides first — PRD Studio and a project's Meetings tab send `departmentId` on
+  `/recordings/start`, and runs derive it — and the PROJECT inference is now only the fallback for
+  rows that pre-date the column: a briefing belongs iff its project is this department's; a run iff
+  its own `project_id` is (WD-30) or its source briefing's project is. Same rule in the Repositories
+  inventory (`buildRepoInventory`).
   Consequence: every briefing needs a project (it is the only recording→department link) — and since
   in Reva's flow the project does not exist yet when the call happens, **the project is created WITH
   the briefing**: `lib/prdActions.ts::createBriefingAction` does `POST /projects` (name = briefing

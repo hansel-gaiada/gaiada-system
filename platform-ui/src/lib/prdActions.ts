@@ -77,7 +77,7 @@ export async function createBriefingAction(_prev: BriefingResult | null, formDat
     const r = await platformFetch<{ id: string; meetingId?: string; deduped?: boolean }>(
       `/api/${c.tenant}/meetings/recordings/start`,
       c.userId,
-      { method: "POST", body: JSON.stringify({ title, kind, clientId, projectId }) },
+      { method: "POST", body: JSON.stringify({ title, kind, clientId, projectId, departmentId }) },
     );
     revalidatePath("/meetings");
     revalidatePath("/projects");

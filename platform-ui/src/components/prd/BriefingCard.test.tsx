@@ -7,7 +7,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 
 function rec(over: Partial<MeetingRecording> = {}): MeetingRecording {
   return {
-    id: "rec-1", meeting_id: "mtg-1", client_id: "cl-1", project_id: null, title: "Cedar — intake call",
+    id: "rec-1", meeting_id: "mtg-1", client_id: "cl-1", project_id: null, department_id: "dept-1", title: "Cedar — intake call",
     kind: "audio", status: "recording", started_at: null, ended_at: null, duration_sec: null, size_bytes: null,
     drive_status: "none", drive_link: null, pipeline_run_id: null, created_by: "u-1",
     created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z", ...over,

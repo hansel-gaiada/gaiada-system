@@ -18,10 +18,11 @@ const runs = [
 ];
 const names = { clients: new Map([["cl-1", "Northwind Traders"], ["cl-2", "Cedar Group"]]), projects: new Map([["p-web-1", "Client site redesign"], ["p-seo-1", "SEO audit — Q3"]]) };
 const webDev = new Set(["p-web-1"]);
+const DEPT = "dept-1";
 
 describe("buildRepoInventory — one row per repo, joined to its run, client and project, scoped to the department", () => {
   it("joins a site to its run and names the client and project", () => {
-    const rows = buildRepoInventory([site({ id: "s1" })], runs, names, webDev);
+    const rows = buildRepoInventory([site({ id: "s1" })], runs, names, DEPT, webDev);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject<Partial<RepoRow>>({
       id: "s1", name: "northwind-site", status: "live", framework: "nextjs",
@@ -31,21 +32,30 @@ describe("buildRepoInventory — one row per repo, joined to its run, client and
     });
   });
 
+  it("a run's stored department_id decides first; project is the fallback for older runs", () => {
+    const stored = [
+      { ...runs[0], id: "run-stored", project_id: null, department_id: "dept-1" },
+      { ...runs[0], id: "run-other", project_id: "p-web-1", department_id: "dept-3" },
+    ];
+    const rows = buildRepoInventory([site({ id: "a", pipelineRunId: "run-stored" }), site({ id: "b", pipelineRunId: "run-other" })], stored, names, DEPT, webDev);
+    expect(rows.map((r) => r.id)).toEqual(["a"]);
+  });
+
   it("keeps only repos whose run's project belongs to the department", () => {
-    const rows = buildRepoInventory([site({ id: "s1" }), site({ id: "s2", pipelineRunId: "run-seo", slug: "cedar" })], runs, names, webDev);
+    const rows = buildRepoInventory([site({ id: "s1" }), site({ id: "s2", pipelineRunId: "run-seo", slug: "cedar" })], runs, names, DEPT, webDev);
     expect(rows.map((r) => r.id)).toEqual(["s1"]);
   });
 
   it("drops repos whose run is unknown or has no project — they cannot be attributed to a department", () => {
     const rows = buildRepoInventory(
       [site({ id: "s1", pipelineRunId: "run-noproj" }), site({ id: "s2", pipelineRunId: "run-gone" })],
-      runs, names, webDev,
+      runs, names, DEPT, webDev,
     );
     expect(rows).toEqual([]);
   });
 
   it("a standalone repo (created by hand, no run) is listed, unlinked — the webdev module owns it", () => {
-    const [row] = buildRepoInventory([site({ id: "s3", pipelineRunId: null, slug: "marketing-microsite" })], runs, names, webDev);
+    const [row] = buildRepoInventory([site({ id: "s3", pipelineRunId: null, slug: "marketing-microsite" })], runs, names, DEPT, webDev);
     expect(row).toMatchObject<Partial<RepoRow>>({ id: "s3", name: "marketing-microsite", run: null, clientName: null, projectName: null });
   });
 
@@ -57,12 +67,12 @@ describe("buildRepoInventory — one row per repo, joined to its run, client and
       site({ id: "pend", status: "pending", repoUrl: null, stagingUrl: null }),
       site({ id: "req", status: "requested", repoUrl: null, stagingUrl: null }),
       site({ id: "fail", status: "failed", failureReason: "slug_conflict_foreign", repoUrl: null }),
-    ], runs, names, webDev);
+    ], runs, names, DEPT, webDev);
     expect(rows.map((r) => r.id)).toEqual(["fail", "pend", "req", "prov", "live-new", "live-old"]);
   });
 
   it("a failed repo carries its plain-language reason and whether it can be re-checked", () => {
-    const [row] = buildRepoInventory([site({ id: "f", status: "failed", failureReason: "poll_timeout", repoUrl: null })], runs, names, webDev);
+    const [row] = buildRepoInventory([site({ id: "f", status: "failed", failureReason: "poll_timeout", repoUrl: null })], runs, names, DEPT, webDev);
     expect(row.failure?.title).toMatch(/still working/i);
     expect(row.failure?.remedy).toBe("reconcile");
     expect(row.canReconcile).toBe(true);
@@ -76,7 +86,7 @@ describe("repoCounts — the one-line summary", () => {
       site({ id: "c", status: "provisioned" }),
       site({ id: "d", status: "pending" }), site({ id: "e", status: "requested" }),
       site({ id: "f", status: "failed", failureReason: "crash" }),
-    ], runs, names, webDev);
+    ], runs, names, DEPT, webDev);
     expect(repoCounts(rows)).toEqual({ total: 6, live: 2, staging: 1, provisioning: 2, failed: 1 });
   });
 });

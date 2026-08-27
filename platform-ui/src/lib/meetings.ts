@@ -35,6 +35,8 @@ export interface MeetingRecording {
   meeting_id: string;
   client_id: string | null;
   project_id: string | null;
+  /** Org-node id of the owning department (2026-08-27); null for rows that pre-date the column. */
+  department_id: string | null;
   title: string | null;
   kind: RecordingKind;
   status: RecordingStatus;

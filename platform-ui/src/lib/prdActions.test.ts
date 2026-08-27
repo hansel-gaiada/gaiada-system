@@ -40,7 +40,7 @@ describe("createBriefingAction — a briefing and its project are born together"
     expect(projCall[0]).toBe("/api/co-agency/projects");
     expect(JSON.parse(projCall[2].body)).toEqual({ name: "Northwind — checkout intake", clientId: "cl-1", departmentId: "dept-1" });
     expect(startCall[0]).toBe("/api/co-agency/meetings/recordings/start");
-    expect(JSON.parse(startCall[2].body)).toEqual({ title: "Northwind — checkout intake", kind: "video", clientId: "cl-1", projectId: "p-new" });
+    expect(JSON.parse(startCall[2].body)).toEqual({ title: "Northwind — checkout intake", kind: "video", clientId: "cl-1", projectId: "p-new", departmentId: "dept-1" });
   });
 
   it("link mode: no project is created, the briefing is filed under the chosen one", async () => {

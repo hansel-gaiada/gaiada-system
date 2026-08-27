@@ -7,7 +7,7 @@ import type { PipelineGate, PipelineRun } from "@/lib/pipeline";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
 const rec = (over: Partial<MeetingRecording> & { id: string }): MeetingRecording => ({
-  meeting_id: `mtg-${over.id}`, client_id: "cl-1", project_id: "p-web-1", title: "Kickoff", kind: "audio", status: "recording",
+  meeting_id: `mtg-${over.id}`, client_id: "cl-1", project_id: "p-web-1", department_id: "dept-1", title: "Kickoff", kind: "audio", status: "recording",
   started_at: null, ended_at: null, duration_sec: null, size_bytes: null, drive_status: "none", drive_link: null,
   pipeline_run_id: null, created_by: "u-1", created_at: "2026-08-20T00:00:00Z", updated_at: "2026-08-20T00:00:00Z", ...over,
 });

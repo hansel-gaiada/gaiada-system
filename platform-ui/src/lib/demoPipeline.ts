@@ -24,9 +24,16 @@ interface DemoGate {
   decision: string | null; note: string | null;
   decided_by: string | null; decided_at: string | null; created_at: string;
 }
+// demoMeetings registers this so createRun can derive a run's department from its source meeting the
+// way the real controller does — without demoPipeline importing demoMeetings (the dependency runs
+// demoMeetings → demoPipeline, see pipelineRunIdForMeeting).
+let meetingDepartmentLookup: (meetingId: string) => string | null = () => null;
+export function registerMeetingDepartmentLookup(fn: (meetingId: string) => string | null): void { meetingDepartmentLookup = fn; }
+function departmentForMeeting(meetingId: string): string | null { return meetingDepartmentLookup(meetingId); }
+
 interface DemoRun {
   id: string; title: string | null; status: string; source_meeting_id: string | null;
-  client_id: string | null; project_id?: string | null; mom_ref: string | null; created_by: string | null;
+  client_id: string | null; project_id?: string | null; department_id?: string | null; mom_ref: string | null; created_by: string | null;
   created_at: string; updated_at: string;
 }
 interface DemoResult { status: number; json: unknown }
@@ -88,6 +95,7 @@ const RUNS: DemoRun[] = [
     source_meeting_id: "mtg-northwind-kickoff", // matches demoMeetings.ts rec-demo-1.meeting_id
     client_id: "cl-1", // Northwind Traders
     project_id: "p-web-1", // WD-30 populates this from the source meeting — the Web Dev "Client site redesign"
+    department_id: "dept-1",
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-07-18T03:10:00Z",
@@ -100,6 +108,7 @@ const RUNS: DemoRun[] = [
     source_meeting_id: null, // exercises "no source meeting" as well as "no client" in the same run
     client_id: null, // KNOWN GAP: the dispatcher currently drops client context on some ingests
     project_id: null, // no project either — so this run is NOT a Web Dev PRD Studio row (only /pipeline shows it)
+    department_id: null,
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-07-23T01:00:00Z",
@@ -114,6 +123,7 @@ const RUNS: DemoRun[] = [
     source_meeting_id: null,
     client_id: "cl-3",
     project_id: "p-web-2",
+    department_id: "dept-1",
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-08-20T08:00:00Z",
@@ -309,7 +319,7 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
   const createRunM = p.match(/^\/api\/[^/]+\/pipeline\/runs$/);
   if (createRunM && m === "POST") {
     const b = JSON.parse(body || "{}") as {
-      title?: string; clientId?: string; projectId?: string; sourceMeetingId?: string;
+      title?: string; clientId?: string; projectId?: string; departmentId?: string; sourceMeetingId?: string;
       stages?: { track: string; name: string; status?: string }[];
     };
     if (!b.title) return { status: 400, json: { error: "title required" } };
@@ -326,6 +336,8 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
       source_meeting_id: b.sourceMeetingId ?? null,
       client_id: b.clientId ?? null,
       project_id: b.projectId ?? null,
+      // Mirror the real derivation: caller → source meeting's department (demoMeetings exposes it).
+      department_id: b.departmentId ?? (b.sourceMeetingId ? departmentForMeeting(b.sourceMeetingId) : null),
       mom_ref: null, created_by: "demo-hansel", created_at: now(), updated_at: now(),
     } as DemoRun);
     for (const st of b.stages ?? []) {

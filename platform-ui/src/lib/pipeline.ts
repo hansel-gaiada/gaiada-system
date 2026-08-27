@@ -48,6 +48,8 @@ export interface PipelineRun {
   // older tag omits them — the UI then renders no link rather than an empty one.
   client_id?: string | null;
   project_id?: string | null;
+  /** Org-node id of the owning department (2026-08-27); derived from the source meeting or project. */
+  department_id?: string | null;
   owner_id?: string | null;
 }
 export interface PipelineStage {
