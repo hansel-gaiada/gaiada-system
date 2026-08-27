@@ -30,12 +30,12 @@ misleads real tickets.
 |---|---|---|---|---|---|
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
-| C · Contract, codegen & the rail | 7 | **4** | 0 | 3 | 0 |
-| D · Control plane · ERP console · envs | 9 | **3** | 1 | 4 | 1 |
+| C · Contract, codegen & the rail | 7 | **6** | 0 | 1 | 0 |
+| D · Control plane · ERP console · envs | 9 | **4** | 0 | 4 | 1 |
 | E · AI execution & approvals | 3 | **1** | 0 | 2 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
-| G · New from reassessment | 2 | **1** | 0 | 1 | 0 |
-| **Total** | **51** | **31** | **4** | **13** | **3** |
+| G · New from reassessment | 2 | **2** | 0 | 0 | 0 |
+| **Total** | **51** | **35** | **0** | **13** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -94,10 +94,10 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅ | WSK-14 ⚡ | **Vocabulary contract + composition validator** — versioned public surface (barrel; existing direct imports unbroken), Layer-2 composition validator with actionable errors, and §05's **breaking-change rules encoded as a computed classifier** across all three axes. **Coordinator-verified:** 27 + 34 + 17 + 8 = **86 new assertions**, and WSK-06's 40 + 60 still green. Validates the two real tenants AND the live `redirect` collection, not just fixtures. ⚠️ **Three interpretations WSK-15/19 will inherit:** the `collections.schema` composition shape was **undefined anywhere** and is now de-facto `{fields?, blocks?}` (presence of `blocks` = closed set, absence = unrestricted); a newly-added **required** field is treated MAJOR though §05 only names optional-add as MINOR; the renderer axis still needs a human to flag which components broke — the bump is then computed, never re-judged | senior-be | WSK-06 ✅ |
 | ✅⚠ | WSK-15 ⚡ | **Codegen pipeline** — **PROVISIONAL: verified on WINDOWS, not re-run on Linux.** OpenAPI hand-authored, TS SDK + `CONTENT-CONTRACT.md` **derived** (WSK-D19); pinned `openapi-typescript`/`tsx`. **Determinism proven properly:** two *separately spawned node processes* per tenant, byte-identical across 4 artifacts for two differently-composed tenants, with the `generatedAt` timestamp kept OUT of every hashed artifact (it lives only in `latest.json`). Replaced WSK-21's contract `501` with the real §06 shape, or an honest `404 contract-not-generated`. 46/46 + WSK-21/22 50/50. Found and fixed a real 500 (storage error escaping when the bucket is absent). ⚠️ `blockLibrary` is a documented placeholder (WSK-16 unbuilt); PHP SDK null (WSK-34); **`applySchema` does not yet trigger codegen** — manual/CI entrypoint only until WSK-19/32 | senior-be | WSK-14 ✅ |
 | ✅ | WSK-16 | **Block-renderer library v0** — **the FIRST ticket verified on real LINUX** (`node:22-bookworm-slim`), per the 2026-08-26 rule. 9 components 1:1 with the vocabulary; props **mechanically cross-checked** against `BLOCKS[type].fields` rather than asserted, and round-tripped through the vocabulary's own `validateBlock()`. **Renderer invariant proven with real output:** an unknown `pricingTable` between a hero and a richText appears **0 times** in the built HTML while both known blocks still render; the QA hook captured it. `meta.draft` + `meta.x.localeFallback` both surfaced. Tarball (23 files, 14.6kB) genuinely `npm pack`-ed and installed by path into a separate consumer. Vocabulary **vendored with a drift check** (`vendor:check` in `prepack`) so a tarball consumer outside this repo still has ONE source of truth. 26/26 unit, `astro check` clean. Honest status: PROTOTYPED — nothing in-repo imports it yet (WSK-17/20 own that) | senior-fe | WSK-14 ✅ |
-| 🟡 | WSK-17 | Proof rebuild — gaiada.com rebuilt purely from generated SDK + shared blocks, zero hand-written fetches | medior | WSK-15, 16 |
+| ✅ | WSK-17 | **The proof rebuild — and it is real proof.** `dist/case-study/acme-rebrand/index.html` contains all 9 `data-block-type` markers **and** the distinctive seeded strings that exist nowhere but that run's Postgres: **Postgres → `/v1` → generated SDK → block components → HTML**, with **grep-proven zero hand-rolled fetches**. Linux-verified, RLS gate green twice. ⚠️ Findings handed back: codegen emits **types-only** (no runtime client — used `openapi-fetch`); `CONTRACT.lock.snapshotId` is a labelled placeholder because no hub tool can read the mirror (see WSK-20) | medior | WSK-15 ✅, 16 ✅ |
 | ⬜ | WSK-18 | P3 QA gate — determinism double-run + cross-machine, SDK↔OpenAPI↔contract coherence, unknown-block probe, artifact-URL expiry | qa | WSK-14–17 |
 | ✅ | WSK-19 ⚡ | **Zone A contract-snapshot mirror** — verified on a real **Linux** container. **Immutability is a DB TRIGGER**, not just an absent app route, so a direct UPDATE/DELETE is refused too. **Both tripwires proven with real output:** hash mismatch → refused with **zero writes**; same version + different bytes → **determinism breach**, alerts via an `outbox_events` row + a `severity:critical` activity, original row untouched, 409 to the caller. Lives in a **sibling** `src/modules/webdev-contracts/` because `webdev`'s own `egress-inventory.test.ts` statically asserts exactly one egress file there — same module key, same third-wall RLS. All six Cerbos artifacts + every pinned count. **Coordinator-verified: `src/rbac` 793/793 on Linux** (the 1 failure the agent saw did not reproduce). ⚠️ Control-channel auth is a **bearer stub** — real mTLS+KC+WS4 is WSK-22/23 | senior-be | WSK-15 ✅ |
-| 🟡 | WSK-20 ⚡ | **`code.scaffold` v2** (rail, demand end) — FROZEN envelope, astro+node templates, SDK from snapshot tarball, `CONTRACT.lock`, conformance test, D-6 never-execute rule | senior-be | WSK-19 |
+| ✅ | WSK-20 ⚡ | **`code.scaffold` v2** — **WSK-D6 PROVEN, not asserted**: composes files and pushes, never runs `npm install`, never executes SDK/template code in the agent-runner. Tested **two ways** — statically (no `child_process` import; no `eval`/`new Function`/`vm.Script`/dynamic import) and dynamically (a real run's exec log contains only `git`). 77/77 on Linux; wider `ai-agents` 295 passed / 0 failed. ⚠️ **Cannot run live:** no hub tool reads a snapshot by id, downloads artifact bytes, or resolves a `pipeline_stages.artifact_ref` — I verified this (the report overstated it: `pipeline.*` tools DO exist, but none returns a snapshot or file bytes). Seams defined; a hub ticket must register them | senior-be | WSK-19 ✅ |
 
 ---
 
@@ -108,7 +108,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅ | WSK-21 ⚡ | **Control-plane API v1 (Zone B)** — 18 commands / 6 controllers, every one carrying an §07 impact class asserted entry-by-entry; idempotency proven by double-fire (+ a DB unique constraint proven as an **independent cross-process backstop**); long commands job-tracked; audit row per command; authz **seam + dev stub only** (WSK-22 owns the real channel). **Coordinator-verified 36/36**, `tsc` 0 errors, WSK-05 26/26 no regression. **Caddyfile already 404s `/control/*` on the public vhost** — confirmed, so the exposure warning is satisfied today. ⚠️ **Two documented 501s** (`site.archive` needs a `sites.status` column; `contract.read` waits on WSK-15) and **no Cerbos sidecar** — interface + stub only | senior-be | WSK-03 ✅ |
 | ✅⚠ | WSK-22 ⚡ | **Control-channel auth, layers 1-4** — **PROVISIONAL: built + agent-verified on WINDOWS, not re-verified on Linux** (owner rule 2026-08-26). 19-row adversarial matrix all refusing with distinct reasons: no cert · token-without-cert · wrong CA/CN · cert-without-token · wrong audience/issuer/kid · tampered signature · **missing WS4 on a HIGH command** · commandHash mismatch · expired assertion · **replay: same approvalId 201 then 403**. Layer-1 certs **actually issued by `synccert`** (real EC P256 CA via WSL), and the **real public issuer was proven reachable** with zero Zone A credential. ⚠️ **Deterministic matrix used a fixture JWKS** — no `webdesk-control` Keycloak client exists, so no token can genuinely verify against the real issuer. ⚠️ **WS4 dedup is a `SELECT` with no unique constraint** — closes realistic replay, not a concurrent double-fire; needs a migration. Proxy-side mTLS termination unbuilt | senior-integrator | WSK-21 ✅ |
 | ✅ | WSK-23 ⚡ | **ERP egress + BFF console read model** — Linux-verified. 4 read endpoints under the `webdev` module, **no new Cerbos kind** (reused `webdev_provisioned_site:read` / `webdev_contract_snapshot:read`, so no policy edit and no restart). Reuses WSK-19's egress driver **verbatim — zero new egress code**, proven against BOTH directories' `egress-inventory` scanners. **The required degrade test passes:** live → 60s cache → last `contract.published` fact → explicit `unavailable`; killing the upstream keeps the **last-good version** with `stale:true, source:"cache"`, never nulled. 13/13 + 8/8 + 6/6; `platform-nest`+`webdev-contracts` 151/151. Claimed **§24** in FRONTEND-BFF-CONTRACT. ⚠️ **Site registry / releases / submissions are ALWAYS `stale:true`** — see the log; that is honesty, not a defect | senior-be | WSK-19 ✅ |
-| 🟡 | WSK-24 | **Sites tab** (platform-ui) — **SPEC REFRESHED for WSK-D26** (was written for Cloudflare Pages, now reversed). Registry with **two independent columns: backend env** (staging/production content) **and frontend deployment** (`delphi` staging · `helios` production · Hostinger for WP) — content and frontend promote separately, and one merged chip hides the question people actually ask. Contract card + **locale-coverage row** (WSK-D18). Shown-once key mint. WS4-gated release buttons rendering approval state inline. Submissions (PII-aware). **Degraded state must be visibly honest** when Zone B is unreachable — never a silent empty list. ⚠️ **Do not build against fixtures alone** — the estate's recurring bug class is frontend-first drift (a console reading fields the backend never sends). Needs WSK-23's BFF first | senior-fe | WSK-23 |
+| ✅ | WSK-24 | **The Sites tab — the first actual WebDesk UI.** Registry with the **two independent columns kept independent** (backend env · frontend deployment: `delphi` staging / `helios` production / Hostinger for WP), contract card + locale-coverage row, shown-once key mint, WS4-gated release buttons rendering approval state inline, PII-aware submissions. **The load-bearing property is honesty about staleness, and it is what the tests assert.** WSK-23 proved these reads can *never* be live (WSK-21 exposes only `contract`, `jobs`, `jobs/:id` as GETs), so `stale:true` is the always-case — and the suite pins the distinction the estate's frontend-first-drift bug class turns on: a **genuinely-unavailable read renders differently from a confirmed-empty one** (`asOf: null`), the degrade banner sits **above** the table rather than being an empty-state one-off, zero sites renders a teach-state not a bare table, and the rare live case renders distinctly so `stale` is not the only state a viewer can ever see. **26/26 + `tsc --noEmit` 0 errors, run on LINUX** (`node:22-bookworm-slim`) per the server-only test rule — `platform-ui/node_modules` is broken on the Windows checkout (rollup native missing), which is an environment fault, not this ticket's. Shared-file edits verified **pure additions** (`+5 -0`, `+8 -0`) | senior-fe | WSK-23 ✅ |
 | ⬜ | WSK-25 | **Promotion engine (shrunk by R-2)** — snapshot-first → migrate → content export/import → **Pages deploy hook** → purge. Rollback = content restore + Pages rollback. *Re-rate from `opus·medium` at ticket time* | senior-be | WSK-21 |
 | ⬜ | WSK-26′ | **Pages deploy + domain adapter** (merges old WSK-26+27) — per-branch preview URLs attached to `customer_feedback` gate rows (D-8 unchanged, only the URL source changes); `setDomain` via Pages custom domains. **Deploy token held in Zone A — Zone B never deploys frontends** | senior-integrator | WSK-25 |
 | ⬜ | WSK-28 | **Zone B ops baseline** — box hardening runbook, secrets layout, synccert issuance, OTel + Zone A write-only OTLP listener, `wd-backup-sentinel`. **Backups per WSK-D23: local versioning + object lock, and a PULL-model nightly copy to a second box (Zone B holds NO credential for the backup target). Google Workspace becomes that target at staging; NAS is target-state.** **+stated RTO/RPO. +status page. +CDN-bypass check on every media path** | devops | A-12 |
@@ -142,7 +142,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | Status | # | Ticket | Tier | Deps |
 |---|---|---|---|---|
 | ✅⚠ | WSK-37 | **Per-tenant outbound webhooks** — **PROVISIONAL: verified on Windows, not Linux.** 32/32 across SSRF (19 unit), registration pre-flight, and end-to-end delivery on real PG+Redis+HTTPS sink. Signature reuses WSK-12's signer verbatim and is **independently verifiable by a receiver**; retry/backoff proven against a genuinely failing sink; cross-tenant isolation proven. **SSRF guard re-validates on EVERY attempt AND every redirect hop** (DNS rebinding + mid-delivery redirects), HTTPS-only, private/loopback/link-local/CGNAT/metadata denied on both address families — the metadata-address test proves **the sink's request log never grew**, i.e. nothing touched the network. Immutable delivery log (`REVOKE DELETE`). RLS gate OK on 16 tables. **Coordinator wired** app.module + forms.module + the step-10 dispatch + env/compose. ⚠️ **Corrected MY spec:** I said hash the secret like `api_keys`; a SIGNING secret cannot be hashed (HMAC needs the bytes back), so it is **AES-256-GCM encrypted** under its own pepper. ⚠️ Control endpoints share WSK-21's unauthenticated gap until WSK-22 fronts them | medior | WSK-12 ✅ |
-| 🟡 | WSK-38 | **Data & Privacy** (R-5) — DSR find/export/delete a data subject's submissions as a WS4-gated audited control-plane command + the console card | senior-be | WSK-21 |
+| ✅ | WSK-38 | **Data-subject requests** — all three commands **HIGH/WS4-gated**, a deliberate widening: finding/exporting a person's whole footprint concentrates PII as much as destroying it. **Erasure = SCRUB not DELETE**; consent columns **preserved** (they evidence the notice, not the subject); attachments hard-deleted object-then-row with abort-before-mutate; the erasure recorded in an append-only `dsr_requests` ledger keyed on a **SHA-256 of the identifier** — so the proof of erasure cannot become a second un-erasable copy of the erased PII. 23/23, and the load-bearing test queries the ledger **after** erasure to prove it survived and the runtime role cannot UPDATE or DELETE it. RLS gate 17/17. ⚠️ Console card is WSK-24's; 2 pre-existing gaps flagged in `submissions-purge` | senior-be | WSK-21 ✅ |
 
 ---
 
@@ -226,6 +226,26 @@ model, so any migration is a DNS + content-export exercise, never a server-side 
 ---
 
 ## Session log
+
+> **Pushed `f14cb3f5` — WSK-20 + WSK-17 + WSK-38, plus a vendor drift I caused.**
+>
+> **🐞 THE DRIFT WAS MINE, and WSK-16's own guard caught it.** Fixing the media validator in
+> `payload/vocabulary` left `webdesk/blocks`' **vendored copy stale** — exactly what WSK-16 built its
+> `vendor:check` for. Re-vendored, and then its regression guard failed **by design**, with the
+> instruction written into the assertion message: *"if this now passes, the gap has been fixed
+> upstream — flip this and delete it from the set"*. I followed it. The set is now **empty rather than
+> deleted**: it is the seam where the next such gap gets recorded, and that loop is what turned an
+> invisible bug into a failing test. Blocks 26/26; gallery + logoCloud now validate.
+>
+> **⚠️ A REAL SCOPE GAP, verified not assumed:** WSK-20 cannot run live because **no hub tool reads a
+> contract snapshot by id, downloads artifact bytes, or resolves a `pipeline_stages.artifact_ref`.**
+> I checked before recording it — the report claimed "zero pipeline tool registrations", which is
+> wrong (`pipeline.createRun/getRun/...` exist), but the specific reads genuinely do not. §06 assumed
+> them. **Someone must register them, or the rail's demand end stays fake-driven.**
+>
+> Also removed `webdesk/postgres/init-roles.sh;C` — an empty dir created by the MSYS path-mangling
+> trap during **my own** WSK-01 verification, which then broke a bind mount for WSK-17.
+
 
 > **Wave dispatched 2026-08-27 — 4 agents, partitioned so they cannot collide:**
 > **WSK-24** owns `platform-ui/src/app` + components (the FIRST UI) · **WSK-17** owns a new
@@ -485,3 +505,29 @@ is not needed.
 3. **WSK-05 / WSK-06** follow. WSK-06 is where the `/v1` envelope freezes with the locale axis.
 4. **A-10 / A-11 / A-12** remain yours: cost numbers, the Payload trademark check, the procurement
    call. None block Milestone 0.
+
+> **WSK-24 closed — the first WebDesk UI, and the 🟡 column is now empty.** 35 ✅ · 0 🟡 · 13 ⬜ · 3 ⏸.
+>
+> Two things worth keeping from how it was verified:
+>
+> 1. **The agent parked without reporting for the tenth time this wave**, so its work was assessed
+>    directly rather than nudged again. That assessment is the only reason the next point was found.
+> 2. **The local test run was meaningless and would have read as a pass.** `platform-ui`'s Windows
+>    `node_modules` is broken — `vitest` unresolvable, and the direct binary path dies with
+>    `MODULE_NOT_FOUND` on rollup's native module. That is *not* a red suite; it is **no suite**, and
+>    a session in a hurry reports "couldn't run tests, code looks fine". The owner's server-only test
+>    rule exists for exactly this: re-run in `node:22-bookworm-slim` and the suite is **26/26**.
+>
+> **What the tests actually pin** is the property the ticket was written around. `stale:true` is not
+> an edge case here — WSK-23 established it is the *permanent* case, because WSK-21 exposes only
+> three GETs (`contract`, `jobs`, `jobs/:id`) and the registry/releases/submissions reads have no
+> live source at all. So the suite pins the distinction that the frontend-first-drift bug class
+> turns on: **an unavailable read must not look like an empty one.** `asOf: null` renders distinctly
+> from a confirmed-empty list, the degrade banner is above the table rather than an empty-state
+> one-off, and the rare live case renders distinctly too — so `stale` never becomes wallpaper the
+> viewer stops reading. A confident empty list is the failure this estate has already shipped once.
+>
+> **Still open and NOT hidden by this close:** the console's demand end remains fixture-driven,
+> because no hub tool can read a contract snapshot by id, download artifact bytes, or resolve a
+> `pipeline_stages.artifact_ref`. §08's site registry **cannot** go live until control-plane read
+> commands exist. And `webdesk` still appears in **zero** CI/deploy workflows.

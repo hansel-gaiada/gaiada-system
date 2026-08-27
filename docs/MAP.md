@@ -355,6 +355,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/requests`
 - `/departments/[deptId]/review`
 - `/departments/[deptId]/search-terms`
+- `/departments/[deptId]/sites`
+- `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`

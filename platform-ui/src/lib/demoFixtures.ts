@@ -11,6 +11,7 @@ import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
+import { webdevConsoleDemo } from "./demoWebdevConsole";
 import { monitoringDemo } from "./demoMonitoring";
 import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
@@ -2024,6 +2025,13 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // PRV-04 — Web Dev "Site & repo" card (run workspace) — stateful store (lib/demoWebdevProvisionedSites.ts).
   const webdevSites = webdevProvisionedSitesDemo(method, p, url.searchParams, body, userId);
   if (webdevSites) return webdevSites;
+
+  // WSK-24 — the WebDesk console read model (WSK-23): sites/releases/submissions/contract-pins.
+  // Read-only fixtures (lib/demoWebdevConsole.ts); placed here, before the generic `ok([])` GET
+  // fallback further down, so fetchSiteRegistry() et al. get a shaped `{sites,meta}`/etc. response
+  // rather than a bare array with no `.meta` to read staleness off of.
+  const webdevConsole = webdevConsoleDemo(method, p, url.searchParams);
+  if (webdevConsole) return webdevConsole;
 
   // MON — monitoring board (Plane B: client properties + services). Read-only fixtures
   // (lib/demoMonitoring.ts); seeded with a down/degraded/stale/maintenance/unknown spread so every
