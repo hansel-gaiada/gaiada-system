@@ -1,0 +1,87 @@
+# WSK-28 -- PROPOSAL, not applied. Read infra/runbooks/webdesk-zoneb-otel.md §4 first.
+#
+# This file is a proposed ADDITION to Zone A's observability stack (infra/observability/), shaped
+# to match infra/observability/otel-collector/config.tier1-metrics.yaml's own conventions
+# (memory_limiter first in every pipeline, resourcedetection, batch). It is NOT wired into any
+# running collector -- infra/observability/ is outside this ticket's file ownership (webdesk/ops/,
+# infra/runbooks/webdesk-*.md, webdesk/docker-compose*.yml only). Whoever owns that directory (or
+# the owner directly) should review this, apply it as a genuinely new collector instance (not
+# merged into an existing multi-purpose one -- see the reasoning below), and re-run
+# ../scripts/check-otlp-write-only.mjs against the APPLIED file as the real verification step.
+#
+# WHY A SEPARATE COLLECTOR INSTANCE, not a new receiver bolted onto the existing config.yaml:
+# the write-only property (design §03: "the listener exposes no query surface") is easiest to
+# GUARANTEE, not just assert, if this instance's only extensions/exporters are the minimal set
+# below -- no zpages, no pprof, no prometheus receiver, nothing the existing full-stack
+# config.yaml carries for its own (legitimate, Zone-A-internal) debugging needs. Merging into
+# config.yaml would mean the write-only guarantee depends on nobody ever adding a debug extension
+# to that shared file for an unrelated reason; a dedicated instance means the guarantee is
+# structural, not procedural.
+#
+# Network placement (not expressible in this YAML -- a firewall/deploy concern for whoever
+# applies this): this collector's port must be reachable from Zone B's egress IP(s) ONLY, and
+# must be a DIFFERENT port/process than whatever the internal Grafana stack queries against.
+
+receivers:
+  otlp/webdesk-zoneb:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4319   # deliberately NOT 4317 -- must not collide with the existing
+                                  # internal collector's port on the same box, and a distinct port
+                                  # makes a firewall rule scoped to "only this port from Zone B's
+                                  # egress IP" easy to write and easy to audit.
+    auth:
+      authenticator: bearertokenauth/webdesk-zoneb
+      # The token value is Zone A secrets custody (OpenBao target-state / platform-nest env
+      # today) -- NEVER placed in this file. Zone B's copy of the SAME token lives in its own
+      # .env as OTEL_EXPORTER_OTLP_HEADERS (see webdesk/.env.example).
+
+extensions:
+  bearertokenauth/webdesk-zoneb:
+    scheme: "Bearer"
+    # tokens: [] -- populated at apply time from the real secret store, not committed here.
+
+processors:
+  batch:
+    timeout: 10s
+  resourcedetection:
+    detectors: [env]
+    timeout: 5s
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  # Rate limiting the write side (design §03: "May cause, at most: Telemetry spam / metric
+  # poisoning (alert-fatigue attack -- bounded by rate limit + per-source labels)"). The
+  # contrib collector's own rate-limiting story varies by version; at apply time confirm which
+  # mechanism the pinned collector image actually supports (e.g. an upstream throttling
+  # processor, or a reverse-proxy-level rate limit in front of this receiver) rather than
+  # assuming this processor block is complete as written -- flagging this explicitly so it is
+  # not silently skipped.
+
+exporters:
+  # Forwards into the EXISTING internal collector/Grafana stack -- this is the one and only
+  # downstream. No exporter here reaches back toward Zone B.
+  otlp/internal:
+    endpoint: otel-collector:4317   # the estate's existing internal collector, per
+                                     # infra/observability/otel-collector/config.yaml
+    tls:
+      insecure: true   # internal network only; confirm against the real internal topology at
+                        # apply time
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp/webdesk-zoneb]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/internal]
+    metrics:
+      receivers: [otlp/webdesk-zoneb]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/internal]
+    # No logs pipeline on purpose at first landing -- Zone B log volume/PII shape hasn't been
+    # reviewed for what's safe to ship to Zone A (client-site content could appear in logs).
+    # Add only after that review; do not add by default when applying this proposal.
