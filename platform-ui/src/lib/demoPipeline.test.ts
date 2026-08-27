@@ -44,6 +44,23 @@ describe("demoPipeline — C1 server-side filters", () => {
   });
 });
 
+describe("demoPipeline — ?include=gates (platform-nest 0.42.0)", () => {
+  it("without the parameter no row carries gates; with it every run has gates[] grouped by run_id", () => {
+    const plain = pipelineDemo("GET", "/api/t1/pipeline/runs", q())!.json as Array<{ id: string; gates?: unknown }>;
+    expect(plain.length).toBeGreaterThan(0);
+    expect(plain.every((r) => !("gates" in r))).toBe(true);
+    const rows = pipelineDemo("GET", "/api/t1/pipeline/runs", q("include=gates"))!.json as Array<{ id: string; gates: Array<{ run_id: string; kind: string }> }>;
+    expect(rows.map((r) => r.id)).toEqual(plain.map((r) => r.id));
+    const one = rows.find((r) => r.id === "run-demo-1")!;
+    expect(one.gates.map((g) => g.kind)).toEqual(["prd_review", "prd_sign", "scope_signoff"]);
+    expect(rows.every((r) => Array.isArray(r.gates) && r.gates.every((g) => g.run_id === r.id))).toBe(true);
+  });
+  it("composes with the server-side filters", () => {
+    const rows = pipelineDemo("GET", "/api/t1/pipeline/runs", q("include=gates&clientId=cl-does-not-exist"))!.json as unknown[];
+    expect(rows).toEqual([]);
+  });
+});
+
 describe("demoPipeline — B2 start a run with no meeting", () => {
   it("creates a run whose source_meeting_id is null, and its stages", () => {
     const before = (pipelineDemo("GET", "/api/t1/pipeline/runs", q())!.json as unknown[]).length;

@@ -7,7 +7,7 @@ import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment } from "@/lib/departments";
 import { deptTabs, toolkitFor } from "@/lib/deptToolkits";
-import { getPipelineRun, listPipelineRuns, type PipelineGate, type PipelineRun } from "@/lib/pipeline";
+import { listPipelineRunsWithGates, type PipelineRunWithGates } from "@/lib/pipeline";
 import { listRecordings, type MeetingRecording } from "@/lib/meetings";
 import { listClients, listProjects } from "@/lib/entities";
 import { ingestAction, retryAudioAction, setTranscriptAction, uploadAudioAction } from "@/lib/meetingsActions";
@@ -23,11 +23,6 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
 
 type Params = Promise<{ deptId: string }>;
-
-// How many active runs get their gates read (one `getPipelineRun` each — the list endpoint carries no
-// gates). Beyond this the row still renders, but says "open the run to see its approvals" rather than
-// guessing. A list-with-gates read on the backend would remove the cap; tracked as a frontend gap.
-const GATE_DETAIL_CAP = 12;
 
 // PRD Studio — one flow, four beats: create a briefing → add its recording → convert the transcript
 // into a PRD run → clear GM review and client sign-off. Every state shown comes from a field the
@@ -51,7 +46,8 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
 
   // AGN-3: the run list is this page's subject, so a refusal is stated rather than rendered as an
   // empty list — "nothing produced" and "you may not see it" are different claims.
-  const runsResult = await listPipelineRuns(userId, tenant);
+  // One read, gates included (`?include=gates`, platform-nest 0.42.0) — the approval chips need them.
+  const runsResult = await listPipelineRunsWithGates(userId, tenant);
   if (runsResult.kind === "forbidden") return <ReadRefusal subject="this department's delivery runs" kind="forbidden" />;
   if (runsResult.kind === "unavailable") return <ReadRefusal subject="This department's delivery runs" kind="unavailable" reason={runsResult.reason} />;
   const allRuns = runsResult.data;
@@ -70,23 +66,15 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
   const deptProjects = projects.filter((p) => p.department_id === deptId);
   const { recordings, runs } = scopeToDepartment(deptId, new Set(deptProjects.map((p) => p.id)), allRecordings, allRuns);
 
-  // Gates for the active runs — the approval chips need them; the list read does not carry them.
   const activeRuns = runs.filter((r) => r.status !== "complete");
   const doneRuns = runs.filter((r) => r.status === "complete");
-  const detailed = activeRuns.slice(0, GATE_DETAIL_CAP);
-  const details = await Promise.all(detailed.map((r) => getPipelineRun(userId, tenant, r.id)));
-  const gatesByRun = new Map<string, PipelineGate[] | null>();
-  detailed.forEach((r, i) => {
-    const d = details[i];
-    gatesByRun.set(r.id, d.kind === "ok" && d.data ? d.data.gates : null);
-  });
 
   // Action order, converted ones lingering briefly — see lib/prdFlow.ts::orderBriefings.
   const briefings = orderBriefings(recordings, Date.now());
 
   const counts = flowCounts(
     recordings,
-    runs.map((run) => ({ run, gates: gatesByRun.get(run.id) ?? [] })),
+    runs.map((run) => ({ run, gates: run.gates ?? [] })),
   );
 
   const mayDecide = can(me, "approvals.decide", tenant);
@@ -97,13 +85,13 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
     revalidatePath(prdPath);
   }
 
-  const renderRun = (run: PipelineRun) => {
+  const renderRun = (run: PipelineRunWithGates) => {
     const rec = run.source_meeting_id ? recordingByMeetingId.get(run.source_meeting_id) : undefined;
     return (
       <RunApprovalRow
         key={run.id}
         run={run}
-        gates={gatesByRun.has(run.id) ? gatesByRun.get(run.id)! : run.status === "complete" ? [] : null}
+        gates={run.gates}
         briefingHref={rec ? `/meetings/${rec.id}` : null}
         briefingTitle={rec?.title ?? null}
         mayDecide={mayDecide}

@@ -140,6 +140,31 @@ export async function listPipelineRuns(
   });
 }
 
+/** A list row with its gates attached — `GET /pipeline/runs?include=gates` (platform-nest 0.42.0).
+ *  `null` means the platform answered WITHOUT gates (a platform older than 0.42.0): the UI then says
+ *  "open the run to see its approvals" rather than reading an absent array as "no approvals". */
+export type PipelineRunWithGates = PipelineRun & { gates: PipelineGate[] | null };
+
+// The list-with-gates read. One request for the whole list; every run answers with `gates` ([] when it
+// has none). Replaced the per-run `getPipelineRun` fan-out behind a 12-run cap that PRD Studio and a
+// project's Meetings tab used while the list carried no gates.
+export async function listPipelineRunsWithGates(
+  userId: string,
+  tenant: string,
+  opts: { status?: string; clientId?: string; projectId?: string } = {},
+): Promise<ReadResult<PipelineRunWithGates[]>> {
+  const q = new URLSearchParams();
+  if (opts.status) q.set("status", opts.status);
+  if (opts.clientId) q.set("clientId", opts.clientId);
+  if (opts.projectId) q.set("projectId", opts.projectId);
+  q.set("include", "gates");
+  const res = await readResult(platformFetch<Array<PipelineRun & { gates?: unknown }>>(`/api/${tenant}/pipeline/runs?${q.toString()}`, userId), {
+    absentAsEmpty: [],
+  });
+  if (res.kind !== "ok") return res;
+  return { ...res, data: res.data.map((r) => ({ ...r, gates: Array.isArray(r.gates) ? (r.gates as PipelineGate[]) : null })) };
+}
+
 export async function getPipelineRun(userId: string, tenant: string, runId: string): Promise<ReadResult<PipelineRunDetail | null>> {
   // 404 on one run is a real answer ("no such run") and stays inside `ok` as null; 403 is not.
   return readResult(platformFetch<PipelineRunDetail>(`/api/${tenant}/pipeline/runs/${runId}`, userId), {

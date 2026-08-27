@@ -10,7 +10,7 @@ import { CommentThread } from "@/components/pm/CommentThread";
 import { Attachments } from "@/components/Attachments";
 import { PendingLink } from "@/components/PendingLink";
 import { listRecordings } from "@/lib/meetings";
-import { getPipelineRun, listPipelineRuns, type PipelineGate } from "@/lib/pipeline";
+import { listPipelineRunsWithGates, type PipelineGate } from "@/lib/pipeline";
 import { decideGateAction } from "@/lib/pipelineActions";
 import { createBriefingAction, startRunManuallyAction } from "@/lib/prdActions";
 import { ingestAction, retryAudioAction, setTranscriptAction, uploadAudioAction } from "@/lib/meetingsActions";
@@ -165,14 +165,12 @@ export async function ProjectWorkspaceView({
     listRecordings(userId, tenant, { projectId }).then((r) => (r.kind === "ok" ? r.data : [])),
   ]);
 
-  // Meetings tab = the PRD Studio flow for this project: its runs + gates (the list carries none;
-  // one detail read per run, capped) — read only when that tab is shown.
+  // Meetings tab = the PRD Studio flow for this project: its runs with their gates in one read
+  // (`?include=gates`, platform-nest 0.42.0) — read only when that tab is shown.
   let projectRuns: Array<{ run: import("@/lib/pipeline").PipelineRun; gates: PipelineGate[] | null }> = [];
   if (view === "meetings") {
-    const runsRes = await listPipelineRuns(userId, tenant, { projectId });
-    const runs = runsRes.kind === "ok" ? runsRes.data : [];
-    const details = await Promise.all(runs.slice(0, 12).map((r) => getPipelineRun(userId, tenant, r.id)));
-    projectRuns = runs.map((run, i) => ({ run, gates: i < 12 ? (details[i].kind === "ok" && details[i].data ? details[i].data.gates : null) : null }));
+    const runsRes = await listPipelineRunsWithGates(userId, tenant, { projectId });
+    projectRuns = runsRes.kind === "ok" ? runsRes.data.map(({ gates, ...run }) => ({ run, gates })) : [];
   }
   const deptMatch = backHref.match(/^\/departments\/([^/]+)/);
   const prdHref = deptMatch ? `/departments/${deptMatch[1]}/prd` : "/pipeline";

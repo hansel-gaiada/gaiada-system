@@ -260,10 +260,13 @@ local stack). None of these mean "production-done".
   refuses a body shorter than its `content-length` with a message naming that limit, instead of
   handing the platform a truncated multipart. Verified: 5 MB and 170 MB → 202 via the route.
 
-**Known gap (frontend)**
-- Gate chips need `GET /pipeline/runs/:id` per active run (the LIST carries no gates) — capped at 12;
-  runs past the cap say "open the run to see its approvals" rather than guessing. A list-with-gates
-  read on the backend removes the cap.
+**Known gap (frontend) — closed 2026-08-27**
+- Gate chips needed `GET /pipeline/runs/:id` per active run (the LIST carried no gates) — capped at 12;
+  runs past the cap said "open the run to see its approvals". platform-nest `0.42.0` added
+  `GET /pipeline/runs?include=gates`; PRD Studio and a project's Meetings tab now read
+  `lib/pipeline.ts::listPipelineRunsWithGates` — one request, no cap, no per-run detail reads
+  (`GATE_DETAIL_CAP` deleted). `RunApprovalRow` keeps its `gates: null` rendering for a refused read.
+  Demo fixture honours the parameter (`demoPipeline.test.ts` +2).
 
 ### platform-ui `0.54.0` - the five remaining finance tabs are real pages (2026-08-26) - PROTOTYPED
 
