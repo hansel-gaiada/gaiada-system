@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.59.0` - finance write surfaces: credit notes, write-offs, and five wire-ups (2026-08-27) - PROTOTYPED
+
+Six finance surfaces whose backends existed and which nothing could reach: consolidation runs +
+eliminations, period reopen, instrument creation + accrual posting, AR customer and AP vendor
+creation, and the fiscal-year close. Plus the new AR credit-note and write-off forms for
+`finance 0.15.0`.
+
+**Credit notes and write-offs are two forms on purpose, not one adjustment form with a reason
+dropdown.** A credit note says the customer never owed it and reverses output VAT; a write-off says
+they owed it and will not pay, and reverses nothing, because the PPN was properly due and has been
+remitted. Choosing wrong is not a wrong button — it produces a wrong VAT return — so both forms state
+the consequence rather than leaving it to be inferred from the name. Line accounts are filtered from
+the real chart (contra-revenue 4300/4200), never hardcoded, because an accountant may renumber it.
+
+- Period reopen requires the period NAME as confirmation and a reason; a HARD_LOCK period is refused
+  with the server's own wording rather than a generic failure.
+- Accrual posting is keyed on the schedule `seq` — the 1-based instalment, picked from a live
+  dropdown — not on a fiscal period. An instrument whose payment months do not align with the fiscal
+  calendar has no unambiguous "accrual for August".
+- Fiscal-year close is disabled while the year still has open periods, showing the count. Learning
+  that from a refusal AFTER typing a confirmation is a worse surface than seeing it on the row.
+
+⚠ **Fixed a defect that made DEMO_MODE lie.** `demoFinance.ts`'s header comments described a "second
+group" of plain writes that had NO dispatch code at all — every one of those endpoints would have
+404'd in demo mode. The build gate and e2e both run in DEMO_MODE, so this was a surface claiming
+capabilities nothing served, invisible to `tsc` and to vitest. Same bug class as the earlier
+"financeDemo never received the request body". Dispatch added for all of them; the FISCAL_YEARS
+fixture now derives its period counts from the existing PERIODS array rather than hand-maintained
+numbers that would drift from the table rendered beside them.
+
+Every stale "not built yet" claim for these surfaces was removed from the receivables, payables,
+close and cutover pages. Gates verified independently of the agent that wrote the code: typecheck
+clean, 177 files / 3445 tests, `DEMO_MODE=1 next build` exit 0.
+
 ### finance `0.15.0` - AR credit notes and write-offs, and the tax return lifecycle (2026-08-27) - PROTOTYPED
 
 Two ways a receivable legitimately shrinks with no cash arriving. They were deferred from F4 on
