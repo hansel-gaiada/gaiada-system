@@ -50,6 +50,15 @@
 .pm-progress__val { flex: 0 0 auto; font: 700 11px var(--font-body); color: var(--pm-text-dim); min-width: 34px; text-align: right; }
 
 /* ---- view switcher ---- */
+/* Project header meta strip — status · progress · Range / Owner / Tags. These classes were used by
+   ProjectWorkspaceView but never defined, so labels and values ran together as one line of text. */
+.pm-meta { display: flex; align-items: center; gap: 12px 28px; flex-wrap: wrap; margin: 12px 0 18px; }
+.pm-meta__prog { flex: 1 1 220px; min-width: 160px; display: flex; align-items: center; }
+.pm-meta__item { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 13px var(--font-body); color: var(--text-primary); }
+.pm-meta__label { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.pm-meta__muted { color: var(--erp-ink-50); }
+.pm-tabsrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; border-bottom: 0.5px solid var(--pm-line); margin-bottom: 20px; }
+.pm-tabsrow .pm-tabs { border-bottom: 0; margin-bottom: 0; }
 .pm-tabs { display: flex; gap: 2px; border-bottom: 0.5px solid var(--pm-line); margin-bottom: 20px; }
 .pm-tab { padding: 10px 16px; font: 400 13px var(--font-body); color: var(--pm-text-dim); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -0.5px; }
 .pm-tab:hover { color: var(--pm-text); }

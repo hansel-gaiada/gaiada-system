@@ -271,10 +271,16 @@ export async function ProjectWorkspaceView({
             into one date. */}
         <span className="pm-meta__item">
           <span className="pm-meta__label">Range</span>
-          <span>{projectStartDate ? formatDate(projectStartDate) : "—"} → {projectDueDate ? formatDate(projectDueDate) : "—"}</span>
-          <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
-            Tasks span {taskEnvelope.start ? formatDate(taskEnvelope.start) : "—"} → {taskEnvelope.end ? formatDate(taskEnvelope.end) : "—"}
-          </span>
+          {projectStartDate || projectDueDate ? (
+            <span>{projectStartDate ? formatDate(projectStartDate) : "—"} → {projectDueDate ? formatDate(projectDueDate) : "—"}</span>
+          ) : (
+            <span className="pm-meta__muted">No dates set</span>
+          )}
+          {(taskEnvelope.start || taskEnvelope.end) && (
+            <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
+              Tasks span {taskEnvelope.start ? formatDate(taskEnvelope.start) : "—"} → {taskEnvelope.end ? formatDate(taskEnvelope.end) : "—"}
+            </span>
+          )}
           <UrgencyChip tier={projectUrgencyRoll.tier} variant="chip" count={projectUrgencyRoll.counts[projectUrgencyRoll.tier] || undefined} />
         </span>
         <span className="pm-meta__item">
