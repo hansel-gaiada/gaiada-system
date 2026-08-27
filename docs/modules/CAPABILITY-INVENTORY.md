@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **116** capabilities across **16** owners
-- **58** writes · 58 reads
-- Writes by impact: **high 11** · medium 17 · low 30
+- **130** capabilities across **16** owners
+- **69** writes · 61 reads
+- Writes by impact: **high 18** · medium 20 · low 31
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -54,7 +54,7 @@ unfalsifiable after.
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |
 | social | `social` | 12 |
-| webdev | `webdev` | 6 |
+| webdev | `webdev` | 8 |
 
 ## Capabilities
 
@@ -173,6 +173,20 @@ unfalsifiable after.
 | social | `social.updateReplyDraft` | `PATCH` | `/api/:tenantId/modules/social/threads/:threadId/messages/:messageId` | write | `low` |
 | social | `social.validateVariant` | `GET` | `/api/:tenantId/modules/social/variants/:variantId/validation` | read | — |
 | social | `social.withdrawClientReview` | `POST` | `/api/:tenantId/modules/social/variants/:variantId/client-review/withdraw` | write | `low` |
+| webdev | `webdesk.deploy.staging` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/deploy/staging` | write | `medium` |
+| webdev | `webdesk.key.mint` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/keys` | write | `high` |
+| webdev | `webdesk.key.revoke` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/revoke` | write | `high` |
+| webdev | `webdesk.key.rotate` | `POST` | `/api/:tenantId/modules/webdev/control/keys/:keyId/rotate` | write | `high` |
+| webdev | `webdesk.listSites` | `GET` | `/api/:tenantId/modules/webdev/control/sites` | read | — |
+| webdev | `webdesk.listSubmissions` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/submissions` | read | — |
+| webdev | `webdesk.schema.apply` | `POST` | `/api/:tenantId/modules/webdev/control/schema/apply` | write | `medium` |
+| webdev | `webdesk.schema.propose` | `POST` | `/api/:tenantId/modules/webdev/control/schema/propose` | write | `low` |
+| webdev | `webdesk.site.archive` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/archive` | write | `high` |
+| webdev | `webdesk.site.promote` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/promote` | write | `high` |
+| webdev | `webdesk.site.provision` | `POST` | `/api/:tenantId/modules/webdev/control/sites` | write | `medium` |
+| webdev | `webdesk.site.rollback` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/rollback` | write | `high` |
+| webdev | `webdesk.site.setDomain` | `POST` | `/api/:tenantId/modules/webdev/control/sites/:siteId/domain` | write | `high` |
+| webdev | `webdesk.siteStatus` | `GET` | `/api/:tenantId/modules/webdev/control/sites/:siteId/status` | read | — |
 | webdev | `webdev.provisionSite` | `POST` | `/api/:tenantId/modules/webdev/provision` | write | `medium` |
 | webdev | `webdev.recordZoneBEvent` | `POST` | `/api/:tenantId/modules/webdev/zoneb-events` | write | `low` |
 | webdev | `webdev.refreshContract` | `POST` | `/api/:tenantId/modules/webdev/contracts/refresh` | write | `medium` |
