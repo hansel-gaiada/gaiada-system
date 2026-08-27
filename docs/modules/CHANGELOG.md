@@ -11,6 +11,23 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.41.0` - a provisioned site knows its client and project (2026-08-27) - DEV-VERIFIED
+
+**Added**
+- `webdev_provisioned_sites.client_id` / `project_id` (nullable FKs). Migration
+  `202608270659_webdev_sites_client_project.sql` adds them, indexes them, and backfills rows that have
+  a run from the run — per tenant AND with `app.scopes = webdev` set, because this table sits behind the
+  third RLS wall (`app_module_allowed`) and a backfill without both GUCs matches zero rows and reports
+  success.
+- `POST /api/:t/modules/webdev/provision` accepts `clientId` / `projectId` for a STANDALONE site (no
+  `runId`). With a `runId` the run's own client/project are copied and the caller's are ignored — a
+  caller cannot file a run's repo under another client. The DTO gains `clientId` / `projectId` (the
+  idempotency suite's exact-key allowlist updated deliberately).
+- Why: a standalone repo could only ever read "not linked to a project" in the Repositories tab.
+  Spec `2026-08-26-webdev-lineage-fields-design.md` (2/3).
+- Tests: `webdev-controller-http.test.ts` (+1 lineage: run copy, standalone supplied, bare null,
+  list returns both); webdev suites 103/103.
+
 ### platform-nest `0.40.0` - briefings and PRD runs know their department (2026-08-27) - DEV-VERIFIED
 
 **Added**
