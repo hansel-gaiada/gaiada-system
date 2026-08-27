@@ -1,0 +1,33 @@
+---
+// webdesk/sites/wsk17-proof/src/pages/index.astro
+//
+// WSK-17 -- the index page. Lists every real case-study item this tenant's Postgres holds, again
+// through the generated SDK's typed list call, no `blocks` expansion needed here (just slug + seo
+// for the link list).
+import { client } from '../lib/client.ts'
+import { TENANT_SLUG, COLLECTION_KEY } from '../lib/site-tenant.ts'
+
+const { data, error } = await client.GET(`/v1/t/${TENANT_SLUG}/${COLLECTION_KEY}`, {
+  params: { query: {} },
+})
+if (error) throw new Error(`[wsk17-proof] list ${COLLECTION_KEY} failed: ${JSON.stringify(error)}`)
+const items = data.items
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WSK-17 proof rebuild — {TENANT_SLUG}</title>
+  </head>
+  <body>
+    <h1>Case studies — {TENANT_SLUG}</h1>
+    <ul data-item-count={items.length}>
+      {items.map((item) => (
+        <li>
+          <a href={`/case-study/${item.slug}/`} data-slug={item.slug}>
+            {item.seo.title ?? item.slug}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </body>
+</html>

@@ -65,17 +65,14 @@ function minimalValidProps(type) {
   return props
 }
 
-// KNOWN VOCABULARY GAP (found by this test, reported upstream — not fixed here: webdesk/payload/
-// vocabulary/** is out of this ticket's scope). primitives.ts's `validate(v, field)` for the
-// "media" primitive never consults `field.multiple` — unlike "relation", whose validator branches
-// on `field?.multiple` and validates each array item. So a field declared `{ primitive: 'media',
-// multiple: true }` (BLOCKS.gallery.fields[0] "items", BLOCKS.logoCloud.fields[1] "logos") can
-// never validate successfully: an array fails `isPlainObject(v)` outright ("expected a media
-// object"), and a single object would fail this renderer's own multi-item Astro markup. The
-// block's declared SHAPE (an array of media) is unambiguous from blocks.ts itself; only the
-// vocabulary's runtime validator disagrees with its own declaration. Components/Props here are
-// still typed to the declared (array) shape, since that is what blocks.ts actually specifies.
-const KNOWN_MULTIPLE_MEDIA_VALIDATION_GAP = new Set(['gallery', 'logoCloud'])
+// RESOLVED 2026-08-27 (was: KNOWN VOCABULARY GAP, found by this very test).
+// primitives.ts's `media` validator ignored `field.multiple` while `relation` honoured it, so
+// `gallery.items` and `logoCloud.logos` -- both declared `{ primitive: 'media', multiple: true }`
+// -- could never pass validateBlock(). Two of the nine frozen block types were unvalidatable.
+// Fixed upstream by mirroring the `relation` branch, then re-vendored here. The set below is now
+// EMPTY on purpose rather than deleted: it is the seam where the next such gap gets recorded, and
+// the loop beneath it is what turned an invisible bug into a failing test.
+const KNOWN_MULTIPLE_MEDIA_VALIDATION_GAP = new Set([])
 
 for (const type of BLOCK_TYPE_NAMES) {
   if (KNOWN_MULTIPLE_MEDIA_VALIDATION_GAP.has(type)) continue

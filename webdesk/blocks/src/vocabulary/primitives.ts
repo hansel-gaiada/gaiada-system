@@ -70,10 +70,24 @@ function validateOne(primitive: PrimitiveName, v: unknown, field?: FieldDef): st
       if (typeof v === 'string') return []
       if (isPlainObject(v) && 'root' in v) return []
       return ['expected a richtext document ({ root: ... }) or a plain string']
-    case 'media':
-      if (!isPlainObject(v)) return ['expected a media object']
-      if (typeof v.url !== 'string' || v.url.length === 0) return ['media.url must be a non-empty string']
-      return []
+    case 'media': {
+      // WSK-16 found this: `media` ignored `field.multiple` while `relation` honoured it, so
+      // `gallery.items` and `logoCloud.logos` -- both declared `multiple: true` media in blocks.ts
+      // -- could NEVER pass validateBlock(). Two of the nine frozen block types were unvalidatable.
+      // Fixed by mirroring the `relation` branch below exactly, so the two behave the same way.
+      const checkOne = (item: unknown): string[] => {
+        if (!isPlainObject(item)) return ['expected a media object']
+        if (typeof item.url !== 'string' || item.url.length === 0) {
+          return ['media.url must be a non-empty string']
+        }
+        return []
+      }
+      if (field?.multiple) {
+        if (!Array.isArray(v)) return ['expected an array of media objects']
+        return v.flatMap(checkOne)
+      }
+      return checkOne(v)
+    }
     case 'relation': {
       const checkOne = (item: unknown): string[] =>
         isPlainObject(item) && typeof item.collection === 'string' && typeof item.slug === 'string'
@@ -118,7 +132,7 @@ export const PRIMITIVES: Record<PrimitiveName, PrimitiveDef> = {
   },
   media: {
     name: 'media',
-    jsonShape: '{ url: string, alt?: string, width?: number, height?: number, mime?: string }',
+    jsonShape: '{ url: string, alt?: string, width?: number, height?: number, mime?: string } (or an array of the same when field.multiple)',
     validate: (v, f) => validateOne('media', v, f),
   },
   relation: {

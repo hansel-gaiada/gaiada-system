@@ -1,0 +1,38 @@
+---
+// webdesk/sites/wsk17-proof/src/pages/case-study/[slug].astro
+//
+// WSK-17 -- the proof page. `getStaticPaths` calls the generated SDK's typed list endpoint
+// (?expand=blocks, so the list response already carries full block content -- one round trip,
+// not N+1) against the LIVE /v1 dev stack started by scripts/seed-and-generate.sh, and every page
+// renders its item's real `blocks` array through @gaiada/webdesk-blocks' ItemRenderer -- the same
+// component WSK-16 proved against fixtures, here fed a real envelope that came out of Postgres.
+import { ItemRenderer } from '@gaiada/webdesk-blocks'
+import { client } from '../../lib/client.ts'
+import { TENANT_SLUG, COLLECTION_KEY } from '../../lib/site-tenant.ts'
+
+export async function getStaticPaths() {
+  const { data, error } = await client.GET(`/v1/t/${TENANT_SLUG}/${COLLECTION_KEY}`, {
+    params: { query: { expand: 'blocks' } },
+  })
+  if (error) throw new Error(`[wsk17-proof] list ${COLLECTION_KEY} failed: ${JSON.stringify(error)}`)
+
+  return data.items.map((envelope) => ({
+    params: { slug: envelope.slug },
+    props: { envelope },
+  }))
+}
+
+const { envelope } = Astro.props
+---
+<html lang={envelope.locale}>
+  <head>
+    <meta charset="utf-8" />
+    <title>{envelope.seo.title ?? envelope.slug}</title>
+    {typeof envelope.seo.description === 'string' && (
+      <meta name="description" content={envelope.seo.description} />
+    )}
+  </head>
+  <body data-tenant={TENANT_SLUG} data-collection={envelope.collection} data-slug={envelope.slug}>
+    <ItemRenderer envelope={envelope} />
+  </body>
+</html>

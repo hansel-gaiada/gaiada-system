@@ -1368,3 +1368,310 @@ docker rm -f wsk37-db wsk37-redis
 
 `npx tsc --noEmit`: clean, 0 errors, whole project (this ticket added no `any`, no `@ts-ignore`).
 Containers torn down (`docker rm -f wsk37-db wsk37-redis`) after the run.
+
+## WSK-38 — Data & Privacy / data-subject requests (DSR)
+
+New paths: `src/privacy/**` (module/controller/service/repository/attachments-service/
+residency-statement-service/identifier/command-types/command-decorator/policy guard),
+`migrations/0007_privacy_dsr.sql`, `test/privacy-*.spec.ts`, `test/privacy-test-app.ts`,
+`test/privacy-fixtures.ts`. This is the ticket that makes the platform legally answerable for the
+third-party PII it holds (design §11/WSK-D22): we are a **processor**, each client is the
+**controller** (UU PDP No. 27/2022 today; GDPR-shaped duties follow any client with EU end-users —
+that belongs in the client contract, not only here).
+
+### The command surface (three commands, all HIGH-impact / WS4-gated)
+
+| Command | Endpoint | Scope | Impact | Idempotency-Key |
+|---|---|---|---|---|
+| `privacy.find` | `POST /control/v1/tenants/:tenantSlug/privacy/find` | `webdesk:operate` | high | not required (every lookup is its own audited event — see below) |
+| `privacy.export` | `POST /control/v1/tenants/:tenantSlug/privacy/export` | `webdesk:operate` | high | not required (same reasoning) |
+| `privacy.erase` | `POST /control/v1/tenants/:tenantSlug/privacy/erase` | `webdesk:promote` | high | **required** |
+
+Body for all three: `{ "identifier": "<email, phone, or whatever a form actually collected>" }`.
+
+**Why all three are HIGH, not just erase.** The ticket's own instruction was explicit ("Expose all
+three as WS4-gated, audited control-plane commands ... with the correct impact class"). A generic
+C-05 reading would put `find`/`export` at `read`/`medium` (no DB mutation) — but finding or
+exporting a real person's COMPLETE footprint across a tenant concentrates PII in a way an ordinary
+read never does, and design §11/WSK-D22b's wording carries no carve-out for the non-destructive
+two. So all three require a WS4 assertion. What DOES distinguish `erase` is its **scope**:
+`webdesk:promote` — the same tier this command surface already reserves for every other
+irreversible action (`tenant.archive`/`site.archive`/`release.rollback` in
+`control/command-types.ts`). `find`/`export` stay on `webdesk:operate`. That is the concrete,
+checkable form "erase is irreversible — treat it accordingly" takes here: same WS4 gate for all
+three, a stricter scope tier for the one that destroys data. Full reasoning:
+`src/privacy/command-types.ts`'s own header.
+
+**Why `find`/`export` are not idempotency-keyed.** Every lookup or export of a real person's data
+is itself a distinct, auditable access. Collapsing a duplicate call into "same command, no new
+effect" would UNDER-count how many times staff looked at that person's data — the opposite of what
+a DSR trail is for. Each call gets its own `dsr_requests` row. Only `erase` (genuinely destructive)
+is idempotency-wrapped, matching WSK-21's "every command double-fired must produce one effect"
+doctrine — proven by `test/privacy-erase.spec.ts`'s double-fire test.
+
+**Matching, not by a hardcoded field-name list.** "email/phone are the realistic keys" (§11) is
+read as an example, not an exhaustive schema: `find`/`export`/`erase` match EITHER the existing
+`data_subject_ref` correlator (0003_forms.sql's own forward-looking hook, populated today only from
+an `email` field by `forms/consent.ts`) OR any VALUE inside a submission's `payload.fields` object,
+whatever that form's own field names happen to be (`privacy.repository.ts`'s `jsonb_each_text`
+scan). This is how a phone-only form (no `email` field, `data_subject_ref` NULL) is still found —
+covered by `test/privacy-find-export.spec.ts`'s own phone-match test. No phone-number
+canonicalization is done (exact case-insensitive string match only) — a follow-up could add
+libphonenumber-based normalization.
+
+### THE DESIGN QUESTION — erasure vs. immutability vs. consent-as-evidence
+
+This was the part of the ticket to answer rather than skip. Erasure collides with two things
+already in this schema: (a) the append-only/immutable-ledger discipline this estate uses everywhere
+(`audit_entries`' `REVOKE UPDATE, DELETE`), and (b) the consent record being itself evidence a
+controller (our client) may need to keep. Resolution, landed in
+`migrations/0007_privacy_dsr.sql` and `src/privacy/privacy.repository.ts`:
+
+- **SCRUB, not DELETE, on `submissions`** — extending `submissions-purge.service.ts`'s own
+  already-established time-based-retention precedent (WSK-10) from automatic-floor to
+  on-demand-rights-request. `erase()` sets `payload = '{}'`, `status = 'erased'` (a THIRD terminal
+  status alongside the pre-existing `'purged'` — added via the migration's `ALTER TABLE ...
+  DROP/ADD CONSTRAINT`), and — **unlike the existing purge job** — also `data_subject_ref = NULL`,
+  so the row stops being findable by identity going forward. The row's `id`/`created_at`/
+  `expires_at`/`form_def_id` survive, matching this ledger's own append-only-history precedent
+  (`audit_entries`/`content_versions`).
+- **Consent columns are DELIBERATELY preserved**, not scrubbed. `consent_notice_text`/
+  `consent_notice_version`/`consent_accepted_at` describe what notice a NOW-erased person was shown
+  and that they accepted it — they are not personal data ABOUT that person. Keeping them serves
+  "consent you cannot evidence is consent you do not have" (§11) without keeping any PII. This is a
+  DEVIATION from the existing purge job, which currently tombstones `consent_notice_text` too —
+  flagged as an observed inconsistency in the existing code, **not fixed** here
+  (`submissions-purge.service.ts` is out of this ticket's owned scope).
+- **A new evidentiary ledger, `dsr_requests`**, distinct from the generic `audit_entries` every
+  other command already writes to (both are written — `CommandAuditService` reused verbatim for
+  the generic `control.privacy.<x>` row). `dsr_requests` is append-only the same way
+  (`REVOKE UPDATE, DELETE ... FROM webdesk_app`, proven against the ACTUAL runtime role in
+  `test/privacy-erase.spec.ts`, not the migrator) and carries `subject_ref_hash` — a **SHA-256 of
+  the normalized identifier, NEVER the plaintext**. This is the crux of resolving the collision: a
+  row proving "subject X's data was erased at time T" must survive the erasure it describes without
+  itself becoming a second, un-erasable copy of X's personal data. A plaintext-carrying audit row
+  would have been exactly that mistake. Proven directly:
+  `test/privacy-erase.spec.ts`'s "THE AUDIT TRAIL SURVIVES THE ERASURE" test queries both
+  `dsr_requests` and `audit_entries` **after** the erasure completes and asserts neither the raw
+  email nor anything resembling it appears anywhere in either row.
+- **Attachments: hard DELETE, both the storage object and the `media_assets` row** — unlike
+  `submissions`, a `media_assets` row carries no evidentiary purpose once its object is gone (it is
+  pure operational metadata, not a rights record), so there is no tombstone to preserve. Ordering is
+  the OPPOSITE of `media.service.ts`'s own upload path ("store then record"): erase deletes the
+  storage object FIRST, and ABORTS the whole command (before any DB row is touched) if even one
+  delete fails — see `privacy-attachments.service.ts`'s header for why an erasure's worst failure
+  mode (a live, un-pointed-to copy of a person's file that nobody would ever know to delete) is
+  worse than the reverse (an orphaned DB row pointing at an already-gone object, which fails loud
+  and cleanly on next access).
+- **Crypto-shredding was considered and rejected for THIS ticket.** Encrypting each submission's
+  PII with a per-subject key and "erasing" by destroying the key is the stronger long-term answer,
+  and would sit more comfortably alongside this estate's hash-chained-ledger instincts elsewhere —
+  but it needs its own key-management schema (a KMS or a wrapped-key column + custody model, the
+  same class of decision WSK-37's AES-256-GCM secret column required) that does not exist anywhere
+  in this ledger yet. Inventing one inside this migration would be improvised DDL beyond a
+  narrowly-scoped, genuinely-needed change. Flagged as a stronger future option, not built — see
+  `migrations/0007_privacy_dsr.sql`'s own header for the full writeup of this decision.
+
+### Residency statement (§11 "(d)")
+
+`src/privacy/residency-statement.service.ts` — `ResidencyStatementService.buildFor(tenantSlug,
+backupPhase)`. Under **WSK-D23** (storage fully self-hosted — MinIO primary, no Cloudflare, no R2)
+this is answerable in one real sentence, generated from the SAME config the system actually runs on
+(`STORAGE_ENDPOINT`/`STORAGE_PUBLIC_BASE_URL`, `APP_DATABASE_URL`'s own host), not hand-typed policy
+prose:
+
+> All of tenant '\<slug>''s content, form submissions and uploaded media are stored on self-hosted
+> infrastructure we operate — Postgres at \<host> and MinIO (S3-API, self-hosted, never Cloudflare
+> R2 or any third-party object store) at \<host> — with backups going to \<phase-specific target,
+> e.g. "a nightly pull-model backup to a second estate-owned box (Zone B holds no credential for the
+> destination and cannot reach, overwrite, or delete it)">.
+
+Not wired to any HTTP route in this ticket (no design text asks for one) — a plain injectable a
+future control-plane read endpoint, or the WSK-24 console card, can call directly. Proven by
+`test/privacy-residency.spec.ts` across all three backup phases (`now`/`staging`/`target-state`,
+per §11's own phased backup description).
+
+### What could not be built as specified / flagged gaps
+
+- **The time-based purge job (`submissions-purge.service.ts`, WSK-10) does not clear
+  `data_subject_ref`** — only `payload` and `consent_notice_text`. A purged row therefore stays
+  findable by identity forever unless a DSR erase also runs against it (which `erase()` handles
+  correctly — see above). Not fixed here; `forms/**` is out of this ticket's owned scope. A
+  one-line follow-up (`data_subject_ref = NULL` added to that job's own `UPDATE`) would close it,
+  and is recommended.
+- **The same purge job also tombstones `consent_notice_text`**, which this ticket's own design
+  decision (above) treats as unnecessary/undesirable — consent evidence is not PII about the
+  subject. Also not fixed here; noted as an inconsistency between the two erasure paths (time-based
+  vs. on-demand) worth resolving in the same follow-up.
+- **No phone-number canonicalization** — `find`/`export`/`erase` match on exact (case-insensitive)
+  string equality against `payload.fields` values; a caller must supply the identifier in
+  approximately the same format the form stored it in. A `libphonenumber`-based normalization layer
+  is a reasonable follow-up if this becomes a real friction point.
+- **Export inlines attachment bytes as base64 in the HTTP response body**, matching the
+  base64-in-JSON convention `forms/**`/`media/**` already use for uploads, rather than writing a
+  bundle to the `artifacts` bucket and returning a presigned URL. Fine for the realistic case
+  (small form-attachment volumes) but would not scale to a subject with many/large attachments — a
+  presigned-URL-based export is a reasonable follow-up, not built here (no existing `artifacts`-
+  bucket-write path exists in this codebase to reuse yet).
+- **Single-use WS4 replay protection has the same known gap `RealPolicyDecisionPoint` already
+  documents** (a plain index, not a unique constraint, on `audit_entries.ws4_approval_id`) — this
+  ticket inherits it unchanged, does not worsen it, and does not fix it (that migration is
+  `control/**`'s own, per that file's own header).
+
+### Required changes outside this ticket's scope (reported, not made)
+
+- **`app.module.ts`** — one import line, same posture WSK-10/11/12/21/37 each already took:
+  ```ts
+  import { PrivacyModule } from "./privacy/privacy.module";
+  // add PrivacyModule to @Module({ imports: [...] })
+  ```
+  Note: `PrivacyModule` re-provides `ControlAuthGuard`/`CONTROL_CHANNEL_AUTHENTICATOR`/
+  `POLICY_DECISION_POINT` under its own DI graph rather than importing `ControlModule` (that
+  module exports only `JobsService` — see `privacy.module.ts`'s header for the full reasoning).
+  This is safe (both bindings are stateless verifiers, same classes, same env-conditional
+  `NODE_ENV=test` switch `control.module.ts` already uses) but is duplication that should collapse
+  the day this merges into `control/**` proper — see the next bullet.
+- **The real merge target: `control/command-types.ts` + `control.module.ts`.** This ticket
+  deliberately built a SHADOW command registry (`src/privacy/command-types.ts`) and a shadow guard
+  (`src/privacy/policy/privacy-command-authorization.guard.ts`) rather than editing `control/**`,
+  per this ticket's hard constraints. The exact merge is small and mechanical:
+  1. Add three rows to `control/command-types.ts`'s `COMMAND_REGISTRY` (and three names to its
+     `CommandName` union):
+     ```ts
+     "privacy.find": { command: "privacy.find", impactClass: "high", scope: "webdesk:operate", jobTracked: false },
+     "privacy.export": { command: "privacy.export", impactClass: "high", scope: "webdesk:operate", jobTracked: false },
+     "privacy.erase": { command: "privacy.erase", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
+     ```
+  2. Change `PrivacyController`'s three `@PrivacyCommand(...)` decorators to `@Command(...)` (the
+     real one, `control/command.decorator.ts`) and its guard list from
+     `[ControlAuthGuard, PrivacyCommandAuthorizationGuard]` to
+     `[ControlAuthGuard, CommandAuthorizationGuard]`.
+  3. Add `PrivacyController` to `ControlModule.controllers` and `PrivacyRepository`/
+     `PrivacyAttachmentsService`/`PrivacyCommandService`/`ResidencyStatementService` to its
+     `providers`; delete `src/privacy/privacy.module.ts`,
+     `src/privacy/policy/privacy-command-authorization.guard.ts`, `src/privacy/command-types.ts`
+     and `src/privacy/command.decorator.ts` (everything this bullet's steps 1-2 make redundant).
+  4. `test/privacy-test-app.ts` and `test/privacy-fixtures.ts` keep working unchanged either way
+     (they build their own standalone Nest app, same as every other ticket's `*-test-app.ts`).
+- **`.env.example`** — no NEW env vars: this ticket reads only vars that already exist
+  (`APP_DATABASE_URL`, `MIGRATE_DATABASE_URL` via the migration runner, `STORAGE_*`/`MINIO_BUCKET_UPLOADS`
+  from `storage.config.ts`, `TENANT_GUC_NAME` from `db/tenant-pool.ts`) — flagged loudly per this
+  ticket's own instruction, and true: no `WSK38_*` prefix was invented anywhere.
+- **The console card (WSK-24's surface, NOT built here).** Shape this ticket's command surface
+  implies for a "data-subject request" card:
+  - An identifier input (label: "email or phone") + three buttons: **Find**, **Export**,
+    **Erase** — `Erase` renders with the same destructive/WS4-confirmation treatment the Sites tab
+    already uses for promote/rollback (§08's button matrix: "always 🔴 WS4").
+  - `Find` result: a table of `matches` (`submissionId`/`formDefId`/`status`/`createdAt`/
+    `attachmentCount`) — no field values rendered (the command itself never returns them).
+  - `Export` result: a downloadable bundle (the response IS the portable form — see the flagged gap
+    above about base64-inlined attachments) — the console's natural move is "trigger a browser
+    download of the JSON response", not a new server-side file-generation step.
+  - `Erase` result: a confirmation summary (`submissionCount`/`attachmentCount`/`erasedAt`) plus a
+    permanent-action warning BEFORE the WS4 confirmation step, not after.
+  - A **residency statement** display: `ResidencyStatementService.buildFor(tenantSlug)`'s
+    `.sentence` rendered as plain text on the same card (or an adjacent "Data & Privacy" settings
+    section) — this is the §11 "(d)" requirement and has no other natural home in the console.
+
+### Verification runbook — one throwaway Postgres (5432→55530) + one throwaway MinIO (9000→55531), run INSIDE a Linux container
+
+Owner rule (2026-08-26): tests run on Linux, never the Windows host. This runbook stands up
+Postgres + MinIO as ordinary Windows-Docker-Desktop containers (host ports only needed for local
+inspection), puts a `node:22-bookworm-slim` container on the SAME docker network, `docker cp`s
+`src/`/`test/`/`package*.json`/`tsconfig.json`/`vitest.config.ts`/`.swcrc` in (never a `-v` bind
+mount — Git Bash on Windows silently rewrites container-side paths; `docs/...gitbash-docker-path-
+mangling.md`), runs `npm install` FRESH inside the container (a Windows-built `node_modules` has
+native bindings — `@swc/core` — that will not load on Linux), and talks to Postgres/MinIO by their
+container DNS names on the shared network, not `localhost`. Ports checked free via `docker ps`
+first (2026-08-27): not 55432/55433/55435, not the 55450/55460-55466/55480-55481/55490/
+55500-55502/55510-55511 blocks from prior tickets, and NOT 55520 (`wsk17-postgres`, a concurrent
+session's own container observed still running at verification time).
+
+```bash
+# 1. Network + throwaway Postgres + throwaway MinIO.
+docker network create wsk38-net
+MSYS_NO_PATHCONV=1 docker run -d --name wsk38-db --network wsk38-net -p 55530:5432 \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=throwaway_super -e POSTGRES_DB=webdesk \
+  -e POSTGRES_OWNER_USER=webdesk_owner -e POSTGRES_OWNER_PASSWORD=throwaway_owner \
+  -e POSTGRES_MIGRATOR_USER=webdesk_migrator -e POSTGRES_MIGRATOR_PASSWORD=throwaway_migrator \
+  -e POSTGRES_APP_USER=webdesk_app -e POSTGRES_APP_PASSWORD=throwaway_app \
+  -v "$(pwd -W)/../postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro" \
+  postgres:16-alpine
+docker run -d --name wsk38-minio --network wsk38-net -p 55531:9000 \
+  -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
+  minio/minio:latest server /data --console-address :9001
+
+# 2. The Linux test runner — `docker cp`, never a bind mount (see header above).
+MSYS_NO_PATHCONV=1 docker run -d --name wsk38-runner --network wsk38-net -w /work node:22-bookworm-slim sleep infinity
+MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'mkdir -p /work/webdesk/api /work/webdesk/migrations /work/webdesk/postgres /work/webdesk/scripts'
+docker cp src wsk38-runner:/work/webdesk/api/src
+docker cp test wsk38-runner:/work/webdesk/api/test
+docker cp package.json package-lock.json tsconfig.json vitest.config.ts .swcrc wsk38-runner:/work/webdesk/api/
+docker cp ../migrations/. wsk38-runner:/work/webdesk/migrations
+docker cp ../postgres/init-roles.sh wsk38-runner:/work/webdesk/postgres/init-roles.sh
+docker cp ../scripts/check-rls-integrity.mjs wsk38-runner:/work/webdesk/scripts/check-rls-integrity.mjs
+MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'cd /work/webdesk/api && npm install --no-audit --no-fund'
+
+# 3. Migrate (real env var name — MIGRATE_DATABASE_URL). Container DNS name, not localhost.
+MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'ln -s /work/webdesk/api/node_modules /work/webdesk/migrations/node_modules'
+MSYS_NO_PATHCONV=1 docker exec -e MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@wsk38-db:5432/webdesk" \
+  wsk38-runner sh -c 'cd /work/webdesk/migrations && node migrate.mjs'
+
+# 4. RLS integrity gate — MUST pass with dsr_requests included.
+MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'ln -s /work/webdesk/api/node_modules /work/webdesk/scripts/node_modules'
+MSYS_NO_PATHCONV=1 docker exec -e DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@wsk38-db:5432/webdesk" \
+  wsk38-runner sh -c 'cd /work/webdesk/scripts && node check-rls-integrity.mjs'
+
+# 5. Run the suite (real env var names — APP_DATABASE_URL, MIGRATE_DATABASE_URL).
+MSYS_NO_PATHCONV=1 docker exec \
+  -e NODE_ENV=test \
+  -e APP_DATABASE_URL="postgres://webdesk_app:throwaway_app@wsk38-db:5432/webdesk" \
+  -e MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@wsk38-db:5432/webdesk" \
+  -e API_KEY_PEPPER="wsk38-test-pepper-never-used-outside-this-suite" \
+  -e STORAGE_ENDPOINT="http://wsk38-minio:9000" \
+  -e STORAGE_ACCESS_KEY_ID="webdesk_minio" \
+  -e STORAGE_SECRET_ACCESS_KEY="changeme_minio_password" \
+  -e MINIO_BUCKET_UPLOADS="uploads" \
+  wsk38-runner sh -c 'cd /work/webdesk/api && npx vitest run test/privacy-command-registry.spec.ts test/privacy-residency.spec.ts test/privacy-find-export.spec.ts test/privacy-erase.spec.ts'
+
+# 6. tsc, then tear down.
+MSYS_NO_PATHCONV=1 docker exec wsk38-runner sh -c 'cd /work/webdesk/api && npx tsc --noEmit -p tsconfig.json'
+docker rm -f wsk38-runner wsk38-db wsk38-minio
+docker network rm wsk38-net
+```
+
+### Actually run (2026-08-27) — verbatim, on Linux (`node:22-bookworm-slim`, container, not the Windows host)
+
+```
+[webdesk:migrate] applying 0001_platform_core.sql ...
+[webdesk:migrate] applying 0002_content.sql ...
+[webdesk:migrate] applying 0003_forms.sql ...
+[webdesk:migrate] applying 0004_mail.sql ...
+[webdesk:migrate] applying 0005_tenant_locales.sql ...
+[webdesk:migrate] applying 0006_tenant_webhooks.sql ...
+[webdesk:migrate] applying 0007_privacy_dsr.sql ...
+[webdesk:migrate] done — 7 file(s) discovered, 7 applied, 0 already in the ledger.
+
+[rls-integrity] OK — 17 tenant-scoped table(s) intact (enabled + forced + >=1 policy).
+
+ ✓ test/privacy-erase.spec.ts (6 tests) 933ms
+ ✓ test/privacy-find-export.spec.ts (7 tests) 738ms
+ ✓ test/privacy-command-registry.spec.ts (6 tests) 3ms
+ ✓ test/privacy-residency.spec.ts (4 tests) 3ms
+
+ Test Files  4 passed (4)
+      Tests  23 passed (23)
+```
+
+`npx tsc --noEmit` (inside the same Linux container): clean, 0 errors, whole project. First run of
+the suite caught two REAL bugs in the test's own assumptions (not the implementation) before this
+green run: (1) the residency-statement test asserted the sentence never contains "cloudflare" — but
+the sentence deliberately says "never Cloudflare R2" as a reassurance, so the assertion itself was
+wrong (fixed to check the sentence never claims we USE Cloudflare); (2) the audit-immutability test
+connected as `webdesk_migrator` (which owns every table and is never subject to the `REVOKE
+UPDATE, DELETE`) instead of `webdesk_app` (the actual runtime role the REVOKE targets) — fixed by
+adding `withTenantAsApp` (connects via `APP_DATABASE_URL`) to `test/privacy-fixtures.ts` and
+re-pointing that one assertion at it; both `DELETE` and `UPDATE` are now proven refused against the
+real runtime role, and the row is proven still present and unmodified afterward. Containers torn
+down (`docker rm -f wsk38-runner wsk38-db wsk38-minio && docker network rm wsk38-net`) after the
+run.
