@@ -163,3 +163,29 @@ export function scopeToDepartment<
     runs: runs.filter((run) => inDept(run.project_id) || (run.source_meeting_id ? inDept(projectByMeeting.get(run.source_meeting_id)) : false)),
   };
 }
+
+// ── Ordering the briefing list ────────────────────────────────────────────────────────────────────
+// Briefings needing a person come first (ready to convert, then failed), then the ones waiting for a
+// recording, then the ones that move on their own. A briefing leaves the list once converted — but
+// not instantly: right after "Convert" the card stays for a while saying where its approvals now
+// live, otherwise the item a person just acted on vanishes under them. Shared by PRD Studio and a
+// project's Meetings tab so both surfaces read the same way.
+const PHASE_ORDER: Record<BriefingPhase, number> = { ready: 0, failed: 1, capture: 2, processing: 3, in_pipeline: 4 };
+export const RECENTLY_CONVERTED_MS = 60 * 60 * 1000;
+
+export function orderBriefings<R extends { status: RecordingStatus; created_at: string; updated_at: string }>(
+  recordings: R[],
+  now: number,
+  recentlyConvertedMs: number = RECENTLY_CONVERTED_MS,
+): R[] {
+  const cutoff = now - recentlyConvertedMs;
+  return recordings
+    .filter((r) => r.status !== "ingested" || Date.parse(r.updated_at) >= cutoff)
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const pa = PHASE_ORDER[briefingPhase(a.r.status).phase];
+      const pb = PHASE_ORDER[briefingPhase(b.r.status).phase];
+      return pa - pb || b.r.created_at.localeCompare(a.r.created_at) || a.i - b.i;
+    })
+    .map(({ r }) => r);
+}

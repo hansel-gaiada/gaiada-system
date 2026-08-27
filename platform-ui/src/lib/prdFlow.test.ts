@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { approvalTrack, briefingPhase, flowCounts, scopeToDepartment } from "./prdFlow";
+import { approvalTrack, briefingPhase, flowCounts, orderBriefings, scopeToDepartment } from "./prdFlow";
 import type { PipelineGate } from "./pipeline";
 
 function gate(over: Partial<PipelineGate>): PipelineGate {
@@ -179,5 +179,22 @@ describe("scopeToDepartment — PRD Studio is a Web Dev tab, so it shows Web Dev
     const out = scopeToDepartment(webDev, [rec("a", "p-seo-1", "mtg-a")], [run("r1", "p-web-1", "mtg-a")]);
     expect(out.runs.map((r) => r.id)).toEqual(["r1"]);
     expect(out.recordings).toEqual([]);
+  });
+});
+
+describe("orderBriefings — what a person must act on first, and converted ones linger briefly", () => {
+  const now = Date.parse("2026-08-26T12:00:00Z");
+  const rec = (id: string, status: Parameters<typeof briefingPhase>[0], created: string, updated = created) => ({ id, status, created_at: created, updated_at: updated });
+  it("ready → failed → capture → processing, newest first inside a group; ingested only if updated within the window", () => {
+    const rows = orderBriefings([
+      rec("old-ingested", "ingested", "2026-07-01T00:00:00Z"),
+      rec("just-ingested", "ingested", "2026-08-01T00:00:00Z", "2026-08-26T11:30:00Z"),
+      rec("cap-old", "recording", "2026-08-01T00:00:00Z"),
+      rec("cap-new", "scheduled", "2026-08-20T00:00:00Z"),
+      rec("proc", "transcribing", "2026-08-22T00:00:00Z"),
+      rec("ready", "transcribed", "2026-08-10T00:00:00Z"),
+      rec("fail", "failed", "2026-08-15T00:00:00Z"),
+    ], now);
+    expect(rows.map((r) => r.id)).toEqual(["ready", "fail", "cap-new", "cap-old", "proc", "just-ingested"]);
   });
 });

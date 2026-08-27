@@ -23,6 +23,7 @@ export function BriefingComposer({
   departmentId,
   departmentName = "this department",
   action,
+  fixed,
 }: {
   clients: ComposerClient[];
   /** This department's projects only — offered in "Link an existing project" mode. */
@@ -30,6 +31,9 @@ export function BriefingComposer({
   departmentId?: string;
   departmentName?: string;
   action: (prev: BriefingResult | null, formData: FormData) => Promise<BriefingResult>;
+  /** Inside a project workspace the lineage is already known: no client/project questions, the
+   *  briefing is filed under this project (projectMode "existing"). */
+  fixed?: { clientId: string | null; clientName: string | null; projectId: string; projectName: string };
 }) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState<BriefingResult | null, FormData>(action, null);
@@ -62,6 +66,18 @@ export function BriefingComposer({
   return (
     <form key={formKey} action={formAction} className="prd-composer">
       {departmentId && <input type="hidden" name="departmentId" value={departmentId} />}
+      {fixed ? (
+        <>
+          <input type="hidden" name="clientId" value={fixed.clientId ?? ""} />
+          <input type="hidden" name="projectMode" value="existing" />
+          <input type="hidden" name="projectId" value={fixed.projectId} />
+          <label className="prd-field">
+            What is this briefing about?
+            <input name="title" required placeholder="e.g. Sprint 3 review with the client" autoComplete="off" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <p className="prd-hint">Filed under {fixed.projectName}{fixed.clientName ? ` · ${fixed.clientName}` : ""}.</p>
+        </>
+      ) : (
       <div className="prd-fields prd-fields--two">
         <label className="prd-field">
           What is this briefing about?
@@ -75,7 +91,9 @@ export function BriefingComposer({
           </select>
         </label>
       </div>
+      )}
 
+      {!fixed && (
       <div className="prd-field" style={{ display: "grid", gap: 6 }}>
         <span id="prd-project-label">Project</span>
         <div className="prd-segment" role="radiogroup" aria-labelledby="prd-project-label">
@@ -102,6 +120,7 @@ export function BriefingComposer({
           </>
         )}
       </div>
+      )}
 
       <div className="prd-field" style={{ display: "grid", gap: 6 }}>
         <span id="prd-kind-label">You will record</span>

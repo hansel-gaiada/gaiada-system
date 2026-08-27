@@ -102,3 +102,20 @@ describe("BriefingComposer — step 1, nothing records yet", () => {
     await waitFor(() => expect(screen.getByText(/no active company selected/i)).toBeInTheDocument());
   });
 });
+
+describe("BriefingComposer — fixed lineage (inside a project workspace)", () => {
+  it("shows where the briefing is filed instead of asking, and submits that client and project", async () => {
+    const action = vi.fn<StartAction>(async () => ({ ok: true, id: "rec-9" }));
+    render(<BriefingComposer clients={[]} projects={[]} action={action} fixed={{ clientId: "cl-1", clientName: "Northwind Traders", projectId: "p-web-1", projectName: "Client site redesign" }} />);
+    expect(screen.getByText(/filed under client site redesign · northwind traders/i)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /client/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /new project/i })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/what is this briefing about/i), { target: { value: "Sprint 3 review" } });
+    fireEvent.click(screen.getByRole("button", { name: /create briefing/i }));
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    const fd = action.mock.calls[0][1];
+    expect(fd.get("clientId")).toBe("cl-1");
+    expect(fd.get("projectMode")).toBe("existing");
+    expect(fd.get("projectId")).toBe("p-web-1");
+  });
+});

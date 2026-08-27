@@ -358,6 +358,22 @@ test("PRD Studio: creating a briefing puts it straight into the capture step", a
   await expect(card.getByText(/· Playwright — kickoff briefing/)).toBeVisible();
 });
 
+test("a project's Meetings tab is the PRD Studio flow, filed under that project", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/projects/p-web-1?view=meetings");
+  await expect(page.getByText(/filed under client site redesign · northwind traders/i)).toBeVisible();
+  // Same cards as PRD Studio, only this project's: the Web Dev demo briefings all sit on p-web-1.
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await expect(intake.getByRole("button", { name: "Upload a transcript" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Cedar Group — SEO scope call" })).toHaveCount(0);
+  // The project's runs with their approvals, and a way to the department-wide view.
+  await expect(page.getByRole("link", { name: "Northwind — site redesign kickoff", exact: true })).toHaveAttribute("href", "/pipeline/run-demo-1");
+  await expect(page.getByText(/prd approved and signed — the build is unlocked/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: /open prd studio/i })).toHaveAttribute("href", "/departments/dept-1/prd");
+  // The old register-for-helper form is gone.
+  await expect(page.getByText(/or register a meeting for the desktop capture helper/i)).toHaveCount(0);
+});
+
 test("Repositories tab is the department's code inventory — repos from provisioned runs, problems first", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1/repositories");

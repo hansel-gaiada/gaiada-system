@@ -198,3 +198,9 @@
   .prd-fields { grid-template-columns: 1fr; }
   .prd-run { grid-template-columns: 1fr; }
 }
+
+/* ── Inside a project workspace (Meetings tab) ─────────────────────────────────────────────── */
+.prd-project { display: grid; gap: 28px; }
+.prd-project__section { display: grid; gap: 12px; }
+.prd-project__head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.prd-project__h { margin: 0; font: 600 15px/1.3 var(--font-body); color: var(--text-primary); }

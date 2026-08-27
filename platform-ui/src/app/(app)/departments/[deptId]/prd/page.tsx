@@ -13,7 +13,7 @@ import { listClients, listProjects } from "@/lib/entities";
 import { ingestAction, retryAudioAction, setTranscriptAction, uploadAudioAction } from "@/lib/meetingsActions";
 import { createBriefingAction, startRunManuallyAction } from "@/lib/prdActions";
 import { decideGateAction } from "@/lib/pipelineActions";
-import { briefingPhase, flowCounts, scopeToDepartment } from "@/lib/prdFlow";
+import { flowCounts, orderBriefings, scopeToDepartment } from "@/lib/prdFlow";
 import { PrdFlowHeader } from "@/components/prd/PrdFlowHeader";
 import { BriefingComposer } from "@/components/prd/BriefingComposer";
 import { BriefingCard } from "@/components/prd/BriefingCard";
@@ -28,10 +28,6 @@ type Params = Promise<{ deptId: string }>;
 // gates). Beyond this the row still renders, but says "open the run to see its approvals" rather than
 // guessing. A list-with-gates read on the backend would remove the cap; tracked as a frontend gap.
 const GATE_DETAIL_CAP = 12;
-const RECENTLY_CONVERTED_MS = 60 * 60 * 1000;
-
-// Briefings needing a person come first, then the ones that will move on their own.
-const PHASE_ORDER = { ready: 0, failed: 1, capture: 2, processing: 3, in_pipeline: 4 } as const;
 
 // PRD Studio — one flow, four beats: create a briefing → add its recording → convert the transcript
 // into a PRD run → clear GM review and client sign-off. Every state shown comes from a field the
@@ -85,18 +81,8 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
     gatesByRun.set(r.id, d.kind === "ok" && d.data ? d.data.gates : null);
   });
 
-  // A briefing leaves this list once converted — but not instantly. Right after "Convert to PRD run"
-  // the card stays for a while saying it was converted and where its approvals now live; otherwise
-  // the item a person just acted on vanishes under them with no hand-off. Older converted briefings
-  // are only reachable through their run (and /meetings).
-  const recentCutoff = Date.now() - RECENTLY_CONVERTED_MS;
-  const briefings = recordings
-    .filter((r) => r.status !== "ingested" || Date.parse(r.updated_at) >= recentCutoff)
-    .sort((a, b) => {
-      const pa = PHASE_ORDER[briefingPhase(a.status).phase];
-      const pb = PHASE_ORDER[briefingPhase(b.status).phase];
-      return pa !== pb ? pa - pb : b.created_at.localeCompare(a.created_at);
-    });
+  // Action order, converted ones lingering briefly — see lib/prdFlow.ts::orderBriefings.
+  const briefings = orderBriefings(recordings, Date.now());
 
   const counts = flowCounts(
     recordings,

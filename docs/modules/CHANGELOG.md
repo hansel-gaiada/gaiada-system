@@ -152,6 +152,13 @@ local stack). None of these mean "production-done".
   Direct GitHub creation outside provisioning stays fail-closed on the backend (WS11); this is the
   sanctioned manual path. `components/repositories/CreateRepoForm` (7 tests); e2e creates a standalone
   repo and provisions demo `run-demo-3`.
+- **A project's Meetings tab is now the PRD Studio flow, filed under that project.** It used to be
+  the old capture trio (record / register for the helper / upload) over a bare recordings table.
+  `components/prd/ProjectBriefings` composes the same pieces PRD Studio uses — `BriefingComposer`
+  with the client and project fixed ("Filed under …"), `BriefingCard`s in the same action order
+  (`lib/prdFlow.ts::orderBriefings`, now shared with PRD Studio), and `RunApprovalRow`s for the
+  project's runs with their GM / client beats — so the two surfaces cannot drift apart. Runs + gates
+  are read only when that tab is shown. `RecordControls` remains for the client workspace.
 - **New project from the Projects tab.** A project no longer has to come out of a PRD run: the
   department's Projects tab has a "New project" button that opens the existing `/projects/new` form
   with the owning department pre-selected (`?departmentId=`).
