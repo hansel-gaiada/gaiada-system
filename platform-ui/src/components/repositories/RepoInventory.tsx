@@ -4,6 +4,7 @@ import { useState, useTransition, type ReactNode } from "react";
 import { HairlineTable, StatusBadge } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { STATUS_LABEL } from "@/lib/webdevProvisionedSites";
+import { REPO_STATUS_LABEL } from "@/lib/repoInventory";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
 import type { ConnectionStatus } from "@/lib/connections";
 import { repoCounts, type RepoRow } from "@/lib/repoInventory";
@@ -31,16 +32,23 @@ export type RepoInventoryState =
 
 export interface GithubConnectionView { status: ConnectionStatus; account: string | null }
 
-const COLUMNS = [
+const BASE_COLUMNS = [
   { label: "Repository" },
   { label: "Client · Project" },
   { label: "Status" },
-  { label: "Staging" },
+  { label: "URL" },
   { label: "From run" },
   { label: "Last checked" },
-  { label: "" },
 ];
-const TCOLS = "2fr 1.6fr 1.5fr 1.6fr 1.6fr 1fr 1.3fr";
+const BASE_TCOLS = "2fr 1.6fr 1.4fr 1.8fr 1.7fr 1fr";
+// The actions column exists only when at least one row has an action (a re-check that can move it,
+// or a re-provision link); otherwise it is not rendered at all — no column of dashes.
+const ACTION_COLUMN = { label: "Action" };
+const ACTION_TCOLS = " 1.3fr";
+
+function rowHasAction(row: RepoRow, mayReconcile: boolean): boolean {
+  return (mayReconcile && row.canReconcile) || row.failure?.remedy === "reprovision";
+}
 
 export function RepoInventory({
   state,
@@ -82,6 +90,7 @@ export function RepoInventory({
 
   const { rows } = state;
   const inSample = !!sample;
+  const hasActions = !inSample && rows.some((r) => rowHasAction(r, mayReconcile));
   const c = repoCounts(rows);
   const summary = rows.length === 0
     ? null
@@ -117,11 +126,11 @@ export function RepoInventory({
           {previewOffer}
         </div>
       ) : (
-        <div className="lux-table-scroll erp-scroll repo-table" style={{ ["--lux-table-min" as string]: "1040px" }}>
+        <div className="lux-table-scroll erp-scroll repo-table" style={{ ["--lux-table-min" as string]: hasActions ? "1040px" : "900px" }}>
           <HairlineTable
-            columns={COLUMNS}
-            tcols={TCOLS}
-            rows={rows.map((r) => repoCells(r, { mayReconcile: mayReconcile && !inSample, sample: inSample, onReconcile: actions.reconcile }))}
+            columns={hasActions ? [...BASE_COLUMNS, ACTION_COLUMN] : BASE_COLUMNS}
+            tcols={hasActions ? BASE_TCOLS + ACTION_TCOLS : BASE_TCOLS}
+            rows={rows.map((r) => repoCells(r, { mayReconcile: mayReconcile && !inSample, withActions: hasActions, onReconcile: actions.reconcile }))}
           />
         </div>
       )}
@@ -147,9 +156,9 @@ function stripScheme(url: string): string {
   return url.replace(/^https?:\/\//, "");
 }
 
-function repoCells(row: RepoRow, opts: { mayReconcile: boolean; sample: boolean; onReconcile: (fd: FormData) => Promise<SiteActionResult> }): ReactNode[] {
+function repoCells(row: RepoRow, opts: { mayReconcile: boolean; withActions: boolean; onReconcile: (fd: FormData) => Promise<SiteActionResult> }): ReactNode[] {
   const lineage = [row.clientName, row.projectName].filter(Boolean).join(" · ");
-  return [
+  const cells: ReactNode[] = [
     // Repository — name → GitHub (plain text until the repo exists), framework underneath.
     <span key="repo" className="repo-cell repo-cell--stack">
       {row.repoUrl ? (
@@ -162,7 +171,7 @@ function repoCells(row: RepoRow, opts: { mayReconcile: boolean; sample: boolean;
     <span key="lineage" className="repo-cell">{lineage || <em className="repo-cell__muted">no client or project</em>}</span>,
     // Status — the badge, and for a failure the reason in plain words right under it.
     <span key="status" className="repo-cell repo-cell--stack">
-      <StatusBadge label={STATUS_LABEL[row.status]} />
+      <StatusBadge label={REPO_STATUS_LABEL[row.status]} />
       {row.failure && (
         <details className="repo-why">
           <summary className="repo-why__summary">{row.failure.title}</summary>
@@ -175,19 +184,19 @@ function repoCells(row: RepoRow, opts: { mayReconcile: boolean; sample: boolean;
     </span>,
     <span key="run" className="repo-cell"><Link href={`/pipeline/${row.run.id}`} className="repo-cell__run">{row.run.title} →</Link></span>,
     <span key="checked" className="repo-cell">{row.lastCheckedAt ? formatDate(row.lastCheckedAt) : <em className="repo-cell__muted">not checked yet</em>}</span>,
-    <RowActions key="actions" row={row} {...opts} />,
   ];
+  if (opts.withActions) cells.push(<RowActions key="actions" row={row} mayReconcile={opts.mayReconcile} onReconcile={opts.onReconcile} />);
+  return cells;
 }
 
-function RowActions({ row, mayReconcile, sample, onReconcile }: {
+function RowActions({ row, mayReconcile, onReconcile }: {
   row: RepoRow;
   mayReconcile: boolean;
-  sample: boolean;
   onReconcile: (formData: FormData) => Promise<SiteActionResult>;
 }) {
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<SiteActionResult | null>(null);
-  if (sample || (!row.failure && row.status === "live")) return <span className="repo-cell repo-cell__muted">—</span>;
+  if (!rowHasAction(row, mayReconcile)) return <span className="repo-cell" />;
   const reconcile = () => {
     setResult(null);
     startTransition(async () => {
@@ -205,7 +214,6 @@ function RowActions({ row, mayReconcile, sample, onReconcile }: {
       {row.failure?.remedy === "reprovision" && (
         <Link href={`/pipeline/${row.run.id}`} className="btn">Start a new provision →</Link>
       )}
-      {!mayReconcile && !row.failure && <span className="repo-cell__muted">—</span>}
       {result && !result.ok && <span className="repo-cell__why repo-cell__why--error">{result.error}</span>}
       {result?.ok && <span className="repo-cell__sub">Now {STATUS_LABEL[result.site.status] ?? result.site.status} — reload to see it in place.</span>}
     </span>

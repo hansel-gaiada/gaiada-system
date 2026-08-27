@@ -38,6 +38,18 @@ export interface NameLookups {
 
 const RANK: Record<SiteStatus, number> = { failed: 0, pending: 1, requested: 1, provisioned: 2, live: 3 };
 
+/** The status column speaks in environments, not provisioning internals: a `provisioned` site is
+ *  reachable on its staging URL (TLS may still be settling), so it reads "Staging". The run workspace
+ *  keeps the finer `STATUS_LABEL` ("Provisioned (SSL pending)") because that is where provisioning is
+ *  operated. */
+export const REPO_STATUS_LABEL: Record<SiteStatus, string> = {
+  requested: "Provisioning",
+  pending: "Provisioning",
+  provisioned: "Staging",
+  live: "Live",
+  failed: "Failed",
+};
+
 export function buildRepoInventory(
   sites: ProvisionedSite[],
   runs: PipelineRun[],

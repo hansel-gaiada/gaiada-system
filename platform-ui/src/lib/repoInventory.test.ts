@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRepoInventory, repoCounts, type RepoRow } from "./repoInventory";
+import { buildRepoInventory, repoCounts, REPO_STATUS_LABEL, type RepoRow } from "./repoInventory";
 import type { ProvisionedSite } from "./webdevProvisionedSites";
 
 function site(over: Partial<ProvisionedSite> & { id: string }): ProvisionedSite {
@@ -73,5 +73,11 @@ describe("repoCounts — the one-line summary", () => {
       site({ id: "f", status: "failed", failureReason: "crash" }),
     ], runs, names, webDev);
     expect(repoCounts(rows)).toEqual({ total: 6, live: 2, staging: 1, provisioning: 2, failed: 1 });
+  });
+});
+
+describe("REPO_STATUS_LABEL — the status column speaks in environments", () => {
+  it("maps the backend's provisioning states to Provisioning / Staging / Live / Failed", () => {
+    expect(REPO_STATUS_LABEL).toEqual({ requested: "Provisioning", pending: "Provisioning", provisioned: "Staging", live: "Live", failed: "Failed" });
   });
 });

@@ -77,6 +77,17 @@ describe("RepoInventory — the department's code, one row per repo", () => {
     expect(screen.getByText("Provisioning")).toBeInTheDocument();
   });
 
+  it("status speaks in environments: a provisioned repo reads Staging, and the actions column only exists when a row has an action", () => {
+    const { rerender } = render(<RepoInventory state={{ kind: "ok", rows: [row({ id: "p", status: "provisioned" }), row({ id: "l", status: "live" })] }} github={github} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
+    expect(screen.getByText("Staging")).toBeInTheDocument();
+    expect(screen.queryByText(/provisioned \(ssl pending\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Action")).not.toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+    rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "f", status: "failed", repoUrl: null, failure: { title: "That name belongs to someone else's site", body: "…", remedy: "reprovision" }, canReconcile: false }), row({ id: "l", status: "live" })] }} github={github} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
+    expect(screen.getByText("Action")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /start a new provision/i })).toBeInTheDocument();
+  });
+
   it("empty: says where repos come from, not 'connect GitHub'", () => {
     render(<RepoInventory state={{ kind: "ok", rows: [] }} github={github} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
     expect(screen.getByText(/no repositories yet/i)).toBeInTheDocument();
