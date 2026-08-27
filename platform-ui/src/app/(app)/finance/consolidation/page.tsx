@@ -7,6 +7,7 @@ import {
 } from "@/lib/finance";
 import { Card, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { CreateConsolidationRunForm, GenerateEliminationsAction } from "@/components/finance/ConsolidationActions";
 
 // Consolidation — the group's trial balance, and what a run has not yet addressed.
 //
@@ -79,8 +80,14 @@ export default async function FinanceConsolidationPage({
         )}
       </Card>
 
+      <div style={{ marginTop: 22 }}>
+        <CreateConsolidationRunForm />
+      </div>
+
       {selected ? (
         <>
+          <GenerateEliminationsAction runId={selected.id} entryCount={selected.entryCount} />
+
           <Card title="Consolidated trial balance" style={{ marginTop: 22 }}>
             {tb == null ? (
               <EmptyNote>
@@ -147,10 +154,15 @@ export default async function FinanceConsolidationPage({
 
       <Card title="What is not built here" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Creating a run, generating the intercompany eliminations, and recording a manual
-          consolidation adjustment are all implemented in the engine — including non-controlling
-          interests (PSAK 65) and the equity method (PSAK 15) — and none is exposed here yet.
-          Everything above reads real runs.
+          Creating a run and generating its intercompany eliminations are wired above. Recording a
+          manual consolidation adjustment is not — non-controlling interests (PSAK 65) and the equity
+          method (PSAK 15) still require one, and it is implemented in the engine but has no endpoint
+          or form here yet.
+        </p>
+        <p className="fin-muted">
+          DEMO_MODE note: this fixture store is not stateful (see <code>lib/demoFinance.ts</code>) —
+          a run created above will not appear in the &ldquo;Runs&rdquo; table in the browser demo,
+          though the write itself, and its validation, is real and reachable.
         </p>
       </Card>
     </div>

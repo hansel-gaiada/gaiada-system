@@ -45,10 +45,14 @@ export function CommitCutoverAction({
 }
 
 export function CloseFiscalYearAction({
-  fiscalYearId, fiscalYearCode,
+  fiscalYearId, fiscalYearCode, openPeriods,
 }: {
   fiscalYearId: string;
   fiscalYearCode: string;
+  /** A year with any period still OPEN is refused by the close engine. Disabling here BEFORE a
+   *  confirmation is typed — rather than letting the reader learn it from a refusal after — mirrors
+   *  the HARD_LOCK note on reopening a period. */
+  openPeriods: number;
 }) {
   return (
     <ConfirmAction
@@ -60,6 +64,11 @@ export function CloseFiscalYearAction({
         + "lets next year's profit start from zero while the accumulated figure keeps its history."
       }
       actionLabel="Close this fiscal year"
+      disabledNote={
+        openPeriods > 0
+          ? `${openPeriods} period(s) in ${fiscalYearCode} are still open. A year with an open period inside it is not closeable — close or lock each one first (see the periods table above).`
+          : null
+      }
       run={({ confirm }) => closeFiscalYear(fiscalYearId, { confirm })}
     />
   );

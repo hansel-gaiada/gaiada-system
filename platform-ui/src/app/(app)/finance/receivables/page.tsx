@@ -4,21 +4,25 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import {
   getArAging, reconcileAr, listPeriods, listArCustomers, listArOpenInvoices, listAccounts,
-  money, type ArAgingRow,
+  listArCreditNotes, money, type ArAgingRow,
 } from "@/lib/finance";
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
-import { IssueInvoiceForm, RecordReceiptForm } from "@/components/finance/ArForms";
+import { IssueInvoiceForm, RecordReceiptForm, CreateCustomerForm } from "@/components/finance/ArForms";
+import { IssueCreditNoteForm, CreditNotesTable, WriteOffInvoiceForm } from "@/components/finance/CreditNotesForms";
 
 // Receivables — what customers owe, bucketed by age, and whether that agrees with the ledger.
 //
-// ── THE POSITION IS THREE NUMBERS, NOT ONE ─────────────────────────────────────────────────────
-// `netReceivable` alone hides the thing a controller actually chases: payments received on account
-// that have never been ALLOCATED to an invoice. Those reduce the net while the invoice they should
-// have settled still sits in the aging, so a healthy-looking net can coexist with a customer being
-// dunned for something they already paid. Open invoices, payments on account and the net are shown
-// as three separate figures for that reason.
+// ── THE POSITION IS FOUR NUMBERS, NOT ONE ──────────────────────────────────────────────────────
+// `netReceivable` alone hides two things a controller actually chases: payments received on account
+// that have never been ALLOCATED to an invoice, and credit notes issued but not yet applied. Both
+// reduce the net while the invoice they might settle still sits in the aging, so a healthy-looking
+// net can coexist with a customer being dunned for something already credited or paid. An unapplied
+// credit note credits the AR control account exactly as an unallocated receipt does — it is a credit
+// note's NORMAL state, not an edge case — so it gets its own figure rather than vanishing into the
+// net. Open invoices, payments on account, unapplied credits and the net are shown as four separate
+// figures for that reason.
 export default async function FinanceReceivablesPage({
   searchParams,
 }: {
@@ -40,12 +44,13 @@ export default async function FinanceReceivablesPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [rows, rec, customers, openInvoices, accounts] = await Promise.all([
+  const [rows, rec, customers, openInvoices, accounts, creditNotes] = await Promise.all([
     getArAging(userId, tenant, asOf),
     reconcileAr(userId, tenant, asOf),
     listArCustomers(userId, tenant),
     listArOpenInvoices(userId, tenant),
     listAccounts(userId, tenant),
+    listArCreditNotes(userId, tenant),
   ]);
 
   // The pickers are built from the REAL chart, not a hardcoded list of codes. A form offering `4100`
@@ -58,6 +63,14 @@ export default async function FinanceReceivablesPage({
   const bankAccounts = (accounts ?? [])
     .filter((a) => a.accountType === "asset" && a.allowManualPosting && a.status === "active"
       && (a.code.startsWith("11") || /bank|kas/i.test(a.name)))
+    .map((a) => ({ code: a.code, name: a.name }));
+  // Contra-revenue, never the original revenue account — crediting revenue itself would net the
+  // credit away and hide a deteriorating return rate inside ordinary sales. 42xx/43xx is the
+  // Indonesian COA convention (Potongan/Retur Penjualan); the codes themselves still come from the
+  // real chart, only the prefix heuristic is fixed, matching the bank-account filter above.
+  const creditAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "revenue" && a.allowManualPosting && a.status === "active"
+      && (a.code.startsWith("42") || a.code.startsWith("43")))
     .map((a) => ({ code: a.code, name: a.name }));
 
   return (
@@ -75,6 +88,12 @@ export default async function FinanceReceivablesPage({
             label="Payments on account"
             value={money(rec.position.paymentsOnAccount)}
             foot="received but not allocated to an invoice"
+          />
+          <KpiTile
+            label="Unapplied credits"
+            value={money(rec.position.unappliedCredits)}
+            foot="issued but not yet applied to an invoice"
+            hint="A credit note credits the AR control account the moment it is issued — the same as an unallocated receipt. This is a credit note's NORMAL state until someone decides what it settles, not an edge case, which is why it is a figure of its own rather than folded silently into the net."
           />
           <KpiTile label="Net receivable" value={money(rec.position.netReceivable)} foot="what is actually owed" />
         </div>
@@ -102,18 +121,32 @@ export default async function FinanceReceivablesPage({
           openInvoices={openInvoices}
           bankAccounts={bankAccounts}
         />
+        <CreateCustomerForm />
       </div>
 
-      <Card title="What is still not built here" style={{ marginTop: 22 }}>
+      <Card
+        title="Credit notes"
+        hint="The customer never owed it. Reverses output VAT along with the sale."
+        style={{ marginTop: 22 }}
+      >
+        <CreditNotesTable notes={creditNotes} openInvoices={openInvoices} />
+      </Card>
+
+      <div style={{ marginTop: 22 }}>
+        <IssueCreditNoteForm customers={customers} openInvoices={openInvoices} creditAccounts={creditAccounts} />
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <WriteOffInvoiceForm openInvoices={openInvoices} />
+      </div>
+
+      <Card title="Design notes" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Credit notes and write-offs are not built. A write-off is deliberately a separate grant
-          from banking a receipt — holding both is a seeded blocking conflict in the duty matrix
-          (take the cash, then write off the debt), so the two must never arrive as one screen.
-        </p>
-        <p className="fin-muted">
-          Adding a customer is also not built; customer records currently come from the finance
-          seed. A customer is not a CRM client — it carries the NPWP, the PKP flag and the payment
-          terms that decide how an invoice is taxed and aged.
+          A write-off and a credit note both bind to the same segregation-of-duties grant
+          (<code>ar_writeoff_approve</code>) and both are a seeded blocking pair with
+          <code> ar_receipt_posting</code> — the person who banks a receipt must not also be the one
+          who writes off or credits the debt it might have settled (&ldquo;pocket the cash, then
+          write off the debt&rdquo;).
         </p>
       </Card>
     </div>

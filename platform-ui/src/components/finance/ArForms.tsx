@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Card, Button } from "@/components/ui";
-import { issueArInvoice, recordArReceipt } from "@/lib/financeActions";
+import { issueArInvoice, recordArReceipt, createArCustomer } from "@/lib/financeActions";
 import type { ArCustomer, ArOpenInvoice } from "@/lib/finance";
 
 // The receivables write surfaces: raise an invoice, bank a receipt.
@@ -312,6 +312,69 @@ export function RecordReceiptForm({
 
         <div className="fin-form__actions">
           <Button type="submit" disabled={pending}>{pending ? "Recording…" : "Record receipt"}</Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/**
+ * Add a customer. A customer record is not a CRM contact — it carries the NPWP, the PKP flag and
+ * the payment terms that decide how an invoice is taxed and aged, which is why this lives here
+ * rather than on an address-book screen.
+ */
+export function CreateCustomerForm() {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  return (
+    <Card title="Add a customer" hint="Not a CRM contact — this record carries the NPWP, the PKP flag and the payment terms that decide how an invoice is taxed and aged.">
+      <form
+        className="fin-form"
+        action={(fd) => {
+          setError(null); setDone(null);
+          start(async () => {
+            const r = await createArCustomer({
+              code: String(fd.get("code")).trim(),
+              name: String(fd.get("name")).trim(),
+              npwp: String(fd.get("npwp") || "") || undefined,
+              isPkp: fd.get("isPkp") === "on",
+              paymentTermsDays: Number(fd.get("paymentTermsDays") || 30),
+            });
+            if (r.ok) setDone(`${r.result?.code ?? "Customer"} added.`);
+            else setError(r.error ?? "Failed.");
+          });
+        }}
+      >
+        <div className="fin-form__field">
+          <label htmlFor="cust-code">Code</label>
+          <input id="cust-code" name="code" required placeholder="C-003" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="cust-name">Name</label>
+          <input id="cust-name" name="name" required placeholder="PT Contoh Sejahtera" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="cust-npwp">NPWP</label>
+          <input id="cust-npwp" name="npwp" placeholder="01.234.567.8-901.000" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="cust-terms">Payment terms (days)</label>
+          <input id="cust-terms" name="paymentTermsDays" type="number" min="0" step="1" defaultValue={30} />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="cust-pkp" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input id="cust-pkp" name="isPkp" type="checkbox" />
+            Registered PKP
+          </label>
+        </div>
+
+        {error ? <p className="fin-form__error fin-form__field--wide">{error}</p> : null}
+        {done ? <p className="fin-muted fin-form__field--wide">{done}</p> : null}
+
+        <div className="fin-form__actions">
+          <Button type="submit" disabled={pending}>{pending ? "Adding…" : "Add customer"}</Button>
         </div>
       </form>
     </Card>

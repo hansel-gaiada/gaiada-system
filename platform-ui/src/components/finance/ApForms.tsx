@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Card, Button, HairlineTable } from "@/components/ui";
-import { enterApBill, approveApBill, releaseApPayment } from "@/lib/financeActions";
+import { enterApBill, approveApBill, releaseApPayment, createApVendor } from "@/lib/financeActions";
 // TYPE-ONLY import, deliberately. `lib/finance.ts` opens with `import "server-only"` and this file
 // is `"use client"` — pulling in any VALUE from that module (its `money()` formatter included)
 // drags the server-only guard into the client bundle and fails the build. ArForms.tsx hit this
@@ -487,6 +487,85 @@ export function ReleasePaymentForm({
 
         <div className="fin-form__actions">
           <Button type="submit" disabled={pending}>{pending ? "Releasing…" : "Release payment"}</Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/**
+ * Add a vendor. `vendor_master`, NOT `manage` — see `lib/financeActions.ts::createApVendor`'s own
+ * note on why creation sits on the same grant as editing a vendor's bank details, and is therefore a
+ * blocking pair with payment release rather than something bill entry can also do.
+ */
+export function CreateVendorForm() {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [whtPercent, setWhtPercent] = useState("");
+
+  return (
+    <Card title="Add a vendor" hint="Not just a name — this record carries the NPWP, the PKP flag and the default withholding code that decide how a bill is taxed.">
+      <form
+        className="fin-form"
+        action={(fd) => {
+          setError(null); setDone(null);
+          const wp = Number(fd.get("defaultWithholdingRate") || 0);
+          start(async () => {
+            const r = await createApVendor({
+              code: String(fd.get("code")).trim(),
+              name: String(fd.get("name")).trim(),
+              npwp: String(fd.get("npwp") || "") || undefined,
+              isPkp: fd.get("isPkp") === "on",
+              defaultWithholdingCode: String(fd.get("defaultWithholdingCode") || "") || undefined,
+              defaultWithholdingRate: wp > 0 ? wp / 100 : undefined,
+              paymentTermsDays: Number(fd.get("paymentTermsDays") || 30),
+            });
+            if (r.ok) setDone(`${r.result?.code ?? "Vendor"} added.`);
+            else setError(r.error ?? "Failed.");
+          });
+        }}
+      >
+        <div className="fin-form__field">
+          <label htmlFor="vend-code">Code</label>
+          <input id="vend-code" name="code" required placeholder="V-003" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="vend-name">Name</label>
+          <input id="vend-name" name="name" required placeholder="CV Contoh Jaya" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="vend-npwp">NPWP</label>
+          <input id="vend-npwp" name="npwp" placeholder="01.234.567.8-901.000" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="vend-terms">Payment terms (days)</label>
+          <input id="vend-terms" name="paymentTermsDays" type="number" min="0" step="1" defaultValue={30} />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="vend-whtCode">Default withholding code</label>
+          <input id="vend-whtCode" name="defaultWithholdingCode" placeholder="PPH23" />
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="vend-whtRate">Default withholding rate (%)</label>
+          <input
+            id="vend-whtRate" name="defaultWithholdingRate" type="number" min="0" max="100" step="0.1"
+            value={whtPercent} onChange={(e) => setWhtPercent(e.target.value)}
+          />
+          <span className="fin-muted">PPh 23 is typically 2%. Sent as a fraction (2% → 0.02) — see the header note on why the field itself takes a percent.</span>
+        </div>
+        <div className="fin-form__field">
+          <label htmlFor="vend-pkp" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input id="vend-pkp" name="isPkp" type="checkbox" />
+            Registered PKP
+          </label>
+        </div>
+
+        {error ? <p className="fin-form__error fin-form__field--wide">{error}</p> : null}
+        {done ? <p className="fin-muted fin-form__field--wide">{done}</p> : null}
+
+        <div className="fin-form__actions">
+          <Button type="submit" disabled={pending}>{pending ? "Adding…" : "Add vendor"}</Button>
         </div>
       </form>
     </Card>

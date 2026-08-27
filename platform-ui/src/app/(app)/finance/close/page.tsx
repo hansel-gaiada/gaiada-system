@@ -4,11 +4,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import {
-  listPeriods, getCloseReadiness, PERIOD_STATE_LABEL, BLOCKER_LABEL, type FiscalPeriod,
+  listPeriods, getCloseReadiness, listFiscalYears,
+  PERIOD_STATE_LABEL, BLOCKER_LABEL, type FiscalPeriod,
 } from "@/lib/finance";
 import { Card, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { ClosePeriodActions } from "@/components/finance/ClosePeriodActions";
+import { CloseFiscalYearAction } from "@/components/finance/CutoverActions";
 
 // Period close — the checklist that decides whether a month can be locked.
 //
@@ -52,6 +54,7 @@ export default async function FinanceClosePage({
     periods.find((p) => p.id === sp.periodId) ?? fallback;
 
   const readiness = await getCloseReadiness(userId, tenant, selected.id);
+  const fiscalYears = await listFiscalYears(userId, tenant);
 
   return (
     <div className="fin-page">
@@ -133,17 +136,57 @@ export default async function FinanceClosePage({
         />
       </Card>
 
-      <Card title="Reopening, and what is still not built" style={{ marginTop: 22 }}>
+      <Card title="Fiscal years" hint="Closing a year rolls its result into retained earnings — the last act in a year's life, and terminal." style={{ marginTop: 22 }}>
+        {fiscalYears.length === 0 ? (
+          <EmptyNote>No fiscal year is recorded for this company.</EmptyNote>
+        ) : (
+          <>
+            <HairlineTable
+              columns={[
+                { label: "Fiscal year" }, { label: "Dates" }, { label: "Periods", align: "right" },
+                { label: "Open periods", align: "right" }, { label: "Status" },
+              ]}
+              rows={fiscalYears.map((fy) => [
+                fy.code,
+                `${fy.startDate} – ${fy.endDate}`,
+                String(fy.periodCount),
+                String(fy.openPeriods),
+                fy.status,
+              ])}
+            />
+            <div style={{ marginTop: 18, display: "grid", gap: 22 }}>
+              {fiscalYears.map((fy) => (
+                <div key={fy.id}>
+                  <Eyebrow>{fy.code}</Eyebrow>
+                  {fy.status === "closed" ? (
+                    <p className="fin-muted">Already closed.</p>
+                  ) : (
+                    <CloseFiscalYearAction
+                      fiscalYearId={fy.id}
+                      fiscalYearCode={fy.code}
+                      openPeriods={fy.openPeriods}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card title="Reopening a period" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          A soft-locked period can be reopened by someone holding the <code>reopen</code> grant,
-          which company administrators deliberately do not have. A hard lock is the audit boundary
-          and has no reopen path at all — that is what makes it worth a separate action rather than
-          a checkbox on this one.
+          Wired above, behind the same typed-confirmation gate as sign-off and close. A soft-locked
+          period can be reopened by someone holding the <code>reopen</code> grant, which company
+          administrators deliberately do not have — a soft lock exists so the routine monthly close
+          is recoverable, but reversing it is somebody else&rsquo;s decision. A hard lock has no
+          reopen path at all, for anyone; that refusal comes from the server and is shown verbatim
+          rather than guessed at here.
         </p>
         <p className="fin-muted">
-          Reopening is not exposed here yet. Neither is editing the close checklist; the readiness
-          gate above computes it, and a hand-editable checklist beside a computed gate would give two
-          answers to the same question.
+          Editing the close checklist is not exposed here. The readiness gate above computes it, and
+          a hand-editable checklist beside a computed gate would give two answers to the same
+          question.
         </p>
       </Card>
     </div>

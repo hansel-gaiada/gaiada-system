@@ -9,6 +9,7 @@ import {
 import { Card, KpiTile, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { RecogniseLeaseAction } from "@/components/finance/RecogniseLeaseAction";
+import { CreateInstrumentForm, PostAccrualForm } from "@/components/finance/TreasuryForms";
 
 // Treasury — loans, bonds and leases, on one model.
 //
@@ -129,8 +130,7 @@ export default async function FinanceTreasuryPage({
       <Card title="Instruments" style={{ marginTop: 22 }}>
         {instruments.length === 0 ? (
           <EmptyNote>
-            No loans, bonds or leases are recorded for this company. Recording one is not built here
-            yet — see the note at the foot of this page.
+            No loans, bonds or leases are recorded for this company yet. Record one below.
           </EmptyNote>
         ) : (
           <HairlineTable
@@ -166,20 +166,23 @@ export default async function FinanceTreasuryPage({
           {schedule.length === 0 ? (
             <EmptyNote>No schedule could be derived for this instrument.</EmptyNote>
           ) : (
-            <HairlineTable
-              columns={[
-                { label: "#" }, { label: "Due" }, { label: "Opening", align: "right" },
-                { label: "Interest", align: "right" }, { label: "Principal", align: "right" },
-                { label: "Closing", align: "right" },
-              ]}
-              rows={schedule.map((r) => [
-                String(r.seq), r.dueDate,
-                money(r.opening, selected.currencyCode),
-                money(r.interest, selected.currencyCode),
-                money(r.principal, selected.currencyCode),
-                money(r.closing, selected.currencyCode),
-              ])}
-            />
+            <>
+              <HairlineTable
+                columns={[
+                  { label: "#" }, { label: "Due" }, { label: "Opening", align: "right" },
+                  { label: "Interest", align: "right" }, { label: "Principal", align: "right" },
+                  { label: "Closing", align: "right" },
+                ]}
+                rows={schedule.map((r) => [
+                  String(r.seq), r.dueDate,
+                  money(r.opening, selected.currencyCode),
+                  money(r.interest, selected.currencyCode),
+                  money(r.principal, selected.currencyCode),
+                  money(r.closing, selected.currencyCode),
+                ])}
+              />
+              <PostAccrualForm instrumentId={selected.id} instrumentCode={selected.code} schedule={schedule} />
+            </>
           )}
         </Card>
       ) : null}
@@ -202,6 +205,10 @@ export default async function FinanceTreasuryPage({
         </Card>
       ) : null}
 
+      <div style={{ marginTop: 22 }}>
+        <CreateInstrumentForm />
+      </div>
+
       {leases.length > 0 ? (
         <Card
           title="Recognise a lease (PSAK 73)"
@@ -221,11 +228,11 @@ export default async function FinanceTreasuryPage({
         </Card>
       ) : null}
 
-      <Card title="What is not built here" style={{ marginTop: 22 }}>
+      <Card title="What is built here" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Recording a new instrument and posting an interest accrual are implemented in the engine
-          and <strong>not exposed here</strong>. Everything above is live and read from the real
-          instruments.
+          Recording a new instrument and posting an interest accrual are both wired above — the
+          accrual is keyed on the schedule instalment (seq), not a fiscal period, so pick a schedule
+          row rather than a month.
         </p>
         <p className="fin-muted">
           {leases.length === 0

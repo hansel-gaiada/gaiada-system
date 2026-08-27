@@ -9,7 +9,7 @@ import {
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
-import { EnterBillForm, ReleasePaymentForm } from "@/components/finance/ApForms";
+import { EnterBillForm, ReleasePaymentForm, CreateVendorForm } from "@/components/finance/ApForms";
 import { ApApprovalQueue } from "@/components/finance/ApApprovalQueue";
 
 // Payables — what the company owes vendors, bucketed by age, and whether that ties to the ledger.
@@ -106,21 +106,15 @@ export default async function FinancePayablesPage({
         <ApApprovalQueue drafts={draftBills} />
         <EnterBillForm vendors={vendors} expenseAccounts={expenseAccounts} liabilityAccounts={liabilityAccounts} />
         <ReleasePaymentForm vendors={vendors} openBills={openBills} bankAccounts={bankAccounts} />
+        <CreateVendorForm />
       </div>
 
       <Card title="What is still not built here" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Credit notes and write-offs are not built — neither has SQL behind it yet, so building a
-          form would mean inventing the accounting rather than exposing it. A write-off is
-          deliberately a separate grant from banking a payment, for the same reason bill entry is
-          separate from approval.
-        </p>
-        <p className="fin-muted">
-          Adding a vendor is also not built here; vendor records currently come from the finance
-          seed. Vendor creation is its own Cerbos action (<code>vendor_master</code>) precisely
-          because editing a vendor&rsquo;s bank details can redirect payment on a genuine bill
-          without forging anything — the duty matrix seeds it as a blocking pair with payment
-          release for that reason, the same shape as bill entry and approval above.
+          Credit notes and write-offs are not built for payables — neither has SQL behind it yet, so
+          building a form would mean inventing the accounting rather than exposing it. The AR side
+          (<code>/finance/receivables</code>) has both, for the mirror-image case: a supplier
+          crediting or forgiving what the company owes THEM has no engine here yet.
         </p>
       </Card>
     </div>

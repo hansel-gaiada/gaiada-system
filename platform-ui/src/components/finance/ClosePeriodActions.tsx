@@ -1,6 +1,6 @@
 "use client";
 import { ConfirmAction } from "@/components/finance/ConfirmAction";
-import { signOffPeriod, closePeriod } from "@/lib/financeActions";
+import { signOffPeriod, closePeriod, reopenPeriod } from "@/lib/financeActions";
 
 // Sign-off and close, in the order they actually happen.
 //
@@ -96,6 +96,35 @@ export function ClosePeriodActions({
           />
         </section>
       ) : null}
+
+      {/* The counterpart to closing, and a DIFFERENT grant (`reopen`, not held by company_admin) —
+          see the note this replaced at the foot of the close page. A soft lock exists so the routine
+          monthly close is recoverable; reversing it is somebody else's decision, not the closer's. A
+          hard lock has no path back at all, which is enforced by the server and surfaced here
+          verbatim rather than guessed at. */}
+      <section>
+        <h3 style={{ margin: "0 0 8px" }}>4 · Reopen</h3>
+        <ConfirmAction
+          expected={periodName}
+          expectedLabel="period"
+          consequence={
+            "Sets this period back to OPEN so an entry can be posted inside it again. Only a soft "
+            + "lock can be reopened — a hard lock is the audit boundary and has no path back, for "
+            + "anyone."
+          }
+          actionLabel="Reopen this period"
+          requireReason
+          reasonHint="e.g. a late vendor bill needs to post inside this period"
+          disabledNote={
+            state === "OPEN"
+              ? `${periodName} is already open — there is nothing to reopen.`
+              : state === "HARD_LOCK"
+                ? `${periodName} is HARD-LOCKED and cannot be reopened. That is what a hard lock means — a correction belongs in a later period, as an ordinary entry that shows on the face of the books.`
+                : null
+          }
+          run={({ confirm, reason }) => reopenPeriod(periodId, { confirm, reason: reason ?? "" })}
+        />
+      </section>
     </div>
   );
 }

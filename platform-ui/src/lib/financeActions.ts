@@ -218,6 +218,25 @@ export async function closePeriod(
   return r as FinanceActionResult<{ period: string; state: string }>;
 }
 
+/**
+ * Reopen a soft-locked period. The counterpart to `closePeriod`, and deliberately a DIFFERENT
+ * Cerbos grant (`reopen`, not held by company_admin) — a soft lock exists so the routine monthly
+ * close is recoverable, but reversing it is somebody else's decision, not the closer's.
+ *
+ * `reason` is required, matching the server. A HARD_LOCK period has no path back at all — the
+ * server refuses with a sentence explaining why, and that message is what the form shows verbatim
+ * rather than a generic "Failed" behind an opaque 400.
+ */
+export async function reopenPeriod(
+  periodId: string, input: { confirm: string; reason: string },
+): Promise<FinanceActionResult<{ period: string; state: string }>> {
+  const r = await send<{ ok: boolean; period: string; state: string }>(
+    `/finance/periods/${periodId}/reopen`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/close"); revalidatePath("/finance"); revalidatePath("/finance/journals"); }
+  return r as FinanceActionResult<{ period: string; state: string }>;
+}
+
 export async function commitCutover(
   cutoverId: string, input: { confirm: string },
 ): Promise<FinanceActionResult<{ journalId: string; cutoverDate: string }>> {
@@ -330,4 +349,167 @@ export async function releaseApPayment(input: {
     revalidatePath("/finance");
   }
   return r as FinanceActionResult<{ id: string; allocated: number; onAccount: number }>;
+}
+
+// ── Master data: customers + vendors ────────────────────────────────────────────────────────────
+// A customer/vendor record is not a CRM contact — it carries the NPWP, PKP flag and payment terms
+// that decide how an invoice/bill is taxed and aged, which is why these are finance writes rather
+// than something an address-book screen could own.
+
+export async function createArCustomer(input: {
+  code: string; name: string; npwp?: string; isPkp?: boolean; paymentTermsDays?: number;
+}): Promise<FinanceActionResult<{ id: string; code: string; name: string }>> {
+  const r = await send<{ id: string; code: string; name: string }>("/finance/ar/customers", input);
+  if (r.ok) { revalidatePath("/finance/receivables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ id: string; code: string; name: string }>;
+}
+
+/**
+ * Create a vendor. `vendor_master`, NOT `manage` — editing a vendor's bank details can redirect
+ * payment on a genuine bill without forging anything, so the duty matrix seeds this as a blocking
+ * pair with `ap_payment_release`. Creation lives on the same grant as that edit.
+ */
+export async function createApVendor(input: {
+  code: string; name: string; npwp?: string; isPkp?: boolean;
+  defaultWithholdingCode?: string;
+  /** A RATE (0.02 for PPh 23 at 2%), not a percentage — matches the database column. */
+  defaultWithholdingRate?: number;
+  paymentTermsDays?: number;
+}): Promise<FinanceActionResult<{ id: string; code: string; name: string }>> {
+  const r = await send<{ id: string; code: string; name: string }>("/finance/ap/vendors", input);
+  if (r.ok) { revalidatePath("/finance/payables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ id: string; code: string; name: string }>;
+}
+
+// ── Consolidation, the write side (F9) ──────────────────────────────────────────────────────────
+// A run is a dated working paper; creating one is cheap. What makes it a CONSOLIDATION rather than
+// a sum of the members is the elimination entries — `finance_consolidated_trial_balance` refuses a
+// run with none, and `generateEliminations` is what escapes that refusal by doing the work.
+
+export async function createConsolidationRun(input: {
+  asOf: string; label?: string;
+}): Promise<FinanceActionResult<{ id: string; asOf: string }>> {
+  const r = await send<{ id: string; asOf: string }>("/finance/consolidation/runs", input);
+  if (r.ok) { revalidatePath("/finance/consolidation"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ id: string; asOf: string }>;
+}
+
+/**
+ * Generate the intercompany eliminations for a run. Runs BOTH the balance-sheet and the P&L
+ * elimination — see the controller's own note on why doing only the first is a half-consolidation
+ * that still double-counts intercompany revenue.
+ */
+export async function generateEliminations(
+  runId: string,
+): Promise<FinanceActionResult<{ entryCount: number }>> {
+  const r = await send<{ ok: boolean; entryCount: number }>(
+    `/finance/consolidation/runs/${runId}/eliminate`, {},
+  );
+  if (r.ok) { revalidatePath("/finance/consolidation"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ entryCount: number }>;
+}
+
+// ── Treasury, the write side (F11) ──────────────────────────────────────────────────────────────
+
+export interface CreateInstrumentInput {
+  code: string; name: string;
+  kind: "loan_payable" | "loan_receivable" | "bond_issued" | "lease";
+  counterpartyName?: string; currencyCode?: string; principal: number;
+  /** A PERCENT (11.5 for 11.5%), matching the column — unlike AP withholding, which is a rate. */
+  nominalRate?: number | null; effectiveRate?: number | null;
+  startDate: string; maturityDate?: string;
+  paymentMonths?: number; repaymentMethod?: string;
+}
+
+export async function createInstrument(
+  input: CreateInstrumentInput,
+): Promise<FinanceActionResult<{ id: string; code: string; kind: string }>> {
+  const r = await send<{ id: string; code: string; kind: string }>("/finance/instruments", input);
+  if (r.ok) { revalidatePath("/finance/treasury"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ id: string; code: string; kind: string }>;
+}
+
+/**
+ * Post the interest accrual for ONE INSTALMENT of an instrument's schedule. Keyed on the schedule
+ * SEQ (the 1-based instalment number), never a fiscal period — see the controller's own note on why
+ * that is the correct key and not an accident of the signature.
+ */
+export async function postInstrumentAccrual(
+  instrumentId: string, seq: number,
+): Promise<FinanceActionResult<{ journalId: string; seq: number }>> {
+  const r = await send<{ journalId: string; seq: number }>(
+    `/finance/instruments/${instrumentId}/accrual`, { seq },
+  );
+  if (r.ok) {
+    revalidatePath("/finance/treasury");
+    revalidatePath("/finance");
+    revalidatePath("/finance/journals");
+  }
+  return r as FinanceActionResult<{ journalId: string; seq: number }>;
+}
+
+// ── AR credit notes and write-offs (F4b) ────────────────────────────────────────────────────────
+// A credit note reverses output VAT along with the sale — the customer never owed it. A write-off
+// does neither — the sale stood and the PPN was properly due — it only stops chasing money that will
+// not come. Two endpoints, two Cerbos actions (`credit_note` vs `write_off`), and deliberately no
+// shared "adjustment" function here that could blur which one a caller meant.
+
+export interface ArCreditNoteLineInput {
+  description: string;
+  amount: number;
+  /** Contra-revenue (4300 Retur Penjualan / 4200 Potongan Penjualan) — never the original revenue
+   *  account, which would net the credit away and hide a deteriorating return rate. */
+  creditAccountCode: string;
+  /** Percent, e.g. 12. Omit for a line that carries no PPN. */
+  taxRate?: number | null;
+}
+
+/** Raise a credit note and post it. Optionally applies it to an invoice in the same call —
+ *  omit `applyToInvoiceId` to leave the credit ON ACCOUNT. */
+export async function createArCreditNote(input: {
+  customerId: string;
+  creditNoteNo: string;
+  creditNoteDate: string;
+  currencyCode?: string;
+  reasonCode: string;
+  reason: string;
+  originalInvoiceId?: string;
+  applyToInvoiceId?: string;
+  applyAmount?: number;
+  lines: ArCreditNoteLineInput[];
+}): Promise<FinanceActionResult<{ id: string; creditNoteNo: string; subtotal: number; taxTotal: number; total: number }>> {
+  const r = await send<{ id: string; creditNoteNo: string; subtotal: number; taxTotal: number; total: number }>(
+    "/finance/ar/credit-notes", input,
+  );
+  if (r.ok) { revalidatePath("/finance/receivables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ id: string; creditNoteNo: string; subtotal: number; taxTotal: number; total: number }>;
+}
+
+/** Apply an already-issued credit note to an invoice. Subledger only — posts nothing. */
+export async function applyArCreditNote(
+  noteId: string, input: { invoiceId: string; amount: number },
+): Promise<FinanceActionResult<{ applicationId: string; amount: number }>> {
+  const r = await send<{ applicationId: string; amount: number }>(
+    `/finance/ar/credit-notes/${noteId}/apply`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/receivables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ applicationId: string; amount: number }>;
+}
+
+/**
+ * Write off an uncollectible receivable. Confirmation-gated on the INVOICE NUMBER, like closing a
+ * period — a write-off is corrected only by a reversal, so re-typing the invoice is the cheapest
+ * guard against writing off the wrong one.
+ *
+ * ⚠ Posts NO VAT line. Indonesian PPN gives no relief for a bad debt — see the controller's own note.
+ */
+export async function writeOffArInvoice(
+  invoiceId: string,
+  input: { amount: number; writeOffDate: string; reasonCode: string; reason: string; confirm: string },
+): Promise<FinanceActionResult<{ writeOffId: string; invoiceNo: string; amount: number }>> {
+  const r = await send<{ writeOffId: string; invoiceNo: string; amount: number }>(
+    `/finance/ar/invoices/${invoiceId}/write-off`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/receivables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ writeOffId: string; invoiceNo: string; amount: number }>;
 }

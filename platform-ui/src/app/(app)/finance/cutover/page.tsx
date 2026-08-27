@@ -167,11 +167,11 @@ export default async function FinanceCutoverPage({
 
       <Card title="The year-end close" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Closing a fiscal year rolls the year&rsquo;s result into retained earnings. It is wired
-          (<code>POST /finance/fiscal-years/:id/close</code>, same typed-confirmation gate) but has
-          no picker on this page yet, because a fiscal-year list is not something this surface reads
-          — it reads cutovers. It belongs next to the calendar, and putting it here would attach a
-          terminal action to the wrong noun.
+          Closing a fiscal year rolls the year&rsquo;s result into retained earnings. It is wired,
+          same typed-confirmation gate as committing a cutover — but the picker lives on{" "}
+          <a href="/finance/close">/finance/close</a>, next to the fiscal calendar it closes, not
+          here. This surface reads cutovers, not fiscal years; putting the action here would attach
+          a terminal act to the wrong noun.
         </p>
       </Card>
     </div>

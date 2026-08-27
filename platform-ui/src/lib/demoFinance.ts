@@ -17,13 +17,20 @@ import "server-only";
 // read console. A fixture that accepted a journal post it could not model would let the page look
 // like it worked, and this is the one module where "looked like it worked" involves money.
 //
-// EXCEPT the five terminal-action writes (owner decision 2026-08-26: typed-confirmation gate —
-// sign-off, close, cutover commit, fiscal-year close, lease recognition). Those forms are useless
-// in DEMO_MODE if the POST falls through to an unhandled-route failure — but faking their success
+// EXCEPT the six typed-confirmation writes (owner decision 2026-08-26 — sign-off, close, cutover
+// commit, fiscal-year close, lease recognition — plus period REOPEN, the counterpart to close,
+// added alongside the rest of the F3/F9/F11 write surface below). Those forms are useless in
+// DEMO_MODE if the POST falls through to an unhandled-route failure — but faking their success
 // would be the exact sin this file exists to avoid. So `financeWrite()` near the bottom REPRODUCES
 // the live handlers' refusals (bad confirmation string, missing reason, a readiness gate with open
-// blockers, an instrument that isn't a lease) against these same fixtures, rather than answering
-// every POST with a cheerful `{ok:true}`. Every other write still falls through unanswered.
+// blockers, an instrument that isn't a lease, a HARD_LOCK that cannot be reopened) against these
+// same fixtures, rather than answering every POST with a cheerful `{ok:true}`.
+//
+// A second, smaller group of PLAIN writes (create a consolidation run, generate its eliminations,
+// record an instrument, post an interest accrual, add a customer, add a vendor) is handled the same
+// way for the same reason — none of them is confirmation-gated, but each has a real validation shape
+// worth mirroring (duplicate codes, range checks, unknown ids) rather than a blind `{ok:true}`.
+// Everything else still falls through unanswered to demoFixtures.ts's generic write fallback.
 //
 // Why it exists at all: `next build` runs with DEMO_MODE=1 and the smoke Playwright project drives
 // the built app, so a route with no fixture is a route nobody can open in CI. Without this the
@@ -79,6 +86,11 @@ const ACCOUNTS: Account[] = [
   { code: "2140", name: "PPN Keluaran", accountType: "liability", normalBalance: "credit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: true },
   { code: "3100", name: "Modal Saham", accountType: "equity", normalBalance: "credit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: true },
   { code: "4100", name: "Pendapatan Usaha", accountType: "revenue", normalBalance: "credit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: true },
+  // Contra-revenue, so the credit-note form's account picker has something real to filter to — see
+  // `financePath`'s AR credit note dispatch below. Normal balance is DEBIT (opposite of ordinary
+  // revenue) because these accounts reduce revenue rather than record it.
+  { code: "4200", name: "Potongan Penjualan", accountType: "revenue", normalBalance: "debit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: false },
+  { code: "4300", name: "Retur Penjualan", accountType: "revenue", normalBalance: "debit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: false },
   { code: "6100", name: "Beban Gaji dan Tunjangan", accountType: "expense", normalBalance: "debit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: true },
   { code: "6200", name: "Beban Sewa", accountType: "expense", normalBalance: "debit", isPostable: true, isControl: false, controlSubledger: null, allowManualPosting: true, status: "active", hasPostings: false },
 ];
@@ -137,8 +149,14 @@ const AP_AGING: ApAgingRow[] = [
 
 const LEDGER_CLEAN: LedgerVerdict = { problems: [], clean: true };
 
+// unappliedCredits is 5,550,000 — CN-2026-001 below, still unapplied. Non-zero on purpose: a demo
+// where every credit note was already applied would make the fourth KPI tile permanently zero and
+// the one figure it exists to surface (a credit note's NORMAL unapplied state) unreachable.
 const AR_RECONCILE: ReconcileVerdict<ArPosition> = {
-  position: { openInvoices: "185000000.0000", paymentsOnAccount: "0.0000", netReceivable: "185000000.0000" },
+  position: {
+    openInvoices: "185000000.0000", paymentsOnAccount: "0.0000", unappliedCredits: "5550000.0000",
+    netReceivable: "179450000.0000",
+  },
   problems: [],
   clean: true,
 };
@@ -324,6 +342,28 @@ const AR_OPEN_INVOICES = [
   },
 ];
 
+// AR credit notes. One unapplied (drives the "apply" cell), one already applied (drives the
+// disabled/settled state) — a store where every note was already settled would make the apply
+// action, and the reason it exists, unreachable in a browser.
+const AR_CREDIT_NOTES = [
+  {
+    id: "cn-1", creditNoteNo: "CN-2026-001", creditNoteDate: "2026-03-05",
+    customerCode: "C-002", customerName: "CV Nusantara Kopi",
+    subtotal: "5000000.0000", taxTotal: "550000.0000", total: "5550000.0000",
+    amountApplied: "0.0000", unapplied: "5550000.0000",
+    reasonCode: "return", reason: "Barang dikembalikan — kualitas tidak sesuai pesanan",
+    status: "issued", originalInvoiceId: "inv-2", originalInvoiceNo: "INV-2026-002",
+  },
+  {
+    id: "cn-2", creditNoteNo: "CN-2026-002", creditNoteDate: "2026-02-20",
+    customerCode: "C-001", customerName: "PT Bali Beach Resort",
+    subtotal: "2000000.0000", taxTotal: "0.0000", total: "2000000.0000",
+    amountApplied: "2000000.0000", unapplied: "0.0000",
+    reasonCode: "discount", reason: "Diskon loyalitas disepakati setelah faktur terbit",
+    status: "applied", originalInvoiceId: "inv-1", originalInvoiceNo: "INV-2026-001",
+  },
+];
+
 // ── The four engine surfaces (F8/F9/F10/F11) ────────────────────────────────────────────────────
 // Without these the new tabs render EMPTY in demo mode while the build gate still passes — the
 // "looks built, is unusable" failure this store exists to prevent. The figures mirror the shapes the
@@ -463,11 +503,21 @@ const CUTOVERS = [
   },
 ];
 
-// Minimal, and read by `closeFiscalYear` below only — no page reads a fiscal-year LIST yet (the
-// cutover page's own copy says why: "a fiscal-year list is not something this surface reads — it
-// reads cutovers"). `code` is what the live handler makes the caller echo back, and it is the same
-// `FY2026` every period in `PERIODS` already carries.
-const FISCAL_YEARS = [{ id: "demo-fy-2026", code: `FY${YEAR}` }];
+// Backs BOTH `GET /finance/fiscal-years` and `closeFiscalYearDemo` below. `periodCount`/`openPeriods`
+// are DERIVED from `PERIODS` above rather than hand-counted, so they cannot drift from the periods
+// table the close page renders right beside this one. That derivation also means this year is
+// genuinely NOT closeable in the demo estate (Apr–Dec are still OPEN) — deliberately, so the
+// close-disabled state (openPeriods > 0) is reachable in a browser rather than only in the live
+// company the real endpoint was verified against.
+const FISCAL_YEARS = [
+  {
+    id: "demo-fy-2026", code: `FY${YEAR}`,
+    startDate: PERIODS[0].startDate, endDate: PERIODS[PERIODS.length - 1].endDate,
+    status: "open",
+    periodCount: PERIODS.length,
+    openPeriods: PERIODS.filter((p) => p.state === "OPEN").length,
+  },
+];
 
 const CUTOVER_READINESS = {
   ready: false,
@@ -553,6 +603,7 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   if (tail === "ownership") return ok(OWNERSHIP);
   if (tail === "settings") return ok(SETTINGS);
   if (tail === "periods") return ok(PERIODS);
+  if (tail === "fiscal-years") return ok(FISCAL_YEARS);
   if (tail === "trial-balance") return ok(TRIAL_BALANCE);
   if (tail === "balance-sheet") return ok(BALANCE_SHEET);
   if (tail === "journals") return ok(JOURNALS);
@@ -584,6 +635,10 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   if (tail === "ap/bills") return ok(_params.get("status") === "draft" ? AP_DRAFT_BILLS : [...AP_DRAFT_BILLS, ...AP_OPEN_BILLS]);
   if (tail === "ar/customers") return ok(AR_CUSTOMERS);
   if (tail === "ar/open-invoices") return ok(AR_OPEN_INVOICES);
+  if (tail === "ar/credit-notes") {
+    const status = _params.get("status");
+    return ok(status ? AR_CREDIT_NOTES.filter((n) => n.status === status) : AR_CREDIT_NOTES);
+  }
   if (tail === "ar/aging") return ok(AR_AGING);
   if (tail === "ap/aging") return ok(AP_AGING);
   if (tail === "ar/reconcile") return ok(AR_RECONCILE);
@@ -718,10 +773,21 @@ function closeFiscalYearDemo(fiscalYearId: string, b: { confirm?: string; retain
   const refused = requireConfirmation(b.confirm, year.code, "fiscal year");
   if (refused) return refused;
 
+  // Mirrors the engine's own gate, per the coordinator's note: a year with any period still OPEN is
+  // not closeable. `CloseFiscalYearAction` already disables the control client-side before a
+  // confirmation can even be typed — this is the server-side backstop for anyone calling the demo
+  // route directly, same posture as every other gate in this file.
+  if (year.openPeriods > 0) {
+    return badRequest(
+      `${year.code} has ${year.openPeriods} period(s) still open — a fiscal year cannot be closed `
+      + `while any period inside it is open.`,
+    );
+  }
+
   // Same default the engine itself uses — 3300 RETAINED earnings, never 3200 (current-year
   // result). `ACCOUNTS` above has no 3300, so the default call refuses honestly rather than
   // inventing an account this demo's chart was never given; passing an existing code (e.g. 3100)
-  // reaches the success path.
+  // reaches the success path — once `openPeriods` above is not the blocker.
   const retained = b.retainedAccountCode?.trim() || "3300";
   if (!ACCOUNTS.some((a) => a.code === retained)) {
     return badRequest(`unknown retained-earnings account ${retained}`);
@@ -749,8 +815,203 @@ function recogniseLeaseDemo(instrumentId: string, b: { confirm?: string; assetCl
   return { status: 201, json: { ok: true, assetId: `demo-asset-${instrument.id}`, instrument: instrument.code } };
 }
 
-/** Dispatches the five gated writes; every other write still falls through unanswered (`null`), for
- *  exactly the reason the top-of-file comment gives. */
+/**
+ * Reopen a soft-locked period — the counterpart to `closePeriodDemo`. Mirrors the live handler's
+ * check ORDER exactly: reason is checked before the period even loads, matching `finance.controller
+ * .ts::reopenPeriod`.
+ */
+function reopenPeriodDemo(periodId: string, b: { confirm?: string; reason?: string }): DemoResult {
+  const reason = b.reason?.trim();
+  if (!reason) return badRequest("reason is required — reopening a closed period is an exception, and an exception with no recorded reason is indistinguishable from a mistake");
+
+  const period = PERIODS.find((x) => x.id === periodId);
+  if (!period) return notFound("no such fiscal period in this company");
+  const refused = requireConfirmation(b.confirm, period.name, "period");
+  if (refused) return refused;
+
+  if (period.state === "OPEN") return badRequest(`${period.name} is already open`);
+  if (period.state === "HARD_LOCK") {
+    return badRequest(
+      `${period.name} is HARD-LOCKED and cannot be reopened. That is what a hard lock means — `
+      + `a correction belongs in a later period, as an ordinary entry that shows on the face of the books.`,
+    );
+  }
+  return { status: 200, json: { ok: true, period: period.name, state: "OPEN" } };
+}
+
+// ── The second group: plain writes, no confirmation gate ───────────────────────────────────────
+// None of these echoes a typed string back — see the header comment. Each still mirrors a real
+// validation shape (duplicate codes, range checks, unknown ids) rather than answering with a blind
+// `{ok:true}`. And — same caveat as the five terminal writes above — this store is NOT stateful: an
+// id minted here (a new run, a new instrument, a new customer) will not appear in the static GET
+// lists afterward. That is a real limitation of a fixture store, named rather than hidden by faking
+// persistence this file does not have.
+
+function createConsolidationRunDemo(b: { asOf?: string; label?: string }): DemoResult {
+  if (!b.asOf) return badRequest("asOf is required");
+  return { status: 201, json: { id: `demo-consol-run-${Date.now()}`, asOf: b.asOf } };
+}
+
+function eliminateIntercompanyDemo(runId: string): DemoResult {
+  const run = CONSOLIDATION_RUNS.find((r) => r.id === runId);
+  if (!run) return notFound("no such consolidation run in this company");
+  return { status: 200, json: { ok: true, entryCount: run.entryCount } };
+}
+
+const INSTRUMENT_KINDS = ["loan_payable", "loan_receivable", "bond_issued", "lease"];
+
+function createInstrumentDemo(b: {
+  code?: string; name?: string; kind?: string; startDate?: string; maturityDate?: string;
+  principal?: number; nominalRate?: number | null;
+}): DemoResult {
+  const code = b.code?.trim();
+  const name = b.name?.trim();
+  if (!code) return badRequest("code is required");
+  if (!name) return badRequest("name is required");
+  if (!b.kind || !INSTRUMENT_KINDS.includes(b.kind)) {
+    return badRequest(`kind must be one of ${INSTRUMENT_KINDS.join(", ")}`);
+  }
+  if (!b.startDate) return badRequest("startDate is required");
+  if (b.maturityDate && b.maturityDate <= b.startDate) return badRequest("maturityDate must be after startDate");
+  const principal = Number(b.principal);
+  if (!Number.isFinite(principal) || principal <= 0) return badRequest("principal must be greater than zero");
+  const nominal = b.nominalRate === undefined || b.nominalRate === null ? null : Number(b.nominalRate);
+  if (nominal !== null && (!Number.isFinite(nominal) || nominal < 0 || nominal > 100)) {
+    return badRequest("nominalRate is a percent (11.5 for 11.5%), between 0 and 100");
+  }
+  if (INSTRUMENTS.some((i) => i.code === code)) return badRequest(`an instrument with code ${code} already exists`);
+  return { status: 201, json: { id: `demo-instrument-${Date.now()}`, code, kind: b.kind } };
+}
+
+function postInstrumentAccrualDemo(instrumentId: string, b: { seq?: number }): DemoResult {
+  const seq = Number(b.seq);
+  if (!Number.isInteger(seq) || seq < 1) {
+    return badRequest("seq is required — the 1-based instalment number from the instrument's schedule");
+  }
+  const instrument = INSTRUMENTS.find((i) => i.id === instrumentId);
+  if (!instrument) return notFound("no such instrument in this company");
+  // INSTRUMENT_SCHEDULE is the same 6-row fixture for every instrument (the GET route answers every
+  // id with it) — so its length is the honest bound to check against here too.
+  const len = INSTRUMENT_SCHEDULE.length;
+  if (seq > len) return badRequest(`this instrument's schedule has ${len} instalment(s); seq ${seq} does not exist`);
+  return { status: 201, json: { journalId: `demo-j-accrual-${instrumentId}-${seq}`, seq } };
+}
+
+function createArCustomerDemo(b: { code?: string; name?: string; paymentTermsDays?: number }): DemoResult {
+  const code = b.code?.trim();
+  const name = b.name?.trim();
+  if (!code) return badRequest("code is required");
+  if (!name) return badRequest("name is required");
+  const terms = b.paymentTermsDays ?? 30;
+  if (!Number.isInteger(terms) || terms < 0) return badRequest("paymentTermsDays must be a whole number of days, zero or more");
+  if (AR_CUSTOMERS.some((c) => c.code === code)) return badRequest(`a customer with code ${code} already exists`);
+  return { status: 201, json: { id: `demo-customer-${Date.now()}`, code, name } };
+}
+
+function createApVendorDemo(b: {
+  code?: string; name?: string; defaultWithholdingRate?: number | null;
+}): DemoResult {
+  const code = b.code?.trim();
+  const name = b.name?.trim();
+  if (!code) return badRequest("code is required");
+  if (!name) return badRequest("name is required");
+  const rate = b.defaultWithholdingRate === undefined || b.defaultWithholdingRate === null
+    ? null : Number(b.defaultWithholdingRate);
+  if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 1)) {
+    return badRequest("defaultWithholdingRate is a rate between 0 and 1 (0.02 for PPh 23 at 2%), not a percentage");
+  }
+  if (AP_VENDORS.some((v) => v.code === code)) return badRequest(`a vendor with code ${code} already exists`);
+  return { status: 201, json: { id: `demo-vendor-${Date.now()}`, code, name } };
+}
+
+// ── AR credit notes and write-offs (F4b) ────────────────────────────────────────────────────────
+const CREDIT_NOTE_REASONS = ["return", "overbilling", "discount", "service_failure", "price_correction", "other"];
+const WRITE_OFF_REASONS = ["uncollectible", "customer_insolvent", "disputed_abandoned", "below_recovery_cost", "statute_barred", "other"];
+
+interface CreditNoteLineBody {
+  description?: string; amount?: number | string; creditAccountCode?: string; taxRate?: number | string | null;
+}
+
+/** Mirrors `finance.controller.ts::createArCreditNote` — same check order, same VAT formula (12% of
+ *  11/12 of the base), so a demo refusal reads the way the live one does. */
+function createArCreditNoteDemo(b: {
+  creditNoteDate?: string; creditNoteNo?: string; customerId?: string;
+  reasonCode?: string; reason?: string; lines?: CreditNoteLineBody[];
+}): DemoResult {
+  if (!b.creditNoteDate) return badRequest("creditNoteDate is required");
+  const creditNoteNo = b.creditNoteNo?.trim();
+  if (!creditNoteNo) return badRequest("creditNoteNo is required");
+  if (!b.customerId) return badRequest("customerId is required");
+  if (!b.reasonCode || !CREDIT_NOTE_REASONS.includes(b.reasonCode)) {
+    return badRequest(`reasonCode must be one of ${CREDIT_NOTE_REASONS.join(", ")}`);
+  }
+  if (!b.reason?.trim()) {
+    return badRequest("reason is required — a credit with no recorded cause is indistinguishable from a concealed write-off");
+  }
+  if (!Array.isArray(b.lines) || b.lines.length === 0) {
+    return badRequest("at least one line is required — a credit note with no lines cannot be issued");
+  }
+
+  let subtotal = 0;
+  let taxTotal = 0;
+  for (let i = 0; i < b.lines.length; i++) {
+    const l = b.lines[i];
+    const amount = Number(l?.amount);
+    if (!l?.description?.trim()) return badRequest(`line ${i + 1}: description is required`);
+    if (!l?.creditAccountCode) return badRequest(`line ${i + 1}: creditAccountCode is required`);
+    if (!Number.isFinite(amount) || amount <= 0) return badRequest(`line ${i + 1}: amount must be greater than zero`);
+    const rate = l?.taxRate === undefined || l.taxRate === null ? null : Number(l.taxRate);
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+      return badRequest(`line ${i + 1}: taxRate must be between 0 and 100`);
+    }
+    if (!ACCOUNTS.some((a) => a.code === l.creditAccountCode)) return badRequest(`unknown account ${l.creditAccountCode}`);
+    subtotal += amount;
+    taxTotal += rate === null ? 0 : Math.round(amount * (11 / 12) * (rate / 100));
+  }
+  if (subtotal + taxTotal <= 0) return badRequest("credit note total must be greater than zero");
+  if (AR_CREDIT_NOTES.some((n) => n.creditNoteNo === creditNoteNo)) {
+    return badRequest(`a credit note numbered ${creditNoteNo} already exists`);
+  }
+
+  return {
+    status: 201,
+    json: { id: `demo-cn-${Date.now()}`, creditNoteNo, subtotal, taxTotal, total: subtotal + taxTotal },
+  };
+}
+
+function applyArCreditNoteDemo(noteId: string, b: { invoiceId?: string; amount?: number }): DemoResult {
+  if (!b.invoiceId) return badRequest("invoiceId is required");
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return badRequest("amount must be greater than zero");
+  const note = AR_CREDIT_NOTES.find((n) => n.id === noteId);
+  if (!note) return notFound("no such credit note in this company");
+  return { status: 200, json: { applicationId: `demo-cn-apply-${Date.now()}`, amount } };
+}
+
+/** Mirrors `finance.controller.ts::writeOffArInvoice` — confirmation-gated on the INVOICE NUMBER,
+ *  same as reopening a period is gated on the period name. */
+function writeOffArInvoiceDemo(invoiceId: string, b: {
+  amount?: number; writeOffDate?: string; reasonCode?: string; reason?: string; confirm?: string;
+}): DemoResult {
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return badRequest("amount must be greater than zero");
+  if (!b.writeOffDate) return badRequest("writeOffDate is required");
+  if (!b.reasonCode || !WRITE_OFF_REASONS.includes(b.reasonCode)) {
+    return badRequest(`reasonCode must be one of ${WRITE_OFF_REASONS.join(", ")}`);
+  }
+  if (!b.reason?.trim()) {
+    return badRequest("reason is required — a write-off with no recorded reason is indistinguishable from a mistake");
+  }
+  const invoice = AR_OPEN_INVOICES.find((i) => i.id === invoiceId);
+  if (!invoice) return notFound("no such invoice in this company");
+  const refused = requireConfirmation(b.confirm, invoice.invoiceNo, "invoice number");
+  if (refused) return refused;
+
+  return { status: 201, json: { writeOffId: `demo-wo-${Date.now()}`, invoiceNo: invoice.invoiceNo, amount } };
+}
+
+/** Dispatches every gated and plain write this store answers; anything else still falls through
+ *  unanswered (`null`), for exactly the reason the top-of-file comment gives. */
 function financeWrite(tail: string, body: string | undefined): DemoResult | null {
   const b = body ? JSON.parse(body) : {};
 
@@ -760,6 +1021,9 @@ function financeWrite(tail: string, body: string | undefined): DemoResult | null
   const close = /^periods\/([^/]+)\/close$/.exec(tail);
   if (close) return closePeriodDemo(close[1], b);
 
+  const reopen = /^periods\/([^/]+)\/reopen$/.exec(tail);
+  if (reopen) return reopenPeriodDemo(reopen[1], b);
+
   const commit = /^cutovers\/([^/]+)\/commit$/.exec(tail);
   if (commit) return commitCutoverDemo(commit[1], b);
 
@@ -768,6 +1032,23 @@ function financeWrite(tail: string, body: string | undefined): DemoResult | null
 
   const lease = /^instruments\/([^/]+)\/recognise-lease$/.exec(tail);
   if (lease) return recogniseLeaseDemo(lease[1], b);
+
+  if (tail === "consolidation/runs") return createConsolidationRunDemo(b);
+  const eliminate = /^consolidation\/runs\/([^/]+)\/eliminate$/.exec(tail);
+  if (eliminate) return eliminateIntercompanyDemo(eliminate[1]);
+
+  if (tail === "instruments") return createInstrumentDemo(b);
+  const accrual = /^instruments\/([^/]+)\/accrual$/.exec(tail);
+  if (accrual) return postInstrumentAccrualDemo(accrual[1], b);
+
+  if (tail === "ar/customers") return createArCustomerDemo(b);
+  if (tail === "ap/vendors") return createApVendorDemo(b);
+
+  if (tail === "ar/credit-notes") return createArCreditNoteDemo(b);
+  const apply = /^ar\/credit-notes\/([^/]+)\/apply$/.exec(tail);
+  if (apply) return applyArCreditNoteDemo(apply[1], b);
+  const writeOff = /^ar\/invoices\/([^/]+)\/write-off$/.exec(tail);
+  if (writeOff) return writeOffArInvoiceDemo(writeOff[1], b);
 
   return null;
 }

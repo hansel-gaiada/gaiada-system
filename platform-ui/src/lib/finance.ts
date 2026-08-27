@@ -100,7 +100,13 @@ export interface ApAgingRow extends AgingRow { vendorCode: string; vendorName: s
 export interface Problem { problem: string; detail: string }
 export interface LedgerVerdict { problems: Array<Problem & { ledgerSequence: string; entryId: string }>; clean: boolean }
 export interface ReconcileVerdict<P> { position: P; problems: Problem[]; clean: boolean }
-export interface ArPosition { openInvoices: string; paymentsOnAccount: string; netReceivable: string }
+/** `openInvoices - paymentsOnAccount - unappliedCredits = the AR control balance`. An unapplied
+ *  credit note credits the control account exactly as an unallocated receipt does — it is a credit
+ *  note's NORMAL state until someone decides what it settles, not an edge case — so it is a fourth
+ *  figure here rather than folded into `netReceivable` unexplained. */
+export interface ArPosition {
+  openInvoices: string; paymentsOnAccount: string; unappliedCredits: string; netReceivable: string;
+}
 export interface ApPosition { openBills: string; paymentsOnAccount: string; netPayable: string }
 export interface CloseReadiness { blockers: Array<{ blocker: string; detail: string }>; ready: boolean }
 
@@ -352,6 +358,32 @@ export function fiscalYearStart(periods: FiscalPeriod[], asOf: string): string |
   return first?.startDate ?? null;
 }
 
+// ── Fiscal years (F3b) ──────────────────────────────────────────────────────────────────────────
+// `GET .../finance/fiscal-years` closed a real gap: `POST .../fiscal-years/:fiscalYearId/close`
+// keys on `finance_fiscal_years.id` (a random uuid), and no other read endpoint returns one —
+// `GET .../finance/periods` carries only the year's CODE. Before this existed, this file derived a
+// year summary from the period list, deliberately WITHOUT an id, and the close page named the gap
+// via `BackendPending` rather than guessing a uuid (passing a code, or any guess, where the server
+// expects a uuid does not degrade to a clean 404 — it surfaces a raw "invalid input syntax for type
+// uuid" dressed up as a working button). That derived helper is gone now that the real read exists;
+// keeping both would be two answers to "what fiscal years does this company have", free to drift.
+export interface FiscalYear {
+  /** The uuid `POST .../fiscal-years/:fiscalYearId/close` actually keys on. */
+  id: string;
+  code: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  periodCount: number;
+  /** A year with any period still OPEN is refused by the close engine. Shown on the row and used to
+   *  disable the close control BEFORE a confirmation is typed — see `CloseFiscalYearAction` — rather
+   *  than letting the reader discover it from a refusal after typing one. */
+  openPeriods: number;
+}
+
+export const listFiscalYears = (u: string, t: string) =>
+  financeData(platformFetch<FiscalYear[]>(`/api/${t}/finance/fiscal-years`, u), [] as FiscalYear[]);
+
 
 // ── Cap table + settings readers ────────────────────────────────────────────────────────────────
 
@@ -577,3 +609,35 @@ export interface ApBill {
  *  session-scoped list cannot serve the cross-person workflow the duty split exists for. */
 export const listApBills = (u: string, t: string, status?: string) =>
   financeData(platformFetch<ApBill[]>(`/api/${t}/finance/ap/bills${qs({ status })}`, u), [] as ApBill[]);
+
+// ── AR credit notes and write-offs (F4b) ────────────────────────────────────────────────────────
+// Two ways a receivable shrinks with no cash arriving, and they are NOT flavours of one thing:
+//
+//   credit note — the customer never owed it. Output VAT IS reversed (nota retur).
+//   write-off   — the customer owed it and will not pay. Output VAT is NOT reversed; the PPN was
+//                 properly due and has already been remitted.
+//
+// Only the credit note has a subledger — a write-off changes an invoice's own balance directly and
+// has no list of its own to read, which is why there is one interface and one reader here, not two.
+export interface ArCreditNote {
+  id: string;
+  creditNoteNo: string;
+  creditNoteDate: string;
+  customerCode: string;
+  customerName: string;
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+  amountApplied: string;
+  unapplied: string;
+  reasonCode: string;
+  reason: string;
+  status: "draft" | "issued" | "applied" | "void";
+  originalInvoiceNo: string | null;
+}
+
+export const listArCreditNotes = (u: string, t: string, status?: string) =>
+  financeData(
+    platformFetch<ArCreditNote[]>(`/api/${t}/finance/ar/credit-notes${qs({ status })}`, u),
+    [] as ArCreditNote[],
+  );
