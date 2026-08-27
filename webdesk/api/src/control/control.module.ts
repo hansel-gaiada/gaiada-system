@@ -94,6 +94,14 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
     { provide: POLICY_DECISION_POINT, useClass: policyDecisionPointClass },
     { provide: RELEASE_TRANSPORT, useClass: NotYetAvailableReleaseTransport },
   ],
-  exports: [JobsService],
+  // WSK-32 (coordinator edit) — `ControlAuthGuard` is exported so a SIBLING module can gate its
+  // own routes with the REAL control-channel authenticator instead of standing up a second,
+  // weaker one. WSK-32 shipped its own `SchemaDraftAuthGuard` precisely because this array held
+  // only `JobsService`; that stub accepted ANY non-empty `x-webdesk-control-principal` value and
+  // then wrote it into an audit row, so the audit trail was caller-controlled. Exporting the
+  // guard (not the `CONTROL_CHANNEL_AUTHENTICATOR` token) is the narrow fix: the guard's own
+  // dependency still resolves inside THIS module, so the environment-conditional binding above
+  // — real authenticator everywhere except NODE_ENV=test — keeps applying to every consumer.
+  exports: [JobsService, ControlAuthGuard],
 })
 export class ControlModule {}

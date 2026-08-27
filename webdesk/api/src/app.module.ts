@@ -21,8 +21,29 @@ import { TenantWebhooksModule } from "./tenant-webhooks/tenant-webhooks.module";
 // WSK-12 (wired by coordinator). Fail-soft by construction: a bridge outage must never
 // break a form submission, so every emit failure is caught and logged, never thrown.
 import { EventsModule } from "./events/events.module";
+// WSK-32 — AI schema drafting (PRD -> validated composition proposal + diff summary; never
+// applies). Deliberately a SIBLING of ControlModule, not nested inside it — see
+// src/schema-draft/schema-draft-auth.guard.ts's header for why. This import + registration is
+// the one cross-file edit WSK-32's ticket brief explicitly permits ("registering your module in
+// the api's root module"); every other file this ticket touches lives under src/schema-draft/.
+import { SchemaDraftModule } from "./schema-draft/schema-draft.module";
 
 @Module({
-  imports: [DbModule, RateLimitModule, TenantsModule, AuditModule, ApiKeysModule, AuthModule, ContentModule, MediaModule, MailModule, FormsModule, ControlModule, EventsModule, TenantWebhooksModule],
+  imports: [
+    DbModule,
+    RateLimitModule,
+    TenantsModule,
+    AuditModule,
+    ApiKeysModule,
+    AuthModule,
+    ContentModule,
+    MediaModule,
+    MailModule,
+    FormsModule,
+    ControlModule,
+    EventsModule,
+    TenantWebhooksModule,
+    SchemaDraftModule,
+  ],
 })
 export class AppModule {}
