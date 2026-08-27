@@ -169,7 +169,16 @@ const MONITORING_KINDS = new Set([
   "monitor", "monitor_incident", "monitor_maintenance", "monitor_channel", "status_page",
 ]);
 
-const NO_ROLE_SEEDED_KINDS = new Set([]);
+const NO_ROLE_SEEDED_KINDS = new Set([
+  // WSK-12 (2026-08-27) — the Zone B signed-fact log.
+  //   `record` belongs to the wd-zoneb-intake AUTOMATION identity (WSK-31 provisions it),
+  //   never to a human role: a person who can record would be able to inject facts that
+  //   look like they came from Zone B, which the signed-webhook boundary exists to stop.
+  //   `read` has no consumer yet — the Sites tab (WSK-24) is unbuilt. Seeding roles now
+  //   would change role-permission-bundles.json, which must equal role_permissions in the
+  //   DB, forcing a seeding migration for a surface nothing can reach. Revisit at WSK-24.
+  "webdev_zoneb_event",
+]);
 
 const DIRECT = {
   platform_admin: ["platform_admin"],

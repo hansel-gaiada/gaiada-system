@@ -26,13 +26,17 @@ import { TenantsModule } from "../tenants/tenants.module";
 import { AuditModule } from "../audit/audit.module";
 import { MediaModule } from "../media/media.module";
 import { MailModule } from "../mail/mail.module";
+// WSK-12 hook (coordinator fix): FormsService injects ZoneBEventEmitterService, so EventsModule
+// must be visible to THIS module. Registering it only in AppModule is not enough -- see this
+// file's own header: injection resolves against providers visible to the injecting module.
+import { EventsModule } from "../events/events.module";
 import { TURNSTILE_VERIFIER, type TurnstileVerifier } from "./turnstile/turnstile-verifier";
 import { StubTurnstileVerifier } from "./turnstile/stub-turnstile-verifier";
 import { CloudflareTurnstileVerifier } from "./turnstile/cloudflare-turnstile-verifier";
 import { turnstileConfig } from "./forms.config";
 
 @Module({
-  imports: [TenantsModule, AuditModule, MediaModule, MailModule],
+  imports: [TenantsModule, AuditModule, MediaModule, MailModule, EventsModule],
   controllers: [FormsController],
   providers: [
     FormsService,

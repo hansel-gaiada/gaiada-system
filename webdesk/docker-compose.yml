@@ -94,6 +94,11 @@ services:
       - -c
       - "echo '[webdesk] api stub — control plane lands at WSK-21' && sleep infinity"
     environment:
+      # WSK-12 Zone B->A events (same passthrough trap).
+      WEBDESK_ZONEB_BRIDGE_URL: ${WEBDESK_ZONEB_BRIDGE_URL:-}
+      WEBDESK_ZONEB_ORIGIN_SITE: ${WEBDESK_ZONEB_ORIGIN_SITE:-webdesk}
+      WEBDESK_ZONEB_EVENT_TIMEOUT_MS: ${WEBDESK_ZONEB_EVENT_TIMEOUT_MS:-5000}
+      WEBDESK_ZONEB_EVENTS_ENABLED: ${WEBDESK_ZONEB_EVENTS_ENABLED:-true}
       # WSK-11 mail. A var in .env does NOTHING unless it is listed here
       # (the estate's compose-env-passthrough trap).
       MAIL_ENABLED: ${MAIL_ENABLED:-true}

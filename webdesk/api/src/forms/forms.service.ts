@@ -21,6 +21,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, Logger } f
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
 import { MailService } from "../mail/mail.service";
+import { ZoneBEventEmitterService } from "../events/zoneb-event-emitter.service";
 import { MediaService } from "../media/media.service";
 import type { ResolvedApiKey } from "../api-keys/api-keys.service";
 import { FormSchemaService } from "./form-schema.service";
@@ -49,6 +50,7 @@ export class FormsService {
     private readonly db: DbService,
     private readonly audit: AuditService,
     private readonly mail: MailService,
+    private readonly zoneBEvents: ZoneBEventEmitterService,
     private readonly media: MediaService,
     private readonly schema: FormSchemaService,
     private readonly submissions: SubmissionsRepository,
@@ -175,6 +177,23 @@ export class FormsService {
     await this.dispatchMail(form, sanitizedFields, submission.id).catch((err) => {
       this.logger.warn(`mail dispatch failed for submission ${submission.id}: ${String(err)}`);
     });
+
+    // 9. Zone B -> Zone A signed fact (WSK-12). Same best-effort discipline as mail, and the
+    //    emitter is fail-soft internally too: a bridge outage must never turn a persisted
+    //    submission into a failed response. Carries CORRELATORS ONLY -- no submitted field
+    //    values cross the zone boundary (design section 04: "never the raw blob").
+    await this.zoneBEvents
+      .emitFormReceived(form.tenantId, {
+        // ResolvedForm carries tenantSlug + siteId (no siteSlug field exists); the agent's
+        // suggested `form.siteSlug` does not compile. tenantSlug is the meaningful correlator.
+        siteSlug: form.tenantSlug,
+        formId: form.formId,
+        submissionId: submission.id,
+        hasAttachments: attachmentRefs.length > 0,
+      })
+      .catch((err) => {
+        this.logger.warn(`zone B event emit failed for submission ${submission.id}: ${String(err)}`);
+      });
 
     return { ok: true, id: submission.id };
   }
