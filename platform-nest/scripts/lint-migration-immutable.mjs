@@ -43,8 +43,23 @@ import { execFileSync } from "node:child_process";
 const BASE = process.env.MIGRATION_BASE_REF || "origin/main";
 const DIR = "platform-nest/migrations/";
 
+// ⚠ EVERY git call is anchored to the REPO ROOT with `-C`, and DIR below is root-relative.
+//
+// Without this the lint is INERT and passes vacuously. `npm run lint:migration-immutable` executes
+// with cwd = platform-nest/, and a git pathspec is resolved relative to CWD — so
+// `-- platform-nest/migrations/` became `platform-nest/platform-nest/migrations/`, matched nothing,
+// and the script cheerfully reported "0 migration file(s) touched; no already-deployed migration had
+// its executable SQL changed". A gate that examines zero files always passes.
+//
+// Found 2026-08-27, one day after this file was written, by noticing it claimed 0 touched files in a
+// commit that added three migrations. CI runs it exactly this way (`- run: npm run
+// lint:migration-immutable` inside the platform-nest job), so it had never actually guarded a build.
+// The OK message now prints the file count for precisely this reason: a gate should say what it
+// looked at, or "OK" cannot be told apart from "I looked at nothing".
+const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+
 function git(...args) {
-  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
 /** Strip SQL comments and collapse whitespace — what remains is what the database will execute. */
