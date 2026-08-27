@@ -675,4 +675,32 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
       expect((await runRow(r.json().id))?.client_id).toBeNull();
     });
   });
+  describe("list ?include=gates (lineage spec 3/3)", () => {
+    it("without include the rows carry no gates; with it every run has gates[] grouped by run_id", async () => {
+      const a = (await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin), payload: { title: "gated-run" } })).json().id as string;
+      const b = (await app.inject({ method: "POST", url: `/api/${co}/pipeline/runs`, headers: asUser(admin), payload: { title: "ungated-run" } })).json().id as string;
+      const g = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/gates`, headers: asUser(admin),
+        payload: { runId: a, kind: "prd_review", actorSide: "internal" },
+      });
+      expect(g.statusCode).toBe(201);
+
+      const plain = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs`, headers: asUser(admin) });
+      expect(plain.statusCode).toBe(200);
+      const plainA = plain.json().find((r: { id: string }) => r.id === a);
+      expect(plainA).toBeDefined();
+      expect(plainA).not.toHaveProperty("gates");
+
+      const withGates = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?include=gates`, headers: asUser(admin) });
+      expect(withGates.statusCode).toBe(200);
+      const rows = withGates.json() as Array<{ id: string; gates: Array<Record<string, unknown>> }>;
+      const ra = rows.find((r) => r.id === a)!;
+      const rb = rows.find((r) => r.id === b)!;
+      expect(ra.gates).toHaveLength(1);
+      expect(ra.gates[0]).toMatchObject({ run_id: a, kind: "prd_review", actor_side: "internal", status: "pending", decision: null });
+      // The absence that matters: a run with no gates says [] — not undefined, not another run's gates.
+      expect(rb.gates).toEqual([]);
+    });
+  });
+
 });

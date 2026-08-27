@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.42.0` - the runs list can carry its gates (2026-08-27) - DEV-VERIFIED
+
+**Added**
+- `GET /api/:t/pipeline/runs?include=gates` — each run comes back with `gates: PipelineGate[]`
+  (the detail endpoint's row shape plus `run_id`), fetched in ONE grouped query
+  (`run_id = ANY($1::uuid[])`) inside the same tenant-scoped call. A run with no gates answers `[]`.
+  Without the parameter the response is byte-for-byte what it was.
+- Why: PRD Studio's approval chips and a project's Meetings tab read `GET /runs/:id` per run behind a
+  12-run cap because the list carried no gates — the cap was a frontend workaround for a missing read.
+  Spec `2026-08-26-webdev-lineage-fields-design.md` (3/3).
+- Tests: `pipeline.test.ts` (+1: no `gates` key without the parameter; grouped per run with it,
+  `[]` for the gateless run); suite 34/34, `lint:withtenants` OK.
+
 ### platform-nest `0.41.0` - a provisioned site knows its client and project (2026-08-27) - DEV-VERIFIED
 
 **Added**
