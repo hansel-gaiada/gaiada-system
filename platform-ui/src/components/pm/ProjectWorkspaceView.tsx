@@ -310,6 +310,14 @@ export async function ProjectWorkspaceView({
           <UrgencyChip tier={projectUrgencyRoll.tier} variant="chip" count={projectUrgencyRoll.counts[projectUrgencyRoll.tier] || undefined} />
         </span>
         <span className="pm-meta__item">
+          <span className="pm-meta__label">Client</span>
+          {base?.client_id ? (
+            <Link href={`/clients/${base.client_id}`} style={{ color: "inherit" }}>{base.client_name ?? base.client_id}</Link>
+          ) : (
+            <span className="pm-meta__muted">None</span>
+          )}
+        </span>
+        <span className="pm-meta__item">
           <span className="pm-meta__label">Owner</span>
           {owner ? (owner.responsibleName || owner.refName) : "Unassigned"}
           {owner && owner.kind !== "person" ? ` · ${owner.refName}` : ""}

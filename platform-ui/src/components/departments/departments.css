@@ -701,3 +701,12 @@ a.dept-proj__name:hover { opacity: 0.6; }
 
 /* Projects tab header: count + the "New project" entry point (a project no longer needs a PRD run first). */
 .dept-proj__head { display: inline-flex; align-items: center; gap: 12px; }
+
+/* Projects tab grouped by client — a client has many projects. */
+.dept-proj__groups { display: grid; gap: 22px; }
+.dept-proj__group { display: grid; gap: 6px; }
+.dept-proj__group-head { display: flex; align-items: baseline; gap: 10px; }
+.dept-proj__client { font: 600 14px/1.3 var(--font-body); color: var(--text-primary); text-decoration: none; }
+a.dept-proj__client:hover { text-decoration: underline; }
+.dept-proj__client--internal { color: var(--erp-ink-50); }
+.dept-proj__group-count { font: 400 12px var(--font-body); color: var(--ink-subtle); }

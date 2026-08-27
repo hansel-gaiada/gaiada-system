@@ -159,6 +159,12 @@ local stack). None of these mean "production-done".
   (`lib/prdFlow.ts::orderBriefings`, now shared with PRD Studio), and `RunApprovalRow`s for the
   project's runs with their GM / client beats — so the two surfaces cannot drift apart. Runs + gates
   are read only when that tab is shown. `RecordControls` remains for the client workspace.
+- **A project belongs to a client; a client has many projects — shown that way.** The department's
+  Projects tab groups projects under their client (clients A→Z, "Internal — no client" last;
+  `page-helpers.ts::groupProjectsByClient`, tested), each client name linking to its hub. The project
+  form gains a required **Client** picker (`?clientId=` pre-selects it; the old "no clients-list
+  endpoint yet" comment was stale — `listClients` exists), and the project header shows **CLIENT**
+  beside range/owner/tags. Frontend only: `POST/PATCH /projects` already carried `clientId`.
 - **New project from the Projects tab.** A project no longer has to come out of a PRD run: the
   department's Projects tab has a "New project" button that opens the existing `/projects/new` form
   with the owning department pre-selected (`?departmentId=`).

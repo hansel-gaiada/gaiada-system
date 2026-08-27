@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tallyProjectTasks, taskDateEnvelope, daysPast, targetNote } from "./page-helpers";
+import { tallyProjectTasks, taskDateEnvelope, daysPast, targetNote, groupProjectsByClient } from "./page-helpers";
 import type { ProjectStatus } from "@/lib/pm";
 
 // P4-H3 inherited-bug fix (found during P4-G5, deliberately not fixed then): this page's
@@ -89,5 +89,25 @@ describe("daysPast / targetNote", () => {
     expect(targetNote("2026-08-19", TODAY)).toEqual({ text: "today", late: false });
     expect(targetNote("2026-08-28", TODAY)).toEqual({ text: "in 9d", late: false });
     expect(targetNote(null, TODAY)).toBeNull();
+  });
+});
+
+describe("groupProjectsByClient — a client has many projects; the tab reads that way", () => {
+  const names = new Map([["cl-1", "Northwind Traders"], ["cl-3", "Lumen Studio"]]);
+  const p = (id: string, name: string, client_id: string | null) => ({ id, name, client_id });
+  it("groups by client, clients A→Z by name, projects in the order given; no-client projects last as Internal", () => {
+    const groups = groupProjectsByClient(
+      [p("a", "Site redesign", "cl-1"), p("b", "Internal tooling", null), p("c", "Portfolio", "cl-3"), p("d", "Checkout revamp", "cl-1")],
+      names,
+    );
+    expect(groups.map((g) => [g.clientId, g.clientName, g.projects.map((x) => x.id)])).toEqual([
+      ["cl-3", "Lumen Studio", ["c"]],
+      ["cl-1", "Northwind Traders", ["a", "d"]],
+      [null, "Internal — no client", ["b"]],
+    ]);
+  });
+  it("a client id with no known name is still its own group, named by id", () => {
+    const groups = groupProjectsByClient([p("a", "X", "cl-ghost")], names);
+    expect(groups[0]).toMatchObject({ clientId: "cl-ghost", clientName: "cl-ghost" });
   });
 });

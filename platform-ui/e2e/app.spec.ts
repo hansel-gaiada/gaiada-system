@@ -438,6 +438,22 @@ test("Repositories tab: a standalone repository is created by hand — no PRD ru
   await expect(row).toContainText(/created by hand/i);
 });
 
+test("Projects tab groups projects under their client — a client has many projects", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/projects");
+  const groups = page.locator(".dept-proj__group");
+  await expect(groups).toHaveCount(2);
+  // Clients A→Z: Lumen Studio (Mobile app revamp) before Northwind Traders (Client site redesign).
+  await expect(groups.nth(0).locator(".dept-proj__client")).toHaveText("Lumen Studio");
+  await expect(groups.nth(0)).toContainText("Mobile app revamp");
+  await expect(groups.nth(1).locator(".dept-proj__client")).toHaveText("Northwind Traders");
+  await expect(groups.nth(1)).toContainText("Client site redesign");
+  await expect(groups.nth(1).getByRole("link", { name: "Northwind Traders" })).toHaveAttribute("href", "/clients/cl-1");
+  // The project header names its client too.
+  await page.getByRole("link", { name: "Client site redesign" }).click();
+  await expect(page.locator(".pm-meta")).toContainText(/client\s*Northwind Traders/i);
+});
+
 test("Projects tab: New project opens the project form with this department pre-selected", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1/projects");
@@ -445,6 +461,12 @@ test("Projects tab: New project opens the project form with this department pre-
   await page.waitForURL(/\/projects\/new\?departmentId=dept-1$/);
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/new project/i);
   await expect(page.getByLabel(/owning department/i)).toHaveValue("dept-1");
+  // A project belongs to a client: the picker is required, and ?clientId= pre-selects it.
+  const client = page.getByRole("combobox", { name: "Client" });
+  await expect(client).toHaveAttribute("required", "");
+  await expect(client).toHaveValue("");
+  await page.goto("/projects/new?departmentId=dept-1&clientId=cl-1");
+  await expect(page.getByRole("combobox", { name: "Client" })).toHaveValue("cl-1");
 });
 
 test("Repositories tab: ?preview=sample shows the layout with sample rows behind a banner", async ({ page }) => {

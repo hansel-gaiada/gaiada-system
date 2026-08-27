@@ -11,9 +11,10 @@ const STATUS_OPTIONS = ["active", "on_hold", "completed", "archived"];
 
 // `members` is accepted for parity with the task's owner-select ask, but is
 // intentionally unused here: neither POST /projects nor PATCH /projects/:id
-// accepts an ownerId, and there is no clients-list endpoint yet, so the
-// owner and client pickers are deferred to a later slice — the form only
-// submits fields the backend can actually persist.
+// accepts an ownerId, so the owner picker is deferred — the form only submits
+// fields the backend can actually persist. A project BELONGS TO a client
+// (client has many projects): the Client picker is required for a new project
+// and pre-selectable via `defaultClientId`.
 //
 // `departments` powers the owning-department picker: a project belongs to one
 // department (Web Dev, Creatives, …). Empty = company-level / unassigned.
@@ -22,8 +23,10 @@ export function ProjectForm({
   defs,
   members: _members,
   departments = [],
+  clients = [],
   project,
   defaultDepartmentId,
+  defaultClientId,
 }: {
   action: (prev: ProjectFormState | null, formData: FormData) => Promise<ProjectFormState>;
   defs: FieldDef[];
@@ -32,12 +35,26 @@ export function ProjectForm({
   project?: ProjectDetail;
   /** Pre-selects the owning department for a NEW project (a department console's "New project"). */
   defaultDepartmentId?: string;
+  /** The company's clients; a project belongs to exactly one. */
+  clients?: { id: string; name: string }[];
+  defaultClientId?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
 
   return (
     <form action={formAction} className="lux-form-grid" style={{ maxWidth: 720 }}>
       <Field name="name" label="Name" required defaultValue={project?.name} />
+
+      <Field
+        name="clientId"
+        label="Client"
+        type="select"
+        required
+        placeholder="— Choose a client —"
+        optionItems={clients.map((c) => ({ value: c.id, label: c.name }))}
+        defaultValue={project?.client_id ?? defaultClientId ?? undefined}
+        hint={clients.length === 0 ? "No clients yet — add one under Clients first." : undefined}
+      />
 
       {departments.length > 0 && (
         <Field
