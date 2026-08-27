@@ -436,6 +436,16 @@ test("Repositories tab: a standalone repository is created by hand — no PRD ru
   await expect(row).toContainText("Provisioning");
   await expect(row).toContainText(/not linked to a project · standalone/i);
   await expect(row).toContainText(/created by hand/i);
+  // A standalone repo CAN carry its lineage (platform-nest 0.41.0): client → that client's projects.
+  await page.getByRole("button", { name: "Create repository" }).click();
+  await page.getByRole("textbox", { name: /repository name/i }).fill("northwind-microsite");
+  await page.getByRole("combobox", { name: /^client/i }).selectOption({ label: "Northwind Traders" });
+  await page.getByRole("combobox", { name: /^project/i }).selectOption({ label: "Client site redesign" });
+  await page.getByRole("button", { name: /^create repository$/i }).click();
+  await expect(page.getByRole("status")).toContainText(/northwind-microsite.*is being provisioned/i);
+  const linked = page.locator(".repo-table .lux-table__row").filter({ hasText: "northwind-microsite" });
+  await expect(linked).toContainText("Northwind Traders · Client site redesign");
+  await expect(linked).toContainText(/created by hand/i);
 });
 
 test("Projects tab groups projects under their client — a client has many projects", async ({ page }) => {

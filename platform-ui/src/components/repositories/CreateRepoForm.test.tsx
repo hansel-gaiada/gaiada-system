@@ -12,6 +12,37 @@ const runs = [
 const provisioned = { ok: true as const, site: { status: "pending", slug: "northwind-checkout-scope" } as ProvisionedSite };
 const actions = (over: Partial<CreateRepoFormActions> = {}): CreateRepoFormActions => ({ provision: vi.fn(async () => provisioned), ...over });
 
+describe("CreateRepoForm — standalone: optional client and project lineage", () => {
+  const clients = [{ id: "cl-1", name: "Northwind Traders" }, { id: "cl-2", name: "Cedar Group" }];
+  const projects = [{ id: "p-web-1", name: "Client site redesign", client_id: "cl-1" }, { id: "p-web-2", name: "Mobile app revamp", client_id: "cl-3" }];
+
+  it("offers a client and, once chosen, that client's projects; both travel with the provision request", async () => {
+    const provision = vi.fn<CreateRepoFormActions["provision"]>(async () => provisioned);
+    render(<CreateRepoForm runs={[]} clients={clients} projects={projects} actions={actions({ provision })} prdHref="/x/prd" />);
+    fireEvent.change(screen.getByRole("textbox", { name: /repository name/i }), { target: { value: "nw-micro" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /^client/i }), { target: { value: "cl-1" } });
+    const proj = screen.getByRole("combobox", { name: /^project/i }) as HTMLSelectElement;
+    expect(Array.from(proj.options).map((o) => o.textContent)).toEqual(["None", "Client site redesign"]);
+    fireEvent.change(proj, { target: { value: "p-web-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create repository$/i }));
+    await waitFor(() => expect(provision).toHaveBeenCalledTimes(1));
+    const fd = provision.mock.calls[0][0];
+    expect(fd.get("clientId")).toBe("cl-1");
+    expect(fd.get("projectId")).toBe("p-web-1");
+    expect(fd.get("runId")).toBeNull();
+  });
+
+  it("both are optional — a bare standalone repo sends neither", async () => {
+    const provision = vi.fn<CreateRepoFormActions["provision"]>(async () => provisioned);
+    render(<CreateRepoForm runs={[]} clients={clients} projects={projects} actions={actions({ provision })} prdHref="/x/prd" />);
+    fireEvent.change(screen.getByRole("textbox", { name: /repository name/i }), { target: { value: "bare" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create repository$/i }));
+    await waitFor(() => expect(provision).toHaveBeenCalledTimes(1));
+    expect(provision.mock.calls[0][0].get("clientId")).toBeNull();
+    expect(provision.mock.calls[0][0].get("projectId")).toBeNull();
+  });
+});
+
 describe("CreateRepoForm — standalone (the default): a repository with no PRD run", () => {
   it("defaults to standalone: name + framework only, and provisions with no runId", async () => {
     const provision = vi.fn<CreateRepoFormActions["provision"]>(async () => ({ ok: true, site: { status: "pending", slug: "marketing-microsite" } as ProvisionedSite }));
@@ -29,9 +60,9 @@ describe("CreateRepoForm — standalone (the default): a repository with no PRD 
     expect(fd.get("framework")).toBe("vite");
   });
 
-  it("says plainly that a standalone repo is not linked to a client or project", () => {
+  it("explains that client and project are optional for a standalone repo", () => {
     render(<CreateRepoForm runs={runs} actions={actions()} prdHref="/departments/dept-1/prd" />);
-    expect(screen.getByText(/not linked to a client or project/i)).toBeInTheDocument();
+    expect(screen.getByText(/client and project are optional/i)).toBeInTheDocument();
   });
 
   it("with no eligible run, the PRD-run mode explains itself but standalone still works", () => {

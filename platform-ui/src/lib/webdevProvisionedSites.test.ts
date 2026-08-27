@@ -11,6 +11,7 @@ function site(over: Partial<ProvisionedSite> & { id: string; status: Provisioned
     slug: "my-site", framework: "vite", repoUrl: null, stagingUrl: null, failureReason: null,
     requestedBy: "u-1", approvalId: null, lastReconciledAt: null,
     createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z",
+    clientId: null, projectId: null,
     ...over,
   };
 }

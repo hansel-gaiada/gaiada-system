@@ -64,10 +64,15 @@ export function buildRepoInventory(
     run.department_id ? run.department_id === deptId : !!run.project_id && deptProjectIds.has(run.project_id);
   const rows: RepoRow[] = [];
   for (const s of sites) {
-    // Standalone (off-pipeline) repos carry no run and so no client/project. The webdev module owns
-    // them and only Web Dev has this tab, so they are listed here, marked as unlinked.
+    // Attribution. A run's site follows its run. A standalone site (no run) follows its own
+    // project when it has one (platform-nest 0.41.0); with no project at all it is still listed —
+    // the webdev module owns it and only Web Dev has this tab — marked as unlinked.
     const run = s.pipelineRunId ? runById.get(s.pipelineRunId) : null;
     if (s.pipelineRunId && (!run || !runInDept(run))) continue;
+    if (!s.pipelineRunId && s.projectId && !deptProjectIds.has(s.projectId)) continue;
+    // Names: the site's own lineage first (stored at provision time), then the run's.
+    const clientId = s.clientId ?? run?.client_id ?? null;
+    const projectId = s.projectId ?? run?.project_id ?? null;
     rows.push({
       id: s.id,
       name: s.slug,
@@ -76,8 +81,8 @@ export function buildRepoInventory(
       frameworkLabel: FRAMEWORK_LABEL[s.framework] ?? s.framework,
       repoUrl: s.repoUrl,
       stagingUrl: s.stagingUrl,
-      clientName: run?.client_id ? names.clients.get(run.client_id) ?? null : null,
-      projectName: run?.project_id ? names.projects.get(run.project_id) ?? null : null,
+      clientName: clientId ? names.clients.get(clientId) ?? null : null,
+      projectName: projectId ? names.projects.get(projectId) ?? null : null,
       run: run ? { id: run.id, title: run.title ?? "(untitled run)" } : null,
       requestedAt: s.createdAt,
       lastCheckedAt: s.lastReconciledAt,

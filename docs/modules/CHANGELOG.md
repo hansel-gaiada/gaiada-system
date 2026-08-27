@@ -191,7 +191,13 @@ local stack). None of these mean "production-done".
   `provisionSiteAction` (now accepts no `runId` when a slug is given); the row lands as Provisioning.
   Direct GitHub creation outside provisioning stays fail-closed on the backend (WS11); this is the
   sanctioned manual path. `components/repositories/CreateRepoForm` (7 tests); e2e creates a standalone
-  repo and provisions demo `run-demo-3`.
+  repo and provisions demo `run-demo-3`. **2026-08-27:** a standalone repo can carry its lineage —
+  platform-nest `0.41.0` stores `clientId`/`projectId` on the site — so Standalone mode gains optional
+  Client → Project pickers (that client's projects in this department; "client and project are
+  optional") and `provisionSiteAction` forwards them; the inventory reads the site's own client ·
+  project first and falls back to the run's, and a standalone site whose project belongs to another
+  department is no longer listed here (`buildRepoInventory`, 2 more tests; `CreateRepoForm` +3; e2e
+  creates a Northwind-linked standalone repo and sees "Northwind Traders · Client site redesign").
 - **A project's Meetings tab is now the PRD Studio flow, filed under that project.** It used to be
   the old capture trio (record / register for the helper / upload) over a bare recordings table.
   `components/prd/ProjectBriefings` composes the same pieces PRD Studio uses — `BriefingComposer`

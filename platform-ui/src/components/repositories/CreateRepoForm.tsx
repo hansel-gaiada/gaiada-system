@@ -18,8 +18,14 @@ export interface CreateRepoFormActions {
   provision: (formData: FormData) => Promise<SiteActionResult>;
 }
 
-export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
+export interface LineageClient { id: string; name: string }
+export interface LineageProject { id: string; name: string; client_id: string | null }
+
+export function CreateRepoForm({ runs, clients = [], projects = [], actions, prdHref, onCreated }: {
   runs: EligibleRun[];
+  /** Optional lineage for a standalone repo (platform-nest 0.41.0 stores it on the site). */
+  clients?: LineageClient[];
+  projects?: LineageProject[];
   actions: CreateRepoFormActions;
   prdHref: string;
   onCreated?: () => void;
@@ -30,7 +36,10 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
   const [runId, setRunId] = useState("");
   const [framework, setFramework] = useState<SiteFramework>(DEFAULT_FRAMEWORK);
   const [slug, setSlug] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [result, setResult] = useState<SiteActionResult | null>(null);
+  const clientProjects = clientId ? projects.filter((p) => p.client_id === clientId) : [];
 
   const slugTrim = slug.trim();
   const slugOk = slugTrim === "" || isValidSlugInput(slugTrim);
@@ -50,6 +59,8 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
     startTransition(async () => {
       const fd = new FormData();
       if (mode === "run") fd.set("runId", runId);
+      if (mode === "standalone" && clientId) fd.set("clientId", clientId);
+      if (mode === "standalone" && projectId) fd.set("projectId", projectId);
       fd.set("framework", framework);
       if (slugTrim) fd.set("slug", slugTrim);
       const r = await actions.provision(fd);
@@ -58,7 +69,7 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
     });
   };
 
-  const switchMode = (m: "standalone" | "run") => { setMode(m); setResult(null); if (m === "standalone") { setRunId(""); } setSlug(""); };
+  const switchMode = (m: "standalone" | "run") => { setMode(m); setResult(null); if (m === "standalone") { setRunId(""); } else { setClientId(""); setProjectId(""); } setSlug(""); };
 
   return (
     <div className="repo-create">
@@ -68,7 +79,7 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
       </div>
       <p className="repo-note">
         {mode === "standalone"
-          ? "The provisioning service creates the GitHub repository and a staging site under this name. A standalone repository is not linked to a client or project — pick “For a PRD run” if it should be."
+          ? "The provisioning service creates the GitHub repository and a staging site under this name. Client and project are optional — set them so the repo shows whose it is."
           : "The GitHub repository and staging site are created for a PRD run; the run brings the client and project with it."}
       </p>
       {mode === "run" && runs.length === 0 && (
@@ -96,6 +107,24 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
             {FRAMEWORKS.map((f) => <option key={f} value={f}>{FRAMEWORK_LABEL[f]}</option>)}
           </select>
         </label>
+        {mode === "standalone" && (
+          <>
+            <label className="repo-field">
+              Client
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setProjectId(""); }} disabled={pending}>
+                <option value="">None</option>
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="repo-field">
+              Project
+              <select value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={pending || !clientId}>
+                <option value="">{clientId ? "None" : "Choose a client first"}</option>
+                {clientProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+          </>
+        )}
         <label className="repo-field">
           Repository name
           <input

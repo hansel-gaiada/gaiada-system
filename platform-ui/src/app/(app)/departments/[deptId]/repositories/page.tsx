@@ -97,6 +97,9 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
   const create = mayProvision && sitesResult.ok
     ? {
         runs: runsEligibleForRepo(deptRuns, sitesResult.sites, new Map(clients.map((c) => [c.id, c.name]))),
+        // Standalone lineage pickers: this department's projects, and the clients they belong to.
+        clients: clients.map((c) => ({ id: c.id, name: c.name })),
+        projects: projects.filter((p) => p.department_id === deptId).map((p) => ({ id: p.id, name: p.name, client_id: p.client_id })),
         actions: { provision: provisionSiteAction },
         prdHref: `/departments/${deptId}/prd`,
       }

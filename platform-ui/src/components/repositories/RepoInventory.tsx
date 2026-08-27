@@ -8,7 +8,7 @@ import { REPO_STATUS_LABEL } from "@/lib/repoInventory";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
 import type { ConnectionStatus } from "@/lib/connections";
 import { repoCounts, type EligibleRun, type RepoRow } from "@/lib/repoInventory";
-import { CreateRepoForm, type CreateRepoFormActions } from "./CreateRepoForm";
+import { CreateRepoForm, type CreateRepoFormActions, type LineageClient, type LineageProject } from "./CreateRepoForm";
 import "./repositories.css";
 
 // The Web Dev department's code inventory, as a table — the same `HairlineTable` the Projects,
@@ -34,7 +34,7 @@ export type RepoInventoryState =
 export interface GithubConnectionView { status: ConnectionStatus; account: string | null }
 
 /** Everything the "Create repository" form needs; present only for people who may provision. */
-export interface CreateRepoOptions { runs: EligibleRun[]; actions: CreateRepoFormActions; prdHref: string }
+export interface CreateRepoOptions { runs: EligibleRun[]; clients?: LineageClient[]; projects?: LineageProject[]; actions: CreateRepoFormActions; prdHref: string }
 
 const BASE_COLUMNS = [
   { label: "Repository" },
@@ -132,7 +132,7 @@ export function RepoInventory({
         <GithubLine github={github} />
       </div>
       {canCreate && creating && create && (
-        <CreateRepoForm runs={create.runs} actions={create.actions} prdHref={create.prdHref} />
+        <CreateRepoForm runs={create.runs} clients={create.clients} projects={create.projects} actions={create.actions} prdHref={create.prdHref} />
       )}
 
       {rows.length === 0 ? (

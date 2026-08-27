@@ -8,7 +8,7 @@ function site(over: Partial<ProvisionedSite> & { id: string }): ProvisionedSite 
     slug: "northwind-site", framework: "nextjs", repoUrl: "https://github.com/gda/northwind-site",
     stagingUrl: "https://northwind-site.gaiada.online", status: "live", failureReason: null,
     requestedBy: "u-1", approvalId: null, lastReconciledAt: "2026-07-21T00:00:00Z",
-    createdAt: "2026-07-18T00:00:00Z", updatedAt: "2026-07-21T00:00:00Z", ...over,
+    createdAt: "2026-07-18T00:00:00Z", updatedAt: "2026-07-21T00:00:00Z", clientId: null, projectId: null, ...over,
   };
 }
 const runs = [
@@ -57,6 +57,21 @@ describe("buildRepoInventory — one row per repo, joined to its run, client and
   it("a standalone repo (created by hand, no run) is listed, unlinked — the webdev module owns it", () => {
     const [row] = buildRepoInventory([site({ id: "s3", pipelineRunId: null, slug: "marketing-microsite" })], runs, names, DEPT, webDev);
     expect(row).toMatchObject<Partial<RepoRow>>({ id: "s3", name: "marketing-microsite", run: null, clientName: null, projectName: null });
+  });
+
+  it("a standalone repo that carries its own client/project (0.41.0) shows them, and a project in this department attributes it", () => {
+    const rows = buildRepoInventory([
+      site({ id: "own", pipelineRunId: null, slug: "cedar-brand", clientId: "cl-2", projectId: "p-seo-1" }),   // SEO project → not Web Dev's
+      site({ id: "mine", pipelineRunId: null, slug: "nw-micro", clientId: "cl-1", projectId: "p-web-1" }),
+      site({ id: "bare", pipelineRunId: null, slug: "bare" }),                                                 // no lineage → listed (module owner), unlinked
+    ], runs, names, DEPT, webDev);
+    expect(rows.map((r) => r.id)).toEqual(["mine", "bare"]);
+    expect(rows[0]).toMatchObject<Partial<RepoRow>>({ clientName: "Northwind Traders", projectName: "Client site redesign", run: null });
+  });
+
+  it("the site's own client/project win over the run's when both exist", () => {
+    const [row] = buildRepoInventory([site({ id: "s1", clientId: "cl-2", projectId: "p-web-1" })], runs, names, DEPT, webDev);
+    expect(row.clientName).toBe("Cedar Group");
   });
 
   it("orders problems first: failed, then provisioning, then provisioned, then live; newest first within a group", () => {

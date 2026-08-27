@@ -356,6 +356,12 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
 /** The run started from this meeting id, if any. Exported for demoMeetings' B6 relink sweep, which
  *  needs the same meeting_id -> run mapping the real endpoint joins on. demoPipeline owns RUNS, so the
  *  lookup lives here and the dependency runs one way (demoMeetings -> demoPipeline). */
+/** A run's client/project, for the demo provisioning store to copy the way the real service does. */
+export function runLineageForDemo(runId: string): { clientId: string | null; projectId: string | null } | null {
+  const r = RUNS.find((x) => x.id === runId);
+  return r ? { clientId: r.client_id ?? null, projectId: r.project_id ?? null } : null;
+}
+
 export function pipelineRunIdForMeeting(meetingId: string): string | null {
   return RUNS.find((r) => r.source_meeting_id === meetingId)?.id ?? null;
 }

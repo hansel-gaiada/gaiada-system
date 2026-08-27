@@ -51,6 +51,8 @@ export async function provisionSiteAction(formData: FormData): Promise<SiteActio
   const runId = String(formData.get("runId") ?? "").trim();
   const framework = String(formData.get("framework") ?? "vite").trim() as SiteFramework;
   const slug = String(formData.get("slug") ?? "").trim();
+  const clientId = String(formData.get("clientId") ?? "").trim() || undefined;
+  const projectId = String(formData.get("projectId") ?? "").trim() || undefined;
   // Two shapes the endpoint accepts: for a run (slug optional, derived from the run title) or
   // STANDALONE — no run, explicit slug required (off-pipeline, `pipeline_run_id: null`).
   if (!runId && !slug) return { ok: false, error: "Give the repository a name, or pick a PRD run." };
@@ -60,7 +62,7 @@ export async function provisionSiteAction(formData: FormData): Promise<SiteActio
   try {
     const site = await platformFetch<ProvisionedSite>(`/api/${c.tenant}/modules/webdev/provision`, c.userId, {
       method: "POST",
-      body: JSON.stringify({ runId: runId || undefined, framework, slug: slug || undefined }),
+      body: JSON.stringify({ runId: runId || undefined, framework, slug: slug || undefined, clientId, projectId }),
     });
     if (runId) revalidatePath(`/pipeline/${runId}`);
     return { ok: true, site };
