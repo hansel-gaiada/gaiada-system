@@ -7,9 +7,9 @@
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
       "groups": 140,
-      "grantablePermissionsInCatalog": 363,
-      "permissionsCoveredByGroups": 338,
-      "permissionsAdvancedOnly": 25,
+      "grantablePermissionsInCatalog": 365,
+      "permissionsCoveredByGroups": 339,
+      "permissionsAdvancedOnly": 26,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 96
     }
@@ -996,7 +996,8 @@
       "permissions": [
         "webdev.provisioned_site.provision",
         "webdev.provisioned_site.reconcile",
-        "webdev.provisioned_site.read"
+        "webdev.provisioned_site.read",
+        "webdev.zoneb_event.read"
       ],
       "sensitive": true
     },
@@ -1717,6 +1718,10 @@
     {
       "key": "it.account.reset_password",
       "reason": "IAM Phase 2 (P2-02): see it.account.provision."
+    },
+    {
+      "key": "webdev.zoneb_event.record",
+      "reason": "WSK-12: the only legitimate caller is the wd-zoneb-intake automation identity (WSK-31 provisions it). Granting this to a human in a role editor would let them inject facts that look like they came from Zone B, which the signed-webhook boundary exists to prevent."
     }
   ]
 }

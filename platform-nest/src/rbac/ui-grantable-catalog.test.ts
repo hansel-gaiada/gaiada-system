@@ -57,7 +57,7 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
   const doc = loadCatalogDoc();
   const { permissions } = doc;
 
-  it("sanity: the catalog has grown to 320 pairs (305 grantable + 15 relationship) — HR-FULL (2026-08-24): +18 grantable across 3 new HR kinds [hr_policy/hr_recruitment/hr_payroll], role-arm only; FINANCE-F0 (2026-08-24): +13 grantable across 3 new finance kinds [finance_config/finance_period/finance_control], role-arm only, 320 -> 333; FINANCE-F1 (2026-08-24): +4 grantable on 1 new kind [finance_ledger], 345 -> 349", () => {
+  it("sanity: the catalog has grown to 320 pairs (305 grantable + 15 relationship) — HR-FULL (2026-08-24): +18 grantable across 3 new HR kinds [hr_policy/hr_recruitment/hr_payroll], role-arm only; FINANCE-F0 (2026-08-24): +13 grantable across 3 new finance kinds [finance_config/finance_period/finance_control], role-arm only, 320 -> 333; FINANCE-F1 (2026-08-24): +4 grantable on 1 new kind [finance_ledger], 345 -> 349; WSK-12 (2026-08-27): +2 on 1 new kind [webdev_zoneb_event], 378 -> 380 pairs / 363 -> 365 grantable", () => {
         // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
     // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
@@ -68,8 +68,8 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // 298/283 -> 301/286.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(permissions.length).toBe(378);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(363);
+    expect(permissions.length).toBe(380);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(365);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
