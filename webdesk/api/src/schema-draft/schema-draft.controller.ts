@@ -10,14 +10,21 @@ import { SchemaDraftService } from "./schema-draft.service";
 // their header contract. The actor written to the audit row is now the AUTHENTICATED subject,
 // not a caller-supplied header value.
 import { ControlAuthGuard } from "../control/auth/control-auth.guard";
+// WSK-33 FIX — authentication alone was not enough. ControlAuthGuard proves WHO the caller is;
+// CommandAuthorizationGuard is the §03 Layer-3 check that proves the caller holds the command's
+// required scope. Without the @Command metadata below, that guard is structurally absent from the
+// chain no matter that it is listed here, because it resolves the command name via Reflector.
+import { CommandAuthorizationGuard } from "../control/policy/command-authorization.guard";
+import { Command } from "../control/command.decorator";
 import { requireControlContext, type ControlRequest } from "../control/auth/control-request";
 import { assertUuid, assertTenantSlug, assertNonEmptyString } from "./dto";
 
 @Controller("control/v1/tenants")
-@UseGuards(ControlAuthGuard)
+@UseGuards(ControlAuthGuard, CommandAuthorizationGuard)
 export class SchemaDraftController {
   constructor(private readonly schemaDraft: SchemaDraftService) {}
 
+  @Command("schema.aiDraft")
   @Post(":tenantSlug/sites/:siteId/collections/:collectionKey/schema/ai-draft")
   async aiDraft(
     @Req() req: ControlRequest,

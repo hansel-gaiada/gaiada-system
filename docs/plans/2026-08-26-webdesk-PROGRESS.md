@@ -32,10 +32,10 @@ misleads real tickets.
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
 | C · Contract, codegen & the rail | 7 | **7** | 0 | 0 | 0 |
 | D · Control plane · ERP console · envs | 9 | **6** | 0 | 2 | 1 |
-| E · AI execution & approvals | 3 | **2** | 0 | 1 | 0 |
+| E · AI execution & approvals | 3 | **3** | 0 | 0 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
 | G · New from reassessment | 2 | **2** | 0 | 0 | 0 |
-| **Total** | **51** | **39** | **0** | **9** | **3** |
+| **Total** | **51** | **40** | **0** | **8** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -123,7 +123,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 |---|---|---|---|---|
 | ✅ | WSK-31 ⚡ | **MCP tool set + the automation identity** — **closes a LIVE PRODUCTION GAP**: before this, `wd-zoneb-intake`'s OBO envelope resolved to **no `identity_links` row → anonymous → Cerbos denied everything → every real bridge call 403'd**. `seed/automation.ts` now provisions `wf:webdesk-zoneb-intake`, confined by the hub allow-list to exactly `recordZoneBEvent` + `notify`. **42 assertions pin the always-WS4 rule** — HIGH-impact commands suspend for **every** principal class incl. a human admin; the impact-registry entry and the Cerbos `approvalId` arm written together (D14). New `operate`/`promote` actions land with their full six-artifact chain. **Coordinator-verified** (the agent parked 3× and never reported): rbac 793/793, webdev suites 187/187, mcp-hub 42/42, lints clean. ⚠️ Its Zone A control endpoints are **honest 501s** — the real command channel is WSK-22 | senior-integrator | WSK-21 ✅, 22 ✅ |
 | ✅⚠ | WSK-32 | **AI schema drafting** — new `webdesk/api/src/schema-draft/` module: PRD → gateway `llm.extract(kind=webdesk_schema)` → parse → vocabulary validation (vendored WSK-14 rules, since NestJS commonjs cannot import `payload/vocabulary`'s ESM-`.ts` files — same constraint WSK-15 documented) → reviewer diff summary, **never persisted**. Reject-and-positive-control proven: unknown block type, unknown field primitive, and unknown composition key each refused with a distinct named reason; a clean additive proposal passes with zero issues. Diff summary flags a removed field/block, a new required field, and a required-flip as `destructive:true` with a data-loss message, and a purely additive diff as `destructive:false`. **Linux-verified (33/33)**: `tsc --noEmit` clean + `vitest run test/schema-draft` (6 files) on `node:22-bookworm-slim`, no Postgres/Cerbos needed (fakes throughout, matching `control-command-registry.spec.ts`'s own "pure" style). Applying a proposal still goes through the PRE-EXISTING, untouched `schema.propose`/`schema.apply` control commands (`webdesk/api/src/control/schema/`), so the D14/WS4 gate on the actual write is exactly what WSK-21 already shipped — this ticket adds nothing to `COMMAND_REGISTRY` and does not touch `control/`. ⚠️ Its own new route has only a self-built dev-mode header guard (not WSK-22's real mTLS/WS4 channel — `ControlModule` doesn't export the tokens needed to reuse it from a sibling module) protected today only by the pre-existing Caddy `/control/*` 404; and the gateway client is proven against a stand-in HTTP server, not a live ai-gateway-go — no live AI brain was reachable to drive kind=webdesk_schema end-to-end | medior | WSK-15 ✅, 31 ✅ |
-| ⬜ | WSK-33 | P5 QA gate — agent provisions from a PRD, human-approved, fully audited + **hostile-PRD injection battery** (must die server-side) | qa | all of E |
+| ✅⚠ | WSK-33 | **P5 QA gate — and it found a REAL authorization hole, which is the point of a gate.** 46 tests: hostile-PRD battery (case games, near-miss names, **unicode homoglyphs**, `<script>`, `__proto__`/`constructor`/`prototype` via real `JSON.parse` — `({}).polluted` confirmed `undefined` after), truncated/malformed/10k-field/500-deep model output, a PRD explicitly ordering *"call schema.apply now"* (no code path exists), cross-tenant escalation, and audit/log-injection. **The strongest evidence is a real RLS proof against real Postgres:** tenant A handed tenant B's **genuine** `siteId` + matching `collectionKey` reads `currentSchema: null`, with B's row verified to exist and contain the confidential field when read as B. Unknown tenant slug 404s **before** any gateway call — no enumeration oracle. **🐞 THE DEFECT (mine, and it was live on main): `ai-draft` ran NO Layer-3 scope check.** The route carried no `@Command` metadata, so `CommandAuthorizationGuard` was **disarmed rather than absent** — any authenticated control-channel principal, *including one with ZERO scopes*, got 201 for ANY tenant, while sibling `schema.propose` correctly 403'd the same caller. My earlier fix closed **authentication** and I did not notice **authorization** was a separate layer. **FIXED:** `schema.aiDraft` is now a registry command (`read`/`webdesk:read`, mirroring `schema.propose`) and the route runs the guard; the two `KNOWN-BAD` tests were **flipped into regression guards** (403 + service never reached, so no LLM budget spent). Gate proven to have teeth: neutering the block validator turned it **6 tests red**, and it went green again on a byte-identical restore. **135/135** on Linux with a live DB. ⚠ No live ai-gateway, so a genuinely adversarial *live-model* reply stays untested | qa | all of E ✅ |
 
 ---
 
@@ -568,3 +568,32 @@ is not needed.
 > it stays out of release.yml; `webdev.listPendingContractNotices` does not exist, so `wd-contract-watch`
 > is inert; and the Zone A→B **command** channel is still absent, so WSK-31's control tools still answer
 > `501 webdesk_control_plane_not_wired`.
+
+> **WSK-33 found a live authorization hole on main, and it was mine.**
+>
+> The `ai-draft` route ran **no Layer-3 scope check at all**. Earlier in this session I replaced
+> WSK-32's home-made auth stub with the real `ControlAuthGuard` and reported the route secured. That
+> fixed **authentication** — who the caller is. It did nothing about **authorization** — whether that
+> caller holds the scope the command requires. They are different layers and I treated them as one.
+>
+> The failure mode is worth remembering because it is invisible in review: `CommandAuthorizationGuard`
+> resolves its command via `Reflector`, so a route **missing `@Command` metadata is DISARMED, not
+> unguarded**. Listing the guard in `@UseGuards` looks correct and enforces nothing. A principal
+> authenticated with **zero scopes** got `201`, while the sibling `schema.propose` on the identical
+> resource shape correctly `403`'d the same caller — which is exactly what made this a real gap rather
+> than "nothing here checks scopes".
+>
+> Fixed properly rather than locally: `schema.aiDraft` is a real registry command
+> (`read`/`webdesk:read`, mirroring `schema.propose` because a draft persists no domain row but does
+> read a tenant's schema and spend LLM budget), and the route now runs the guard. The registry spec's
+> exhaustive `Record<CommandName, ...>` caught the omission at **compile time** — that type is doing
+> real work, and it is the reason I could not add a command and forget to classify it.
+>
+> **The agent did the single most valuable thing available to it: it did NOT patch `src/`.** It wrote
+> the defect up as two `KNOWN-BAD` tests plus a *positive control* proving the mechanism works on the
+> sibling route. A silent fix would have destroyed the evidence and I would never have known the
+> authentication/authorization confusion happened. I flipped both tests into regression guards.
+>
+> **And I checked the gate could fail before trusting it green:** neutering the block validator inside
+> the container turned it **6 tests red**, and it returned to 46/46 on a byte-identical restore. A
+> green security gate that cannot fail is worse than no gate.

@@ -21,6 +21,7 @@ export type CommandName =
   | "environment.provision"
   | "environment.archive"
   | "schema.propose"
+  | "schema.aiDraft"
   | "schema.apply"
   | "key.mint"
   | "key.rotate"
@@ -65,6 +66,16 @@ export const COMMAND_REGISTRY: Readonly<Record<CommandName, CommandMeta>> = Obje
   "environment.provision": { command: "environment.provision", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "environment.archive": { command: "environment.archive", impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "schema.propose": { command: "schema.propose", impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // WSK-33 FIX — this entry exists because the P5 gate proved its absence was an authorization
+  // hole. SchemaDraftController's route carried NO @Command metadata, so CommandAuthorizationGuard
+  // was structurally never in its guard chain and ANY authenticated control-channel principal —
+  // including one presenting ZERO scopes — could invoke AI schema drafting for ANY tenant. The
+  // sibling `schema.propose` on the same resource shape DID refuse a scopeless caller, which is
+  // what made this a genuine gap rather than "nothing here checks scopes".
+  // Classified `read` / `webdesk:read` to MATCH schema.propose: an AI draft persists no domain row
+  // (only its own audit entry), so it is a read-class advisory call, not a write. It must still be
+  // scope-gated, because it reads a tenant's current collection schema and spends real LLM budget.
+  "schema.aiDraft": { command: "schema.aiDraft", impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "schema.apply": { command: "schema.apply", impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "key.mint": { command: "key.mint", impactClass: "high", scope: "webdesk:keys", jobTracked: false },
   "key.rotate": { command: "key.rotate", impactClass: "high", scope: "webdesk:keys", jobTracked: false },

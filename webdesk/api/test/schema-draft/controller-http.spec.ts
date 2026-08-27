@@ -16,6 +16,12 @@ import { SchemaDraftController } from "../../src/schema-draft/schema-draft.contr
 import { ControlAuthGuard } from "../../src/control/auth/control-auth.guard";
 import { CONTROL_CHANNEL_AUTHENTICATOR } from "../../src/control/auth/control-channel-authenticator";
 import { DevModeControlChannelAuthenticator } from "../../src/control/auth/dev-mode-control-channel-authenticator";
+// WSK-33 FIX — the route now also runs CommandAuthorizationGuard (§03 Layer 3). Its collaborators
+// must be bound here or the module fails to compile at boot.
+import { Reflector } from "@nestjs/core";
+import { CommandAuthorizationGuard } from "../../src/control/policy/command-authorization.guard";
+import { POLICY_DECISION_POINT } from "../../src/control/policy/policy-decision-point";
+import { DevModePolicyDecisionPoint } from "../../src/control/policy/dev-mode-policy-decision-point";
 import { SchemaDraftService } from "../../src/schema-draft/schema-draft.service";
 
 class FakeSchemaDraftService {
@@ -37,6 +43,9 @@ beforeAll(async () => {
     providers: [
       ControlAuthGuard,
       { provide: CONTROL_CHANNEL_AUTHENTICATOR, useClass: DevModeControlChannelAuthenticator },
+      CommandAuthorizationGuard,
+      { provide: POLICY_DECISION_POINT, useClass: DevModePolicyDecisionPoint },
+      Reflector,
       { provide: SchemaDraftService, useValue: fake },
     ],
   }).compile();
@@ -64,7 +73,7 @@ describe("SchemaDraftController — POST .../schema/ai-draft", () => {
     const res = await app.inject({
       method: "POST",
       url: `/control/v1/tenants/acme/sites/${SITE_ID}/collections/landing/schema/ai-draft`,
-      headers: { "x-webdesk-control-principal": "human:qa" },
+      headers: { "x-webdesk-control-principal": "human:qa", "x-webdesk-control-scopes": "webdesk:read" },
       payload: {},
     });
     expect(res.statusCode).toBe(400);
@@ -75,7 +84,7 @@ describe("SchemaDraftController — POST .../schema/ai-draft", () => {
     const res = await app.inject({
       method: "POST",
       url: `/control/v1/tenants/acme/sites/not-a-uuid/collections/landing/schema/ai-draft`,
-      headers: { "x-webdesk-control-principal": "human:qa" },
+      headers: { "x-webdesk-control-principal": "human:qa", "x-webdesk-control-scopes": "webdesk:read" },
       payload: { prd: "x" },
     });
     expect(res.statusCode).toBe(400);
@@ -85,7 +94,7 @@ describe("SchemaDraftController — POST .../schema/ai-draft", () => {
     const res = await app.inject({
       method: "POST",
       url: `/control/v1/tenants/acme/sites/${SITE_ID}/collections/landing/schema/ai-draft`,
-      headers: { "x-webdesk-control-principal": "human:qa" },
+      headers: { "x-webdesk-control-principal": "human:qa", "x-webdesk-control-scopes": "webdesk:read" },
       payload: { prd: "a landing page with a hero" },
     });
     expect(res.statusCode).toBe(201);

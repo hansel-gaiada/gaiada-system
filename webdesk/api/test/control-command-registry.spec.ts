@@ -14,6 +14,12 @@ const EXPECTED: Record<CommandName, Omit<CommandMeta, "command">> = {
   "environment.provision": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "environment.archive": { impactClass: "high", scope: "webdesk:promote", jobTracked: false },
   "schema.propose": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
+  // WSK-33 — added because the P5 gate proved the ai-draft route ran NO Layer-3 scope check: it
+  // carried no @Command metadata, so CommandAuthorizationGuard was disarmed and any authenticated
+  // principal (even a scopeless one) could draft for any tenant. `read`/`webdesk:read` mirrors
+  // schema.propose deliberately — a draft persists no domain row, but it does read a tenant's
+  // schema and spend LLM budget, so it must still be scoped.
+  "schema.aiDraft": { impactClass: "read", scope: "webdesk:read", jobTracked: false },
   "schema.apply": { impactClass: "medium", scope: "webdesk:operate", jobTracked: false },
   "key.mint": { impactClass: "high", scope: "webdesk:keys", jobTracked: false },
   "key.rotate": { impactClass: "high", scope: "webdesk:keys", jobTracked: false },

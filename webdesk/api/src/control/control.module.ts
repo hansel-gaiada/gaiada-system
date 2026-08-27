@@ -102,6 +102,6 @@ const policyDecisionPointClass = process.env.NODE_ENV === "test" ? DevModePolicy
   // guard (not the `CONTROL_CHANNEL_AUTHENTICATOR` token) is the narrow fix: the guard's own
   // dependency still resolves inside THIS module, so the environment-conditional binding above
   // — real authenticator everywhere except NODE_ENV=test — keeps applying to every consumer.
-  exports: [JobsService, ControlAuthGuard],
+  exports: [JobsService, ControlAuthGuard, CommandAuthorizationGuard],
 })
 export class ControlModule {}
