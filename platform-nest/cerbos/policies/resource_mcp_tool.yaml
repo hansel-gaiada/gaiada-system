@@ -238,4 +238,32 @@ resourcePolicy:
                                                     "hr.hireEmployee", "hr.transferEmployee",
                                                     "hr.terminateEmployee",
                                                     "iam.grantRole", "iam.revokeRoleGrant",
-                                                    "iam.assignPosition", "iam.unassignPosition"])))
+                                                    "iam.assignPosition", "iam.unassignPosition",
+                                                    "webdesk.schema.apply", "webdesk.site.provision",
+                                                    "webdesk.deploy.staging", "webdesk.site.promote",
+                                                    "webdesk.site.rollback", "webdesk.site.setDomain",
+                                                    "webdesk.key.mint", "webdesk.key.rotate",
+                                                    "webdesk.key.revoke", "webdesk.site.archive"])))
+              # ── WSK-31 (docs/blueprints/webdesk-design.md §07) — ALWAYS-WS4 CONJUNCT ────────────
+              # A SEPARATE, INDEPENDENT `all.of` entry, evaluated for EVERY caller regardless of the
+              # `isUnattended` conjunct above — that is the whole point. §07's blueprint C-05 rule
+              # names seven WebDesk commands (promote/rollback/setDomain/key mint·rotate·revoke/
+              # archive) that must suspend for a named WS4 approval for EVERY principal class,
+              # including an ATTENDED human — the estate's normal "attended callers do not need to
+              # approve their own click" exemption (the conjunct above) does not apply to these seven
+              # BY NAME. Mirrored in `mcp-hub/src/policy.ts`'s `ALWAYS_WS4_TOOLS` — see that
+              # constant's own header for the full reasoning on why this is a narrow, tool-named
+              # override rather than a change to the estate-wide attendance rule.
+              #
+              # A tool in this list is allowed ONLY when it carries a verified `approvalId` — same
+              # shape as the grant-lift disjunct above, minus the `isUnattended` gate: an attended
+              # human calling `webdesk.site.promote` with NO grant is DENIED here exactly like an
+              # unattended automation caller would be.
+              - expr: >
+                  !(request.resource.attr.name in ["webdesk.site.promote", "webdesk.site.rollback",
+                                                    "webdesk.site.setDomain", "webdesk.key.mint",
+                                                    "webdesk.key.rotate", "webdesk.key.revoke",
+                                                    "webdesk.site.archive"]) ||
+                  (has(request.resource.attr.approvalId) &&
+                   type(request.resource.attr.approvalId) == string &&
+                   request.resource.attr.approvalId != "")

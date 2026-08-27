@@ -110,7 +110,12 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // FINANCE-F0 (2026-08-24): +13 pairs / +3 kinds (finance_config, finance_period,
     // finance_control), 320/81 -> 333/84. Deliberate pin update, not a silence.
     // FINANCE-F1 (2026-08-24): +4 pairs / +1 kind (finance_ledger) -> 349/87.
-    expect(catalog.length).toBe(383);
+    // WSK-19 (2026-08-27): +2 pairs / +1 kind (webdev_contract_snapshot), 380/95 -> 382/96.
+    // WSK-31 (2026-08-27): +2 pairs on 1 EXISTING kind [webdev_provisioned_site: operate + promote,
+    // the §07 WebDesk control-plane MCP tool set's Zone A authz] -- no new kind, 382 -> 384 pairs,
+    // 96 kinds unchanged. Both deliberately NOT uiGrantable (see permission-groups.json's
+    // advancedOnly note) -- the controller behind them is an honest 501 stub pending WSK-23.
+    expect(catalog.length).toBe(384);
     expect(catalogKindSet.size).toBe(96);
   });
 

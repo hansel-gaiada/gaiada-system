@@ -64,6 +64,20 @@ export const AUTOMATION_ACCOUNTS: ReadonlyArray<{ workflowId: string; role: stri
   // AUTOMATION_ALLOWLIST entries (automation-policy.ts).
   { workflowId: "wf:reports-weekly-seal", role: "company_admin", email: "automation+reports-weekly-seal@gaiada.system", name: "Automation — Reports weekly seal" },
   { workflowId: "wf:reports-monthly-seal", role: "company_admin", email: "automation+reports-monthly-seal@gaiada.system", name: "Automation — Reports monthly seal" },
+  // WSK-31 — the WebDesk Zone B->A bridge identity (webdesk-design.md §03 channel 1 / §09;
+  // ZoneBEventsController's own header names this seed as its job). `resource_webdev_zoneb_event.yaml`
+  // grants `record` to company_admin/manager/module_manager, gated on `variables.inTenant &&
+  // variables.notLow` — `manager` is the SAME MINIMUM tier every other single-purpose bridge/CRON
+  // account above already uses (wf:mtg-dispatcher, wf:delivery, wf:org-updated-notify: all
+  // "manager" for "can notify / can record a fact"), so this follows that precedent rather than
+  // inventing a new one. Scoped to the SAME agency tenant every other wf: account here is scoped to
+  // (AGENCY_NAME) — the live Zone A mirror for WebDesk sites is agency-owned today (WSK-D26's
+  // tenant-zero finding); a genuinely multi-company WebDesk tenant set is WSK-23/24's Sites-tab
+  // scope, not this bridge identity's. Before this row landed, the `wd-zoneb-intake` flow's OBO
+  // envelope (provider n8n, external_id wf:webdesk-zoneb-intake) resolved to NO identity_links row
+  // at all -> ANONYMOUS -> Cerbos denies everything -> every real call 403s. This is the exact
+  // production gap this ticket exists to close (PROGRESS.md WSK-12 session log, 2026-08-27).
+  { workflowId: "wf:webdesk-zoneb-intake", role: "manager", email: "automation+webdesk-zoneb-intake@gaiada.system", name: "Automation — WebDesk Zone B intake" },
 ];
 
 async function existingLink(externalId: string): Promise<boolean> {

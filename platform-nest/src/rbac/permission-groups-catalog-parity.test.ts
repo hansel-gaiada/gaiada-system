@@ -91,7 +91,11 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // +3 grantable, 283 -> 286.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(grantable.length).toBe(368);
+    // WSK-19 (2026-08-27): +2 grantable — webdev.contract_snapshot.{read,refresh}, 365 -> 367.
+    // WSK-31 (2026-08-27): +2 grantable — webdev.provisioned_site.{operate,promote} (the §07 WebDesk
+    // control-plane MCP tool set's Zone A authz, on the EXISTING webdev_provisioned_site kind — no
+    // new authoring group; both advancedOnly, same reasoning webdev.zoneb_event.record used), 367 -> 369.
+    expect(grantable.length).toBe(369);
     expect(relationshipKeys.size).toBe(15);
   });
 

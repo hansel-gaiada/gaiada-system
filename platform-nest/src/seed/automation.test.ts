@@ -101,6 +101,30 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
     expect(overview.statusCode).toBe(200);
   });
 
+  // WSK-31 — THE LIVE GAP THIS TICKET CLOSES. Before `wf:webdesk-zoneb-intake` was seeded, the
+  // `wd-zoneb-intake` bridge's OBO envelope resolved to no identity_links row -> ANONYMOUS -> every
+  // real call 403'd (PROGRESS.md's own WSK-12 session-log entry). `co` here is created WITHOUT
+  // "webdev" enabled, so the controller-level positive proof lives in
+  // `modules/webdev/zoneb-events-http.test.ts`'s sibling suite instead — but the identity chain
+  // itself (OBO envelope -> a REAL, non-anonymous, "manager"-tier principal) is exactly what this
+  // describe block already proves for every other wf: account, so pin it here too rather than
+  // asserting it only indirectly through a 403-vs-not-403 read on an unrelated module.
+  it("wf:webdesk-zoneb-intake resolves to a real, non-anonymous principal (was ANONYMOUS before this seed row existed)", async () => {
+    const anonymous = await app.inject({
+      method: "POST", url: `/api/${co}/projects`,
+      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403" },
+    });
+    expect(anonymous.statusCode).toBe(403); // the OLD behaviour for an unseeded/unknown workflow id
+
+    // The seeded identity is a REAL principal — it resolves and is authorized for its OWN role tier
+    // (manager) on an ordinary manager-reachable action, proving the identity_link + membership +
+    // role grant chain landed, without depending on the webdev module being enabled on `co`.
+    const seeded = await app.inject({
+      method: "GET", url: `/api/${co}/projects`, headers: asWorkflow("wf:webdesk-zoneb-intake"),
+    });
+    expect(seeded.statusCode).toBe(200);
+  });
+
   it("wf:reports-monthly-seal (company_admin role) can list+seal report periods", async () => {
     const list = await app.inject({
       method: "GET", url: `/api/${co}/reports/periods?kind=month&from=2026-01-01&to=2026-01-01`,

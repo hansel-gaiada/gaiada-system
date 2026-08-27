@@ -3,15 +3,15 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (367 grantable permissions, WSK-19 2026-08-27)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 142,
-      "grantablePermissionsInCatalog": 368,
-      "permissionsCoveredByGroups": 342,
-      "permissionsAdvancedOnly": 26,
+      "groups": 141,
+      "grantablePermissionsInCatalog": 369,
+      "permissionsCoveredByGroups": 341,
+      "permissionsAdvancedOnly": 28,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 98
+      "sensitiveGroups": 97
     }
   },
   "groups": [
@@ -1466,16 +1466,6 @@
       "sensitive": true
     },
     {
-      "key": "finance_ar_credit_note",
-      "name": "Issue Credit Notes",
-      "domain": "finance",
-      "description": "Raise and issue AR credit notes — a sales return, an over-billing or an agreed discount. Reduces the receivable AND reverses the output VAT previously declared, which is what separates it from a write-off. Held apart from receipt posting for the same reason as writing off: holding both is a blocking segregation-of-duties conflict, and both bind to the ar_writeoff_approve duty. Kept separate from Write Off Receivables so a controller can issue routine credit notes without holding the step-up-gated power to forgive a debt.",
-      "permissions": [
-        "finance.ar.credit_note"
-      ],
-      "sensitive": true
-    },
-    {
       "key": "finance_ar_write_off",
       "name": "Write Off Receivables",
       "domain": "finance",
@@ -1743,6 +1733,14 @@
     {
       "key": "webdev.zoneb_event.record",
       "reason": "WSK-12: the only legitimate caller is the wd-zoneb-intake automation identity (WSK-31 provisions it). Granting this to a human in a role editor would let them inject facts that look like they came from Zone B, which the signed-webhook boundary exists to prevent."
+    },
+    {
+      "key": "webdev.provisioned_site.operate",
+      "reason": "WSK-31: the §07 WebDesk MEDIUM control-plane commands (schema.apply, site.provision, deploy.staging), routed to an honest 501 stub pending WSK-23's Zone B egress client. advancedOnly until that lands and a real console surface (WSK-24) exists to grant it against."
+    },
+    {
+      "key": "webdev.provisioned_site.promote",
+      "reason": "WSK-31: the §07 WebDesk HIGH control-plane commands (site.promote/rollback/setDomain, key.mint/rotate/revoke, site.archive) — always WS4-gated for every principal class (mcp-hub's ALWAYS_WS4_TOOLS), routed to an honest 501 stub pending WSK-23's Zone B egress client. advancedOnly for the same reason webdev.provisioned_site.operate is."
     }
   ]
 }

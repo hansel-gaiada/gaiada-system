@@ -751,6 +751,90 @@ export function registerWebdevExecutableApprovals(): void {
 
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
+// WSK-31 — the §07 WebDesk control-plane commands: `webdesk.schema.apply`, `webdesk.site.provision`,
+// `webdesk.deploy.staging` (medium) and `webdesk.site.promote`/`rollback`/`setDomain`,
+// `webdesk.key.mint`/`rotate`/`revoke`, `webdesk.site.archive` (HIGH, always-WS4).
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/blueprints/webdesk-design.md §07 (impact classes) / §09 (D14 pairing doctrine).
+// Every tool is declared in `modules/webdev/index.ts` and dispatched by
+// `modules/webdev/webdesk-control.controller.ts`. THE D14 REGISTRY PAIRING DOCTRINE applies here
+// exactly as the file header states: a registry entry with no matching Cerbos executable-list entry
+// (resource_mcp_tool.yaml) would pass its precondition and then be denied at the door. Both are
+// added in this same change.
+//
+// WHY EVERY PRECONDITION HERE REFUSES, ALWAYS — READ THIS BEFORE ASSUMING IT IS A PLACEHOLDER LEFT
+// UNFINISHED. `webdesk-control.controller.ts`'s own endpoints are honest 501 stubs: WSK-23 (the ERP
+// module egress client into Zone B) has not landed, so there is genuinely nothing for an approved
+// row to execute yet. Leaving these tools OUT of the registry entirely would make an approved row
+// sit `not_applicable` forever — indistinguishable from "nobody built the executor" to whoever is
+// reading the approval. Registering them WITH a precondition that always names the real, typed
+// reason (`webdesk_control_plane_not_wired`) is more honest: the row lands `failed` with a reason
+// that says exactly what is missing, not merely that nothing happened. When WSK-23 lands, this
+// precondition is the ONE place that needs a real re-check (site/env state, same as
+// `webdevProvisionPrecondition` re-derives PRV-03's own state) — nothing about the registrations
+// below needs to change shape.
+//
+// LOCK KEY: `siteId` when the tool args carry one (every §07 command except the two key-lifecycle
+// ones, which carry `keyId` instead) — the one unit of consistency two approvals for the SAME site
+// (or key) contend over. A missing/malformed id falls back to a tool-prefixed key of the raw args,
+// same fail-closed shape `deployLockKey`/`pmLockKey`/`webdevProvisionLockKey` already established.
+function webdeskUnitId(toolArgs: Record<string, unknown>): string | null {
+  const siteId = toolArgs?.siteId;
+  if (typeof siteId === "string" && siteId.trim().length > 0) return siteId;
+  const keyId = toolArgs?.keyId;
+  if (typeof keyId === "string" && keyId.trim().length > 0) return keyId;
+  return null;
+}
+
+function webdeskLockKey(toolArgs: Record<string, unknown>, toolName: string): string {
+  const unit = webdeskUnitId(toolArgs);
+  if (unit) return `webdesk:${unit}`;
+  return `${toolName}:invalid-args:${JSON.stringify(toolArgs)}`;
+}
+
+/** Always refuses — see the section header above for why that is the honest answer today, not an
+ *  unfinished one. Never writes; never calls out over the network (precondition contract). */
+async function webdeskNotWiredPrecondition(): Promise<PreconditionVerdict> {
+  return { ok: false, reason: "webdesk_control_plane_not_wired" };
+}
+
+/** The §07 command names this ticket registers — medium and HIGH writes only.
+ *  `webdesk.schema.propose` is deliberately EXCLUDED: it is `impact:"low"` (draft-only by
+ *  construction, §07), and a low-impact write never suspends, so it can never reach this registry
+ *  at all (same reasoning `pm.createTask`/`pm.createDoc`'s own D14-15 section already states for
+ *  their low-impact siblings). The three read tools are excluded for the same reason `pm.listTasks`
+ *  etc. need no registry entry: nothing to approve. */
+export const WEBDESK_REGISTRY_TOOLS: readonly string[] = [
+  "webdesk.schema.apply",
+  "webdesk.site.provision",
+  "webdesk.deploy.staging",
+  "webdesk.site.promote",
+  "webdesk.site.rollback",
+  "webdesk.site.setDomain",
+  "webdesk.key.mint",
+  "webdesk.key.rotate",
+  "webdesk.key.revoke",
+  "webdesk.site.archive",
+];
+
+/**
+ * Registers the ten §07 medium/HIGH webdesk tools. Exported for the same reason the other
+ * bootstraps are: a suite that calls `resetExecutableApprovals()` and wants these back should call
+ * this rather than hand-roll a second copy of the lock/precondition.
+ */
+export function registerWebdeskExecutableApprovals(): void {
+  for (const toolName of WEBDESK_REGISTRY_TOOLS) {
+    registerExecutableApproval({
+      toolName,
+      lockKey: (args) => webdeskLockKey(args, toolName),
+      precondition: webdeskNotWiredPrecondition,
+    });
+  }
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
 // SMM-09 — `social.publishPost` (executable) and `social.publishPostMetered` (BARRED twin).
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 //
@@ -1539,6 +1623,7 @@ export function registerAllExecutableApprovals(): void {
   registerCoreExecutableApprovals();
   registerPmExecutableApprovals();
   registerWebdevExecutableApprovals();
+  registerWebdeskExecutableApprovals();
   registerSocialExecutableApprovals();
   registerSocialReplyExecutableApprovals();
   registerSocialReplyDraftExecutableApproval();

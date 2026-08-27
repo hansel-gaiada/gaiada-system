@@ -3465,6 +3465,81 @@ that was never asked. `src/lib/lms-readers.test.ts` pins the paths.
 
 ---
 
+## 24. WebDesk console read model (WSK-23, 2026-08-27) — `src/modules/webdev/console-reads.{controller,service}.ts`, `platform-ui/src/lib/webdesk.ts` — **STATUS: BACKEND DEV-VERIFIED (Linux, see the ticket report); UI: no consumer yet (WSK-24)**
+
+**§24 claimed at write time** — `webdesk-design.md` §09 calls the §15+ region of this doc "racing;
+claim at ticket time". A `grep -n "^## 2[4-9]\."` immediately before writing this block found
+nothing claimed; §23 (LMS) was the prior highest number.
+
+Design: `docs/blueprints/webdesk-design.md` §08 ("Console UX") + §09 ("ERP integration points").
+This is the BFF the console (WSK-24, not yet built) reads — **before this ticket there was no
+route at all**, so every row below is newly reachable, not a status flip on something that already
+existed. Its own module key is the EXISTING `webdev` (WSK-12/19/PRV-02 already own it); every route
+404s unless the company has `webdev` enabled, same as every sibling `/modules/webdev/*` route.
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| GET | `/api/:t/modules/webdev/console/sites` | `{ sites: SiteConsoleRow[], meta: DegradeMeta }` — reuses `GET .../provisioned-sites`'s row shape verbatim, plus `lastKnownDeployment`/`lastKnownPromotion`/`lastKnownRollback` (the latest `deploy.done`/`promote.done`/`rollback.done` fact per slug from `webdev_zoneb_event_log`, WSK-12's bridge ledger) | `webdev_provisioned_site:read` (existing kind/action, WSK-12) |
+| GET | `/api/:t/modules/webdev/console/sites/:slug/releases` | `{ releases: ReleaseFact[], meta: DegradeMeta }` | `webdev_provisioned_site:read` |
+| GET | `/api/:t/modules/webdev/console/sites/:slug/submissions[?formId=]` | `{ submissions: SubmissionFact[], meta: DegradeMeta }` — slim projection only (`submissionId, formId, hasAttachments, receivedAt`); Zone A never receives submission content over the bridge, so this is PII-aware by construction, not by filtering | `webdev_provisioned_site:read` |
+| GET | `/api/:t/modules/webdev/console/contract-pins[?slug=]` | `{ pins: ContractPinStatus[] }` — WSK-19's pinned snapshot × the live-or-degraded "latest published" read | `webdev_contract_snapshot:read` (existing kind/action, WSK-19) |
+
+**No new Cerbos resource kind.** The ticket's own warning ("a new kind costs six coupled
+artifacts") was heeded by checking first: design §08's button matrix already gates registry/env-
+status/submissions under ONE action, and both existing kinds this file authorizes against
+(`webdev_provisioned_site`, `webdev_contract_snapshot`) already carry a `read` action with the
+right role tiers wired by earlier tickets. Nothing here required a policy edit, a catalog edit, a
+migration, or a Cerbos restart.
+
+### ⚠ Every read here is `meta`/`latest`-wrapped — `stale: false` is the RARE case, not the default
+
+`platform-ui/src/lib/webdesk.ts`'s own header states this at length; restated here because it is
+the ticket's central finding, not a footnote. **Zone B's control plane (WSK-21) ships exactly three
+`GET` routes today: `contract`, `jobs`, `jobs/:jobId`.** There is no live read endpoint for site/
+environment status, releases, or form submissions — every other control-plane route is a write
+command. So:
+
+- **Site registry, releases, submissions** have no live upstream to proxy at all. They are built
+  directly from Zone A's own facts (`webdev_provisioned_sites` + `webdev_zoneb_event_log`) and are
+  **always** `meta.source: "facts"` (or `"unavailable"` when nothing is on file yet) — never
+  `"live"`. Marking them live would be exactly the fabrication this contract exists to prevent.
+- **Contract pin-vs-latest** is the one read with a genuine live upstream (WSK-19's own
+  `getContractBundle`, reused verbatim — no new egress code anywhere in this ticket). It gets the
+  full three-tier degrade: **live** (a real call succeeded this cycle) → **cache** (a short
+  in-process TTL cache from an earlier live success, when the live call just failed) → **facts**
+  (the last `contract.published` event-log fact on file) → **unavailable** (genuinely nothing).
+  Proven with a real test that establishes a live cache entry and then kills the upstream mid-suite
+  (`console-reads.service.test.ts`, `"THE REQUIRED TEST: kill the upstream..."`) — the degraded
+  response keeps the LAST GOOD version and vocabulary, never nulls them out, and `source` is never
+  `"unavailable"` when a cache or fact answer exists.
+- `deploy.done` / `promote.done` / `rollback.done` / `contract.published` have **no real emitter
+  yet** (WSK-10's `form.received` is the only DEV-VERIFIED one) — their event-log `payload` shape is
+  therefore best-effort field-matched (`siteSlug`/`slug`/`webdeskTenantSlug`, `version`/
+  `contractVersion`), flagged in the service file's own header as unpinned until a real emitter
+  lands. Tests prove the AGGREGATION logic against synthetic rows this ticket inserts itself, not
+  against a real emitter (none exists to test against).
+
+### What §08/§09 asked for that this ticket did NOT build, and why
+
+- **The real mTLS + Keycloak client-credentials + WS4-assertion control channel.** `config.ts`'s own
+  `webdevControl` header names this "WSK-22/23's job" — but WSK-22 built the Zone B **verification**
+  side only (no `webdesk-control` Keycloak client exists yet — an **owner action**, §09's own table)
+  and this ticket's given scope was the BFF read/degrade surface, not channel hardening. The bearer-
+  token stub WSK-19 shipped is unchanged; every proxy read in this ticket degrades cleanly through
+  it exactly as it would through the real thing once WSK-22's owner-gated piece lands.
+- **WS4 wiring.** Every route in this ticket is a pure read (§08's button matrix: 🟢, `webdesk:read`
+  only) — WS4 gates writes (promote/rollback/keys), which are WSK-25/29's scope, not this one's.
+  `refresh`'s own WS4 path (D14, automation-only) already existed from WSK-19 and is untouched.
+- **Separate backend-env vs frontend-deployment columns, and a domain field**, on the site registry
+  row (§08 v1.1: "the row splits into two columns"). `webdev_provisioned_sites` (0090) has neither
+  column, and this ticket's constraints forbid improvising DDL — flagged for whichever ticket owns
+  the next `webdev_provisioned_sites` schema change (senior-db/architect call).
+- **Locale-coverage row** (§08 v1.1) — no locale data reaches Zone A over the bridge today (no
+  `kind` in `webdev_zoneb_event_log`'s CHECK-enumerated vocabulary carries it); would need either a
+  new bridge fact kind or a live Zone B endpoint, neither of which exists.
+
+---
+
 ## IAM Phase 2 — employees + joiner/mover/leaver (P2-06, 2026-08-18)
 
 **Status:** PROTOTYPED / DEV-VERIFIED against `gaiada-test-pg` + a restarted test Cerbos
@@ -4088,19 +4163,6 @@ client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
 | GET | `/finance/ledger/verify` | `{ problems, clean }` | `finance_ledger:verify` |
 | GET | `/finance/ar/aging?asOf=` · `/finance/ap/aging?asOf=` | aging rows | `finance_ar\|ap:read` |
 | GET | `/finance/ar/reconcile` · `/finance/ap/reconcile` | `{ position, problems, clean }` | `…:reconcile` |
-| GET | `/finance/fiscal-years` | `{ id, code, startDate, endDate, status, periodCount, openPeriods }[]` | `finance_period:read` |
-| | | Added 2026-08-27 because closing a year was reachable only by somebody who already held the uuid — nothing returned one, and `/finance/periods` carries the year CODE but not its id. `openPeriods > 0` means the year is NOT closeable; show it on the row and disable the control, rather than letting the user type a confirmation and then be refused. | |
-| GET | `/finance/ar/credit-notes?status=` | credit-note rows (incl. `unapplied`) | `finance_ar:read` |
-| POST | `/finance/ar/credit-notes` | `{ id, creditNoteNo, subtotal, taxTotal, total }` — raises AND posts | `finance_ar:credit_note` |
-| POST | `/finance/ar/credit-notes/:noteId/apply` | `{ applicationId, amount }` — subledger only, posts nothing | `finance_ar:credit_note` |
-| POST | `/finance/ar/invoices/:invoiceId/write-off` | `{ writeOffId, invoiceNo, amount }` — `confirm` must equal the invoice number | `finance_ar:write_off` |
-| | | ⚠ **A credit note and a write-off are NOT two flavours of one adjustment, and a consumer that presents them as one will cause a real tax error.** A CREDIT NOTE means the customer never owed it (return, over-bill, agreed discount): it debits contra-revenue AND **reverses output VAT** (a 2140 debit). A WRITE-OFF means they owed it and will not pay: it debits bad-debt expense (6950) or the allowance (1131) per `finance_company_settings.bad_debt_method`, and posts **NO VAT line at all** — Indonesian PPN gives no relief for a bad debt, so reversing it reclaims tax the company is not entitled to and shows up in a Coretax reconciliation. They also carry different rights (`credit_note` vs the step-up-gated `write_off`), though both bind to the same SoD duty `ar_writeoff_approve`. | |
-| | | ⚠ `/finance/ar/reconcile`'s `position` gained a FOURTH field, `unappliedCredits`. The identity is `open invoices - payments on account - unapplied credit notes = the AR control balance`: an unapplied credit note credits the control account exactly as an unallocated receipt does. A consumer that still computes `open - onAccount` will disagree with the ledger the moment any credit note is issued and not yet applied — which is its normal state. | |
-| GET | `/finance/tax/returns?year=&kind=` | filed/draft return rows | `finance_tax:read` |
-| POST | `/finance/tax/returns` | `{ id, status, computed:{output,input,net} }` — idempotent per period | `finance_tax:prepare` |
-| POST | `/finance/tax/returns/:returnId/file` | `{ id, status, filed:{…} }` — needs `filingReference` + `confirm`; `amend:true` to re-file | `finance_tax:file` |
-| GET | `/finance/tax/returns/drift` | `{ problems, clean }` — filed returns the ledger no longer agrees with | `finance_tax:read` |
-| | | ⚠ Filed figures are a SNAPSHOT taken at filing and are never recomputed. `filed*` is what was told to DJP; the summary endpoints are what the data says today. They diverge the moment a journal lands in a filed period, and `/drift` is the endpoint that measures it — do not "helpfully" refresh `filed*` from the live summary, that destroys the only evidence of the gap. | |
 | GET | `/finance/tax/ppn?from=&to=` | PPN summary | `finance_tax:read` |
 | GET | `/finance/tax/efaktur-exceptions?from=&to=` | exception rows | `finance_tax:read` |
 | GET | `/finance/periods/:periodId/close-readiness` | `{ blockers, ready }` | `finance_bank:reconcile` |

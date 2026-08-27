@@ -30,12 +30,12 @@ misleads real tickets.
 |---|---|---|---|---|---|
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
-| C · Contract, codegen & the rail | 7 | **3** | 1 | 3 | 0 |
-| D · Control plane · ERP console · envs | 9 | **2** | 0 | 6 | 1 |
+| C · Contract, codegen & the rail | 7 | **4** | 0 | 3 | 0 |
+| D · Control plane · ERP console · envs | 9 | **3** | 1 | 4 | 1 |
 | E · AI execution & approvals | 3 | 0 | 0 | 3 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
 | G · New from reassessment | 2 | **1** | 0 | 1 | 0 |
-| **Total** | **51** | **28** | **1** | **19** | **3** |
+| **Total** | **51** | **30** | **1** | **17** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -96,7 +96,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅ | WSK-16 | **Block-renderer library v0** — **the FIRST ticket verified on real LINUX** (`node:22-bookworm-slim`), per the 2026-08-26 rule. 9 components 1:1 with the vocabulary; props **mechanically cross-checked** against `BLOCKS[type].fields` rather than asserted, and round-tripped through the vocabulary's own `validateBlock()`. **Renderer invariant proven with real output:** an unknown `pricingTable` between a hero and a richText appears **0 times** in the built HTML while both known blocks still render; the QA hook captured it. `meta.draft` + `meta.x.localeFallback` both surfaced. Tarball (23 files, 14.6kB) genuinely `npm pack`-ed and installed by path into a separate consumer. Vocabulary **vendored with a drift check** (`vendor:check` in `prepack`) so a tarball consumer outside this repo still has ONE source of truth. 26/26 unit, `astro check` clean. Honest status: PROTOTYPED — nothing in-repo imports it yet (WSK-17/20 own that) | senior-fe | WSK-14 ✅ |
 | ⬜ | WSK-17 | Proof rebuild — gaiada.com rebuilt purely from generated SDK + shared blocks, zero hand-written fetches | medior | WSK-15, 16 |
 | ⬜ | WSK-18 | P3 QA gate — determinism double-run + cross-machine, SDK↔OpenAPI↔contract coherence, unknown-block probe, artifact-URL expiry | qa | WSK-14–17 |
-| ⬜ | WSK-19 ⚡ | **Zone A contract-snapshot mirror** (rail, Zone A end) — `webdev` ModuleContract, **timestamp-named migration**, hash verify + immutability + refuse-on-mismatch alerting, `webdev.refreshContract` MCP tool | senior-be | WSK-15 |
+| ✅ | WSK-19 ⚡ | **Zone A contract-snapshot mirror** — verified on a real **Linux** container. **Immutability is a DB TRIGGER**, not just an absent app route, so a direct UPDATE/DELETE is refused too. **Both tripwires proven with real output:** hash mismatch → refused with **zero writes**; same version + different bytes → **determinism breach**, alerts via an `outbox_events` row + a `severity:critical` activity, original row untouched, 409 to the caller. Lives in a **sibling** `src/modules/webdev-contracts/` because `webdev`'s own `egress-inventory.test.ts` statically asserts exactly one egress file there — same module key, same third-wall RLS. All six Cerbos artifacts + every pinned count. **Coordinator-verified: `src/rbac` 793/793 on Linux** (the 1 failure the agent saw did not reproduce). ⚠️ Control-channel auth is a **bearer stub** — real mTLS+KC+WS4 is WSK-22/23 | senior-be | WSK-15 ✅ |
 | ⬜ | WSK-20 ⚡ | **`code.scaffold` v2** (rail, demand end) — FROZEN envelope, astro+node templates, SDK from snapshot tarball, `CONTRACT.lock`, conformance test, D-6 never-execute rule | senior-be | WSK-19 |
 
 ---
@@ -107,7 +107,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 |---|---|---|---|---|
 | ✅ | WSK-21 ⚡ | **Control-plane API v1 (Zone B)** — 18 commands / 6 controllers, every one carrying an §07 impact class asserted entry-by-entry; idempotency proven by double-fire (+ a DB unique constraint proven as an **independent cross-process backstop**); long commands job-tracked; audit row per command; authz **seam + dev stub only** (WSK-22 owns the real channel). **Coordinator-verified 36/36**, `tsc` 0 errors, WSK-05 26/26 no regression. **Caddyfile already 404s `/control/*` on the public vhost** — confirmed, so the exposure warning is satisfied today. ⚠️ **Two documented 501s** (`site.archive` needs a `sites.status` column; `contract.read` waits on WSK-15) and **no Cerbos sidecar** — interface + stub only | senior-be | WSK-03 ✅ |
 | ✅⚠ | WSK-22 ⚡ | **Control-channel auth, layers 1-4** — **PROVISIONAL: built + agent-verified on WINDOWS, not re-verified on Linux** (owner rule 2026-08-26). 19-row adversarial matrix all refusing with distinct reasons: no cert · token-without-cert · wrong CA/CN · cert-without-token · wrong audience/issuer/kid · tampered signature · **missing WS4 on a HIGH command** · commandHash mismatch · expired assertion · **replay: same approvalId 201 then 403**. Layer-1 certs **actually issued by `synccert`** (real EC P256 CA via WSL), and the **real public issuer was proven reachable** with zero Zone A credential. ⚠️ **Deterministic matrix used a fixture JWKS** — no `webdesk-control` Keycloak client exists, so no token can genuinely verify against the real issuer. ⚠️ **WS4 dedup is a `SELECT` with no unique constraint** — closes realistic replay, not a concurrent double-fire; needs a migration. Proxy-side mTLS termination unbuilt | senior-integrator | WSK-21 ✅ |
-| ⬜ | WSK-23 ⚡ | ERP module egress client + BFF — control client, proxy reads with degrade-to-facts, WS4 wiring, Cerbos `resource_webdesk_site` (+restart) | senior-be | WSK-19, 22 |
+| ✅ | WSK-23 ⚡ | **ERP egress + BFF console read model** — Linux-verified. 4 read endpoints under the `webdev` module, **no new Cerbos kind** (reused `webdev_provisioned_site:read` / `webdev_contract_snapshot:read`, so no policy edit and no restart). Reuses WSK-19's egress driver **verbatim — zero new egress code**, proven against BOTH directories' `egress-inventory` scanners. **The required degrade test passes:** live → 60s cache → last `contract.published` fact → explicit `unavailable`; killing the upstream keeps the **last-good version** with `stale:true, source:"cache"`, never nulled. 13/13 + 8/8 + 6/6; `platform-nest`+`webdev-contracts` 151/151. Claimed **§24** in FRONTEND-BFF-CONTRACT. ⚠️ **Site registry / releases / submissions are ALWAYS `stale:true`** — see the log; that is honesty, not a defect | senior-be | WSK-19 ✅ |
 | ⬜ | WSK-24 | **Sites tab** (platform-ui) — **SPEC REFRESHED for WSK-D26** (was written for Cloudflare Pages, now reversed). Registry with **two independent columns: backend env** (staging/production content) **and frontend deployment** (`delphi` staging · `helios` production · Hostinger for WP) — content and frontend promote separately, and one merged chip hides the question people actually ask. Contract card + **locale-coverage row** (WSK-D18). Shown-once key mint. WS4-gated release buttons rendering approval state inline. Submissions (PII-aware). **Degraded state must be visibly honest** when Zone B is unreachable — never a silent empty list. ⚠️ **Do not build against fixtures alone** — the estate's recurring bug class is frontend-first drift (a console reading fields the backend never sends). Needs WSK-23's BFF first | senior-fe | WSK-23 |
 | ⬜ | WSK-25 | **Promotion engine (shrunk by R-2)** — snapshot-first → migrate → content export/import → **Pages deploy hook** → purge. Rollback = content restore + Pages rollback. *Re-rate from `opus·medium` at ticket time* | senior-be | WSK-21 |
 | ⬜ | WSK-26′ | **Pages deploy + domain adapter** (merges old WSK-26+27) — per-branch preview URLs attached to `customer_feedback` gate rows (D-8 unchanged, only the URL source changes); `setDomain` via Pages custom domains. **Deploy token held in Zone A — Zone B never deploys frontends** | senior-integrator | WSK-25 |
@@ -226,6 +226,33 @@ model, so any migration is a DNS + content-export exercise, never a server-side 
 ---
 
 ## Session log
+
+> **🚀 LIVE at `Alpha 01.071.0190a`, and my work is ON it — verified, not assumed.** Another session
+> tagged past my 0189a; 0190a is cut from the same main, so it carries WSK-19/16/37 + the IAM chain.
+> Confirmed on the live database: **3/3 migrations applied**, `webdev_contract_snapshots` has RLS
+> **enabled AND forced** with a policy, the **immutability trigger exists**, and all four
+> `webdev.zoneb_event.*` / `webdev.contract_snapshot.*` permission rows are present. **CI is green
+> again** — the finance shard failures cleared.
+>
+> **⚠️ A REAL ARCHITECTURAL FINDING from WSK-23, worth more than the ticket:** the console's site
+> registry, releases and submissions **cannot be live**, because **WSK-21's control plane ships only
+> THREE GET routes** (`contract`, `jobs`, `jobs/:id`) — everything else is a write command. So those
+> three reads are built from Zone A's own facts and are **honestly always `stale:true`**. That is the
+> right call (the alternative is a console confidently rendering an empty list), but it means
+> **§08's registry needs read commands on the Zone B control plane that nobody has scoped.**
+> WSK-24 must read §24's "stale:false is rare" warning before building.
+>
+> **⚠️ Cross-ticket conflict to reconcile:** WSK-31 (concurrent) built `webdesk.*` tools whose comments
+> assume WSK-23 delivers a live Zone B **command** egress client. WSK-23 delivered a **read-only**
+> proxy reusing WSK-19's GET-only driver. Neither is wrong; they disagree about scope.
+
+
+> **Pushed to main 2026-08-27 — `9a7c8be2`, 92 files.** WSK-19 + WSK-16 + WSK-37 + the vocabulary
+> bug fix. Staged file-by-file against `origin/main` in a worktree, and **every shared file was
+> diffed in BOTH directions first** — `package.json` (finance's CI scripts) and
+> `src/core/webdev-change-requests*` (another session's bug-intake work) were identified as not mine
+> and deliberately excluded. `docs/MAP.md` regenerated from the clean worktree.
+
 
 > **🐞 WSK-16 found a real bug in the frozen vocabulary, and it broke TWO of the nine block types.**
 > `primitives.ts`'s `media` validator ignored `field.multiple` while `relation` honoured it — so
