@@ -9,13 +9,11 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { buildConfig } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-// @ts-expect-error - plain .mjs, no types authored for this project's tenancy files
 import { tenantAwarePg } from './src/tenant-pg.mjs'
 // WSK-04b (WSK-D25) — the app-layer tenant predicate, independent of the `webdesk.tenant_ctx`
 // GUC `tenant-pg.mjs` stamps on the pool. See src/tenant-access.mjs's header for why this is a
 // SEPARATE mechanism (reads tenantStore directly, never touches Postgres) and why it does not
 // weaken the overrideAccess:true callers (setup-schema.mjs, future seeding) rely on.
-// @ts-expect-error - plain .mjs, no types authored for this project's tenancy files
 import { tenantScopedAccess } from './src/tenant-access.mjs'
 // WSK-06 — the vocabulary v1 package (8 primitives, 9 block types), consumed here so
 // payload.config.ts is one of the "config" surfaces the design says the vocabulary feeds

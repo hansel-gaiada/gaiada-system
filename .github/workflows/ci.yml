@@ -486,6 +486,16 @@ jobs:
           cache-dependency-path: webdesk/package-lock.json
       - run: npm ci
       - run: npm test
+      # WSK-28 (2026-08-27) — published-port collision gate. `docker compose config` exits 0 on a
+      # file whose service DEFAULTS claim the same host port: it validates schema, not whether the
+      # services can coexist. payload-gateway and redis both defaulted to 8384, so `--profile dev up`
+      # died on a bind conflict for anyone without a local override — and the local override is
+      # exactly what hides it from the person who has one. Selftest runs first so a gate that has
+      # stopped being able to fail cannot report a pass.
+      - name: Compose published-port collision gate (WSK-28)
+        run: |
+          node scripts/check-compose-ports.mjs --selftest
+          node scripts/check-compose-ports.mjs docker-compose.yml
 
   # webdesk/blocks (WSK-16) — the lightest of the three: no database, no external service. Its own
   # `npm run build` already IS the gate (vendor-drift check against ../payload/vocabulary + the unit

@@ -241,7 +241,11 @@ services:
     image: redis:7-alpine
     profiles: ["dev"]
     ports:
-      - "${WEBDESK_REDIS_PORT:-8384}:6379"
+      # WSK-28 fix: was :-8384, which WEBDESK_PAYLOAD_PUBLIC_PORT already claims. Two services in the
+      # SAME (dev) profile defaulting to one host port means `up` dies on a bind conflict, and
+      # `docker compose config` cannot see it — it validates schema, not port uniqueness. See
+      # scripts/check-compose-ports.mjs, added so this cannot recur.
+      - "${WEBDESK_REDIS_PORT:-8390}:6379"
     volumes:
       - webdesk_redisdata:/data
     restart: unless-stopped

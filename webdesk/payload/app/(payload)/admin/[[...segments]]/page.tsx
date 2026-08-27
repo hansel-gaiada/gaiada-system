@@ -4,7 +4,6 @@ import config from '@payload-config'
 import { generatePageMetadata, RootPage } from '@payloadcms/next/views'
 import { headers as getHeaders, cookies as getCookies } from 'next/headers'
 
-// @ts-expect-error - plain .mjs, no types authored for this project's tenancy files
 import { runWithTenant } from '../../../../src/tenant-context.mjs'
 import { importMap } from '../importMap.js'
 

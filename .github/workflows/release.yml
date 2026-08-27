@@ -58,6 +58,13 @@ jobs:
           # is no Zone B box yet (A-12), so this closes "nothing builds a webdesk image" without
           # inventing a deploy path nothing can serve.
           - webdesk-api
+          # WSK-28 (2026-08-27) — now in the matrix. It was deliberately EXCLUDED because
+          # `next build`'s type-check was red (TS2578 unused @ts-expect-error x5, then TS5097 on 41
+          # .ts-extension imports once those were cleared), and `needs: build-sign` waits for every
+          # matrix leg, so one red leg would have skipped `deploy` for EVERY component in the
+          # estate. Both causes are fixed and the build is green, so it joins. Its context is a
+          # subdirectory like webdesk-api's -- see the `context:` expression below.
+          - webdesk-payload
           # MON-09f. Unlike every other entry this does NOT live at ./<component> - see the
           # `context:` expression below. It is here because deploy.yml runs `up -d --no-build`:
           # a service that exists only as a local `build:` has no image to start, so the deploy
@@ -91,7 +98,7 @@ jobs:
           # a flat string: the GHCR prune step below builds `package-name: gaiada-${{ matrix.component }}`
           # from it, and the image name (`gaiada-webdesk-api`) is deliberately hyphenated even though
           # the source path (`webdesk/api`) is not — same convention synthetic-prober already sets.
-          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || matrix.component == 'webdesk-api' && './webdesk/api' || format('./{0}', matrix.component) }}
+          context: ${{ matrix.component == 'synthetic-prober' && './infra/observability/synthetic-prober' || matrix.component == 'webdesk-api' && './webdesk/api' || matrix.component == 'webdesk-payload' && './webdesk/payload' || format('./{0}', matrix.component) }}
           push: true
           tags: ${{ env.IMAGE }}:${{ env.TAG }}
           provenance: false # we attach a richer SLSA attestation below

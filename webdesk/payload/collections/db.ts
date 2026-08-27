@@ -10,7 +10,6 @@
 // way the NestJS `api` service (webdesk/api/src/db/*) also runs its own independent pool against
 // this database rather than sharing Payload's.
 import type { Pool, PoolClient } from 'pg'
-// @ts-expect-error - plain .mjs, no types authored for this project's tenancy files (WSK-02)
 import { tenantAwarePg, tenantStore } from '../src/tenant-pg.mjs'
 
 const GUC_PLATFORM = 'webdesk.platform_ctx'

@@ -8,7 +8,6 @@ import {
   REST_PUT,
 } from '@payloadcms/next/routes'
 
-// @ts-expect-error - plain .mjs, no types authored for this project's tenancy files
 import { resolveTenantId, runWithTenant } from '../../../../src/tenant-context.mjs'
 
 // WSK-02 — Payload's generic, unscoped collection REST (proven correct for the GUC by WSK-00's
