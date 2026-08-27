@@ -153,9 +153,9 @@ export class PipelineController {
   async createRun(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { sourceMeetingId?: string; title?: string; momRef?: string; status?: string; clientId?: string; projectId?: string; ownerId?: string; stages?: Array<{ track?: string; name?: string; status?: string; artifactRef?: string; confidence?: number }> },
+    @Body() body: { sourceMeetingId?: string; title?: string; momRef?: string; status?: string; clientId?: string; projectId?: string; departmentId?: string; ownerId?: string; stages?: Array<{ track?: string; name?: string; status?: string; artifactRef?: string; confidence?: number }> },
   ) {
-    const { sourceMeetingId, title, momRef, status = "extracting", clientId, projectId, ownerId, stages = [] } = body ?? {};
+    const { sourceMeetingId, title, momRef, status = "extracting", clientId, projectId, departmentId, ownerId, stages = [] } = body ?? {};
     if (!RUN_STATUS.has(status)) throw new BadRequestException("invalid run status");
     for (const s of stages) {
       if (!s.track || !TRACKS.has(s.track)) throw new BadRequestException("stage.track must be delivery|report|scope");
@@ -187,22 +187,33 @@ export class PipelineController {
       // a gap, so a caller deliberately creating an unattached run keeps that ability.
       let derivedClientId = clientId ?? null;
       let derivedProjectId = projectId ?? null;
-      if (sourceMeetingId && (derivedClientId === null || derivedProjectId === null)) {
-        const src = await c.query<{ client_id: string | null; project_id: string | null }>(
-          `SELECT client_id, project_id FROM meeting_recordings
-            WHERE meeting_id = $1 AND deleted_at IS NULL LIMIT 1`,
+      // Department lineage: same rule as client/project — the caller's value wins; else the source
+      // meeting's; else (for rows that pre-date meeting_recordings.department_id) the project's.
+      let derivedDepartmentId = departmentId ?? null;
+      if (sourceMeetingId && (derivedClientId === null || derivedProjectId === null || derivedDepartmentId === null)) {
+        const src = await c.query<{ client_id: string | null; project_id: string | null; department_id: string | null }>(
+          `SELECT client_id, project_id, department_id FROM meeting_recordings
+            WHERE meeting_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
           [sourceMeetingId],
         );
         if (src.rows[0]) {
           derivedClientId = derivedClientId ?? src.rows[0].client_id;
           derivedProjectId = derivedProjectId ?? src.rows[0].project_id;
+          derivedDepartmentId = derivedDepartmentId ?? src.rows[0].department_id;
         }
+      }
+      if (derivedDepartmentId === null && derivedProjectId !== null) {
+        const proj = await c.query<{ department_id: string | null }>(
+          `SELECT department_id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+          [derivedProjectId],
+        );
+        derivedDepartmentId = proj.rows[0]?.department_id ?? null;
       }
       const id = newId();
       await c.query(
-        `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, derivedClientId, derivedProjectId, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
+        `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id, created_by, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, derivedClientId, derivedProjectId, derivedDepartmentId, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
       );
       for (const s of stages) {
         // WD-29: the same identity guard as createStage. No lock is needed here (the run id was just
@@ -299,7 +310,7 @@ export class PipelineController {
         // C4/C6: client_id + project_id are selected here so the list can show WHOSE work a run is and
         // link to it. Their absence is why `lib/pipeline.ts` had to cross-reference the recordings
         // registry to render a client column, and why run->project navigation did not exist at all.
-        `SELECT id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id,
+        `SELECT id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id,
                 created_by, created_at, updated_at
          FROM pipeline_runs WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
@@ -315,7 +326,7 @@ export class PipelineController {
     return withTenants([tenantId], async (c) => {
       const run = await c.query(
         // C6: project_id added so the run workspace can link to the project this delivery belongs to.
-        `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id,
+        `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id,
                 created_by, created_at, updated_at
          FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`,
         [runId],

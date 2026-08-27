@@ -556,22 +556,61 @@ describe.skipIf(!TEST_URL)("meeting-to-delivery pipeline surface (WS11 §4B)", (
   // blind for a reason no test asserted, since every existing test passes clientId explicitly or
   // never looks at it.
   describe("WD-30 run inherits client/project from its source meeting", () => {
-    async function recording(meetingId: string, clientId: string | null, projectId: string | null) {
+    async function recording(meetingId: string, clientId: string | null, projectId: string | null, departmentId: string | null = null) {
       await withTenants([co], (c) =>
         c.query(
-          `INSERT INTO meeting_recordings (id, tenant_id, meeting_id, client_id, project_id, title, origin_site)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [newId(), co, meetingId, clientId, projectId, "src", config.originSite],
+          `INSERT INTO meeting_recordings (id, tenant_id, meeting_id, client_id, project_id, department_id, title, origin_site)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [newId(), co, meetingId, clientId, projectId, departmentId, "src", config.originSite],
         ),
       );
     }
     const runRow = (id: string) =>
       withTenants([co], (c) =>
-        c.query<{ client_id: string | null; project_id: string | null }>(
-          `SELECT client_id, project_id FROM pipeline_runs WHERE id = $1`,
+        c.query<{ client_id: string | null; project_id: string | null; department_id: string | null }>(
+          `SELECT client_id, project_id, department_id FROM pipeline_runs WHERE id = $1`,
           [id],
         ),
       ).then((r) => r.rows[0]);
+
+    it("department lineage: fills department_id from the meeting, the caller's explicit value wins, and the list returns it", async () => {
+      await recording("mtg-dept-1", null, null, "dept-web");
+      const derived = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-dept-1", title: "no departmentId sent" },
+      });
+      expect(derived.statusCode).toBe(201);
+      expect((await runRow(derived.json().id))?.department_id).toBe("dept-web");
+
+      await recording("mtg-dept-2", null, null, "dept-web");
+      const explicit = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-dept-2", departmentId: "dept-seo" },
+      });
+      expect((await runRow(explicit.json().id))?.department_id).toBe("dept-seo");
+
+      const list = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs?sourceMeetingId=mtg-dept-1`, headers: asWorkflow("wf:mtg-dispatcher") });
+      expect(list.json()[0]).toMatchObject({ department_id: "dept-web" });
+      const detail = await app.inject({ method: "GET", url: `/api/${co}/pipeline/runs/${derived.json().id}`, headers: asWorkflow("wf:mtg-dispatcher") });
+      expect(detail.json()).toMatchObject({ department_id: "dept-web" });
+    });
+
+    it("department lineage: falls back to the project's department when the meeting has none", async () => {
+      const projectId = newId();
+      await withTenants([co], (c) =>
+        c.query(
+          `INSERT INTO projects (id, tenant_id, name, department_id, origin_site) VALUES ($1, $2, $3, $4, $5)`,
+          [projectId, co, "Dept-owned project", "dept-web", config.originSite],
+        ),
+      );
+      await recording("mtg-dept-3", null, projectId, null);
+      const r = await app.inject({
+        method: "POST", url: `/api/${co}/pipeline/runs`, headers: asWorkflow("wf:mtg-dispatcher"),
+        payload: { sourceMeetingId: "mtg-dept-3", title: "via project" },
+      });
+      expect(r.statusCode).toBe(201);
+      expect((await runRow(r.json().id))?.department_id).toBe("dept-web");
+    });
 
     it("fills client_id from the meeting when the caller omits it", async () => {
       const cl = await createClient(co, "Inheriting Co");

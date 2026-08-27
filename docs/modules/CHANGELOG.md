@@ -11,6 +11,25 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.40.0` - briefings and PRD runs know their department (2026-08-27) - DEV-VERIFIED
+
+**Added**
+- `meeting_recordings.department_id` and `pipeline_runs.department_id` (org-node id, free text —
+  the shape `projects.department_id` already uses; nullable). Migration
+  `202608270652_department_lineage_on_recordings_and_runs.sql` adds both, indexes them, and
+  backfills existing rows through their project per tenant (the `set_config` pattern from 0051/0074;
+  `lint:migration-rls` green). Rows with neither project nor department stay NULL — honestly unknown.
+- `POST /api/:t/meetings/recordings/start` accepts `departmentId`; the list and detail reads return
+  `department_id`.
+- `POST /api/:t/pipeline/runs` accepts `departmentId` and derives it like `client_id`/`project_id`:
+  the caller's value wins, else the source meeting's, else the project's. List and detail return it.
+- Why: the Web Dev console inferred department ownership through the project, which fails for a
+  briefing that has no project yet — and a briefing usually exists before its project. Spec:
+  `docs/superpowers/specs/2026-08-26-webdev-lineage-fields-design.md` (1/3).
+- Tests: `meetings.test.ts` (+1), `pipeline.test.ts` (+2) against the disposable test Postgres +
+  live Cerbos — 79/79.
+
+
 ### platform-nest `0.39.2` - the finance seed counted calls, not writes (2026-08-26) - DEV-VERIFIED
 
 **Fixed**
