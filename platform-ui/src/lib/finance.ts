@@ -107,7 +107,20 @@ export interface ReconcileVerdict<P> { position: P; problems: Problem[]; clean: 
 export interface ArPosition {
   openInvoices: string; paymentsOnAccount: string; unappliedCredits: string; netReceivable: string;
 }
-export interface ApPosition { openBills: string; paymentsOnAccount: string; netPayable: string }
+/** `openBills - paymentsOnAccount - unappliedCredits = the AP control balance` — the payables mirror
+ *  of `ArPosition` above, same reasoning: an unapplied vendor credit debits the AP control account
+ *  exactly as an unallocated payment does.
+ *
+ *  ⚠ VERIFIED AGAINST THE CONTROLLER, NOT ASSUMED: as of this file's own edit,
+ *  `finance.controller.ts::apReconcile`'s SELECT list does not yet alias
+ *  `unapplied_credits AS "unappliedCredits"` even though `finance_ap_position()` (migration
+ *  202608272000) returns it — the AR sibling's SELECT does carry the AR equivalent, this one does
+ *  not. A live response can therefore omit the field; `money()` renders `undefined` as "—" rather
+ *  than crashing, so the KPI tile degrades visibly instead of silently. Re-check the controller
+ *  before removing this note. */
+export interface ApPosition {
+  openBills: string; paymentsOnAccount: string; unappliedCredits: string; netPayable: string;
+}
 export interface CloseReadiness { blockers: Array<{ blocker: string; detail: string }>; ready: boolean }
 
 export interface PpnSummary {
@@ -640,4 +653,76 @@ export const listArCreditNotes = (u: string, t: string, status?: string) =>
   financeData(
     platformFetch<ArCreditNote[]>(`/api/${t}/finance/ar/credit-notes${qs({ status })}`, u),
     [] as ArCreditNote[],
+  );
+
+// ── AP vendor credits and write-offs (F5b) ──────────────────────────────────────────────────────
+// The payables mirror of the pair above, and NOT a sign flip — see
+// `components/finance/ApCreditNotesForms.tsx`'s header note for the full reasoning. Three
+// consequences carry money and are why this is a second, deliberately different, type/form pair
+// rather than the AR one reused with a relabelled noun:
+//
+//   · a vendor credit reverses INPUT VAT (PPN Masukan, 1170) — VAT the company CLAIMED, not
+//     charged. Indonesian law (PMK 65/2010) validates that reversal with a nota retur the BUYER
+//     issues, not the supplier's own credit note — `notaReturNo` records it.
+//   · it unwinds WITHHOLDING, which can make an already-issued bukti potong overstate what was
+//     withheld. Owner ruling (c): the credit posts and is NOT blocked on this — the exposure is
+//     flagged instead. `requiresBupotAmendment` / `bupotAmendmentRef` / `bupotAmendedAt` are the
+//     flag-and-clear pair; `listApBupotExceptions` below is the chase list.
+//   · a write-off (no subledger reader — it mutates a bill's own balance directly, exactly like
+//     the AR side) credits OTHER INCOME (7300), not an expense: released debt (pembebasan utang)
+//     is taxable income, the opposite of the AR write-off's bad-debt expense.
+export interface ApVendorCredit {
+  id: string;
+  creditNo: string;
+  creditDate: string;
+  vendorId: string;
+  vendorCode: string;
+  vendorName: string;
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+  withholdingCode: string | null;
+  withholdingAmount: string;
+  amountPayable: string;
+  amountApplied: string;
+  unapplied: string;
+  reasonCode: string;
+  reason: string;
+  status: "draft" | "issued" | "applied" | "void";
+  notaReturNo: string | null;
+  /** True the moment a credit with withholding posts — see the header note. Never gates the write;
+   *  only ever a flag for the chase list below. */
+  requiresBupotAmendment: boolean;
+  bupotAmendmentRef: string | null;
+  bupotAmendedAt: string | null;
+  originalBillId: string | null;
+  originalBillNo: string | null;
+}
+
+export const listApVendorCredits = (u: string, t: string, status?: string) =>
+  financeData(
+    platformFetch<ApVendorCredit[]>(`/api/${t}/finance/ap/vendor-credits${qs({ status })}`, u),
+    [] as ApVendorCredit[],
+  );
+
+/** The bukti potong chase list — every issued/applied vendor credit that unwound withholding and
+ *  has not yet had its amendment filed. Same shape as `EfakturException` above, and read the same
+ *  way: a list of things somebody still owes DJP, not a verdict, so it degrades to `[]` rather than
+ *  `null`. */
+export interface ApBupotException {
+  creditNo: string;
+  creditDate: string;
+  vendorCode: string;
+  vendorName: string;
+  npwp: string | null;
+  withholdingCode: string | null;
+  withholdingReversed: string;
+  originalBillNo: string | null;
+  detail: string;
+}
+
+export const listApBupotExceptions = (u: string, t: string) =>
+  financeData(
+    platformFetch<ApBupotException[]>(`/api/${t}/finance/ap/bupot-exceptions`, u),
+    [] as ApBupotException[],
   );

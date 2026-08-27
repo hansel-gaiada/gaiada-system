@@ -513,3 +513,118 @@ export async function writeOffArInvoice(
   if (r.ok) { revalidatePath("/finance/receivables"); revalidatePath("/finance"); }
   return r as FinanceActionResult<{ writeOffId: string; invoiceNo: string; amount: number }>;
 }
+
+// ── AP vendor credits and write-offs (F5b) ──────────────────────────────────────────────────────
+// Same posture as the AR pair above — nothing here re-checks a rule the server enforces. Three
+// things are NOT symmetric with AR, though, and the copy in `ApCreditNotesForms.tsx` exists to say
+// so: a vendor credit reverses INPUT VAT via a buyer-issued nota retur, it can leave an issued bukti
+// potong overstating what was withheld (posted anyway, flagged for a human — never blocked), and an
+// AP write-off is OTHER INCOME, not an expense.
+
+export interface ApVendorCreditLineInput {
+  description: string;
+  amount: number;
+  /** The vendor's original expense/COGS account is fine here — unlike the AR side there is no
+   *  contra-revenue convention to preserve, since a vendor credit doesn't need to keep a return rate
+   *  visible inside ordinary purchases the way a sales credit does inside ordinary revenue. */
+  creditAccountCode: string;
+  /** Percent, e.g. 12. Omit for a line that carries no PPN. */
+  taxRate?: number | null;
+}
+
+/**
+ * Raise a vendor credit and post it. Optionally applies it to a bill in the same call — omit
+ * `applyToBillId` to leave the credit ON ACCOUNT.
+ *
+ * ⚠ `withholdingAmount` is NOT recomputed server-side from `withholdingRate` the way a bill's split
+ * is — it is taken from the caller directly, because it is meant to be copied from the bill being
+ * credited (its own withheld amount), not re-derived from today's rate. `withholdingRate` is stored
+ * for the record only. Naming a bill via `originalBillId` is strongly preferred: it is how the
+ * server resolves which withholding liability account to reverse into (the same one the bill
+ * credited); without one the server demands `withholdingAccountCode` explicitly and refuses with a
+ * 400 this form surfaces verbatim, same as every other refusal here.
+ */
+export async function createApVendorCredit(input: {
+  vendorId: string;
+  creditNo: string;
+  creditDate: string;
+  currencyCode?: string;
+  reasonCode: string;
+  reason: string;
+  originalBillId?: string;
+  /** The nota retur the BUYER (this company) issues — what actually validates the input-VAT
+   *  reversal under PMK 65/2010; the vendor's own credit note does not. */
+  notaReturNo?: string;
+  withholdingCode?: string;
+  /** A RATE (0.02 for PPh 23 at 2%), copied from the original bill's own rate — not a percentage,
+   *  and not today's default rate. */
+  withholdingRate?: number | null;
+  withholdingAmount?: number;
+  withholdingAccountCode?: string;
+  applyToBillId?: string;
+  applyAmount?: number;
+  lines: ApVendorCreditLineInput[];
+}): Promise<FinanceActionResult<{
+  id: string; creditNo: string; subtotal: number; taxTotal: number; total: number;
+  amountPayable: number; requiresBupotAmendment: boolean;
+}>> {
+  const r = await send<{
+    id: string; creditNo: string; subtotal: number; taxTotal: number; total: number;
+    amountPayable: number; requiresBupotAmendment: boolean;
+  }>("/finance/ap/vendor-credits", input);
+  if (r.ok) { revalidatePath("/finance/payables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{
+    id: string; creditNo: string; subtotal: number; taxTotal: number; total: number;
+    amountPayable: number; requiresBupotAmendment: boolean;
+  }>;
+}
+
+/** Apply an already-issued vendor credit to a bill. Subledger only — posts nothing. */
+export async function applyApVendorCredit(
+  creditId: string, input: { billId: string; amount: number },
+): Promise<FinanceActionResult<{ applicationId: string; amount: number }>> {
+  const r = await send<{ applicationId: string; amount: number }>(
+    `/finance/ap/vendor-credits/${creditId}/apply`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/payables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ applicationId: string; amount: number }>;
+}
+
+/**
+ * Record that the amended bukti potong has been filed — the resolution half of the bupot-exception
+ * chase list. `amendmentRef` is required by the server for the same reason a write-off needs a
+ * reason: marking this resolved with nothing to point at is indistinguishable from nobody having
+ * filed it.
+ */
+export async function recordBupotAmendment(
+  creditId: string, input: { amendmentRef: string },
+): Promise<FinanceActionResult<{ creditNo: string; amendmentRef: string }>> {
+  const r = await send<{ ok: boolean; creditNo: string; amendmentRef: string }>(
+    `/finance/ap/vendor-credits/${creditId}/bupot-amended`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/payables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ creditNo: string; amendmentRef: string }>;
+}
+
+/**
+ * Write off a payable the company will not pay. Confirmation-gated on the BILL NUMBER, matching the
+ * AR side's invoice-number gate and `ConfirmAction`'s own convention elsewhere in this module.
+ *
+ * ⚠ Credits OTHER INCOME (7300 by default), not an expense — released debt (pembebasan utang) is
+ * taxable income under UU PPh, the opposite direction from the AR write-off's bad-debt expense. Posts
+ * NO VAT leg: the input VAT on the original purchase was validly claimed when the supply happened,
+ * and nothing about that is undone by not paying for it.
+ */
+export async function writeOffApBill(
+  billId: string,
+  input: {
+    amount: number; writeOffDate: string; reasonCode: string; reason: string; confirm: string;
+    incomeAccountCode?: string;
+  },
+): Promise<FinanceActionResult<{ writeOffId: string; billNo: string; amount: number }>> {
+  const r = await send<{ writeOffId: string; billNo: string; amount: number }>(
+    `/finance/ap/bills/${billId}/write-off`, input,
+  );
+  if (r.ok) { revalidatePath("/finance/payables"); revalidatePath("/finance"); }
+  return r as FinanceActionResult<{ writeOffId: string; billNo: string; amount: number }>;
+}

@@ -4,13 +4,16 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import {
   getApAging, reconcileAp, listPeriods, listApVendors, listApOpenBills, listApBills, listAccounts,
-  money, type ApAgingRow,
+  listApVendorCredits, listApBupotExceptions, money, type ApAgingRow,
 } from "@/lib/finance";
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
 import { EnterBillForm, ReleasePaymentForm, CreateVendorForm } from "@/components/finance/ApForms";
 import { ApApprovalQueue } from "@/components/finance/ApApprovalQueue";
+import {
+  IssueVendorCreditForm, VendorCreditsTable, BupotExceptionsCard, WriteOffBillForm,
+} from "@/components/finance/ApCreditNotesForms";
 
 // Payables — what the company owes vendors, bucketed by age, and whether that ties to the ledger.
 //
@@ -42,13 +45,18 @@ export default async function FinancePayablesPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [rows, rec, vendors, openBills, accounts, draftBills] = await Promise.all([
+  const [rows, rec, vendors, openBills, accounts, draftBills, vendorCredits, bupotExceptions] = await Promise.all([
     getApAging(userId, tenant, asOf),
     reconcileAp(userId, tenant, asOf),
     listApVendors(userId, tenant),
     listApOpenBills(userId, tenant),
     listAccounts(userId, tenant),
     listApBills(userId, tenant, "draft"),
+    // No status filter — `BupotExceptionsCard` below resolves `creditNo → id` against this same
+    // list, so filtering it here would silently break that resolution for anything outside the
+    // filtered status.
+    listApVendorCredits(userId, tenant),
+    listApBupotExceptions(userId, tenant),
   ]);
 
   // The pickers are built from the REAL chart, not a hardcoded list of codes — same reasoning as
@@ -83,6 +91,12 @@ export default async function FinancePayablesPage({
             value={money(rec.position.paymentsOnAccount)}
             foot="paid but not allocated to a bill"
           />
+          <KpiTile
+            label="Unapplied credits"
+            value={money(rec.position.unappliedCredits)}
+            foot="issued but not yet applied to a bill"
+            hint="A vendor credit debits the AP control account the moment it is issued — the same as an unallocated payment. This is a credit's NORMAL state until someone decides what it settles, not an edge case, which is why it is a figure of its own rather than folded silently into the net."
+          />
           <KpiTile label="Net payable" value={money(rec.position.netPayable)} foot="what is actually owed" />
         </div>
       ) : null}
@@ -109,12 +123,43 @@ export default async function FinancePayablesPage({
         <CreateVendorForm />
       </div>
 
-      <Card title="What is still not built here" style={{ marginTop: 22 }}>
+      <Card
+        title="Vendor credits"
+        hint="The vendor never should have billed it. Reverses input VAT along with the spend — validated by a nota retur THIS company issues, not the vendor's own document."
+        style={{ marginTop: 22 }}
+      >
+        <VendorCreditsTable credits={vendorCredits} openBills={openBills} />
+      </Card>
+
+      <div style={{ marginTop: 22 }}>
+        <IssueVendorCreditForm
+          vendors={vendors}
+          openBills={openBills}
+          expenseAccounts={expenseAccounts}
+          liabilityAccounts={liabilityAccounts}
+        />
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <BupotExceptionsCard exceptions={bupotExceptions} credits={vendorCredits} />
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <WriteOffBillForm openBills={openBills} />
+      </div>
+
+      <Card title="Design notes" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Credit notes and write-offs are not built for payables — neither has SQL behind it yet, so
-          building a form would mean inventing the accounting rather than exposing it. The AR side
-          (<code>/finance/receivables</code>) has both, for the mirror-image case: a supplier
-          crediting or forgiving what the company owes THEM has no engine here yet.
+          Vendor credits and bill write-offs are NOT the AR forms with the nouns swapped — see
+          <code> components/finance/ApCreditNotesForms.tsx</code>&rsquo;s header note for the three
+          consequences that carry money: a vendor credit reverses INPUT VAT (validated by a
+          buyer-issued nota retur, not the vendor&rsquo;s own document), it can leave an issued
+          bukti potong overstating what was withheld (posted regardless, flagged on the &ldquo;Bukti
+          potong amendments needed&rdquo; card above rather than blocked), and a bill write-off
+          credits OTHER INCOME — released debt is taxable income, the opposite direction from the AR
+          side&rsquo;s bad-debt expense. What is still genuinely missing here: there is no AP-side
+          manual consolidation adjustment — a vendor credit or write-off can only be entered against
+          a real bill line item, never posted as a free-standing correction to the payables balance.
         </p>
       </Card>
     </div>

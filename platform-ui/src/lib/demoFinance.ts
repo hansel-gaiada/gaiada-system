@@ -163,8 +163,16 @@ const AR_RECONCILE: ReconcileVerdict<ArPosition> = {
 
 // ⚠ DELIBERATELY BROKEN. Without one failing tie-out, the "does not tie" badge and the problem
 // table below it are unreachable in a browser — and they are the reason this console exists.
+//
+// unappliedCredits is 5,450,000 — VCN-2026-001 below, still unapplied — same reasoning as the AR
+// side's non-zero unappliedCredits: a demo where every vendor credit was already applied would make
+// the fourth KPI tile permanently zero. netPayable is openBills - paymentsOnAccount - unappliedCredits
+// (94,000,000 - 0 - 5,450,000), matching the identity `finance_ap_position()` now computes.
 const AP_RECONCILE: ReconcileVerdict<ApPosition> = {
-  position: { openBills: "94000000.0000", paymentsOnAccount: "0.0000", netPayable: "94000000.0000" },
+  position: {
+    openBills: "94000000.0000", paymentsOnAccount: "0.0000",
+    unappliedCredits: "5450000.0000", netPayable: "88550000.0000",
+  },
   problems: [
     {
       problem: "AP_BILL_PAID_CACHE_DRIFT",
@@ -580,6 +588,58 @@ const AP_OPEN_BILLS = [
   },
 ];
 
+// AP vendor credits (F5b). Same "one unapplied, one settled" shape as AR_CREDIT_NOTES, plus a THIRD
+// state neither AR fixture needs to model: a credit that unwound withholding and is still waiting on
+// its bukti potong amendment. Without vc-1 the "requires amendment" badge, the bupot chase list and
+// its clear action would all be unreachable in a browser.
+const AP_VENDOR_CREDITS = [
+  {
+    // Tied to bill-1 (PT Kreatif Media Nusantara) so the apply cell has a real candidate bill of the
+    // SAME vendor to offer, and withheld PPh 23 (2% of the 5,000,000 base) so this is the one that
+    // requires a bukti potong amendment — not yet filed, on purpose (see AP_BUPOT_EXCEPTIONS below).
+    id: "vc-1", creditNo: "VCN-2026-001", creditDate: "2026-03-25",
+    vendorId: "vend-1", vendorCode: "V-001", vendorName: "PT Kreatif Media Nusantara",
+    subtotal: "5000000.0000", taxTotal: "550000.0000", total: "5550000.0000",
+    withholdingCode: "PPH23", withholdingAmount: "100000.0000",
+    amountPayable: "5450000.0000", amountApplied: "0.0000", unapplied: "5450000.0000",
+    reasonCode: "service_failure",
+    reason: "Jasa tidak selesai sesuai kontrak — sebagian pekerjaan tidak dikerjakan",
+    status: "issued", notaReturNo: "NR-2026-014",
+    requiresBupotAmendment: true, bupotAmendmentRef: null, bupotAmendedAt: null,
+    originalBillId: "bill-1", originalBillNo: "BILL-8841",
+  },
+  {
+    // No withholding at all (CV Sinar Percetakan is not PKP — see AP_VENDORS), already applied in
+    // full, no original bill named. Drives the settled/disabled state and shows a vendor credit that
+    // never touches the bupot surface, which is the common case, not the one above.
+    id: "vc-2", creditNo: "VCN-2026-002", creditDate: "2026-02-14",
+    vendorId: "vend-2", vendorCode: "V-002", vendorName: "CV Sinar Percetakan",
+    subtotal: "1500000.0000", taxTotal: "0.0000", total: "1500000.0000",
+    withholdingCode: null, withholdingAmount: "0.0000",
+    amountPayable: "1500000.0000", amountApplied: "1500000.0000", unapplied: "0.0000",
+    reasonCode: "overbilling", reason: "Kelebihan tagih pada cetakan brosur",
+    status: "applied", notaReturNo: null,
+    requiresBupotAmendment: false, bupotAmendmentRef: null, bupotAmendedAt: null,
+    originalBillId: null, originalBillNo: null,
+  },
+];
+
+// The chase list `finance_ap_bupot_amendment_exceptions()` returns — every issued/applied vendor
+// credit with `requires_bupot_amendment` and no `bupot_amended_at` yet. Only vc-1 qualifies; the
+// detail sentence mirrors the SQL function's own concatenation verbatim (see migration
+// 202608272000) so a demo refusal or explanation is never one the live text disagrees with.
+const AP_BUPOT_EXCEPTIONS = [
+  {
+    creditNo: "VCN-2026-001", creditDate: "2026-03-25",
+    vendorCode: "V-001", vendorName: "PT Kreatif Media Nusantara", npwp: "01.234.567.8-901.000",
+    withholdingCode: "PPH23", withholdingReversed: "100000.0000",
+    originalBillNo: "BILL-8841",
+    detail: "vendor credit VCN-2026-001 reversed 100000.0000 of PPH23 originally withheld on bill "
+      + "BILL-8841 -- the bukti potong issued to this vendor now overstates what was withheld and "
+      + "needs an amended e-Bupot",
+  },
+];
+
 export function financeDemo(method: string, p: string, _params: URLSearchParams, userId?: string, body?: string): DemoResult | null {
   const tail = financePath(p);
   if (tail == null) return null;
@@ -633,6 +693,11 @@ export function financeDemo(method: string, p: string, _params: URLSearchParams,
   if (tail === "ap/vendors") return ok(AP_VENDORS);
   if (tail === "ap/open-bills") return ok(AP_OPEN_BILLS);
   if (tail === "ap/bills") return ok(_params.get("status") === "draft" ? AP_DRAFT_BILLS : [...AP_DRAFT_BILLS, ...AP_OPEN_BILLS]);
+  if (tail === "ap/vendor-credits") {
+    const status = _params.get("status");
+    return ok(status ? AP_VENDOR_CREDITS.filter((c) => c.status === status) : AP_VENDOR_CREDITS);
+  }
+  if (tail === "ap/bupot-exceptions") return ok(AP_BUPOT_EXCEPTIONS);
   if (tail === "ar/customers") return ok(AR_CUSTOMERS);
   if (tail === "ar/open-invoices") return ok(AR_OPEN_INVOICES);
   if (tail === "ar/credit-notes") {
@@ -1010,6 +1075,141 @@ function writeOffArInvoiceDemo(invoiceId: string, b: {
   return { status: 201, json: { writeOffId: `demo-wo-${Date.now()}`, invoiceNo: invoice.invoiceNo, amount } };
 }
 
+// ── AP vendor credits and write-offs (F5b) ──────────────────────────────────────────────────────
+// Mirrors `finance.controller.ts::createApVendorCredit` / `applyApVendorCredit` /
+// `recordBupotAmendment` / `writeOffApBill` — same check order as the live handlers, so a demo
+// refusal reads the way the real one does. `CREDIT_NOTE_REASONS` above is reused rather than
+// duplicated: the AP endpoint validates against the exact same six-value enum as the AR one.
+const AP_WRITE_OFF_REASONS = ["vendor_dissolved", "statute_barred", "disputed_abandoned", "unclaimed", "other"];
+
+function createApVendorCreditDemo(b: {
+  creditDate?: string; creditNo?: string; vendorId?: string;
+  reasonCode?: string; reason?: string; lines?: CreditNoteLineBody[];
+  originalBillId?: string; withholdingAmount?: number | string; withholdingCode?: string;
+  withholdingAccountCode?: string;
+}): DemoResult {
+  if (!b.creditDate) return badRequest("creditDate is required");
+  const creditNo = b.creditNo?.trim();
+  if (!creditNo) return badRequest("creditNo is required");
+  if (!b.vendorId) return badRequest("vendorId is required");
+  if (!b.reasonCode || !CREDIT_NOTE_REASONS.includes(b.reasonCode)) {
+    return badRequest(`reasonCode must be one of ${CREDIT_NOTE_REASONS.join(", ")}`);
+  }
+  if (!b.reason?.trim()) {
+    return badRequest("reason is required — a credit with no recorded cause is indistinguishable from a concealed write-off");
+  }
+  if (!Array.isArray(b.lines) || b.lines.length === 0) {
+    return badRequest("at least one line is required — a vendor credit with no lines cannot be issued");
+  }
+
+  let subtotal = 0;
+  let taxTotal = 0;
+  for (let i = 0; i < b.lines.length; i++) {
+    const l = b.lines[i];
+    const amount = Number(l?.amount);
+    if (!l?.description?.trim()) return badRequest(`line ${i + 1}: description is required`);
+    if (!l?.creditAccountCode) return badRequest(`line ${i + 1}: creditAccountCode is required`);
+    if (!Number.isFinite(amount) || amount <= 0) return badRequest(`line ${i + 1}: amount must be greater than zero`);
+    const rate = l?.taxRate === undefined || l.taxRate === null ? null : Number(l.taxRate);
+    if (rate !== null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+      return badRequest(`line ${i + 1}: taxRate must be between 0 and 100`);
+    }
+    if (!ACCOUNTS.some((a) => a.code === l.creditAccountCode)) return badRequest(`unknown account ${l.creditAccountCode}`);
+    subtotal += amount;
+    taxTotal += rate === null ? 0 : Math.round(amount * (11 / 12) * (rate / 100));
+  }
+  const total = subtotal + taxTotal;
+  if (total <= 0) return badRequest("vendor credit total must be greater than zero");
+
+  const whtAmount = Number(b.withholdingAmount ?? 0);
+  if (!Number.isFinite(whtAmount) || whtAmount < 0) return badRequest("withholdingAmount must be zero or more");
+  if (whtAmount > total) return badRequest("withholdingAmount cannot exceed the credit total");
+  if (whtAmount > 0 && !b.withholdingCode) {
+    return badRequest("withholdingCode is required when withholdingAmount is greater than zero");
+  }
+
+  if (AP_VENDOR_CREDITS.some((c) => c.creditNo === creditNo)) {
+    return badRequest(`a vendor credit numbered ${creditNo} already exists`);
+  }
+
+  // Resolve which withholding liability to reverse into — mirrors the live handler's preference for
+  // `originalBillId` (so the reversal lands where the bill put it) over a bare `withholdingAccountCode`.
+  if (whtAmount > 0) {
+    const bill = b.originalBillId
+      ? [...AP_OPEN_BILLS, ...AP_DRAFT_BILLS].find((x) => x.id === b.originalBillId)
+      : undefined;
+    if (b.originalBillId && !bill) return notFound("no such bill in this company");
+    if (!bill) {
+      if (b.withholdingAccountCode) {
+        if (!ACCOUNTS.some((a) => a.code === b.withholdingAccountCode)) {
+          return badRequest(`unknown withholding account ${b.withholdingAccountCode}`);
+        }
+      } else {
+        return badRequest(
+          "cannot tell which withholding liability to unwind — name the originalBillId (preferred, so the reversal "
+          + "lands where the bill put it) or pass withholdingAccountCode",
+        );
+      }
+    }
+  }
+
+  return {
+    status: 201,
+    json: {
+      id: `demo-vc-${Date.now()}`, creditNo, subtotal, taxTotal, total,
+      amountPayable: total - whtAmount, requiresBupotAmendment: whtAmount > 0,
+    },
+  };
+}
+
+function applyApVendorCreditDemo(creditId: string, b: { billId?: string; amount?: number }): DemoResult {
+  if (!b.billId) return badRequest("billId is required");
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return badRequest("amount must be greater than zero");
+  const credit = AP_VENDOR_CREDITS.find((c) => c.id === creditId);
+  if (!credit) return notFound("no such vendor credit in this company");
+  return { status: 200, json: { applicationId: `demo-vc-apply-${Date.now()}`, amount } };
+}
+
+/** Mirrors `finance.controller.ts::recordBupotAmendment` — `amendmentRef` required, and the credit
+ *  must both exist AND still need the amendment (a already-cleared or never-flagged credit 404s,
+ *  matching the live handler's `WHERE ... AND requires_bupot_amendment` returning no row). */
+function recordBupotAmendmentDemo(creditId: string, b: { amendmentRef?: string }): DemoResult {
+  const ref = b.amendmentRef?.trim();
+  if (!ref) {
+    return badRequest(
+      "amendmentRef is required — the reference of the amended bukti potong. Marking it resolved with no "
+      + "reference cannot be told apart from nobody having filed it.",
+    );
+  }
+  const credit = AP_VENDOR_CREDITS.find((c) => c.id === creditId && c.requiresBupotAmendment);
+  if (!credit) return notFound("no such vendor credit in this company, or it needs no bukti potong amendment");
+  return { status: 200, json: { ok: true, creditNo: credit.creditNo, amendmentRef: ref } };
+}
+
+/** Mirrors `finance.controller.ts::writeOffApBill` — confirmation-gated on the BILL NUMBER, and any
+ *  bill status is eligible (the live query carries no status filter), so this checks both the open
+ *  and the draft-approval fixtures. */
+function writeOffApBillDemo(billId: string, b: {
+  amount?: number; writeOffDate?: string; reasonCode?: string; reason?: string; confirm?: string;
+}): DemoResult {
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return badRequest("amount must be greater than zero");
+  if (!b.writeOffDate) return badRequest("writeOffDate is required");
+  if (!b.reasonCode || !AP_WRITE_OFF_REASONS.includes(b.reasonCode)) {
+    return badRequest(`reasonCode must be one of ${AP_WRITE_OFF_REASONS.join(", ")}`);
+  }
+  if (!b.reason?.trim()) {
+    return badRequest("reason is required — a write-off with no recorded reason is indistinguishable from a mistake");
+  }
+  const bill = [...AP_OPEN_BILLS, ...AP_DRAFT_BILLS].find((x) => x.id === billId);
+  if (!bill) return notFound("no such bill in this company");
+  const refused = requireConfirmation(b.confirm, bill.billNo, "bill number");
+  if (refused) return refused;
+
+  return { status: 201, json: { writeOffId: `demo-apwo-${Date.now()}`, billNo: bill.billNo, amount } };
+}
+
 /** Dispatches every gated and plain write this store answers; anything else still falls through
  *  unanswered (`null`), for exactly the reason the top-of-file comment gives. */
 function financeWrite(tail: string, body: string | undefined): DemoResult | null {
@@ -1049,6 +1249,14 @@ function financeWrite(tail: string, body: string | undefined): DemoResult | null
   if (apply) return applyArCreditNoteDemo(apply[1], b);
   const writeOff = /^ar\/invoices\/([^/]+)\/write-off$/.exec(tail);
   if (writeOff) return writeOffArInvoiceDemo(writeOff[1], b);
+
+  if (tail === "ap/vendor-credits") return createApVendorCreditDemo(b);
+  const apApply = /^ap\/vendor-credits\/([^/]+)\/apply$/.exec(tail);
+  if (apApply) return applyApVendorCreditDemo(apApply[1], b);
+  const bupotAmended = /^ap\/vendor-credits\/([^/]+)\/bupot-amended$/.exec(tail);
+  if (bupotAmended) return recordBupotAmendmentDemo(bupotAmended[1], b);
+  const apWriteOff = /^ap\/bills\/([^/]+)\/write-off$/.exec(tail);
+  if (apWriteOff) return writeOffApBillDemo(apWriteOff[1], b);
 
   return null;
 }

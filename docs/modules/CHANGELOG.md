@@ -11,6 +11,29 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.60.0` - the AP credit-note and write-off surface (2026-08-27) - PROTOTYPED
+
+The payables half of `finance 0.16.0`: `IssueVendorCreditForm`, `VendorCreditsTable` with a per-row
+apply, `BupotExceptionsCard` with a per-row amend action, and `WriteOffBillForm` behind
+`ConfirmAction` on the bill number. Plus the fourth `unappliedCredits` KPI tile.
+
+The three domain points are stated as COPY on the forms, not left implicit, because a user who
+assumes AP mirrors AR will misread their tax position: a vendor credit reverses **input** VAT and
+needs a buyer-issued nota retur; the withholding it unwinds can invalidate an issued bukti potong,
+which is flagged rather than blocking; and an AP write-off credits **other income**, increasing
+taxable profit — the opposite of the AR write-off.
+
+`bupot-exceptions` is a first-class card rather than a footnote. Owner ruling (c) makes the credit
+post regardless, so the only thing standing between a reversed withholding and a wrong filing is
+somebody seeing the chase list.
+
+⚠ **The FE work caught a backend bug during it**, which is why the review order matters:
+`apReconcile` did not SELECT `unapplied_credits` even though `finance_ap_position()` returns it — the
+SQL computed the number and the handler discarded it, invisible to `tsc` because a query is a string.
+Reported rather than typed around (that agent was barred from `platform-nest`), and the KPI was made
+to degrade to `—` so it would fail visibly against a backend that had not caught up. Fixed in
+`finance 0.16.0`, and now pinned by a test asserting all four fields are on the WIRE.
+
 ### finance `0.16.0` - AP vendor credits and write-offs (2026-08-27) - PROTOTYPED
 
 The payables mirror of F4b, and deliberately NOT a sign flip. Three differences each carry money:
