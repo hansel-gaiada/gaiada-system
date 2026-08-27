@@ -31,11 +31,11 @@ misleads real tickets.
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
 | C · Contract, codegen & the rail | 7 | **7** | 0 | 0 | 0 |
-| D · Control plane · ERP console · envs | 9 | **6** | 0 | 2 | 1 |
+| D · Control plane · ERP console · envs | 9 | **7** | 0 | 1 | 1 |
 | E · AI execution & approvals | 3 | **3** | 0 | 0 | 0 |
 | F · WordPress headless | 3 | **2** | 0 | 1 | 0 |
 | G · New from reassessment | 2 | **2** | 0 | 0 | 0 |
-| **Total** | **51** | **42** | **0** | **6** | **3** |
+| **Total** | **51** | **43** | **0** | **5** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -109,7 +109,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅⚠ | WSK-22 ⚡ | **Control-channel auth, layers 1-4** — **PROVISIONAL: built + agent-verified on WINDOWS, not re-verified on Linux** (owner rule 2026-08-26). 19-row adversarial matrix all refusing with distinct reasons: no cert · token-without-cert · wrong CA/CN · cert-without-token · wrong audience/issuer/kid · tampered signature · **missing WS4 on a HIGH command** · commandHash mismatch · expired assertion · **replay: same approvalId 201 then 403**. Layer-1 certs **actually issued by `synccert`** (real EC P256 CA via WSL), and the **real public issuer was proven reachable** with zero Zone A credential. ⚠️ **Deterministic matrix used a fixture JWKS** — no `webdesk-control` Keycloak client exists, so no token can genuinely verify against the real issuer. ⚠️ **WS4 dedup is a `SELECT` with no unique constraint** — closes realistic replay, not a concurrent double-fire; needs a migration. Proxy-side mTLS termination unbuilt | senior-integrator | WSK-21 ✅ |
 | ✅ | WSK-23 ⚡ | **ERP egress + BFF console read model** — Linux-verified. 4 read endpoints under the `webdev` module, **no new Cerbos kind** (reused `webdev_provisioned_site:read` / `webdev_contract_snapshot:read`, so no policy edit and no restart). Reuses WSK-19's egress driver **verbatim — zero new egress code**, proven against BOTH directories' `egress-inventory` scanners. **The required degrade test passes:** live → 60s cache → last `contract.published` fact → explicit `unavailable`; killing the upstream keeps the **last-good version** with `stale:true, source:"cache"`, never nulled. 13/13 + 8/8 + 6/6; `platform-nest`+`webdev-contracts` 151/151. Claimed **§24** in FRONTEND-BFF-CONTRACT. ⚠️ **Site registry / releases / submissions are ALWAYS `stale:true`** — see the log; that is honesty, not a defect | senior-be | WSK-19 ✅ |
 | ✅ | WSK-24 | **The Sites tab — the first actual WebDesk UI.** Registry with the **two independent columns kept independent** (backend env · frontend deployment: `delphi` staging / `helios` production / Hostinger for WP), contract card + locale-coverage row, shown-once key mint, WS4-gated release buttons rendering approval state inline, PII-aware submissions. **The load-bearing property is honesty about staleness, and it is what the tests assert.** WSK-23 proved these reads can *never* be live (WSK-21 exposes only `contract`, `jobs`, `jobs/:id` as GETs), so `stale:true` is the always-case — and the suite pins the distinction the estate's frontend-first-drift bug class turns on: a **genuinely-unavailable read renders differently from a confirmed-empty one** (`asOf: null`), the degrade banner sits **above** the table rather than being an empty-state one-off, zero sites renders a teach-state not a bare table, and the rare live case renders distinctly so `stale` is not the only state a viewer can ever see. **26/26 + `tsc --noEmit` 0 errors, run on LINUX** (`node:22-bookworm-slim`) per the server-only test rule — `platform-ui/node_modules` is broken on the Windows checkout (rollup native missing), which is an environment fault, not this ticket's. Shared-file edits verified **pure additions** (`+5 -0`, `+8 -0`) | senior-fe | WSK-23 ✅ |
-| ⬜ | WSK-25 | **Promotion engine (shrunk by R-2)** — snapshot-first → migrate → content export/import → **Pages deploy hook** → purge. Rollback = content restore + Pages rollback. *Re-rate from `opus·medium` at ticket time* | senior-be | WSK-21 |
+| ✅⚠ | WSK-25 | **Promotion engine — content half DEV-VERIFIED, frontend half honestly behind a seam.** **Snapshot-FIRST is proven, not asserted:** a REAL failure is injected after the snapshot commits and before the mutation (a bundle violating `content_items`' own CHECK — `unpublish_at` before `publish_at`, a genuine constraint violation, nothing mocked) and the snapshot survives with the target's content untouched. `promotion_snapshots` proven **genuinely append-only** — the app role can neither UPDATE nor DELETE a restore point. **Rollback with NO prior snapshot REFUSES rather than silently no-opping**, and a rollback restores the exact prior state *including deleting an item the promotion added*. **The cross-INSTANCE test is no longer skipped:** I stood up a SECOND Zone B database and drove export-from-db#1 to promote-into-db#2, which is the real D-4 mechanism. Migration `0008_promotion.sql` applies clean and the RLS gate covers both new tables (**17 to 19**, enabled + forced + >=1 policy). Authorization is explicit and imperative — `content.export` `webdesk:read`; **promote/rollback `webdesk:promote` + ALWAYS a WS4 assertion** — and I verified all three routes call it. Frontend deploy sits behind `FRONTEND_DEPLOY_DRIVER`, bound to a not-yet-available driver, copying WSK-21's own `NotYetAvailableReleaseTransport` precedent. **190/190 on Linux**, `tsc` clean. WARN Authorization is a SECOND mechanism parallel to `COMMAND_REGISTRY` — these three commands are invisible to the registry's exhaustive type check, which is what caught the `schema.aiDraft` omission. WARN No frontend was deployed anywhere | senior-be | WSK-21 done |
 | ⬜ | WSK-26′ | **Pages deploy + domain adapter** (merges old WSK-26+27) — per-branch preview URLs attached to `customer_feedback` gate rows (D-8 unchanged, only the URL source changes); `setDomain` via Pages custom domains. **Deploy token held in Zone A — Zone B never deploys frontends** | senior-integrator | WSK-25 |
 | ✅⚠ | WSK-28 | **Zone B ops baseline — authored, and honest that the box does not exist.** 9 deliverables: hardening runbook, secrets layout (zero secret values), synccert issuance written from `sync-engine-go/cmd/synccert`'s REAL flags, OTel + a **write-only** Zone A OTLP proposal, `wd-backup-sentinel`, WSK-D23 backups (local versioning + object lock, **pull-model** offsite so Zone B holds NO target credential — an `authorized_keys` forced-command, target initiates), stated RTO/RPO, status page, CDN-bypass check. **Two security properties are asserted by a check that FAILS in the wrong direction**, verified independently: `check-otlp-write-only` rejects a config carrying a `zpages` extension, and `check-cdn-bypass` flags a bypassable origin. Compose verified on **exit code** (`config` exit 0, dev and dev+ops), 12 env vars each wired into an `environment:` block. Caddy CDN gate driven live: unset→200, set+no/wrong header→403, set+correct→200. ⚠ **Coordinator addition — the gate was fail-OPEN:** the Caddy matcher is false when the secret is unset, so production with a missing var served `/media/*` unguarded and **no check complained** (`--probe` can't tell it from a dev box). Added `--assert-configured`; selftest 7/7 and all four directions driven. ⚠ Nothing past PLANNED until **A-12**; the Zone A OTLP listener needs `infra/observability/` (not owned); status page adds a new public `/status/*` route | devops | A-12 ⏸ |
 | ✅⚠ | WSK-29 ⚡ | **Deploy-tool wiring — and the "WebDesk is in NO workflow" gap is CLOSED.** `grep -rn webdesk .github/workflows/` was **zero hits**; ci.yml now has **5 real jobs** (`webdesk-root`, `webdesk-blocks`, `webdesk-api` with Postgres+Redis+MinIO, `webdesk-payload`, `webdesk-deploy`) and release.yml builds/cosign-signs/SBOMs **`webdesk-api`**. All 4 workflow files re-parsed clean (14 jobs in ci.yml) and I **built the image myself from release.yml's own resolved context** — because a red matrix leg would skip `deploy` for EVERY component in the estate, not just WebDesk. `webdesk-payload` deliberately **excluded** from release.yml: its `next build` type-check is red today (TS2578 unused `@ts-expect-error`, 4 files) and `fail-fast:false` stops sibling *cancellation*, not job failure. New `webdesk/deploy/` driver seam (real SSH+rsync, injected exec) **24/24** and mcp-hub **356/356** (24 skipped, no live Cerbos), both on Linux. The hub tool is **read-only on purpose** (`webdesk.deploy.probeReachability`) — the mutating `deploy()` has NO network path, because a service with no Cerbos client and no principal model must never be what a caller invokes to change a live host. ⚠ `wd-contract-watch` is **PROTOTYPED, not live**: it calls `webdev.listPendingContractNotices`, which **does not exist anywhere in the repo** | senior-integrator | WSK-21–23 ✅ |
@@ -664,3 +664,37 @@ is not needed.
 >
 > **The lesson worth keeping is not "export your tokens".** It is that a test suite made entirely of
 > hand-assembled modules can be large, green, and structurally incapable of noticing the app is dead.
+
+> **WSK-25 landed — I took it over after its agent parked four times at ~314k tokens.**
+>
+> Its design was right and its harness was broken. Seven tests were red and the cause was **not** the
+> promotion engine:
+>
+> 1. **`APP_DATABASE_URL` was unconditionally overwritten** at module load from a suite-specific
+>    `WSK25_TEST_DATABASE_URL`. I was exporting `WSK21_*`, so the app pointed at `localhost:55495`,
+>    every control call returned **500**, and `t.json().tenant` was undefined — surfacing as
+>    `Cannot read properties of undefined (reading 'id')` seven times. The estate's phantom-failure
+>    pattern in a new costume: read the suite's own env contract before believing a red suite.
+> 2. **`seedOneItem` inserted a `collections` row unconditionally** while `collections` carries
+>    `UNIQUE (site_id, key)` (0002_content.sql:55). The rollback test seeds twice into the same
+>    collection, so the second call died on the unique constraint — and it read exactly like *"rollback
+>    fails to delete an item the promotion added"*. Made idempotent on the natural key with
+>    `DO UPDATE` (not `DO NOTHING`, so `RETURNING` still yields the existing id).
+>
+> **A wrong turn of mine worth recording:** I first concluded the missing
+> `await app.getHttpAdapter().getInstance().ready()` was the cause, since Fastify registers routes at
+> `ready()`, not `init()`. It was not — the responses were **500, not 404**, which I should have read
+> more carefully before forming a theory. I kept the `ready()` calls as hygiene (every other suite here
+> awaits it) but they fixed nothing, and the comments say so.
+>
+> **The skip I refused to accept.** The cross-INSTANCE test — export from one Zone B database, promote
+> into a *separate* one, the actual D-4 mechanism — was gated behind two env vars and skipping. I stood
+> up a second Zone B Postgres, migrated it, and drove it: **it passes**. That is now real evidence
+> instead of a documented gap, and the suite runs with **no skips at all**.
+>
+> **A design tension I am flagging rather than silently accepting:** promotion authorization is a
+> **second, parallel mechanism** to `COMMAND_REGISTRY`. It is explicit and imperative (so immune to the
+> disarmed-guard trap that hid the `schema.aiDraft` hole) and I verified all three routes call it — but
+> `content.export`/`promote`/`rollback` are **invisible to the registry's exhaustive
+> `Record<CommandName, ...>`**, which is precisely the type that caught the last missing
+> classification. Two authorization systems is one more than this estate should have.

@@ -27,6 +27,11 @@ import { EventsModule } from "./events/events.module";
 // the one cross-file edit WSK-32's ticket brief explicitly permits ("registering your module in
 // the api's root module"); every other file this ticket touches lives under src/schema-draft/.
 import { SchemaDraftModule } from "./schema-draft/schema-draft.module";
+// WSK-25 — promotion engine (content half): snapshot-first -> migrate -> content export/import,
+// rollback = content restore. Sibling of ControlModule (imports it for ControlAuthGuard only —
+// same pattern as SchemaDraftModule above), not nested inside it. This import + registration is
+// the one cross-file edit this ticket's brief explicitly permits.
+import { PromotionModule } from "./promotion/promotion.module";
 
 @Module({
   imports: [
@@ -44,6 +49,7 @@ import { SchemaDraftModule } from "./schema-draft/schema-draft.module";
     EventsModule,
     TenantWebhooksModule,
     SchemaDraftModule,
+    PromotionModule,
   ],
 })
 export class AppModule {}
