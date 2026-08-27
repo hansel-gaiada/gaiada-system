@@ -23,12 +23,15 @@ export function ProjectForm({
   members: _members,
   departments = [],
   project,
+  defaultDepartmentId,
 }: {
   action: (prev: ProjectFormState | null, formData: FormData) => Promise<ProjectFormState>;
   defs: FieldDef[];
   members: Member[];
   departments?: { id: string; name: string }[];
   project?: ProjectDetail;
+  /** Pre-selects the owning department for a NEW project (a department console's "New project"). */
+  defaultDepartmentId?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
 
@@ -43,7 +46,7 @@ export function ProjectForm({
           type="select"
           placeholder="— Company-level —"
           optionItems={departments.map((d) => ({ value: d.id, label: d.name }))}
-          defaultValue={project?.department_id ?? undefined}
+          defaultValue={project?.department_id ?? defaultDepartmentId ?? undefined}
         />
       )}
 

@@ -83,7 +83,12 @@ export default async function DepartmentProjectsPage({ params }: { params: Param
     <Card
       title="Department projects"
       // A bare "2" in the corner names nothing. The word costs three characters.
-      headerRight={<span className="dept-proj__total">{owned.length} owned</span>}
+      headerRight={
+        <span className="dept-proj__head">
+          <span className="dept-proj__total">{owned.length} owned</span>
+          <Link href={`/projects/new?departmentId=${encodeURIComponent(deptId)}`} className="lux-btn lux-btn--solid lux-btn--sm">New project</Link>
+        </span>
+      }
     >
       {owned.length === 0 ? (
         <EmptyNote>No projects owned by this department yet. Create one from Projects and set its owning department, or assign work here from a shared project — it appears on the Board tab.</EmptyNote>

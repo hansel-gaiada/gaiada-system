@@ -8,7 +8,13 @@ import { PageHeader } from "@/components/PageHeader";
 import { ProjectForm } from "@/components/forms/ProjectForm";
 import { createProject } from "../actions";
 
-export default async function NewProjectPage() {
+type Search = Promise<{ departmentId?: string | string[] }>;
+
+// `?departmentId=` pre-selects the owning department — the department consoles' "New project" button
+// arrives with it, so a Web Dev lead does not re-pick their own department.
+export default async function NewProjectPage({ searchParams }: { searchParams: Search }) {
+  const { departmentId } = await searchParams;
+  const defaultDepartmentId = typeof departmentId === "string" ? departmentId : undefined;
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
 
@@ -25,7 +31,7 @@ export default async function NewProjectPage() {
   return (
     <>
       <PageHeader eyebrow="Project" title="New project" breadcrumbs={[{ label: "Projects", href: "/projects" }, { label: "New project" }]} />
-      <ProjectForm action={createProject} defs={defs} members={members} departments={departments} />
+      <ProjectForm action={createProject} defs={defs} members={members} departments={departments} defaultDepartmentId={defaultDepartmentId} />
     </>
   );
 }

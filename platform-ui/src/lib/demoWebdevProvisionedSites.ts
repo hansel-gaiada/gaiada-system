@@ -129,14 +129,17 @@ export function webdevProvisionedSitesDemo(
   if (provisionM && m === "POST") {
     const b = JSON.parse(body || "{}") as { runId?: string; framework?: SiteFramework; slug?: string };
     const runId = b.runId?.trim() || null;
-    if (!runId) return err(400, "invalid_slug");
+    // Mirror the real controller: a run OR an explicit slug (standalone, off-pipeline) is required.
+    if (!runId && !b.slug?.trim()) return err(400, "invalid_slug");
     const framework: SiteFramework = b.framework === "nextjs" ? "nextjs" : "vite";
     const slug = (b.slug?.trim() || `run-${runId}`).toLowerCase();
 
     // Idempotency mirror of the real precondition: a non-failed row already active for this run
-    // gets handed BACK (200), never a second egress.
-    const active = SITES.find((s) => s.pipelineRunId === runId && s.status !== "failed");
-    if (active) return ok(toRow(active), 200);
+    // gets handed BACK (200), never a second egress. Standalone rows key on the slug instead.
+    const active = runId
+      ? SITES.find((s) => s.pipelineRunId === runId && s.status !== "failed")
+      : SITES.find((s) => s.slug === slug && s.status !== "failed");
+    if (active) return runId ? ok(toRow(active), 200) : err(409, "slug_taken");
 
     if (!/^[a-z0-9-]{1,40}$/.test(slug)) return err(400, "invalid_slug");
     if (slug.includes("taken")) return err(409, "slug_taken");

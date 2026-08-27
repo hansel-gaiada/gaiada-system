@@ -36,12 +36,17 @@ describe("buildRepoInventory — one row per repo, joined to its run, client and
     expect(rows.map((r) => r.id)).toEqual(["s1"]);
   });
 
-  it("drops repos whose run is unknown or has no project — they cannot be attributed", () => {
+  it("drops repos whose run is unknown or has no project — they cannot be attributed to a department", () => {
     const rows = buildRepoInventory(
-      [site({ id: "s1", pipelineRunId: "run-noproj" }), site({ id: "s2", pipelineRunId: "run-gone" }), site({ id: "s3", pipelineRunId: null })],
+      [site({ id: "s1", pipelineRunId: "run-noproj" }), site({ id: "s2", pipelineRunId: "run-gone" })],
       runs, names, webDev,
     );
     expect(rows).toEqual([]);
+  });
+
+  it("a standalone repo (created by hand, no run) is listed, unlinked — the webdev module owns it", () => {
+    const [row] = buildRepoInventory([site({ id: "s3", pipelineRunId: null, slug: "marketing-microsite" })], runs, names, webDev);
+    expect(row).toMatchObject<Partial<RepoRow>>({ id: "s3", name: "marketing-microsite", run: null, clientName: null, projectName: null });
   });
 
   it("orders problems first: failed, then provisioning, then provisioned, then live; newest first within a group", () => {

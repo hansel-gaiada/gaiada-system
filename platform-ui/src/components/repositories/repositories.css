@@ -67,3 +67,9 @@ a.repo-cell__name:hover { text-decoration: underline; }
 .repo-create__foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .repo-note--ok { color: var(--status-ok-fg); }
 @media (max-width: 760px) { .repo-create__fields { grid-template-columns: 1fr; } }
+.repo-create__mode { display: inline-flex; border: 0.5px solid var(--line-control); border-radius: var(--radius-sm); overflow: hidden; width: max-content; }
+.repo-create__opt { background: transparent; border: 0; padding: 8px 14px; font: 500 13px var(--font-body); color: var(--text-primary); cursor: pointer; transition: background 0.2s var(--erp-ease); }
+.repo-create__opt + .repo-create__opt { border-left: 0.5px solid var(--line-control); }
+.repo-create__opt:hover { background: var(--tint-hover); }
+.repo-create__opt[aria-checked="true"] { background: var(--erp-accent); color: var(--text-on-accent); }
+.repo-create__opt:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }

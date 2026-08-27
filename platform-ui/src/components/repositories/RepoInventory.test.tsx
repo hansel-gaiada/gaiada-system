@@ -30,7 +30,7 @@ describe("RepoInventory — Create repository entry point", () => {
     const create = { runs: [{ id: "run-3", title: "Northwind — Checkout scope", clientName: "Northwind Traders", retry: false }], actions: { provision: vi.fn(async () => okSite) }, prdHref: "/departments/dept-1/prd" };
     const { rerender } = render(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" create={create} />);
     fireEvent.click(screen.getByRole("button", { name: /create repository/i }));
-    expect(screen.getByRole("combobox", { name: /prd run/i })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: /repository name/i })).toBeInTheDocument(); // standalone is the default
     rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
     expect(screen.queryByRole("button", { name: /create repository/i })).not.toBeInTheDocument();
     rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" create={create} sample={{ exitHref: "/x" }} />);
@@ -88,6 +88,18 @@ describe("RepoInventory — the department's code, one row per repo", () => {
     expect(reconcile.mock.calls[0][0].get("runId")).toBe("run-demo-1");
     // The one that needs a new provision points at the run, where provisioning lives.
     expect(screen.getByRole("link", { name: /start a new provision/i })).toHaveAttribute("href", "/pipeline/run-demo-1");
+  });
+
+  it("a standalone repo says it is not linked to a project, and its failure offers only what can help", () => {
+    render(<RepoInventory state={{ kind: "ok", rows: [
+      row({ id: "u1", name: "marketing-microsite", run: null, clientName: null, projectName: null }),
+      row({ id: "u2", name: "old-try", run: null, clientName: null, projectName: null, status: "failed", repoUrl: null, stagingUrl: null, failure: { title: "That name belongs to someone else's site", body: "…", remedy: "reprovision" }, canReconcile: false }),
+    ] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" />);
+    expect(screen.getAllByText(/not linked to a project/i)).toHaveLength(2);
+    expect(screen.getAllByText(/standalone/i).length).toBeGreaterThan(0);
+    // No run → no "Start a new provision" link into a run workspace; the Create form is the retry path.
+    expect(screen.queryByRole("link", { name: /start a new provision/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/create it again with a different name/i)).toBeInTheDocument();
   });
 
   it("a repo without a URL yet says so instead of rendering a dead link", () => {

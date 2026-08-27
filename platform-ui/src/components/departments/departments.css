@@ -698,3 +698,6 @@ a.dept-proj__name:hover { opacity: 0.6; }
 .serviced-block__row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .serviced-block__company { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
 .serviced-block__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
+
+/* Projects tab header: count + the "New project" entry point (a project no longer needs a PRD run first). */
+.dept-proj__head { display: inline-flex; align-items: center; gap: 12px; }

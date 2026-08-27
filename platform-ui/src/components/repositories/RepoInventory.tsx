@@ -53,6 +53,7 @@ const ACTION_TCOLS = " 1.3fr";
 function rowHasAction(row: RepoRow, mayReconcile: boolean): boolean {
   return (mayReconcile && row.canReconcile) || row.failure?.remedy === "reprovision";
 }
+const STANDALONE = "Not linked to a project · standalone";
 
 export function RepoInventory({
   state,
@@ -187,7 +188,7 @@ function repoCells(row: RepoRow, opts: { mayReconcile: boolean; withActions: boo
       )}
       <span className="repo-cell__sub">{row.frameworkLabel}</span>
     </span>,
-    <span key="lineage" className="repo-cell">{lineage || <em className="repo-cell__muted">no client or project</em>}</span>,
+    <span key="lineage" className="repo-cell">{lineage || <em className="repo-cell__muted">{row.run ? "no client or project" : STANDALONE}</em>}</span>,
     // Status — the badge, and for a failure the reason in plain words right under it.
     <span key="status" className="repo-cell repo-cell--stack">
       <StatusBadge label={REPO_STATUS_LABEL[row.status]} />
@@ -201,7 +202,9 @@ function repoCells(row: RepoRow, opts: { mayReconcile: boolean; withActions: boo
     <span key="staging" className="repo-cell">
       {row.stagingUrl ? <a href={row.stagingUrl} target="_blank" rel="noreferrer">{stripScheme(row.stagingUrl)}</a> : <em className="repo-cell__muted">not available yet</em>}
     </span>,
-    <span key="run" className="repo-cell"><Link href={`/pipeline/${row.run.id}`} className="repo-cell__run">{row.run.title} →</Link></span>,
+    <span key="run" className="repo-cell">
+      {row.run ? <Link href={`/pipeline/${row.run.id}`} className="repo-cell__run">{row.run.title} →</Link> : <em className="repo-cell__muted">created by hand</em>}
+    </span>,
     <span key="checked" className="repo-cell">{row.lastCheckedAt ? formatDate(row.lastCheckedAt) : <em className="repo-cell__muted">not checked yet</em>}</span>,
   ];
   if (opts.withActions) cells.push(<RowActions key="actions" row={row} mayReconcile={opts.mayReconcile} onReconcile={opts.onReconcile} />);
@@ -221,7 +224,7 @@ function RowActions({ row, mayReconcile, onReconcile }: {
     startTransition(async () => {
       const fd = new FormData();
       fd.set("siteId", row.id);
-      fd.set("runId", row.run.id);
+      if (row.run) fd.set("runId", row.run.id);
       setResult(await onReconcile(fd));
     });
   };
@@ -231,7 +234,9 @@ function RowActions({ row, mayReconcile, onReconcile }: {
         <button type="button" className="btn" onClick={reconcile} disabled={pending}>{pending ? "Checking…" : "Check status now"}</button>
       )}
       {row.failure?.remedy === "reprovision" && (
-        <Link href={`/pipeline/${row.run.id}`} className="btn">Start a new provision →</Link>
+        row.run
+          ? <Link href={`/pipeline/${row.run.id}`} className="btn">Start a new provision →</Link>
+          : <span className="repo-cell__sub">Create it again with a different name — use “Create repository” above.</span>
       )}
       {result && !result.ok && <span className="repo-cell__why repo-cell__why--error">{result.error}</span>}
       {result?.ok && <span className="repo-cell__sub">Now {STATUS_LABEL[result.site.status] ?? result.site.status} — reload to see it in place.</span>}

@@ -141,13 +141,20 @@ local stack). None of these mean "production-done".
   come from (a provisioned run), not "connect GitHub". A GitHub line states the viewer's connection
   and that commit/PR activity needs the App. Module-off and refused reads are stated, not blanked.
   `components/repositories/RepoInventory` (7 tests); e2e drives the demo store's failed + live pair.
-  **Create repository** (people with `webdev.provision`): a repository is created by provisioning a
-  site for a PRD run — direct GitHub creation is fail-closed on the backend by design (WS11) — so the
-  form asks for a *run* (this department's runs with no active site; a failed-only run is offered
-  again as a retry — `runsEligibleForRepo`), a framework, and a name pre-filled from the run title
-  (`suggestSlug`, validated live against provision's slug grammar), then calls the existing
-  `provisionSiteAction`; the row lands as Provisioning. `components/repositories/CreateRepoForm`
-  (4 tests); e2e provisions demo `run-demo-3`.
+  **Create repository** (people with `webdev.provision`), two modes on the same endpoint
+  (`POST /modules/webdev/provision`, which already accepted an explicit slug with no run —
+  off-pipeline, `pipeline_run_id: null`): **Standalone** (default) — a name and a framework, no PRD
+  run, no client/project, listed as "Not linked to a project · standalone"; **For a PRD run** — the
+  run brings client and project (this department's runs with no active site; a failed-only run is
+  offered again as a retry — `runsEligibleForRepo`), name pre-filled from the run title
+  (`suggestSlug`). Both validate the name live against provision's slug grammar and call
+  `provisionSiteAction` (now accepts no `runId` when a slug is given); the row lands as Provisioning.
+  Direct GitHub creation outside provisioning stays fail-closed on the backend (WS11); this is the
+  sanctioned manual path. `components/repositories/CreateRepoForm` (7 tests); e2e creates a standalone
+  repo and provisions demo `run-demo-3`.
+- **New project from the Projects tab.** A project no longer has to come out of a PRD run: the
+  department's Projects tab has a "New project" button that opens the existing `/projects/new` form
+  with the owning department pre-selected (`?departmentId=`).
   **`?preview=sample`** renders five sample rows (every status) behind a loud "Sample data — nothing
   here is from your platform" banner, offered from the empty and module-off states so the layout can
   be reviewed on a platform where nothing has been provisioned; real reads are skipped in preview so

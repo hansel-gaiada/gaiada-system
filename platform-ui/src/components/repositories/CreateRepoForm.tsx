@@ -7,11 +7,13 @@ import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
 import { suggestSlug, type EligibleRun } from "@/lib/repoInventory";
 import "./repositories.css";
 
-// "Create repository" = provision a site for a PRD run. The GitHub repo and the staging site are
-// created together by the provisioning service; the run is what carries the client and project, so
-// the form asks for a RUN, a framework and a name — never a bare GitHub name (direct repo creation is
-// fail-closed on the backend by design). Submits through the same `provisionSiteAction` the run
-// workspace uses; the new row lands in the table as Provisioning and moves on its own.
+// "Create repository" = ask the provisioning service for a site: it creates the GitHub repo and a
+// staging site together. Two ways, same endpoint (`POST /modules/webdev/provision`):
+//   • Standalone (default) — just a name and a framework. Off-pipeline on the backend
+//     (`pipeline_run_id: null`), so it carries no client or project; the table says so.
+//   • For a PRD run — the run brings the client and project with it and the repo shows in its lineage.
+// Direct GitHub creation outside provisioning is fail-closed on the backend by design (WS11); this is
+// the sanctioned manual path. The new row lands in the table as Provisioning and moves on its own.
 export interface CreateRepoFormActions {
   provision: (formData: FormData) => Promise<SiteActionResult>;
 }
@@ -24,25 +26,16 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [mode, setMode] = useState<"standalone" | "run">("standalone");
   const [runId, setRunId] = useState("");
   const [framework, setFramework] = useState<SiteFramework>(DEFAULT_FRAMEWORK);
   const [slug, setSlug] = useState("");
   const [result, setResult] = useState<SiteActionResult | null>(null);
 
-  if (runs.length === 0) {
-    return (
-      <div className="repo-create">
-        <p className="repo-note">
-          Every PRD run in this department already has a repository, or there are no runs yet. Repositories are created from PRD runs —{" "}
-          <Link href={prdHref}>start one in PRD Studio →</Link>
-        </p>
-      </div>
-    );
-  }
-
-  const slugOk = slug.trim() === "" || isValidSlugInput(slug.trim());
+  const slugTrim = slug.trim();
+  const slugOk = slugTrim === "" || isValidSlugInput(slugTrim);
   const chosen = runs.find((r) => r.id === runId) ?? null;
-  const canSubmit = !!runId && slugOk && !pending;
+  const canSubmit = !pending && slugOk && (mode === "standalone" ? slugTrim !== "" : !!runId);
 
   const pickRun = (id: string) => {
     setRunId(id);
@@ -56,32 +49,47 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
     setResult(null);
     startTransition(async () => {
       const fd = new FormData();
-      fd.set("runId", runId);
+      if (mode === "run") fd.set("runId", runId);
       fd.set("framework", framework);
-      if (slug.trim()) fd.set("slug", slug.trim());
+      if (slugTrim) fd.set("slug", slugTrim);
       const r = await actions.provision(fd);
       setResult(r);
       if (r.ok) { router.refresh(); onCreated?.(); }
     });
   };
 
+  const switchMode = (m: "standalone" | "run") => { setMode(m); setResult(null); if (m === "standalone") { setRunId(""); } setSlug(""); };
+
   return (
     <div className="repo-create">
+      <div className="repo-create__mode" role="radiogroup" aria-label="What is this repository for?">
+        <button type="button" role="radio" aria-checked={mode === "standalone"} className="prd-segment__opt repo-create__opt" onClick={() => switchMode("standalone")}>Standalone</button>
+        <button type="button" role="radio" aria-checked={mode === "run"} className="prd-segment__opt repo-create__opt" onClick={() => switchMode("run")}>For a PRD run</button>
+      </div>
       <p className="repo-note">
-        A repository is created for a PRD run: the provisioning service creates the GitHub repo and a staging site together, and the run brings the client and project with it.
+        {mode === "standalone"
+          ? "The provisioning service creates the GitHub repository and a staging site under this name. A standalone repository is not linked to a client or project — pick “For a PRD run” if it should be."
+          : "The GitHub repository and staging site are created for a PRD run; the run brings the client and project with it."}
       </p>
+      {mode === "run" && runs.length === 0 && (
+        <p className="repo-note">
+          Every PRD run in this department already has a repository, or there are no runs yet — <Link href={prdHref}>start one in PRD Studio →</Link>, or create a standalone repository instead.
+        </p>
+      )}
       <div className="repo-create__fields">
-        <label className="repo-field">
-          PRD run
-          <select value={runId} onChange={(e) => pickRun(e.target.value)} disabled={pending} required>
-            <option value="">Choose a run…</option>
-            {runs.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.title}{r.clientName ? ` · ${r.clientName}` : ""}{r.retry ? " (previous attempt failed)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        {mode === "run" && (
+          <label className="repo-field">
+            PRD run
+            <select value={runId} onChange={(e) => pickRun(e.target.value)} disabled={pending || runs.length === 0} required>
+              <option value="">Choose a run…</option>
+              {runs.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.title}{r.clientName ? ` · ${r.clientName}` : ""}{r.retry ? " (previous attempt failed)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="repo-field">
           Framework
           <select value={framework} onChange={(e) => setFramework(e.target.value as SiteFramework)} disabled={pending}>
@@ -94,8 +102,8 @@ export function CreateRepoForm({ runs, actions, prdHref, onCreated }: {
             type="text"
             value={slug}
             onChange={(e) => { setSlug(e.target.value); setResult(null); }}
-            disabled={pending || !runId}
-            placeholder={runId ? "my-project-name" : "Choose a run first"}
+            disabled={pending || (mode === "run" && !runId)}
+            placeholder={mode === "run" && !runId ? "Choose a run first" : "my-project-name"}
             aria-invalid={!slugOk}
           />
         </label>

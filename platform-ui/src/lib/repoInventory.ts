@@ -23,7 +23,8 @@ export interface RepoRow {
   stagingUrl: string | null;
   clientName: string | null;
   projectName: string | null;
-  run: { id: string; title: string };
+  /** The PRD run this repo was provisioned for; `null` for a standalone repo created by hand. */
+  run: { id: string; title: string } | null;
   requestedAt: string;
   lastCheckedAt: string | null;
   /** Plain-language failure, only when `status === "failed"`. */
@@ -59,9 +60,10 @@ export function buildRepoInventory(
   const runById = new Map(runs.map((r) => [r.id, r]));
   const rows: RepoRow[] = [];
   for (const s of sites) {
-    if (!s.pipelineRunId) continue;
-    const run = runById.get(s.pipelineRunId);
-    if (!run || !run.project_id || !deptProjectIds.has(run.project_id)) continue;
+    // Standalone (off-pipeline) repos carry no run and so no client/project. The webdev module owns
+    // them and only Web Dev has this tab, so they are listed here, marked as unlinked.
+    const run = s.pipelineRunId ? runById.get(s.pipelineRunId) : null;
+    if (s.pipelineRunId && (!run || !run.project_id || !deptProjectIds.has(run.project_id))) continue;
     rows.push({
       id: s.id,
       name: s.slug,
@@ -70,9 +72,9 @@ export function buildRepoInventory(
       frameworkLabel: FRAMEWORK_LABEL[s.framework] ?? s.framework,
       repoUrl: s.repoUrl,
       stagingUrl: s.stagingUrl,
-      clientName: run.client_id ? names.clients.get(run.client_id) ?? null : null,
-      projectName: names.projects.get(run.project_id) ?? null,
-      run: { id: run.id, title: run.title ?? "(untitled run)" },
+      clientName: run?.client_id ? names.clients.get(run.client_id) ?? null : null,
+      projectName: run?.project_id ? names.projects.get(run.project_id) ?? null : null,
+      run: run ? { id: run.id, title: run.title ?? "(untitled run)" } : null,
       requestedAt: s.createdAt,
       lastCheckedAt: s.lastReconciledAt,
       failure: s.status === "failed" ? failureCopy(s.failureReason) : null,

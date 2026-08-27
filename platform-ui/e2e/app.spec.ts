@@ -382,19 +382,53 @@ test("Repositories tab: Create repository provisions a PRD run and the row appea
   await switchToAgency(page);
   await page.goto("/departments/dept-1/repositories");
   await page.getByRole("button", { name: "Create repository" }).click();
-  // Only runs without a repository are offered: run-demo-1 already has a live site, run-demo-3 does not.
+  // Switch to run mode — retried, because a click that lands before hydration is lost.
+  const runRadio = page.getByRole("radio", { name: "For a PRD run" });
+  await expect(async () => {
+    await runRadio.click();
+    await expect(page.getByRole("combobox", { name: /prd run/i })).toBeVisible({ timeout: 1_000 });
+  }).toPass();
   const runSelect = page.getByRole("combobox", { name: /prd run/i });
-  await expect(runSelect.locator("option")).toHaveCount(2); // placeholder + run-demo-3
-  await runSelect.selectOption({ label: "Lumen — portfolio discovery · Lumen Studio" });
-  await expect(page.getByRole("textbox", { name: /repository name/i })).toHaveValue("lumen-portfolio-discovery");
-  await page.getByRole("combobox", { name: /framework/i }).selectOption("nextjs");
+  // Only runs without a repository are offered: run-demo-1 has a live site and is never listed.
+  await expect(runSelect.locator("option", { hasText: "Northwind — site redesign kickoff" })).toHaveCount(0);
+  // run-demo-3 is offered until something provisions it. The demo store lives as long as the dev
+  // server, so an earlier run of this test may already have done so — then the create path is
+  // skipped and the row it created is checked instead.
+  const lumen = runSelect.locator("option", { hasText: "Lumen — portfolio discovery" });
+  if ((await lumen.count()) > 0) {
+    await runSelect.selectOption({ label: "Lumen — portfolio discovery · Lumen Studio" });
+    await expect(page.getByRole("textbox", { name: /repository name/i })).toHaveValue("lumen-portfolio-discovery");
+    await page.getByRole("combobox", { name: /framework/i }).selectOption("nextjs");
+    await page.getByRole("button", { name: /^create repository$/i }).click();
+    await expect(page.getByRole("status")).toContainText(/lumen-portfolio-discovery.*is being provisioned/i);
+  }
+  const row = page.locator(".repo-table .lux-table__row").filter({ hasText: "lumen-portfolio-discovery" });
+  await expect(row).toContainText("Lumen Studio");
+  await expect(row).toContainText(/Provisioning|Staging|Live/);
+});
+
+test("Repositories tab: a standalone repository is created by hand — no PRD run, no project", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories");
+  await page.getByRole("button", { name: "Create repository" }).click();
+  await expect(page.getByRole("radio", { name: "Standalone" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("combobox", { name: /prd run/i })).toHaveCount(0);
+  await page.getByRole("textbox", { name: /repository name/i }).fill("marketing-microsite");
   await page.getByRole("button", { name: /^create repository$/i }).click();
-  await expect(page.getByRole("status")).toContainText(/lumen-portfolio-discovery.*is being provisioned/i);
-  // The table picks it up (router.refresh) — problems/provisioning first, so it is the first or second row.
-  const rows = page.locator(".repo-table .lux-table__row");
-  await expect(rows).toHaveCount(3);
-  await expect(rows.filter({ hasText: "lumen-portfolio-discovery" })).toContainText("Provisioning");
-  await expect(rows.filter({ hasText: "lumen-portfolio-discovery" })).toContainText("Lumen Studio");
+  await expect(page.getByRole("status")).toContainText(/marketing-microsite.*is being provisioned/i);
+  const row = page.locator(".repo-table .lux-table__row").filter({ hasText: "marketing-microsite" });
+  await expect(row).toContainText("Provisioning");
+  await expect(row).toContainText(/not linked to a project · standalone/i);
+  await expect(row).toContainText(/created by hand/i);
+});
+
+test("Projects tab: New project opens the project form with this department pre-selected", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/projects");
+  await page.getByRole("link", { name: "New project" }).click();
+  await page.waitForURL(/\/projects\/new\?departmentId=dept-1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/new project/i);
+  await expect(page.getByLabel(/owning department/i)).toHaveValue("dept-1");
 });
 
 test("Repositories tab: ?preview=sample shows the layout with sample rows behind a banner", async ({ page }) => {
