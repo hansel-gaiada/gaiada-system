@@ -198,6 +198,38 @@ export class FinanceController {
     return rows.rows;
   }
 
+  /**
+   * The fiscal years, with the id `POST /fiscal-years/:id/close` needs.
+   *
+   * Added because closing a year was reachable only by somebody who already had the uuid: nothing
+   * returned one. `GET /periods` carries the year CODE and not its id, so a console could show the
+   * years and could not act on one — the UI correctly rendered a BackendPending rather than guessing
+   * an identifier, which is the right failure but not a usable surface.
+   *
+   * `periodCount` / `openPeriods` come along because "close this year" is not answerable without
+   * them: a year with open periods inside it is not closeable, and finding that out from a refusal
+   * after typing a confirmation is a worse experience than seeing it on the row.
+   */
+  @Get(":tenantId/finance/fiscal-years")
+  async fiscalYears(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "read");
+    const rows = await withFinance(tenantId, (c) =>
+      c.query(
+        `SELECT y.id, y.code, y.start_date::text AS "startDate", y.end_date::text AS "endDate",
+                y.status,
+                (SELECT count(*) FROM finance_fiscal_periods p
+                  WHERE p.tenant_id = y.tenant_id AND p.fiscal_year_id = y.id)::int AS "periodCount",
+                (SELECT count(*) FROM finance_fiscal_periods p
+                  WHERE p.tenant_id = y.tenant_id AND p.fiscal_year_id = y.id AND p.state = 'OPEN')::int AS "openPeriods"
+           FROM finance_fiscal_years y
+          WHERE y.tenant_id = $1
+          ORDER BY y.start_date DESC`,
+        [tenantId],
+      ),
+    );
+    return rows.rows;
+  }
+
   @Get(":tenantId/finance/periods")
   async periods(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
     await authorize(req.principal, { kind: "finance_period", tenantId, module: "finance" }, "read");

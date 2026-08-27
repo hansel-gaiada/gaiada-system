@@ -4088,6 +4088,8 @@ client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
 | GET | `/finance/ledger/verify` | `{ problems, clean }` | `finance_ledger:verify` |
 | GET | `/finance/ar/aging?asOf=` · `/finance/ap/aging?asOf=` | aging rows | `finance_ar\|ap:read` |
 | GET | `/finance/ar/reconcile` · `/finance/ap/reconcile` | `{ position, problems, clean }` | `…:reconcile` |
+| GET | `/finance/fiscal-years` | `{ id, code, startDate, endDate, status, periodCount, openPeriods }[]` | `finance_period:read` |
+| | | Added 2026-08-27 because closing a year was reachable only by somebody who already held the uuid — nothing returned one, and `/finance/periods` carries the year CODE but not its id. `openPeriods > 0` means the year is NOT closeable; show it on the row and disable the control, rather than letting the user type a confirmation and then be refused. | |
 | GET | `/finance/ar/credit-notes?status=` | credit-note rows (incl. `unapplied`) | `finance_ar:read` |
 | POST | `/finance/ar/credit-notes` | `{ id, creditNoteNo, subtotal, taxTotal, total }` — raises AND posts | `finance_ar:credit_note` |
 | POST | `/finance/ar/credit-notes/:noteId/apply` | `{ applicationId, amount }` — subledger only, posts nothing | `finance_ar:credit_note` |

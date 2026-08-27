@@ -857,6 +857,25 @@ describe.skipIf(!TEST_URL)("Finance module BFF", () => {
     expect(back.statusCode).toBe(200);
   });
 
+  // ── The fiscal-year list exists so closing a year is reachable ────────────────────────────────
+  it("fiscal-years returns the ID the close endpoint needs, and the open-period count", async () => {
+    const r = await get(`/api/${tenant}/finance/fiscal-years`, controller);
+    expect(r.statusCode).toBe(200);
+    const rows = r.json() as Array<{
+      id: string; code: string; startDate: string; endDate: string;
+      status: string; periodCount: number; openPeriods: number;
+    }>;
+    expect(rows.length).toBeGreaterThan(0);
+    // The whole point: POST /fiscal-years/:id/close takes a uuid, and before this endpoint nothing
+    // returned one — /periods carries the year CODE only, so a console could list years and not act.
+    expect(rows[0].id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(rows[0].startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // Counts are numbers, not decimal strings — they are ::int in the query so the UI can compare
+    // `openPeriods > 0` without coercing. A string "0" is truthy and would disable nothing.
+    expect(typeof rows[0].periodCount).toBe("number");
+    expect(typeof rows[0].openPeriods).toBe("number");
+  });
+
   // ── F4b: CREDIT NOTES AND WRITE-OFFS ──────────────────────────────────────────────────────────
   //
   // The whole point of these two being separate documents is the VAT treatment, and that is a
