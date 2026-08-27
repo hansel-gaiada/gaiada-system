@@ -448,7 +448,7 @@ test("Projects tab groups projects under their client — a client has many proj
   await expect(groups.nth(0)).toContainText("Mobile app revamp");
   await expect(groups.nth(1).locator(".dept-proj__client")).toHaveText("Northwind Traders");
   await expect(groups.nth(1)).toContainText("Client site redesign");
-  await expect(groups.nth(1).getByRole("link", { name: "Northwind Traders" })).toHaveAttribute("href", "/clients/cl-1");
+  await expect(groups.nth(1).getByRole("link", { name: /open client/i })).toHaveAttribute("href", "/clients/cl-1");
   // The project header names its client too.
   await page.getByRole("link", { name: "Client site redesign" }).click();
   await expect(page.locator(".pm-meta")).toContainText(/client\s*Northwind Traders/i);

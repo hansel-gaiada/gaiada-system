@@ -106,14 +106,14 @@ export default async function DepartmentProjectsPage({ params }: { params: Param
            Gantt and the connections table already use. */
         <div className="dept-proj__groups">
           {groups.map((g) => (
-            <section key={g.clientId ?? "internal"} className="dept-proj__group">
+            <section key={g.clientId ?? "internal"} className={`dept-proj__group${g.clientId ? "" : " dept-proj__group--internal"}`} aria-label={g.clientName}>
               <div className="dept-proj__group-head">
-                {g.clientId ? (
-                  <Link href={`/clients/${g.clientId}`} className="dept-proj__client">{g.clientName}</Link>
-                ) : (
-                  <span className="dept-proj__client dept-proj__client--internal">{g.clientName}</span>
-                )}
-                <span className="dept-proj__group-count">{g.projects.length} project{g.projects.length === 1 ? "" : "s"}</span>
+                <span className="dept-proj__group-title">
+                  <span className="dept-proj__group-kicker">{g.clientId ? "Client" : "Internal"}</span>
+                  <span className="dept-proj__client">{g.clientName}</span>
+                  <span className="dept-proj__group-count">{g.projects.length} project{g.projects.length === 1 ? "" : "s"}</span>
+                </span>
+                {g.clientId && <Link href={`/clients/${g.clientId}`} className="lux-btn lux-btn--ghost lux-btn--sm">Open client →</Link>}
               </div>
               <div className="lux-table-scroll erp-scroll">
             <HairlineTable
