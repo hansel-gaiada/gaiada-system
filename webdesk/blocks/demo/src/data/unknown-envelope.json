@@ -1,0 +1,46 @@
+{
+  "collection": "article",
+  "slug": "pricing-2027",
+  "locale": "en-US",
+  "localizations": [],
+  "seo": {
+    "title": "Pricing (draft, EN fallback)"
+  },
+  "meta": {
+    "publishedAt": null,
+    "updatedAt": "2026-08-25T00:00:00.000Z",
+    "draft": true,
+    "x": {
+      "localeFallback": {
+        "requested": "id-ID",
+        "served": "en-US",
+        "defaultLocale": "en-US"
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "hero",
+      "props": {
+        "heading": "New pricing, explained"
+      }
+    },
+    {
+      "type": "pricingTable",
+      "props": {
+        "tiers": [
+          {
+            "name": "Pro",
+            "price": 49
+          }
+        ]
+      }
+    },
+    {
+      "type": "richText",
+      "props": {
+        "content": "The tier structure below replaces the old one."
+      }
+    }
+  ]
+}

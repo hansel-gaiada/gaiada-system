@@ -22,6 +22,7 @@ import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
 import { MailService } from "../mail/mail.service";
 import { ZoneBEventEmitterService } from "../events/zoneb-event-emitter.service";
+import { TenantWebhookDispatcherService } from "../tenant-webhooks/tenant-webhook-dispatcher.service";
 import { MediaService } from "../media/media.service";
 import type { ResolvedApiKey } from "../api-keys/api-keys.service";
 import { FormSchemaService } from "./form-schema.service";
@@ -51,6 +52,7 @@ export class FormsService {
     private readonly audit: AuditService,
     private readonly mail: MailService,
     private readonly zoneBEvents: ZoneBEventEmitterService,
+    private readonly tenantWebhooks: TenantWebhookDispatcherService,
     private readonly media: MediaService,
     private readonly schema: FormSchemaService,
     private readonly submissions: SubmissionsRepository,
@@ -193,6 +195,23 @@ export class FormsService {
       })
       .catch((err) => {
         this.logger.warn(`zone B event emit failed for submission ${submission.id}: ${String(err)}`);
+      });
+
+    // 10. Tenant outbound webhooks (WSK-37) -- the client's own CRM. Same fail-soft discipline:
+    //     a client's endpoint being down is THEIR problem, never a failed submission for the
+    //     person who filled in the form. Unlike the Zone A fact above, this DOES carry the
+    //     submitted fields, because that is the whole point -- which is why the SSRF guard and
+    //     the per-tenant secret matter.
+    await this.tenantWebhooks
+      .dispatchFormReceived(form.tenantId, {
+        siteSlug: form.tenantSlug,
+        formId: form.formId,
+        submissionId: submission.id,
+        hasAttachments: attachmentRefs.length > 0,
+        fields: sanitizedFields,
+      })
+      .catch((err) => {
+        this.logger.warn(`tenant webhook dispatch failed for submission ${submission.id}: ${String(err)}`);
       });
 
     return { ok: true, id: submission.id };

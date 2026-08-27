@@ -1,0 +1,67 @@
+---
+// webdesk/blocks/src/renderer/BlockRenderer.astro — WSK-16 scope item 2 (THE RENDERER INVARIANT,
+// webdesk-design.md §05 hard rule 2): "an unknown block type renders nothing and reports". Takes
+// the raw `blocks` array from a `/v1` item envelope, renders each KNOWN block through its
+// component, and for each UNKNOWN block: renders nothing (no fallback markup for that entry at
+// all) and calls the report hook (default: console.warn, from ./report.ts) — never throws.
+import type { BlockType } from '../vocabulary/blocks.ts'
+import { resolveBlocks, type RawBlock } from './resolve-blocks.ts'
+import { defaultUnknownBlockReport, type UnknownBlockReportHook } from './report.ts'
+
+import Hero from '../components/Hero.astro'
+import RichText from '../components/RichText.astro'
+import Gallery from '../components/Gallery.astro'
+import Cta from '../components/Cta.astro'
+import FeatureGrid from '../components/FeatureGrid.astro'
+import FormBlock from '../components/FormBlock.astro'
+import Testimonial from '../components/Testimonial.astro'
+import Faq from '../components/Faq.astro'
+import LogoCloud from '../components/LogoCloud.astro'
+
+export interface Props {
+  /** The envelope's `blocks` array, in order — rendered in that order, unconditionally. */
+  blocks: RawBlock[]
+  /** Called once per unknown block encountered. Defaults to a console.warn (see ./report.ts). A
+   *  host wiring its own QA signal should typically call `defaultUnknownBlockReport` too, rather
+   *  than replacing it, so the console channel keeps working during local dev either way. */
+  onUnknownBlock?: UnknownBlockReportHook
+  /** Threaded through to the report only — this component does not fetch or validate collection data. */
+  collection?: string
+  slug?: string
+}
+
+const { blocks, onUnknownBlock = defaultUnknownBlockReport, collection, slug } = Astro.props
+
+// One entry per vocabulary block type (../vocabulary/blocks.ts BLOCK_TYPE_NAMES) — TypeScript
+// enforces this map is exhaustive (`Record<BlockType, ...>`), so adding a 10th type to the
+// vendored vocabulary without adding it here is a compile error, not a silent gap.
+const COMPONENT_MAP: Record<BlockType, unknown> = {
+  hero: Hero,
+  richText: RichText,
+  gallery: Gallery,
+  cta: Cta,
+  featureGrid: FeatureGrid,
+  form: FormBlock,
+  testimonial: Testimonial,
+  faq: Faq,
+  logoCloud: LogoCloud,
+}
+
+const resolved = resolveBlocks(blocks)
+
+// Report every unknown block BEFORE rendering anything, so a host relying on the hook to abort
+// (e.g. failing a QA build) sees every gap in one pass rather than one-at-a-time interleaved with
+// markup output.
+for (const b of resolved) {
+  if (!b.known) onUnknownBlock({ type: b.type, index: b.index, collection, slug })
+}
+---
+{resolved.map((b) => {
+  if (!b.known) {
+    // THE INVARIANT: nothing is rendered for this entry. No placeholder, no error markup — the
+    // page continues to the next block exactly as if this one were absent.
+    return null
+  }
+  const Component = COMPONENT_MAP[b.type] as any
+  return <Component {...b.props} />
+})}

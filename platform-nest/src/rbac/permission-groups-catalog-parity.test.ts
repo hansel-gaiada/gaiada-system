@@ -91,7 +91,7 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // +3 grantable, 283 -> 286.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(grantable.length).toBe(366);
+    expect(grantable.length).toBe(368);
     expect(relationshipKeys.size).toBe(15);
   });
 

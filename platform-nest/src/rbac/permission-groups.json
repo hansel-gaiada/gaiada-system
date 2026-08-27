@@ -3,15 +3,15 @@
     "title": "Gaiada permission groups — the authoring layer (IAM-01b-3)",
     "status": "PROTOTYPED — 2026-08-10. Seeded from the ~40 existing platform-ui CAPABILITIES plus every grantable catalog permission they did not already reach. Pending owner/HR review before use in role authoring.",
     "parent": "docs/superpowers/plans/2026-08-10-permission-groups.md",
-    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (330 grantable permissions, LMS-L1 2026-08-24)",
+    "catalogSource": "platform-nest/src/rbac/permission-catalog.json (367 grantable permissions, WSK-19 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 141,
-      "grantablePermissionsInCatalog": 366,
-      "permissionsCoveredByGroups": 340,
+      "groups": 142,
+      "grantablePermissionsInCatalog": 368,
+      "permissionsCoveredByGroups": 342,
       "permissionsAdvancedOnly": 26,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 97
+      "sensitiveGroups": 98
     }
   },
   "groups": [
@@ -998,6 +998,17 @@
         "webdev.provisioned_site.reconcile",
         "webdev.provisioned_site.read",
         "webdev.zoneb_event.read"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "webdev_contract_snapshots",
+      "name": "WebDesk Contract Snapshots",
+      "domain": "webdev",
+      "description": "View a client site's pinned WebDesk contract (the Contract card) and refresh it from the platform's control channel -- the one-rail mirror, WSK-19.",
+      "permissions": [
+        "webdev.contract_snapshot.read",
+        "webdev.contract_snapshot.refresh"
       ],
       "sensitive": true
     },

@@ -500,6 +500,29 @@ const configBase = {
     pollMaxIntervalMs: Number(process.env.PROVISION_POLL_MAX_INTERVAL_MS ?? 30_000),
     pollMaxMs: Number(process.env.PROVISION_POLL_MAX_MS ?? 5 * 60_000),
   },
+  // WSK-19 — the rail's Zone A end (docs/blueprints/webdesk-design.md §06). The control-channel
+  // call `GET /control/v1/tenants/:slug/contract`, per the design's §03 A→B channel.
+  //
+  // ── THIS IS A STUB OF THE REAL FOUR-LAYER CONTROL CHANNEL, NOT THE THING ITSELF ────────────────
+  // §03 specs mTLS (the synccert internal CA) + a Keycloak client-credentials token, verified
+  // OFFLINE in Zone B, + Cerbos command-authz + a WS4 assertion on irreversible commands. None of
+  // that infrastructure exists on the Zone A caller side yet — provisioning the `webdesk-control`
+  // Keycloak client and the mTLS client cert is WSK-22/23's job (WSK-22 is itself still
+  // PROVISIONAL, built against a fixture JWKS). `contract.read` is not on the irreversible-command
+  // list (§03's Layer-4 table), so this stub carries only an optional bearer token — a placeholder
+  // for the eventual KC access token — and NO client cert. Wiring the real mTLS/KC/WS4 stack onto
+  // this call is a flagged follow-up for WSK-22/23, not silently invented here.
+  //
+  // FAIL-CLOSED WITHOUT CREDENTIALS, same doctrine as `provision` above: no default base URL, no
+  // silent no-op. An unconfigured deployment gets a 503 from the refresh endpoint, never a request
+  // aimed at a host nobody chose.
+  webdevControl: {
+    baseUrl: process.env.WEBDEV_CONTROL_BASE_URL ?? "",
+    bearerToken: process.env.WEBDEV_CONTROL_BEARER_TOKEN ?? "",
+    timeoutMs: Number(process.env.WEBDEV_CONTROL_TIMEOUT_MS ?? 20_000),
+    retryAttempts: Number(process.env.WEBDEV_CONTROL_RETRY_ATTEMPTS ?? 3),
+    retryBaseDelayMs: Number(process.env.WEBDEV_CONTROL_RETRY_BASE_DELAY_MS ?? 500),
+  },
   // ASST-06 — the assistant's send->stream engine. Reuses `services.gateway` above for the actual
   // ai-gateway-go URL/token (already the one place GATEWAY_URL/GATEWAY_TOKEN are wired from env,
   // same binding admin-systems.controller.ts and search's providers/gateway-client.ts read) —

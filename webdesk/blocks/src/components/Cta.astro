@@ -1,0 +1,13 @@
+---
+// webdesk/blocks/src/components/Cta.astro — vocabulary block type "cta".
+import type { CtaProps } from '../types.ts'
+
+export interface Props extends CtaProps {}
+
+const { heading, body, buttonLabel, buttonHref } = Astro.props
+---
+<section class="wd-block wd-block-cta" data-block-type="cta">
+  <h2 class="wd-cta-heading">{heading}</h2>
+  {body && <p class="wd-cta-body">{body}</p>}
+  <a class="wd-cta-button" href={buttonHref}>{buttonLabel}</a>
+</section>

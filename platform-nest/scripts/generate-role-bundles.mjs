@@ -213,7 +213,10 @@ function moduleStaffTargets(kind, cond) {
       ? ["reports_staff"]
       : ["hr_staff", "search_staff", "reports_staff"];
   }
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
+  // WSK-19 (2026-08-27): webdev_contract_snapshot joins its two siblings on the webdev module
+  // tier — UNLIKE webdev_zoneb_event (NO_ROLE_SEEDED_KINDS below), this kind's `refresh` action is
+  // a real console button (design §08) and webdev_staff/webdev_manager already exist (0097/0098).
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
     return ["webdev_staff"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
@@ -241,7 +244,7 @@ function moduleManagerTargets(kind, cond) {
       ? ["reports_manager"]
       : ["hr_manager", "search_manager", "reports_manager"];
   }
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
     return ["webdev_manager"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];

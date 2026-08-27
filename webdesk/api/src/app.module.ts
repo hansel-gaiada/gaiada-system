@@ -16,11 +16,13 @@ import { FormsModule } from "./forms/forms.module";
 // WSK-21 (wired by coordinator). NOT public-proxy-reachable until WSK-22 lands the real
 // mTLS + Keycloak + WS4 channel; webdesk/proxy/Caddyfile 404s /control/* on the public vhost.
 import { ControlModule } from "./control/control.module";
+// WSK-37 (wired by coordinator).
+import { TenantWebhooksModule } from "./tenant-webhooks/tenant-webhooks.module";
 // WSK-12 (wired by coordinator). Fail-soft by construction: a bridge outage must never
 // break a form submission, so every emit failure is caught and logged, never thrown.
 import { EventsModule } from "./events/events.module";
 
 @Module({
-  imports: [DbModule, RateLimitModule, TenantsModule, AuditModule, ApiKeysModule, AuthModule, ContentModule, MediaModule, MailModule, FormsModule, ControlModule, EventsModule],
+  imports: [DbModule, RateLimitModule, TenantsModule, AuditModule, ApiKeysModule, AuthModule, ContentModule, MediaModule, MailModule, FormsModule, ControlModule, EventsModule, TenantWebhooksModule],
 })
 export class AppModule {}
