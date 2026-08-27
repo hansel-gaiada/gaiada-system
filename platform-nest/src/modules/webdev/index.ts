@@ -35,19 +35,28 @@ import type { ModuleContract } from "../contract";
 export const webdevModule: ModuleContract = {
   key: "webdev",
   migrations: [
-    // WSK-12
-    "202608261440_webdev_zoneb_event_log.sql","0090_webdev_provisioned_sites.sql"],
+    // WSK-12 (coordinator, additive)
+    "0090_webdev_provisioned_sites.sql",
+    "202608261440_webdev_zoneb_event_log.sql",
+    // WSK-19 (additive): the rail's Zone A end — the contract-snapshot mirror table + its IAM.
+    "202608271500_webdev_contract_snapshots.sql",
+    "202608271510_iam_webdev_contract_snapshot_permissions.sql",
+  ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
   permissions: [
     { key: "webdev.provisioned_site.read", description: "Read provisioned sites (repo + hosting) for this company" },
     { key: "webdev.provisioned_site.provision", description: "Provision a site and repo for a delivery run" },
     { key: "webdev.provisioned_site.reconcile", description: "Re-poll a provisioned site's status from its provider" },
+    // WSK-19 (additive): the one-rail contract-snapshot mirror (design §06).
+    { key: "webdev.contract_snapshot.read", description: "View pinned WebDesk contract snapshots (the Contract card)" },
+    { key: "webdev.contract_snapshot.refresh", description: "Fetch, hash-verify and record a new WebDesk contract snapshot" },
   ],
   customFieldTargets: [],
   mcpTools: [
-    // WSK-12: the wd-zoneb-intake bridge consumer. n8n may not touch a database directly
-    // (automation backbone rule), so the dedup insert is reachable only as an MCP tool.
+    // WSK-12 (coordinator, additive): the wd-zoneb-intake bridge consumer. n8n may not
+    // touch a database directly (automation backbone rule), so the dedup insert is
+    // reachable only as an MCP tool.
     {
       name: "webdev.recordZoneBEvent",
       description: "Idempotent record of a Zone B (WebDesk) signed fact - the wd-zoneb-intake bridge consumer.",
@@ -102,6 +111,30 @@ export const webdevModule: ModuleContract = {
           },
         },
         required: ["tenantId", "runId"],
+      },
+    },
+    // WSK-19 (additive): the rail's Zone A end — MCP entry, WS4-gated for automation principals
+    // (impact: "medium" — same reasoning `webdev.provisionSite` states above: `low` assurance never
+    // suspends on its own, the `impact` value is what does; a human calling the HTTP endpoint
+    // directly is an ordinary console action per design §08's button matrix, not suspended).
+    {
+      name: "webdev.refreshContract",
+      description:
+        "Fetch, hash-verify and record a new WebDesk contract snapshot for a site (the one-rail "
+        + "mirror, design §06). Refuses loudly on a hash mismatch against Zone B's claim or a "
+        + "codegen determinism breach against an already-recorded version.",
+      minAssurance: "low",
+      write: true,
+      impact: "medium",
+      method: "POST",
+      pathTemplate: "/api/:tenantId/modules/webdev/contracts/refresh",
+      inputSchema: {
+        type: "object",
+        properties: {
+          tenantId: { type: "string", description: "Company id (route scope)." },
+          slug: { type: "string", description: "Zone B (WebDesk) tenant slug to fetch the contract for." },
+        },
+        required: ["tenantId", "slug"],
       },
     },
   ],

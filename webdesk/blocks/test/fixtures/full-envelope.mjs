@@ -1,0 +1,98 @@
+// webdesk/blocks/test/fixtures/full-envelope.mjs
+//
+// WSK-16 — "every block renders from a real envelope fixture". Built with the vendored
+// vocabulary's OWN `buildItemEnvelope` (../../src/vocabulary/envelope.ts, byte-identical to
+// webdesk/payload/vocabulary/envelope.ts) rather than a hand-typed object literal, so this fixture
+// is guaranteed to be a real, valid `/v1` item envelope shape — not merely something that looks
+// like one. Uses all 9 known block types, in the exact order the vocabulary declares them
+// (BLOCK_TYPE_NAMES), each with props exercising both its required and optional fields.
+import { buildItemEnvelope } from '../../src/vocabulary/envelope.ts'
+
+export const fullEnvelopeFixture = buildItemEnvelope({
+  collectionKey: 'case-study',
+  slug: 'acme-rebrand',
+  locale: 'id-ID',
+  localizations: [{ locale: 'en-US', slug: 'acme-rebrand-en' }],
+  seo: { title: 'Acme rebrand', description: 'A full rebrand case study.' },
+  publishedAt: '2026-08-01T00:00:00.000Z',
+  updatedAt: '2026-08-20T00:00:00.000Z',
+  draft: false,
+  blocks: [
+    {
+      type: 'hero',
+      props: {
+        heading: 'We rebuilt Acme from the ground up',
+        subheading: 'A case study in disciplined scope',
+        media: { url: 'https://cdn.example.com/hero.jpg', alt: 'Acme storefront', width: 1600, height: 900 },
+        ctaLabel: 'Read the brief',
+        ctaHref: '/case-study/acme-rebrand/brief',
+      },
+    },
+    {
+      type: 'richText',
+      props: { content: '<p>Acme came to us with a fragmented brand across six markets.</p>' },
+    },
+    {
+      type: 'gallery',
+      props: {
+        items: [
+          { url: 'https://cdn.example.com/g1.jpg', alt: 'Before' },
+          { url: 'https://cdn.example.com/g2.jpg', alt: 'After' },
+        ],
+        caption: 'Before and after the rebrand',
+      },
+    },
+    {
+      type: 'cta',
+      props: {
+        heading: 'Want results like this?',
+        body: 'Talk to us about your own rebrand.',
+        buttonLabel: 'Get in touch',
+        buttonHref: '/contact',
+      },
+    },
+    {
+      type: 'featureGrid',
+      props: {
+        heading: 'What changed',
+        items: [
+          { collection: 'feature', slug: 'brand-system' },
+          { collection: 'feature', slug: 'design-tokens' },
+        ],
+      },
+    },
+    {
+      type: 'form',
+      props: { formKey: { collection: 'form_defs', slug: 'case-study-inquiry' } },
+    },
+    {
+      type: 'testimonial',
+      props: {
+        quote: 'The team understood our brand better than we did.',
+        author: 'Jane Doe',
+        role: 'VP Marketing, Acme',
+        avatar: { url: 'https://cdn.example.com/jane.jpg', alt: 'Jane Doe' },
+      },
+    },
+    {
+      type: 'faq',
+      props: {
+        heading: 'Common questions',
+        items: [
+          { collection: 'faqItem', slug: 'how-long-did-it-take' },
+          { collection: 'faqItem', slug: 'what-was-the-budget' },
+        ],
+      },
+    },
+    {
+      type: 'logoCloud',
+      props: {
+        heading: 'Trusted by',
+        logos: [
+          { url: 'https://cdn.example.com/logo1.svg', alt: 'Partner one' },
+          { url: 'https://cdn.example.com/logo2.svg', alt: 'Partner two' },
+        ],
+      },
+    },
+  ],
+})

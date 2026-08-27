@@ -1,0 +1,17 @@
+---
+// webdesk/blocks/demo/src/pages/full.astro — imports ONLY from the installed tarball
+// (`@gaiada/webdesk-blocks`, resolved from node_modules, not a relative path into the sibling
+// package source), proving item 1 of WSK-16's scope: "every block renders from a real envelope
+// fixture" for a real, external consumer.
+import { ItemRenderer } from '@gaiada/webdesk-blocks'
+import envelope from '../data/full-envelope.json'
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WSK-16 demo — full envelope</title>
+  </head>
+  <body>
+    <ItemRenderer envelope={envelope} />
+  </body>
+</html>

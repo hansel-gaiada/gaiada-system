@@ -1,0 +1,9 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "outDir": "./.tsbuild-unused"
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "demo"]
+}

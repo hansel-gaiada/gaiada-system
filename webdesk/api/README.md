@@ -1214,3 +1214,157 @@ failure being the stale WSK-21-authored 501 expectation documented above (not a 
 test's own describe-block name already says "WSK-15 unbuilt").
 
 Containers torn down (`docker rm -f wsk15-db wsk15-minio`) after the run.
+
+## WSK-37 — per-tenant outbound webhooks
+
+New paths: `src/tenant-webhooks/**` (module/controller/service/repository/dispatcher/BullMQ
+worker/SSRF guard/secret encryption), `migrations/0006_tenant_webhooks.sql`,
+`test/tenant-webhooks-*.spec.ts`. Clients register their own HTTPS endpoint; their own
+`form.received` submissions are POSTed there, signed the same way WSK-12's Zone A bridge signs
+its own B→A facts (`events/zoneb-event-signature.ts`, reused verbatim — no second signer written).
+
+### THE SECURITY QUESTION (design §03 amendment this ticket proposes)
+
+A tenant webhook's `target_url` is the first destination in this whole design a TENANT gets to
+type in themselves — a brand-new egress class §03's allowlist table (a fixed, operator-controlled
+destination list) does not describe. Proposed addition to §03's "Zone B egress allowlist" section:
+
+> **Per-tenant outbound webhooks (WSK-37) — a CLIENT-CONTROLLED destination, not an
+> operator-controlled one.** Every other row in this table names a destination WE chose; this one
+> is chosen by the tenant at registration time and can point anywhere on the public internet by
+> design (that is the point of the feature). The containment obligation this table exists to state
+> is therefore not "which fixed host" but "which categories of host can never be reached, no
+> matter what a tenant types" — enforced entirely in application code
+> (`tenant-webhooks/ssrf-guard.ts`), on EVERY delivery attempt AND every redirect hop, not once at
+> registration:
+> - HTTPS only, no other scheme.
+> - Every RFC1918/loopback/link-local/CGNAT/multicast/broadcast/reserved IPv4 and IPv6 range is
+>   refused, including the cloud-metadata address (169.254.169.254) specifically.
+> - A hostname is resolved and EVERY returned address is checked — refusing only when all
+>   addresses are bad would let an attacker win a race on which address `fetch()` picks.
+> - Re-validated on every delivery attempt and every redirect hop (`redirect: "manual"`, capped at
+>   `TENANT_WEBHOOK_MAX_REDIRECTS`, default 2) — DNS is not a fact checked once: a name that
+>   resolved public at registration can rebind to a private address before the next retry, or a
+>   302 partway through delivery can point somewhere the original URL never did.
+> - Bounded per-attempt timeout (`TENANT_WEBHOOK_REQUEST_TIMEOUT_MS`, default 5s) and payload size
+>   cap (`TENANT_WEBHOOK_MAX_PAYLOAD_BYTES`, default 64KB) — an endpoint that accepts-but-never-
+>   responds, or demands an unbounded body, is itself a resource-exhaustion vector.
+> - What a forged/replayed delivery can cause is bounded structurally, same shape as channel 1's
+>   own row: a delivery is an OUTBOUND POST carrying a slim projection of ONE tenant's OWN
+>   submitted-form data to a URL that SAME tenant registered — it can never cause a privileged
+>   transition, never touches another tenant's data (dispatch is `tenant_id`-scoped end to end,
+>   RLS + explicit app-layer filter), and the signature lets the receiving client detect tampering
+>   in transit, not prevent Zone B from choosing what to send.
+
+### Why the secret is ENCRYPTED, not hashed (deliberate deviation from the ticket's literal wording)
+
+The ticket asked for "a per-tenant secret, hashed at rest the way `api_keys` does — sha256 +
+pepper — never plaintext." That is right for a VERIFICATION secret (api_keys: compare a freshly
+hashed presented value to a stored hash) but is mathematically impossible for a SIGNING secret: the
+dispatcher must compute a fresh HMAC over new bytes on every delivery, which requires the original
+secret bytes, not a one-way hash of them. Implemented instead: AES-256-GCM ciphertext
+(`secret_ciphertext`), keyed by `sha256(TENANT_WEBHOOK_SECRET_PEPPER)` — same custody model as
+`API_KEY_PEPPER` (Zone B env only, never in the database, never in git, deliberately a SEPARATE
+pepper so a leak on one path cannot weaken the other). A database-only compromise (no env access)
+recovers nothing usable to forge a signature with — the actual property "hashed at rest" was
+reaching for. Full reasoning in `migrations/0006_tenant_webhooks.sql`'s own header and
+`tenant-webhooks/webhook-secret.ts`'s header.
+
+### Required changes outside this ticket's scope (reported, not made)
+
+- **`app.module.ts`** — one import line, same posture WSK-10/11/12/21 each already took:
+  ```ts
+  import { TenantWebhooksModule } from "./tenant-webhooks/tenant-webhooks.module";
+  // add TenantWebhooksModule to @Module({ imports: [...] })
+  ```
+- **`forms/forms.service.ts`** — ONE call, alongside the existing WSK-12 hook at step 9 of
+  `submit()` (immediately after the `zoneBEvents.emitFormReceived(...)` call, same best-effort
+  `.catch()` discipline — `forms.service.ts` is not this ticket's owned path):
+  ```ts
+  // WSK-37 — fan out to any tenant-registered outbound webhooks. Same fail-soft discipline as the
+  // WSK-12 call immediately above: a client's own endpoint being down must never fail the
+  // submission response.
+  await this.tenantWebhookDispatcher
+    .dispatchFormReceived(form.tenantId, {
+      siteSlug: form.tenantSlug,
+      formId: form.formId,
+      submissionId: submission.id,
+      hasAttachments: attachmentRefs.length > 0,
+      fields: sanitizedFields, // already-sanitized submitted values — the tenant's OWN form fields
+    })
+    .catch((err) => {
+      this.logger.warn(`tenant webhook dispatch failed for submission ${submission.id}: ${String(err)}`);
+    });
+  ```
+  This needs `TenantWebhookDispatcherService` injected into `FormsService`'s constructor, and
+  `forms.module.ts`'s `imports` array to add `TenantWebhooksModule` (same reasoning
+  `forms.module.ts`'s own header gives for why `EventsModule` had to be imported there directly:
+  injection resolves against providers visible to the injecting module, not transitively).
+- **`.env.example`** — new vars, none of which exist yet (WSK-01's file): `TENANT_WEBHOOK_SECRET_PEPPER`
+  (required in production, same `requireInProd` shape as `API_KEY_PEPPER`), `TENANT_WEBHOOK_QUEUE_NAME`,
+  `TENANT_WEBHOOK_MAX_ATTEMPTS`, `TENANT_WEBHOOK_BACKOFF_DELAY_MS`, `TENANT_WEBHOOK_REQUEST_TIMEOUT_MS`,
+  `TENANT_WEBHOOK_MAX_REDIRECTS`, `TENANT_WEBHOOK_MAX_PAYLOAD_BYTES` — see
+  `tenant-webhooks.config.ts` for defaults. `TENANT_WEBHOOK_SSRF_TEST_ALLOWLIST` is TEST-ONLY (see
+  `ssrf-guard.ts`'s own header) and must never be added to `.env.example` or any real environment.
+
+### Verification runbook — one throwaway Postgres (port 55510) + one Redis (port 55511)
+
+Checked free via `docker ps` first — not 55432/55433/55435/55480/55481/55490/55496/55500-55502,
+not the 55450-55466 WSK-05/10/11 block. The receiving side is an in-process local HTTPS sink
+(`test/helpers/tenant-webhook-sink.ts`, self-signed cert embedded in that file) — no extra
+container needed for it.
+
+```bash
+# 1. Fresh throwaway Postgres — same role bootstrap as every prior ticket's runbook, port 55510.
+MSYS_NO_PATHCONV=1 docker run -d --name wsk37-db -p 55510:5432 \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=throwaway_super -e POSTGRES_DB=webdesk \
+  -e POSTGRES_OWNER_USER=webdesk_owner -e POSTGRES_OWNER_PASSWORD=throwaway_owner \
+  -e POSTGRES_MIGRATOR_USER=webdesk_migrator -e POSTGRES_MIGRATOR_PASSWORD=throwaway_migrator \
+  -e POSTGRES_APP_USER=webdesk_app -e POSTGRES_APP_PASSWORD=throwaway_app \
+  -v "$(pwd -W)/../postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro" \
+  postgres:16-alpine
+
+# 2. Redis (BullMQ), port 55511.
+docker run -d --name wsk37-redis -p 55511:6379 redis:7-alpine
+
+# 3. Migrate.
+MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:55510/webdesk" \
+  node ../migrations/migrate.mjs
+
+# 4. RLS integrity gate — MUST pass with the two new tables included.
+DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:55510/webdesk" \
+  node ../scripts/check-rls-integrity.mjs
+
+# 5. Run the suite.
+APP_DATABASE_URL="postgres://webdesk_app:throwaway_app@localhost:55510/webdesk" \
+MIGRATE_DATABASE_URL="postgres://webdesk_migrator:throwaway_migrator@localhost:55510/webdesk" \
+REDIS_URL="redis://localhost:55511" \
+TENANT_WEBHOOK_SECRET_PEPPER="wsk37-test-pepper-never-used-outside-this-suite" \
+  npx vitest run test/tenant-webhooks-ssrf.spec.ts test/tenant-webhooks-registration.spec.ts test/tenant-webhooks-delivery.spec.ts
+
+# 6. Tear down.
+docker rm -f wsk37-db wsk37-redis
+```
+
+### Real run (2026-08-27) — verbatim
+
+```
+[rls-integrity] OK — 16 tenant-scoped table(s) intact (enabled + forced + >=1 policy).
+
+✓ test/tenant-webhooks-delivery.spec.ts (4 tests) 7481ms
+  ✓ registers a webhook, dispatches a form.received event, and the sink can verify the
+    signature with WSK-12's own verifySignature() 408ms
+  ✓ retries with growing backoff while the sink fails, then delivers once it recovers 1685ms
+  ✓ REFUSES an SSRF-targeted webhook — a target pointed at the cloud-metadata address never
+    reaches the network, delivery marked failed with an SSRF reason, sink untouched 3382ms
+  ✓ cross-tenant isolation: a webhook registered for tenant A never fires when tenant B's
+    event is dispatched 1892ms
+✓ test/tenant-webhooks-registration.spec.ts (9 tests) 641ms
+✓ test/tenant-webhooks-ssrf.spec.ts (19 tests) 15ms
+
+ Test Files  3 passed (3)
+      Tests  32 passed (32)
+```
+
+`npx tsc --noEmit`: clean, 0 errors, whole project (this ticket added no `any`, no `@ts-ignore`).
+Containers torn down (`docker rm -f wsk37-db wsk37-redis`) after the run.

@@ -164,14 +164,15 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `search` | `search` | yes |
 | `social` | `social` | yes |
 | `webdev` | `webdev` | yes |
+| `webdev-contracts` | — | — |
 
 ## platform-nest — migrations
 
-- Head: `202608271400_iam_webdev_zoneb_event_permissions.sql`
+- Head: `202608271510_iam_webdev_contract_snapshot_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 194 (121 legacy `NNNN_`, 73 timestamped)
+- Applied files on disk: 196 (121 legacy `NNNN_`, 75 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -183,6 +184,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | _(root)_ | `platform-nest/src/modules/reports/print-payload.controller.ts` |
 | _(root)_ | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
 | _(root)_ | `platform-nest/src/modules/search/search.controller.ts` |
+| _(root)_ | `platform-nest/src/modules/webdev-contracts/contract-snapshots.controller.ts` |
 | _(root)_ | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
 | `/api` | `platform-nest/src/admin/admin-identity.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-admin.controller.ts` |
@@ -247,6 +249,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/youtube-oauth.controller.ts` |
+| `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev-contracts/contract-snapshots.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |

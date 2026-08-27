@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1647,
+      "totalPairs": 1658,
       "perRole": {
-        "platform_admin": 365,
-        "company_admin": 332,
-        "manager": 154,
+        "platform_admin": 367,
+        "company_admin": 334,
+        "manager": 156,
         "member": 82,
         "viewer": 29,
         "org_unit_lead": 16,
@@ -34,8 +34,8 @@
         "search_manager": 40,
         "reports_staff": 4,
         "reports_manager": 3,
-        "webdev_staff": 4,
-        "webdev_manager": 6,
+        "webdev_staff": 5,
+        "webdev_manager": 8,
         "social_staff": 19,
         "social_manager": 33,
         "monitoring_staff": 10,
@@ -44,7 +44,7 @@
         "finance_manager": 40,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 332
+        "owner": 334
       },
       "selfScopedPairs": 28
     }
@@ -411,6 +411,8 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.contract_snapshot.read",
+      "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
@@ -745,6 +747,8 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.contract_snapshot.read",
+      "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
@@ -901,6 +905,8 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.contract_snapshot.read",
+      "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",
@@ -1242,12 +1248,15 @@
       "core.member.read",
       "core.service_assignment.read",
       "webdev.change_request.read",
+      "webdev.contract_snapshot.read",
       "webdev.provisioned_site.read"
     ],
     "webdev_manager": [
       "core.service_assignment.read",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.contract_snapshot.read",
+      "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile"
@@ -1747,6 +1756,8 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.contract_snapshot.read",
+      "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.provision",
       "webdev.provisioned_site.read",
       "webdev.provisioned_site.reconcile",

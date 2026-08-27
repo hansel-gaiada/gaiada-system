@@ -1,0 +1,30 @@
+---
+// webdesk/blocks/src/components/FormBlock.astro — vocabulary block type "form". File named
+// FormBlock (not Form) to avoid shadowing the HTML <form> element / DOM Form global inside this
+// package's own source; re-exported as `Form` from ../index.ts, matching the vocabulary's name.
+//
+// `formKey` is a RelationValue -> `form_defs` (BLOCKS.form.fields[0].relationTo). This component
+// renders the submission surface generically (POST to the WSK-10 forms endpoint shape,
+// `/v1/t/:tenantSlug/forms/:formId/submit` per the PROGRESS tracker's WSK-10 row) using only the
+// relation pointer's `slug` as the form id — it does NOT fetch or render `form_defs.schema`
+// itself, since that is a live data call the block-renderer library (a static component set) has
+// no business making on the vocabulary's behalf; a host wires the actual field list from its own
+// SDK call, this component only supplies the block's identity and mount point.
+import type { FormProps } from '../types.ts'
+
+export interface Props extends FormProps {}
+
+const { formKey } = Astro.props
+---
+<section
+  class="wd-block wd-block-form"
+  data-block-type="form"
+  data-form-collection={formKey.collection}
+  data-form-key={formKey.slug}
+>
+  <slot>
+    <!-- Default, minimal fallback when a host does not supply its own field markup via the slot:
+         a mount point a host's own hydration script can find by `data-form-key`. -->
+    <p class="wd-form-placeholder">Form: {formKey.slug}</p>
+  </slot>
+</section>

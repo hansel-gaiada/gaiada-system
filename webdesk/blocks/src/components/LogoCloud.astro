@@ -1,0 +1,18 @@
+---
+// webdesk/blocks/src/components/LogoCloud.astro — vocabulary block type "logoCloud".
+import type { LogoCloudProps } from '../types.ts'
+
+export interface Props extends LogoCloudProps {}
+
+const { heading, logos } = Astro.props
+---
+<section class="wd-block wd-block-logo-cloud" data-block-type="logoCloud">
+  {heading && <h2 class="wd-logo-cloud-heading">{heading}</h2>}
+  <ul class="wd-logo-cloud-logos">
+    {logos.map((logo) => (
+      <li class="wd-logo-cloud-logo">
+        <img src={logo.url} alt={logo.alt ?? ''} width={logo.width} height={logo.height} />
+      </li>
+    ))}
+  </ul>
+</section>

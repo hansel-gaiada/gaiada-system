@@ -30,12 +30,12 @@ misleads real tickets.
 |---|---|---|---|---|---|
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
-| C · Contract, codegen & the rail | 7 | **2** | 0 | 5 | 0 |
+| C · Contract, codegen & the rail | 7 | **3** | 1 | 3 | 0 |
 | D · Control plane · ERP console · envs | 9 | **2** | 0 | 6 | 1 |
 | E · AI execution & approvals | 3 | 0 | 0 | 3 | 0 |
 | F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
-| G · New from reassessment | 2 | 0 | 0 | 2 | 0 |
-| **Total** | **51** | **26** | **0** | **22** | **3** |
+| G · New from reassessment | 2 | **1** | 0 | 1 | 0 |
+| **Total** | **51** | **28** | **1** | **19** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -93,7 +93,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 |---|---|---|---|---|
 | ✅ | WSK-14 ⚡ | **Vocabulary contract + composition validator** — versioned public surface (barrel; existing direct imports unbroken), Layer-2 composition validator with actionable errors, and §05's **breaking-change rules encoded as a computed classifier** across all three axes. **Coordinator-verified:** 27 + 34 + 17 + 8 = **86 new assertions**, and WSK-06's 40 + 60 still green. Validates the two real tenants AND the live `redirect` collection, not just fixtures. ⚠️ **Three interpretations WSK-15/19 will inherit:** the `collections.schema` composition shape was **undefined anywhere** and is now de-facto `{fields?, blocks?}` (presence of `blocks` = closed set, absence = unrestricted); a newly-added **required** field is treated MAJOR though §05 only names optional-add as MINOR; the renderer axis still needs a human to flag which components broke — the bump is then computed, never re-judged | senior-be | WSK-06 ✅ |
 | ✅⚠ | WSK-15 ⚡ | **Codegen pipeline** — **PROVISIONAL: verified on WINDOWS, not re-run on Linux.** OpenAPI hand-authored, TS SDK + `CONTENT-CONTRACT.md` **derived** (WSK-D19); pinned `openapi-typescript`/`tsx`. **Determinism proven properly:** two *separately spawned node processes* per tenant, byte-identical across 4 artifacts for two differently-composed tenants, with the `generatedAt` timestamp kept OUT of every hashed artifact (it lives only in `latest.json`). Replaced WSK-21's contract `501` with the real §06 shape, or an honest `404 contract-not-generated`. 46/46 + WSK-21/22 50/50. Found and fixed a real 500 (storage error escaping when the bucket is absent). ⚠️ `blockLibrary` is a documented placeholder (WSK-16 unbuilt); PHP SDK null (WSK-34); **`applySchema` does not yet trigger codegen** — manual/CI entrypoint only until WSK-19/32 | senior-be | WSK-14 ✅ |
-| ⬜ | WSK-16 | Block-renderer library v0 — 1:1 per block type, unknown-block invariant (render nothing + report), versioned tarball | senior-fe | WSK-14 |
+| ✅ | WSK-16 | **Block-renderer library v0** — **the FIRST ticket verified on real LINUX** (`node:22-bookworm-slim`), per the 2026-08-26 rule. 9 components 1:1 with the vocabulary; props **mechanically cross-checked** against `BLOCKS[type].fields` rather than asserted, and round-tripped through the vocabulary's own `validateBlock()`. **Renderer invariant proven with real output:** an unknown `pricingTable` between a hero and a richText appears **0 times** in the built HTML while both known blocks still render; the QA hook captured it. `meta.draft` + `meta.x.localeFallback` both surfaced. Tarball (23 files, 14.6kB) genuinely `npm pack`-ed and installed by path into a separate consumer. Vocabulary **vendored with a drift check** (`vendor:check` in `prepack`) so a tarball consumer outside this repo still has ONE source of truth. 26/26 unit, `astro check` clean. Honest status: PROTOTYPED — nothing in-repo imports it yet (WSK-17/20 own that) | senior-fe | WSK-14 ✅ |
 | ⬜ | WSK-17 | Proof rebuild — gaiada.com rebuilt purely from generated SDK + shared blocks, zero hand-written fetches | medior | WSK-15, 16 |
 | ⬜ | WSK-18 | P3 QA gate — determinism double-run + cross-machine, SDK↔OpenAPI↔contract coherence, unknown-block probe, artifact-URL expiry | qa | WSK-14–17 |
 | ⬜ | WSK-19 ⚡ | **Zone A contract-snapshot mirror** (rail, Zone A end) — `webdev` ModuleContract, **timestamp-named migration**, hash verify + immutability + refuse-on-mismatch alerting, `webdev.refreshContract` MCP tool | senior-be | WSK-15 |
@@ -141,7 +141,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 
 | Status | # | Ticket | Tier | Deps |
 |---|---|---|---|---|
-| ⬜ | WSK-37 | **Per-tenant outbound webhooks** — clients receive their own form submissions in their CRM. Reuses the WSK-12 HMAC emitter | medior | WSK-12 |
+| ✅⚠ | WSK-37 | **Per-tenant outbound webhooks** — **PROVISIONAL: verified on Windows, not Linux.** 32/32 across SSRF (19 unit), registration pre-flight, and end-to-end delivery on real PG+Redis+HTTPS sink. Signature reuses WSK-12's signer verbatim and is **independently verifiable by a receiver**; retry/backoff proven against a genuinely failing sink; cross-tenant isolation proven. **SSRF guard re-validates on EVERY attempt AND every redirect hop** (DNS rebinding + mid-delivery redirects), HTTPS-only, private/loopback/link-local/CGNAT/metadata denied on both address families — the metadata-address test proves **the sink's request log never grew**, i.e. nothing touched the network. Immutable delivery log (`REVOKE DELETE`). RLS gate OK on 16 tables. **Coordinator wired** app.module + forms.module + the step-10 dispatch + env/compose. ⚠️ **Corrected MY spec:** I said hash the secret like `api_keys`; a SIGNING secret cannot be hashed (HMAC needs the bytes back), so it is **AES-256-GCM encrypted** under its own pepper. ⚠️ Control endpoints share WSK-21's unauthenticated gap until WSK-22 fronts them | medior | WSK-12 ✅ |
 | ⬜ | WSK-38 | **Data & Privacy** (R-5) — DSR find/export/delete a data subject's submissions as a WS4-gated audited control-plane command + the console card | senior-be | WSK-21 |
 
 ---
@@ -226,6 +226,50 @@ model, so any migration is a DNS + content-export exercise, never a server-side 
 ---
 
 ## Session log
+
+> **🐞 WSK-16 found a real bug in the frozen vocabulary, and it broke TWO of the nine block types.**
+> `primitives.ts`'s `media` validator ignored `field.multiple` while `relation` honoured it — so
+> `gallery.items` and `logoCloud.logos`, both declared `multiple: true` media in `blocks.ts`, could
+> **never** pass `validateBlock()`. Confirmed by reading both branches, then fixed by mirroring the
+> `relation` branch exactly. **Proven, not assumed:** gallery + logoCloud now validate, a bare object
+> is refused (`expected an array of media objects`), and a member missing `url` is refused. WSK-06's
+> 40 and WSK-14's 78 assertions all still pass.
+> **Why it survived until now:** every existing test fed those blocks fixtures that happened to avoid
+> the multiple-media path, and the renderer never called the validator. It took a ticket that
+> round-tripped props through the vocabulary's OWN validator to surface it — which is exactly what
+> WSK-16 was asked to do and did.
+
+
+> **WSK-37 corrected an instruction of mine, and was right.** I specified the webhook signing secret
+> be "hashed at rest the way `api_keys` does — sha256 + pepper". That is correct for a *verification*
+> secret and **mathematically impossible for a signing one**: HMAC needs the original bytes back and a
+> one-way hash cannot return them. It implemented AES-256-GCM under a separate pepper instead, same
+> custody model (Zone B env only, never in DB or git), and flagged the deviation rather than either
+> following a broken spec or silently diverging. That is the behaviour these prompts are asking for.
+> **Also worth carrying to §03:** this is the **first client-controlled egress destination** in the
+> design — every other row in the egress table names an operator-chosen host. §03 should say so.
+
+
+> **🚀 DEPLOYED 2026-08-27 — live is `Alpha 01.071.0188a`.** The WebDesk rail + control channel +
+> the first Zone A bridge shipped through the normal pipeline (main -> tag -> release -> deploy).
+> **Verified on live:** `webdev_zoneb_event_log` migration applied, table has RLS **enabled AND
+> forced** with 1 policy. Cerbos restarted as part of the deploy.
+>
+> **Three follow-ups from the deploy, stated honestly:**
+> 1. **CI red on my commits was partly mine and is now fixed.** The WSK-12 Cerbos kind landed without
+>    its **six coupled artifacts**; IAM-07b caught it. All six closed in `03d6caa1` (catalog, groups,
+>    a seeding migration, BOTH bundle resolvers, the regenerated bundle, and every pinned count with
+>    its own note). `src/rbac`: 40 files / 792 tests / 0 failures.
+> 2. **The remaining CI red is NOT mine.** All four `platform-nest` shards have failed since
+>    `a4a84292` (a finance commit); `100bf749` = 0184a was the last green. This is the known
+>    finance+rbac interaction — pass alone, fail together. Finance session's area.
+> 3. **Could NOT prove the live Cerbos loaded the new policy.** Probes were inconclusive: a kind
+>    Cerbos has never heard of denies identically to one it knows, and a control probe against
+>    `webdev_provisioned_site` (which certainly exists) also denied, so the principal was
+>    under-specified. The admin API is 404 (disabled). Real proof needs an end-to-end call once
+>    **WSK-31** provisions the `wf:webdesk-zoneb-intake` identity. Until then the bridge is
+>    **fail-closed on live** — the permission rows ship with the NEXT tag, so every call 403s.
+
 
 > **2026-08-27 — a bug I introduced, caught by WSK-15, now fixed.** My WSK-12 hook made `FormsService`
 > inject `ZoneBEventEmitterService`, but I registered `EventsModule` only in `AppModule` — not in

@@ -1,0 +1,27 @@
+---
+// webdesk/blocks/src/components/LocaleFallbackNotice.astro — the §05/WSK-D18 locale rule, made
+// visible: "A missing translation falls back to the default locale and says so in
+// meta.x.localeFallback — silently serving the wrong language is worse than an honest fallback
+// flag the renderer can act on." This component IS that "act on" — it is the honest flag,
+// rendered, rather than a value the FE could receive and quietly ignore.
+export interface LocaleFallbackShape {
+  requested: string
+  served: string
+  defaultLocale: string
+}
+
+export interface Props {
+  fallback: LocaleFallbackShape
+}
+
+const { fallback } = Astro.props
+---
+<div
+  class="wd-locale-fallback-notice"
+  data-webdesk-locale-fallback="true"
+  data-requested-locale={fallback.requested}
+  data-served-locale={fallback.served}
+  role="status"
+>
+  Showing {fallback.served} — {fallback.requested} is not yet translated.
+</div>

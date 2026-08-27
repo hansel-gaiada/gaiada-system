@@ -1,0 +1,69 @@
+# WSK-19 (docs/blueprints/webdesk-design.md §06/§04/§08) — authz for the NEW `webdev_contract_
+# snapshot` resource kind. Nothing existed for this kind before this file landed; an unlisted
+# kind/action is a SILENT DENY that reads exactly like a logic bug (standing estate trap — restart
+# `gaiada-test-cerbos`/the real sidecar after adding this file; the bind-mount does not hot-reload).
+#
+# webdev_contract_snapshot = the immutable Zone A mirror row for one fetched WebDesk contract
+# bundle (202608271500_webdev_contract_snapshots.sql). Handlers pass
+# resource.attr = {kind:"webdev_contract_snapshot", tenantId, module:"webdev", id?} — same shape as
+# the sibling `webdev_provisioned_site` / `webdev_zoneb_event` resources, which this file is a
+# byte-level sibling of.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read    — the Contract card (webdesk-design §08, WSK-24's Sites tab — not built yet) and this
+#             ticket's own list endpoint.
+#   refresh — POST …/modules/webdev/contracts/refresh. Fetches Zone B's bundle over the control
+#             channel, recomputes and verifies contentHash, writes ONE immutable snapshot row.
+#             §08's button matrix lists this as a real console action ("🌐 read; 🔴 when
+#             automation-initiated") — unlike WSK-12's `record`, a HUMAN calling this endpoint is a
+#             normal staff action, not exclusively an automation identity. D14's impact gate (not
+#             this policy) is what routes an AUTOMATION-initiated call into WS4 — see this kind's
+#             mcpTool entry (`webdev.refreshContract`, impact:"medium") in
+#             `platform-nest/src/modules/webdev/index.ts`.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ──────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately — same invariant every
+# staff-only webdev_* resource in this program states for itself. A contract snapshot (SDK/OpenAPI/
+# CONTRACT.md artifacts + hashes) is never portal-readable; a principal holding only the `client`
+# grant must DENY on every action here.
+#
+# ── TRAP #4 (repeated verbatim; this file is the Nth application of it) ─────────────────────────
+# `group_executive` is a GLOBAL cross-company grant. Folding it into the company_admin/manager rule
+# below would produce a global grant that never fires for an exec with no membership row in a given
+# company — the shipped correct shape is resource_webdev_provisioned_site.yaml's own, copied here.
+#
+# ── MODULE TIER, SEEDED (unlike WSK-12's zoneb_event) ───────────────────────────────────────────
+# `webdev_staff`/`webdev_manager` already exist as real roles (0097/0098). This kind's
+# module_manager rule covers read+refresh (mirrors resource_webdev_provisioned_site.yaml's
+# manager/staff split: creating/recording an artifact is a manager-tier act, reading the card is
+# not); module_staff is read-only. The seeding migration (202608271510) arms both roles.
+#
+# ── NO IAM-04-ROLLOUT-B12 PERMISSION-MIRROR ARM (deliberate, flagged — same posture WSK-12 took) ─
+# `perm_webdev_contract_snapshot_read`/`_refresh` are NOT registered in `derived_roles.yaml`'s
+# IAM-04a section. Adding an unregistered derivedRole reference here would either fail Cerbos
+# policy compilation or silently never match. The base rules below (company_admin/manager/
+# module_manager/module_staff/platform_admin) already give full coverage without the catalog arm.
+# Flagged as a follow-up: wire the B12 mirror for this kind if/when it is wanted.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdev_contract_snapshot
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "refresh"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read", "refresh"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

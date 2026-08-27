@@ -1,0 +1,52 @@
+---
+// webdesk/blocks/src/renderer/ItemRenderer.astro — WSK-16 scope item 4: "A renderer for a whole
+// /v1 item envelope — takes the envelope, renders `blocks` in order, honours `meta.draft`, and
+// surfaces `meta.x.localeFallback` visibly rather than silently serving the wrong language (§05's
+// locale rule)." This is the top-level component a scaffolded site actually imports; it wraps
+// BlockRenderer.astro (which owns the renderer invariant) with the two envelope-level behaviors
+// the design calls for by name.
+import type { ItemEnvelope } from '../vocabulary/envelope.ts'
+import BlockRenderer from './BlockRenderer.astro'
+import type { UnknownBlockReportHook } from './report.ts'
+import DraftBanner from '../components/DraftBanner.astro'
+import LocaleFallbackNotice, { type LocaleFallbackShape } from '../components/LocaleFallbackNotice.astro'
+
+export interface Props {
+  envelope: ItemEnvelope
+  onUnknownBlock?: UnknownBlockReportHook
+  /** Default true — a host that wants its own draft UI can turn this off and read `envelope.meta.draft` itself. */
+  showDraftBanner?: boolean
+  /** Default true — see ./DraftBanner's sibling rationale; same escape hatch for locale UI. */
+  showLocaleFallbackNotice?: boolean
+}
+
+const { envelope, onUnknownBlock, showDraftBanner = true, showLocaleFallbackNotice = true } = Astro.props
+
+// meta.x is the envelope's reserved, additive-forever extension namespace (envelope.ts's own doc
+// comment); localeFallback is the one key §05/WSK-D18 names explicitly. Read defensively — meta.x
+// is untyped `Record<string, unknown>` by design, so this is the one place in the renderer that
+// narrows an "any shape" value, and it does so without throwing on an absent or malformed key.
+function readLocaleFallback(x: Record<string, unknown>): LocaleFallbackShape | null {
+  const v = x.localeFallback
+  if (
+    v !== null &&
+    typeof v === 'object' &&
+    typeof (v as any).requested === 'string' &&
+    typeof (v as any).served === 'string' &&
+    typeof (v as any).defaultLocale === 'string'
+  ) {
+    return v as LocaleFallbackShape
+  }
+  return null
+}
+
+const localeFallback = readLocaleFallback(envelope.meta.x ?? {})
+---
+{showDraftBanner && envelope.meta.draft && <DraftBanner />}
+{showLocaleFallbackNotice && localeFallback && <LocaleFallbackNotice fallback={localeFallback} />}
+<BlockRenderer
+  blocks={envelope.blocks}
+  onUnknownBlock={onUnknownBlock}
+  collection={envelope.collection}
+  slug={envelope.slug}
+/>

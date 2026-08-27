@@ -183,7 +183,10 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
       ? ["reports_staff"]
       : ["hr_staff", "search_staff", "reports_staff"];
   }
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
+  // WSK-19 (2026-08-27): kept byte-aligned with generate-role-bundles.mjs's own addition —
+  // webdev_contract_snapshot joins the webdev module tier (unlike webdev_zoneb_event below, its
+  // `refresh` action is a real console button, design §08).
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
     return ["webdev_staff"];
   }
   if (kind === "service_assignment" || kind === "member") {
@@ -208,7 +211,7 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
       ? ["reports_manager"]
       : ["hr_manager", "search_manager", "reports_manager"];
   }
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site") {
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
     return ["webdev_manager"];
   }
   if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager", "monitoring_manager"];

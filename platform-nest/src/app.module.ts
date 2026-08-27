@@ -108,8 +108,13 @@ import { ReportsController } from "./modules/reports/reports.controller";
 // webdev surface to be module-scoped rather than core, because `webdev_provisioned_sites` (0090)
 // carries the third RLS wall and the client portal never touches it.
 import { WebdevController } from "./modules/webdev/webdev.controller";
-// WSK-12: the Zone B signed-fact consumer.
+// WSK-12 (coordinator, additive): the Zone B signed-fact consumer.
 import { ZoneBEventsController } from "./modules/webdev/zoneb-events.controller";
+// WSK-19: the rail's Zone A end (the contract-snapshot mirror). Lives in the SIBLING directory
+// src/modules/webdev-contracts/, not src/modules/webdev/ — see
+// contract-fetch-provider.ts's header for why (egress-inventory.test.ts's scope). Still gated by
+// the SAME "webdev" module key (ModuleEnabledGuard("webdev")) and the same third-wall RLS.
+import { ContractSnapshotsController } from "./modules/webdev-contracts/contract-snapshots.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
@@ -175,6 +180,8 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
     ZoneBEventsController,
+    // WSK-19: /api/:t/modules/webdev/contracts[/refresh] (the one-rail contract-snapshot mirror).
+    ContractSnapshotsController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,

@@ -68,8 +68,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // 298/283 -> 301/286.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(permissions.length).toBe(380);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(365);
+    // WSK-19 (2026-08-27): +2 grantable / +2 total (webdev_contract_snapshot: read, refresh),
+    // 380 -> 382 / 365 -> 367.
+    expect(permissions.length).toBe(382);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(367);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

@@ -1,0 +1,24 @@
+---
+// webdesk/blocks/src/components/FeatureGrid.astro — vocabulary block type "featureGrid".
+// `items` are RelationValue entries pointing at the conceptual `feature` collection
+// (BLOCKS.featureGrid.fields[1].relationTo — ../vocabulary/blocks.ts); the vocabulary's relation
+// primitive resolves to `{ collection, slug }`, not an inlined structured object, so v0 renders
+// what the envelope actually gives it (the relation pointer) rather than inventing a resolved-
+// feature shape the frozen envelope does not define. A host wanting full feature copy per item
+// resolves those relations through its own data layer.
+import type { FeatureGridProps } from '../types.ts'
+
+export interface Props extends FeatureGridProps {}
+
+const { heading, items } = Astro.props
+---
+<section class="wd-block wd-block-feature-grid" data-block-type="featureGrid">
+  {heading && <h2 class="wd-feature-grid-heading">{heading}</h2>}
+  <ul class="wd-feature-grid-items">
+    {items.map((item) => (
+      <li class="wd-feature-grid-item" data-relation-collection={item.collection} data-relation-slug={item.slug}>
+        {item.slug}
+      </li>
+    ))}
+  </ul>
+</section>

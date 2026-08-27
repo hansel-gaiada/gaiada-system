@@ -1,0 +1,7 @@
+# webdesk/blocks/.gitignore — node_modules/ and dist/ are already covered by the repo root
+# .gitignore; these are the build artifacts specific to this package that aren't.
+.astro/
+*.tgz
+demo/qa-reports/
+demo/dist/
+.tsbuild-unused/
