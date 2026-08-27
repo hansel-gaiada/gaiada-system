@@ -140,6 +140,11 @@ const WEB_DEV: DeptToolkit = {
         { key: "requests", label: "Requests", path: "requests", icon: "bell", blurb: "Triage client and internal maintenance requests." },
         { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Linked code repositories." },
         { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
+        // WSK-24 — the WebDesk console: site registry, contract pin status, submissions, and
+        // WS4-gated release actions. Reads only (webdesk-design.md §08); every read here degrades
+        // honestly rather than pretending Zone B is live (WSK-21 ships no live status/release/
+        // submission endpoint yet — see components/webdesk/DegradeBanner.tsx).
+        { key: "sites", label: "Sites", path: "sites", icon: "server", blurb: "Provisioned WebDesk sites, contract pins, submissions, and releases." },
       ],
     },
     CONNECTIONS_GROUP,
