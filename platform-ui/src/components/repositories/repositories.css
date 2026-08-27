@@ -46,3 +46,24 @@ a.repo-cell__name:hover { text-decoration: underline; }
 .repo-empty__title { font: 700 14px var(--font-body); color: var(--text-primary); }
 .repo-empty__body { font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); max-width: 56ch; }
 .repo-empty .lux-btn { margin-top: 10px; }
+
+/* ── Create repository ──────────────────────────────────────────────────────────────────────── */
+.repo-inventory__lead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.repo-create { display: grid; gap: 12px; padding: 14px 16px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-page); }
+.repo-create__fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; }
+.repo-field {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50);
+}
+.repo-field select, .repo-field input {
+  width: 100%; min-width: 0;
+  border: 0.5px solid var(--line-control); border-radius: var(--radius-sm);
+  background: var(--surface-card); color: var(--text-primary);
+  padding: 9px 12px; font: 400 14px var(--font-body); letter-spacing: normal; text-transform: none;
+}
+.repo-field select:focus-visible, .repo-field input:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+.repo-field input[aria-invalid="true"] { border-color: var(--status-critical); }
+.repo-field input:disabled, .repo-field select:disabled { opacity: 0.6; }
+.repo-create__foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.repo-note--ok { color: var(--status-ok-fg); }
+@media (max-width: 760px) { .repo-create__fields { grid-template-columns: 1fr; } }

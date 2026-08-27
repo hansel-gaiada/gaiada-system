@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRepoInventory, repoCounts, REPO_STATUS_LABEL, type RepoRow } from "./repoInventory";
+import { buildRepoInventory, repoCounts, runsEligibleForRepo, suggestSlug, REPO_STATUS_LABEL, type RepoRow } from "./repoInventory";
 import type { ProvisionedSite } from "./webdevProvisionedSites";
 
 function site(over: Partial<ProvisionedSite> & { id: string }): ProvisionedSite {
@@ -79,5 +79,34 @@ describe("repoCounts — the one-line summary", () => {
 describe("REPO_STATUS_LABEL — the status column speaks in environments", () => {
   it("maps the backend's provisioning states to Provisioning / Staging / Live / Failed", () => {
     expect(REPO_STATUS_LABEL).toEqual({ requested: "Provisioning", pending: "Provisioning", provisioned: "Staging", live: "Live", failed: "Failed" });
+  });
+});
+
+describe("runsEligibleForRepo — which PRD runs can get a repository created", () => {
+  it("offers this department's runs that have no active (non-failed) site yet, newest first, with the client named", () => {
+    const deptRuns = [
+      { ...runs[0] }, // run-1 has a live site below → not eligible
+      { id: "run-2", title: "Lumen — portfolio discovery", client_id: "cl-3", project_id: "p-web-2", source_meeting_id: null, status: "extracting" as const, mom_ref: null, created_at: "2026-08-20T00:00:00Z", updated_at: "2026-08-20T00:00:00Z" },
+      { id: "run-3", title: "Northwind — checkout scope", client_id: "cl-1", project_id: "p-web-1", source_meeting_id: null, status: "extracting" as const, mom_ref: null, created_at: "2026-08-25T00:00:00Z", updated_at: "2026-08-25T00:00:00Z" },
+      { id: "run-done", title: "Old complete run", client_id: "cl-1", project_id: "p-web-1", source_meeting_id: null, status: "complete" as const, mom_ref: null, created_at: "2026-05-01T00:00:00Z", updated_at: "2026-05-01T00:00:00Z" },
+    ];
+    const sites = [
+      site({ id: "s1", pipelineRunId: "run-1", status: "live" }),
+      site({ id: "s3f", pipelineRunId: "run-3", status: "failed", failureReason: "slug_conflict_foreign" }), // failed does not hold the slot
+    ];
+    const eligible = runsEligibleForRepo(deptRuns, sites, names.clients);
+    expect(eligible.map((r) => r.id)).toEqual(["run-3", "run-2", "run-done"]);
+    expect(eligible[0]).toEqual({ id: "run-3", title: "Northwind — checkout scope", clientName: "Northwind Traders", retry: true });
+    expect(eligible[1].clientName).toBeNull();
+    expect(eligible[1].retry).toBe(false);
+  });
+});
+
+describe("suggestSlug — a repo name from a run title", () => {
+  it("lowercases, replaces everything that is not a-z0-9 with single hyphens, trims them, caps at 40", () => {
+    expect(suggestSlug("Northwind — Checkout flow scope call")).toBe("northwind-checkout-flow-scope-call");
+    expect(suggestSlug("  Lumen / Portfolio (v2)!  ")).toBe("lumen-portfolio-v2");
+    expect(suggestSlug("A".repeat(60))).toHaveLength(40);
+    expect(suggestSlug("---")).toBe("");
   });
 });

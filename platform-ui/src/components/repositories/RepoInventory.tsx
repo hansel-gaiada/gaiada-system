@@ -7,7 +7,8 @@ import { STATUS_LABEL } from "@/lib/webdevProvisionedSites";
 import { REPO_STATUS_LABEL } from "@/lib/repoInventory";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
 import type { ConnectionStatus } from "@/lib/connections";
-import { repoCounts, type RepoRow } from "@/lib/repoInventory";
+import { repoCounts, type EligibleRun, type RepoRow } from "@/lib/repoInventory";
+import { CreateRepoForm, type CreateRepoFormActions } from "./CreateRepoForm";
 import "./repositories.css";
 
 // The Web Dev department's code inventory, as a table — the same `HairlineTable` the Projects,
@@ -31,6 +32,9 @@ export type RepoInventoryState =
   | { kind: "refused" };
 
 export interface GithubConnectionView { status: ConnectionStatus; account: string | null }
+
+/** Everything the "Create repository" form needs; present only for people who may provision. */
+export interface CreateRepoOptions { runs: EligibleRun[]; actions: CreateRepoFormActions; prdHref: string }
 
 const BASE_COLUMNS = [
   { label: "Repository" },
@@ -58,6 +62,7 @@ export function RepoInventory({
   pipelineHref,
   previewHref,
   sample,
+  create,
 }: {
   state: RepoInventoryState;
   /** The viewer's own GitHub connection, if any (Connections tab). */
@@ -69,7 +74,9 @@ export function RepoInventory({
   previewHref?: string;
   /** Set when `state.rows` are SAMPLES: renders the banner and disables every real action. */
   sample?: { exitHref: string };
+  create?: CreateRepoOptions;
 }) {
+  const [creating, setCreating] = useState(false);
   const previewOffer = previewHref ? (
     <p className="repo-note">
       Want to see the layout with repositories in it? <Link href={previewHref}>Preview with sample data →</Link>
@@ -90,6 +97,12 @@ export function RepoInventory({
 
   const { rows } = state;
   const inSample = !!sample;
+  const canCreate = !!create && !inSample;
+  const createButton = canCreate ? (
+    <button type="button" className="lux-btn lux-btn--solid lux-btn--sm" aria-expanded={creating} onClick={() => setCreating((v) => !v)}>
+      {creating ? "Close" : "Create repository"}
+    </button>
+  ) : null;
   const hasActions = !inSample && rows.some((r) => rowHasAction(r, mayReconcile));
   const c = repoCounts(rows);
   const summary = rows.length === 0
@@ -111,9 +124,15 @@ export function RepoInventory({
         </div>
       )}
       <div className="repo-inventory__head">
-        {summary ? <span className="repo-inventory__summary">{summary}</span> : <span />}
+        <div className="repo-inventory__lead">
+          {summary && <span className="repo-inventory__summary">{summary}</span>}
+          {createButton}
+        </div>
         <GithubLine github={github} />
       </div>
+      {canCreate && creating && create && (
+        <CreateRepoForm runs={create.runs} actions={create.actions} prdHref={create.prdHref} />
+      )}
 
       {rows.length === 0 ? (
         <div className="repo-empty">

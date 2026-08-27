@@ -378,6 +378,25 @@ test("Repositories tab is the department's code inventory — repos from provisi
   await expect(page.getByText(/commit and pr activity appears once the github app is connected/i)).toBeVisible();
 });
 
+test("Repositories tab: Create repository provisions a PRD run and the row appears as Provisioning", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories");
+  await page.getByRole("button", { name: "Create repository" }).click();
+  // Only runs without a repository are offered: run-demo-1 already has a live site, run-demo-3 does not.
+  const runSelect = page.getByRole("combobox", { name: /prd run/i });
+  await expect(runSelect.locator("option")).toHaveCount(2); // placeholder + run-demo-3
+  await runSelect.selectOption({ label: "Lumen — portfolio discovery · Lumen Studio" });
+  await expect(page.getByRole("textbox", { name: /repository name/i })).toHaveValue("lumen-portfolio-discovery");
+  await page.getByRole("combobox", { name: /framework/i }).selectOption("nextjs");
+  await page.getByRole("button", { name: /^create repository$/i }).click();
+  await expect(page.getByRole("status")).toContainText(/lumen-portfolio-discovery.*is being provisioned/i);
+  // The table picks it up (router.refresh) — problems/provisioning first, so it is the first or second row.
+  const rows = page.locator(".repo-table .lux-table__row");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.filter({ hasText: "lumen-portfolio-discovery" })).toContainText("Provisioning");
+  await expect(rows.filter({ hasText: "lumen-portfolio-discovery" })).toContainText("Lumen Studio");
+});
+
 test("Repositories tab: ?preview=sample shows the layout with sample rows behind a banner", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1/repositories?preview=sample");

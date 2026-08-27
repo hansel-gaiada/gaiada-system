@@ -105,6 +105,20 @@ const RUNS: DemoRun[] = [
     created_at: "2026-07-23T01:00:00Z",
     updated_at: "2026-07-23T02:30:00Z",
   },
+  // Repositories tab "Create repository": a Web Dev run (p-web-2, Lumen) with NO provisioned site, so
+  // the create form has an eligible run in DEMO_MODE. Not started from a briefing.
+  {
+    id: "run-demo-3",
+    title: "Lumen — portfolio discovery",
+    status: "extracting",
+    source_meeting_id: null,
+    client_id: "cl-3",
+    project_id: "p-web-2",
+    mom_ref: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-20T08:00:00Z",
+    updated_at: "2026-08-20T08:00:00Z",
+  },
 ];
 
 const STAGES: DemoStage[] = [

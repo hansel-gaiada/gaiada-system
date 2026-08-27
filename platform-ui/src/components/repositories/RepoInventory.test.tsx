@@ -2,6 +2,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { RepoInventory, type RepoInventoryActions } from "./RepoInventory";
 import type { RepoRow } from "@/lib/repoInventory";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 import type { ProvisionedSite } from "@/lib/webdevProvisionedSites";
 
 const okSite = { ok: true as const, site: { status: "live" } as ProvisionedSite };
@@ -22,6 +24,25 @@ const actions = (over: Partial<RepoInventoryActions> = {}): RepoInventoryActions
   ...over,
 });
 const github = { status: "pending" as const, account: "hansel-gh" };
+
+describe("RepoInventory — Create repository entry point", () => {
+  it("shows the button only for people who may provision and never in sample preview; the form opens inline", () => {
+    const create = { runs: [{ id: "run-3", title: "Northwind — Checkout scope", clientName: "Northwind Traders", retry: false }], actions: { provision: vi.fn(async () => okSite) }, prdHref: "/departments/dept-1/prd" };
+    const { rerender } = render(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" create={create} />);
+    fireEvent.click(screen.getByRole("button", { name: /create repository/i }));
+    expect(screen.getByRole("combobox", { name: /prd run/i })).toBeInTheDocument();
+    rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
+    expect(screen.queryByRole("button", { name: /create repository/i })).not.toBeInTheDocument();
+    rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" create={create} sample={{ exitHref: "/x" }} />);
+    expect(screen.queryByRole("button", { name: /create repository/i })).not.toBeInTheDocument();
+  });
+
+  it("the empty state offers Create repository too, when allowed", () => {
+    const create = { runs: [{ id: "run-3", title: "Northwind — Checkout scope", clientName: "Northwind Traders", retry: false }], actions: { provision: vi.fn(async () => okSite) }, prdHref: "/departments/dept-1/prd" };
+    render(<RepoInventory state={{ kind: "ok", rows: [] }} github={github} mayReconcile actions={actions()} pipelineHref="/pipeline" create={create} />);
+    expect(screen.getByRole("button", { name: /create repository/i })).toBeInTheDocument();
+  });
+});
 
 describe("RepoInventory — preview with sample data is unmistakable", () => {
   it("empty and module-off states offer the preview; preview shows a banner and an exit", () => {

@@ -98,3 +98,42 @@ export function repoCounts(rows: RepoRow[]): RepoCounts {
   }
   return c;
 }
+
+// ── Creating a repository ─────────────────────────────────────────────────────────────────────────
+// A repository is created by provisioning a site for a PRD run (`POST /modules/webdev/provision`);
+// direct GitHub repo creation is fail-closed on the backend by design (WS11: a PM step). So the form
+// offers RUNS, not a blank name: this department's runs that have no active site yet. A `failed` row
+// does not hold the run's slot (partial-unique on non-failed rows), so a run whose only attempt
+// failed is offered again, flagged as a retry.
+export interface EligibleRun { id: string; title: string; clientName: string | null; retry: boolean }
+
+export function runsEligibleForRepo(
+  deptRuns: PipelineRun[],
+  sites: ProvisionedSite[],
+  clientNames: Map<string, string>,
+): EligibleRun[] {
+  const byRun = new Map<string, ProvisionedSite[]>();
+  for (const s of sites) {
+    if (!s.pipelineRunId) continue;
+    (byRun.get(s.pipelineRunId) ?? byRun.set(s.pipelineRunId, []).get(s.pipelineRunId)!).push(s);
+  }
+  return deptRuns
+    .filter((run) => !(byRun.get(run.id) ?? []).some((s) => s.status !== "failed"))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((run) => ({
+      id: run.id,
+      title: run.title ?? "(untitled run)",
+      clientName: run.client_id ? clientNames.get(run.client_id) ?? null : null,
+      retry: (byRun.get(run.id) ?? []).length > 0,
+    }));
+}
+
+/** A repo name from a run title, in provision's slug grammar (`^[a-z0-9-]{1,40}$`). */
+export function suggestSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+}
