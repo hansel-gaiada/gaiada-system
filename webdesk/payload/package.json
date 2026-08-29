@@ -15,7 +15,10 @@
     "migrate": "payload migrate",
     "migrate:create": "payload migrate:create",
     "migrate:status": "payload migrate:status",
-    "init:prod": "payload migrate && node src/reapply-tenant-rls.mjs && node ../scripts/check-rls-integrity.mjs"
+    "init:prod": "payload migrate && node src/reapply-tenant-rls.mjs && node ../scripts/check-rls-integrity.mjs",
+    "lint:local-api": "node scripts/check-local-api-override.mjs",
+    "lint:local-api:selftest": "node scripts/check-local-api-override.mjs --selftest",
+    "test": "npm run lint:local-api:selftest && npm run lint:local-api"
   },
   "dependencies": {
     "payload": "3.88.0",
