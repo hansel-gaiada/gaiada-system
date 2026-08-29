@@ -182,3 +182,46 @@ services:
     deploy:
       resources:
         limits: { cpus: "0.50", memory: 512M }
+
+  # --- public exposure via Cloudflare Tunnel (owner-ruled 2026-08-29) --------------------------
+  #
+  # GATED BEHIND ITS OWN PROFILE ON PURPOSE. `--profile public` is the ONLY way this starts, so
+  # the default `up -d` leaves Zone B exactly as it is today: loopback-only, reachable through an
+  # SSH tunnel and nothing else. Exposure becomes a deliberate command, never a side effect of a
+  # routine restart.
+  #
+  # WHY A TUNNEL AND NOT A VHOST — two facts about this box decided it:
+  #   1. `:80`/`:443` here belong to ANOTHER PROJECT's Let's Encrypt reverse proxy. A webdesk vhost
+  #      would mean editing that project's config, and Zone B's uptime would then depend on it.
+  #   2. A tunnel needs NO inbound port at all — the connector dials out. On a co-tenanted box that
+  #      is a smaller footprint than any listener we could add, so exposing Zone B *reduces* the
+  #      host's inbound surface rather than growing it.
+  # It also satisfies WSK-D23's standing precondition that the CDN is mandatory, not optional:
+  # traffic terminates at Cloudflare's edge, so the origin is never directly reachable.
+  #
+  # BEFORE THIS CAN RUN, one value must exist and it is not in this repo:
+  #   CLOUDFLARE_TUNNEL_TOKEN  — created in the Cloudflare dashboard (Zero Trust -> Networks ->
+  #   Tunnels), put in `.env.control` (0600, gitignored), NEVER in `.env` and never committed.
+  # Full procedure: ../infra/runbooks/webdesk-zoneb-box-hardening.md §0b.
+  #
+  # The tunnel's public hostname must map to `http://proxy:80` — that is Caddy, the one listener,
+  # which already 404s /admin, /api/*, /api/graphql and /control/*. The tunnel does NOT bypass it.
+  # Never point a tunnel route at `payload`, `payload-gateway` or `api` directly: that would route
+  # around the denylist and hand the internet Payload's admin panel.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["public"]
+    command: tunnel --no-autoupdate run
+    environment:
+      # NOT `${CLOUDFLARE_TUNNEL_TOKEN:?...}` — found the hard way: Compose interpolates BEFORE it
+      # filters by profile, so a `:?` here makes `docker compose config` and every ordinary
+      # `up -d` fail on a box that has no token, even though this service would never start.
+      # An empty default keeps the default profile resolvable; cloudflared itself exits
+      # immediately and loudly on an empty token, which is the right place for that failure.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - proxy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M }
