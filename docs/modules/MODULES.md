@@ -500,7 +500,7 @@ Phase 1; Phase 3 (external wiring â€” GitHub App, Drive OAuth, Claude Admin
 decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
 webdesk's own P3 codegen lands.
 
-## webdesk â€” Website Platform Â· `0.0.0` Â· PLANNED
+## webdesk â€” Website Platform Â· `0.1.0` Â· PROTOTYPED
 
 **What exists:** blueprint only (approved 2026-07-23) â€” see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation â†’ P2 Forms+Mail â†’ P3 Contract/codegen â†’ P4 ERP control+envs â†’

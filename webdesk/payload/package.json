@@ -11,7 +11,11 @@
     "gateway": "node src/public-gateway.mjs",
     "setup-schema": "node --import tsx scripts/setup-schema.mjs",
     "test:lockdown": "node test/lockdown.test.mjs",
-    "test:boot": "node --import tsx test/boot-local-api.test.mjs && node --import tsx test/boot-rest-admin.test.mjs"
+    "test:boot": "node --import tsx test/boot-local-api.test.mjs && node --import tsx test/boot-rest-admin.test.mjs",
+    "migrate": "payload migrate",
+    "migrate:create": "payload migrate:create",
+    "migrate:status": "payload migrate:status",
+    "init:prod": "payload migrate && node src/reapply-tenant-rls.mjs && node ../scripts/check-rls-integrity.mjs"
   },
   "dependencies": {
     "payload": "3.88.0",

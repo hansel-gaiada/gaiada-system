@@ -9,12 +9,15 @@
 # this image needing two Dockerfiles for one codebase.
 #
 # NOT wired into release.yml's build matrix yet — same reason as webdesk/api/Dockerfile's header:
-# no Zone B target exists yet (A-12). This Dockerfile is also currently RED at the type-check step
-# (`next build`) — see this ticket's report and ci.yml's `webdesk-payload` job comment for the exact
-# 4 files / TS2578 errors, which are outside this ticket's file ownership and were reported, not
-# fixed. `docker build` on this file will fail until that lands; kept as source-of-truth for the
-# eventual image shape rather than omitted, so the fix is a one-command verification, not a
-# from-scratch Dockerfile write.
+# no Zone B target exists in the release matrix (A-12).
+#
+# ⚠ SUPERSEDED CLAIM (2026-08-29): this header used to say the file was "currently RED at the
+# type-check step (4 files / TS2578)" and that `docker build` would fail until that landed. It is
+# no longer true — the errors were fixed by later work. `docker compose build payload` completes
+# in under two minutes and the resulting image boots and serves. Verified on real Linux, not on
+# the Windows dev box. Leaving the old warning in place cost nothing to write and would have cost
+# the next person a day of not trying.
+
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./

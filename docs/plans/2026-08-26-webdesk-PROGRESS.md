@@ -21,6 +21,12 @@ misleads real tickets.
 > **Nothing in this session is committed.** This is a shared checkout with concurrent sessions;
 > the work sits in the working tree. ✅ does **not** mean merged, and no independent `qa` pass has
 > run yet — the M0 gate (WSK-M0) is where that happens.
+>
+> **➕ 2026-08-29 — the provisional caveat is now PARTLY discharged.** Zone B is deployed on a real
+> Linux box and the tenancy wall, the ledger, the lockdown and the determinism gate were all
+> re-run there (see the top of the session log for the exact suites and counts). What is still
+> provisional is everything those suites do not cover — and the full `webdesk/api` batch, which
+> does not pass as one run for harness reasons that are themselves WSK-M0 work.
 
 ---
 
@@ -226,6 +232,77 @@ model, so any migration is a DNS + content-export exercise, never a server-side 
 ---
 
 ## Session log
+
+> **🚀 ZONE B IS DEPLOYED AND RUNNING — `sumopod`, 2026-08-29.** Owner ruled the two-tier estate
+> rule (WSK-D27): client delivery = `helios`/`delphi`/Hostinger · this ERP and everything
+> operational to it = `gda-aicenter` + `sumopod`. WebDesk is an ERP capability, so Zone B lands on
+> the ERP tier. **Build from [`webdesk-design-v2.md`](../blueprints/webdesk-design-v2.md)** — v1.1
+> and the provision seam design are both superseded (banners added naming what remains valid).
+>
+> **The stack:** 7 services (`proxy` `payload` `payload-gateway` `api` `postgres` `redis` `minio`)
+> in their own compose project, **exactly one published port, on loopback**, proven against the
+> RESOLVED config rather than the overlay. Payload admin reachable only through an SSH tunnel.
+> Nothing exposed to the internet: no vhost, no TLS, deliberately.
+>
+> **NO LONGER PROVISIONAL — re-run on real Linux (the 2026-08-26 rule):**
+> migrations **8/8** applied from scratch + idempotent re-run (`0 applied, 8 already in ledger`) ·
+> role split confirmed NOSUPERUSER/NOBYPASSRLS · migration lint + RLS selftest **6/6** ·
+> RLS integrity **20/20** tenant-scoped tables (enabled + forced + ≥1 policy) ·
+> **WSK-04 cross-path suite ALL PATHS OK** (raw SQL · Payload Local API · pool-subclass pin ·
+> api guarded routes · condition-1 gate; 1 labeled non-blocking gap = admin-SSR first paint,
+> 1 skipped = jobs, no config) · **WSK-02 lockdown 11/11** ·
+> **WSK-15 codegen double-run determinism gate 3/3 including its negative control**.
+>
+> **⚠️ The full `webdesk/api` vitest suite does NOT pass as one batch: 251 pass / 77 fail.** Traced,
+> not guessed — the failures are suites needing services this production-shaped overlay omits on
+> purpose (`clamav`, a Zone A bridge endpoint, an SMTP host) plus the **per-ticket env-name
+> fragmentation this tracker already flagged** (`WSK05_`/`WSK11_`/`WSK21_` prefixes for what is one
+> variable). Not a code regression — the security-relevant subset passes via the cross-path suite.
+> **Normalising that env naming and defining the service fixture IS WSK-M0's real content.**
+>
+> **FOUR REAL DEFECTS THAT ONLY A REAL DEPLOY COULD FIND — all four fixed in this change:**
+> 1. **The base compose could never boot `api` in production.** Its `api` block forwarded exactly
+>    one storage var; the code `requireInProd`s four and reads eight more. Crash-looped on a `.env`
+>    that defined every one of them. **The passthrough is now in `docker-compose.yml` itself.**
+> 2. **`payload/Dockerfile` claimed it was "currently RED (4 files / TS2578)" and would fail to
+>    build.** Stale — it builds in under two minutes and the image boots. Header corrected.
+> 3. **Payload's tables could not be created in a production-shaped environment at all** — push is
+>    hard-disabled at `NODE_ENV=production` (correctly), and nothing else owned that schema. Closed
+>    properly: **Payload's own migration mechanism is now wired** (`src/migrations/`, generated not
+>    hand-written) plus `npm run init:prod` = `payload migrate` → `reapply-tenant-rls` →
+>    `check-rls-integrity`. Payload migrations do NOT re-arm RLS, which is exactly why the chain has
+>    three links. The deployed DB is baselined against that migration.
+> 4. **A multi-line PEM in `.env` silently breaks every ad-hoc verification container** —
+>    `docker run --env-file` is a flat parser and dies on it, while Compose's own parser is fine. So
+>    the stack worked and the tooling didn't. Control-channel trust material now lives in its own
+>    `.env.control`.
+>
+> **A fifth, found by reading main rather than my own checkout:** the local tree was **71 commits
+> behind**, so the Caddyfile I first deployed was the pre-`8c35909b` one — the version whose own
+> fix commit says it *"never routed /v1, /forms or /media"* because bare `respond` sorts before
+> `reverse_proxy`. **Every security probe still passed against it**, because "denied" and "not
+> routed" are both 404. Re-deployed with the fixed proxy and re-verified with a discriminator:
+> catch-all returns `webdesk`, `/v1/*` returns the RFC 9457 envelope with a requestId, `/forms/*`
+> returns a NestJS error, `/media/*` returns **403** from the CDN-bypass check. The denials mean
+> something now.
+>
+> **The control channel runs on a PLACEHOLDER CA whose private key was generated and immediately
+> destroyed** — no client certificate can ever be issued against it, so the channel is fail-closed
+> *by construction* rather than by configuration. WSK-22's synccert material replaces that one PEM
+> and nothing else.
+>
+> **Still open, stated plainly:** the docker log-rotation cap is written but inert until a daemon
+> restart · Zone B has no public vhost/TLS · the `overrideAccess` lint (WSK-D25) is still unbuilt ·
+> the hub tool that resolves a `pipeline_stages.artifact_ref` still does not exist (the consumer
+> adapter `ai-agents/src/code-scaffold/artifact-fetcher.ts` was written against a tool name that
+> is *not yet a hub contract* — its own header says so), so PRD-driven scaffolding cannot run live.
+>
+> **Estate hygiene done in the same pass, without disturbing any other project:** 87 GB reclaimed
+> on the box (build cache 86.89 GB fully reclaimable, plus two unrotated container logs at 3.8 GB
+> and 3.3 GB), and **`aire` decommissioned** from it after verifying it is live on its own VPS
+> serving publicly — backed up first (`pg_dumpall` + 7 volume tarballs + the compose dir) and the
+> shared `waha` image deliberately kept because another project still uses it.
+
 
 > **Pushed `f14cb3f5` — WSK-20 + WSK-17 + WSK-38, plus a vendor drift I caused.**
 >
