@@ -1,5 +1,18 @@
 # Provision ⇄ ERP Seam — Architect Design (signed PRD → repo + hosting, on the One Rail)
 
+> # ⛔ SUPERSEDED — 2026-08-29
+>
+> **[`webdesk-design-v2.md`](./webdesk-design-v2.md) §08 replaces this design.** The owner ruled
+> (WSK-D29) that provisioning is **rebuilt inside the ERP** and the external `provision` tool
+> retired once parity is proven — it is internet-facing with demo credentials on its own login
+> screen, and repo creation depended on an individual's personal PAT.
+>
+> **Still valuable here, and cited by v2.0 §08:** the read of what one `provision` run actually
+> creates (template repo → vhost → TLS → sealed Actions secrets), its idempotency and
+> crash-resume behaviour (which the rebuild must not regress), the credential-custody analysis
+> (D-P4, now amended), and PRV-01/02's shipped code. The **direction** is superseded; the
+> **field research is not**.
+
 > **Status:** Design blueprint — PLANNED. Nothing in this document changes any module version;
 > the first merged ticket flips the relevant registry rows per the status-language doctrine
 > ([`../modules/MODULES.md`](../modules/MODULES.md)).
