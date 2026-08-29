@@ -67,9 +67,17 @@ re-sequences it.
 
 ## §01 · Honest status audit (read from source, 2026-08-28/29)
 
-**The build is far ahead of every document describing it.** `docs/modules/MODULES.md` still carries
-`webdesk 0.0.0 PLANNED` for a component with ~11k lines of service code. That row is wrong and
-fixing it is part of this design's landing (§12, step 0).
+**The build is far ahead of every document describing it**, and `docs/modules/MODULES.md` says so
+twice, inconsistently: its **registry table** carries `webdesk 0.1.0 PROTOTYPED` while its own
+**section heading** still says `0.0.0 PLANNED`. That is v1.1's F-1 heading-vs-table drift, on the
+component this document governs. Per F-1 the table is the number of record, so `0.1.0 PROTOTYPED`
+is the live claim — the heading is the stale half, and reconciling both is part of this design's
+landing (§12, step 0).
+
+*(Corrected 2026-08-29: an earlier revision of this section asserted the registry read
+`0.0.0 PLANNED`. That was read from a checkout 71 commits behind `main` — the exact staleness
+hazard §01 warns about, demonstrated on this document. Verify current-state claims against
+`origin/main`, never against a local tree.)*
 
 | Layer | Reality | Claimable status |
 |---|---|---|
