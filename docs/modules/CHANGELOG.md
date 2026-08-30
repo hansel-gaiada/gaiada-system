@@ -11,6 +11,19 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.43.1` - webdev_sites.origin accepts 'probe' (2026-08-30) - PROTOTYPED
+
+Found the moment real survey data met the constraint. The registry's `origin` CHECK allowed
+`(nexus-import, provisioned, manual)` while `search_properties.topology_source` — added the same
+afternoon, for the same purpose — allowed `(nexus-import, probe, manual)`. Two provenance
+vocabularies for one concept, disagreeing on the value that matters most.
+
+`probe` is the honest label for the estate survey and for everything MON-01 produces: observed from
+outside, never read off a server. The alternative was seeding ~20 real rows as `manual`, recording a
+human assertion where there was a measurement — exactly the distinction the column exists to keep.
+
+Widen-only and idempotent; no existing row can violate a superset.
+
 ### platform-nest `0.43.0` - site environments, GitHub wiring, and the portfolio read model (2026-08-30) - PROTOTYPED
 
 The registry shipped with no way to say **which environment** a domain is, and a survey of the live
