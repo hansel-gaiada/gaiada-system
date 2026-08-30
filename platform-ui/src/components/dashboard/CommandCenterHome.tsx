@@ -72,12 +72,15 @@ export function CommandCenterHome({ items, filter, buildFilterHref, decide, thro
         <ThroughputSparkline series={throughput} />
       </div>
       <div className="command-center__split">
-        <section>
-          <span className="type-eyebrow command-center__heading">Needs you{items.length > 0 ? ` (${items.length})` : ""}</span>
+        {/* Both sections wear .lux-card so they carry the shared card material
+            rather than re-declaring it here — the design draws each as its own
+            panel. Class added, nothing removed. */}
+        <section className="lux-card">
+          <span className="command-center__heading">Needs you{items.length > 0 ? ` (${items.length})` : ""}</span>
           <NeedsMeQueue items={filtered} decide={decide} emptyText={emptyText} />
         </section>
-        <section>
-          <span className="type-eyebrow command-center__heading">Your work</span>
+        <section className="lux-card">
+          <span className="command-center__heading">Your work</span>
           <TodayAgenda items={agenda} />
         </section>
       </div>
