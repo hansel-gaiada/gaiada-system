@@ -20,11 +20,11 @@ export function QueueAgendaHome({ items, decide, emptyText, agendaItems }: {
   return (
     <div className="queue-agenda">
       <section className="lux-card queue-agenda__queue">
-        <span className="type-eyebrow queue-agenda__heading">Needs you ({items.length})</span>
+        <span className="queue-agenda__heading">Needs you ({items.length})</span>
         <NeedsMeQueue items={items} decide={decide} emptyText={emptyText} />
       </section>
       <section className="lux-card queue-agenda__agenda">
-        <span className="type-eyebrow queue-agenda__heading">Today</span>
+        <span className="queue-agenda__heading">Today</span>
         <TodayAgenda items={agenda} />
       </section>
     </div>

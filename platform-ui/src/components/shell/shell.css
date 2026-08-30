@@ -85,9 +85,11 @@
 .erp-side { grid-area: side; display: flex; flex-direction: column; min-height: 0; }
 /* Brand + collapse control share the header row. */
 .erp-side__head { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 20px 22px 15px; border-bottom: 0.5px solid var(--line-soft); }
-.erp-side__brand { flex: 1; min-width: 0; display: block; text-decoration: none; color: inherit; }
+/* The design puts a gold badge and the wordmark on ONE row, with the
+   tagline wrapping beneath — not three stacked blocks. */
+.erp-side__brand { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; text-decoration: none; color: inherit; }
 .erp-side__brand:hover .erp-side__wordmark { color: var(--erp-accent); }
-.erp-side__mark { display: none; font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: 0.06em; color: var(--erp-accent); }
+.erp-side__mark { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-fill); box-shadow: var(--glow); font-family: var(--font-display); font-weight: 700; font-size: 15px; letter-spacing: 0.01em; color: var(--ink-on-accent-fill); }
 .erp-side__wordmark { font-family: var(--font-display); font-weight: 700; font-size: 20px; line-height: 1.1; letter-spacing: 0.01em; color: var(--text-primary); }
 /* Company scope block (moved from the top bar into the sidebar). */
 .erp-side__company { margin: 4px 12px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); transition: border-color 0.2s var(--erp-ease); }
@@ -221,7 +223,7 @@
 .erp-app[data-density="compact"] .erp-navbtn { padding-top: 7px; padding-bottom: 7px; }
 
 /* ---- Sidebar eyebrows (class-based so media queries can reach them) ---- */
-.erp-side__tagline { display: block; margin-top: 5px; opacity: 0.6; font-size: 11px; }
+.erp-side__tagline { flex-basis: 100%; display: block; margin-top: 2px; opacity: 0.6; font-size: 11px; }
 .erp-side__grouplabel { display: block; padding: 18px 10px 8px; opacity: 0.75; font-size: 12px; }
 
 /* ---- Collapsible nav groups ---- */
@@ -268,7 +270,7 @@ html[data-sidebar="collapsed"] .erp-railmenu .erp-navbtn span { display: inline;
   html[data-sidebar="collapsed"] .erp-navgroup__head,
   html[data-sidebar="collapsed"] .erp-navbtn span,
   html[data-sidebar="collapsed"] .erp-usermenu__trigger > div + div { display: none; }
-  html[data-sidebar="collapsed"] .erp-side__mark { display: block; }
+  html[data-sidebar="collapsed"] .erp-side__mark { display: flex; }
   /* Toggle above the mark, both centred — the rail has no room for a row. */
   html[data-sidebar="collapsed"] .erp-side__head { flex-direction: column-reverse; align-items: center; gap: 12px; padding: 16px 0 14px; }
   html[data-sidebar="collapsed"] .erp-sidetoggle { position: static; }
