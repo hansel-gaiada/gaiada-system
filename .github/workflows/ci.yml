@@ -603,6 +603,9 @@ jobs:
       - run: npm test
         env:
           APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          # test/helpers/fixtures.ts reads THIS name and falls back to localhost:55450 without it
+          # — the single variable behind the first wave of AggregateError failures.
+          MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
           WSK05_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           REDIS_URL: redis://localhost:6379
           API_KEY_PEPPER: ci-throwaway-pepper
