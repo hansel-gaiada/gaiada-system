@@ -606,8 +606,14 @@ jobs:
           WSK05_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           REDIS_URL: redis://localhost:6379
           API_KEY_PEPPER: ci-throwaway-pepper
-          MINIO_ENDPOINT: http://localhost:9000
-          STORAGE_ENDPOINT: http://localhost:9000
+          # 127.0.0.1, NOT localhost. `docker run -p 9000:9000` binds IPv4 only, while `localhost`
+          # on the runner resolves to ::1 first. `pg` degrades gracefully across address families;
+          # undici (which the S3 client's fetch uses) does not — it reports the combined failure as
+          # a bare `AggregateError`, which surfaced here as every storage-touching create returning
+          # 500 instead of 201, with nothing naming the port. Redis keeps `localhost` because it is
+          # a real service container on the job network, not a published port.
+          MINIO_ENDPOINT: http://127.0.0.1:9000
+          STORAGE_ENDPOINT: http://127.0.0.1:9000
           MINIO_ROOT_USER: webdesk_minio
           MINIO_ROOT_PASSWORD: changeme_minio_password
 
