@@ -28,10 +28,26 @@ import {
   getSiteRegistry, getReleaseHistory, getSubmissions, listContractPinStatuses,
   type SiteRegistryResult, type ReleaseHistoryResult, type SubmissionsResult, type ContractPinStatus,
 } from "./console-reads.service";
+import { getPortfolio, type PortfolioResult } from "./portfolio-reads.service";
 
 @Controller("api/:tenantId/modules/webdev")
 @UseGuards(AuthGuard, ModuleEnabledGuard("webdev"))
 export class ConsoleReadsController {
+  // The ESTATE portfolio — a different question from `console/sites` below, which answers "which
+  // Zone B tenants exist" and is honestly stale because the control plane is write-mostly. This
+  // answers "what does the estate consist of", including the sites we do not host and must not
+  // touch. It reads Zone A's own tables only: no egress, nothing to be stale about, and no reason
+  // for it to degrade when Zone B is unreachable.
+  //
+  // Reuses `webdev_provisioned_site:read` rather than minting a Cerbos kind — the same reasoning as
+  // WSK-23, which established that precedent for this module's read surface: a new kind costs six
+  // coupled artifacts and this is the same audience reading the same department's site facts.
+  @Get("console/portfolio")
+  async portfolio(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string): Promise<PortfolioResult> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "read");
+    return getPortfolio(tenantId);
+  }
+
   @Get("console/sites")
   async sites(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string): Promise<SiteRegistryResult> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "read");
