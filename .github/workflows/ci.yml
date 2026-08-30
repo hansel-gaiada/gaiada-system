@@ -546,24 +546,6 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s
           --health-timeout 5s --health-retries 10
-      minio:
-        image: minio/minio:RELEASE.2024-01-01T16-36-33Z
-        # The upstream image's ENTRYPOINT is the `minio` binary itself, so a `services:` container
-        # (which cannot pass a custom `command:`, same limitation the platform-nest job's own
-        # comment on Postgres/Cerbos explains) needs the server subcommand baked into `ENTRYPOINT`
-        # or supplied via `options` — `options` reaches `docker create`'s flags, not the image's
-        # own args, so the working form here is the env-only server-default invocation.
-        env:
-          MINIO_ROOT_USER: webdesk_minio
-          MINIO_ROOT_PASSWORD: changeme_minio_password
-        ports: ["9000:9000"]
-        # No curl/wget/mc in this image (verified 2026-08-27: RHEL-minimal base, coreutils + bash
-        # only) — a curl-based healthcheck would never pass and hang the job until timeout. bash's
-        # own /dev/tcp is guaranteed present and proves the same thing a curl probe would (the port
-        # is accepting connections), same technique this ticket's own live delphi/helios probe used.
-        options: >-
-          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"
-          --health-interval 5s --health-timeout 5s --health-retries 20
     defaults:
       run:
         working-directory: webdesk/api
@@ -585,6 +567,22 @@ jobs:
             postgres:16-alpine
           for i in $(seq 1 30); do
             docker exec webdesk-postgres pg_isready -U webdesk_owner -d webdesk && break || sleep 1
+          done
+      - name: Start MinIO as a STEP, not a service container
+        # A `services:` container cannot pass the `server /data` subcommand this image needs, and
+        # `options:` reaches `docker create`'s flags rather than the image's own args — so as a
+        # service it started, found no subcommand, and exited: "Failed to initialize container
+        # minio/minio". The job then failed before a single test ran, on every run since it was
+        # added. Fixed the way THIS JOB ALREADY SOLVES THE SAME PROBLEM one step below for
+        # Postgres: run it as a step, where arguments are expressible.
+        run: |
+          docker run -d --name webdesk-minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
+            minio/minio:RELEASE.2024-01-01T16-36-33Z server /data
+          # The image is RHEL-minimal: no curl, no wget, no mc. bash's own /dev/tcp proves the same
+          # thing a curl probe would — the port is accepting connections.
+          for i in $(seq 1 30); do
+            bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000' 2>/dev/null && break || sleep 1
           done
       - name: Create the 4 MinIO buckets the storage adapter expects (media/video/uploads/artifacts)
         run: |
@@ -621,15 +619,20 @@ jobs:
   # build`'s own type-checker, which reads this project's `.ts`-extension-import tsconfig correctly
   # where a bare `tsc --noEmit` invocation (tried first) did not.
   #
-  # ⚠ HONEST STATE, recorded 2026-08-27: this build is RED today. `next build`'s type-check fails
-  # with TS2578 "Unused '@ts-expect-error' directive" in 4 files (app/(payload)/admin/
-  # [[...segments]]/page.tsx:7, app/(payload)/api/[...slug]/route.ts:11, collections/db.ts:13,
-  # payload.config.ts:12+18) — a mechanical drift (the suppression comments predate a TypeScript
-  # version where the `.mjs` import they guard no longer errors) that this ticket did NOT fix:
-  # `webdesk/payload/` is outside this ticket's file ownership (`.github/workflows/`, `mcp-hub/`,
-  # `webdesk/deploy/`). Reported per this ticket's own "need a change outside your area? STOP and
-  # report it" rule, not silently patched. Left wired anyway — same "red here costs nothing, silence
-  # costs more" reasoning as webdesk-api above.
+  # ⚠ SUPERSEDED 2026-08-30. This comment used to record the build as RED with TS2578
+  # "Unused '@ts-expect-error' directive" in 4 files. That is no longer true — those suppressions
+  # were fixed by later work, and `next build` completes and produces a bootable image (verified on
+  # real Linux, twice). The comment outlived the defect, which is its own lesson: a stale RED note
+  # costs the next person a day of not trying.
+  #
+  # What DID break this job afterwards was mine: the generated Payload migration under
+  # `src/migrations/` does not type-check, because two physically duplicated copies of the SAME
+  # drizzle-orm version (0.45.2, nested under @payloadcms/db-postgres and @payloadcms/drizzle)
+  # give `SQL<unknown>` two distinct nominal types. `overrides` pins the version but does not
+  # collapse the nesting. Those migrations are executed by Payload's own CLI and never by the Next
+  # build, so `tsconfig.json` now excludes them — the phantom is out of scope rather than
+  # suppressed file-by-file in generated output that regeneration would overwrite.
+
   webdesk-payload:
     runs-on: ubuntu-latest
     defaults:
