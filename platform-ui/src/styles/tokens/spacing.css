@@ -103,7 +103,7 @@
      no rule change required there. --row-height/--control-height are new. */
   --card-padding:    var(--space-20);  /* ui.css previously hardcoded 22px independently — now unified onto this token */
   --card-gap:        var(--space-16);  /* was a fixed 20px */
-  --row-height:      40px;
+  --row-height:      52px;  /* gold-glass: the design draws 56 at Airy; 52 is that rhythm at our comfortable default */
   --control-height:  40px;
 
   /* ---- Motion — restrained, editorial (no bounce) ----------------- */

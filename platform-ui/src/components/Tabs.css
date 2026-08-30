@@ -1,26 +1,33 @@
 /* Shared tab-strip primitive (Phase 4 unify target — §6). Visually matches the existing
    `.sec-tabs`/`.sec-tab` shell convention (hairline underline, active = accent underline) without
    depending on shell.css, which is frozen through Phase 2/3. */
+/* GOLD-GLASS UI/UX pass: the design draws tab strips as PILLS, filled with
+   the accent when active, not as an underlined rail. Markup, links and
+   active-state logic are untouched. */
 .ui-tabs {
   display: flex;
-  gap: 4px;
-  border-bottom: 0.5px solid var(--line);
+  gap: 6px;
+  flex-wrap: wrap;
   overflow-x: auto;
 }
 .ui-tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 14px;
-  font: 700 12px var(--font-body);
-  letter-spacing: 0.02em;
+  height: 34px;
+  padding: 0 14px;
+  font: 500 13px var(--font-body);
+  letter-spacing: 0.01em;
   color: var(--ink-muted);
   text-decoration: none;
-  border-bottom: 2px solid transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
   white-space: nowrap;
+  transition: color 0.18s var(--erp-ease), border-color 0.18s var(--erp-ease), background 0.18s var(--erp-ease);
 }
-.ui-tab:hover { color: var(--text-primary); }
-.ui-tab--active { color: var(--text-primary); border-bottom-color: var(--accent); }
+.ui-tab:hover { color: var(--text-primary); border-color: var(--accent-fg); background: var(--tint-hover); }
+.ui-tab--active, .ui-tab--active:hover { color: var(--ink-on-accent-fill); background: var(--accent-fill); border-color: var(--accent-fill); font-weight: 600; }
 
 .ui-subtabs {
   display: flex;
@@ -40,4 +47,4 @@
   white-space: nowrap;
 }
 .ui-subtab:hover { background: var(--tint-hover); color: var(--text-primary); }
-.ui-subtab--active { background: var(--tint-active); color: var(--text-primary); font-weight: 700; }
+.ui-subtab--active { background: var(--tint-active); color: var(--accent-fg); font-weight: 600; }

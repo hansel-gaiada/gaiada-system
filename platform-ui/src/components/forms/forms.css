@@ -22,11 +22,16 @@
 }
 
 .lux-field__control {
-  border: none;
-  border-bottom: 0.5px solid var(--line-control);
-  background: transparent;
+  /* GOLD-GLASS UI/UX pass: the design draws BOXED controls — 1px border,
+     12px radius — not the underline field the old system used. An underline
+     on a translucent card has almost no edge to sit against. Every state
+     below (hover / focus / error / disabled) still applies; only the edge
+     they are drawn on moved from border-bottom to border. */
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-page);
   outline: none;
-  padding: 8px 2px;
+  padding: 10px 13px;
   font: 400 14px var(--font-body);
   color: var(--text-primary);
   transition: border-color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
@@ -41,16 +46,16 @@
   width: 100%;
 }
 .lux-field__control::placeholder { color: var(--ink-faint); }
-.lux-field__control:hover:not(:disabled) { border-bottom-color: var(--text-primary); }
+.lux-field__control:hover:not(:disabled) { border-color: var(--line-strong); }
 /* Focus is a state worth seeing across a 20-field form: the rule thickens to the accent and the
    field takes a faint accent wash, so the active field is findable at a glance rather than only by
    the caret. */
 .lux-field__control:focus {
-  border-bottom: 1.5px solid var(--erp-accent);
+  border-color: var(--accent-fg);
   background: var(--tint-hover);
 }
 .lux-field__control--textarea { resize: vertical; min-height: 72px; font-family: var(--font-body); }
-.lux-field__control--error { border-bottom-color: var(--status-critical); }
+.lux-field__control--error { border-color: var(--status-critical); }
 .lux-field__control:disabled { color: var(--ink-faint); cursor: not-allowed; }
 
 /* Select: appearance:none removed the native caret, leaving it indistinguishable from a text input
