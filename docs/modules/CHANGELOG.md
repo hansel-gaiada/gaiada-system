@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.42.1` / infra - SM-74 hosting topology + MON-01 probe generator (2026-08-30) - PROTOTYPED
+
+~63 managed client properties are monitored by nobody, and the program had this recorded as blocked
+behind the observe-only ruling on `delphi`/`helios`. **It is not.** That ruling forbids *changing
+things on* those hosts; an HTTP GET changes nothing. Re-probed 2026-08-30 — SSH to both is
+filtered, HTTP and HTTPS answer. Observation was never the blocked half; deployment was.
+
+**SM-74** adds the hosting-topology field set to `search_properties` rather than `webdev_sites`,
+split by ownership and not convenience: `search_properties` already owns domain identity, the
+crawl-**consent** gate, the audit history and the crawler, so anything true of the domain *as an
+observable thing on the internet* belongs there. `webdev_sites` owns how we deliver it. One domain,
+one row, one consent gate, one crawler — a second registry would fork consent, which is the one
+thing that must never be ambiguous.
+
+**Every column is nullable on purpose.** Most of these properties have never been surveyed, and
+`NOT NULL DEFAULT 'unknown'` would render as a measurement in every console that reads it. NULL
+means "not surveyed"; `'unknown'` would mean "surveyed and could not tell". Same reason
+`plugin_surface` distinguishes NULL from `[]`, and why `topology_checked_at` exists at all — without
+it a 2025 fingerprint is indistinguishable from this morning's.
+
+**MON-01's generator puts the consent gate in the SQL, not in a comment.** Only verified, active,
+non-deleted properties become probe targets; an unverified property is *absent*, not throttled. It
+also refuses private, loopback and link-local hosts — a property row is client-supplied data, and a
+generator that will happily probe `169.254.169.254` because a row said so is an SSRF with a cron
+attached. Selftest 8/8 including that case; skipped rows are logged rather than silently dropped.
+
+The scrape job is **proposed, not applied**: wiring it decides which host makes standing outbound
+requests to 63 client domains — whose IP appears in their logs, and whose egress posture a
+compromise inherits. Not the ERP box. It also sets 60s rather than the global 15s, because 63
+properties at 15s is ~15k requests an hour from a single IP.
+
 ### platform-nest `0.42.0` - webdev_sites, the site portfolio registry (2026-08-30) - PROTOTYPED
 
 v2.0 §04/§07. The design assumed every client site becomes a Zone B tenant; most never will. The
