@@ -2,44 +2,47 @@
    Self-hosted per design system. Inter (body/data) — and, once its files land,
    Urbanist (display).
 
-   GOLD-GLASS, 2026-08-30 — the serif is gone. Owner decision 1 retires
-   Cormorant Garamond from the product entirely (not just from card titles, as
-   the 2026-08-22 pass had it): the new design sets every heading in Urbanist
-   600/700 and uses no serif anywhere, login and print covers included.
+   GOLD-GLASS, 2026-08-30 — the serif is gone, Urbanist is in. Owner
+   decision 1 retires Cormorant Garamond from the product entirely (not just
+   from card titles, as the 2026-08-22 pass had it): the design sets every
+   heading in Urbanist 600/700 and uses no serif anywhere, login and print
+   covers included.
 
-   *** BLOCKED — Urbanist is NOT in this repo. ***
-   The design pulls it from the Google Fonts CDN. This app self-hosts with zero
-   external font references (BFF-only egress), so adopting Urbanist needs the
-   actual files, which nobody has committed:
-       public/fonts/Urbanist-Variable-latin.woff2
-       public/fonts/Urbanist-Variable-latin-ext.woff2      (variable, wght 400-700)
-   Until they exist, --font-display points at the Inter stack. That is a
-   deliberate interim, not the design: every heading currently renders in the
-   body face, so the display/body contrast the design relies on is absent.
-   To finish it, add the two files, restore a @font-face pair below in the
-   shape of the Inter one, and change --font-display's first family. Nothing
-   else has to move — all 54 display-face consumers read the token.
-   Do NOT "fix" this by naming "Urbanist" in the stack without a @font-face:
-   it would then render only for viewers who happen to have it installed, so
-   the app would look different per machine.
+   Urbanist is SELF-HOSTED like the others, not pulled from the Google Fonts
+   CDN the design prototype used. This app has zero external font references
+   by design (BFF-only egress), and a CDN font is also a third-party request
+   on every route. The files are the same variable woff2 Google serves,
+   subset the same way (latin / latin-ext by unicode-range). Urbanist is
+   OFL-1.1, so redistribution in-tree is permitted.
 
-   Both are VARIABLE fonts declared over the full 400–700 range, so weights
-   500 and 600 render as real interpolated instances. The previous build
-   shipped only static 400 + 700, which meant every `font-weight: 500|600`
-   in the codebase (11 sites) was synthesised by the browser — smeared
-   outlines that differed between Chrome and Safari.
-
-   Payload: latin 400–700 for both families is ~85 KB, against 1.66 MB for
-   the four static .ttf/.woff files it replaces. latin-ext is a separate
-   @font-face gated on unicode-range, so it only downloads when a page
-   actually renders an extended-latin glyph.
-
-   `size-adjust` on the fallback stack is deliberately omitted — the metric
-   difference is absorbed by `font-display: swap` plus the <link rel=preload>
-   in app/layout.tsx, which lands the real face before first paint on any
-   warm cache.
+   The Cormorant @font-face pair and its <link rel=preload> are gone; the
+   two CormorantGaramond-Variable-*.woff2 files are deleted with them.
    ===================================================================== */
 
+
+/* ---- Display · Urbanist (variable, wght 400–700) ------------------- */
+@font-face {
+  font-family: "Urbanist";
+  src: url("/fonts/Urbanist-Variable-latin.woff2") format("woff2-variations"),
+       url("/fonts/Urbanist-Variable-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                 U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                 U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Urbanist";
+  src: url("/fonts/Urbanist-Variable-latin-ext.woff2") format("woff2-variations"),
+       url("/fonts/Urbanist-Variable-latin-ext.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                 U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+                 U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 /* ---- Body / utility · Inter (variable, wght 400–700) --------------- */
 @font-face {
@@ -66,12 +69,12 @@
 }
 
 :root {
-  --font-display: "Inter", system-ui, sans-serif;  /* INTERIM — see the blocked-Urbanist note above */
+  --font-display: "Urbanist", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
   /* Data face — the same grotesk as the body, but always tabular. Every
      figure that sits in a column (KPI values, money, counts, durations)
-     must use this so digits align and scan. Kept as its own token even though
-     it currently equals --font-body and --font-display: when Urbanist lands,
-     display moves and this must NOT follow it. */
+     must use this so digits align and scan. Kept as its own token, separate
+     from --font-display: Urbanist is a display face and must never be what a
+     numeric column is set in. */
   --font-data: "Inter", system-ui, sans-serif;
 }
