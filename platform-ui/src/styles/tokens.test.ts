@@ -229,11 +229,16 @@ describe("design tokens", () => {
   });
 
   it("the display face carries no serif", () => {
-    // Owner decision 1: Cormorant Garamond leaves the product. This guard is
-    // what stops it drifting back in a later edit. It does NOT assert Urbanist
-    // — those files are not in the repo yet and --font-display points at the
-    // Inter stack as a documented interim (see tokens/fonts.css).
+    // Owner decision 1: Cormorant Garamond leaves the product, Urbanist takes
+    // the display tier. Asserting the @font-face too, not just the token: a
+    // --font-display naming a family with no @font-face would render only for
+    // viewers who happen to have it installed locally, so the app would look
+    // different per machine and nothing would fail.
     const fonts = read("./tokens/fonts.css");
+    expect(fonts).toMatch(/--font-display:\s*"Urbanist"/);
+    expect(fonts).toContain('font-family: "Urbanist"');
+    expect(fonts).toContain("/fonts/Urbanist-Variable-latin.woff2");
+    expect(fonts).toContain("/fonts/Urbanist-Variable-latin-ext.woff2");
     // `sans-serif` legitimately contains "serif" — the lookbehind is what makes
     // this assert an ACTUAL serif rather than every sans stack in the file.
     expect(fonts).not.toMatch(/--font-display:[^;]*((?<!sans-)serif|Cormorant|Georgia)/);

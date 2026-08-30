@@ -24,16 +24,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             injects. Fonts always fetch in CORS mode, hence crossOrigin even
             though these are same-origin.
 
-            Gold-glass (2026-08-30): the Cormorant Garamond preload is gone with
-            the serif itself (owner decision 1). Inter is now the only face the
-            app actually uses — --font-display resolves to it as a documented
-            interim until Urbanist's woff2 files are committed; see the blocked
-            note in styles/tokens/fonts.css. Add the Urbanist preload back HERE
-            in the same change that adds those files, or the display face will
-            arrive a paint late on every route. The orphaned
-            /public/fonts/CormorantGaramond-*.woff2 are no longer referenced by
-            anything and can be deleted. */}
+            Gold-glass (2026-08-30): Cormorant Garamond left the product with
+            the serif (owner decision 1) and its woff2 files are deleted;
+            Urbanist replaces it as --font-display. Both faces are needed for
+            first paint — Urbanist for every heading, Inter for everything
+            else — so both are preloaded. */}
         <link rel="preload" href="/fonts/Inter-Variable-latin.woff2" as="font" type="font/woff2" crossOrigin="" />
+        <link rel="preload" href="/fonts/Urbanist-Variable-latin.woff2" as="font" type="font/woff2" crossOrigin="" />
         {children}
       </body>
     </html>
