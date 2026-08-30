@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.43.0` - site environments, GitHub wiring, and the portfolio read model (2026-08-30) - PROTOTYPED
+
+The registry shipped with no way to say **which environment** a domain is, and a survey of the live
+estate made that untenable: one project routinely owns several — `bali-girls.com` plus eight
+`baligirls-*.gaiada2.online` variants, `blossomsteakhouse.com` plus `sst.` and `preview-sst.`,
+`essentialbali.com` plus its `gaiada2.online` alias. Without `environment`, "the production URL for
+this project" is not a query, it is a guess from a naming convention — and the conventions run four
+deep (`gaiada.online`, `gaiada1.online`, `gaiada2.online`, per-project slots). A console built on
+that guess shows a client their staging site.
+
+`preview` is separate from `staging` deliberately: staging is durable and client-visible, preview
+slots are ephemeral and machine-generated (delphi serves ~11 right now). A partial unique index
+enforces **one production per project**, itself three-way partial so an internal site with no
+project stays unconstrained — there is nothing for it to be the production *of*.
+
+A `site_environments` child table was considered and rejected: each environment here **is** a
+distinct domain with its own host, TLS, adoption state and audit history, which is precisely a
+`webdev_sites` row. The grouping already existed — `project_id`.
+
+`GET console/portfolio` is a **separate endpoint from `console/sites`** on purpose. That one answers
+"which Zone B tenants exist" and is honestly `stale:true` because the control plane is write-mostly.
+This answers "what does the estate consist of", including the sites we neither host nor control —
+and it reads Zone A tables only, so it carries no `DegradeMeta` and cannot degrade when Zone B is
+unreachable. It left-joins `search_properties` for hosting topology and the crawl-consent flag
+rather than duplicating either.
+
 ### platform-nest `0.42.1` / infra - SM-74 hosting topology + MON-01 probe generator (2026-08-30) - PROTOTYPED
 
 ~63 managed client properties are monitored by nobody, and the program had this recorded as blocked
