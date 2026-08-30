@@ -35,7 +35,7 @@
 .asst-context-chip--unavailable { cursor: default; border-color: var(--erp-hairline); color: var(--ink-faint); }
 .asst-context-chip--unavailable:hover { background: transparent; }
 .asst-promote-link {
-  font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle);
+  font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--ink-subtle);
   padding: 6px 4px; text-decoration: none; transition: color 0.2s var(--erp-ease);
 }
 .asst-promote-link:hover, .asst-promote-link:focus-visible { color: var(--erp-accent); }
@@ -55,7 +55,7 @@
 /* ASST-16 — the per-thread brain picker, same toolbar row as the memory toggle. */
 .asst-brain-picker { display: flex; align-items: center; gap: 6px; }
 .asst-brain-picker__label {
-  font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle);
+  font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle);
 }
 .asst-brain-picker__select {
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
@@ -69,7 +69,7 @@
 .asst-brain-picker__error { font: 400 11px var(--font-body); color: var(--status-danger-fg); }
 .asst-cap-toggle {
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
-  padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.01em;
   color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
 }
 .asst-cap-toggle:hover, .asst-cap-toggle:focus-visible, .asst-cap-toggle[aria-expanded="true"] {
@@ -77,7 +77,7 @@
 }
 .asst-memory-toggle {
   border: 0.5px solid var(--erp-hairline); background: transparent; cursor: pointer;
-  padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 6px 12px; font: 700 10px var(--font-body); letter-spacing: 0.01em;
   color: var(--ink-subtle); transition: color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
 }
 .asst-memory-toggle:hover, .asst-memory-toggle:focus-visible, .asst-memory-toggle[aria-expanded="true"] {
@@ -115,7 +115,7 @@
 }
 .asst-rail__search input:focus-visible { border-bottom-color: var(--erp-accent); }
 .asst-rail__list { flex: 1; overflow-y: auto; padding: 6px 0 14px; min-height: 0; }
-.asst-rail__group-label { margin: 0; padding: 12px 14px 4px; font: 700 10px var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--erp-ink-50); }
+.asst-rail__group-label { margin: 0; padding: 12px 14px 4px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .asst-rail__list ul { list-style: none; margin: 0; padding: 0; }
 
 .asst-rail__row { display: flex; align-items: center; gap: 4px; padding: 2px 8px; }
@@ -123,7 +123,7 @@
 .asst-rail__row--active { background: var(--tint-active); }
 .asst-rail__title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: none; background: transparent; cursor: pointer; padding: 9px 6px; text-align: left; font: 400 13px var(--font-body); color: var(--text-primary); }
 .asst-rail__title-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.asst-rail__chip { flex-shrink: 0; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-rail__chip { flex-shrink: 0; font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle); }
 .asst-rail__rename-input { flex: 1; border: none; border-bottom: 0.5px solid var(--erp-accent); background: transparent; outline: none; padding: 8px 6px; font: 400 13px var(--font-body); color: var(--text-primary); }
 .asst-rail__row-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .asst-rail__icon-btn {
@@ -132,7 +132,7 @@
   color: var(--ink-faint); transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
 }
 .asst-rail__icon-btn:hover, .asst-rail__icon-btn:focus-visible { color: var(--text-primary); background: var(--wash); }
-.asst-rail__icon-btn--danger { width: auto; padding: 0 8px; font: 700 10px var(--font-body); color: var(--status-danger-fg); letter-spacing: 0.04em; text-transform: uppercase; }
+.asst-rail__icon-btn--danger { width: auto; padding: 0 8px; font: 700 10px var(--font-body); color: var(--status-danger-fg); letter-spacing: 0.04em; }
 .asst-rail__empty { padding: 20px 16px; font: 400 13px var(--font-body); color: var(--ink-faint); }
 
 /* ---- Main column ------------------------------------------------------------------------------ */
@@ -143,7 +143,7 @@
 .asst-msg { display: flex; flex-direction: column; gap: 4px; max-width: 720px; }
 .asst-msg--user { align-self: flex-end; align-items: flex-end; }
 .asst-msg--assistant { align-self: flex-start; align-items: flex-start; }
-.asst-msg__role { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.asst-msg__role { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .asst-msg__bubble { border: 0.5px solid var(--erp-hairline); padding: 12px 16px; background: var(--surface-page); }
 .asst-msg--user .asst-msg__bubble { background: var(--tint-active); border-color: transparent; }
 .asst-msg__body { font: 400 14px/1.55 var(--font-body); color: var(--text-primary); word-break: break-word; }
@@ -153,7 +153,7 @@
 
 /* ASST-12 — "served by" brain badge + the truthful cost meter (real vs estimated tokens). */
 .asst-msg__servedby { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--erp-hairline-soft); }
-.asst-msg__badge { font: 700 9.5px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-msg__badge { font: 700 9.5px var(--font-body); letter-spacing: 0.06em; color: var(--ink-subtle); }
 /* A11Y-AUTO-01 — was `--ink-faint` (the token's own comment reserves that tier for "decorative
    only", ~3.3:1 in light theme; axe measured 2.82:1 here in practice). The token count/cost line is
    real informational text, not decoration — `--ink-subtle` (>=4.5:1, "small caps labels" tier) is
@@ -173,7 +173,7 @@
 .asst-code-block:last-child { margin-bottom: 0; }
 /* A11Y-AUTO-01 — same `--ink-faint`-on-real-text fix as `.asst-msg__usage` above: the language tag
    is informational (identifies the fenced block), not decorative. */
-.asst-code-lang { position: absolute; top: 6px; right: 10px; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-code-lang { position: absolute; top: 6px; right: 10px; font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle); }
 
 /* Blinking caret while a reply is actively streaming. Neutralised by the global reduced-motion rule. */
 .asst-cursor { display: inline-block; width: 2px; height: 14px; margin-left: 2px; background: var(--erp-accent); vertical-align: -2px; animation: asst-blink 1s steps(1) infinite; }
@@ -220,7 +220,7 @@
 .asst-mem__error { margin: 0; padding: 8px 14px; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
 
 .asst-mem__list { flex: 1; overflow-y: auto; padding: 4px 0 14px; min-height: 0; }
-.asst-mem__group-label { margin: 0; padding: 12px 14px 2px; font: 700 10px var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--erp-ink-50); }
+.asst-mem__group-label { margin: 0; padding: 12px 14px 2px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .asst-mem__group-hint { margin: 0; padding: 0 14px 6px; font: 400 11.5px var(--font-body); color: var(--ink-faint); }
 .asst-mem__empty { padding: 10px 14px 16px; font: 400 12.5px var(--font-body); color: var(--ink-faint); }
 .asst-mem__list ul { list-style: none; margin: 0; padding: 0; }
@@ -233,9 +233,9 @@
   padding: 4px 2px; font: 400 12.5px/1.45 var(--font-body); color: var(--text-primary);
 }
 .asst-mem__row-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.asst-mem__scope-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-mem__scope-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; color: var(--ink-subtle); }
 .asst-mem__row-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
-.asst-mem__action { border: 0.5px solid var(--erp-accent); background: transparent; cursor: pointer; padding: 3px 8px; font: 700 9.5px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--erp-accent); }
+.asst-mem__action { border: 0.5px solid var(--erp-accent); background: transparent; cursor: pointer; padding: 3px 8px; font: 700 9.5px var(--font-body); letter-spacing: 0.05em; color: var(--erp-accent); }
 .asst-mem__action:hover, .asst-mem__action:focus-visible { background: var(--tint-active); }
 .asst-mem__icon-btn {
   border: none; background: transparent; cursor: pointer; width: 24px; height: 24px; padding: 0;
@@ -243,12 +243,12 @@
   color: var(--ink-faint); transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);
 }
 .asst-mem__icon-btn:hover, .asst-mem__icon-btn:focus-visible { color: var(--text-primary); background: var(--wash); }
-.asst-mem__icon-btn--danger { width: auto; padding: 0 8px; font: 700 10px var(--font-body); color: var(--status-danger-fg); letter-spacing: 0.04em; text-transform: uppercase; }
+.asst-mem__icon-btn--danger { width: auto; padding: 0 8px; font: 700 10px var(--font-body); color: var(--status-danger-fg); letter-spacing: 0.04em; }
 
 /* ---- Roster panel (ASST-21) — reuses .asst-mem's shell; these are the roster/handoff-only bits -- */
 .asst-roster__handoff { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .asst-roster__status-chip {
-  font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle);
+  font: 700 9px var(--font-body); letter-spacing: 0.06em; color: var(--ink-subtle);
 }
 /* Lifecycle -> the shared status tiers (colors.css) — terminal-ok=ok, terminal-bad=danger,
    waiting-on-a-human=warning, still in flight=progress; queued/cancelled read as neutral. */
@@ -274,7 +274,7 @@
    note: this no longer also renders inline in the empty state) ------------------------------------ */
 .asst-cap-cards { display: flex; flex-direction: column; gap: 14px; padding: 0 14px; }
 .asst-cap-card { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 10px 12px; }
-.asst-cap-card__title { margin: 0 0 6px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.asst-cap-card__title { margin: 0 0 6px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .asst-cap-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .asst-cap-card__tool { display: flex; flex-direction: column; gap: 1px; }
 .asst-cap-card__tool-name { font: 600 12px var(--font-data); color: var(--text-primary); }
@@ -299,7 +299,7 @@
 .asst-cite-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .asst-cite-chip {
   border: 0.5px solid var(--erp-accent); background: transparent; cursor: pointer;
-  padding: 3px 9px; font: 700 9.5px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--erp-accent);
+  padding: 3px 9px; font: 700 9.5px var(--font-body); letter-spacing: 0.05em; color: var(--erp-accent);
   transition: background 0.2s var(--erp-ease), color 0.2s var(--erp-ease), border-color 0.2s var(--erp-ease);
 }
 .asst-cite-chip:hover, .asst-cite-chip:focus-visible { background: var(--tint-active); }
@@ -313,7 +313,7 @@
   padding: 3px 9px; font: 400 11px var(--font-body); color: var(--ink-subtle);
 }
 .asst-toolchip__name { font: 400 11px var(--font-data); color: var(--text-primary); }
-.asst-toolchip__status { font: 700 9px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; }
+.asst-toolchip__status { font: 700 9px var(--font-body); letter-spacing: 0.05em; }
 .asst-toolchip[data-status="succeeded"] .asst-toolchip__status { color: var(--status-ok-fg); }
 .asst-toolchip[data-status="failed"] .asst-toolchip__status { color: var(--status-danger-fg); }
 .asst-toolchip[data-status="denied"] .asst-toolchip__status { color: var(--status-idle-fg); }
@@ -330,8 +330,8 @@
 }
 .asst-proposal__head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
 .asst-proposal__tool { font: 600 12.5px var(--font-data); color: var(--text-primary); }
-.asst-proposal__impact { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-subtle); }
-.asst-proposal__state { font: 700 9.5px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; margin-left: auto; }
+.asst-proposal__impact { font: 700 9px var(--font-body); letter-spacing: 0.06em; color: var(--ink-subtle); }
+.asst-proposal__state { font: 700 9.5px var(--font-body); letter-spacing: 0.05em; margin-left: auto; }
 /* Colour tiers follow the SAME lifecycle mapping RosterPanel's own status chip already established
    (terminal-ok=ok, terminal-bad=danger, waiting-on-a-human=warning/progress, closed-without-
    success=idle) — see this file's ASST-21 section above. */
@@ -358,7 +358,7 @@
 .asst-proposal__hint { margin: 0; font: 400 11px var(--font-body); color: var(--ink-subtle); font-style: italic; }
 .asst-proposal__error { margin: 0; font: 600 12px var(--font-body); color: var(--status-danger-fg); }
 .asst-proposal__actions { display: flex; gap: 8px; }
-.asst-proposal__link { font: 700 10px var(--font-body); letter-spacing: 0.05em; text-transform: uppercase; color: var(--erp-accent); text-decoration: none; }
+.asst-proposal__link { font: 700 10px var(--font-body); letter-spacing: 0.05em; color: var(--erp-accent); text-decoration: none; }
 .asst-proposal__link:hover, .asst-proposal__link:focus-visible { text-decoration: underline; }
 
 /* ---- Composer tools-mode affordance (T4, ASST-23) ------------------------------------------------- */

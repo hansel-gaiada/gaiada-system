@@ -19,7 +19,7 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
         <div className="erp-side__head">
           <Link href="/" className="erp-side__brand" aria-label="Home">
             <span className="erp-side__mark" aria-hidden="true">S</span>
-            <div className="erp-side__wordmark">SYROWATKA</div>
+            <div className="erp-side__wordmark">Syrowatka</div>
             <Eyebrow className="erp-side__tagline">Operating Platform</Eyebrow>
           </Link>
           <SidebarToggle />

@@ -6,7 +6,7 @@
 
 .iam-form { display: grid; gap: 8px; padding: 10px 12px; border: 0.5px solid var(--erp-hairline);
   background: var(--surface-card); min-width: 260px; }
-.iam-form__title { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+.iam-form__title { font: 700 10px var(--font-body); letter-spacing: 0.01em;
   color: var(--erp-ink-50); }
 .iam-form__field { display: grid; gap: 3px; }
 .iam-form__label { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
@@ -27,7 +27,7 @@
   font: 400 14px var(--font-body); line-height: 1; padding: 0 2px; }
 
 /* Position / seat state. `orphaned` is the one an operator must escalate rather than fix. */
-.iam-badge { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+.iam-badge { font: 700 9px var(--font-body); letter-spacing: 0.01em;
   padding: 2px 5px; border: 0.5px solid var(--erp-hairline); }
 .iam-badge--orphaned { color: var(--status-critical-fg); border-color: var(--status-critical); }
 .iam-badge--vacant { color: var(--erp-accent); border-color: var(--erp-accent); }

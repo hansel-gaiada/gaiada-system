@@ -22,7 +22,7 @@
 .dt__search { flex: 1; min-width: 0; display: flex; align-items: center; }
 .dt__search input { width: 100%; max-width: 320px; border: none; border-bottom: 0.5px solid var(--erp-hairline); background: transparent; outline: none; padding: 6px 2px; font: 400 13px var(--font-body); color: var(--text-primary); }
 .dt__search input:focus-visible { border-bottom-color: var(--erp-accent); }
-.dt__count { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.dt__count { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 
 .dt__scroll { overflow-x: auto; }
 .dt__sentinel { height: 1px; }
@@ -31,10 +31,10 @@
 /* Sticky-header scroll shadow (design-language §10): flat at rest, one shadow tier once content
    has scrolled beneath it — never a shadow before that. */
 .dt__table--scrolled thead th { box-shadow: var(--elev-1); }
-.dt__sort { border: none; background: transparent; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); display: inline-flex; align-items: center; gap: 6px; padding: 0; }
+.dt__sort { border: none; background: transparent; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); display: inline-flex; align-items: center; gap: 6px; padding: 0; }
 .dt__sort:hover { color: var(--text-primary); }
 .dt__arrow { font-size: 8px; color: var(--erp-accent); width: 8px; }
-.dt__table thead th:not(:has(.dt__sort)) { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.dt__table thead th:not(:has(.dt__sort)) { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 /* Row height sourced from the density token — already density-aware via [data-density] in
    shell.css, so a table just has to consume it, no separate density prop needed here. */
 .dt__table tbody tr { height: var(--row-height); }

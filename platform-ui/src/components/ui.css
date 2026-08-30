@@ -62,7 +62,7 @@
 .lux-btn--sm { height: 32px; padding: 0 14px; font-size: 13px; }
 .lux-btn--md { height: 36px; padding: 0 18px; font-size: 13px; }
 
-.lux-badge { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.lux-badge { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.01em; }
 .lux-badge__dot { width: 6px; height: 6px; border-radius: 50%; } /* the dot is the system's one sanctioned circle */
 
 .lux-kpi { position: relative; background: transparent; border: none; border-radius: var(--radius-lg); padding: var(--card-padding); display: flex; flex-direction: column; gap: 12px; }
@@ -124,7 +124,7 @@
 .lux-rm { min-width: 0; }
 .lux-rm__summary {
   cursor: pointer; list-style: none; width: max-content;
-  font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  font: 700 10px var(--font-body); letter-spacing: 0.01em;
   color: var(--erp-accent); padding: 3px 0;
 }
 .lux-rm__summary::-webkit-details-marker { display: none; }
@@ -138,7 +138,7 @@
    inside its own stat instead of widening the strip. */
 .lux-statstrip { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 14px; }
 .lux-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.lux-stat__label { font: 700 9px var(--font-body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-subtle); }
+.lux-stat__label { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle); }
 .lux-stat__value { font: 700 22px/1.1 var(--font-body); color: var(--text-primary); font-variant-numeric: lining-nums tabular-nums; }
 
 .lux-toast { box-shadow: var(--elev-overlay); position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: var(--surface-inverse); color: var(--text-on-inverse); padding: 13px 22px; font: 400 13px var(--font-body); letter-spacing: 0.02em; z-index: 200; animation: erp-toast 0.28s var(--erp-ease); display: flex; align-items: center; gap: 12px; border-radius: var(--radius-md); }
@@ -157,7 +157,7 @@
 
 /* Reusable filter bar (audit, search, any GET-form filter row). */
 .lux-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
-.lux-filters__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.lux-filters__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .lux-filters__field select, .lux-filters__field input { border: none; border-bottom: 0.5px solid var(--line-control); background: transparent; outline: none; padding: 7px 2px; min-width: 150px; font: 400 14px var(--font-body); letter-spacing: normal; text-transform: none; color: var(--text-primary); }
 .lux-filters__field select:focus-visible, .lux-filters__field input:focus-visible { border-bottom-color: var(--erp-accent); }
 .lux-filters__actions { display: flex; gap: 10px; margin-left: auto; }

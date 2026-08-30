@@ -23,7 +23,7 @@
 .org-readonly .org-chartscroll { max-height: none; }
 
 .org-listwrap { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
-.org-listwrap__head { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.org-listwrap__head { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .org-editor { padding: 12px 14px; max-height: 44vh; overflow: auto; min-width: 0; }
 
 /* ---- Editor: nested indented list ---- */
@@ -43,12 +43,12 @@
 .connect-svc { border: 0.5px solid var(--erp-accent); background: var(--surface-card); padding: 14px 16px; margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
 .connect-svc__head { display: flex; align-items: center; justify-content: space-between; }
 .connect-svc__title { font: 700 13px var(--font-body); color: var(--text-primary); }
-.connect-svc__eyebrow { display: block; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); margin-bottom: 6px; }
+.connect-svc__eyebrow { display: block; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); margin-bottom: 6px; }
 .connect-svc__existing, .connect-svc__form, .connect-svc__preview, .connect-svc__confirmed { border-top: 0.5px solid var(--erp-hairline-soft); padding-top: 12px; }
 .connect-svc__existing:first-child { border-top: none; padding-top: 0; }
 .connect-svc__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .connect-svc__row { display: flex; align-items: center; gap: 10px; font: 400 13px var(--font-body); color: var(--text-primary); }
-.connect-svc__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
+.connect-svc__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--erp-ink-50); }
 .connect-svc__targets { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
 .connect-svc__check { display: flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--text-primary); border: 0.5px solid var(--erp-hairline); padding: 5px 9px; cursor: pointer; }
 .connect-svc__field { display: block; margin-bottom: 10px; }
@@ -88,7 +88,7 @@
 .org-box:hover .org-box__add, .org-box--sel .org-box__add { opacity: 1; }
 .org-box__add:hover { color: var(--erp-accent); border-color: var(--erp-accent); }
 .org-box__name { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; }
-.org-box__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.org-box__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 /* holding + company roots read as anchors; departments/divisions get edges */
 .org-box--holding, .org-box--company { background: var(--surface-inverse); border-color: transparent; }
 .org-box--holding .org-box__name, .org-box--company .org-box__name { color: var(--text-on-inverse); }

@@ -19,11 +19,11 @@ export function QueueAgendaHome({ items, decide, emptyText, agendaItems }: {
   const agenda = agendaItems ?? items.filter((i) => i.type === "task");
   return (
     <div className="queue-agenda">
-      <section className="queue-agenda__queue">
+      <section className="lux-card queue-agenda__queue">
         <span className="type-eyebrow queue-agenda__heading">Needs you ({items.length})</span>
         <NeedsMeQueue items={items} decide={decide} emptyText={emptyText} />
       </section>
-      <section className="queue-agenda__agenda">
+      <section className="lux-card queue-agenda__agenda">
         <span className="type-eyebrow queue-agenda__heading">Today</span>
         <TodayAgenda items={agenda} />
       </section>

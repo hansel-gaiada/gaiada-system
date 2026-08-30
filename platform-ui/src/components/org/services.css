@@ -3,7 +3,7 @@
 
 .svc-panel { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 16px; margin-top: 16px; }
 .svc-panel__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.svc-panel__eyebrow { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.svc-panel__eyebrow { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .svc-panel__empty { font: 400 13px var(--font-body); color: var(--erp-ink-50); margin: 0; }
 
 .svc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
@@ -11,7 +11,7 @@
 .svc-row:last-child { border-bottom: none; }
 .svc-row__main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .svc-row__label { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
-.svc-row__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
+.svc-row__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--erp-ink-50); }
 .svc-row__banner { margin: 0; font: 400 12px var(--font-body); color: var(--dept-risk, var(--status-critical-fg)); }
 .svc-row__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .svc-row__relink { display: inline-flex; align-items: center; gap: 6px; }

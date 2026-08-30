@@ -10,7 +10,7 @@
 }
 .scope-pill__summary::-webkit-details-marker { display: none; }
 .scope-pill__eyebrow {
-  font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50);
+  font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50);
 }
 .scope-pill__value { font: 400 13px var(--font-body); color: var(--text-primary); }
 .scope-pill__menu { box-shadow: var(--elev-overlay);
@@ -47,7 +47,7 @@
 .scope-bar__pill--active .scope-bar__summary { border-color: var(--accent); }
 .scope-bar__pill--active .scope-bar__value { color: var(--accent); font-weight: 700; }
 .scope-bar__label {
-  font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50);
+  font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50);
 }
 .scope-bar__value { font: 400 13px var(--font-body); color: var(--text-primary); }
 .scope-bar__menu { box-shadow: var(--elev-overlay);
