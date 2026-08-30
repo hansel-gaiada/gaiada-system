@@ -42,7 +42,7 @@
 .pl-scope__party-name { font: 700 13px var(--font-body); min-width: 70px; }
 .pl-scope__meta { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 .pl-scope__form { display: flex; align-items: flex-end; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
-.pl-scope__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.pl-scope__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .pl-scope__field input { border: none; border-bottom: 0.5px solid var(--line-control); background: transparent; outline: none; padding: 7px 2px; min-width: 220px; font: 400 14px var(--font-body); letter-spacing: normal; text-transform: none; color: var(--text-primary); }
 .pl-scope__field input:focus-visible { border-bottom-color: var(--erp-accent); }
 
@@ -82,6 +82,6 @@
 .pl-site-row__ok, .pl-site-form__ok { margin: 8px 0 0; font: 500 12px/1.4 var(--font-body); color: var(--status-ok-fg); }
 
 .pl-site-form { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 0.5px solid var(--erp-hairline-soft); }
-.pl-site-form__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); max-width: 340px; }
+.pl-site-form__field { display: flex; flex-direction: column; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); max-width: 340px; }
 .pl-site-form__field select, .pl-site-form__field input { border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-4); padding: 8px 10px; font: 400 13px var(--font-body); letter-spacing: normal; text-transform: none; background: transparent; color: var(--text-primary); }
 .pl-site-form__field input:focus-visible, .pl-site-form__field select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }

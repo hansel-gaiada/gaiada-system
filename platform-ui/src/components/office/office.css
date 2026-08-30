@@ -22,8 +22,7 @@
 
 .office__demo-badge {
   font: 700 11px var(--font-body);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--status-warning-fg);
   background: var(--status-warning-bg, transparent);
   padding: var(--space-4) var(--space-8);
@@ -252,7 +251,6 @@
 .office__roster-kind {
   font: 600 10px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--erp-ink-60);
 }
 .office__roster-name { font: 500 13px var(--font-body); color: var(--ink-strong); }
@@ -261,7 +259,6 @@
   align-self: flex-start;
   font: 700 10px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--accent-fg);
 }
 /* The roster's non-canvas equivalent of the emote bubble's loudest treatment (req #2:
@@ -302,7 +299,6 @@
 .office__assurance {
   display: inline-block;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 11px;
 }
@@ -363,7 +359,6 @@
   text-align: left;
   font: 600 11px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--erp-ink-60);
   padding: var(--space-8) var(--space-12);
   border-bottom: 1px solid var(--erp-hairline);

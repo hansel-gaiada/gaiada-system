@@ -48,7 +48,7 @@
 .prod-heatmap__months { display: grid; grid-auto-flow: column; gap: 3px; margin-bottom: 2px; }
 .prod-heatmap__month {
   font: 600 9px var(--font-body); color: var(--pm-text-faint);
-  letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+  letter-spacing: 0.04em; white-space: nowrap;
 }
 
 .prod-heatmap__grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px; }

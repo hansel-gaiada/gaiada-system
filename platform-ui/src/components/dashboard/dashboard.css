@@ -4,8 +4,13 @@
 .dash-approval__title { font: 400 14px/1.35 var(--font-body); color: var(--text-primary); }
 .dash-approval__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; }
 .dash-approval__actions { display: flex; gap: 6px; }
-.dash-approval__btn { width: 26px; height: 26px; border: 0.5px solid var(--line-control); background: transparent; color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-.dash-approval__btn--solid { border-color: var(--erp-accent); background: var(--erp-accent); color: var(--text-on-accent); }
+.dash-approval__btn { min-width: 32px; height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: transparent; color: var(--ink-body); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 600 13px var(--font-body); transition: border-color 0.18s var(--erp-ease), background 0.18s var(--erp-ease); }
+.dash-approval__btn:hover { border-color: var(--accent-fg); background: var(--tint-hover); color: var(--text-primary); }
+/* The design draws the primary row action OUTLINED in the accent, not
+   filled — a queue of filled gold buttons is a wall of gold. The filled
+   treatment stays for the page-level CTA (Submit check-in, New). */
+.dash-approval__btn--solid { border-color: var(--accent-fg); background: transparent; color: var(--accent-fg); }
+.dash-approval__btn--solid:hover { background: var(--tint-active); color: var(--accent-fg); }
 .dash-empty { padding: 26px 0; text-align: center; }
 .dash-empty p { font: 400 13px var(--font-body); color: var(--ink-subtle); margin-top: 6px; }
 .dash-pending-chip { font: 700 11px var(--font-body); letter-spacing: 0.06em; color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 4px 9px; }
@@ -17,7 +22,12 @@
 
 /* ---- UX-2 §1: role-differentiated Home (WSUX-5) ---- */
 
-.needs-me-queue__row { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-top: 0.5px solid var(--line-soft); }
+/* The design puts this queue in a card and gives each row real height —
+   the kind label, the title and the actions need to read as one row, not
+   as three stacked lines. --line, not the soft alias: the soft tier is
+   invisible on a translucent surface. */
+.queue-agenda__queue, .queue-agenda__agenda { min-width: 0; }
+.needs-me-queue__row { display: flex; align-items: center; gap: 14px; min-height: var(--row-height); padding: 12px 0; border-top: 1px solid var(--line); }
 .needs-me-queue__dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
 /* Risk-colour discipline (WSUX-11 Major-1 fix): rust (--status-critical) is the app's
    one alarm colour, reserved for the most urgent band. `urgencyBand()`
@@ -30,19 +40,23 @@
 .needs-me-queue__dot--soon { background: var(--status-neutral); }
 .needs-me-queue__body { min-width: 0; flex: 1; }
 .needs-me-queue__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.needs-me-queue__type { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
-.needs-me-queue__title { font: 400 14px/1.35 var(--font-body); color: var(--text-primary); }
+.needs-me-queue__type { font: 700 12px var(--font-body); letter-spacing: 0.01em; color: var(--ink-muted); flex-shrink: 0; min-width: 76px; }
+.needs-me-queue__title { font: 400 14px/1.4 var(--font-body); color: var(--text-primary); }
 .needs-me-queue__title-link { color: inherit; text-decoration: none; }
 .needs-me-queue__title-link:hover { text-decoration: underline; }
 .needs-me-queue__meta { font: 400 12px var(--font-body); color: var(--ink-subtle); margin-top: 3px; }
 .needs-me-queue__actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.filter-chip { display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--erp-hairline); padding: 8px 14px; text-decoration: none; color: var(--text-primary); background: var(--surface-card); }
-.filter-chip:hover { background: var(--tint-hover); }
-.filter-chip--active { border-color: var(--erp-accent); color: var(--erp-accent); }
-.filter-chip__label { font: 400 12px var(--font-body); }
-.filter-chip__count { font: 700 12px var(--font-body); }
+/* GOLD-GLASS UI/UX pass: the design draws the filter row as PILLS and
+   FILLS the selected one with the accent, which is what makes the active
+   filter readable at a glance. Tinting only the border (the old idiom)
+   reads as "slightly different", not "selected". */
+.filter-chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 0 15px; text-decoration: none; color: var(--ink-muted); background: transparent; transition: color 0.18s var(--erp-ease), border-color 0.18s var(--erp-ease), background 0.18s var(--erp-ease); }
+.filter-chip:hover { background: var(--tint-hover); border-color: var(--accent-fg); color: var(--text-primary); }
+.filter-chip--active, .filter-chip--active:hover { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--ink-on-accent-fill); }
+.filter-chip__label { font: 500 13px var(--font-body); }
+.filter-chip__count { font: 700 13px var(--font-body); }
 
 /* `align-items: flex-end` bottom-aligned a ~34px chip row against a ~72px sparkline block, so the
    row stood 72px tall with the chips pinned to its floor and the chart's label floating away up
@@ -56,14 +70,14 @@
   min-width: 150px; max-width: 230px; flex: 0 1 auto;
   padding-left: 20px; border-left: 0.5px solid var(--erp-hairline);
 }
-.command-center__heading { display: block; margin-bottom: 10px; }
+.command-center__heading { display: block; margin-bottom: 10px; font-size: 12px; color: var(--accent-fg); font-weight: 600; }
 
 .queue-agenda { display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start; }
-.queue-agenda__heading { display: block; margin-bottom: 10px; }
+.queue-agenda__heading { display: block; margin-bottom: 14px; font: 700 var(--h2-size)/var(--h2-line) var(--font-body); letter-spacing: -0.01em; color: var(--text-primary); }
 @media (max-width: 900px) { .queue-agenda { grid-template-columns: 1fr; } }
 
 .today-agenda__bucket { margin-bottom: 18px; }
-.today-agenda__heading { display: block; margin-bottom: 8px; }
+.today-agenda__heading { display: block; margin-bottom: 12px; font: 700 var(--h2-size)/var(--h2-line) var(--font-body); letter-spacing: -0.01em; color: var(--text-primary); }
 .today-agenda__list { list-style: none; margin: 0; padding: 0; }
 .today-agenda__item { font: 400 13px/1.5 var(--font-body); color: var(--text-primary); padding: 6px 0; border-top: 0.5px solid var(--line-soft); }
 .today-agenda__link { color: inherit; text-decoration: none; }
@@ -95,7 +109,7 @@
 .checkin-card__error { margin: 10px 0 0; font: 400 13px var(--font-body); color: var(--status-critical-fg); }
 .checkin-card__submitted-summary { margin: 0 0 8px; font: 400 14px/1.5 var(--font-body); color: var(--text-primary); }
 .checkin-card__note { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-60); }
-.checkin-card__pill { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 9px; border: 0.5px solid currentColor; }
+.checkin-card__pill { font: 700 10px var(--font-body); letter-spacing: 0.06em; padding: 4px 9px; border: 0.5px solid currentColor; }
 .checkin-card__pill--submitted { color: var(--erp-accent); }
 .checkin-card__pill--quiet { color: var(--erp-ink-50); }
 /* CheckinLine — the compact idle states (excused / submitted / not-expected). These class names
@@ -104,7 +118,7 @@
    working day, or you're on approved leave." Read as a typo in the copy; it was a missing
    stylesheet. Flex with a gap is the fix — spacing belongs to layout, not to padding a string. */
 .checkin-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
-.checkin-line__pill { font: 700 11px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--erp-ink-60); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); padding: 3px 9px; white-space: nowrap; }
+.checkin-line__pill { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-60); border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-sm); padding: 3px 9px; white-space: nowrap; }
 .checkin-line__pill--submitted { color: var(--status-ok-fg); border-color: var(--status-ok); }
 .checkin-line__note { font: 400 13px/20px var(--font-body); color: var(--erp-ink-60); }
 .checkin-line__blockers { font: 400 13px/20px var(--font-body); color: var(--status-warning-fg); }

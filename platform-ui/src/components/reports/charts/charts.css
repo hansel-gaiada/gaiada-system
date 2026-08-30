@@ -94,7 +94,7 @@
   padding: 8px 10px; font: 400 11px var(--font-body); color: var(--rc-text-primary);
   pointer-events: none; z-index: 4; white-space: nowrap;
 }
-.rc-tooltip__head { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); margin-bottom: 5px; }
+.rc-tooltip__head { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--rc-text-muted); margin-bottom: 5px; }
 .rc-tooltip__row { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 1px 0; }
 .rc-tooltip__row strong { font-weight: 700; margin-left: 10px; }
 .rc-tooltip__key { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; }
@@ -166,12 +166,12 @@
    label simply wrapping inside it. */
 .rc-kpi__label-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .rc-kpi__label-row .rc-kpi__label { min-width: 0; overflow-wrap: anywhere; }
-.rc-kpi__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--rc-text-muted); }
+.rc-kpi__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--rc-text-muted); }
 .rc-kpi__value { font: 700 28px var(--font-body); color: var(--rc-text-primary); line-height: 1.1; font-variant-numeric: proportional-nums; }
 .rc-kpi__foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 11px var(--font-body); color: var(--rc-text-secondary); }
 .rc-kpi__ratio { color: var(--rc-text-muted); }
 .rc-kpi__badge {
-  font: 700 8px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  font: 700 8px var(--font-body); letter-spacing: 0.01em;
   color: var(--rc-text-secondary); border: 0.5px solid var(--rc-axis); padding: 1px 5px; white-space: nowrap;
 }
 /* The appraisal marker is no longer a badge at all — it is `.rc-kpi__mark` inline in the label,
@@ -225,7 +225,7 @@
 .rc-bar-group__cat-label { font: 400 10px var(--font-body); fill: var(--rc-text-muted); overflow-wrap: anywhere; }
 
 /* ---- donut ---- */
-.rc-donut__center-label { font: 700 10px var(--font-body); fill: var(--rc-text-muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.rc-donut__center-label { font: 700 10px var(--font-body); fill: var(--rc-text-muted); letter-spacing: 0.05em; }
 .rc-donut__center-value { font: 700 20px var(--font-body); fill: var(--rc-text-primary); }
 
 /* ---- calendar heatmap ---- */
@@ -253,7 +253,7 @@
 /* ---- plain ReportTable renderer (ReportTableView) ---- */
 .rc-rtable { display: flex; flex-direction: column; min-width: 0; font: 400 13px var(--font-body); color: var(--rc-text-primary); }
 .rc-rtable__head, .rc-rtable__row { display: grid; grid-template-columns: var(--rc-rtable-cols, 1fr); gap: 8px; padding: 8px 0; }
-.rc-rtable__head { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-text-muted); border-bottom: 0.5px solid var(--rc-axis); }
+.rc-rtable__head { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--rc-text-muted); border-bottom: 0.5px solid var(--rc-axis); }
 .rc-rtable__row { border-bottom: 0.5px solid var(--rc-grid); }
 .rc-rtable__row--total { font-weight: 700; border-bottom: 0; border-top: 0.5px solid var(--rc-axis); }
 .rc-rtable__cell--right { justify-self: end; text-align: right; }
