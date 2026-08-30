@@ -1,5 +1,88 @@
-.erp-app { --rail: 64px; display: grid; grid-template-columns: 248px 1fr; grid-template-rows: 64px 1fr; grid-template-areas: "side top" "side main"; height: 100vh; width: 100%; background: var(--surface-page); font-family: var(--font-body); }
-.erp-side { grid-area: side; background: var(--surface-chrome); border-right: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; min-height: 0; }
+/* =====================================================================
+   GOLD-GLASS - Phase 4: the shell becomes the design (2026-08-30)
+   ---------------------------------------------------------------------
+   Phase 3 shipped the token vocabulary and NOTHING consumed it, so the app
+   looked unchanged after a deploy. This is the file that spends it: the
+   sidebar and top bar stop being flush chrome and become inset floating
+   glass panels over a page-level ambient accent wash, which is the
+   design's whole identity.
+
+   WHY THE GLASS IS PAINTED ON ::before AND NOT ON THE PANEL ITSELF.
+   `backdrop-filter` makes an element a containing block for `position:
+   fixed` DESCENDANTS. `.erp-railmenu` (the collapsed-rail flyout) and
+   `.erp-railtip` are `position: fixed` and render INSIDE `.erp-side` —
+   RailCategory.tsx renders the menu inline, not through a portal. Putting
+   the filter on `.erp-side` would silently re-anchor `left: var(--rail)`
+   to the sidebar instead of the viewport and park every flyout in the
+   wrong place — on the collapsed-rail layout, which is the one least
+   likely to be opened during a quick visual check. An absolutely
+   positioned ::before carries the filter, has no fixed descendants of its
+   own, and leaves the panel an ordinary positioned box.
+
+   Glass is capped at chrome + top-level cards (owner decision 3);
+   tokens.test.ts fails any component CSS outside this file and ui.css
+   that names --blur-glass. The ambient wash is stripped under print by
+   the standing rule in tokens/colors.css. */
+
+/* Gap between the floating panels and the viewport edge. One token so the
+   density modes below can tighten it without hunting four selectors. */
+.erp-app { --shell-gap: 10px; }
+.erp-app[data-density="compact"] { --shell-gap: 6px; }
+
+/* The ambient wash. Fixed to the viewport so it does not scroll with the
+   main column, and pointer-events:none so it can never eat a click. The
+   three stops read --ambient-1/2/3, which the theme sets far stronger in
+   light than in dark: the same mix is nearly invisible on cream. */
+.erp-app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(46vw 40vh at 100% 0%, color-mix(in srgb, var(--accent-fill) var(--ambient-1), transparent), transparent 68%),
+    radial-gradient(52vw 46vh at 0% 100%, color-mix(in srgb, var(--accent-fill) var(--ambient-2), transparent), transparent 68%),
+    radial-gradient(26vw 30vh at 78% 12%, color-mix(in srgb, var(--accent-fill) var(--ambient-3), transparent), transparent 72%);
+}
+/* Every grid child sits above the wash. */
+.erp-side, .erp-top, .erp-main, .erp-special { position: relative; z-index: 1; }
+
+/* The two glass panels. `border: none` replaces the old hairline edges:
+   the material carries the separation now, through --glass-inner's inset
+   highlight, and a border on top of that reads as a double edge. */
+.erp-side, .erp-top {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-lg);
+}
+.erp-side::before, .erp-top::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-lg);
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur-glass)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(var(--glass-saturate));
+  box-shadow: var(--elev-2), var(--glass-inner);
+}
+/* NOT `overflow: hidden` on .erp-side, tempting as it is for clipping the
+   scrolling nav to the rounded corner: .erp-usermenu__pop is position:
+   ABSOLUTE and would be clipped by it, and that popover holds Sign out.
+   (The rail flyouts are position: fixed and would have escaped, since
+   .erp-side is deliberately not a containing block — but the user menu is
+   not.) A few pixels of nav bleeding past a corner is the cheaper defect. */
+
+/* Dividers inside a glass panel take the glass divider, which is tuned to
+   read on a translucent ground rather than an opaque one. */
+.erp-side__head, .erp-side__company, .erp-side__user, .erp-usermenu__trigger {
+  border-color: var(--glass-divider);
+}
+/* Main is transparent so the wash shows behind the content column. */
+.erp-main { background: transparent; }
+
+.erp-app { --rail: 64px; position: relative; display: grid; grid-template-columns: 248px 1fr; grid-template-rows: 66px 1fr; grid-template-areas: "side top" "side main"; gap: var(--shell-gap); padding: var(--shell-gap); height: 100vh; width: 100%; background: var(--surface-page); font-family: var(--font-body); }
+.erp-side { grid-area: side; display: flex; flex-direction: column; min-height: 0; }
 /* Brand + collapse control share the header row. */
 .erp-side__head { position: relative; display: flex; align-items: flex-start; gap: 8px; padding: 20px 22px 15px; border-bottom: 0.5px solid var(--line-soft); }
 .erp-side__brand { flex: 1; min-width: 0; display: block; text-decoration: none; color: inherit; }
@@ -41,8 +124,8 @@
 .erp-usermenu__item + .erp-usermenu__item, .erp-usermenu__pop form { border-top: 0.5px solid var(--erp-hairline-soft); }
 .erp-usermenu__item:hover { background: var(--tint-hover); }
 .erp-usermenu__item--danger { color: var(--erp-accent); }
-.erp-side__avatar { width: 36px; height: 36px; background: var(--erp-accent); color: var(--text-on-accent); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 15px; }
-.erp-top { grid-area: top; background: var(--surface-chrome); border-bottom: 0.5px solid var(--erp-hairline); display: flex; align-items: center; gap: 20px; padding: 0 26px; }
+.erp-side__avatar { width: 36px; height: 36px; border-radius: var(--radius-pill); background: var(--accent-fill); color: var(--ink-on-accent-fill); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 15px; }
+.erp-top { grid-area: top; display: flex; align-items: center; gap: 20px; padding: 0 26px; }
 .erp-top__meta { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .erp-top__divider { width: 0.5px; height: 16px; background: var(--wash-strong); }
 .erp-top__date { font: 400 13px var(--font-body); color: var(--erp-ink-60); white-space: nowrap; }
@@ -52,12 +135,14 @@
 .erp-top__bell { position: relative; display: inline-flex; align-items: center; justify-content: center; color: var(--erp-ink-60); transition: color 0.2s var(--erp-ease); }
 .erp-top__bell:hover { color: var(--text-primary); }
 .erp-top__badge { position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px; padding: 0 4px; background: var(--erp-accent); color: var(--text-on-accent); font: 700 9px var(--font-body); display: inline-flex; align-items: center; justify-content: center; }
-.erp-main { grid-area: main; overflow-y: auto; min-height: 0; background: var(--surface-page); }
+.erp-main { grid-area: main; overflow-y: auto; min-height: 0; }
 .erp-main__inner { padding: 30px 32px 40px; max-width: 1180px; }
 /* ---- Global "+ New" menu ---- */
 .erp-new { position: relative; }
-.erp-new__btn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); background: var(--erp-accent); color: var(--text-on-accent); padding: 7px 12px; font: 600 13px var(--font-body); cursor: pointer; }
-.erp-new__btn:hover { opacity: 0.92; }
+/* Bright gold, and --ink-on-accent-fill rather than --text-on-accent: in LIGHT
+   the latter is cream, which on a #F5D560 fill lands around 1.3:1. */
+.erp-new__btn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--accent-fill); border-radius: var(--radius-md); background: var(--accent-fill); color: var(--ink-on-accent-fill); padding: 7px 12px; font: 600 13px var(--font-body); cursor: pointer; }
+.erp-new__btn:hover { opacity: 0.92; box-shadow: var(--glow); }
 .erp-new__menu { box-shadow: var(--elev-overlay); position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); z-index: 40; display: flex; flex-direction: column; padding: 4px; }
 .erp-new__item { padding: 9px 12px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; }
 .erp-new__item:hover { background: var(--tint-hover); }
@@ -199,7 +284,12 @@ html[data-sidebar="collapsed"] .erp-railmenu .erp-navbtn span { display: inline;
    dropped every label, which left five identically-drawn department icons
    stacked with nothing to tell them apart. Off-canvas keeps the labels. */
 @media (max-width: 760px) {
-  .erp-app { grid-template-columns: 1fr; grid-template-rows: 56px 1fr; grid-template-areas: "top" "main"; }
+  /* The floating inset treatment is desktop-only. Below this the sidebar
+     leaves the grid and becomes a full-height off-canvas drawer, where an
+     inset rounded panel would read as a mistake. */
+  .erp-app { grid-template-columns: 1fr; grid-template-rows: 56px 1fr; grid-template-areas: "top" "main"; gap: 0; padding: 0; }
+  .erp-top, .erp-side,
+  .erp-top::before, .erp-side::before { border-radius: var(--radius-none); }
   .erp-side {
     position: fixed; top: 0; bottom: 0; left: 0; z-index: 100;
     width: min(var(--drawer-width), 86vw);
