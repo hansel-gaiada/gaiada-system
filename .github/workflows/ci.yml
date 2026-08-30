@@ -616,6 +616,38 @@ jobs:
           STORAGE_ENDPOINT: http://127.0.0.1:9000
           MINIO_ROOT_USER: webdesk_minio
           MINIO_ROOT_PASSWORD: changeme_minio_password
+          # ── THE PER-TICKET ENV FRAGMENTATION, paid off here ────────────────────────────────
+          # The suites read SEVEN different names for "the test database URL" — APP_, MIGRATE_,
+          # WSK05_, WSK21_x2, WSK25_x3, WSK33_x2 — each with its OWN hardcoded localhost:555xx
+          # fallback baked into the spec file. Any name this block misses does not fail loudly:
+          # the spec silently falls back to a port nothing listens on, and the failure surfaces as
+          # `AggregateError` / `expected 500 to be 201` with no host or port anywhere in it. That
+          # cost a full debugging pass to trace back to a missing variable.
+          #
+          # They all point at the ONE Postgres this job starts. The tracker already flagged the
+          # naming as needing normalisation (WSK-M0); until that happens, every alias must be
+          # listed here or the job cannot pass.
+          WSK21_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK21_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          WSK25_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK25_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          WSK25_TARGET_APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK25_TARGET_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          WSK33_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK33_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          # Storage credentials the S3 adapter requires by name (MINIO_ROOT_* is the server's view;
+          # STORAGE_* is the client's, and the adapter reads the latter).
+          STORAGE_ACCESS_KEY_ID: webdesk_minio
+          STORAGE_SECRET_ACCESS_KEY: changeme_minio_password
+          MINIO_BUCKET_MEDIA: media
+          MINIO_BUCKET_VIDEO: video
+          MINIO_BUCKET_UPLOADS: uploads
+          MINIO_BUCKET_ARTIFACTS: artifacts
+          # Throwaway secrets. Real values live only on the box; these exist so the suites that
+          # assert on hashing/signing BEHAVIOUR have deterministic inputs.
+          TENANT_WEBHOOK_SECRET_PEPPER: ci-throwaway-webhook-pepper
+          WEBDESK_EVENT_SECRET: ci-throwaway-event-secret
+          WEBDESK_APPROVAL_ASSERTION_KEY: ci-throwaway-ws4-key
 
   # webdesk/payload (Zone B Payload 3 app — WSK-00/02/04/04b/06). Deliberately NOT running the full
   # WSK-00/02 spike-style verification here (dual internal/public listeners, dev-push guard, a
