@@ -11,6 +11,34 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.42.0` - webdev_sites, the site portfolio registry (2026-08-30) - PROTOTYPED
+
+v2.0 §04/§07. The design assumed every client site becomes a Zone B tenant; most never will. The
+requirement is two-sided — **future projects must use the unified backend; past and current ones
+must never be touched**, only tracked, with adoption optional and per site.
+
+`webdev_provisioned_sites` (0090) cannot hold these rows and must not be widened to: its
+`framework CHECK IN ('vite','nextjs')` refuses everything else *by design* (D-P7) and its status
+column models a provisioning lifecycle, not the life of a site. It stays the record of how a site
+was **born**, for the subset we provisioned. This is the record of what **exists**.
+
+**Two rules matter more than the columns.** It lives in Zone A and never in Zone B — a tracked site
+must not require a Zone B tenant row, or the internet-facing backend ends up holding an inventory
+of the entire client estate, including the sites on clients' own infrastructure that we cannot
+defend. And it *references* credentials without storing them: `vault_ref` is a pointer and there is
+deliberately no column a password could occupy.
+
+**Hosting and adoption are independent axes, on purpose.** `/v1` is HTTPS with a scoped key, so a
+site on a client's own cPanel can be `linked` (its forms POST to WebDesk) or fully `adopted` (built
+static uploaded by FTP, content read from `/v1`). What a client-owned host costs us is deploy
+automation, not the platform — one combined column would have quietly ruled that out.
+
+`kind` is nullable rather than defaulting to `unknown`: for a legacy site whose stack is
+unsurveyed, `unknown` is a claim and NULL is an admission.
+
+Lints: names · RLS no unguarded backfills · immutability, all clean. CI green, which for this
+change means the migration applied against a real database in the platform-nest shards.
+
 ### mcp-hub `0.12.0` / platform-nest `0.41.0` - pipeline.artifacts.get, the rail's missing link (2026-08-30) - PROTOTYPED
 
 `code.scaffold` v2's frozen envelope carries `prdArtifact` and `prototypeArtifact` — both
