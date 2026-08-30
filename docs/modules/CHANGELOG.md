@@ -11,6 +11,28 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.61.0` - the site portfolio page (2026-08-30) - PROTOTYPED
+
+The estate inventory in the ERP: every site we build or operate — including the ones hosted
+elsewhere that we only track — grouped by project, with each environment as its own row.
+
+**No degrade banner, deliberately.** `SiteRegistryPanel` renders one because Zone B's control plane
+has no live reads and that data is permanently `stale:true`. This page reads Zone A's own tables, so
+there is nothing to be stale about, and a banner "for consistency" would teach people to ignore it
+on the panel where it means something.
+
+Three things it is careful about, because most rows describe sites we must not touch: a null stack
+renders as an em dash with an explanation rather than "Unknown" — *not surveyed* and *surveyed,
+could not tell* are different claims; **probe consent gets a column, not a footnote**, because a
+site nobody may probe looks identical to a healthy one in any monitoring list; and a project with no
+production row renders as a fact, not an error.
+
+A forbidden read renders `ReadRefusal`, never an empty list — on this page an empty portfolio would
+read as "we operate no sites" when the truth is "you cannot see them".
+
+Verified with `next build`, not `tsc` alone: this repo has a documented case of `tsc` passing while
+the build broke.
+
 ### platform-nest `0.43.1` - webdev_sites.origin accepts 'probe' (2026-08-30) - PROTOTYPED
 
 Found the moment real survey data met the constraint. The registry's `origin` CHECK allowed
