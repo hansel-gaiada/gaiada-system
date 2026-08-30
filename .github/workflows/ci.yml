@@ -681,8 +681,11 @@ jobs:
           MAIL_PROVIDER: smtp
           MAIL_SMTP_HOST: 127.0.0.1
           MAIL_SMTP_PORT: "1025"
-          MAIL_FROM_ADDRESS: ci@example.test
-          MAIL_FROM_NAME: WebDesk CI
+          # MAIL_FROM_ADDRESS / MAIL_FROM_NAME are deliberately NOT set. WSK-11's identity rule is
+          # that `resolveFromIdentity()` takes zero arguments — the sending identity is structural
+          # and must not be overridable from outside. Setting them here made the delivery test fail
+          # with `expected 'WebDesk CI' to be 'Gaiada WebDesk Forms'`, which is that test doing
+          # precisely its job: catching an environment that tried to override the identity.
           MAILPIT_HTTP_URL: http://127.0.0.1:8025
           MAILPIT_CONTAINER_NAME: wsk11-mailpit
           # 64 KB, deliberately well UNDER Fastify's 1 MB default body limit. The oversize-upload
