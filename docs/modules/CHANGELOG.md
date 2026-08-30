@@ -11,6 +11,53 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### webdesk `0.2.0` - Zone B is deployed and running, and main is green again (2026-08-30) - DEV-VERIFIED
+
+Zone B runs on a real Linux host: 7 services in their own compose project, **exactly one published
+port and it is on loopback**, proven against the RESOLVED compose config rather than the overlay.
+Payload's admin is reachable only through an SSH tunnel. Nothing is exposed to the internet — no
+vhost, no TLS — deliberately.
+
+**No longer provisional, because it was re-run on Linux:** migrations 8/8 from scratch plus an
+idempotent re-run · role split confirmed NOSUPERUSER/NOBYPASSRLS · RLS integrity 20/20 tenant-scoped
+tables · **WSK-04 cross-path suite ALL PATHS OK** · **WSK-02 lockdown 11/11** · **WSK-15 codegen
+double-run determinism 3/3 including its negative control**.
+
+**Four defects that only a real boot could find**, all fixed here: the base compose could never boot
+`api` in production (its block forwarded one storage var; the code requires four and reads eight
+more) · `payload/Dockerfile` claimed it was RED and unbuildable, which had stopped being true ·
+Payload's tables could not be created in a production-shaped environment at all, now closed with
+Payload's own migration mechanism plus `init:prod` = migrate → reapply-tenant-rls → check-rls-
+integrity, three links because Payload migrations do not re-arm RLS · a multi-line PEM in `.env`
+silently broke every ad-hoc verification container while the stack itself worked, since
+`docker run --env-file` is a flat parser and Compose's is not.
+
+**The estate internal CA existed nowhere** — gateway and hub both had TLS off and no `gaiada_*`
+volume held cert material — while three designs were written against it. It exists now
+(`CN=gaiada-internal-ca`, ECDSA P-256, key never off-host), and the A→B control channel is proven to
+discriminate three ways: no cert → 401 at Layer 1 · right CN signed by a foreign CA → 401 at Layer 1
+· the issued cert → 401 *"Layer 2: no Bearer token"*, i.e. it passed mTLS. A channel answering all
+three identically would have proven nothing, which is exactly what the placeholder did.
+
+**CI is green for the first time in more than a dozen commits.** `webdesk-api` had never once passed:
+MinIO was declared as a `services:` container, which cannot take the `server /data` argument it
+needs, so the job died before a test ran. Beyond that, the suites read 58 environment variables
+against nine supplied, with **seven different names for "the test database URL"**, each carrying its
+own hardcoded `localhost:555xx` fallback — so a missing name produced `AggregateError` and
+`expected 500 to be 201` with no host or port named anywhere. 56 → 8 → 2 → 0.
+
+Also: the `overrideAccess` lint WSK-D25 asked for and nobody built (Payload runs its access function
+only when `overrideAccess` is falsy, and the Local API defaults it true — so an un-opted-in call
+runs on RLS alone) · Cloudflare Tunnel as the exposure path, gated behind its own profile so
+exposure is never a side effect of a restart · `aire` decommissioned from the box after verifying it
+serves publicly from its own VPS, backed up first · 87 GB reclaimed.
+
+**Design v2.0 supersedes v1.1 and the provision seam design.** Zone B moved to the ERP-operational
+tier under a two-tier estate rule, Payload was recorded as editorial-only at last, the portfolio
+adoption ladder was added so live client sites are tracked and never touched, and §03's containment
+claim was rewritten rather than repeated — v1.1 said a Zone B compromise cannot reach Zone A, and on
+a co-tenanted box that is no longer true.
+
 ### platform-ui `0.60.0` - the AP credit-note and write-off surface (2026-08-27) - PROTOTYPED
 
 The payables half of `finance 0.16.0`: `IssueVendorCreditForm`, `VendorCreditsTable` with a per-row
