@@ -11,6 +11,34 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### mcp-hub `0.12.0` / platform-nest `0.41.0` - pipeline.artifacts.get, the rail's missing link (2026-08-30) - PROTOTYPED
+
+`code.scaffold` v2's frozen envelope carries `prdArtifact` and `prototypeArtifact` — both
+`pipeline_stages.artifact_ref` — and **nothing could dereference either**. The consumer adapter
+(`ai-agents/src/code-scaffold/artifact-fetcher.ts`) was written against the tool name
+`pipeline.artifacts.get`, and its own header records that no hub contract answered it. That is the
+reason PRD-driven scaffolding could not run live: the scaffolder was handed references into a
+system with no read side.
+
+**The ref must be stage-referenced, and that is the security property.** Resolving a
+caller-supplied id straight to file bytes would make this a generic file reader wearing a pipeline
+name — any automation principal holding `pipeline_run:read` could then read any file in the tenant.
+The platform side first requires the ref to be referenced by a real stage in that tenant and only
+then resolves it. The stage lookup is the authorization boundary, not a convenience.
+
+Reuses `pipeline_run:read` rather than minting a Cerbos kind: a new kind costs six coupled
+artifacts (catalog, groups, seeding migration, both bundle resolvers, the regenerated bundle), and
+this read genuinely is "read a pipeline run's own output", which the existing kind already means.
+
+Returns `{resolvable:false, reason}` instead of failing when a ref is a URL, a repo or an external
+link rather than stored text — a scaffolder must tell "cannot fetch this" apart from "this was
+empty". Non-UUID refs are rejected before the query, so a legitimate non-file ref cannot surface as
+a Postgres `invalid input syntax for type uuid`.
+
+Added to `wf:delivery`'s allowlist, which is the identity the scaffolder runs under.
+
+Verified: platform-nest `tsc` clean · mcp-hub `tsc` clean · mcp-hub 380/380 · CI all green.
+
 ### webdesk `0.2.0` - Zone B is deployed and running, and main is green again (2026-08-30) - DEV-VERIFIED
 
 Zone B runs on a real Linux host: 7 services in their own compose project, **exactly one published
