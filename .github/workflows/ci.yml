@@ -584,6 +584,29 @@ jobs:
           for i in $(seq 1 30); do
             bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000' 2>/dev/null && break || sleep 1
           done
+      - name: Start ClamAV and Mailpit (the last two fixtures webdesk-api's suites need)
+        # Both are STEPS rather than `services:` for the same reason MinIO and Postgres above are:
+        # arguments and container NAMES are expressible here and not there. `mail-retry-backoff`
+        # looks for a container literally named `wsk11-mailpit` (MAILPIT_CONTAINER_NAME), which a
+        # service container cannot provide.
+        #
+        # Without these, 8 tests fail in a way that reads like application bugs rather than a
+        # missing fixture: ClamAV-dependent uploads return 503 where the suite asserts 403/201,
+        # and the Mailpit delivery test reports a bare "fetch failed".
+        run: |
+          docker run -d --name wsk11-mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit:latest
+          docker run -d --name webdesk-clamav -p 3310:3310 \
+            -e CLAMAV_NO_FRESHCLAMD=true clamav/clamav:stable
+          # Mailpit is up in about a second; ClamAV loads its signature database first and needs
+          # far longer, so it gets its own generous budget. Both probes use bash's /dev/tcp for the
+          # same reason the MinIO one does: neither image ships curl.
+          for i in $(seq 1 30); do
+            bash -c 'exec 3<>/dev/tcp/127.0.0.1/8025' 2>/dev/null && break || sleep 1
+          done
+          for i in $(seq 1 90); do
+            bash -c 'exec 3<>/dev/tcp/127.0.0.1/3310' 2>/dev/null && break || sleep 2
+          done
+          docker ps --format '  {{.Names}} {{.Status}}'
       - name: Create the 4 MinIO buckets the storage adapter expects (media/video/uploads/artifacts)
         run: |
           docker run --rm --network host --entrypoint sh minio/mc:latest -c "
@@ -651,6 +674,23 @@ jobs:
           TENANT_WEBHOOK_SECRET_PEPPER: ci-throwaway-webhook-pepper
           WEBDESK_EVENT_SECRET: ci-throwaway-event-secret
           WEBDESK_APPROVAL_ASSERTION_KEY: ci-throwaway-ws4-key
+          # ClamAV + Mailpit, matching the containers started above.
+          CLAMAV_HOST: 127.0.0.1
+          CLAMAV_PORT: "3310"
+          MAIL_ENABLED: "true"
+          MAIL_PROVIDER: smtp
+          MAIL_SMTP_HOST: 127.0.0.1
+          MAIL_SMTP_PORT: "1025"
+          MAIL_FROM_ADDRESS: ci@example.test
+          MAIL_FROM_NAME: WebDesk CI
+          MAILPIT_HTTP_URL: http://127.0.0.1:8025
+          MAILPIT_CONTAINER_NAME: wsk11-mailpit
+          # 64 KB, deliberately well UNDER Fastify's 1 MB default body limit. The oversize-upload
+          # test builds a body just over this cap and asserts the application's own 400. Left
+          # unset, the cap defaults to 8 MB, Fastify rejects the body itself with 413 before the
+          # handler runs, and the app's error envelope never gets the chance to fire — the test
+          # then fails on 413-vs-400 and looks like an assertion bug rather than a missing value.
+          WEBDESK_MEDIA_MAX_UPLOAD_BYTES: "65536"
 
   # webdesk/payload (Zone B Payload 3 app — WSK-00/02/04/04b/06). Deliberately NOT running the full
   # WSK-00/02 spike-style verification here (dual internal/public listeners, dev-push guard, a
