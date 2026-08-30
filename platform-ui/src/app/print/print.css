@@ -21,8 +21,18 @@
      a plain `.rc-viz` print rule — so if a site-wide dark-theme toggle ever lands (tracked in the
      UI-polish work split) and somehow stamps `data-theme="dark"` on `:root` while this route is
      being rendered, the print branch would LOSE that specificity fight without `!important` here.
-     Today nothing in the codebase sets `data-theme` at all (confirmed absent — see charts.css's own
-     comment), so this is insurance against a future regression, not a fix to a bug that exists yet.
+
+     UPDATED 2026-08-30 — this paragraph used to end "today nothing in the codebase sets
+     `data-theme` at all (confirmed absent)", i.e. insurance against a future regression. That is
+     no longer true and has not been for some time: `components/shell/ThemeToggle.tsx` sets it on
+     `document.documentElement`, and `app/layout.tsx` stamps it server-side from the `gaiada_prefs`
+     cookie on EVERY route, this one included. The `!important` here is now live protection, not
+     insurance. The route still renders light in practice because the `report-renderer` sidecar
+     sends no session cookie (so prefs fall back to `theme: "auto"`, which stamps no attribute) —
+     but that is a property of the caller, not of this file. The two belts that actually hold it:
+     the sidecar's `emulateMedia({ media: "print", colorScheme: "light" })`, and the full forced-
+     light palette in `styles/tokens/colors.css`'s `@media print` block, which now names the
+     `[data-theme]` selectors so it can win the same specificity fight described above.
    - `.tr20-mark` — the §6.3 / §15 provenance banner (`AD HOC · UNSEALED · as of <ts>` /
      `SEALED · rev N · <hash prefix>`). TR-19's sidecar (already shipped, `report-renderer/src/
      server.ts`) calls `page.pdf()` with a BLANK `headerTemplate` and a generic, document-agnostic

@@ -1,0 +1,314 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/core/**",
+              "components/forms/**",
+              "components/navigation/**",
+              "ui_kits/maison/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:Cormorant Garamond|Inter))/i]",
+        "message": "Font not provided by the design system. Available: Cormorant Garamond, Inter."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Badge'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|variant|className|key|ref|className|style|children)$/]",
+        "message": "<Badge> doesn't accept that prop. Declared props: children, variant, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Badge'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:outline|accent|solid)$/]",
+        "message": "<Badge> variant must be one of 'outline' | 'accent' | 'solid'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|variant|size|accent|iconLeft|iconRight|disabled|as|className|key|ref|className|style|children)$/]",
+        "message": "<Button> doesn't accept that prop. Declared props: children, variant, size, accent, iconLeft, iconRight, disabled, as, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:ghost|solid)$/]",
+        "message": "<Button> variant must be one of 'ghost' | 'solid'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='size'] > Literal[value!=/^(?:md|sm)$/]",
+        "message": "<Button> size must be one of 'md' | 'sm'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='accent'] > Literal[value!=/^(?:primary|secondary)$/]",
+        "message": "<Button> accent must be one of 'primary' | 'secondary'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='as'] > Literal[value!=/^(?:button|a)$/]",
+        "message": "<Button> as must be one of 'button' | 'a'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Card'] > JSXAttribute > JSXIdentifier[name!=/^(?:title|children|action|onAction|actionNode|surface|className|key|ref|className|style|children)$/]",
+        "message": "<Card> doesn't accept that prop. Declared props: title, children, action, onAction, actionNode, surface, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Card'] > JSXAttribute[name.name='surface'] > Literal[value!=/^(?:light|accent|secondary|dark)$/]",
+        "message": "<Card> surface must be one of 'light' | 'accent' | 'secondary' | 'dark'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='FloatingInput'] > JSXAttribute > JSXIdentifier[name!=/^(?:label|type|value|defaultValue|onChange|error|id|className|key|ref|className|style|children)$/]",
+        "message": "<FloatingInput> doesn't accept that prop. Declared props: label, type, value, defaultValue, onChange, error, id, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Footer'] > JSXAttribute > JSXIdentifier[name!=/^(?:brand|logoSrc|address|social|columns|copyright|className|key|ref|className|style|children)$/]",
+        "message": "<Footer> doesn't accept that prop. Declared props: brand, logoSrc, address, social, columns, copyright, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Header'] > JSXAttribute > JSXIdentifier[name!=/^(?:brand|logoSrc|links|actions|sticky|overlay|className|key|ref|className|style|children)$/]",
+        "message": "<Header> doesn't accept that prop. Declared props: brand, logoSrc, links, actions, sticky, overlay, className."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Separator'] > JSXAttribute > JSXIdentifier[name!=/^(?:orientation|className|style|key|ref|className|style|children)$/]",
+        "message": "<Separator> doesn't accept that prop. Declared props: orientation, className, style."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Separator'] > JSXAttribute[name.name='orientation'] > Literal[value!=/^(?:horizontal|vertical)$/]",
+        "message": "<Separator> orientation must be one of 'horizontal' | 'vertical'."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "Badge": {
+        "replaces": []
+      },
+      "Button": {
+        "replaces": []
+      },
+      "Card": {
+        "replaces": []
+      },
+      "FloatingInput": {
+        "replaces": []
+      },
+      "Footer": {
+        "replaces": []
+      },
+      "Header": {
+        "replaces": []
+      },
+      "Separator": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--accent",
+      "--accent-secondary",
+      "--bar-weight",
+      "--blur-glass",
+      "--blur-overlay",
+      "--body-lg-line",
+      "--body-lg-size",
+      "--body-md-line",
+      "--body-md-size",
+      "--body-sm-line",
+      "--body-sm-size",
+      "--brand-color-bg",
+      "--brand-color-primary",
+      "--brand-color-secondary",
+      "--brand-color-text-dark",
+      "--brand-logo-source",
+      "--brand-logo-text",
+      "--button-height-md",
+      "--button-height-sm",
+      "--canvas-width",
+      "--caption-line",
+      "--caption-size",
+      "--card-gap",
+      "--card-grid-max",
+      "--card-padding",
+      "--cta-width",
+      "--drawer-width",
+      "--drawer-width-sm",
+      "--dur-base",
+      "--dur-quick",
+      "--dur-slow",
+      "--ease-luxury",
+      "--font-body",
+      "--font-display",
+      "--h1-line",
+      "--h1-size",
+      "--h2-line",
+      "--h2-size",
+      "--h3-line",
+      "--h3-size",
+      "--hairline",
+      "--hairline-strong",
+      "--hairline-weight",
+      "--header-height",
+      "--icon-size",
+      "--icon-touch",
+      "--input-underline",
+      "--layout-gutter",
+      "--logo-height",
+      "--measure-form",
+      "--measure-hero",
+      "--measure-note",
+      "--nav-item-gap",
+      "--opacity-fade",
+      "--opacity-hairline",
+      "--opacity-muted",
+      "--opacity-soft",
+      "--opacity-strong",
+      "--overlay-scrim",
+      "--primitive-bronze",
+      "--primitive-champagne",
+      "--primitive-line",
+      "--primitive-off-black",
+      "--primitive-off-white",
+      "--primitive-paper",
+      "--section-max-width",
+      "--section-pad-block",
+      "--section-pad-inline",
+      "--shadow-header",
+      "--space-10",
+      "--space-100",
+      "--space-15",
+      "--space-20",
+      "--space-30",
+      "--space-40",
+      "--space-50",
+      "--space-60",
+      "--surface-card",
+      "--surface-page",
+      "--text-on-accent",
+      "--text-primary",
+      "--track-normal",
+      "--track-wide",
+      "--weight-bold",
+      "--weight-regular"
+    ],
+    "tokenKinds": {
+      "--primitive-off-white": "color",
+      "--primitive-off-black": "color",
+      "--primitive-bronze": "color",
+      "--primitive-champagne": "color",
+      "--primitive-paper": "color",
+      "--primitive-line": "color",
+      "--brand-color-primary": "color",
+      "--brand-color-secondary": "color",
+      "--brand-color-bg": "color",
+      "--brand-color-text-dark": "font",
+      "--brand-logo-text": "other",
+      "--brand-logo-source": "other",
+      "--surface-page": "color",
+      "--surface-card": "color",
+      "--text-primary": "font",
+      "--text-on-accent": "font",
+      "--accent": "color",
+      "--accent-secondary": "color",
+      "--hairline": "color",
+      "--opacity-muted": "other",
+      "--opacity-fade": "other",
+      "--opacity-hairline": "other",
+      "--font-display": "font",
+      "--font-body": "font",
+      "--weight-regular": "font",
+      "--weight-bold": "font",
+      "--track-normal": "spacing",
+      "--track-wide": "spacing",
+      "--h1-size": "spacing",
+      "--h1-line": "spacing",
+      "--h2-size": "spacing",
+      "--h2-line": "spacing",
+      "--h3-size": "spacing",
+      "--h3-line": "spacing",
+      "--body-lg-size": "spacing",
+      "--body-lg-line": "spacing",
+      "--body-md-size": "spacing",
+      "--body-md-line": "spacing",
+      "--body-sm-size": "spacing",
+      "--body-sm-line": "spacing",
+      "--caption-size": "spacing",
+      "--caption-line": "spacing",
+      "--space-10": "spacing",
+      "--space-15": "spacing",
+      "--space-20": "spacing",
+      "--space-30": "spacing",
+      "--space-40": "spacing",
+      "--space-50": "spacing",
+      "--space-60": "spacing",
+      "--space-100": "spacing",
+      "--canvas-width": "spacing",
+      "--section-max-width": "spacing",
+      "--section-pad-inline": "spacing",
+      "--section-pad-block": "spacing",
+      "--card-grid-max": "spacing",
+      "--layout-gutter": "color",
+      "--logo-height": "spacing",
+      "--header-height": "spacing",
+      "--button-height-md": "spacing",
+      "--button-height-sm": "spacing",
+      "--nav-item-gap": "spacing",
+      "--card-padding": "spacing",
+      "--card-gap": "spacing",
+      "--icon-size": "spacing",
+      "--hairline-weight": "font",
+      "--input-underline": "spacing",
+      "--ease-luxury": "other",
+      "--dur-quick": "other",
+      "--dur-base": "other",
+      "--dur-slow": "other",
+      "--shadow-header": "shadow",
+      "--blur-glass": "spacing",
+      "--blur-overlay": "spacing",
+      "--hairline-strong": "spacing",
+      "--overlay-scrim": "color",
+      "--drawer-width": "spacing",
+      "--drawer-width-sm": "spacing",
+      "--cta-width": "spacing",
+      "--icon-touch": "spacing",
+      "--bar-weight": "font",
+      "--measure-hero": "spacing",
+      "--measure-note": "spacing",
+      "--measure-form": "spacing",
+      "--opacity-soft": "other",
+      "--opacity-strong": "other"
+    },
+    "fontFamilies": [
+      "Cormorant Garamond",
+      "Inter"
+    ]
+  }
+}

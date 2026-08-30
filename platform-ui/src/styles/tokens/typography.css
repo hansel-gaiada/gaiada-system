@@ -1,6 +1,7 @@
 /* =====================================================================
    Dark-First Design System — Typography Scale
-   Display family : Cormorant Garamond (H1, H2, print/login/empty-state only)
+   Display family : --font-display (gold-glass: Urbanist once its files land;
+                    Inter as the documented interim — see tokens/fonts.css)
    Utility family : Inter (body, eyebrows, labels, UI, and now H3/card titles)
    Letter-spacing : Normal = 0em · Wide = 0.30em (editorial tracking)
 
@@ -52,9 +53,9 @@
 
   /* ---- Scale matrix (size / line-height) — dense dashboard, not
      editorial marketing. See spec §8.2 for the full before/after table. */
-  --h1-size: 28px;  --h1-line: 36px;   /* Page title (Cormorant)         */
-  --h2-size: 22px;  --h2-line: 30px;   /* Section title (Cormorant)      */
-  --h3-size: 16px;  --h3-line: 22px;   /* Card title (Inter Semibold — was 24px Cormorant) */
+  --h1-size: 32px;  --h1-line: 34px;   /* Page title — the design draws 32/1.04 */
+  --h2-size: 20px;  --h2-line: 28px;   /* Section/card title — the design draws 20 */
+  --h3-size: 16px;  --h3-line: 22px;   /* Sub-card title (body face, semibold) */
 
   --body-lg-size:   16px;  --body-lg-line:   26px;  /* prose / long-form help text */
   --body-md-size:   14px;  --body-md-line:   22px;  /* default UI/table text */

@@ -18,14 +18,22 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" data-theme={theme === "auto" ? undefined : theme} data-sidebar={sidebar === "collapsed" ? "collapsed" : undefined}>
       <body>
-        {/* Both faces are needed for first paint (display for the H1, body for
-            everything else), so preload them instead of letting the browser
-            discover them through the stylesheet. React hoists these into
-            <head> — declaring a literal <head> here would displace the script
-            tags Next injects. Fonts always fetch in CORS mode, hence
-            crossOrigin even though these are same-origin. */}
+        {/* Preloaded rather than discovered through the stylesheet, so the real
+            face lands before first paint. React hoists these into <head> —
+            declaring a literal <head> here would displace the script tags Next
+            injects. Fonts always fetch in CORS mode, hence crossOrigin even
+            though these are same-origin.
+
+            Gold-glass (2026-08-30): the Cormorant Garamond preload is gone with
+            the serif itself (owner decision 1). Inter is now the only face the
+            app actually uses — --font-display resolves to it as a documented
+            interim until Urbanist's woff2 files are committed; see the blocked
+            note in styles/tokens/fonts.css. Add the Urbanist preload back HERE
+            in the same change that adds those files, or the display face will
+            arrive a paint late on every route. The orphaned
+            /public/fonts/CormorantGaramond-*.woff2 are no longer referenced by
+            anything and can be deleted. */}
         <link rel="preload" href="/fonts/Inter-Variable-latin.woff2" as="font" type="font/woff2" crossOrigin="" />
-        <link rel="preload" href="/fonts/CormorantGaramond-Variable-latin.woff2" as="font" type="font/woff2" crossOrigin="" />
         {children}
       </body>
     </html>
