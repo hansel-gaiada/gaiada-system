@@ -49,8 +49,17 @@ scopes to `:root`, the login to `.fd`.)
 
 Plan: https://claude.ai/code/artifact/51d0879e-04ed-4592-bfa7-c1766f936e10
 
-Phases 1 (vendor), 2 (print path) and 3 (token layer) are implemented but NOT yet dev-verified —
-no PDF has been rendered and `next build` has not run since the change. Urbanist is BLOCKED —
-its woff2 files are not in the repo, so `--font-display` sits on Inter as an interim.
+Phases 1 (vendor), 2 (print path) and 3 (token layer) are implemented and CI-GREEN, but NOT yet
+DEV-VERIFIED. CI run 33296271430 on `office-floor-2026-08-26`: `next build` compiled and generated
+117/117 static pages, the full vitest suite ran 183/183 files (not a truncated fast-gate run), and
+`tokens.test.ts` passed all 30 tests including the four new gold-glass guards. What is still
+unobserved is the thing the vocabulary actually requires — nobody has DRIVEN the themed UI or
+rendered a PDF and looked at it. Do that before calling this DEV-VERIFIED.
+
+Note CI does NOT run on this branch automatically (`ci.yml` triggers on `main` and PRs only); the
+run above was a manual `workflow_dispatch`.
+
+Urbanist is BLOCKED — its woff2 files are not in the repo, so `--font-display` sits on Inter as an
+interim and every heading renders in the body face.
 Phase 4 is the shell chrome.
 Status: **PLANNED** for everything after that — no component CSS has been touched.
