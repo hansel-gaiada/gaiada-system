@@ -112,7 +112,9 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
   it("wf:webdesk-zoneb-intake resolves to a real, non-anonymous principal (was ANONYMOUS before this seed row existed)", async () => {
     const anonymous = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403" },
+      // isInternal so the lineage-4/4 `clientId` check — a 400 thrown before `authorize` — cannot
+      // pre-empt the authz denial this test is actually asserting.
+      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403", isInternal: true },
     });
     expect(anonymous.statusCode).toBe(403); // the OLD behaviour for an unseeded/unknown workflow id
 

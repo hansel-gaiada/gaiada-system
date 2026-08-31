@@ -11,6 +11,8 @@ function row(over: Partial<SiteConsoleRow> = {}): SiteConsoleRow {
     slug: "acme-site", framework: "vite", repoUrl: null, stagingUrl: "https://acme-site.gaiada.online",
     status: "live", failureReason: null, requestedBy: null, approvalId: null, lastReconciledAt: null,
     createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z",
+    // Lineage (platform-nest 0.45.0): this fixture is a row that pre-dates the columns.
+    clientId: null, projectId: null,
     lastKnownDeployment: null, lastKnownPromotion: null, lastKnownRollback: null,
     ...over,
   };
