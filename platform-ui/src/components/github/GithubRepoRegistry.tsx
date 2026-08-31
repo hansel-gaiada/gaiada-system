@@ -33,7 +33,7 @@ import "./github.css";
 //    components/webdesk/DegradeBanner.tsx's own reasoning: a state that is normal-and-common must be
 //    visible every time, or its absence gets learned as "this is current" everywhere else.
 export function GithubRepoRegistry({
-  linked, unlinked, archivedTotal, includeArchived,
+  linked, unlinked, archivedTotal, includeArchived, basePath,
 }: {
   linked: GithubRepoListResponse;
   unlinked: GithubRepoListResponse;
@@ -41,6 +41,14 @@ export function GithubRepoRegistry({
    *  lightweight read itself failed (non-fatal; the toggle just loses its number, not its function). */
   archivedTotal: number | null;
   includeArchived: boolean;
+  /** The page this registry is mounted on, for the archived toggle's own href.
+   *
+   *  REQUIRED, and a prop rather than a hardcoded path because it already broke once: the toggle
+   *  read `/systems/github` literally, so when the registry moved onto the Web Dev Repositories tab
+   *  (2026-08-31, owner decision) clicking "Show archived" would have navigated the operator OFF the
+   *  page they were reading and back to a route that no longer hosts it. A component that renders
+   *  anywhere must not name one route. */
+  basePath: string;
 }) {
   // Frozen once per mount rather than re-read on every render — a freshness badge that silently
   // ticks from "Synced" to "Stale" while an operator is mid-read on an open tab is a worse surprise
@@ -119,7 +127,7 @@ export function GithubRepoRegistry({
               (components/systems/systems.css's `.sys-filter`/`.sys-filter--active`) — no
               `aria-pressed`, which is only valid ARIA on a button/toggle role, not a link. */}
           <Link
-            href={includeArchived ? "/systems/github" : "/systems/github?archived=1"}
+            href={includeArchived ? basePath : `${basePath}?archived=1`}
             className={`sys-filter${includeArchived ? " sys-filter--active" : ""}`}
           >
             {includeArchived

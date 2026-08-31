@@ -15,9 +15,13 @@ import { SAMPLE_REPO_ROWS } from "@/lib/repoInventory.sample";
 import { RepoInventory, type RepoInventoryState } from "@/components/repositories/RepoInventory";
 import { Card } from "@/components/ui";
 import { ReadRefusal } from "@/components/systems/ReadRefusal";
+import { EmptyNote } from "@/components/systems/EmptyNote";
+import { BackendPending } from "@/components/BackendPending";
+import { listGithubRepos, type ListGithubReposResult } from "@/lib/githubRepos-data";
+import { GithubRepoRegistry } from "@/components/github/GithubRepoRegistry";
 
 type Params = Promise<{ deptId: string }>;
-type Search = Promise<{ preview?: string | string[] }>;
+type Search = Promise<{ preview?: string | string[]; archived?: string }>;
 
 // Repositories — the department's code inventory: every repository the delivery pipeline has
 // provisioned for this department's projects (`webdev_provisioned_sites`, read tenant-wide, then
@@ -32,7 +36,7 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   const { deptId } = await params;
-  const { preview } = await searchParams;
+  const { preview, archived } = await searchParams;
   if (!tenant) notFound();
 
   const dept = await getDepartment(userId, tenant, deptId);
@@ -106,15 +110,91 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
     : undefined;
 
   return (
-    <Card title="Repositories">
-      <RepoInventory
-        state={state}
-        github={github}
-        mayReconcile={mayProvision}
-        actions={{ reconcile: reconcileSiteAction }}
-        pipelineHref="/pipeline"
-        previewHref={`${basePath}?preview=sample`}
-        create={create}
+    <>
+      <Card title="Provisioned by the pipeline">
+        <RepoInventory
+          state={state}
+          github={github}
+          mayReconcile={mayProvision}
+          actions={{ reconcile: reconcileSiteAction }}
+          pipelineHref="/pipeline"
+          previewHref={`${basePath}?preview=sample`}
+          create={create}
+        />
+      </Card>
+      <OrgRegistry userId={userId} tenant={tenant} includeArchived={archived === "1"} basePath={basePath} />
+    </>
+  );
+}
+
+// ── The org-wide GitHub registry (blueprint §5.4), MOVED HERE from /systems/github 2026-08-31 ──────
+// Owner decision. Web Dev already owns Repositories / Sites / Portfolio, so a second "Sites & Repos"
+// under Systems was a trap: someone looking for repositories opens the department's Repositories tab,
+// finds only the pipeline-provisioned list, and concludes the registry is empty. That happened on the
+// very first real look at it.
+//
+// The two sections are DIFFERENT DATASETS and are labelled rather than merged. Above:
+// `webdev_provisioned_sites` — what the delivery pipeline built for THIS department, with client and
+// project lineage and a provision action. Below: `github_repos` — every repo GitHub reports for the
+// org, the superset, including repos no pipeline created. This file's original comment said that
+// second view "needs the GitHub App on the org (WD-21/22, owner action)". That is now done, and this
+// is it.
+function refusalOrPending(result: Extract<ListGithubReposResult, { ok: false }>) {
+  if (result.reason === "refused") {
+    return (
+      <ReadRefusal
+        subject="the org-wide GitHub registry"
+        kind="forbidden"
+        detail="Your account is not authorized to read the repository registry. The github_repo policy is live, so this is a real authorization decision, not a pending feature and not an outage."
+      />
+    );
+  }
+  return (
+    <BackendPending
+      what="The org-wide GitHub registry isn't reachable right now."
+      contract="GET /api/:t/github/repos (docs/FRONTEND-BFF-CONTRACT.md §25)"
+    />
+  );
+}
+
+async function OrgRegistry({
+  userId,
+  tenant,
+  includeArchived,
+  basePath,
+}: {
+  userId: string;
+  tenant: string;
+  includeArchived: boolean;
+  basePath: string;
+}) {
+  // `archived: undefined` (param omitted) means "both states" per §25 — there is no third value.
+  const archivedFilter = includeArchived ? undefined : false;
+  const [linkedResult, unlinkedResult, archivedCountResult] = await Promise.all([
+    listGithubRepos(userId, tenant, { linked: true, archived: archivedFilter, limit: 200 }),
+    listGithubRepos(userId, tenant, { linked: false, archived: archivedFilter, limit: 200 }),
+    listGithubRepos(userId, tenant, { archived: true, limit: 1 }),
+  ]);
+
+  if (!linkedResult.ok) return <Card title="Everything in the GitHub org">{refusalOrPending(linkedResult)}</Card>;
+  if (!unlinkedResult.ok) return <Card title="Everything in the GitHub org">{refusalOrPending(unlinkedResult)}</Card>;
+
+  if (linkedResult.data.total === 0 && unlinkedResult.data.total === 0) {
+    return (
+      <Card title="Everything in the GitHub org">
+        <EmptyNote>No repositories on file yet. The initial org crawl (GH-06) seeds this table.</EmptyNote>
+      </Card>
+    );
+  }
+
+  return (
+    <Card title="Everything in the GitHub org">
+      <GithubRepoRegistry
+        linked={linkedResult.data}
+        unlinked={unlinkedResult.data}
+        archivedTotal={archivedCountResult.ok ? archivedCountResult.data.total : null}
+        includeArchived={includeArchived}
+        basePath={basePath}
       />
     </Card>
   );
