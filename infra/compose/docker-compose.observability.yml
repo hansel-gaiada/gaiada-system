@@ -28,9 +28,22 @@
 # -f docker-compose.observability.yml`) already points at the corrected file once this ships.
 name: gaiada
 
+# OBS-05 (2026-08-31): shared log cap. Applied by merge key to the containers that were observed
+# to produce unbounded json-file logs on gda-aicenter — the otel-collector's own log had reached
+# 657 MB and cadvisor's 222 MB, neither of which anything reads. Docker's default is no limit at
+# all, so a cap has to be stated somewhere; stating it here rather than in /etc/docker/daemon.json
+# keeps it in version control and avoids needing a daemon restart to take effect (a recreate is
+# enough), which on this box is a real consideration — see the Postgres/docker0 boot race.
+x-log-cap: &log-cap
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # --- Pipeline: OTLP ingest → fan out to Prometheus/Tempo/Loki ---
   otel-collector:
+    logging: *log-cap
     # MON-09q: runs as ROOT, and this is a considered tradeoff rather than laziness.
     #
     # The filelog receiver tails /var/lib/docker/containers/*/*-json.log. That directory is
@@ -149,6 +162,7 @@ services:
       - /:/host:ro,rslave
 
   cadvisor:
+    logging: *log-cap
     # MON-09n: v0.52.1 was TRIED and reverted. It produced the same zero per-container metrics
     # AND resurrected the `Failed to create existing container` spam that `cgroup: host` had
     # silenced on v0.49.1 -- strictly worse, so the version gap was not the cause after all.

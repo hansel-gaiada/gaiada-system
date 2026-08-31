@@ -319,6 +319,22 @@ services:
       driver: json-file
       options:
         labels: "com.docker.compose.service"
+        # OBS-05 (2026-08-31): CAP THE FILE. Cerbos decision auditing (cerbos.yaml
+        # `decisionLogsEnabled: true`) writes one record per authorization call, and each record is
+        # ~105 KB because it embeds the principal's whole permission-mirror catalog. On 2026-08-31
+        # this container's json log had reached 5.3 GB — 85% of everything under
+        # /var/lib/docker/containers — from a few hours of ordinary ERP use.
+        #
+        # `--log-level=warn` on the command above does NOT bound this: the audit decision log is a
+        # SEPARATE channel from the server log and is unaffected by the level. Nothing else bounded
+        # it either — no service in this estate had a max-size and there is no /etc/docker/daemon.json,
+        # so every container log here was unbounded.
+        #
+        # Losing nothing: the trail's durable home is Loki, which the otel-collector's filelog
+        # receiver ships it to. This file is only Docker's local buffer, and filelog follows
+        # json-file rotation natively.
+        max-size: "100m"
+        max-file: "3"
     volumes:
       - ../../platform-nest/cerbos:/config:ro
       - ../../platform-nest/cerbos/policies:/policies:ro
