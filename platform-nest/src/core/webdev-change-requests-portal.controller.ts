@@ -31,6 +31,18 @@ import type { PoolClient } from "pg";
 const KINDS = new Set(["content", "design", "feature", "bug"]);
 const MAX_TITLE = 300;
 const MAX_BODY = 10_000;
+// Bug-detail caps. These four are REPORTER-SUPPLIED — they are the things only the person who hit
+// the defect knows. `severity` is deliberately NOT among them: it is a triage output, set by staff
+// (migration 202608271000 §3). A portal caller naming their own severity is exactly the failure that
+// constraint exists to prevent.
+//
+// Not gated on `kind === 'bug'`. A design request can legitimately carry an affected URL, and
+// refusing a field the caller took the trouble to fill in buys nothing — the columns are nullable
+// and non-bug rows simply leave them NULL.
+const MAX_REPRO = 5_000;
+const MAX_ENVIRONMENT = 200;
+const MAX_SEEN_ON_VERSION = 100;
+const MAX_AFFECTED_URL = 2_000;
 
 /** Every column the portal is allowed to see on a change request, camelCased once here so list and
  *  detail can never drift into two different shapes for the same row. */
@@ -39,7 +51,14 @@ const SELECT_COLUMNS = `
   wcr.client_id AS "clientId", wcr.project_id AS "projectId", p.name AS "projectName",
   wcr.pipeline_run_id AS "pipelineRunId", wcr.pm_task_id AS "pmTaskId",
   wcr.declined_reason AS "declinedReason", wcr.requested_by AS "requestedBy",
-  wcr.created_at AS "createdAt", wcr.updated_at AS "updatedAt"`;
+  wcr.created_at AS "createdAt", wcr.updated_at AS "updatedAt",
+  -- Bug detail. Selected so the portal can read back what it submitted: an omitted column is
+  -- indistinguishable from a NULL value, so leaving these out would make a successfully-stored
+  -- repro step look, to the UI, exactly like one the client never typed.
+  -- severity IS included and is READ-ONLY here — the client may see how their bug was ranked at
+  -- triage, but create never accepts it.
+  wcr.severity, wcr.repro_steps AS "reproSteps", wcr.environment,
+  wcr.seen_on_version AS "seenOnVersion", wcr.affected_url AS "affectedUrl"`;
 
 @Controller("api")
 @UseGuards(AuthGuard)
@@ -90,7 +109,10 @@ export class WebdevChangeRequestsPortalController {
   async create(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { kind?: string; title?: string; body?: string; projectId?: string; clientId?: string },
+    @Body() body: {
+      kind?: string; title?: string; body?: string; projectId?: string; clientId?: string;
+      reproSteps?: string; environment?: string; seenOnVersion?: string; affectedUrl?: string;
+    },
   ) {
     const b = body ?? {};
     if (!KINDS.has(b.kind ?? "")) throw new BadRequestException("kind must be one of content|design|feature|bug");
@@ -106,13 +128,22 @@ export class WebdevChangeRequestsPortalController {
 
       await c.query(
         `INSERT INTO webdev_change_requests
-           (id, tenant_id, client_id, project_id, source, kind, title, body, requested_by, origin_site)
-         VALUES ($1, $2, $3, $4, 'portal', $5, $6, $7, $8, $9)`,
+           (id, tenant_id, client_id, project_id, source, kind, title, body, requested_by, origin_site,
+            repro_steps, environment, seen_on_version, affected_url)
+         VALUES ($1, $2, $3, $4, 'portal', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [
           id, tenantId, clientId, projectId, kind,
           scrubText(title).text.slice(0, MAX_TITLE),
           b.body ? scrubText(b.body).text.slice(0, MAX_BODY) : null,
           req.principal.userId, config.originSite,
+          // scrubText on every one of these: they are free text from outside the trust boundary, and
+          // a reproduction step is exactly where someone pastes a real account number to show what
+          // broke. Same idiom as title/body above — the PAN/national-ID scrub is not optional here.
+          // NO severity parameter. See MAX_* block.
+          b.reproSteps ? scrubText(b.reproSteps).text.slice(0, MAX_REPRO) : null,
+          b.environment ? scrubText(b.environment).text.slice(0, MAX_ENVIRONMENT) : null,
+          b.seenOnVersion ? scrubText(b.seenOnVersion).text.slice(0, MAX_SEEN_ON_VERSION) : null,
+          b.affectedUrl ? scrubText(b.affectedUrl).text.slice(0, MAX_AFFECTED_URL) : null,
         ],
       );
       // Transactional outbox: the row and its event commit or roll back together (MI-02 AC).

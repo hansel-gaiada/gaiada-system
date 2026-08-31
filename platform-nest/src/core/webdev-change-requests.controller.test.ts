@@ -187,7 +187,10 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
   const crRow = async (id: string) =>
     (
       await adminPool().query(
-        `SELECT status, route, pipeline_run_id, pm_task_id, kind, declined_reason, triaged_by, triaged_at, source, client_id, project_id, requested_by
+        // `severity` is in this list deliberately: an OMITTED column is indistinguishable from a NULL
+        // value to most assertions, so a helper that does not select it cannot prove severity is
+        // absent — it can only fail to observe it.
+        `SELECT status, route, pipeline_run_id, pm_task_id, kind, declined_reason, triaged_by, triaged_at, source, client_id, project_id, requested_by, severity
            FROM webdev_change_requests WHERE id = $1`,
         [id],
       )
@@ -534,20 +537,42 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
   it("kind defaults route: content/bug -> pm_task, design/feature -> mini_run (a suggestion, overridable)", async () => {
     for (const [kind, route] of [["content", "pm_task"], ["bug", "pm_task"], ["design", "mini_run"], ["feature", "mini_run"]] as const) {
       const cr = await internalCr({ kind });
-      const r = await triage(cr.id, { action: "convert" }); // NO route named -> the §2.3 default
+      // `severity` only for bugs — a converted bug must carry one (`wcr_bug_has_severity`), and the
+      // other kinds must keep proving they do NOT need one. Route defaulting is what this asserts.
+      const r = await triage(cr.id, { action: "convert", ...(kind === "bug" ? { severity: "high" } : {}) }); // NO route named -> the §2.3 default
       expect(r.statusCode).toBe(200);
       expect((r.json() as { route: string }).route).toBe(route);
     }
     // ...and the PM's explicit choice always wins over the suggestion (blueprint §07).
     const bug = await internalCr({ kind: "bug" });
-    const overridden = await triage(bug.id, { action: "convert", route: "mini_run" });
+    const overridden = await triage(bug.id, { action: "convert", route: "mini_run", severity: "high" });
     expect(overridden.statusCode).toBe(200);
     expect((overridden.json() as { route: string }).route).toBe("mini_run");
   });
 
+  it("converting a bug WITHOUT a severity is refused 400, and the request stays re-triageable", async () => {
+    const cr = await internalCr({ kind: "bug" });
+    const r = await triage(cr.id, { action: "convert", route: "pm_task" });
+    // A TYPED refusal, not the CHECK surfacing as a 500 (agentic-native criterion 2). The database
+    // constraint is the backstop; this is the contract.
+    expect(r.statusCode).toBe(400);
+    // `.error`, not `.message`: throwers set `message` and the exception filter renames it on the
+    // way out — the same shape the 501 test above asserts.
+    expect((r.json() as { error: string }).error).toMatch(/severity/i);
+    // Refused inside the transaction — nothing partial survives, same property the 501 test asserts.
+    expect(await crRow(cr.id)).toMatchObject({ status: "new", route: null, triaged_by: null, triaged_at: null });
+
+    // A DECLINE of the same bug needs no severity: 'declined' is pre-triage terminal in the CHECK.
+    const declined = await triage(cr.id, { action: "decline", reason: "not reproducible" });
+    expect(declined.statusCode).toBe(200);
+    expect(await crRow(cr.id)).toMatchObject({ status: "declined", severity: null });
+  });
+
   it("convert -> pm_task creates a REAL pm_task through the PM module and links it; kindOverride is recorded", async () => {
     const cr = await internalCr({ kind: "feature" });
-    const r = await triage(cr.id, { action: "convert", route: "pm_task", kindOverride: "bug" });
+    // kindOverride 'bug' CREATES the severity obligation at triage time — the row was filed as a
+    // feature, so severity could not have been supplied earlier.
+    const r = await triage(cr.id, { action: "convert", route: "pm_task", kindOverride: "bug", severity: "high" });
     expect(r.statusCode).toBe(200);
     const taskId = (r.json() as { pmTaskId: string }).pmTaskId;
 
