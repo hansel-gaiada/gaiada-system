@@ -22,14 +22,15 @@ async function insertSite(
   tenantId: string,
   domain: string,
   environment: string,
+  clientId: string | null = null,
 ): Promise<void> {
   await withTenants(
     [tenantId],
     (c) =>
       c.query(
-        `INSERT INTO webdev_sites (tenant_id, domain, environment, host_kind, access, adoption, origin, origin_site)
-         VALUES ($1, $2, $3, 'unknown', 'none', 'tracked', 'manual', 'portfolio-test')`,
-        [tenantId, domain, environment],
+        `INSERT INTO webdev_sites (tenant_id, domain, environment, host_kind, access, adoption, origin, client_id, origin_site)
+         VALUES ($1, $2, $3, 'unknown', 'none', 'tracked', 'manual', $4, 'portfolio-test')`,
+        [tenantId, domain, environment, clientId],
       ),
     { modules: ["webdev"] },
   );
