@@ -14,7 +14,7 @@
 // The first test below is the one that fails if the `modules` option is ever dropped again.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { initTestDb, teardownTestDb } from "../../testing/setup";
-import { createCompany } from "../../testing/fixtures";
+import { createCompany, createClient } from "../../testing/fixtures";
 import { withTenants } from "../../db";
 import { getPortfolio } from "./portfolio-reads.service";
 
@@ -79,5 +79,47 @@ describe("getPortfolio — the module scope its RLS depends on", () => {
     // not because the module gate silently blanked it.
     const res = await getPortfolio(tenantId);
     expect(res.counts.withoutConsent).toBe(2);
+  });
+});
+
+describe("getPortfolio — grouping when a site has an owner but no project", () => {
+  let tenantId: string;
+  let clientId: string;
+
+  beforeAll(async () => {
+    await initTestDb();
+    tenantId = await createCompany("Grouping Co", ["webdev", "search"]);
+    clientId = await createClient(tenantId, "Owned Client");
+    // Two environments of the same client's engagement, with NO project row — the exact shape of
+    // the domains discovered on our own servers, where the owner is known but the engagement is not.
+    await insertSite(tenantId, "owned-prod.test", "production", clientId);
+    await insertSite(tenantId, "owned-stg.test", "staging", clientId);
+    // ...and one genuinely unowned domain, which must NOT be folded in with them.
+    await insertSite(tenantId, "orphan.test", "production", null);
+  });
+
+  afterAll(async () => {
+    await teardownTestDb();
+  });
+
+  it("keeps the client's name instead of collapsing into one anonymous bucket", async () => {
+    const res = await getPortfolio(tenantId);
+    const owned = res.projects.find((p) => p.clientName === "Owned Client");
+    expect(owned).toBeDefined();
+    // Both of that client's environments in ONE group...
+    expect(owned?.environments.map((e) => e.domain).sort()).toEqual([
+      "owned-prod.test",
+      "owned-stg.test",
+    ]);
+    expect(owned?.production?.domain).toBe("owned-prod.test");
+  });
+
+  it("does not fold an unowned domain in with an owned one", async () => {
+    const res = await getPortfolio(tenantId);
+    const orphan = res.projects.find((p) => p.clientName === null);
+    expect(orphan).toBeDefined();
+    expect(orphan?.environments.map((e) => e.domain)).toEqual(["orphan.test"]);
+    // Two distinct groups, not one: the bug being guarded is the opposite.
+    expect(res.counts.projects).toBe(2);
   });
 });

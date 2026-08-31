@@ -84,7 +84,7 @@ const PORTFOLIO_SQL = `
     LEFT JOIN search_properties sp
            ON sp.tenant_id = s.tenant_id AND sp.domain = s.domain AND sp.deleted_at IS NULL
    WHERE s.deleted_at IS NULL
-   ORDER BY COALESCE(pr.name, '~unassigned'),
+   ORDER BY COALESCE(pr.name, cl.name, '~~unassigned'),
             CASE s.environment WHEN 'production' THEN 0 WHEN 'staging' THEN 1
                                WHEN 'development' THEN 2 ELSE 3 END,
             s.domain
@@ -157,7 +157,16 @@ export async function getPortfolio(tenantId: string): Promise<PortfolioResult> {
     byEnvironment[site.environment] = (byEnvironment[site.environment] ?? 0) + 1;
     if (!site.crawlConsent) withoutConsent++;
 
-    const key = r.project_id ?? "~unassigned";
+    // Group by project when there IS one; otherwise fall back to the CLIENT.
+    //
+    // Keying project-less rows on a single literal collapsed every one of them into one anonymous
+    // bucket: nine tracked domains discovered on our own boxes (the Viceroy DMS across three
+    // environments, iSort's second domain, and the rest) all landed together under a group whose
+    // clientName came from whichever row happened to be read first — so a site WITH a known owner
+    // displayed as having none. The owner is on the row; the grouping was throwing it away.
+    //
+    // Prefixed so a client id can never collide with a project id in the same map.
+    const key = r.project_id ?? (r.client_id ? `client:${r.client_id}` : "~unassigned");
     let group = byProject.get(key);
     if (!group) {
       group = {
