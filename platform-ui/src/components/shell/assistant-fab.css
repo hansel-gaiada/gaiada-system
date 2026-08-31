@@ -10,7 +10,7 @@
   align-items: center;
   gap: 6px;
   border: 0.5px solid var(--erp-accent);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   color: var(--erp-accent);
   padding: 10px 16px;
   font: 700 11px var(--font-body);

@@ -2,7 +2,7 @@
    `.filter-chips`/`.filter-chip` idiom (dashboard.css) — a new, shared class name because this
    is the target primitive for new call sites, not a rename of the old ones (those stay as-is). */
 .fb { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.fb__chip { display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-pill); padding: 7px 14px; text-decoration: none; color: var(--text-primary); background: var(--surface-card); }
+.fb__chip { display: inline-flex; align-items: center; gap: 8px; border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-pill); padding: 7px 14px; text-decoration: none; color: var(--text-primary); background: var(--surface-card-solid); }
 .fb__chip:hover { background: var(--tint-hover); }
 .fb__chip--active { border-color: var(--erp-accent); color: var(--erp-accent); }
 .fb__label { font: 400 12px var(--font-body); }
@@ -17,7 +17,7 @@
 .bab__actions { display: flex; align-items: center; gap: 8px; }
 
 /* Data table — search/sort/paginate/export. Hairline design language. */
-.dt { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
+.dt { border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); }
 .dt__bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .dt__search { flex: 1; min-width: 0; display: flex; align-items: center; }
 .dt__search input { width: 100%; max-width: 320px; border: none; border-bottom: 0.5px solid var(--erp-hairline); background: transparent; outline: none; padding: 6px 2px; font: 400 13px var(--font-body); color: var(--text-primary); }
@@ -27,7 +27,7 @@
 .dt__scroll { overflow-x: auto; }
 .dt__sentinel { height: 1px; }
 .dt__table { width: 100%; border-collapse: collapse; font: 400 13.5px var(--font-body); }
-.dt__table thead th { text-align: left; padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card); position: sticky; top: 0; transition: box-shadow 0.15s var(--erp-ease); }
+.dt__table thead th { text-align: left; padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); position: sticky; top: 0; transition: box-shadow 0.15s var(--erp-ease); }
 /* Sticky-header scroll shadow (design-language §10): flat at rest, one shadow tier once content
    has scrolled beneath it — never a shadow before that. */
 .dt__table--scrolled thead th { box-shadow: var(--elev-1); }

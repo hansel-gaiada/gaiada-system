@@ -25,7 +25,7 @@
 .obs-toolbar__search input { border: none; border-bottom: 0.5px solid var(--erp-hairline); background: transparent; outline: none; padding: 6px 2px; font: 400 13px var(--font-body); color: var(--text-primary); }
 .obs-toolbar__search input:focus-visible { border-bottom-color: var(--erp-accent); }
 .obs-toolbar__field { display: flex; flex-direction: column; gap: 6px; }
-.obs-toolbar__field select { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); color: var(--text-primary); font: 400 13px var(--font-body); padding: 6px 8px; }
+.obs-toolbar__field select { border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); color: var(--text-primary); font: 400 13px var(--font-body); padding: 6px 8px; }
 .obs-toolbar__field select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
 
 .obs-chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -43,9 +43,9 @@
 .obs-count { font: 400 12px var(--font-body); color: var(--erp-ink-50); white-space: nowrap; margin-left: auto; }
 
 /* ── The dense table itself: real <table>, sortable headers, one row per host ───────────────── */
-.obs-table-wrap { overflow-x: auto; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
+.obs-table-wrap { overflow-x: auto; border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); }
 .obs-table { width: 100%; border-collapse: collapse; font: 400 13px var(--font-body); min-width: 920px; }
-.obs-table thead th { text-align: left; padding: 9px 12px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card); position: sticky; top: 0; white-space: nowrap; }
+.obs-table thead th { text-align: left; padding: 9px 12px; border-bottom: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); position: sticky; top: 0; white-space: nowrap; }
 .obs-table tbody td { padding: 9px 12px; border-bottom: 0.5px solid var(--erp-hairline-soft); color: var(--ink-muted); vertical-align: middle; white-space: nowrap; }
 .obs-table tbody tr:last-child td { border-bottom: none; }
 .obs-table tbody tr { cursor: pointer; transition: background 0.15s ease; }

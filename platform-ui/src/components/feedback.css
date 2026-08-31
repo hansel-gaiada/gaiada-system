@@ -5,7 +5,7 @@
 
 .fb-skeleton-page { display: flex; flex-direction: column; gap: 26px; animation: erp-fade 0.28s var(--erp-ease); }
 .fb-skeleton-cards { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.fb-skeleton-card { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.fb-skeleton-card { border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); padding: 22px; display: flex; flex-direction: column; gap: 14px; }
 
 .fb-state { max-width: 520px; margin: 0 auto; padding: 64px 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; animation: erp-fade 0.28s var(--erp-ease); }
 .fb-state__code { font-family: var(--font-display); font-weight: 700; font-size: 56px; line-height: 1; color: var(--ink-faint); letter-spacing: 0.04em; }

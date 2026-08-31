@@ -66,7 +66,7 @@
    caption to show. Flex let each tile stack to its own height and Progress' caption dropped a
    line below the other three. */
 .dept-kpi {
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 0.5px solid var(--erp-hairline);
   padding: var(--space-20);
   display: grid;
@@ -147,7 +147,7 @@
    whole point — the figure and its caption are ONE object and sit tight together; the ring block
    is a second object and gets real air. */
 .dept-ring-card {
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 0.5px solid var(--erp-hairline);
   padding: var(--space-20);
   display: flex;
@@ -341,7 +341,7 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
 .dept-activity__more { margin: 16px 0 0; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
 
 /* ── My-work rail (persistent, decision #10) ────────────────────────────── */
-.dept-rail { display: flex; flex-direction: column; gap: 0; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); }
+.dept-rail { display: flex; flex-direction: column; gap: 0; background: var(--surface-card-solid); border: 0.5px solid var(--erp-hairline); }
 .dept-rail__section { padding: 20px 22px; }
 .dept-rail__section + .dept-rail__section { border-top: 0.5px solid var(--erp-hairline); }
 /* `color`, not `opacity` (Phase 5 a11y fix, 2026-08-22): opacity composites against
@@ -480,7 +480,7 @@ a.dept-ring-card__name:hover { opacity: 0.6; }
      instead of running off the card. */
   max-width: 240px;
   width: max-content;
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 0.5px solid var(--erp-hairline);
   box-shadow: var(--elev-overlay);
   opacity: 0;
@@ -616,7 +616,7 @@ a.dept-proj__name:hover { opacity: 0.6; }
   gap: 14px;
   padding: 16px;
   border: 0.5px solid var(--erp-hairline);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   text-decoration: none;
   color: var(--text-primary);
   transition: border-color 0.15s ease, transform 0.1s ease;
@@ -668,7 +668,7 @@ a.dept-proj__name:hover { opacity: 0.6; }
 .dept-conn-row__input {
   font: 400 13px var(--font-body);
   border: 0.5px solid var(--erp-hairline);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   color: var(--text-primary);
   padding: 6px 10px;
   min-width: 200px;
@@ -686,7 +686,7 @@ a.dept-proj__name:hover { opacity: 0.6; }
 /* ---- ServicedBlock (ORG-13 / UX-2 §3C) ---- */
 .serviced-block {
   border: 0.5px solid var(--erp-hairline);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   padding: 16px;
   margin-top: 16px;
 }

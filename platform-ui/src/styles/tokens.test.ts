@@ -189,7 +189,14 @@ describe("design tokens", () => {
     // backdrop-filter itself, because the two scrims — the command palette and
     // the mobile-nav dim — legitimately blur with --blur-overlay and are not
     // glass. Widening this list is a design decision; make it deliberately.
-    const GLASS_ALLOWED = ["shell/shell.css", "ui.css"];
+    // Three entries, and each is a CHROME or the card primitive itself:
+    //   shell/shell.css   the staff shell
+    //   portal/portal.css the CLIENT shell — a separate shell, not a page
+    //                     inside the staff one, so it needs its own chrome
+    //   ui.css            .lux-card / .lux-kpi, the card primitive
+    // Adding a fourth should be argued, not assumed: the whole point of this
+    // list is that glass does not spread to whatever surface wants it.
+    const GLASS_ALLOWED = ["shell/shell.css", "portal/portal.css", "ui.css"];
     const offenders = componentCssFiles([])
       .filter((p) => readFileSync(p, "utf8").includes("--blur-glass"))
       .map((p) => p.replace(/\\/g, "/"))
