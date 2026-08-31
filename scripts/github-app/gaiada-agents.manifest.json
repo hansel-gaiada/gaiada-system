@@ -1,0 +1,15 @@
+{
+  "name": "gaiada-agents",
+  "description": "Read-only GitHub access for mcp-hub agent tools. Deliberately cannot write: agents are prompt-injectable, and all writes must route through platform-nest so the ERP ledger stays complete. See docs/blueprints/github-integration-foundation.md §2.2.",
+  "url": "https://erp.gaiada.online",
+  "public": false,
+  "redirect_url": "http://localhost:8765/callback",
+  "default_events": [],
+  "default_permissions": {
+    "contents": "read",
+    "metadata": "read",
+    "pull_requests": "read",
+    "actions": "read",
+    "statuses": "read"
+  }
+}

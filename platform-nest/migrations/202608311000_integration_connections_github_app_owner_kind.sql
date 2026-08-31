@@ -1,0 +1,51 @@
+-- 202608311000_integration_connections_github_app_owner_kind.sql
+-- GH-01 §2.3(b) — RULING CORRECTED 2026-08-31 (docs/blueprints/github-integration-foundation.md).
+--
+-- ── NUMBERING (migrations/README.md rule 5) ───────────────────────────────────────────────────────
+-- Timestamp naming. `ls migrations/*.sql | sort | tail` at write time showed head =
+-- 202608310900_iam_github_repo_permissions.sql. 1000 is clear of it and of everything below it;
+-- re-verified immediately before writing.
+--
+-- ── WHAT WAS WRONG ─────────────────────────────────────────────────────────────────────────────────
+-- credential-store.ts (GH-01/GH-03/GH-04) needs TWO GitHub App credential rows to coexist under one
+-- tenant/provider in `integration_connections` (0033) — the write-arm `gaiada-erp` App and the
+-- read-only `gaiada-agents` App. 0033's `UNIQUE (tenant_id, owner_kind, owner_id, provider)` collides
+-- if both rows use `owner_kind='company', owner_id=tenantId` (0033's own documented meaning of that
+-- pair). The first attempt at a fix used a synthetic STRING owner_id (`github-app:<slug>`), which does
+-- not compile against `owner_id uuid NOT NULL` — proven live: credential-store.test.ts failed 8/8 and
+-- one repo-sync.db.test.ts case failed, both with
+-- `invalid input syntax for type uuid: "github-app:gaiada-erp"`.
+--
+-- The cheaper-looking alternative — keep `owner_kind='company'` and just make owner_id a synthetic
+-- uuid — is rejected too: 0033 documents `owner_kind='company' -> owner_id = the company's id`. A
+-- value that is not a company id under that discriminator makes the row lie about its own meaning,
+-- the same objection `202608261100_activity_approval_attribution.sql` raises about audit columns
+-- ("a column with a foreign key cannot lie that way"). This table's owner_id carries no FK, but the
+-- discriminator is the thing standing in for one — widening it costs one ALTER and keeps it honest.
+--
+-- ── THE FIX ────────────────────────────────────────────────────────────────────────────────────────
+-- 1. Widen the owner_kind CHECK to admit 'github_app' as a THIRD, honestly-named discriminator.
+-- 2. App credential rows use owner_kind='github_app', owner_id = a deterministic UUIDv5 derived from
+--    the App slug (src/core/github/apps.ts `githubAppOwnerId()`, uuid v5 over a fixed namespace
+--    constant) — stable across environments, distinct per App, satisfies UNIQUE without a backfill
+--    (there are no existing github_app rows to migrate: this owner_kind did not exist until now).
+-- 3. The human-readable slug lives in `meta.appSlug` for legibility (credential-store.ts).
+--
+-- ── WHY NO BACKFILL / NO NOT VALID ────────────────────────────────────────────────────────────────
+-- Purely additive: every existing row's owner_kind is 'user' or 'company', both still valid under the
+-- widened CHECK, so it is vacuously satisfied for all history. No UPDATE, no INSERT — this migration
+-- is DDL only and therefore outside lint-migration-rls.mjs's DML scan entirely.
+--
+-- ── SECURITY-RELEVANT NOTE FOR THE HTTP API (NOT changed here, see integrations.service.ts) ─────────
+-- `github_app` is intentionally NOT added to `CLIENT_CREATABLE_OWNER_KINDS` (integrations.controller.ts
+-- POST validation) — these rows are ops-provisioned via credential-store.ts only, never created
+-- through the generic connections HTTP API. Verified further: the GET list endpoint's `owner=`
+-- selector recognizes only `me | company | user:<id>` (no `github_app` branch), so these rows are
+-- currently unreachable through that HTTP surface in EITHER direction, not merely write-excluded —
+-- they are read exclusively via credential-store.ts's own service-layer calls. This migration does
+-- not touch RLS or any GRANT.
+
+ALTER TABLE integration_connections DROP CONSTRAINT IF EXISTS integration_connections_owner_kind_check;
+ALTER TABLE integration_connections
+  ADD CONSTRAINT integration_connections_owner_kind_check
+  CHECK (owner_kind IN ('user', 'company', 'github_app'));

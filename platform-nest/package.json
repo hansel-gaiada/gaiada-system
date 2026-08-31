@@ -2,7 +2,7 @@
   "name": "gaiada-platform-nest",
   "version": "0.1.0",
   "private": true,
-  "description": "Gaiada Platform core \u2014 NestJS port of the Fastify v1 core (spec-locked backend, WS1). Contract-identical; the 86 platform tests are the parity oracle.",
+  "description": "Gaiada Platform core — NestJS port of the Fastify v1 core (spec-locked backend, WS1). Contract-identical; the 86 platform tests are the parity oracle.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
@@ -13,6 +13,8 @@
     "seed:automation": "node dist/seed/automation.js",
     "iam:backfill": "node dist/seed/iam-phase2-backfill.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
+    "seed:github-apps": "node dist/seed/github-app-credentials.js",
+    "seed:github-sync": "node dist/seed/github-repo-sync.js",
     "seed:search": "node dist/seed/search.js",
     "seed:portal-clients": "node dist/seed/portal-clients.js",
     "provision:roster": "node dist/seed/provision-roster.js",

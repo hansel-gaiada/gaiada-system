@@ -138,6 +138,11 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
     // silently collapse every Google refusal onto the generic backstop's status, and every
     // direct-`.catch()` unit test in google-oauth-error.filter.test.ts would stay green.
     "GoogleOAuthErrorFilter",
+    // GH-02 (core/github/errors.ts + github-error.filter.ts). Same family-of-fixes shape as
+    // GoogleOAuthErrorFilter immediately above: GithubSurfaceError extends Error, not HttpException,
+    // so without this mapping every GitHub refusal (rate-limited, not-configured, read-only-role,
+    // upstream API error) would collapse onto LastResortExceptionFilter's generic 500.
+    "GithubErrorFilter",
     // W0-4 (webdev client access). Sixth member, added DELIBERATELY here — which is the whole point of
     // the exact-set pin below. It maps two families that both extend Error rather than HttpException:
     // the Keycloak-admin family (503 not-configured / 409 user-exists / 502 admin error) and
@@ -190,6 +195,8 @@ describe("SM-53/SM-57/SM-58/SM-25a · the filters are actually REGISTERED, not m
       "ProviderDispatchErrorFilter",
       "GatewayNotConfiguredErrorFilter",
       "GoogleOAuthErrorFilter",
+      // GH-02: GithubErrorFilter, same reasoning as the it.each entry above.
+      "GithubErrorFilter",
       // Type-scoped filters' order relative to EACH OTHER does not matter (their @Catch types are
       // disjoint), so appending here is safe; what matters is that LastResortExceptionFilter stays
       // FIRST, which the next test pins independently.

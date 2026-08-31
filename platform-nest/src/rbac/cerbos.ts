@@ -71,6 +71,17 @@ export interface Resource {
   panelistUserIds?: string[];
   hiringManagerUserId?: string | null;
   recruiterUserId?: string | null;
+  /** GH-03 (github_repo's `create_repo`/`delete_repo` rules) — mirrors `resource_mcp_tool.yaml`'s
+   *  WSK-31 "ALWAYS-WS4" shape, reapplied to a platform-nest-native resource kind instead of
+   *  `mcp_tool`: repo creation and deletion are D14-gated even for an ATTENDED company_admin, so the
+   *  policy admits the action only when this attribute carries a verified grant id — never merely
+   *  because the caller holds an elevated role. Whoever wires the create/delete endpoint (GH-10/12)
+   *  is responsible for setting this ONLY from a verified D14 execution grant (the platform-nest
+   *  equivalent of mcp-hub's branded `VerifiedExecutionGrant` — never from a client-supplied field,
+   *  a header, or any other unverified source). Omitted -> "" -> the policy's `has() && type==string
+   *  && != ""` guard denies, same fail-closed convention as every other optional attr here — so an
+   *  unwired caller (today, there is none) gets a denial rather than a silent bypass. */
+  approvalId?: string;
 }
 
 export type Decision = { allow: true } | { allow: false; reason: string };
@@ -130,6 +141,16 @@ function resourcePayload(r: Resource) {
       panelistUserIds: r.panelistUserIds ?? [],
       hiringManagerUserId: r.hiringManagerUserId ?? "",
       recruiterUserId: r.recruiterUserId ?? "",
+      // GH-03. MUST be listed here to reach resource_github.yaml at all — this function is an
+      // explicit allow-list (see the comment above `published`/`panelistUserIds`): a Resource field
+      // added without a matching line here is a no-op with no error, and for this specific field
+      // that failure mode would be the WORST direction — a `create_repo`/`delete_repo` rule silently
+      // never seeing an approvalId reads as "always deny", which is safe; the trap this comment
+      // exists to prevent is the reverse fear (that omitting it here could widen access). It cannot:
+      // an absent attribute makes the `has()` guard false, which DENIES, never allows. Recorded
+      // anyway because the estate's own trap note names this allow-list as the failure class to
+      // check first when a resource-policy rule "isn't seeing" an attribute a caller believes it set.
+      approvalId: r.approvalId ?? "",
     },
   };
 }

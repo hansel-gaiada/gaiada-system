@@ -462,6 +462,56 @@ const configBase = {
     // AGENT_RUNNER_TOKEN gates every runner call, same convention as the other service tokens.
     agents: { url: process.env.AGENTS_URL ?? "", token: process.env.AGENT_RUNNER_TOKEN ?? "" },
   },
+  // GH-01 (docs/blueprints/github-integration-foundation.md §2.2/§2.3) — the two GitHub Apps
+  // platform-nest mints installation tokens for. Deliberately its OWN namespace, not `services.*`:
+  // `services.*` is url+token pairs for OUR downstream microservices; a GitHub App is identified by
+  // (app_id, installation_id) and its actual credential (the PEM) is NEVER an env var — it is sealed
+  // into `integration_connections` via secret-box.ts (src/core/github/credential-store.ts), same as
+  // every other provider credential in this vault. Only the non-secret identifiers live here.
+  //
+  // NO DEFAULT IDS, EVER — same rule as PRV-02's "no default endpoint" below. app_id/installation_id
+  // are not secrets, but hardcoding the blueprint's measured values (§2.2b: erp=4777424/157879245,
+  // agents=4777699/157885994) as fallbacks would let an unconfigured deployment silently mint tokens
+  // against the LIVE gaiadabali org's installations the moment a PEM happened to be sealed under the
+  // matching role. Empty ⇒ `core/github/apps.ts` reports the role unconfigured (fail-closed), never a
+  // half-attempt with the wrong installation.
+  githubApps: {
+    erp: {
+      appId: process.env.GITHUB_ERP_APP_ID ?? "",
+      installationId: process.env.GITHUB_ERP_INSTALLATION_ID ?? "",
+    },
+    agents: {
+      appId: process.env.GITHUB_AGENTS_APP_ID ?? "",
+      installationId: process.env.GITHUB_AGENTS_INSTALLATION_ID ?? "",
+    },
+  },
+  // GH-06 (docs/blueprints/github-integration-foundation.md §5.3) — the org crawl / reconcile
+  // sweep's tenant. NOT resolved by a company-NAME lookup at runtime (this repo's own documented
+  // "Seeds — the rename trap": a name is not a stable identifier — see platform-nest/CLAUDE.md) and
+  // NOT guessed inside core/github/repo-sync.service.ts (§2.3's GAP-CLOSED ruling on githubApps
+  // immediately above: "every function still takes tenantId as a parameter... the ruling says which
+  // value callers pass, not that the layer should guess" — §5.2 rules the identical question for
+  // this exact table). This is that value, set once by ops at deploy time to the id of the company
+  // that owns the gaiadabali GitHub org. NO DEFAULT, EVER — same reasoning as githubApps above: a
+  // default tenant id would let an unconfigured deployment silently sync real repos into the wrong
+  // company's registry the moment a credential happened to be sealed.
+  githubRepoSync: {
+    tenantId: process.env.GITHUB_REPO_SYNC_TENANT_ID ?? "",
+    enabled: process.env.GITHUB_REPO_SYNC_ENABLED === "true",
+    intervalMs: Number(process.env.GITHUB_REPO_SYNC_INTERVAL_MS ?? 21_600_000), // 6h
+  },
+  // GH-07 (docs/blueprints/github-integration-foundation.md §4.5) — `POST /api/webhooks/github`.
+  // This endpoint is internet-facing and deliberately carries NO AuthGuard (GitHub is not a session
+  // holder) — the HMAC secret IS the authentication, same shape as `mail.webhookToken` and
+  // `social.webhookSecret` just above/below in this file. Empty ⇒ the receiver refuses EVERY
+  // request rather than trusting an unsigned payload; never a default, for the same reason
+  // `githubApps` above has none — a guessed secret is not a secret.
+  githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? "",
+  // Bounded raw-body capture cap (core/github/webhook-raw-body.ts). GitHub's own documented webhook
+  // payload ceiling is 25 MB; defaulted much lower here because none of the 7 subscribed event types
+  // legitimately approach that — an oversized delivery is rejected with a clean 413, not buffered
+  // without limit.
+  githubWebhookMaxBytes: Number(process.env.GITHUB_WEBHOOK_MAX_BYTES ?? 5_000_000), // 5 MB
   // PRV-02 — the `provision` seam (docs/blueprints/provision-erp-seam-design.md §03/§04). This is a
   // REAL cross-host hop: platform-nest on gda-aicenter calling `provision` on gda-s01 over public
   // HTTPS. Deliberately its OWN namespace, not a `services.*` row, because `services.*` is the

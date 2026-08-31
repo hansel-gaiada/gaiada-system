@@ -216,7 +216,13 @@ function moduleStaffTargets(kind, cond) {
   // WSK-19 (2026-08-27): webdev_contract_snapshot joins its two siblings on the webdev module
   // tier — UNLIKE webdev_zoneb_event (NO_ROLE_SEEDED_KINDS below), this kind's `refresh` action is
   // a real console button (design §08) and webdev_staff/webdev_manager already exist (0097/0098).
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
+  // GH-03 (2026-08-31): github_repo's `read` rule for module_staff/module_manager. Mapped to
+  // webdev_staff like its three siblings above — `resource.attr.module` is caller-supplied and
+  // COULD in principle be any registered module, but no handler sets it to anything but "webdev"
+  // today (github-repos.controller.ts never resolves module at all; core/github/ledger.ts's future
+  // GH-10 caller is the only one that will), matching the same "real console consumer today" test
+  // WSK-19 used to justify webdev_contract_snapshot's own inclusion here.
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo") {
     return ["webdev_staff"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_staff"];
@@ -244,7 +250,8 @@ function moduleManagerTargets(kind, cond) {
       ? ["reports_manager"]
       : ["hr_manager", "search_manager", "reports_manager"];
   }
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
+  // GH-03 (2026-08-31) — see moduleStaffTargets' own GH-03 note above.
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo") {
     return ["webdev_manager"];
   }
   if (SOCIAL_KINDS.has(kind)) return ["social_manager"];
