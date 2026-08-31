@@ -128,30 +128,49 @@ unreadable sign-in button survived.
 
 ## 7. Measured adoption — where the port actually stands
 
-Counted from **rendered HTML on the live site** (authenticated session, 2026-08-31), not
-from the source.
+**CORRECTION (2026-08-31, same day).** The first version of this section claimed
+`/admin` and `/reports` render **zero** cards, measured by counting class names in
+HTML fetched over curl. That was wrong, and the error is worth recording because it
+is the same shape as the 0301a mistake: *the measurement did not measure what it
+claimed to.*
 
-| Route | `lux-card` | pills/tabs | glass shell | Notes |
-|---|---|---|---|---|
-| `/` | 7 | 14 | yes | Two-column split live |
-| `/approvals` | 12 | 28 | yes | Best-adopted surface |
-| `/pm` | 4 | 0 | yes | Own island (`pm.css`); **39.8 MB of HTML — see §8** |
-| `/hr` | 30 | 16 | yes | Good adoption |
-| `/admin` | **0** | **0** | yes | Bespoke `admin.css`; never adopted the primitive |
-| `/reports` | **0** | **0** | yes | Bespoke `reports.css` + chart kit |
-| `/account` | 24 | 0 | yes | Good adoption |
-| `/portal` | 24 | 12 | own (`cp-*`) | Separate shell, now on the design |
+Those routes stream. Curl captured `fb-skeleton` — the `loading.tsx` fallback — and
+finished before the suspended content arrived: 12 `self.__next_f.push` chunks against
+`/pm`'s 1,971. **A page that has not finished streaming is indistinguishable from a
+page with no cards, if all you count is class names.**
 
-**The chrome is universal.** The gap is per-surface: `/admin` and `/reports` render
-**zero** cards, so they are still on their own visual language inside a gold-glass shell.
+Counted from SOURCE instead — files under each route group that use `<Card>`,
+`<KpiTile>`, `<HairlineTable>` or `lux-card`:
 
----
+| Route group | Files using a card primitive | Total pages | Adoption |
+|---|---|---|---|
+| `hr` | 14 | 14 | 100% |
+| `pm` | 1 | 1 | 100% |
+| `approvals` | 2 | 2 | 100% |
+| `finance` | 17 | 17 | 100% |
+| `portal` | 15 | 15 | 100% |
+| `admin` | 9 | 10 | **90%** |
+| `it` | 9 | 10 | 90% |
+| `clients` | 4 | 5 | 80% |
+| `departments` | 34 | 45 | 75% |
+| `systems` | 4 | 6 | 66% |
+| `reports` | 2 | 4 | **50%** |
+| `office` | 1 | 2 | 50% |
+
+`admin` is at 90%, not 0%. `reports` is at 50%, not 0%.
+
+**The chrome is universal and primitive adoption is broadly high.** The remaining
+surfaces are `reports` (its chart kit is legitimately its own thing), `office`,
+`systems` and the long tail of `departments`.
+
+**Lesson for anyone measuring this again:** count from source, or drive a real browser.
+An HTTP fetch of a streaming route measures how fast curl gave up.
 
 ## 8. Open items
 
 | # | Item | Why it is not done |
 |---|---|---|
-| 1 | `/admin` and `/reports` adopt the card primitive | ~0 adoption today. Real work, no artboard for either — the design draws neither screen. |
+| 1 | `reports`, `office`, `systems` and the `departments` tail finish adopting the primitive | 50-75% today, not 0% — see the correction in §7. No artboard for any of them; the design draws none of these screens, so completing them is judgement rather than transcription. |
 | 2 | The check-in card's inline-input composition | The artboard puts the input and a gold Submit inside one card. Ours renders a different structure with real submit logic behind it; decision 5 says UI/UX only. |
 | 3 | Light-theme bright gold | §3. Needs the ~124-site graphic/text audit. |
 | 4 | `/pm` returns **39.8 MB** of HTML | Found during this assessment. Not a design issue and not investigated — flagging it because it is by far the largest thing measured here. |
