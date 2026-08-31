@@ -44,9 +44,20 @@ if have amtool && have envsubst; then
   # Provide harmless defaults so type-checked fields (chat_id int, URLs) validate.
   # ALERT_CHAT_ID must be NON-ZERO: Alertmanager's telegram_config treats a 0 chat_id as unset
   # and rejects the file with "missing chat_id on telegram_config".
+  #
+  # ⚠ EVERY ${VAR} IN alertmanager.yml MUST APPEAR HERE. envsubst substitutes an unset variable with
+  # the EMPTY STRING, and amtool then rejects the file with `unsupported scheme "" for URL` — a
+  # message that points at the config, not at this list, so the natural reaction is to "fix" a
+  # perfectly good config. This broke CI on 2026-08-31 when the account-managers receiver added
+  # AM_ALERT_WEBHOOK_URL / AM_ALERT_EMAIL_TO without extending this line.
+  #
+  # To check for drift:
+  #   grep -oE '\$\{[A-Z_]+\}' infra/observability/alertmanager/alertmanager.yml | tr -d '${}' | sort -u
+  # and confirm every name is assigned below.
   ALERT_CHAT_ID=123456 SMTP_SMARTHOST=mail.example.com:587 SMTP_FROM=a@example.com \
   SMTP_USERNAME=u SMTP_PASSWORD=p ALERT_EMAIL_TO=a@example.com \
   TELEGRAM_BOT_TOKEN=x ALERT_WEBHOOK_URL=http://example.com/h DEADMANSSWITCH_URL=http://example.com/p \
+  AM_ALERT_WEBHOOK_URL=http://example.com/am AM_ALERT_EMAIL_TO=am@example.com \
     envsubst < "$OBS/alertmanager/alertmanager.yml" \
     | sed "s#/etc/alertmanager/templates#$tmp/templates#" > "$tmp/am.yml"
   amtool check-config "$tmp/am.yml" || fail=1
