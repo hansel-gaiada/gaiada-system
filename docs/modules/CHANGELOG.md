@@ -4120,6 +4120,13 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > from the TAGS, and a `version-gate` CI job fails any PR that edits `/VERSION` to a version whose
 > tag already exists.
 
+> **⚠ FORMAT CHANGED at `1.0.0-alpha.302` (2026-08-31).** The app version is now SemVer 2.0.0
+> (`docs/modules/VERSIONING.md`); rows above this point use the retired
+> `Alpha 01.071.NNNNa` format. The counter is continuous across the cutover — legacy `…0301a` is
+> followed by `1.0.0-alpha.302` — so no number is reused and builds stay comparable. Tags gain a
+> `v` prefix (`v1.0.0-alpha.302`); `deploy.yml` accepts both spellings while any legacy-format
+> release could still be in flight.
+
 | App version | Cut | Module versions moved (vs the previous cut) |
 |---|---|---|
 | `Alpha 01.068.0144a` | 2026-08-23 | platform-ui `0.44.0`→`0.45.0` |
@@ -4194,7 +4201,9 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 | `Alpha 01.071.0208a` | 2026-08-31 | *(no module version moved)* |
 | `Alpha 01.071.0209a` | 2026-08-31 | platform-nest `0.47.0`→`0.48.0` |
 | `Alpha 01.071.0210a` | 2026-08-31 | *(no module version moved)* |
-| `Alpha 01.071.0300a` | 2026-08-31 | *(no module version moved — headroom seed, see below)* |
+| `Alpha 01.071.0300a` | — | **cut but NEVER TAGGED** — headroom seed only; no build, no deploy |
+| `Alpha 01.071.0301a` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.302` | 2026-08-31 | *(no module version moved — first SemVer cut)* |
 
 ### `Alpha 01.067.0144a` - 2026-08-23 - the work that was finished but never left the laptop
 
