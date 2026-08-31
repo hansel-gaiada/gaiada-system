@@ -31,6 +31,7 @@ import { AuthGuard } from "../auth/guards";
 import { isElevated } from "./elevated";
 import { getBridgeHealth, replayBridgeDeadLetters, type BridgeHealth } from "../events/bridge-health";
 import { allModules } from "../modules/registry";
+import { githubAdminDetail, type GithubRoleAdminDetail } from "../core/github/github-app.service";
 
 type SystemKey = "bot" | "gateway" | "hub" | "agents" | "knowledge" | "automation";
 const SYSTEMS: SystemKey[] = ["bot", "gateway", "hub", "agents", "knowledge", "automation"];
@@ -770,6 +771,31 @@ export class AdminSystemsController {
   async hubDetail(@Req() req: FastifyRequest): Promise<HubDetail | null> {
     if (!isElevated(req)) throw new ForbiddenException("platform admin required");
     return fetchHubDetail();
+  }
+
+  /** GH-02 §4.7 — "surface remaining quota on /admin/info", follow the pattern this file already
+   *  uses for gateway/hub: project the PROVIDER's own state, not a fabricated summary.
+   *
+   *  Unlike gateway/hub this is NOT a proxy — GitHub App credential state lives IN this process
+   *  (core/github/github-app.service.ts), not behind another service's HTTP surface — so there is no
+   *  network hop here, just a read of already-observed in-memory state per role (erp/agents): the
+   *  last x-ratelimit-* snapshot, whether an installation token is currently cached, and the
+   *  fairness-queue backlog.
+   *
+   *  `companyId` is REQUIRED and not defaulted: unlike gateway/hub (one deployment-wide instance),
+   *  the GitHub App credential is sealed under a specific company tenant (§2.3 — see
+   *  core/github/credential-store.ts's header for why), and this ticket's scope (GH-01/GH-02) does
+   *  not define a "home company" resolution for the admin console. Omitting it returns `null` (the
+   *  same "nothing to show yet" shape gateway/hub use when unreachable) rather than guessing a
+   *  tenant — a real UI wiring is GH-09's job once the registry ships. */
+  @Get("github/detail")
+  async githubDetail(
+    @Req() req: FastifyRequest,
+    @Query("companyId") companyId?: string,
+  ): Promise<{ roles: GithubRoleAdminDetail[] } | null> {
+    if (!isElevated(req)) throw new ForbiddenException("platform admin required");
+    if (!companyId) return null;
+    return { roles: githubAdminDetail(companyId) };
   }
 
   /** The hub's tool-call decision audit — who called what, allowed or denied, and why. */

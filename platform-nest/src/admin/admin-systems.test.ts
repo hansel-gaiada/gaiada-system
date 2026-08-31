@@ -301,6 +301,23 @@ describe.skipIf(!TEST_URL)("admin systems aggregator (Phase C)", () => {
     expect(rows[0].reason).toContain("suspend");
   });
 
+  it("GH-02 §4.7 github/detail: null with no companyId, both roles reported once one is given", async () => {
+    const bare = (await app.inject({ method: "GET", url: `/api/admin/github/detail`, headers: asUser(admin) })).json();
+    expect(bare).toBeNull(); // same "nothing to show yet" shape as an unreachable gateway/hub
+
+    const res = await app.inject({ method: "GET", url: `/api/admin/github/detail?companyId=${tenantA}`, headers: asUser(admin) });
+    expect(res.statusCode).toBe(200);
+    const d = res.json() as { roles: Array<{ role: string; readOnly: boolean; configured: boolean; tokenCached: boolean }> };
+    expect(d.roles.map((r) => r.role)).toEqual(["erp", "agents"]);
+    // Nothing sealed/configured in this suite -> honestly unconfigured, never fabricated.
+    expect(d.roles.every((r) => !r.configured && !r.tokenCached)).toBe(true);
+    expect(d.roles.find((r) => r.role === "agents")?.readOnly).toBe(true);
+    expect(d.roles.find((r) => r.role === "erp")?.readOnly).toBe(false);
+
+    // Non-elevated callers cannot see it, matching every other route on this controller.
+    expect((await app.inject({ method: "GET", url: `/api/admin/github/detail?companyId=${tenantA}`, headers: asUser(member) })).statusCode).toBe(403);
+  });
+
   it("automation exposes execution history and bridge health", async () => {
     config.services.automation = { url: config.services.automation.url, token: "n8n-key" };
     const runs = (await app.inject({ method: "GET", url: `/api/admin/automation/executions`, headers: asUser(admin) })).json() as Array<{ workflowName: string; status: string }>;

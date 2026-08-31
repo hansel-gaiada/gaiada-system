@@ -72,8 +72,12 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // 380 -> 382 / 365 -> 367.
     // WSK-31 (2026-08-27): +2 grantable / +2 total, on the EXISTING webdev_provisioned_site kind
     // (operate, promote — the §07 WebDesk control-plane MCP tool set's Zone A authz), 382 -> 384 / 367 -> 369.
-    expect(permissions.length).toBe(387);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(372);
+    // GH-03 (2026-08-31): +9 grantable / +9 total, on the NEW github_repo kind (read/link/unlink/
+    // push/merge/deploy/secret_write/create_repo/delete_repo — the four D14-gated ones ARE grantable
+    // in the catalog sense, per 0094's bundling methodology for attribute-gated rules), 387 -> 396 /
+    // 372 -> 381.
+    expect(permissions.length).toBe(396);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(381);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

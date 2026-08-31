@@ -23,7 +23,7 @@ import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../auth/guards";
 import { authorize } from "./http";
 import {
-  CLIENT_SETTABLE_STATUSES, CONNECTION_OWNER_KINDS, CONNECTION_PROVIDERS,
+  CLIENT_CREATABLE_OWNER_KINDS, CLIENT_SETTABLE_STATUSES, CONNECTION_PROVIDERS,
   createConnection, getConnectionRow, listConnections, patchConnection, revokeConnection,
   type ConnectionDbRow,
 } from "./integrations.service";
@@ -120,7 +120,10 @@ export class IntegrationsController {
   @HttpCode(201)
   async create(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Body() body: CreateBody) {
     const ownerKind = body?.ownerKind ?? "user";
-    if (!CONNECTION_OWNER_KINDS.has(ownerKind)) throw new BadRequestException("ownerKind must be user|company");
+    // Client-facing surface, NOT the full DB-valid set — 'github_app' is ops-provisioned only
+    // (github/credential-store.ts), never created through this endpoint. See
+    // CLIENT_CREATABLE_OWNER_KINDS's doc comment in integrations.service.ts.
+    if (!CLIENT_CREATABLE_OWNER_KINDS.has(ownerKind)) throw new BadRequestException("ownerKind must be user|company");
     if (!body?.provider || !CONNECTION_PROVIDERS.has(body.provider)) {
       throw new BadRequestException(`provider must be one of ${[...CONNECTION_PROVIDERS].join(",")}`);
     }

@@ -46,6 +46,12 @@ import { ContractsController } from "./core/contracts.controller";
 // module: there is no `src/modules/webdev/`, and `webdev_change_requests` takes the plain tenant wall
 // (D-2a) so no ModuleEnabledGuard belongs in front of triage. See the controller's own header.
 import { WebdevChangeRequestsController } from "./core/webdev-change-requests.controller";
+// GH-08: BFF for the GitHub repo registry (list/detail/link/unlink). Deliberately its own
+// controller file outside `core/github/` — see that file's own header for why.
+import { GithubReposController } from "./core/github-repos.controller";
+// GH-07: the webhook receiver (`POST /api/webhooks/github`) + reverse attribution. Own controller,
+// same "outside core/github/" placement reasoning as GithubReposController immediately above.
+import { GithubWebhookController } from "./core/github-webhook.controller";
 import { FilesController } from "./core/files.controller";
 import { CreativeController } from "./core/creative.controller";
 import { WorkActivityController } from "./core/work-activity.controller";
@@ -149,7 +155,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, HrController, LoansController,

@@ -17,6 +17,12 @@ import { GatewayNotConfiguredErrorFilter } from "./modules/search/gateway-not-co
 // SM-25a: the Google-surface error family (modules/search/google/errors.ts). Registered here for
 // exactly the reason SM-53/SM-57 had to be — an unmapped plain Error escapes as a body-less 500.
 import { GoogleOAuthErrorFilter } from "./modules/search/google/google-oauth-error.filter";
+// GH-02 — the GitHub-surface error family (core/github/errors.ts). Same reasoning as SM-25a/SM-53/
+// SM-57 immediately above: a plain Error escapes as a body-less 500 without a mapping filter.
+import { GithubErrorFilter } from "./core/github/github-error.filter";
+// GH-06 — the org crawl + periodic reconcile sweep's background-loop starter (see the call site
+// near the other dark-by-default sweeps below for why it is gated the way it is).
+import { startGithubRepoSyncLoop } from "./core/github/repo-sync.service";
 import { ClientAccessErrorFilter } from "./core/client-access-error.filter";
 // SMM-05 — the social publisher's typed refusals. Registered for the same reason its search
 // sibling above is: SocialPublisherError is a plain Error, so without a filter every refusal —
@@ -143,6 +149,10 @@ import { startMailSenderLoop } from "./mail/sender";
 // URL-scoped raw-body hook rather than a global parser change.
 import type { FastifyInstance } from "fastify";
 import { registerInboundRawBodyCapture } from "./mail/inbound/raw-body";
+// GH-07 (docs/blueprints/github-integration-foundation.md §4.5) — the webhook receiver's own
+// URL-scoped raw-body hook, same shape as MAIL-13's immediately above (HMAC needs the exact bytes
+// GitHub signed, not a re-parsed/re-serialized object). See core/github-webhook-raw-body.ts.
+import { registerGithubWebhookRawBodyCapture } from "./core/github-webhook-raw-body";
 import { registerRequestContext } from "./core/request-context";
 // 2026-08-24 — `:tenantId` shape validation. See src/core/tenant-param.ts for why this is a root
 // hook rather than a pipe on 602 `@Param("tenantId")` call sites.
@@ -187,6 +197,9 @@ export async function buildApp(): Promise<NestFastifyApplication> {
     new ProviderDispatchErrorFilter(),
     new GatewayNotConfiguredErrorFilter(),
     new GoogleOAuthErrorFilter(),
+    // GH-02: same family-of-fixes shape as GoogleOAuthErrorFilter immediately above — one filter for
+    // the whole GithubSurfaceError hierarchy, each subclass carrying its own status/code.
+    new GithubErrorFilter(),
     // FINANCE-APP: the FINANCE_* refusal family arrives as pg DatabaseError (a plain Error), so
     // HttpErrorFilter never saw it and every accounting refusal surfaced as a body-less 500.
     // Same class of bug as the four this file already carries. See the filter's own header.
@@ -216,6 +229,11 @@ export async function buildApp(): Promise<NestFastifyApplication> {
   // mail well below the documented `MAIL_INBOUND_MAX_BYTES` cap. URL-scoped, so no other route's
   // parsing behaviour changes — see src/mail/inbound/raw-body.ts for the full rationale.
   registerInboundRawBodyCapture(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
+  // GH-07 — same URL-scoped-hook shape as the mail inbound one immediately above, for
+  // `POST /api/webhooks/github` only. Must be registered before `app.init()` for the same reason
+  // every other root Fastify hook in this function is — see registerTenantParamValidation's own
+  // comment below for why that ordering is load-bearing, not stylistic.
+  registerGithubWebhookRawBodyCapture(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
   // [agent-attribution-gate] interim — wrap every request in an AsyncLocalStorage box so
   // `writeActivity` can record WHICH CHANNEL (and which agent) drove a write without threading a
   // parameter through 263 call sites. See src/core/request-context.ts for why ambient beats explicit
@@ -706,6 +724,23 @@ async function bootstrap(): Promise<void> {
     startMailSenderLoop(config.mail.senderIntervalMs);
     // eslint-disable-next-line no-console
     console.log(`mail sender on: every ${config.mail.senderIntervalMs}ms (MAIL_ENABLED=1)`);
+  }
+  // GH-06 (docs/blueprints/github-integration-foundation.md §5.3): the org crawl + periodic
+  // reconcile sweep that populates `github_repos`. A plain call through the existing GH-01/GH-02
+  // GitHub chokepoint (core/github/github-app.service.ts) — no Redis dependency, same
+  // dark-by-default pattern as the sweeps above. Gated on BOTH the flag AND a configured tenant id
+  // (config.githubRepoSync): unlike the sweeps above there is no sensible "on but misconfigured"
+  // state here — starting it without a tenant id would mean guessing which company owns the org,
+  // which §5.2's GAP-CLOSED ruling explicitly forbids this layer from doing.
+  if (config.githubRepoSync.enabled && config.githubRepoSync.tenantId) {
+    startGithubRepoSyncLoop(config.githubRepoSync.tenantId, config.githubRepoSync.intervalMs);
+    // eslint-disable-next-line no-console
+    console.log(
+      `github repo sync (GH-06) on: every ${config.githubRepoSync.intervalMs}ms, tenant=${config.githubRepoSync.tenantId}`,
+    );
+  } else if (config.githubRepoSync.enabled) {
+    // eslint-disable-next-line no-console
+    console.warn("GITHUB_REPO_SYNC_ENABLED=true but GITHUB_REPO_SYNC_TENANT_ID is unset — sweep NOT started");
   }
   const app = await buildApp();
   const port = Number(process.env.PLATFORM_PORT ?? 3004);

@@ -126,15 +126,31 @@ export async function authorize(principal: Principal, resource: Resource, action
  *
  * A caller that passes its own `metadata.via` WINS — the executor re-driving an approved write knows
  * the original filing channel, which is better provenance than the channel of the retry.
+ *
+ * ── GH-04 WIDENING (2026-08-31): `entityId` now accepts `null`, and the function now RETURNS the
+ * generated row id ────────────────────────────────────────────────────────────────────────────────
+ * Both are additive, not opt-in parameters — no existing call site changes shape or behaviour.
+ *
+ *  - `entityId: string | null`. Every pre-GH-04 caller passes a real DB row's uuid. GitHub's own
+ *    per-repo registry (`github_repos`, GH-05) does not exist in this checkout, so a GitHub-op
+ *    ledger row (core/github/ledger.ts) has no uuid to put here YET — and a non-uuid string (a repo
+ *    `org/name`) would fail the column's uuid cast, not silently store wrong data. `null` is what
+ *    the schema already allows (`target_entity_id uuid` — nullable); this only unlocks passing it.
+ *    Once GH-05/06 land, a GitHub caller can pass the real `github_repos.id` and stop passing null.
+ *  - Return type `Promise<string>`. §4.4 of the GitHub blueprint requires a commit trailer
+ *    `Gaiada-Activity: <activities.id>` — the id of THIS row, minted before the GitHub call it
+ *    records the attempt for. Returning the id `writeActivity` already generates (`newId()` below)
+ *    is the correlation handle GH-04's ledger wrapper and GH-07's webhook reverse-mapping need; it
+ *    costs nothing to callers that ignore the return value, which is all 263 of them today.
  */
 export async function writeActivity(
   tenantId: string,
   actorId: string | null,
   verb: string,
   entityType: string,
-  entityId: string,
+  entityId: string | null,
   metadata: Record<string, unknown> = {},
-): Promise<void> {
+): Promise<string> {
   const via = currentVia();
   const withVia = via && metadata.via === undefined ? { ...metadata, via } : metadata;
   // The APPROVAL behind this write, if one was required (202608261100). Ambient for the same reason
@@ -146,15 +162,17 @@ export async function writeActivity(
   // The DB CHECK enforces the pairing (an approver without a channel is rejected), so a half-recorded
   // approval cannot be stored at all.
   const appr = currentApproval();
+  const id = newId();
   await withTenants([tenantId], (c) =>
     c.query(
       `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site,
                                approved_by, approval_channel, executed_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [newId(), tenantId, actorId, verb, entityType, entityId, JSON.stringify(withVia), config.originSite,
+      [id, tenantId, actorId, verb, entityType, entityId, JSON.stringify(withVia), config.originSite,
        appr?.approvedBy ?? null, appr?.channel ?? null, appr?.executedBy ?? null],
     ),
   );
+  return id;
 }
 
 /** Typed notification payload contract (WSUX-4; FRONTEND-BFF-CONTRACT §9(c)): every notification

@@ -15,7 +15,22 @@ import { emitEvent } from "../events/outbox.service";
 import { encryptSecret, TOKEN_KEY_VERSION } from "./secret-box";
 
 export const CONNECTION_PROVIDERS = new Set(["github", "google_drive", "claude"]);
-export const CONNECTION_OWNER_KINDS = new Set(["user", "company"]);
+/** Every owner_kind the DB CHECK admits (migration 202608311000 added 'github_app' — GH-01 §2.3(b)
+ *  corrected). NOT the set a client may create through the generic HTTP API — see
+ *  CLIENT_CREATABLE_OWNER_KINDS below for that. */
+export const CONNECTION_OWNER_KINDS = new Set(["user", "company", "github_app"]);
+/** The subset of CONNECTION_OWNER_KINDS a caller may pass to POST /connections. Deliberately
+ *  EXCLUDES 'github_app': those rows are ops-provisioned via github/credential-store.ts only (App
+ *  private keys, sealed outside any request a client can shape), never created by a user or company
+ *  admin clicking through the generic connections UI. Same idiom as CLIENT_SETTABLE_STATUSES below —
+ *  a schema-valid value is not automatically a client-writable one.
+ *
+ *  The read side goes further than "list-only": integrations.controller.ts's GET list endpoint's
+ *  `owner=` selector only recognizes `me | company | user:<id>` (no `github_app` branch), so a
+ *  github_app row is currently unreachable through the generic connections HTTP API in EITHER
+ *  direction — not merely write-excluded. It is read exclusively through credential-store.ts's own
+ *  direct service-layer calls (loadAppCredential/loadAppCredentialOrThrow). */
+export const CLIENT_CREATABLE_OWNER_KINDS = new Set(["user", "company"]);
 export const CONNECTION_STATUSES = new Set(["unconfigured", "pending", "linked", "error", "revoked"]);
 /** Statuses a client may set directly via PATCH. 'linked' is reserved for the token path (setting it
  *  by hand would falsely imply a stored credential); 'revoked' goes through DELETE (soft revoke). */

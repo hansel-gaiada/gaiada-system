@@ -1,0 +1,22 @@
+/* GH-09 — Sites/Repos registry. New surface, own prefix (`ghr-`) per platform-ui/CLAUDE.md's class
+   prefix rule ("a genuinely new surface gets a new prefix, never a bare class name"). No colour
+   literals: every tone below rides `--status-*`/`--erp-*` tokens, per the tokens.test.ts guard. */
+
+.ghr-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ghr-toggle-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ghr-tag { display: inline-flex; align-items: center; gap: 5px; font: 600 11px var(--font-body); letter-spacing: 0.02em; white-space: nowrap; }
+.ghr-tag__dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+
+.ghr-repo-cell { display: flex; flex-direction: column; gap: 2px; }
+.ghr-repo-cell__link { font: 600 14px var(--font-body); color: var(--text-primary); text-decoration: none; }
+.ghr-repo-cell__link:hover { text-decoration: underline; }
+.ghr-repo-cell__meta { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+
+.ghr-commit-cell { display: flex; flex-direction: column; gap: 2px; }
+.ghr-commit-cell__when { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+
+.ghr-sync-cell { display: flex; flex-direction: column; gap: 2px; }
+.ghr-sync-cell__asof { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+
+.ghr-unlinked-note { margin: 0 0 12px; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); }

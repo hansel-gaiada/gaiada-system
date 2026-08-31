@@ -1,0 +1,25 @@
+{
+  "name": "gaiada-erp",
+  "description": "The Gaiada ERP's hands on GitHub. FALLBACK MANIFEST: read-only permission set sufficient for the phase-1 repo registry (GH-05..09). Write permissions are added afterwards in the app's settings UI. See docs/blueprints/github-integration-foundation.md §2.2 for the full intended set.",
+  "url": "https://erp.gaiada.online",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://erp.gaiada.online/api/webhooks/github",
+    "active": true
+  },
+  "redirect_url": "http://localhost:8765/callback",
+  "default_events": [
+    "push",
+    "pull_request",
+    "workflow_run",
+    "repository"
+  ],
+  "default_permissions": {
+    "metadata": "read",
+    "contents": "read",
+    "pull_requests": "read",
+    "actions": "read",
+    "statuses": "read",
+    "checks": "read"
+  }
+}

@@ -6,10 +6,10 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 144,
-      "grantablePermissionsInCatalog": 372,
-      "permissionsCoveredByGroups": 344,
-      "permissionsAdvancedOnly": 28,
+      "groups": 145,
+      "grantablePermissionsInCatalog": 381,
+      "permissionsCoveredByGroups": 349,
+      "permissionsAdvancedOnly": 32,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 100
     }
@@ -1657,6 +1657,20 @@
         "finance.posting_rule.activate"
       ],
       "sensitive": true
+    },
+    {
+      "key": "github_repos",
+      "name": "GitHub Repos",
+      "domain": "core",
+      "description": "View the ERP's GitHub repo registry, link/unlink a repo to a site or project, and push/merge through the ERP's single GitHub chokepoint. GH-03.",
+      "permissions": [
+        "core.github_repo.read",
+        "core.github_repo.link",
+        "core.github_repo.unlink",
+        "core.github_repo.push",
+        "core.github_repo.merge"
+      ],
+      "sensitive": false
     }
   ],
   "advancedOnly": [
@@ -1771,6 +1785,22 @@
     {
       "key": "webdev.provisioned_site.promote",
       "reason": "WSK-31: the §07 WebDesk HIGH control-plane commands (site.promote/rollback/setDomain, key.mint/rotate/revoke, site.archive) — always WS4-gated for every principal class (mcp-hub's ALWAYS_WS4_TOOLS), routed to an honest 501 stub pending WSK-23's Zone B egress client. advancedOnly for the same reason webdev.provisioned_site.operate is."
+    },
+    {
+      "key": "core.github_repo.deploy",
+      "reason": "GH-03 (2026-08-31): D14-gated in Cerbos (approvalId required, never reachable by role tier alone) -- advancedOnly until a dedicated approval-authoring surface exists, matching core.position.assign's own precedent for an action that confers real authority."
+    },
+    {
+      "key": "core.github_repo.secret_write",
+      "reason": "GH-03 (2026-08-31): D14-gated in Cerbos (approvalId required, never reachable by role tier alone) -- advancedOnly until a dedicated approval-authoring surface exists, matching core.position.assign's own precedent for an action that confers real authority."
+    },
+    {
+      "key": "core.github_repo.create_repo",
+      "reason": "GH-03 (2026-08-31): D14-gated in Cerbos (approvalId required, never reachable by role tier alone) -- advancedOnly until a dedicated approval-authoring surface exists, matching core.position.assign's own precedent for an action that confers real authority."
+    },
+    {
+      "key": "core.github_repo.delete_repo",
+      "reason": "GH-03 (2026-08-31): D14-gated in Cerbos (approvalId required, never reachable by role tier alone) -- advancedOnly until a dedicated approval-authoring surface exists, matching core.position.assign's own precedent for an action that confers real authority."
     }
   ]
 }

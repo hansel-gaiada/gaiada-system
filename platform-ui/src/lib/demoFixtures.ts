@@ -12,6 +12,7 @@ import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { webdevConsoleDemo } from "./demoWebdevConsole";
+import { githubReposDemo } from "./demoGithubRepos";
 import { monitoringDemo } from "./demoMonitoring";
 import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
@@ -2032,6 +2033,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // rather than a bare array with no `.meta` to read staleness off of.
   const webdevConsole = webdevConsoleDemo(method, p, url.searchParams);
   if (webdevConsole) return webdevConsole;
+
+  // GH-09 — Sites/Repos registry, consuming GH-08's `/github/repos` read (§25). Read-only fixture
+  // (lib/demoGithubRepos.ts); placed here, before the generic `ok([])` GET fallback further down,
+  // for the same reason as the WSK-24 entry above it — a bare `[]` would silently satisfy
+  // `listGithubRepos()`'s `{repos,total,limit,offset}` shape and hide a real backend problem
+  // behind a fake "zero repos, zero total" response.
+  const githubRepos = githubReposDemo(method, p, url.searchParams);
+  if (githubRepos) return githubRepos;
 
   // MON — monitoring board (Plane B: client properties + services). Read-only fixtures
   // (lib/demoMonitoring.ts); seeded with a down/degraded/stale/maintenance/unknown spread so every
