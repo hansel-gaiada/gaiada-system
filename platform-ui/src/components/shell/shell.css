@@ -148,7 +148,12 @@
 .erp-top__bell:hover { color: var(--text-primary); }
 .erp-top__badge { position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px; padding: 0 4px; background: var(--erp-accent); color: var(--text-on-accent); font: 700 9px var(--font-body); display: inline-flex; align-items: center; justify-content: center; }
 .erp-main { grid-area: main; overflow-y: auto; min-height: 0; }
-.erp-main__inner { padding: 30px 32px 40px; max-width: 1180px; }
+/* CENTRED. This had a max-width and no `margin: 0 auto`, so on any screen
+   wider than 1180px every page in the app hugged the left edge with the
+   remainder as dead space on the right — which is what "the layout still
+   looks different" was on most pages. The design centres its content
+   column at 1160px. Not a per-page problem: it was every page. */
+.erp-main__inner { padding: 30px 32px 40px; max-width: 1160px; margin: 0 auto; }
 /* ---- Global "+ New" menu ---- */
 .erp-new { position: relative; }
 /* Bright gold, and --ink-on-accent-fill rather than --text-on-accent: in LIGHT
@@ -224,15 +229,26 @@
 
 /* ---- Sidebar eyebrows (class-based so media queries can reach them) ---- */
 .erp-side__tagline { flex-basis: 100%; display: block; margin-top: 2px; opacity: 0.6; font-size: 11px; }
-.erp-side__grouplabel { display: block; padding: 18px 10px 8px; opacity: 0.75; font-size: 12px; }
+.erp-side__grouplabel { display: block; flex: 1; min-width: 0; padding: 0; opacity: 1; font: 400 13px var(--font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- Collapsible nav groups ---- */
-.erp-navgroup__head { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 8px 0 0; border: none; background: transparent; color: inherit; cursor: pointer; }
-.erp-navgroup__head:hover .erp-side__grouplabel { opacity: 0.75; }
-.erp-navgroup__chev { display: inline-flex; margin-top: 11px; color: var(--ink-subtle); transition: transform 0.2s var(--erp-ease); }
+/* The design carries the ICON on the GROUP row and leaves the children as
+   plain indented text under a rule. We had it the other way round: a bare
+   tiny label for the group, an icon on every child. That is the single
+   biggest reason the sidebar still read differently. */
+.erp-navgroup__head { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 12px 9px 14px; margin: 1px 0; border: none; border-radius: var(--radius-md); background: transparent; color: var(--ink-muted); cursor: pointer; text-align: left; transition: background 0.18s var(--erp-ease); }
+.erp-navgroup__head:hover { background: var(--tint-hover); color: var(--text-primary); }
+.erp-navgroup__icon { display: inline-flex; align-items: center; flex-shrink: 0; }
+.erp-navgroup__head .erp-navgroup__chev { margin-left: auto; }
+.erp-navgroup__chev { display: inline-flex; flex-shrink: 0; color: var(--ink-subtle); transition: transform 0.2s var(--erp-ease); }
 .erp-navgroup--open .erp-navgroup__chev { transform: rotate(90deg); }
 .erp-navgroup__items { display: none; }
-.erp-navgroup--open .erp-navgroup__items { display: block; }
+.erp-navgroup--open .erp-navgroup__items { display: block; margin: 2px 0 8px 27px; padding-left: 6px; border-left: 1px solid var(--glass-divider); }
+/* Child rows are plain text in the design. Scoped so the collapsed rail —
+   where a glyph is the ONLY thing identifying a row — keeps its icons, and
+   so does the rail flyout, which lives in .erp-railmenu, not here. */
+html:not([data-sidebar="collapsed"]) .erp-navgroup__items .erp-navbtn > svg { display: none; }
+html:not([data-sidebar="collapsed"]) .erp-navgroup__items .erp-navbtn { padding: 7px 10px; font-size: 13px; }
 
 /* ---- Mobile navigation: burger + off-canvas drawer + scrim ----
    Hidden above the drawer breakpoint, where the sidebar is a real grid column

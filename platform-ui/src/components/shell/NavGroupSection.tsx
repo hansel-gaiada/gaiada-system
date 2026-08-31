@@ -5,7 +5,6 @@ import { Icon } from "./icons";
 import { NavLink } from "./NavLink";
 import { RailCategory } from "./RailCategory";
 import { useSidebarState } from "./sidebarState";
-import { Eyebrow } from "@/components/ui";
 import { type NavGroup } from "./nav";
 
 // One collapsible unit per group, so ~35 destinations don't all compete at once.
@@ -43,7 +42,13 @@ export function NavGroupSection({ group }: { group: NavGroup }) {
         aria-controls={id}
         onClick={() => setOverride(!open)}
       >
-        <Eyebrow className="erp-side__grouplabel">{group.label}</Eyebrow>
+        {/* The group carries the glyph in the design; children are plain text.
+            `?? "box"` mirrors the rail's own documented fallback for a group
+            that never declared one (Workspace is pinned and has none). */}
+        <span className="erp-navgroup__icon" aria-hidden="true">
+          <Icon name={group.icon ?? "box"} size={17} />
+        </span>
+        <span className="erp-side__grouplabel">{group.label}</span>
         <span className="erp-navgroup__chev">
           <Icon name="chevron" size={14} />
         </span>
