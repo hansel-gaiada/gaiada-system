@@ -2,7 +2,7 @@
   "name": "gaiada-platform-nest",
   "version": "0.1.0",
   "private": true,
-  "description": "Gaiada Platform core — NestJS port of the Fastify v1 core (spec-locked backend, WS1). Contract-identical; the 86 platform tests are the parity oracle.",
+  "description": "Gaiada Platform core \u2014 NestJS port of the Fastify v1 core (spec-locked backend, WS1). Contract-identical; the 86 platform tests are the parity oracle.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
@@ -55,7 +55,8 @@
     "check:shards": "node scripts/check-shards.mjs",
     "gen:role-bundles": "node scripts/generate-role-bundles.mjs",
     "gen:scope-constrained-roles": "node scripts/generate-scope-constrained-roles.mjs",
-    "seed:hr-statutory-ratify": "node dist/seed/hr-statutory-ratify.js"
+    "seed:hr-statutory-ratify": "node dist/seed/hr-statutory-ratify.js",
+    "provision:client-portal-logins": "node dist/admin/provision-client-portal-logins.js"
   },
   "dependencies": {
     "@fastify/multipart": "^8.3.1",
