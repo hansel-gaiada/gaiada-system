@@ -31,7 +31,7 @@ Node scripts per component:
 - `hermes-gateway` — `start`, `test`
 - `lab-runner` — `dev`, `start`, `test`, `typecheck`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `check:function-drift`, `check:shards`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-immutable`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-demo`, `seed:finance-live-defaults`, `seed:hr-config`, `seed:hr-statutory-ratify`, `seed:lms-creative-social`, `seed:lms-general-track`, `seed:lms-hr-it`, `seed:lms-seo-gm`, `seed:lms-webdev-curriculum`, `seed:lms-webdev-labs`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `test:perf`, `typecheck`
+- `platform-nest` — `build`, `check:function-drift`, `check:shards`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-immutable`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:client-portal-logins`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-demo`, `seed:finance-live-defaults`, `seed:hr-config`, `seed:hr-statutory-ratify`, `seed:lms-creative-social`, `seed:lms-general-track`, `seed:lms-hr-it`, `seed:lms-seo-gm`, `seed:lms-webdev-curriculum`, `seed:lms-webdev-labs`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `test:perf`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202608272010_iam_finance_ap_credit_writeoff.sql`
+- Head: `202608301116_webdev_sites_origin_probe.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 204 (121 legacy `NNNN_`, 83 timestamped)
+- Applied files on disk: 210 (121 legacy `NNNN_`, 89 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -357,6 +357,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/search-terms`
 - `/departments/[deptId]/sites`
 - `/departments/[deptId]/sites/[slug]`
+- `/departments/[deptId]/sites/portfolio`
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
