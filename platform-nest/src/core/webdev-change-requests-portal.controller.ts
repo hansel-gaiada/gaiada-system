@@ -115,10 +115,13 @@ export class WebdevChangeRequestsPortalController {
     },
   ) {
     const b = body ?? {};
+    // AUTHORIZE BEFORE VALIDATE — same fix as createProject / triage. This one faces CLIENTS, so
+    // leaking the request contract to someone who may not file a change request is the least
+    // acceptable of the three. Nothing below the call depends on the body.
+    await authorize(req.principal, { kind: "portal", tenantId }, "request_change");
     if (!KINDS.has(b.kind ?? "")) throw new BadRequestException("kind must be one of content|design|feature|bug");
     const title = (b.title ?? "").trim();
     if (!title) throw new BadRequestException("title is required");
-    await authorize(req.principal, { kind: "portal", tenantId }, "request_change");
 
     const id = newId();
     const kind = b.kind as string;

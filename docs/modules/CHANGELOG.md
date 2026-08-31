@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.48.0` - authorize before validate on the three write paths (2026-08-31) - PROTOTYPED
+
+`createProject`, webdev change-request `triage` and the client-facing portal `create` all ran
+their payload checks **before** `authorize()`. Two consequences, one of which had already bitten:
+
+- A caller with no rights on the tenant received a field-level description of the write contract
+  (`{field: "clientId"}`, `"severity must be critical|high|medium|low"`) instead of a denial.
+  The portal one faces **clients**, which makes it the least acceptable of the three.
+- Any newly-required field silently demoted every denial-path test that posts an incomplete
+  payload from asserting 403 to asserting 400. This is not hypothetical: adding the `clientId`
+  gate turned `seed/automation.test.ts`'s "unseeded workflow id → ANONYMOUS → denied" probe into
+  a 400, so it stopped exercising the identity chain it exists to pin while still looking green
+  once someone relaxed the expectation. The `severity` gate did the same to
+  `webdev-cr-race.test.ts`'s MI-03 probe.
+
+The `authorize` call moves to the top of each handler; nothing in any of the three depends on the
+body (`ownerId` is the principal's own id). `automation.test.ts` is restored to posting a
+deliberately incomplete payload and asserting 403 — if that ever reads 400 again, the ordering
+regressed. `projects-client.test.ts` gains a test that pins the ordering directly: a real,
+resolvable principal with rights on a *different* company posts an invalid payload and must be
+denied on identity, with no `clientId` in the response.
+
+**Contract change:** an unauthorized caller who also sends a malformed body now gets **403 where it
+previously got 400**. Authorized callers are unaffected — same validation, same messages.
+
+
 > **Renumbered at merge (2026-08-31):** the five `reva/ui` entries below landed there as
 > platform-nest `0.40.0`–`0.43.0`, platform-ui `0.55.0`, mcp-hub `0.11.2`; `main` had already used
 > those numbers for other work, so they are `0.44.0`–`0.47.0`, `0.62.0` and `0.12.1` here. The
@@ -4061,6 +4087,102 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > (which already carries OBS-01), not the recorded manifest — so OBS-01 is not re-counted below.
 > Not corrected retroactively (moving a pushed, already-deployed tag is its own risk); flagging so
 > the next session doesn't re-diagnose the same gap.
+
+> **⚠ LOG GAP CLOSED (2026-08-31), PARTIALLY.** Rule 2 ("every app version records its module
+> manifest") had been skipped for every cut after `0144a` — **69 releases**, none of them
+> reconstructible from this file. The table below back-fills them. It is *reconstructed evidence,
+> not recovered prose*: the manifests come from each tag's own `MODULES.md`
+> (`git show <tag>:docs/modules/MODULES.md` remains the authoritative full manifest for any cut),
+> so the module movements are exact, but the narrative of *why* each release was cut is not
+> recoverable and is deliberately not invented here. Two entries above (`0144a`) and the three
+> named in the older gap notice still have no tag at all.
+>
+> **⚠ THE FORMAT IN `VERSIONING.md` NO LONGER DESCRIBES PRACTICE — needs an owner ruling.**
+> Measured across these 69 cuts:
+> - the **app release counter** (`071`) has not moved since `0147a` on 2026-08-24 — **65
+>   consecutive releases** share it, though rule 3 says "+1 for every app version that gets cut".
+> - the **module-reference counter** advances by exactly **+1 per release** regardless of module
+>   movement: **33** of these cuts moved *no* module version at all, and **13** moved more than one.
+>   Rule 4 says it is derived — "if a release bumps `platform-nest` and `platform-ui`, the counter
+>   advances by 2".
+>
+> So the third field is de facto a plain release counter and the second field is dead. Cutting a
+> release today follows *practice* (+1 on the third field), because `deploy.yml` cross-checks the
+> tag against `/VERSION` and the other sessions cutting releases assume it. Do not "fix" this by
+> quietly editing either the doc or a version — decide which is authoritative and record it in the
+> decision log.
+
+| App version | Cut | Module versions moved (vs the previous cut) |
+|---|---|---|
+| `Alpha 01.068.0144a` | 2026-08-23 | platform-ui `0.44.0`→`0.45.0` |
+| `Alpha 01.069.0145a` | 2026-08-23 | platform-ui `0.45.0`→`0.46.0` |
+| `Alpha 01.070.0146a` | 2026-08-24 | platform-nest `0.36.3`→`0.36.4` |
+| `Alpha 01.070.0146b` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0147a` | 2026-08-24 | platform-nest `0.36.4`→`0.36.5` |
+| `Alpha 01.071.0148a` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0148b` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0148c` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0148d` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0149a` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0149b` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0149c` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0150a` | 2026-08-24 | platform-nest `0.36.5`→`0.38.0`, platform-ui `0.46.0`→`0.49.0`, hr `—`→`0.4.0` |
+| `Alpha 01.071.0151a` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0152a` | 2026-08-24 | *(no module version moved)* |
+| `Alpha 01.071.0153a` | 2026-08-25 | lms `—`→`0.1.0`, finance `—`→`0.9.0` |
+| `Alpha 01.071.0155a` | 2026-08-25 | platform-ui `0.49.0`→`0.50.0`, lms `0.1.0`→`0.2.0`, finance `0.9.0`→`0.10.0` |
+| `Alpha 01.071.0156a` | 2026-08-25 | platform-nest `0.38.0`→`0.38.1`, lms `0.2.0`→`0.4.0` |
+| `Alpha 01.071.0157a` | 2026-08-25 | lab-runner `—`→`0.1.0`, finance `0.10.0`→`0.11.0` |
+| `Alpha 01.071.0158a` | 2026-08-25 | finance `0.11.0`→`0.12.0` |
+| `Alpha 01.071.0159a` | 2026-08-25 | finance `0.12.0`→`0.13.0` |
+| `Alpha 01.071.0160a` | 2026-08-25 | platform-ui `0.50.0`→`0.51.0`, lms `0.4.0`→`0.5.0`, lab-runner `0.1.0`→`0.1.1`, finance `0.13.0`→`0.14.0` |
+| `Alpha 01.071.0161a` | 2026-08-25 | finance `0.14.0`→`0.14.1` |
+| `Alpha 01.071.0162a` | 2026-08-25 | lms `0.5.0`→`0.7.0`, lab-runner `0.1.1`→`0.2.1` |
+| `Alpha 01.071.0163a` | 2026-08-25 | *(no module version moved)* |
+| `Alpha 01.071.0164a` | 2026-08-25 | *(no module version moved)* |
+| `Alpha 01.071.0165a` | 2026-08-25 | *(no module version moved)* |
+| `Alpha 01.071.0166a` | 2026-08-25 | platform-ui `0.51.0`→`0.52.0` |
+| `Alpha 01.071.0167a` | 2026-08-26 | platform-nest `0.38.1`→`0.39.0`, hr `0.4.0`→`0.5.0` |
+| `Alpha 01.071.0168a` | 2026-08-26 | platform-ui `0.52.0`→`0.54.0` |
+| `Alpha 01.071.0169a` | 2026-08-26 | platform-nest `0.39.0`→`0.39.1` |
+| `Alpha 01.071.0170a` | 2026-08-26 | platform-nest `0.39.1`→`0.39.2` |
+| `Alpha 01.071.0171a` | 2026-08-26 | platform-nest `0.39.2`→`0.40.0`, platform-ui `0.54.0`→`0.57.0` |
+| `Alpha 01.071.0172a` | 2026-08-26 | platform-nest `0.40.0`→`0.40.1` |
+| `Alpha 01.071.0173a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0174a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0175a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0176a` | 2026-08-26 | platform-ui `0.57.0`→`0.58.0` |
+| `Alpha 01.071.0177a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0178a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0179a` | 2026-08-26 | webdesk `0.0.0`→`0.1.0` |
+| `Alpha 01.071.0180a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0181a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0182a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0183a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0184a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0185a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0186a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0187a` | 2026-08-26 | *(no module version moved)* |
+| `Alpha 01.071.0188a` | 2026-08-27 | *(no module version moved)* |
+| `Alpha 01.071.0189a` | 2026-08-27 | *(no module version moved)* |
+| `Alpha 01.071.0190a` | 2026-08-27 | platform-ui `0.58.0`→`0.59.0`, finance `0.14.1`→`0.15.0` |
+| `Alpha 01.071.0191a` | 2026-08-27 | platform-ui `0.59.0`→`0.59.1` |
+| `Alpha 01.071.0192a` | 2026-08-27 | platform-ui `0.59.1`→`0.60.0`, finance `0.15.0`→`0.16.0` |
+| `Alpha 01.071.0193a` | 2026-08-30 | webdesk `0.1.0`→`0.2.0` |
+| `Alpha 01.071.0194a` | 2026-08-30 | platform-nest `0.40.1`→`0.41.0`, mcp-hub `0.11.1`→`0.12.0` |
+| `Alpha 01.071.0195a` | 2026-08-30 | *(no module version moved)* |
+| `Alpha 01.071.0196a` | 2026-08-30 | *(no module version moved)* |
+| `Alpha 01.071.0197a` | 2026-08-30 | *(no module version moved)* |
+| `Alpha 01.071.0198a` | 2026-08-30 | *(no module version moved)* |
+| `Alpha 01.071.0199a` | 2026-08-30 | platform-nest `0.41.0`→`0.42.0` |
+| `Alpha 01.071.0200a` | 2026-08-30 | *(no module version moved)* |
+| `Alpha 01.071.0201a` | 2026-08-30 | platform-nest `0.42.0`→`0.42.1` |
+| `Alpha 01.071.0202a` | 2026-08-30 | platform-nest `0.42.1`→`0.43.0` |
+| `Alpha 01.071.0203a` | 2026-08-30 | platform-nest `0.43.0`→`0.43.1` |
+| `Alpha 01.071.0204a` | 2026-08-30 | platform-ui `0.60.0`→`0.61.0` |
+| `Alpha 01.071.0205a` | 2026-08-31 | platform-ui `0.61.0`→`0.61.1` |
+| `Alpha 01.071.0206a` | 2026-08-31 | platform-nest `0.43.1`→`0.44.0` |
+| `Alpha 01.071.0207a` | 2026-08-31 | platform-nest `0.44.0`→`0.47.0`, platform-ui `0.61.1`→`0.62.0`, mcp-hub `0.12.0`→`0.12.1` |
 
 ### `Alpha 01.067.0144a` - 2026-08-23 - the work that was finished but never left the laptop
 
