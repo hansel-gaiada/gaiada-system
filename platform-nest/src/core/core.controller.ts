@@ -15,6 +15,14 @@ import { AuthGuard } from "../auth/guards";
 import { getServiceScopes } from "./service-scopes";
 import { deriveUniqueShortCode } from "./project-short-codes";
 
+// Lineage spec 4/4: the client a project is filed under must exist in the caller's tenant. Runs on the
+// tenant-scoped connection so RLS answers "not yours" and "does not exist" the same way — 400 on the
+// field, never a 500 from a uuid cast on a hand-typed id.
+async function assertClientInTenant(c: { query: <T>(sql: string, params: unknown[]) => Promise<{ rows: T[] }> }, clientId: string): Promise<void> {
+  const r = await c.query<{ id: string }>(`SELECT id FROM clients WHERE id::text = $1 AND deleted_at IS NULL`, [clientId]);
+  if (!r.rows[0]) throw new BadRequestException({ message: "unknown client for this company", field: "clientId" });
+}
+
 @Controller("api")
 @UseGuards(AuthGuard)
 export class CoreController {
@@ -124,10 +132,21 @@ export class CoreController {
   async createProject(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { name?: string; clientId?: string; departmentId?: string; customFields?: Record<string, unknown> },
+    @Body() body: { name?: string; clientId?: string | null; isInternal?: boolean; departmentId?: string; customFields?: Record<string, unknown> },
   ) {
-    const { name, clientId, departmentId, customFields = {} } = body ?? {};
+    const { name, clientId, isInternal, departmentId, customFields = {} } = body ?? {};
     if (!name) throw new BadRequestException("name required");
+    // Lineage spec 4/4 — a project belongs to a client (client hasMany projects). The one sanctioned
+    // client-less shape is the company's OWN work, and it has to be declared (`isInternal: true`) —
+    // an omitted client is a 400, never a silent NULL. This is what made `client_id IS NULL` mean
+    // two different things on the live estate (client-filter.ts: 9 clientless rows, only 7 flagged
+    // internal). Same rule for every caller: the UI form, the hub's `projects.create`, n8n's seed.
+    if (!clientId && isInternal !== true) {
+      throw new BadRequestException({ message: "clientId required — every project belongs to a client (pass isInternal: true for the company's own internal work)", field: "clientId" });
+    }
+    if (clientId && isInternal === true) {
+      throw new BadRequestException({ message: "a project is either a client's or internal, not both", field: "isInternal" });
+    }
     // The controller always sets owner_id = the creating user on insert (below) — pass that same
     // intended ownerId into the authz check so Cerbos's member "create own project" rule
     // (resource_project.yaml's `owns` condition) can actually be satisfied. Without this, a brand
@@ -141,11 +160,14 @@ export class CoreController {
       // WD-28: every new project gets a unique short_code up front (not just the 0050 backfill's
       // one-time pass over pre-existing rows) so pm_tasks created under it can always display
       // CODE-SEQ. `projects_short_code_uidx` is the hard backstop if this probe ever loses a race.
+      // The client must be one of THIS tenant's (RLS scopes the read). Compared as text so a malformed
+      // id is a 400 on the field, not a 500 on a uuid cast.
+      if (clientId) await assertClientInTenant(c, clientId);
       const shortCode = await deriveUniqueShortCode(c, tenantId, name);
       await c.query(
-        `INSERT INTO projects (id, tenant_id, name, client_id, owner_id, custom_fields, department_id, short_code, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [id, tenantId, name, clientId ?? null, req.principal.userId, JSON.stringify(customFields), departmentId ?? null, shortCode, config.originSite],
+        `INSERT INTO projects (id, tenant_id, name, client_id, is_internal, owner_id, custom_fields, department_id, short_code, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [id, tenantId, name, clientId ?? null, isInternal === true, req.principal.userId, JSON.stringify(customFields), departmentId ?? null, shortCode, config.originSite],
       );
     });
     await writeActivity(tenantId, req.principal.userId, "created", "project", id, { name });
@@ -272,13 +294,21 @@ export class CoreController {
     );
     if (!existing.rows[0]) throw new NotFoundException("project not found");
     await authorize(req.principal, { kind: "project", tenantId, id: projectId, ownerId: existing.rows[0].owner_id ?? undefined }, "update");
+    // Lineage spec 4/4: a project is never detached from its client. `clientId: null` used to be
+    // swallowed by the COALESCE below (a silent no-op that looked like success); it is now a 400.
+    // Setting a client on an internal project converts it (is_internal → false).
+    if (b.clientId === null) {
+      throw new BadRequestException({ message: "a project cannot be detached from its client", field: "clientId" });
+    }
     await withTenants([tenantId], async (c) => {
       if (b.customFields) {
         const cfError = await validateCustomFields(c, tenantId, "project", b.customFields);
         if (cfError) throw new BadRequestException(cfError);
       }
+      if (b.clientId) await assertClientInTenant(c, b.clientId);
       const res = await c.query(
         `UPDATE projects SET name = COALESCE($2, name), status = COALESCE($3, status), client_id = COALESCE($4, client_id),
+           is_internal = CASE WHEN $4::uuid IS NOT NULL THEN false ELSE is_internal END,
            start_date = COALESCE($5, start_date), due_date = COALESCE($6, due_date), custom_fields = COALESCE($7, custom_fields),
            department_id = COALESCE($8, department_id), updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,

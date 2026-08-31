@@ -36,7 +36,7 @@ describe.skipIf(!TEST_URL)("PM short-codes (WD-28)", () => {
   });
 
   const createProject = (name: string, headers = asUser(managerA), tenant = tenantA) =>
-    app.inject({ method: "POST", url: `/api/${tenant}/projects`, headers, payload: { name } });
+    app.inject({ method: "POST", url: `/api/${tenant}/projects`, headers, payload: { name, isInternal: true } });
 
   const createTask = (projectId: string, title: string, headers = asUser(managerA), tenant = tenantA) =>
     app.inject({ method: "POST", url: `/api/${tenant}/pm/tasks`, headers, payload: { projectId, title } });

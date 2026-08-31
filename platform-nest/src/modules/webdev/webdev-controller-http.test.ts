@@ -28,7 +28,7 @@ import { config } from "../../config";
 import { buildApp } from "../../main";
 import { newId, withTenants } from "../../db";
 import { initTestDb, teardownTestDb, TEST_URL } from "../../testing/setup";
-import { createCompany, createUser, addMembership, createRole, grantRole } from "../../testing/fixtures";
+import { createCompany, createUser, addMembership, createRole, grantRole, createClient } from "../../testing/fixtures";
 import { startMockProvision, type ProvisionMock } from "../../testing/mock-provision";
 import { ProvisionHttpDriver } from "./provision-http";
 import type { ProvisionProvider, CreateProjectResult } from "./provision-provider";
@@ -96,6 +96,42 @@ describe.skipIf(!TEST_URL)("PRV-05 — webdev.controller HTTP error-contract pin
   }
 
   // ══ Positive control: the shape is not broken for the HAPPY path ═════════════════════════════
+  it("lineage: a site provisioned for a run copies the run's client/project; a standalone site takes the caller's; the list returns both", async () => {
+    setProvisionProviderForTests(driver());
+    const clientId = await createClient(tenant, "Lineage Co");
+    const projectId = newId();
+    await withTenants([tenant], (c) =>
+      c.query(`INSERT INTO projects (id, tenant_id, name, client_id, origin_site) VALUES ($1, $2, $3, $4, $5)`,
+        [projectId, tenant, "Lineage project", clientId, config.originSite]),
+    );
+    const runId = newId();
+    await withTenants([tenant], (c) =>
+      c.query(
+        `INSERT INTO pipeline_runs (id, tenant_id, title, status, client_id, project_id, created_by, origin_site)
+         VALUES ($1, $2, $3, 'delivery_active', $4, $5, $6, $7)`,
+        [runId, tenant, "Lineage run", clientId, projectId, admin, config.originSite],
+      ),
+    );
+    const fromRun = await app.inject({ method: "POST", url: `/api/${tenant}/modules/webdev/provision`, headers: asUser(admin), payload: { runId } });
+    expect(fromRun.statusCode).toBe(201);
+    expect(fromRun.json()).toMatchObject({ clientId, projectId });
+
+    const standalone = await app.inject({
+      method: "POST", url: `/api/${tenant}/modules/webdev/provision`, headers: asUser(admin),
+      payload: { slug: "lineage-standalone", clientId, projectId },
+    });
+    expect(standalone.statusCode).toBe(201);
+    expect(standalone.json()).toMatchObject({ pipelineRunId: null, clientId, projectId });
+
+    const bare = await app.inject({ method: "POST", url: `/api/${tenant}/modules/webdev/provision`, headers: asUser(admin), payload: { slug: "lineage-bare" } });
+    expect(bare.json()).toMatchObject({ clientId: null, projectId: null });
+
+    const list = await app.inject({ method: "GET", url: `/api/${tenant}/modules/webdev/provisioned-sites`, headers: asUser(admin) });
+    const rows = list.json() as Array<{ id: string; clientId: string | null; projectId: string | null }>;
+    expect(rows.find((x) => x.id === standalone.json().id)).toMatchObject({ clientId, projectId });
+    expect(rows.find((x) => x.id === fromRun.json().id)).toMatchObject({ clientId, projectId });
+  });
+
   it("201 created: no `error` key at all, and the site DTO is the response body directly", async () => {
     const { r } = await createRunViaHttp("HTTP Pin Happy Path");
     expect(r.statusCode).toBe(201);

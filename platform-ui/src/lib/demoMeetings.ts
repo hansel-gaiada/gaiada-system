@@ -1,5 +1,5 @@
 import "server-only";
-import { pipelineRunIdForMeeting } from "./demoPipeline";
+import { pipelineRunIdForMeeting, registerMeetingDepartmentLookup } from "./demoPipeline";
 // TEMP DEMO MODE — stateful in-memory store for the meeting-recordings registry (WS11 capture edge),
 // mirroring demoPm.ts. Module-level state persists per dev-server process, resets on restart. Active
 // only via DEMO_MODE=1; routed from demoFixtures.getDemoResponse. Lets the whole record → transcript →
@@ -10,6 +10,7 @@ interface DemoRec {
   meeting_id: string;
   client_id: string | null;
   project_id: string | null;
+  department_id: string | null;
   title: string | null;
   kind: "audio" | "video";
   status: "recording" | "recorded" | "transcribing" | "transcribed" | "ingested" | "failed";
@@ -41,6 +42,7 @@ const RECORDINGS: DemoRec[] = [
     meeting_id: "mtg-northwind-kickoff",
     client_id: "cl-1",
     project_id: "p-web-1",
+    department_id: "dept-1",
     title: "Northwind — site redesign kickoff",
     kind: "video",
     status: "ingested",
@@ -65,6 +67,7 @@ const RECORDINGS: DemoRec[] = [
     meeting_id: "mtg-cedar-scope",
     client_id: "cl-2",
     project_id: "p-seo-1",
+    department_id: "dept-3",
     title: "Cedar Group — SEO scope call",
     kind: "audio",
     status: "transcribed",
@@ -91,6 +94,7 @@ const RECORDINGS: DemoRec[] = [
     meeting_id: "mtg-atlas-followup",
     client_id: "cl-1",
     project_id: "p-web-1",
+    department_id: "dept-1",
     title: "Atlas — scope follow-up (uploaded, no helper)",
     kind: "audio",
     status: "failed",
@@ -110,7 +114,91 @@ const RECORDINGS: DemoRec[] = [
     created_at: "2026-07-27T04:00:00Z",
     updated_at: "2026-07-27T04:23:00Z",
   },
+  // PRD Studio step 2 — a Web Dev briefing that exists but has no recording yet (exactly what
+  // "Create briefing" produces), so the capture methods are drivable in DEMO_MODE.
+  {
+    id: "rec-demo-4",
+    meeting_id: "mtg-northwind-intake",
+    client_id: "cl-1",
+    project_id: "p-web-1",
+    department_id: "dept-1",
+    title: "Northwind — checkout flow intake",
+    kind: "audio",
+    status: "recording",
+    started_at: null,
+    ended_at: null,
+    duration_sec: null,
+    size_bytes: null,
+    local_hint: null,
+    transcript: null,
+    transcript_ref: null,
+    audio_ref: null,
+    drive_status: "none",
+    drive_file_id: null,
+    drive_link: null,
+    pipeline_run_id: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-25T02:00:00Z",
+    updated_at: "2026-08-25T02:00:00Z",
+  },
+  // PRD Studio step 3 — a Web Dev briefing whose transcript is ready, so "Convert to PRD run" is
+  // drivable. (rec-demo-2 is transcribed too, but it is an SEO project and must NOT appear on the
+  // Web Dev tab — that exclusion is part of what the e2e checks.)
+  {
+    id: "rec-demo-5",
+    meeting_id: "mtg-northwind-checkout-scope",
+    client_id: "cl-1",
+    project_id: "p-web-1",
+    department_id: "dept-1",
+    title: "Northwind — checkout flow scope call",
+    kind: "video",
+    status: "transcribed",
+    started_at: "2026-08-24T03:00:00Z",
+    ended_at: "2026-08-24T03:35:00Z",
+    duration_sec: 2100,
+    size_bytes: 310_000_000,
+    local_hint: null,
+    transcript: "Checkout must drop to two steps. Guest checkout stays. Apple Pay and GoPay before launch. Analytics events per step.",
+    transcript_ref: null,
+    audio_ref: "demo-audio-rec-5",
+    drive_status: "none",
+    drive_file_id: null,
+    drive_link: null,
+    pipeline_run_id: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-24T03:00:00Z",
+    updated_at: "2026-08-24T03:40:00Z",
+  },
+  // PRD Studio "no AI pipeline" path: transcribed, Web Dev, and its ingest answers bridge_not_configured
+  // (see the ingest route below) — so the by-hand run start is drivable in DEMO_MODE.
+  {
+    id: "rec-demo-6",
+    meeting_id: "mtg-northwind-payments-nobridge",
+    client_id: "cl-1",
+    project_id: "p-web-1",
+    department_id: "dept-1",
+    title: "Northwind — payments follow-up",
+    kind: "audio",
+    status: "transcribed",
+    started_at: "2026-08-25T04:00:00Z",
+    ended_at: "2026-08-25T04:20:00Z",
+    duration_sec: 1200,
+    size_bytes: 18_000_000,
+    local_hint: null,
+    transcript: "Dana Whitfield: GoPay and Apple Pay both before launch. Made Putra: Apple Pay needs the merchant account first.",
+    transcript_ref: null,
+    audio_ref: "demo-audio-rec-6",
+    drive_status: "none",
+    drive_file_id: null,
+    drive_link: null,
+    pipeline_run_id: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-25T04:00:00Z",
+    updated_at: "2026-08-25T04:25:00Z",
+  },
 ];
+
+registerMeetingDepartmentLookup((meetingId) => RECORDINGS.find((r) => r.meeting_id === meetingId)?.department_id ?? null);
 
 interface DemoResult { status: number; json: unknown }
 const ok = (json: unknown): DemoResult => ({ status: 200, json });
@@ -132,6 +220,7 @@ export function meetingsDemo(method: string, p: string, params: URLSearchParams,
     const rec: DemoRec = {
       id: nid("rec"), meeting_id: `mtg-${nid("d")}`, client_id: b.clientId ?? null, project_id: b.projectId ?? null,
       title: b.title ?? null, kind: b.kind === "video" ? "video" : "audio", status: "recording",
+      department_id: b.departmentId ?? null,
       started_at: now(), ended_at: null, duration_sec: null, size_bytes: null, local_hint: null,
       transcript: null, transcript_ref: null, audio_ref: null, drive_status: "none", drive_file_id: null, drive_link: null,
       pipeline_run_id: null, created_by: "demo-hansel", created_at: now(), updated_at: now(),
@@ -172,7 +261,10 @@ export function meetingsDemo(method: string, p: string, params: URLSearchParams,
     const rec = RECORDINGS.find((r) => r.id === ingestM[1]);
     if (!rec) return { status: 404, json: { error: "recording not found" } };
     if (!rec.transcript) return { status: 400, json: { error: "no transcript to ingest" } };
-    // Demo: simulate a successful dispatch (real bridge is proxied server-side in prod).
+    // Demo: a meeting id ending in "-nobridge" answers the way a platform with no n8n configured does,
+    // so PRD Studio's "start the run without the AI draft" path is drivable. Everything else
+    // simulates a successful dispatch (the real bridge is proxied server-side in prod).
+    if (rec.meeting_id.endsWith("-nobridge")) return ok({ ok: false, reason: "bridge_not_configured" });
     rec.status = "ingested"; rec.pipeline_run_id = rec.pipeline_run_id ?? nid("run"); rec.updated_at = now();
     return ok({ ok: true, runId: rec.pipeline_run_id, deduped: false });
   }

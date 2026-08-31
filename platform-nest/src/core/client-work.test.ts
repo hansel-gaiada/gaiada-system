@@ -160,7 +160,7 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
   it("member creates a project with departmentId; it lists and details with department_id", async () => {
     const createResp = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asUser(member), payload: { name: "Mobile Redesign", departmentId: "web-dev-dept-123" },
+      headers: asUser(member), payload: { isInternal: true, name: "Mobile Redesign", departmentId: "web-dev-dept-123" },
     });
     expect(createResp.statusCode).toBe(201);
     const newProjectId = createResp.json().id;
@@ -187,7 +187,7 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
   it("member can PATCH a project to update departmentId", async () => {
     const createResp = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asUser(member), payload: { name: "SEO Overhaul" },
+      headers: asUser(member), payload: { isInternal: true, name: "SEO Overhaul" },
     });
     expect(createResp.statusCode).toBe(201);
     const newProjectId = createResp.json().id;
@@ -210,7 +210,7 @@ describe.skipIf(!TEST_URL)("core client-work", () => {
   it("project departmentId can be null when not provided", async () => {
     const createResp = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asUser(member), payload: { name: "Generic Project" },
+      headers: asUser(member), payload: { isInternal: true, name: "Generic Project" },
     });
     expect(createResp.statusCode).toBe(201);
     const newProjectId = createResp.json().id;

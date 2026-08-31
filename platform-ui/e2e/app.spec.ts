@@ -214,8 +214,9 @@ test("pipeline list links a run into its workspace (client-linked, pending clien
   await expect(page.getByRole("heading", { name: /scope agreement/i })).toBeVisible();
 
   // Gate history: the decided prd_sign + the pending scope_signoff both show, correctly labeled.
-  await expect(page.getByText(/prd sign-off \(client\)/i)).toBeVisible();
-  await expect(page.getByText(/waiting on client/i)).toBeVisible();
+  // Scoped to the gate row: the workspace's open-gate <select> also lists "PRD sign-off (client)".
+  await expect(page.locator(".pl-gate-row", { hasText: /prd sign-off \(client\)/i })).toBeVisible();
+  await expect(page.getByText(/waiting on client/i).first()).toBeVisible(); // badge + scope summary both say it
 });
 
 test("pipeline workspace degrades cleanly with no client linked and decides its own internal gate", async ({ page }) => {
@@ -223,7 +224,7 @@ test("pipeline workspace degrades cleanly with no client linked and decides its 
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
 
   // KNOWN GAP teach-state: client_id is null on this demo run (mirrors the live dispatcher gap).
-  await expect(page.getByText(/no client is linked to this run yet/i)).toBeVisible();
+  await expect(page.getByText(/no client is linked to this run/i)).toBeVisible();
   await expect(page.getByText(/no source meeting linked/i)).toBeVisible();
 
   // Both un-drafted stages (scope + report) degrade to the empty note, not a blank/broken panel.
@@ -241,9 +242,253 @@ test("PRD Studio run rows deep-link into the pipeline workspace", async ({ page 
   await page.goto("/departments/dept-1/prd");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/web dev/i);
   await expect(page.getByRole("heading", { name: /prd runs/i })).toBeVisible();
-  await page.getByRole("link", { name: "Mobile app revamp — discovery" }).click();
-  await page.waitForURL(/\/pipeline\/run-demo-2$/);
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/mobile app revamp/i);
+  // run-demo-2 carries no project and no source briefing, so it is NOT a Web Dev row here (it stays
+  // on /pipeline). run-demo-1's project is the Web Dev "Client site redesign".
+  await expect(page.getByRole("link", { name: "Mobile app revamp — discovery" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Northwind — site redesign kickoff", exact: true }).click();
+  await page.waitForURL(/\/pipeline\/run-demo-1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/northwind/i);
+});
+
+test("PRD Studio reads as one flow: create → record → convert → approve", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+
+  // The flow strip names the four beats in the order a person does them.
+  const beats = page.getByRole("list", { name: /how a briefing becomes an approved prd/i }).getByRole("listitem");
+  await expect(beats).toHaveCount(4);
+  await expect(beats.nth(0)).toContainText(/create a briefing/i);
+  await expect(beats.nth(3)).toContainText(/get it approved/i);
+
+  // A briefing with no recording yet offers exactly the three ways to add one, and nothing else.
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await expect(intake.getByText("No recording yet")).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Record here" })).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Desktop capture helper" })).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Upload a file" })).toBeVisible();
+  await expect(intake.getByRole("button", { name: /convert to prd run/i })).toHaveCount(0);
+  await intake.getByRole("button", { name: "Desktop capture helper" }).click();
+  await expect(intake.getByText("mtg-northwind-intake")).toBeVisible();
+
+  // A transcribed briefing has one primary action: convert.
+  const scope = page.getByRole("article", { name: "Northwind — checkout flow scope call" });
+  await expect(scope.getByText("Transcript ready")).toBeVisible();
+  await expect(scope.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
+
+  // Web Dev only: the SEO department's transcribed call is not a Web Dev briefing.
+  await expect(page.getByRole("article", { name: "Cedar Group — SEO scope call" })).toHaveCount(0);
+
+  // The approvals list shows both beats per run, in plain words (run-demo-1: approved + signed).
+  await expect(page.getByRole("heading", { name: /prd runs/i })).toBeVisible();
+  await expect(page.getByText(/prd approved and signed — the build is unlocked/i)).toBeVisible();
+});
+
+test("PRD Studio: uploading a file streams through the BFF route and flips the briefing to transcribing", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await intake.getByRole("button", { name: "Upload a file" }).click();
+  const uploadBtn = intake.getByRole("button", { name: "Upload & transcribe" });
+  await expect(uploadBtn).toBeDisabled(); // nothing chosen yet
+  await intake.getByLabel(/audio or video file/i).setInputFiles({ name: "intake.m4a", mimeType: "audio/mp4", buffer: Buffer.alloc(64 * 1024, 1) });
+  await expect(intake.getByText(/intake\.m4a · 1 MB/)).toBeVisible();
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/meetings/rec-demo-4/audio") && r.request().method() === "POST"),
+    uploadBtn.click(),
+  ]);
+  expect(res.status()).toBe(202);
+  await expect(intake.getByText("Transcribing")).toBeVisible();
+  await expect(intake.getByRole("button", { name: "Upload a file" })).toHaveCount(0);
+});
+
+test("PRD Studio: a transcript can be supplied directly — no transcription service involved", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await intake.getByRole("button", { name: "Upload a transcript" }).click();
+  const save = intake.getByRole("button", { name: "Save transcript" });
+  await expect(save).toBeDisabled();
+  await intake.getByLabel(/transcript file/i).setInputFiles({
+    name: "intake.srt", mimeType: "text/plain",
+    buffer: Buffer.from("1\n00:00:01,000 --> 00:00:04,000\nCheckout must drop to two steps.\n\n2\n00:00:04,500 --> 00:00:07,000\nGuest checkout stays.\n"),
+  });
+  await expect(intake.getByLabel(/paste the transcript/i)).toHaveValue("Checkout must drop to two steps.\nGuest checkout stays.");
+  await expect(intake.getByText(/2 lines · 54 characters/)).toBeVisible();
+  await save.click();
+  await expect(intake.getByText("Transcript ready")).toBeVisible();
+  await expect(intake.getByRole("button", { name: /convert to prd run/i })).toBeVisible();
+});
+
+test("PRD Studio: when the AI pipeline is not connected, the run can be started by hand", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  const card = page.getByRole("article", { name: "Northwind — payments follow-up" });
+  await expect(card.getByText("Transcript ready")).toBeVisible();
+  await card.getByRole("button", { name: /convert to prd run/i }).click();
+  await expect(card.getByText(/ai pipeline .*isn.t connected on this platform/i)).toBeVisible();
+  await card.getByRole("button", { name: "Start the run without the AI draft" }).click();
+  await expect(card.getByText("In the pipeline")).toBeVisible();
+  await expect(card.getByRole("link", { name: /open the run/i })).toHaveAttribute("href", /\/pipeline\/run-demo-/);
+  // The run is now under approvals, telling the reader what happens next.
+  const row = page.locator(".prd-run", { hasText: "Northwind — payments follow-up" });
+  await expect(row.getByText(/no prd review yet/i)).toBeVisible();
+  await expect(row.getByText(/from briefing: northwind — payments follow-up/i)).toBeVisible();
+});
+
+test("PRD Studio exists for Web Dev only — another department's /prd is not found", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-3/prd"); // SEO — its toolkit has no `prd` tab
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/page not found/i);
+});
+
+test("PRD Studio: creating a briefing puts it straight into the capture step", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/prd");
+  await page.getByLabel(/what is this briefing about/i).fill("Playwright — kickoff briefing");
+  await page.getByRole("combobox", { name: "Client" }).selectOption({ label: "Northwind Traders" });
+  // Default: a Web Dev project is created WITH the briefing, named after it — no picking.
+  await expect(page.getByText(/a web dev project “playwright — kickoff briefing” is created for northwind traders/i)).toBeVisible();
+  await page.getByRole("radio", { name: "Audio + video" }).click();
+  await page.getByRole("button", { name: "Create briefing" }).click();
+  await expect(page.getByText(/briefing created with its project — add its recording below/i)).toBeVisible();
+  const card = page.getByRole("article", { name: "Playwright — kickoff briefing" });
+  await expect(card.getByText("No recording yet")).toBeVisible();
+  await expect(card.getByText(/audio \+ video/i)).toBeVisible();
+  // The new project shows on the card (it is now in the department's project list).
+  await expect(card.getByText(/· Playwright — kickoff briefing/)).toBeVisible();
+});
+
+test("a project's Meetings tab is the PRD Studio flow, filed under that project", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/projects/p-web-1?view=meetings");
+  await expect(page.getByText(/filed under client site redesign · northwind traders/i)).toBeVisible();
+  // Same cards as PRD Studio, only this project's: the Web Dev demo briefings all sit on p-web-1.
+  const intake = page.getByRole("article", { name: "Northwind — checkout flow intake" });
+  await expect(intake.getByRole("button", { name: "Upload a transcript" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Cedar Group — SEO scope call" })).toHaveCount(0);
+  // The project's runs with their approvals, and a way to the department-wide view.
+  await expect(page.getByRole("link", { name: "Northwind — site redesign kickoff", exact: true })).toHaveAttribute("href", "/pipeline/run-demo-1");
+  await expect(page.getByText(/prd approved and signed — the build is unlocked/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: /open prd studio/i })).toHaveAttribute("href", "/departments/dept-1/prd");
+  // The old register-for-helper form is gone.
+  await expect(page.getByText(/or register a meeting for the desktop capture helper/i)).toHaveCount(0);
+});
+
+test("Repositories tab is the department's code inventory — repos from provisioned runs, problems first", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories");
+  await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+  // run-demo-1 (Web Dev project) has two provisioned sites in the demo store: one failed, one live.
+  await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
+  const rows = page.locator(".repo-table .lux-table__row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("Failed"); // problems first
+  await expect(rows.nth(0).getByText(/that name belongs to someone else's site/i)).toBeVisible();
+  await expect(rows.nth(0).getByRole("link", { name: /start a new provision/i })).toHaveAttribute("href", "/pipeline/run-demo-1");
+  await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/Gaia-Digital-Agency\/northwind-site-redesign-kickoff/);
+  await expect(rows.nth(1).getByText("Northwind Traders · Client site redesign")).toBeVisible();
+  await expect(rows.nth(1).getByText("Live")).toBeVisible();
+  await expect(rows.nth(1).getByRole("link", { name: /northwind-site-redesign-kickoff\.gaiada\.online/ })).toBeVisible();
+  // GitHub line: the demo persona has an identity-only connection, and the App isn't installed.
+  await expect(page.getByText(/github: hansel-gh · identity only/i)).toBeVisible();
+  await expect(page.getByText(/commit and pr activity appears once the github app is connected/i)).toBeVisible();
+});
+
+test("Repositories tab: Create repository provisions a PRD run and the row appears as Provisioning", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories");
+  await page.getByRole("button", { name: "Create repository" }).click();
+  // Switch to run mode — retried, because a click that lands before hydration is lost.
+  const runRadio = page.getByRole("radio", { name: "For a PRD run" });
+  await expect(async () => {
+    await runRadio.click();
+    await expect(page.getByRole("combobox", { name: /prd run/i })).toBeVisible({ timeout: 1_000 });
+  }).toPass();
+  const runSelect = page.getByRole("combobox", { name: /prd run/i });
+  // Only runs without a repository are offered: run-demo-1 has a live site and is never listed.
+  await expect(runSelect.locator("option", { hasText: "Northwind — site redesign kickoff" })).toHaveCount(0);
+  // run-demo-3 is offered until something provisions it. The demo store lives as long as the dev
+  // server, so an earlier run of this test may already have done so — then the create path is
+  // skipped and the row it created is checked instead.
+  const lumen = runSelect.locator("option", { hasText: "Lumen — portfolio discovery" });
+  if ((await lumen.count()) > 0) {
+    await runSelect.selectOption({ label: "Lumen — portfolio discovery · Lumen Studio" });
+    await expect(page.getByRole("textbox", { name: /repository name/i })).toHaveValue("lumen-portfolio-discovery");
+    await page.getByRole("combobox", { name: /framework/i }).selectOption("nextjs");
+    await page.getByRole("button", { name: /^create repository$/i }).click();
+    await expect(page.getByRole("status")).toContainText(/lumen-portfolio-discovery.*is being provisioned/i);
+  }
+  const row = page.locator(".repo-table .lux-table__row").filter({ hasText: "lumen-portfolio-discovery" });
+  await expect(row).toContainText("Lumen Studio");
+  await expect(row).toContainText(/Provisioning|Staging|Live/);
+});
+
+test("Repositories tab: a standalone repository is created by hand — no PRD run, no project", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories");
+  await page.getByRole("button", { name: "Create repository" }).click();
+  await expect(page.getByRole("radio", { name: "Standalone" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("combobox", { name: /prd run/i })).toHaveCount(0);
+  await page.getByRole("textbox", { name: /repository name/i }).fill("marketing-microsite");
+  await page.getByRole("button", { name: /^create repository$/i }).click();
+  await expect(page.getByRole("status")).toContainText(/marketing-microsite.*is being provisioned/i);
+  const row = page.locator(".repo-table .lux-table__row").filter({ hasText: "marketing-microsite" });
+  await expect(row).toContainText("Provisioning");
+  await expect(row).toContainText(/not linked to a project · standalone/i);
+  await expect(row).toContainText(/created by hand/i);
+  // A standalone repo CAN carry its lineage (platform-nest 0.41.0): client → that client's projects.
+  await page.getByRole("button", { name: "Create repository" }).click();
+  await page.getByRole("textbox", { name: /repository name/i }).fill("northwind-microsite");
+  await page.getByRole("combobox", { name: /^client/i }).selectOption({ label: "Northwind Traders" });
+  await page.getByRole("combobox", { name: /^project/i }).selectOption({ label: "Client site redesign" });
+  await page.getByRole("button", { name: /^create repository$/i }).click();
+  await expect(page.getByRole("status")).toContainText(/northwind-microsite.*is being provisioned/i);
+  const linked = page.locator(".repo-table .lux-table__row").filter({ hasText: "northwind-microsite" });
+  await expect(linked).toContainText("Northwind Traders · Client site redesign");
+  await expect(linked).toContainText(/created by hand/i);
+});
+
+test("Projects tab groups projects under their client — a client has many projects", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/projects");
+  const groups = page.locator(".dept-proj__group");
+  await expect(groups).toHaveCount(2);
+  // Clients A→Z: Lumen Studio (Mobile app revamp) before Northwind Traders (Client site redesign).
+  await expect(groups.nth(0).locator(".dept-proj__client")).toHaveText("Lumen Studio");
+  await expect(groups.nth(0)).toContainText("Mobile app revamp");
+  await expect(groups.nth(1).locator(".dept-proj__client")).toHaveText("Northwind Traders");
+  await expect(groups.nth(1)).toContainText("Client site redesign");
+  await expect(groups.nth(1).getByRole("link", { name: /open client/i })).toHaveAttribute("href", "/clients/cl-1");
+  // The project header names its client too.
+  await page.getByRole("link", { name: "Client site redesign" }).click();
+  await expect(page.locator(".pm-meta")).toContainText(/client\s*Northwind Traders/i);
+});
+
+test("Projects tab: New project opens the project form with this department pre-selected", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/projects");
+  await page.getByRole("link", { name: "New project" }).click();
+  await page.waitForURL(/\/projects\/new\?departmentId=dept-1$/);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/new project/i);
+  await expect(page.getByLabel(/owning department/i)).toHaveValue("dept-1");
+  // A project belongs to a client: the picker is required, and ?clientId= pre-selects it.
+  const client = page.getByRole("combobox", { name: "Client" });
+  await expect(client).toHaveAttribute("required", "");
+  await expect(client).toHaveValue("");
+  await page.goto("/projects/new?departmentId=dept-1&clientId=cl-1");
+  await expect(page.getByRole("combobox", { name: "Client" })).toHaveValue("cl-1");
+});
+
+test("Repositories tab: ?preview=sample shows the layout with sample rows behind a banner", async ({ page }) => {
+  await switchToAgency(page);
+  await page.goto("/departments/dept-1/repositories?preview=sample");
+  await expect(page.getByRole("status")).toContainText(/sample data/i);
+  await expect(page.locator(".repo-table .lux-table__row")).toHaveCount(5);
+  await expect(page.getByText("5 repos · 2 live · 1 on staging · 1 provisioning · 1 failed")).toBeVisible();
+  await expect(page.getByRole("button", { name: /check status now/i })).toHaveCount(0); // samples offer no real actions
+  await page.getByRole("link", { name: /back to real data/i }).click();
+  await page.waitForURL(/\/departments\/dept-1\/repositories$/);
+  await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
 });
 
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {

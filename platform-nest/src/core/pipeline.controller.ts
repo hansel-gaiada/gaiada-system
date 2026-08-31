@@ -154,9 +154,9 @@ export class PipelineController {
   async createRun(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { sourceMeetingId?: string; title?: string; momRef?: string; status?: string; clientId?: string; projectId?: string; ownerId?: string; stages?: Array<{ track?: string; name?: string; status?: string; artifactRef?: string; confidence?: number }> },
+    @Body() body: { sourceMeetingId?: string; title?: string; momRef?: string; status?: string; clientId?: string; projectId?: string; departmentId?: string; ownerId?: string; stages?: Array<{ track?: string; name?: string; status?: string; artifactRef?: string; confidence?: number }> },
   ) {
-    const { sourceMeetingId, title, momRef, status = "extracting", clientId, projectId, ownerId, stages = [] } = body ?? {};
+    const { sourceMeetingId, title, momRef, status = "extracting", clientId, projectId, departmentId, ownerId, stages = [] } = body ?? {};
     if (!RUN_STATUS.has(status)) throw new BadRequestException("invalid run status");
     for (const s of stages) {
       if (!s.track || !TRACKS.has(s.track)) throw new BadRequestException("stage.track must be delivery|report|scope");
@@ -188,22 +188,33 @@ export class PipelineController {
       // a gap, so a caller deliberately creating an unattached run keeps that ability.
       let derivedClientId = clientId ?? null;
       let derivedProjectId = projectId ?? null;
-      if (sourceMeetingId && (derivedClientId === null || derivedProjectId === null)) {
-        const src = await c.query<{ client_id: string | null; project_id: string | null }>(
-          `SELECT client_id, project_id FROM meeting_recordings
-            WHERE meeting_id = $1 AND deleted_at IS NULL LIMIT 1`,
+      // Department lineage: same rule as client/project — the caller's value wins; else the source
+      // meeting's; else (for rows that pre-date meeting_recordings.department_id) the project's.
+      let derivedDepartmentId = departmentId ?? null;
+      if (sourceMeetingId && (derivedClientId === null || derivedProjectId === null || derivedDepartmentId === null)) {
+        const src = await c.query<{ client_id: string | null; project_id: string | null; department_id: string | null }>(
+          `SELECT client_id, project_id, department_id FROM meeting_recordings
+            WHERE meeting_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
           [sourceMeetingId],
         );
         if (src.rows[0]) {
           derivedClientId = derivedClientId ?? src.rows[0].client_id;
           derivedProjectId = derivedProjectId ?? src.rows[0].project_id;
+          derivedDepartmentId = derivedDepartmentId ?? src.rows[0].department_id;
         }
+      }
+      if (derivedDepartmentId === null && derivedProjectId !== null) {
+        const proj = await c.query<{ department_id: string | null }>(
+          `SELECT department_id FROM projects WHERE id = $1 AND deleted_at IS NULL`,
+          [derivedProjectId],
+        );
+        derivedDepartmentId = proj.rows[0]?.department_id ?? null;
       }
       const id = newId();
       await c.query(
-        `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, derivedClientId, derivedProjectId, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
+        `INSERT INTO pipeline_runs (id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id, created_by, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [id, tenantId, sourceMeetingId ?? null, title ?? null, momRef ?? null, status, derivedClientId, derivedProjectId, derivedDepartmentId, ownerId ? await this.assertOwnerIsStaff(c, ownerId) : null, req.principal.userId, config.originSite],
       );
       for (const s of stages) {
         // WD-29: the same identity guard as createStage. No lock is needed here (the run id was just
@@ -285,8 +296,14 @@ export class PipelineController {
     // them in the browser. Both are indexed by the tenant-scoped queries that already use them.
     @Query("clientId") clientId?: string,
     @Query("projectId") projectId?: string,
+    // Lineage spec 3/3: `?include=gates` attaches each run's gates (same row shape as the detail
+    // endpoint, plus `run_id`) in ONE grouped query. Without it the response is unchanged. Exists so
+    // a list surface (PRD Studio's approval chips, a project's Meetings tab) stops reading
+    // `GET /runs/:id` per run behind a cap.
+    @Query("include") include?: string,
   ) {
     await authorize(req.principal, { kind: "pipeline_run", tenantId }, "read");
+    const withGates = (include ?? "").split(",").map((s) => s.trim()).includes("gates");
     const conditions = ["deleted_at IS NULL"];
     const params: string[] = [];
     if (status) { params.push(status); conditions.push(`status = $${params.length}`); }
@@ -295,19 +312,28 @@ export class PipelineController {
     // nothing instead of erroring the whole request with a 500 on an invalid-uuid cast.
     if (clientId) { params.push(clientId); conditions.push(`client_id::text = $${params.length}`); }
     if (projectId) { params.push(projectId); conditions.push(`project_id::text = $${params.length}`); }
-    const rows = await withTenants([tenantId], (c) =>
-      c.query(
+    return withTenants([tenantId], async (c) => {
+      const rows = await c.query<{ id: string }>(
         // C4/C6: client_id + project_id are selected here so the list can show WHOSE work a run is and
         // link to it. Their absence is why `lib/pipeline.ts` had to cross-reference the recordings
         // registry to render a client column, and why run->project navigation did not exist at all.
-        `SELECT id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id,
+        `SELECT id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id,
                 created_by, created_at, updated_at
          FROM pipeline_runs WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC LIMIT 200`,
         params,
-      ),
-    );
-    return rows.rows;
+      );
+      if (!withGates || rows.rows.length === 0) return withGates ? [] : rows.rows;
+      const gates = await c.query<{ run_id: string }>(
+        `SELECT id, run_id, stage_id, kind, actor_side, status, decision, note, decided_by, decided_at, created_at
+         FROM pipeline_gates WHERE run_id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY created_at ASC`,
+        [rows.rows.map((r) => r.id)],
+      );
+      const byRun = new Map<string, Array<{ run_id: string }>>();
+      for (const g of gates.rows) (byRun.get(g.run_id) ?? byRun.set(g.run_id, []).get(g.run_id)!).push(g);
+      // Every run answers with an array — [] is "no gates", not "not asked".
+      return rows.rows.map((r) => ({ ...r, gates: byRun.get(r.id) ?? [] }));
+    });
   }
 
   // The rail's missing link. `code.scaffold` v2's envelope carries `prdArtifact` and
@@ -390,7 +416,7 @@ export class PipelineController {
     return withTenants([tenantId], async (c) => {
       const run = await c.query(
         // C6: project_id added so the run workspace can link to the project this delivery belongs to.
-        `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, owner_id,
+        `SELECT id, tenant_id, source_meeting_id, title, mom_ref, status, client_id, project_id, department_id, owner_id,
                 created_by, created_at, updated_at
          FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`,
         [runId],

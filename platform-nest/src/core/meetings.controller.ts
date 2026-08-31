@@ -192,9 +192,9 @@ export class MeetingRecordingsController {
   async start(
     @Req() req: FastifyRequest,
     @Param("tenantId") tenantId: string,
-    @Body() body: { title?: string; kind?: string; clientId?: string; projectId?: string; meetingId?: string },
+    @Body() body: { title?: string; kind?: string; clientId?: string; projectId?: string; departmentId?: string; meetingId?: string },
   ) {
-    const { title, kind = "audio", clientId, projectId } = body ?? {};
+    const { title, kind = "audio", clientId, projectId, departmentId } = body ?? {};
     if (!KINDS.has(kind)) throw new BadRequestException("kind must be audio|video");
     await authorize(req.principal, { kind: "meeting_recording", tenantId }, "create");
     // Mint a stable meeting id (the frozen-contract dedupe key) unless the caller supplied one.
@@ -209,9 +209,9 @@ export class MeetingRecordingsController {
       if (existing.rows[0]) return { id: existing.rows[0].id, meetingId, deduped: true };
       await c.query(
         `INSERT INTO meeting_recordings
-           (id, tenant_id, meeting_id, client_id, project_id, title, kind, status, started_at, created_by, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'recording', now(), $8, $9)`,
-        [id, tenantId, meetingId, clientId ?? null, projectId ?? null, title ?? null, kind, req.principal.userId, config.originSite],
+           (id, tenant_id, meeting_id, client_id, project_id, department_id, title, kind, status, started_at, created_by, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'recording', now(), $9, $10)`,
+        [id, tenantId, meetingId, clientId ?? null, projectId ?? null, departmentId ?? null, title ?? null, kind, req.principal.userId, config.originSite],
       );
       // TR-31: actorId is the registering user (a genuine per-request principal, unlike the
       // async transcription job below, which has none). The consumer's mapMeetingRecording still
@@ -675,7 +675,7 @@ export class MeetingRecordingsController {
     const orderBy = scheduled === "upcoming" ? "scheduled_at ASC" : "created_at DESC";
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, meeting_id, client_id, project_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
+        `SELECT id, meeting_id, client_id, project_id, department_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
                 duration_sec, size_bytes, drive_status, drive_link, pipeline_run_id, created_by, created_at, updated_at
          FROM meeting_recordings WHERE ${clauses.join(" AND ")} ORDER BY ${orderBy} LIMIT 200`,
         args,
@@ -689,7 +689,7 @@ export class MeetingRecordingsController {
     await authorize(req.principal, { kind: "meeting_recording", tenantId }, "read");
     const rows = await withTenants([tenantId], (c) =>
       c.query(
-        `SELECT id, meeting_id, client_id, project_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
+        `SELECT id, meeting_id, client_id, project_id, department_id, title, kind, status, scheduled_at, scheduled_by, started_at, ended_at,
                 duration_sec, size_bytes, local_hint, transcript, transcript_ref, audio_ref, drive_status,
                 drive_file_id, drive_link, pipeline_run_id, created_by, created_at, updated_at
          FROM meeting_recordings WHERE id = $1 AND deleted_at IS NULL`,

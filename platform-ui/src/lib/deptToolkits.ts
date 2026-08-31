@@ -134,11 +134,11 @@ const WEB_DEV: DeptToolkit = {
       label: "Build",
       icon: "gateway",
       tabs: [
-        { key: "prd", label: "PRD Studio", path: "prd", icon: "pulse", blurb: "Record a requirements briefing; turn it into a PRD." },
+        { key: "prd", label: "PRD Studio", path: "prd", icon: "pulse", blurb: "Create a briefing, record it, convert it to a PRD run, get it approved." },
         // MI-05 — maintenance intake triage queue over the MI-03 endpoints (webdev_change_requests):
         // decline, or convert into a mini pipeline run or a PM task.
         { key: "requests", label: "Requests", path: "requests", icon: "bell", blurb: "Triage client and internal maintenance requests." },
-        { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Linked code repositories." },
+        { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Every repository the pipeline has provisioned for this department — status, staging, lineage.", fullBleed: true },
         { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
         // WSK-24 — the WebDesk console: site registry, contract pin status, submissions, and
         // WS4-gated release actions. Reads only (webdesk-design.md §08); every read here degrades

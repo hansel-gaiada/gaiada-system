@@ -60,17 +60,17 @@ export function registerPlatformWriteTools(): void {
 
   registerTool({
     name: "projects.create",
-    description: "Create a project in a company you belong to.",
+    description: "Create a project in a company you belong to. A project belongs to a client: pass clientId, or isInternal: true for the company's own internal work — the platform rejects a project with neither (400 on clientId).",
     minAssurance: "low",
     write: true,
     impact: "low", // in-tenant, reversible; Cerbos + RLS still enforced at the platform
     inputSchema: {
       type: "object",
-      properties: { tenantId: { type: "string" }, name: { type: "string" }, clientId: { type: "string" } },
+      properties: { tenantId: { type: "string" }, name: { type: "string" }, clientId: { type: "string" }, isInternal: { type: "boolean" } },
       required: ["tenantId", "name"],
     },
     handler: (args, principal) =>
-      platformSend("POST", `/api/${String(args.tenantId)}/projects`, { name: args.name, clientId: args.clientId }, principal),
+      platformSend("POST", `/api/${String(args.tenantId)}/projects`, { name: args.name, clientId: args.clientId, isInternal: args.isInternal }, principal),
   });
 
   registerTool({

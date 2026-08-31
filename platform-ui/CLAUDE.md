@@ -32,6 +32,13 @@ npm run e2e                    # playwright; self-contained (starts next dev + D
 npx playwright test --project=smoke --grep @smoke   # the CI build-gate smoke check
 ```
 
+**Never share `.next` with a running dev server.** `next dev`, `next build` and Playwright's
+`webServer` all write to `.next` by default; a build or e2e run in this folder while someone's
+`next dev` is up corrupts that server (`Cannot find module './1331.js'` from
+`webpack-runtime.js`, fixed only by restarting it with a clean `.next`). `next.config.ts` reads
+`NEXT_DIST_DIR`, and `playwright.config.ts` sets it to `.next-e2e` for its own server — so run the
+gate as `NEXT_DIST_DIR=.next-gate DEMO_MODE=1 npm run build` whenever a dev server may be running.
+
 **`next build` is the real gate.** `tsc` + vitest have both passed while the build broke and
 routes 500'd (a `server-only` import reaching a client component). CI runs `npm run build`
 then the `smoke` Playwright project against the built app for exactly that reason.
@@ -62,7 +69,9 @@ field-level 400s.
 - A bodyless POST must not declare a JSON content-type — Fastify 400s on it. `platformFetch`
   already handles this; don't re-add the header.
 - `src/app/api/*` route handlers exist **only** where the browser itself must hit a URL:
-  polling (`meetings/[id]/status`), the bot admin console, an OAuth callback
+  polling (`meetings/[id]/status`), a large upload with progress (`meetings/[id]/audio` — streams
+  the multipart body to the platform; Server Actions buffer + cap bodies, 1 MB by default, and give
+  the browser no progress events), the bot admin console, an OAuth callback
   (`search/google/callback`), a file download (`search/change-proposals/[id]/export-file`).
   Pages and server actions call `platformFetch` directly — don't proxy through our own API.
 
@@ -220,6 +229,12 @@ to; a genuinely new surface gets a new prefix, never a bare class name.
   runtime ICU. Pin both locale and `timeZone` (see `charts/chartHover.ts::fmtDate`).
 - vitest aliases `@` → `src` and `server-only` → an empty module (vitest has no `react-server`
   export condition). That's why a bad `server-only` import passes tests and fails the build.
+- **Two request-body caps, both 1–10 MB by default, both silent.** Server Actions cap at 1 MB
+  (`serverActions.bodySizeLimit`), and because `src/middleware.ts` exists Next buffers EVERY request
+  body for middleware and truncates it at `experimental.middlewareClientMaxBodySize` (10 MB) — a route
+  handler then sees a short body and the platform reports a multipart error that looks like a size
+  cap. Both are set to 520 MB in `next.config.ts` (the platform's 500 MB video cap + overhead); if an
+  upload "exceeds cap" at a size that plainly doesn't, check these first.
 - `next.config.ts` pins `outputFileTracingRoot: __dirname` because a parent folder has its own
   lockfile; removing it nests `.next/standalone/server.js` several dirs deep.
 - Bring the backend up with **both** compose files (`docker-compose.vps.yml` +

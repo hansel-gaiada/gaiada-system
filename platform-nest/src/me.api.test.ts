@@ -69,7 +69,7 @@ describe.skipIf(!TEST_URL)("me / activity / tasks API (nest)", () => {
 
   it("GET /api/:tenantId/activity returns recent audit rows with actor name", async () => {
     const create = await app.inject({
-      method: "POST", url: `/api/${tenant}/projects`, headers: asUser(hansel), payload: { name: "Second project" },
+      method: "POST", url: `/api/${tenant}/projects`, headers: asUser(hansel), payload: { isInternal: true, name: "Second project" },
     });
     expect(create.statusCode).toBe(201);
     const res = await app.inject({ method: "GET", url: `/api/${tenant}/activity?limit=5`, headers: asUser(hansel) });

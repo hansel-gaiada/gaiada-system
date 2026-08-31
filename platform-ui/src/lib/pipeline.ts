@@ -48,6 +48,8 @@ export interface PipelineRun {
   // older tag omits them — the UI then renders no link rather than an empty one.
   client_id?: string | null;
   project_id?: string | null;
+  /** Org-node id of the owning department (2026-08-27); derived from the source meeting or project. */
+  department_id?: string | null;
   owner_id?: string | null;
 }
 export interface PipelineStage {
@@ -136,6 +138,31 @@ export async function listPipelineRuns(
   return readResult(platformFetch<PipelineRun[]>(`/api/${tenant}/pipeline/runs${qs ? `?${qs}` : ""}`, userId), {
     absentAsEmpty: [],
   });
+}
+
+/** A list row with its gates attached — `GET /pipeline/runs?include=gates` (platform-nest 0.46.0).
+ *  `null` means the platform answered WITHOUT gates (a platform older than 0.46.0): the UI then says
+ *  "open the run to see its approvals" rather than reading an absent array as "no approvals". */
+export type PipelineRunWithGates = PipelineRun & { gates: PipelineGate[] | null };
+
+// The list-with-gates read. One request for the whole list; every run answers with `gates` ([] when it
+// has none). Replaced the per-run `getPipelineRun` fan-out behind a 12-run cap that PRD Studio and a
+// project's Meetings tab used while the list carried no gates.
+export async function listPipelineRunsWithGates(
+  userId: string,
+  tenant: string,
+  opts: { status?: string; clientId?: string; projectId?: string } = {},
+): Promise<ReadResult<PipelineRunWithGates[]>> {
+  const q = new URLSearchParams();
+  if (opts.status) q.set("status", opts.status);
+  if (opts.clientId) q.set("clientId", opts.clientId);
+  if (opts.projectId) q.set("projectId", opts.projectId);
+  q.set("include", "gates");
+  const res = await readResult(platformFetch<Array<PipelineRun & { gates?: unknown }>>(`/api/${tenant}/pipeline/runs?${q.toString()}`, userId), {
+    absentAsEmpty: [],
+  });
+  if (res.kind !== "ok") return res;
+  return { ...res, data: res.data.map((r) => ({ ...r, gates: Array.isArray(r.gates) ? (r.gates as PipelineGate[]) : null })) };
 }
 
 export async function getPipelineRun(userId: string, tenant: string, runId: string): Promise<ReadResult<PipelineRunDetail | null>> {

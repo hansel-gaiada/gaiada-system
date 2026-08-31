@@ -118,6 +118,10 @@ export interface SiteDto {
   lastReconciledAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Lineage (2026-08-27): copied from the run when there is one, supplied by the caller for a
+   *  standalone site. Null for rows that pre-date the columns. */
+  clientId: string | null;
+  projectId: string | null;
 }
 
 interface SiteRow {
@@ -137,6 +141,8 @@ interface SiteRow {
   last_reconciled_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  client_id: string | null;
+  project_id: string | null;
 }
 
 const iso = (v: Date | string | null): string | null =>
@@ -160,12 +166,14 @@ export function toSiteDto(r: SiteRow): SiteDto {
     lastReconciledAt: iso(r.last_reconciled_at),
     createdAt: iso(r.created_at) as string,
     updatedAt: iso(r.updated_at) as string,
+    clientId: r.client_id,
+    projectId: r.project_id,
   };
 }
 
 const SITE_COLUMNS = `id, tenant_id, pipeline_run_id, provider, provider_ref, slug, framework,
   repo_url, staging_url, status, failure_reason, requested_by, approval_id, last_reconciled_at,
-  created_at, updated_at`;
+  created_at, updated_at, client_id, project_id`;
 
 // ── Framework / stack vocabulary (design D-P7) ───────────────────────────────────────────────────
 export const SUPPORTED_FRAMEWORKS = new Set(["vite", "nextjs"]);
@@ -273,6 +281,10 @@ export interface ProvisionSiteArgs {
   /** True on the automation path (D14 executes the approved call) — see
    *  `evaluateProvisionPrecondition`. */
   requireSignedPrdGate?: boolean;
+  /** Lineage for a STANDALONE site (no run). Ignored when `runId` is set — the run's own
+   *  client/project are copied instead, so a caller cannot file a run's repo under another client. */
+  clientId?: string | null;
+  projectId?: string | null;
 }
 
 async function readSite(c: PoolClient, id: string): Promise<SiteRow | null> {
@@ -535,15 +547,27 @@ export async function provisionSite(args: ProvisionSiteArgs): Promise<ProvisionO
     // ── 3. CLAIM. Occupies the `ux_wps_run` / `ux_wps_slug` partial-unique slot before any egress,
     // so even a caller that somehow bypassed the re-check above collides here instead of creating a
     // second repo. `requested` is the design's explicit PRE-EGRESS state (0090 deviation 1).
+    // Lineage: a run's site inherits the run's client/project (never the caller's); a standalone site
+    // takes what the caller supplied.
+    let clientId: string | null = args.clientId ?? null;
+    let projectId: string | null = args.projectId ?? null;
+    if (runId) {
+      const lineage = await c.query<{ client_id: string | null; project_id: string | null }>(
+        `SELECT client_id, project_id FROM pipeline_runs WHERE id = $1 AND deleted_at IS NULL`,
+        [runId],
+      );
+      clientId = lineage.rows[0]?.client_id ?? null;
+      projectId = lineage.rows[0]?.project_id ?? null;
+    }
     const id = newId();
     let row: SiteRow;
     try {
       const ins = await c.query<SiteRow>(
         `INSERT INTO webdev_provisioned_sites
-           (id, tenant_id, pipeline_run_id, provider, slug, framework, status, requested_by, approval_id, origin_site)
-         VALUES ($1, $2, $3, $4, $5, $6, 'requested', $7, $8, $9)
+           (id, tenant_id, pipeline_run_id, provider, slug, framework, status, requested_by, approval_id, client_id, project_id, origin_site)
+         VALUES ($1, $2, $3, $4, $5, $6, 'requested', $7, $8, $9, $10, $11)
          RETURNING ${SITE_COLUMNS}`,
-        [id, tenantId, runId, provider.key, slug, framework, requestedBy, args.approvalId ?? null, config.originSite],
+        [id, tenantId, runId, provider.key, slug, framework, requestedBy, args.approvalId ?? null, clientId, projectId, config.originSite],
       );
       row = ins.rows[0];
     } catch (err) {
