@@ -1,0 +1,227 @@
+# WebDesk Zone B — sumopod overlay (WSK-D27, owner-ruled 2026-08-29)
+#
+# Used WITH the base file, never alone:
+#   docker compose -f docker-compose.yml -f docker-compose.sumopod.yml <cmd>
+#
+# Design: ../docs/blueprints/webdesk-design-v2.md §00a (why this box) and §03 (what co-tenancy
+# costs and the six hardening ACs this file implements). Runbook:
+# ../infra/runbooks/webdesk-zoneb-box-hardening.md §0a.
+#
+# =============================================================================================
+# WHY AN OVERLAY, AND WHY `!reset` ON EVERY `ports:`
+# =============================================================================================
+# The base file is a DEV skeleton: `payload`, `payload-gateway`, `api` and `worker` run
+# `echo … && sleep infinity` on a bare node image, and every backing service PUBLISHES a host
+# port on 0.0.0.0. Both are wrong here, and the second is dangerous:
+#
+#   sumopod runs 48 containers across 12 unrelated compose projects, the estate's observability
+#   store, a gVisor sandbox that executes employee-written code, and the WireGuard hub with a
+#   LIVE peer to gda-aicenter (the production ERP). Publishing Zone B's Postgres, Redis or MinIO
+#   on 0.0.0.0 there would expose client data to every neighbour — and on this estate Docker's
+#   DNAT is evaluated BEFORE ufw, so a 0.0.0.0 bind is internet-reachable even where the
+#   firewall reports deny.
+#
+# Compose MERGES `ports` additively across files — an overlay cannot remove a published port by
+# redeclaring the list. Hence `ports: !reset []` on every service: it CLEARS the base file's
+# publication instead of appending to it.
+#
+# CAREFUL — `!reset` REMOVES a key; it cannot reset-and-replace. Written as `ports: !reset` with
+# a list underneath, Compose discards the list too, and `docker compose config` exits 0 on the
+# result. Replacement needs `!override`. Both are used deliberately below. This trap and the rest
+# of the overlay mechanics are written up in ops/README.md — read that before editing this file.
+#
+# ALWAYS AUDIT THE RESOLVED CONFIG, NEVER THE OVERLAY:
+#   docker compose -f docker-compose.yml -f docker-compose.sumopod.yml config | grep -A3 'ports:'
+# The only published port must be proxy's, bound to 127.0.0.1.
+#
+# =============================================================================================
+# TOPOLOGY THIS ENFORCES
+# =============================================================================================
+#   127.0.0.1:8380 -> proxy (Caddy)
+#                       |- /v1     -> payload-gateway   (public read path, WSK-D24)
+#                       |- /forms  -> api
+#                       |- /media  -> api
+#                       |- /healthz
+#                       `- 404: /admin* /api/* /control/*
+#
+#   private compose network, NO host ports at all:
+#     postgres  redis  minio  payload (admin/internal)  payload-gateway  api
+#
+# Payload's admin panel is reachable ONLY from inside the Docker network — i.e. over an SSH
+# tunnel. That is design D-5 / WSK-D20 ("Payload admin is never public").
+#
+# NOTHING is published to the internet by this file. Exposing Zone B publicly needs a vhost on
+# the box's existing web listener plus a TLS decision, and that is a separate, deliberate step.
+#
+# =============================================================================================
+# WHAT IS DELIBERATELY ABSENT
+# =============================================================================================
+# * `worker` — no worker entrypoint exists. `api/package.json` has exactly one start script
+#   (`node dist/main.js`); queue consumers are WSK-07/11 scope. Shipping the base file's stub
+#   would be a container that prints a sentence and sleeps.
+# * `clamav`, `imgproxy`, `otel-collector`, `status-page`, `wd-backup-sentinel` — additive, none
+#   on the request path for /v1, /forms or /media. `proxy`'s depends_on is overridden below
+#   BECAUSE the base file makes it wait for `status-page`, which this overlay does not start.
+# * Resource limits ARE present on every service, in both directions: Zone B must not degrade
+#   the observability hub the whole estate depends on, and must survive a neighbour spiking.
+#   ~8 GB RAM and 4 cores are shared with 11 other projects.
+
+services:
+
+  # --- the one published listener, loopback only ------------------------------------------------
+  proxy:
+    profiles: !reset []
+    ports: !override
+      - "127.0.0.1:${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
+    depends_on: !override
+      - api
+      - payload-gateway
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 256M }
+
+  # --- Payload: admin + authoring ONLY. Not the read path (WSK-D24). ----------------------------
+  payload:
+    profiles: !reset []
+    image: !reset null
+    build:
+      context: ./payload
+      dockerfile: Dockerfile
+    command: !override ["node", "server.js"]
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+    ports: !reset []
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: 1024M }
+
+  # --- the public read path: /v1 + /healthz, denylist before allowlist --------------------------
+  payload-gateway:
+    profiles: !reset []
+    image: !reset null
+    build:
+      context: ./payload
+      dockerfile: Dockerfile
+    command: !override ["node", "src/public-gateway.mjs"]
+    ports: !reset []
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 512M }
+
+  # --- forms · mail · media · control plane -----------------------------------------------------
+  api:
+    profiles: !reset []
+    image: !reset null
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: !override ["node", "dist/main.js"]
+    ports: !reset []
+    # THE COMPOSE ENV-PASSTHROUGH TRAP, caught by the first real boot (2026-08-29).
+    # The base file's `api` service declares exactly ONE storage var (MINIO_ENDPOINT), but
+    # api/src/storage/storage.config.ts calls requireInProd("STORAGE_ACCESS_KEY_ID") and
+    # requireInProd("STORAGE_SECRET_ACCESS_KEY") and reads eight more. A var in `.env` does
+    # NOTHING unless the service lists it here — so `api` crash-looped with
+    # "STORAGE_ACCESS_KEY_ID is not set — refusing to boot in production" on a .env that
+    # defines it. The guard is right; the passthrough was missing.
+    #
+    # This belongs in docker-compose.yml (every environment needs it, not just this box) and is
+    # REPORTED as a base-file fix, not silently owned here — the base file is another ticket's.
+    environment:
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
+      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
+      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
+      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
+      WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
+      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # Also absent from the base file's api block, also `requireInProd`:
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+    # Control-channel trust material (WSK-22) lives in its OWN env file, not in `.env`.
+    #
+    # WHY THE SPLIT — a footgun found the hard way on 2026-08-29: the CA is a multi-line PEM, and
+    # `docker run --env-file` is a flat KEY=VALUE parser with NO multiline support. Compose's own
+    # parser handles it fine, so the STACK worked while every ad-hoc verification container died
+    # with `invalid env file (.env): variable '-----END CERTIFICATE-----"' contains whitespaces`.
+    # Keeping the PEM out of `.env` means the migration runner, the RLS gate and the cross-path
+    # suite can all keep using `--env-file .env`.
+    #
+    # The CA itself is a PLACEHOLDER whose private key was generated and immediately DESTROYED,
+    # so no client certificate can ever be issued against it: the control channel is fail-closed
+    # BY CONSTRUCTION rather than by configuration, until synccert issues real material. Swapping
+    # that one PEM is the entire migration path.
+    env_file:
+      - .env.control
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: 768M }
+
+  # --- datastores: private network only ---------------------------------------------------------
+  postgres:
+    profiles: !reset []
+    ports: !reset []
+    deploy:
+      resources:
+        limits: { cpus: "1.00", memory: 1024M }
+
+  redis:
+    profiles: !reset []
+    ports: !reset []
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 256M }
+
+  minio:
+    profiles: !reset []
+    ports: !reset []
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 512M }
+
+  # --- public exposure via Cloudflare Tunnel (owner-ruled 2026-08-29) --------------------------
+  #
+  # GATED BEHIND ITS OWN PROFILE ON PURPOSE. `--profile public` is the ONLY way this starts, so
+  # the default `up -d` leaves Zone B exactly as it is today: loopback-only, reachable through an
+  # SSH tunnel and nothing else. Exposure becomes a deliberate command, never a side effect of a
+  # routine restart.
+  #
+  # WHY A TUNNEL AND NOT A VHOST — two facts about this box decided it:
+  #   1. `:80`/`:443` here belong to ANOTHER PROJECT's Let's Encrypt reverse proxy. A webdesk vhost
+  #      would mean editing that project's config, and Zone B's uptime would then depend on it.
+  #   2. A tunnel needs NO inbound port at all — the connector dials out. On a co-tenanted box that
+  #      is a smaller footprint than any listener we could add, so exposing Zone B *reduces* the
+  #      host's inbound surface rather than growing it.
+  # It also satisfies WSK-D23's standing precondition that the CDN is mandatory, not optional:
+  # traffic terminates at Cloudflare's edge, so the origin is never directly reachable.
+  #
+  # BEFORE THIS CAN RUN, one value must exist and it is not in this repo:
+  #   CLOUDFLARE_TUNNEL_TOKEN  — created in the Cloudflare dashboard (Zero Trust -> Networks ->
+  #   Tunnels), put in `.env.control` (0600, gitignored), NEVER in `.env` and never committed.
+  # Full procedure: ../infra/runbooks/webdesk-zoneb-box-hardening.md §0b.
+  #
+  # The tunnel's public hostname must map to `http://proxy:80` — that is Caddy, the one listener,
+  # which already 404s /admin, /api/*, /api/graphql and /control/*. The tunnel does NOT bypass it.
+  # Never point a tunnel route at `payload`, `payload-gateway` or `api` directly: that would route
+  # around the denylist and hand the internet Payload's admin panel.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["public"]
+    command: tunnel --no-autoupdate run
+    environment:
+      # NOT `${CLOUDFLARE_TUNNEL_TOKEN:?...}` — found the hard way: Compose interpolates BEFORE it
+      # filters by profile, so a `:?` here makes `docker compose config` and every ordinary
+      # `up -d` fail on a box that has no token, even though this service would never start.
+      # An empty default keeps the default profile resolvable; cloudflared itself exits
+      # immediately and loudly on an empty token, which is the right place for that failure.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - proxy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.25", memory: 128M }

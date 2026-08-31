@@ -44,11 +44,25 @@ export async function waitForMailpitMessage(
   const timeoutMs = opts.timeoutMs ?? 10_000;
   const intervalMs = opts.intervalMs ?? 250;
   const deadline = Date.now() + timeoutMs;
+  // A CONNECTION ERROR IS "NOT READY YET", NOT A FAILURE. `mail-retry-backoff` proves retry and
+  // backoff by STOPPING a real Mailpit container and starting it again, so this loop is guaranteed
+  // to poll a sink that is down — and `docker start` returns before the port is re-bound, which on
+  // a CI runner is slow enough to matter and on a warm laptop usually is not. Rethrowing the first
+  // `fetch failed` aborted the whole wait and surfaced as a bare "fetch failed" with nothing naming
+  // Mailpit. The DEADLINE stays the only thing that fails this helper; the last error is carried
+  // into that message so a genuinely-unreachable sink is still diagnosable.
+  let lastError: unknown;
   for (;;) {
-    const messages = await mailpitSearch(query);
-    if (messages.length > 0) return messages[0];
+    try {
+      const messages = await mailpitSearch(query);
+      if (messages.length > 0) return messages[0];
+      lastError = undefined;
+    } catch (err) {
+      lastError = err;
+    }
     if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for a Mailpit message matching "${query}"`);
+      const because = lastError ? ` (last error: ${(lastError as Error).message})` : "";
+      throw new Error(`timed out waiting for a Mailpit message matching "${query}"${because}`);
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }

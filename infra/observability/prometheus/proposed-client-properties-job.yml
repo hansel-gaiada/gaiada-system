@@ -1,0 +1,67 @@
+# MON-01 — the client-property probe job. PROPOSED, NOT APPLIED.
+#
+# Same convention as webdesk/ops/otel/proposed-zonea-otlp-listener.yaml: this is the config to
+# paste in, kept in the repo so the decision is reviewable, deliberately not merged into a live
+# `prometheus.yml` by the ticket that wrote it.
+#
+# ══ WHAT THIS MONITORS, AND WHY IT IS AVAILABLE NOW ═══════════════════════════════════════════
+# ~63 managed client properties are monitored by nobody. This gives them uptime and TLS-expiry
+# coverage using infrastructure that already exists — blackbox-exporter is already deployed and
+# already scraped.
+#
+# It was recorded as blocked behind the observe-only ruling on `delphi`/`helios`. It is not: that
+# ruling forbids *changing things on those hosts*, and an HTTP GET changes nothing. Re-probed
+# 2026-08-30 — SSH to both is filtered, HTTP and HTTPS answer. Observation was never the blocked
+# half; deployment was.
+#
+# ══ THE ONE DECISION THAT MUST BE MADE BEFORE APPLYING ════════════════════════════════════════
+# WHICH HOST DOES THE PROBING. This job makes scheduled outbound requests to client domains, so
+# the prober's IP is what appears in ~63 clients' access logs, and its egress posture is what a
+# compromise would inherit.
+#
+#   NOT the ERP box. It is Zone A, it holds the company database, and it has no business making a
+#   standing outbound connection to third-party infrastructure every 60 seconds.
+#
+#   The ops/observability host is the natural home — it already runs the remote Prometheus, it is
+#   already the estate's egress point for telemetry, and it is not Zone A. Note it now also
+#   co-tenants Zone B, so the prober and an internet-facing service share a kernel; that is a
+#   documented exception (webdesk-design-v2.md §03), not a new one this job creates.
+#
+# ══ CONSENT ═══════════════════════════════════════════════════════════════════════════════════
+# The targets file is generated ONLY from properties with `verified_at` set, active and not
+# deleted — see ../scripts/gen-client-property-targets.mjs, where the gate is the SQL itself
+# rather than a comment. An unverified property is absent from the file, not throttled. Do not
+# hand-edit the generated file: an entry added by hand is a probe without recorded consent.
+#
+# ══ WIRING ════════════════════════════════════════════════════════════════════════════════════
+#   1. Schedule the generator (systemd timer or cron) to write the targets file. It reads the DB,
+#      writes JSON, and reloads nothing.
+#   2. Add the job below to the chosen Prometheus.
+#   3. Prometheus picks up file_sd changes on its own — no reload, no restart.
+#
+# `http_2xx` already exports `probe_ssl_earliest_cert_expiry` for an https target, so TLS-expiry
+# monitoring needs no second module and no second job. Alert on it at 21 and 7 days.
+
+scrape_configs:
+  - job_name: client-properties
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    # 60s, not the global 15s. These are OTHER PEOPLE'S SERVERS: 63 properties at 15s is ~15k
+    # requests an hour arriving from one IP, which is indistinguishable from something hostile and
+    # is a good way to get the prober blocked by a client's own WAF.
+    scrape_interval: 60s
+    scrape_timeout: 15s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/client-properties.json
+        refresh_interval: 5m
+    relabel_configs:
+      # The blackbox indirection: the target becomes a PARAM, and the address becomes the exporter.
+      # Getting this wrong scrapes the client's site for Prometheus metrics instead of probing it.
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115

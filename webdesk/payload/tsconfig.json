@@ -1,17 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "ES2022"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "ES2022"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": false,
     "noEmit": true,
-    // WSK-28 (Zone B provisioning, 2026-08-27): this project imports its own modules with an
-    // explicit .ts extension in 41 places (ESM style, and the reason webdesk/blocks and
-    // webdesk/api vendor-with-a-drift-check instead of importing across the boundary). Without
-    // this flag next build fails type-checking with TS5097 on every one of them. Valid here
-    // because noEmit is true above; rewriting 41 runtime import specifiers would be the riskier
-    // change.
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -20,12 +18,28 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@payload-config": ["./payload.config.ts"],
-      "@/*": ["./*"]
+      "@payload-config": [
+        "./payload.config.ts"
+      ],
+      "@/*": [
+        "./*"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/migrations"
+  ]
 }

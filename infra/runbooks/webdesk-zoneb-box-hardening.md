@@ -13,6 +13,84 @@ containment statement §03 depends on). `docs/plans/2026-08-26-webdesk-PROGRESS.
 
 ---
 
+## 0a. ⚠ THE BOX IS `sumopod` — addendum, 2026-08-29 (WSK-D27)
+
+**This runbook was written for a dedicated box that was never procured.** The owner has ruled Zone
+B onto **`sumopod`** under the two-tier estate rule — see
+[`webdesk-design-v2.md`](../../docs/blueprints/webdesk-design-v2.md) §00a and §03. Read that §03
+before anything below: it states what co-tenancy costs and what remains true, and its hardening
+list is the acceptance criteria this runbook must satisfy.
+
+**Host identity, the neighbour inventory, the mesh addressing and the published-port list are in
+the gitignored operator note `docs/blueprints/webdesk-zoneb-box-detail.local.md` —
+this repository is public. Read that note first; the constraints below are the rules it implies.**
+
+| | Rule on the Zone B box |
+|---|---|
+| Existing workloads | It carries ~10 unrelated projects plus the estate's observability store and a sandbox that executes untrusted code. **Touch none of them.** |
+| Private mesh | The box terminates the estate's mesh, with a live peer to the production ERP. **Default-deny Zone B container routing to the mesh subnet** and record the decision. |
+| Ports | Zone B publishes **nothing** except the proxy, on loopback. Verify the **resolved** compose config, never the overlay — `webdesk/ops/README.md` documents the `!reset`/`!override` trap where a broken overlay still exits 0. |
+| Pre-existing exposures | Services already published on all interfaces belong to **other projects**. Do not depend on them being fixed and **do not fix them here** — raise separately with the owner. |
+| Resource limits | CPU + memory caps on every Zone B service, both directions: Zone B must not degrade the observability store the estate depends on, and must survive a neighbour spiking. Capacity is shared. |
+| Payload admin | SSH tunnel only. No vhost, no published port, ever (design D-5 / WSK-D20). |
+| CI runners | **Never put a GitHub Actions runner on this box.** A runner executes arbitrary repo code beside the mesh endpoint and the telemetry store (v2.0 §10). |
+
+## 0b. Public exposure — Cloudflare Tunnel (owner-ruled 2026-08-29)
+
+**Zone B is loopback-only until this is done deliberately.** The connector is gated behind its own
+compose profile, so a routine `up -d` can never expose it by accident.
+
+**Why a tunnel rather than a vhost**, on this box specifically: `:80`/`:443` are owned by another
+project's Let's Encrypt reverse proxy, so a vhost would mean editing that project's config and
+making Zone B's uptime depend on it. A tunnel needs **no inbound port at all** — the connector
+dials out — so exposing Zone B *reduces* this host's inbound surface instead of growing it. It also
+satisfies WSK-D23's standing precondition that the CDN is mandatory: traffic terminates at
+Cloudflare's edge and the origin is never directly reachable.
+
+### What the owner must supply (none of this can come from the repo)
+
+1. A Cloudflare account with a zone you control. **`gaiada.online` is on GoDaddy today**
+   (`ns37`/`ns38.domaincontrol.com`) and no gaiada domain is on Cloudflare — so this is either a
+   nameserver move for that zone (which WSK-D26 said would not happen, so it needs its own ruling)
+   or a different domain/zone used for the tunnel hostname.
+2. In the dashboard: **Zero Trust -> Networks -> Tunnels -> Create a tunnel** (type `cloudflared`).
+3. Copy the tunnel token into **`.env.control`** on the box (mode 0600, gitignored):
+   `CLOUDFLARE_TUNNEL_TOKEN=...` — never in `.env`, never committed.
+4. Add a **public hostname** route on the tunnel pointing at **`http://proxy:80`**.
+
+### The route target is a security decision, not a detail
+
+The route MUST target **`proxy`** — Caddy, the single listener, which already 404s `/admin`,
+`/api/*`, `/api/graphql` and `/control/*`. Pointing a tunnel route at `payload`,
+`payload-gateway` or `api` directly routes *around* that denylist and hands the internet Payload's
+admin panel. The tunnel does not bypass the proxy; it must terminate on it.
+
+### Start, verify, stop
+
+    cd /home/ubuntu/webdesk
+    docker compose --profile public -f docker-compose.yml -f docker-compose.sumopod.yml up -d cloudflared
+    docker compose --profile public -f docker-compose.yml -f docker-compose.sumopod.yml logs -f cloudflared
+
+Then verify **from off the box** — the point is what the internet sees, not what localhost sees:
+
+    curl -sI https://HOST/healthz          # expect 200
+    curl -sI https://HOST/admin            # expect 404 -- if this is 200, STOP
+    curl -sI https://HOST/api/graphql      # expect 404
+    curl -sI https://HOST/control/v1/jobs  # expect 404
+
+`/admin` returning anything other than 404 means the route bypasses Caddy. Take the tunnel down
+(`... --profile public ... stop cloudflared`) before investigating anything else.
+
+To stop exposing Zone B, stop that one container. Nothing else changes, and no other project on
+the box is involved at any point in this procedure.
+
+---
+
+**Authority note:** nothing in this runbook has been executed. `sumopod` runs the owner's
+production; execution is an explicit, separately-confirmed step (v2.0 OQ-2.2).
+
+---
+
 ## 0. Never-touch / scope
 
 | Item | Rule |

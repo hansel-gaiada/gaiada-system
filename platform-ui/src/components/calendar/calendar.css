@@ -142,8 +142,7 @@
 .cal-tab {
   padding: 6px 13px;
   font: 700 10px var(--font-body);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--erp-ink-60);
   text-decoration: none;
   transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease);

@@ -3,7 +3,7 @@
 
 .approval-row__age { font: 700 11px var(--font-body); color: var(--ink-subtle); flex-shrink: 0; width: 34px; }
 .approval-row__origin {
-  font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase;
+  font: 700 9px var(--font-body); letter-spacing: 0.01em;
   color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 2px 7px; flex-shrink: 0;
 }
 .approval-row__note {

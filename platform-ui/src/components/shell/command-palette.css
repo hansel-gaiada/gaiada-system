@@ -15,7 +15,7 @@
 .cmdk__list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
 .cmdk__empty { padding: 18px 12px; text-align: center; font: 400 13px var(--font-body); color: var(--erp-ink-50); }
 .cmdk__group + .cmdk__group { margin-top: 4px; }
-.cmdk__group-label { padding: 8px 10px 4px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.cmdk__group-label { padding: 8px 10px 4px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .cmdk__group-list { list-style: none; margin: 0; padding: 0; }
 .cmdk__opt { display: flex; align-items: baseline; gap: 10px; padding: 9px 10px; cursor: pointer; font: 400 14px var(--font-body); color: var(--text-primary); }
 .cmdk__opt-label { flex-shrink: 0; }

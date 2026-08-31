@@ -34,7 +34,7 @@
   display: grid; place-items: center; font-size: 13px; box-shadow: 0 1px 6px rgba(0,0,0,.35);
 }
 .cs-ba__tag {
-  position: absolute; top: 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  position: absolute; top: 8px; font-size: 10px; letter-spacing: 0.01em;
   padding: 2px 8px; border-radius: var(--radius-pill); background: rgba(0,0,0,.55); color: #fff; line-height: 1.4;
 }
 .cs-ba__tag--l { left: 8px; } .cs-ba__tag--r { right: 8px; }
@@ -43,7 +43,7 @@
 /* Control panel */
 .cs-panel { display: flex; flex-direction: column; gap: 18px; }
 .cs-section { display: flex; flex-direction: column; gap: 10px; }
-.cs-h { margin: 0; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
+.cs-h { margin: 0; font-size: 11px; letter-spacing: 0.01em; color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
 
 .cs-presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .cs-chip {

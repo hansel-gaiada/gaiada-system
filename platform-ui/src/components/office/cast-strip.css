@@ -95,7 +95,6 @@
   align-self: flex-start;
   font: 700 10px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .cast-strip__status--ok { color: var(--status-ok-fg); }
 .cast-strip__status--warning { color: var(--status-warning-fg); }

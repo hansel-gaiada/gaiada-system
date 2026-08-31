@@ -2,7 +2,7 @@
    The status dot is the one sanctioned circle (border-radius: 50%). */
 .sys-status-dot { display: inline-flex; align-items: center; gap: 6px; }
 .sys-status-dot__mark { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.sys-status-dot__label { font: 700 11px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.sys-status-dot__label { font: 700 11px var(--font-body); letter-spacing: 0.01em; }
 
 .sys-connection-state__copy { margin: 6px 0 0; font: 400 14px var(--font-body); color: var(--erp-ink-50); }
 
@@ -16,7 +16,7 @@
 /* Audit/registry filter chips. Links, not buttons — a filtered console view stays server-rendered
    and shareable, and the row degrades to plain navigation without JS. */
 .sys-filter-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.sys-filter { display: inline-flex; align-items: center; padding: 5px 10px; font: 600 11px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--erp-ink-50); border: 0.5px solid var(--erp-hairline); text-decoration: none; transition: color 0.15s ease, border-color 0.15s ease; }
+.sys-filter { display: inline-flex; align-items: center; padding: 5px 10px; font: 600 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-50); border: 0.5px solid var(--erp-hairline); text-decoration: none; transition: color 0.15s ease, border-color 0.15s ease; }
 .sys-filter:hover { color: var(--text-primary); }
 .sys-filter--active { color: var(--erp-accent); border-color: var(--erp-accent); }
 
@@ -65,7 +65,7 @@
 .bot-chat-row__count { margin-left: auto; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
 .bot-chat-row__preview { margin: 0; font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-50); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.bot-chat-badge { display: inline-flex; align-items: center; font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-50); }
+.bot-chat-badge { display: inline-flex; align-items: center; font: 700 9px var(--font-body); letter-spacing: 0.06em; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-50); }
 .bot-chat-badge--whatsapp { color: var(--status-ok-fg); border-color: var(--status-ok); }
 .bot-chat-badge--telegram { color: var(--status-info-fg); border-color: var(--status-info); }
 
@@ -76,7 +76,7 @@
 .bot-bubble__sender { font: 700 11px var(--font-body); color: var(--erp-accent); }
 .bot-bubble__time { font: 400 11px var(--font-body); color: var(--erp-ink-50); white-space: nowrap; }
 .bot-bubble__text { margin: 0; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
-.bot-bubble__media { margin-top: 6px; padding-top: 6px; border-top: 0.5px solid var(--erp-hairline-soft); font: 700 10px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--erp-ink-50); }
+.bot-bubble__media { margin-top: 6px; padding-top: 6px; border-top: 0.5px solid var(--erp-hairline-soft); font: 700 10px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-50); }
 .bot-bubble__media-text { margin: 4px 0 0; font: 400 13px/1.5 var(--font-body); color: var(--text-primary); white-space: pre-wrap; word-break: break-word; text-transform: none; letter-spacing: normal; font-weight: 400; }
 
 /* Logs tab — session-events timeline. */
@@ -93,7 +93,7 @@
 .lux-paginator__range { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 .lux-paginator__controls { display: flex; align-items: center; gap: 12px; }
 .lux-paginator__page { font: 700 11px var(--font-body); letter-spacing: 0.04em; color: var(--text-primary); }
-.lux-paginator__btn { background: none; border: 0.5px solid var(--erp-hairline); color: var(--text-primary); font: 600 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 6px 12px; cursor: pointer; transition: border-color 0.15s ease, opacity 0.15s ease; }
+.lux-paginator__btn { background: none; border: 0.5px solid var(--erp-hairline); color: var(--text-primary); font: 600 11px var(--font-body); letter-spacing: 0.06em; padding: 6px 12px; cursor: pointer; transition: border-color 0.15s ease, opacity 0.15s ease; }
 .lux-paginator__btn:hover:not(:disabled) { border-color: var(--erp-accent); color: var(--erp-accent); }
 .lux-paginator__btn:disabled { opacity: 0.35; cursor: default; }
 

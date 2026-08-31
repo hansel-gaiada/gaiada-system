@@ -1,28 +1,30 @@
 /* =====================================================================
-   Self-hosted per design system: Cormorant Garamond (display), Inter (body).
+   Self-hosted per design system. Inter (body/data) — and, once its files land,
+   Urbanist (display).
 
-   Both are VARIABLE fonts declared over the full 400–700 range, so weights
-   500 and 600 render as real interpolated instances. The previous build
-   shipped only static 400 + 700, which meant every `font-weight: 500|600`
-   in the codebase (11 sites) was synthesised by the browser — smeared
-   outlines that differed between Chrome and Safari.
+   GOLD-GLASS, 2026-08-30 — the serif is gone, Urbanist is in. Owner
+   decision 1 retires Cormorant Garamond from the product entirely (not just
+   from card titles, as the 2026-08-22 pass had it): the design sets every
+   heading in Urbanist 600/700 and uses no serif anywhere, login and print
+   covers included.
 
-   Payload: latin 400–700 for both families is ~85 KB, against 1.66 MB for
-   the four static .ttf/.woff files it replaces. latin-ext is a separate
-   @font-face gated on unicode-range, so it only downloads when a page
-   actually renders an extended-latin glyph.
+   Urbanist is SELF-HOSTED like the others, not pulled from the Google Fonts
+   CDN the design prototype used. This app has zero external font references
+   by design (BFF-only egress), and a CDN font is also a third-party request
+   on every route. The files are the same variable woff2 Google serves,
+   subset the same way (latin / latin-ext by unicode-range). Urbanist is
+   OFL-1.1, so redistribution in-tree is permitted.
 
-   `size-adjust` on the fallback stack is deliberately omitted — the metric
-   difference is absorbed by `font-display: swap` plus the <link rel=preload>
-   in app/layout.tsx, which lands the real face before first paint on any
-   warm cache.
+   The Cormorant @font-face pair and its <link rel=preload> are gone; the
+   two CormorantGaramond-Variable-*.woff2 files are deleted with them.
    ===================================================================== */
 
-/* ---- Display · Cormorant Garamond (variable, wght 400–700) --------- */
+
+/* ---- Display · Urbanist (variable, wght 400–700) ------------------- */
 @font-face {
-  font-family: "Cormorant Garamond";
-  src: url("/fonts/CormorantGaramond-Variable-latin.woff2") format("woff2-variations"),
-       url("/fonts/CormorantGaramond-Variable-latin.woff2") format("woff2");
+  font-family: "Urbanist";
+  src: url("/fonts/Urbanist-Variable-latin.woff2") format("woff2-variations"),
+       url("/fonts/Urbanist-Variable-latin.woff2") format("woff2");
   font-weight: 400 700;
   font-style: normal;
   font-display: swap;
@@ -31,9 +33,9 @@
                  U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Cormorant Garamond";
-  src: url("/fonts/CormorantGaramond-Variable-latin-ext.woff2") format("woff2-variations"),
-       url("/fonts/CormorantGaramond-Variable-latin-ext.woff2") format("woff2");
+  font-family: "Urbanist";
+  src: url("/fonts/Urbanist-Variable-latin-ext.woff2") format("woff2-variations"),
+       url("/fonts/Urbanist-Variable-latin-ext.woff2") format("woff2");
   font-weight: 400 700;
   font-style: normal;
   font-display: swap;
@@ -67,11 +69,12 @@
 }
 
 :root {
-  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-display: "Urbanist", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
   /* Data face — the same grotesk as the body, but always tabular. Every
      figure that sits in a column (KPI values, money, counts, durations)
-     must use this so digits align and scan. Cormorant's oldstyle-ish,
-     hairline-stroke figures are display-only and never tabular. */
+     must use this so digits align and scan. Kept as its own token, separate
+     from --font-display: Urbanist is a display face and must never be what a
+     numeric column is set in. */
   --font-data: "Inter", system-ui, sans-serif;
 }

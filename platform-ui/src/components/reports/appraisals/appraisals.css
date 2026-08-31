@@ -12,7 +12,7 @@
    built entirely from `--rc-*` tokens, which DO have a dark step, instead of the site-wide
    `--text-primary`/`--erp-accent` tokens, which don't. Use these (not `.lux-btn`) for any button
    rendered inside `.rc-viz`. */
-.rc-appr-btn { font: 700 11px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; transition: opacity 0.2s var(--erp-ease, ease); }
+.rc-appr-btn { font: 700 11px var(--font-body); letter-spacing: 0.01em; padding: 8px 14px; cursor: pointer; transition: opacity 0.2s var(--erp-ease, ease); }
 .rc-appr-btn:disabled { opacity: 0.4; cursor: default; }
 .rc-appr-btn--solid { background: var(--rc-text-primary); color: var(--rc-surface); border: 0.5px solid var(--rc-text-primary); }
 .rc-appr-btn--solid:hover:not(:disabled) { opacity: 0.7; }
@@ -31,7 +31,7 @@
 /* ---- composite + axis table ---- */
 .rc-appr-composite { display: flex; align-items: baseline; gap: 10px; }
 .rc-appr-composite__value { font: 700 32px var(--font-body); color: var(--rc-text-primary); }
-.rc-appr-composite__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--rc-text-muted); }
+.rc-appr-composite__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--rc-text-muted); }
 
 .rc-appr-axes { display: flex; flex-direction: column; gap: 10px; }
 .rc-appr-axis { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 0.5px solid var(--rc-axis); background: var(--rc-surface); }
@@ -40,7 +40,7 @@
 .rc-appr-axis__weight { font: 400 11px var(--font-body); color: var(--rc-text-muted); }
 .rc-appr-axis__scores { display: flex; align-items: center; gap: 14px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
 .rc-appr-axis__score-value { font: 700 16px var(--font-body); color: var(--rc-text-primary); }
-.rc-appr-axis__deviation { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--rc-serious); }
+.rc-appr-axis__deviation { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--rc-serious); }
 .rc-appr-axis__note { font: 400 12px/1.5 var(--font-body); color: var(--rc-text-secondary); padding-top: 4px; border-top: 0.5px solid var(--rc-grid); }
 
 /* ---- axis picker (manager scoring form) ---- */
@@ -64,7 +64,7 @@
 .rc-appr-ack { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 0.5px solid var(--rc-grid); }
 .rc-appr-ack:last-child { border-bottom: 0; }
 .rc-appr-ack__row { display: flex; align-items: center; gap: 8px; font: 400 12px var(--font-body); color: var(--rc-text-secondary); }
-.rc-appr-ack__action { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 6px; border: 0.5px solid var(--rc-axis); }
+.rc-appr-ack__action { font: 700 10px var(--font-body); letter-spacing: 0.06em; padding: 1px 6px; border: 0.5px solid var(--rc-axis); }
 .rc-appr-ack__action--disputed { color: var(--rc-serious); border-color: var(--rc-serious); }
 .rc-appr-ack__action--acknowledged, .rc-appr-ack__action--finalized { color: var(--rc-good); border-color: var(--rc-good); }
 .rc-appr-ack__comment { font: 400 13px/1.5 var(--font-body); color: var(--rc-text-primary); }

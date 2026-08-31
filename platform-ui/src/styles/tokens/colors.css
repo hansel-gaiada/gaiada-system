@@ -63,7 +63,7 @@
   --primitive-off-black:   #1A1916;  /* matte editorial near-black  */
   --primitive-bronze:      #6E5A43;  /* burnished accent — DECORATIVE brand only, never interactive */
   --primitive-champagne:   #A39174;  /* secondary highlight — DECORATIVE brand only */
-  --primitive-paper:       #FBFAF6;  /* legacy raised-card reference (superseded by --n-12; kept, unused by name below, for any external consumer) */
+  --primitive-paper:       #FFFFFF;  /* legacy raised-card reference (superseded by --n-12; kept, unused by name below, for any external consumer) */
   --primitive-line:        #1A1916;  /* hairline reference          */
 
   /* Status primitives. `rust` was already the app's de-facto alarm color
@@ -99,18 +99,18 @@
      Low numbers = the dark end (dark is primary); high numbers = the
      light end. Surfaces map onto this ramp directly (see TIER 3 below);
      ink/line stay alpha-based on purpose (see the ink-ramp comment). */
-  --n-1:  #0c0b08;  /* dark: sunken (recessed wells, code blocks, board troughs) */
-  --n-2:  #14120e;  /* dark: canvas — identical to --primitive-ink-page */
-  --n-3:  #1b1813;  /* dark: sunken-soft (zebra stripe, nested card-in-card) */
-  --n-4:  #23201a;  /* dark: card */
-  --n-5:  #2f2b23;  /* dark: raised (menus, dropdowns, popovers) */
-  --n-6:  #3d382f;  /* dark: overlay / modal surface */
+  --n-1:  #000000;  /* dark: page ground + chrome — the design's true black */
+  --n-2:  #050504;  /* dark: canvas / opaque card-solid tier */
+  --n-3:  #100f0c;  /* dark: sunken-soft (zebra stripe, nested card-in-card) */
+  --n-4:  #1a1814;  /* dark: card (the opaque base a glass card composites over) */
+  --n-5:  #292418;  /* dark: raised (menus, dropdowns, popovers) */
+  --n-6:  #322c1e;  /* dark: overlay / modal surface */
   --n-7:  #565043;  /* mid-neutral divider, either theme */
   --n-8:  #837863;  /* disabled/placeholder baseline, either theme */
   --n-9:  #aea38f;  /* light: border baseline */
-  --n-10: #d2cbbc;  /* light: sunken (recessed wells) */
-  --n-11: #ece8df;  /* light: canvas — close kin of the legacy off-white */
-  --n-12: #f9f7f3;  /* light: card / raised — close kin of the legacy paper */
+  --n-10: #e2ded1;  /* light: sunken (recessed wells) */
+  --n-11: #f1eee5;  /* light: canvas — the design's page ground */
+  --n-12: #f3f1e9;  /* light: card-solid / panel */
 
   /* Interactive colour — deliberately NOT the brand colour (RULE 4 above).
      A deep teal/verdigris: "the patina bronze forms," kin to the brand
@@ -124,6 +124,17 @@
      needs an audit of all 124 call sites into "graphic use" vs "text use"
      first, which is Phase 2+ scope. Dark converges the same way status
      colours already do (the lifted value clears 4.5:1 as text on its own). */
+  /* Gold-glass (2026-08-30). Gold is a LIGHT colour, so it can never be the
+     generic light-theme --accent: as text on the cream canvas #F5D560 lands
+     around 1.4:1. The deep tone carries every generic use in light; the bright
+     tone is reserved for deliberate solid fills, which always take dark ink.
+     The teal below is retained (unreferenced) so a rollback is a re-point. */
+  --primitive-gold:      #F5D560;  /* bright — solid fills, dark accent, both themes take INK on it */
+  --primitive-gold-deep: #7C671D;  /* light-theme generic accent — 5.0:1 as text on --n-11 */
+  --primitive-gold-soft: #E8D5A0;  /* dark secondary highlight */
+  --primitive-gold-dim:  #6E5A22;  /* light secondary highlight */
+  --primitive-ink-gold:  #23200F;  /* the ONE ink that sits on a gold fill, both themes */
+
   --primitive-teal:      #146e71;  /* light — 4.91:1 vs --n-11, 5.61:1 vs --n-12, white-on-fill 6.00:1 */
   --primitive-teal-lift: #71d2d6;  /* dark  — 10.59:1 vs --n-2, 6.59:1 vs --n-6 (worst case) */
 
@@ -195,9 +206,46 @@
   --surface-page:     var(--brand-color-bg);
   --surface-sunken:   var(--n-10);                    /* NEW: recessed wells, board troughs */
   --surface-card:     var(--n-12);
-  --surface-raised:   var(--n-12);                    /* menus, popovers, dropdowns */
-  --surface-overlay:  var(--n-12);                    /* NEW: popover/tooltip tier, --elev-overlay pairs with this */
-  --surface-modal:    var(--n-12);                    /* NEW: dialogs, --elev-4 + --scrim pair with this */
+  /* NEW 2026-08-30 — the OPAQUE card tier. Decision 3 caps glass at chrome and
+     top-level cards; everything nested (card-in-card, drawer over card, table
+     shell, popover over glass) reads this instead of --surface-glass. Identical
+     value to --surface-card today; it exists so the nested rule is expressible
+     at all, and so a future glass --surface-card does not drag nested surfaces
+     with it. */
+  --surface-card-solid: var(--n-12);
+
+  /* ---- Glass (gold-glass, 2026-08-30) ------------------------------
+     The one genuinely NEW material in this theme, and the one with a hard
+     boundary on it. Owner decision 3: glass is for CHROME (sidebar, top bar)
+     and TOP-LEVEL cards only. Anything nested — card-in-card, a drawer over a
+     card, a table shell, a popover over glass — reads --surface-card-solid
+     instead. Stacked translucency stops being legible after two layers, and
+     this app stacks routinely across 208 routes. tokens.test.ts enforces the
+     boundary by banning backdrop-filter outside the allowed component set;
+     it is a rule, not a convention.
+
+     --surface-glass is deliberately kept separate from the plain card surface —
+     a component opts INTO glass by naming it. That keeps the default safe and makes every glass
+     surface greppable. --blur-glass and --glass-saturate live in spacing.css
+     with the other non-colour geometry. */
+  --surface-glass:  rgb(255 255 255 / 0.34);
+  --glass-line:     rgb(255 255 255 / 0.90);
+  --glass-divider:  rgb(28 25 16 / 0.10);
+  --glass-sheen:    rgb(255 255 255 / 0.60);
+  --glass-inner:    inset 0 1px 0 rgb(255 255 255 / 1), inset 0 -1px 0 rgb(28 25 16 / 0.06), inset 0 0 70px rgb(245 213 96 / 0.10);
+  --glow:           0 8px 22px -10px color-mix(in srgb, var(--accent-fill) 70%, transparent);
+
+  /* Ambient wash — the page-level accent gradient the design lays behind the
+     shell. Percentages, not colours, so one gradient rule in shell.css reads
+     all three and the theme controls only their strength. Light needs far more
+     of it than dark: the same mix reads as almost nothing on cream. The print
+     block strips it entirely. */
+  --ambient-1: 52%;
+  --ambient-2: 40%;
+  --ambient-3: 26%;
+  --surface-raised:   var(--primitive-paper);         /* menus, popovers, dropdowns — pure white, a real step above card */
+  --surface-overlay:  var(--primitive-paper);         /* popover/tooltip tier, --elev-overlay pairs with this */
+  --surface-modal:    var(--primitive-paper);         /* dialogs, --elev-4 + --scrim pair with this */
   --surface-chrome:   var(--brand-color-bg);          /* sidebar + top bar          */
   --surface-inverse:  var(--primitive-off-black);
   --text-on-inverse:  var(--primitive-off-white);
@@ -216,10 +264,16 @@
 
   --text-primary:     var(--brand-color-text-dark);
   --text-on-accent:   var(--brand-color-bg);
-  --accent:           var(--primitive-teal);          /* INTERACTIVE — see RULE 4 in the file header */
-  --accent-fg:         var(--primitive-teal);          /* text-safe tier; same value as --accent in light (already >=4.5:1 as text) */
-  --accent-fill:       color-mix(in srgb, var(--accent) 94%, #000);  /* amendment 01 — full-width/large solid buttons only */
-  --accent-secondary: var(--brand-color-secondary);    /* DECORATIVE only — champagne, no longer aliased by any status */
+  --accent:           var(--primitive-gold-deep);          /* INTERACTIVE — see RULE 4 in the file header */
+  --accent-fg:         var(--primitive-gold-deep);          /* text-safe tier; same value as --accent in light (already >=4.5:1 as text) */
+  --accent-fill:       var(--primitive-gold);       /* amendment 01 — full-width/large solid buttons only. NOT derived from
+                                                       --accent any more: the bright tone IS the fill, the deep tone is the
+                                                       generic accent, and they are different colours rather than one shaded. */
+  --ink-on-accent-fill: var(--primitive-ink-gold);  /* NEW 2026-08-30 — the ink for --accent-fill. Separate from
+                                                       --text-on-accent because in LIGHT those two fills differ:
+                                                       --accent is deep gold (takes cream) and --accent-fill is
+                                                       bright gold (takes near-black). Same value in both themes. */
+  --accent-secondary: var(--primitive-gold-dim);    /* DECORATIVE only — champagne, no longer aliased by any status */
   --hairline:         var(--brand-color-text-dark);
 
   /* Ink ramp — the ONLY source of text color. Alphas are chosen so every
@@ -232,21 +286,21 @@
      AA against the new --n-10 sunken surface introduced in Phase 1;
      every other tier already cleared the new worst case at its existing
      alpha and is left untouched. */
-  --ink-strong: rgb(26 25 22);            /* 10.89:1 vs --n-10 — headings, primary text */
-  --ink-body:   rgb(26 25 22 / 0.86);     /*  7.93:1 vs --n-10 — long-form body         */
-  --ink-muted:  rgb(26 25 22 / 0.70);     /*  5.14:1 vs --n-10 — secondary/meta text    */
-  --ink-subtle: rgb(26 25 22 / 0.66);     /*  4.54:1 vs --n-10 — small caps labels (was 0.62 / 4.07:1, failed AA on the new surface) */
-  --ink-faint:  rgb(26 25 22 / 0.45);     /*  2.62:1 vs --n-10 — decorative only        */
+  --ink-strong: rgb(28 25 16);            /* 10.89:1 vs --n-10 — headings, primary text */
+  --ink-body:   rgb(28 25 16 / 0.86);     /*  7.93:1 vs --n-10 — long-form body         */
+  --ink-muted:  rgb(28 25 16 / 0.70);     /*  5.14:1 vs --n-10 — secondary/meta text    */
+  --ink-subtle: rgb(28 25 16 / 0.66);     /*  4.54:1 vs --n-10 — small caps labels (was 0.62 / 4.07:1, failed AA on the new surface) */
+  --ink-faint:  rgb(28 25 16 / 0.45);     /*  2.62:1 vs --n-10 — decorative only        */
 
   /* Structure. `--line-control` is the interactive-boundary tier: input
      underlines, select borders, ghost-button outlines. WCAG 1.4.11 wants
      3:1 for those, which the decorative hairlines below deliberately miss.
      All four values already clear their target against the new --n-10
      worst-case surface at the legacy alpha — no change needed here. */
-  --line-control: rgb(26 25 22 / 0.55);   /* 3.38:1 vs --n-10 — form control borders */
-  --line-strong:  rgb(26 25 22 / 0.30);   /* emphasis dividers            */
-  --line:         rgb(26 25 22 / 0.16);   /* default hairline             */
-  --line-soft:    rgb(26 25 22 / 0.10);   /* nested / inner hairline      */
+  --line-control: rgb(28 25 16 / 0.55);   /* 3.38:1 vs --n-10 — form control borders */
+  --line-strong:  rgb(28 25 16 / 0.30);   /* emphasis dividers            */
+  --line:         rgb(28 25 16 / 0.16);   /* default hairline             */
+  --line-soft:    rgb(28 25 16 / 0.10);   /* nested / inner hairline      */
 
   /* Accent washes — derived from --accent so re-branding carries them. */
   --tint-hover:  color-mix(in srgb, var(--accent) 6%, transparent);
@@ -270,7 +324,7 @@
   --status-danger:   var(--primitive-crimson);
   --status-progress: var(--primitive-bronze);   /* was var(--accent) — decoupled, same bronze value, 5.36:1 vs --n-11 */
   --status-idle:     var(--primitive-idle);     /* was var(--accent-secondary)/champagne (2.50:1) — decoupled + retuned, 3.92:1 */
-  --status-neutral:  rgb(26 25 22 / 0.48);      /* was 0.28 (1.90:1) — retuned to 3.32:1 vs --n-11 */
+  --status-neutral:  rgb(28 25 16 / 0.48);      /* was 0.28 (1.90:1) — retuned to 3.32:1 vs --n-11 */
 
   /* … and text value (4.5:1 on the surface the badge actually renders on
      — canvas or card; --n-10 sunken is not a realistic text location for
@@ -392,30 +446,45 @@
 
     --surface-sunken:   var(--n-1);
     --surface-card:     var(--n-4);
+    --surface-card-solid: var(--n-2);  /* the design's opaque panel tier */
     --surface-raised:   var(--n-5);
     --surface-overlay:  var(--n-6);
     --surface-modal:    var(--n-6);
     --surface-chrome:   var(--n-1);   /* chrome recedes below the content canvas */
     --surface-inverse:  #2E2A22;
     --text-on-inverse:  var(--primitive-off-white);
-    --wash:        rgb(232 227 214 / 0.06);
-    --wash-strong: rgb(232 227 214 / 0.10);
+    --wash:        rgb(246 242 230 / 0.06);
+    --wash-strong: rgb(246 242 230 / 0.10);
     /* The accent is now light, so text sitting ON it must be dark. */
-    --text-on-accent:   var(--primitive-off-black);
-    --accent:            var(--primitive-teal-lift);
-    --accent-fg:         var(--primitive-teal-lift);   /* converges with graphic, same as --status-*-fg already does in dark */
-    --accent-fill:       color-mix(in srgb, var(--accent) 86%, var(--n-1));  /* amendment 01 */
+    --text-on-accent:   var(--primitive-ink-gold);
+    --accent:            var(--primitive-gold);
+    --accent-fg:         var(--primitive-gold);   /* converges with graphic, same as --status-*-fg already does in dark */
+    --accent-fill:        var(--primitive-gold);
+    --ink-on-accent-fill: var(--primitive-ink-gold);
+    --accent-secondary:   var(--primitive-gold-soft);
+    /* Glass — see the light block for the boundary rule. Dark uses a warm
+       charcoal wash rather than white so the material keeps the theme's
+       warmth instead of reading as grey film. */
+    --surface-glass:  rgb(32 31 28 / 0.28);
+    --glass-line:     rgb(246 242 230 / 0.06);
+    --glass-divider:  rgb(246 242 230 / 0.15);
+    --glass-sheen:    rgb(246 242 230 / 0.05);
+    --glass-inner:    inset 0 1px 0 rgb(246 242 230 / 0.30), inset 0 -1px 0 rgb(0 0 0 / 0.18);
+    --glow:           0 8px 24px -10px color-mix(in srgb, var(--accent-fill) 60%, transparent);
+    --ambient-1: 10%;
+    --ambient-2: 19%;
+    --ambient-3: 5%;  /* amendment 01 */
 
-    --ink-strong: rgb(232 227 214);
-    --ink-body:   rgb(232 227 214 / 0.84);
-    --ink-muted:  rgb(232 227 214 / 0.68);
-    --ink-subtle: rgb(232 227 214 / 0.62);  /* was 0.58 / 4.20:1 vs the new --n-6 — bumped to clear 4.5:1 (4.57:1) */
-    --ink-faint:  rgb(232 227 214 / 0.40);
+    --ink-strong: rgb(246 242 230);
+    --ink-body:   rgb(246 242 230 / 0.84);
+    --ink-muted:  rgb(246 242 230 / 0.68);
+    --ink-subtle: rgb(246 242 230 / 0.62);  /* was 0.58 / 4.20:1 vs the new --n-6 — bumped to clear 4.5:1 (4.57:1) */
+    --ink-faint:  rgb(246 242 230 / 0.40);
 
-    --line-control: rgb(232 227 214 / 0.48);
-    --line-strong:  rgb(232 227 214 / 0.26);
-    --line:         rgb(232 227 214 / 0.14);
-    --line-soft:    rgb(232 227 214 / 0.09);
+    --line-control: rgb(246 242 230 / 0.48);
+    --line-strong:  rgb(246 242 230 / 0.26);
+    --line:         rgb(246 242 230 / 0.14);
+    --line-soft:    rgb(246 242 230 / 0.09);
 
     --tint-hover:  color-mix(in srgb, var(--accent) 10%, transparent);
     --tint-active: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -427,7 +496,7 @@
     --status-danger:   var(--primitive-crimson-lift);
     --status-progress: var(--primitive-bronze-lift);   /* was var(--accent) — decoupled */
     --status-idle:     var(--primitive-champagne-lift); /* was var(--accent-secondary) — decoupled, value unchanged (already passes dark) */
-    --status-neutral:  rgb(232 227 214 / 0.42);        /* was 0.26 (2.16:1 vs the new --n-6) — bumped to 3.30:1 */
+    --status-neutral:  rgb(246 242 230 / 0.42);        /* was 0.26 (2.16:1 vs the new --n-6) — bumped to 3.30:1 */
 
     /* On a dark surface the lifted graphic values already clear 4.5:1, so
        text and graphic tiers converge — no separate darkened -fg needed. */
@@ -491,29 +560,44 @@ html[data-theme="dark"] {
 
   --surface-sunken:   var(--n-1);
   --surface-card:     var(--n-4);
+  --surface-card-solid: var(--n-2);
   --surface-raised:   var(--n-5);
   --surface-overlay:  var(--n-6);
   --surface-modal:    var(--n-6);
   --surface-chrome:   var(--n-1);   /* chrome recedes below the content canvas */
   --surface-inverse:  #2E2A22;
   --text-on-inverse:  var(--primitive-off-white);
-  --text-on-accent:   var(--primitive-off-black);
-  --accent:            var(--primitive-teal-lift);
-  --accent-fg:         var(--primitive-teal-lift);
-  --accent-fill:       color-mix(in srgb, var(--accent) 86%, var(--n-1));
-  --wash:        rgb(232 227 214 / 0.06);
-  --wash-strong: rgb(232 227 214 / 0.10);
+  --text-on-accent:   var(--primitive-ink-gold);
+  --accent:            var(--primitive-gold);
+  --accent-fg:         var(--primitive-gold);
+  --accent-fill:        var(--primitive-gold);
+  --ink-on-accent-fill: var(--primitive-ink-gold);
+  --accent-secondary:   var(--primitive-gold-soft);
+  /* Glass — see the light block for the boundary rule. Dark uses a warm
+     charcoal wash rather than white so the material keeps the theme's
+     warmth instead of reading as grey film. */
+  --surface-glass:  rgb(32 31 28 / 0.28);
+  --glass-line:     rgb(246 242 230 / 0.06);
+  --glass-divider:  rgb(246 242 230 / 0.15);
+  --glass-sheen:    rgb(246 242 230 / 0.05);
+  --glass-inner:    inset 0 1px 0 rgb(246 242 230 / 0.30), inset 0 -1px 0 rgb(0 0 0 / 0.18);
+  --glow:           0 8px 24px -10px color-mix(in srgb, var(--accent-fill) 60%, transparent);
+  --ambient-1: 10%;
+  --ambient-2: 19%;
+  --ambient-3: 5%;
+  --wash:        rgb(246 242 230 / 0.06);
+  --wash-strong: rgb(246 242 230 / 0.10);
 
-  --ink-strong: rgb(232 227 214);
-  --ink-body:   rgb(232 227 214 / 0.84);
-  --ink-muted:  rgb(232 227 214 / 0.68);
-  --ink-subtle: rgb(232 227 214 / 0.62);
-  --ink-faint:  rgb(232 227 214 / 0.40);
+  --ink-strong: rgb(246 242 230);
+  --ink-body:   rgb(246 242 230 / 0.84);
+  --ink-muted:  rgb(246 242 230 / 0.68);
+  --ink-subtle: rgb(246 242 230 / 0.62);
+  --ink-faint:  rgb(246 242 230 / 0.40);
 
-  --line-control: rgb(232 227 214 / 0.48);
-  --line-strong:  rgb(232 227 214 / 0.26);
-  --line:         rgb(232 227 214 / 0.14);
-  --line-soft:    rgb(232 227 214 / 0.09);
+  --line-control: rgb(246 242 230 / 0.48);
+  --line-strong:  rgb(246 242 230 / 0.26);
+  --line:         rgb(246 242 230 / 0.14);
+  --line-soft:    rgb(246 242 230 / 0.09);
 
   --tint-hover:  color-mix(in srgb, var(--accent) 10%, transparent);
   --tint-active: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -525,7 +609,7 @@ html[data-theme="dark"] {
   --status-danger:   var(--primitive-crimson-lift);
   --status-progress: var(--primitive-bronze-lift);
   --status-idle:     var(--primitive-champagne-lift);
-  --status-neutral:  rgb(232 227 214 / 0.42);
+  --status-neutral:  rgb(246 242 230 / 0.42);
 
   --status-critical-fg: var(--primitive-rust-lift);
   --status-ok-fg:       var(--primitive-sage-lift);
@@ -580,8 +664,117 @@ html[data-theme="dark"] {
    through the print route). Values are the light ones, kept literal here rather than aliased,
    because the surrounding page tokens are not in play on paper. Declared at html level so it beats
    whichever dark block was active on screen. */
+/* =====================================================================
+   PRINT  ·  the report PDF is ALWAYS light
+   ---------------------------------------------------------------------
+   Owner decision 2026-08-30: a report PDF never renders in the viewer's
+   dark theme. `/print/reports/[jobToken]` is rendered by the
+   `report-renderer` sidecar, which sends no session cookie — so
+   app/layout.tsx falls back to `theme: "auto"`, stamps no `data-theme`,
+   and the decision lands on `@media (prefers-color-scheme: dark)` above.
+
+   That used to be the WHOLE story, and it was luck: it resolved light only
+   because Playwright's default colorScheme is light. Two things now make it
+   ours instead. The sidecar declares `emulateMedia({ colorScheme: "light" })`
+   (report-renderer/src/server.ts), and this block re-declares the complete
+   light palette under print — deliberately redundant with each other.
+
+   SPECIFICITY IS THE POINT. This block previously selected a bare `html`
+   (0-0-1), which LOSES to `html[data-theme="dark"]` (0-1-1) — so a pinned
+   dark theme would have survived into print and taken every surface and ink
+   token with it, while print.css's hardcoded `.tr20-print { background:#fff }`
+   kept the outer sheet white. That is dark components on a white page, in a
+   customer-facing PDF, failing silently. The three-selector list below matches
+   that specificity and, sitting last in the file, wins on source order.
+
+   The token list is exactly the set the two dark blocks above override —
+   tokens.test.ts asserts that correspondence, so a token added to a dark
+   block without a print value fails the build rather than leaking into a PDF.
+
+   The --rc-* chart values are NOT the light-root values: the chart kit has its
+   own print-optimised palette (higher-contrast series on paper), unchanged
+   here and mirrored defensively in app/print/print.css.
+   ===================================================================== */
 @media print {
-  html {
+  html,
+  html[data-theme="dark"],
+  html[data-theme="light"] {
+    color-scheme: light;
+
+    --brand-color-primary:    var(--primitive-bronze);
+    --brand-color-secondary:  var(--primitive-champagne);
+    --brand-color-bg:         var(--n-11);
+    --brand-color-text-dark:  var(--primitive-off-black);
+    --surface-sunken:         var(--n-10);
+    --surface-card:           var(--n-12);
+    --surface-raised:         var(--primitive-paper);
+    --surface-overlay:        var(--primitive-paper);
+    --surface-modal:          var(--primitive-paper);
+    --surface-chrome:         var(--brand-color-bg);
+    --surface-inverse:        var(--primitive-off-black);
+    --text-on-inverse:        var(--primitive-off-white);
+    --wash:                   rgb(12 11 8 / 0.05);
+    --wash-strong:            rgb(12 11 8 / 0.09);
+    --text-on-accent:         var(--brand-color-bg);
+    --accent:                 var(--primitive-gold-deep);
+    --accent-fg:              var(--primitive-gold-deep);
+    --accent-fill:            var(--primitive-gold);
+    --ink-strong:             rgb(28 25 16);
+    --ink-body:               rgb(28 25 16 / 0.86);
+    --ink-muted:              rgb(28 25 16 / 0.70);
+    --ink-subtle:             rgb(28 25 16 / 0.66);
+    --ink-faint:              rgb(28 25 16 / 0.45);
+    --line-control:           rgb(28 25 16 / 0.55);
+    --line-strong:            rgb(28 25 16 / 0.30);
+    --line:                   rgb(28 25 16 / 0.16);
+    --line-soft:              rgb(28 25 16 / 0.10);
+    --tint-hover:             color-mix(in srgb, var(--accent) 6%, transparent);
+    --tint-active:            color-mix(in srgb, var(--accent) 10%, transparent);
+    --status-critical:        var(--primitive-rust);
+    --status-ok:              var(--primitive-sage);
+    --status-info:            var(--primitive-azure);
+    --status-warning:         var(--primitive-amber);
+    --status-danger:          var(--primitive-crimson);
+    --status-progress:        var(--primitive-bronze);
+    --status-idle:            var(--primitive-idle);
+    --status-neutral:         rgb(28 25 16 / 0.48);
+    --status-critical-fg:     #A0511F;
+    --status-ok-fg:           #3C6449;
+    --status-info-fg:         #2F6390;
+    --status-warning-fg:      #8A5E13;
+    --status-danger-fg:       var(--primitive-crimson);
+    --status-progress-fg:     var(--primitive-bronze);
+    --status-idle-fg:         #77664B;
+    --status-critical-bg:     color-mix(in srgb, var(--status-critical) 10%, transparent);
+    --status-critical-line:   color-mix(in srgb, var(--status-critical) 40%, transparent);
+    --status-warning-bg:      color-mix(in srgb, var(--status-warning) 10%, transparent);
+    --status-ok-bg:           color-mix(in srgb, var(--status-ok) 10%, transparent);
+    --status-info-bg:         color-mix(in srgb, var(--status-info) 10%, transparent);
+    --elev-1:                 0 1px 2px rgb(12 11 8 / 0.06), 0 1px 1px rgb(12 11 8 / 0.04);
+    --elev-2:                 0 4px 10px -4px rgb(12 11 8 / 0.14), 0 1px 2px rgb(12 11 8 / 0.08);
+    --elev-overlay:           0 10px 24px -8px rgb(12 11 8 / 0.20), 0 2px 4px rgb(12 11 8 / 0.10);
+    --elev-4:                 0 20px 48px -12px rgb(12 11 8 / 0.28), 0 4px 8px rgb(12 11 8 / 0.14);
+    --scrim:                  rgb(12 11 8 / 0.40);
+
+    /* Gold-glass additions (2026-08-30). The accent family takes its light-root
+       values; the GLASS family is deliberately flattened instead — a backdrop
+       blur over a white sheet prints as grey mush and the ambient gradient
+       would ink every page. tokens.test.ts carries these names on an explicit
+       divergence list so the flattening is a declared intent, not a drift. */
+    --surface-card-solid: var(--n-12);
+    --ink-on-accent-fill: var(--primitive-ink-gold);
+    --accent-secondary:   var(--primitive-gold-dim);
+    --surface-glass:  var(--primitive-paper);
+    --glass-line:     var(--line-soft);
+    --glass-divider:  var(--line-soft);
+    --glass-sheen:    transparent;
+    --glass-inner:    none;
+    --glow:           none;
+    --ambient-1: 0%;
+    --ambient-2: 0%;
+    --ambient-3: 0%;
+
+    /* Chart kit — print-specific palette, not the light-root values (see above). */
     --rc-surface:        #f9f7f3;
     --rc-text-primary:   #0c0b08;
     --rc-text-secondary: #52514e;
@@ -590,6 +783,13 @@ html[data-theme="dark"] {
     --rc-axis:           #c3c2b7;
     --rc-tooltip-bg:     #f9f7f3;
     --rc-tooltip-border: rgba(11, 11, 11, 0.1);
+    /* Was MISSING from this block until 2026-08-30 — found by the new
+       dark/print parity test on its first run, not by reading. Both dark
+       blocks pin it to #71d2d6, so a dark-pinned render kept a dark-theme
+       focus ring. Written as var(--accent) rather than light root's
+       var(--erp-accent) so this does not spread the compat alias layer that
+       gold-glass Phase 3 retires; the two resolve to the same value. */
+    --rc-focus:          var(--accent);
 
     --rc-series-1: #b42254;
     --rc-series-2: #2273b4;
@@ -605,5 +805,20 @@ html[data-theme="dark"] {
     --rc-serious:       #ec835a;
     --rc-critical:      #d03b3b;
     --rc-delta-up-good: #006300;
+  }
+
+  /* Glass never reaches paper. Written as a STANDING rule ahead of the glass
+     tokens themselves (gold-glass Phase 3) so a later translucent surface
+     cannot silently reintroduce it: a backdrop blur over a white sheet prints
+     as grey mush, and the theme's ambient accent gradient is a full-page
+     background image that `print-color-adjust: exact` would ink onto every
+     single page. Scoped to background-IMAGE only — background colours, which
+     every status pill and the provenance banner depend on, are untouched. */
+  *, *::before, *::after {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  html, body {
+    background-image: none !important;
   }
 }

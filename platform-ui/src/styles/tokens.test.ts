@@ -16,7 +16,15 @@ function declaredVars(css: string, blockStart: number): Record<string, string> {
     i++;
   }
   const out: Record<string, string> = {};
-  for (const m of css.slice(start, i - 1).matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+  // Strip comments from the extracted slice BEFORE matching declarations.
+  // Without this, prose that names a token followed by a colon — "…is not
+  // --surface-card: a component opts into glass by naming it" — parses as a
+  // declaration whose value runs to the next semicolon, silently overwriting
+  // the real one. That produced a phantom mismatch on the gold-glass pass.
+  // Stripping happens after the brace walk, not before, so the walk still sees
+  // the original text and the caller's index stays valid.
+  const body = css.slice(start, i - 1).replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const m of body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
     out[m[1]] = m[2].trim();
   }
   return out;
@@ -123,6 +131,144 @@ describe("design tokens", () => {
     const pinned = declaredVars(colors, colors.indexOf('html[data-theme="dark"]'));
     expect(Object.keys(media).length).toBeGreaterThan(20);
     expect(pinned).toEqual(media);
+  });
+
+  // ---- Print is always light (owner decision, 2026-08-30) ----------------
+  // A report PDF never renders in the viewer's dark theme. Two mechanisms
+  // enforce that and they are meant to be redundant: the report-renderer
+  // sidecar declares emulateMedia({ colorScheme: "light" }), and colors.css's
+  // @media print block re-declares the light palette. This pair of tests
+  // guards the CSS half — the half that used to be wrong.
+  it("the print block outranks a pinned dark theme", () => {
+    // A bare `html` selector (0-0-1) LOSES the cascade to html[data-theme="dark"]
+    // (0-1-1). That was the shipped bug: pin dark, render a PDF, and every
+    // surface and ink token stayed dark underneath print.css's white sheet.
+    // The block must name the attribute selectors to match their specificity.
+    const colors = read("./tokens/colors.css");
+    const print = colors.slice(colors.indexOf("@media print"));
+    expect(print).toContain('html[data-theme="dark"]');
+    expect(print).toContain('html[data-theme="light"]');
+    // ...and it must sit last, because equal specificity is settled by source order.
+    expect(colors.indexOf("@media print")).toBeGreaterThan(colors.indexOf('html[data-theme="dark"]'));
+  });
+
+  it("every token a dark block overrides has a light value under print", () => {
+    // The failure this catches: someone adds a token to the dark blocks and
+    // forgets the print block, so that one token leaks dark into a
+    // customer-facing PDF while everything around it stays light. The set of
+    // tokens that can leak is exactly the set the dark blocks override.
+    const colors = read("./tokens/colors.css");
+    const base = declaredVars(colors, colors.indexOf(":root {"));
+    const dark = declaredVars(colors, colors.indexOf('html:not([data-theme="light"])'));
+    const print = declaredVars(colors, colors.indexOf("@media print"));
+
+    // Presence is required for EVERY dark-overridden token, no exceptions.
+    const missing = Object.keys(dark).filter((k) => !(k in print));
+    expect(missing).toEqual([]);
+
+    // Two families deliberately diverge from the light values under print, and
+    // the divergence is the point rather than a bug:
+    //   --rc-*   the chart kit's print palette is tuned for higher contrast on
+    //            paper than on screen.
+    //   glass    a backdrop blur over a white sheet prints as grey mush, so the
+    //            glass family flattens to an opaque surface and the ambient
+    //            gradient goes to 0%.
+    // Anything NOT on this list must match the light root exactly.
+    const PRINT_INTENTIONAL_DIVERGENCE = ["--rc-", "--surface-glass", "--glass-", "--glow", "--ambient-"];
+    const wrong = Object.keys(dark)
+      .filter((k) => !PRINT_INTENTIONAL_DIVERGENCE.some((d) => k.startsWith(d)))
+      .filter((k) => print[k] !== base[k]);
+    expect(wrong).toEqual([]);
+  });
+
+  // ---- Gold-glass (owner decisions, 2026-08-30) --------------------------
+  it("glass stays inside its boundary — chrome and top-level cards only", () => {
+    // Decision 3. Stacked translucency stops being legible after two layers and
+    // this app stacks routinely, so the cap is enforced rather than documented.
+    // The guard is on --blur-glass (the glass material) and NOT on
+    // backdrop-filter itself, because the two scrims — the command palette and
+    // the mobile-nav dim — legitimately blur with --blur-overlay and are not
+    // glass. Widening this list is a design decision; make it deliberately.
+    const GLASS_ALLOWED = ["shell/shell.css", "ui.css"];
+    const offenders = componentCssFiles([])
+      .filter((p) => readFileSync(p, "utf8").includes("--blur-glass"))
+      .map((p) => p.replace(/\\/g, "/"))
+      .filter((p) => !GLASS_ALLOWED.some((a) => p.includes(a)));
+    expect(offenders).toEqual([]);
+  });
+
+  it("a gold fill always carries its own ink, in both themes", () => {
+    // The trap this closes: gold is a LIGHT colour, so anything sitting on it
+    // takes near-black ink — never the cream that --text-on-accent carries in
+    // light, where --accent is the DEEP gold. A component writing
+    // `background: var(--accent-fill); color: var(--text-on-accent)` would read
+    // correctly in dark and be invisible in light. --ink-on-accent-fill is the
+    // one ink for --accent-fill and must be identical in every block.
+    const colors = read("./tokens/colors.css");
+    const base = declaredVars(colors, colors.indexOf(":root {"));
+    const media = declaredVars(colors, colors.indexOf('html:not([data-theme="light"])'));
+    const pinned = declaredVars(colors, colors.indexOf('html[data-theme="dark"] {'));
+    expect(base["--ink-on-accent-fill"]).toBeTruthy();
+    expect(media["--ink-on-accent-fill"]).toBe(base["--ink-on-accent-fill"]);
+    expect(pinned["--ink-on-accent-fill"]).toBe(base["--ink-on-accent-fill"]);
+  });
+
+  it("the nested surface tier flips for dark", () => {
+    // --surface-card-solid is what everything nested reads instead of glass.
+    // It was added to the light root first, where it resolves to --n-12 — a
+    // near-white card. Without a dark override that white would have rendered
+    // on a black page on every nested surface in the app.
+    const colors = read("./tokens/colors.css");
+    const base = declaredVars(colors, colors.indexOf(":root {"));
+    const media = declaredVars(colors, colors.indexOf('html:not([data-theme="light"])'));
+    const pinned = declaredVars(colors, colors.indexOf('html[data-theme="dark"] {'));
+    expect(base["--surface-card-solid"]).toBeTruthy();
+    expect(media["--surface-card-solid"]).toBeTruthy();
+    expect(media["--surface-card-solid"]).not.toBe(base["--surface-card-solid"]);
+    expect(pinned["--surface-card-solid"]).toBe(media["--surface-card-solid"]);
+  });
+
+  it("the display face carries no serif", () => {
+    // Owner decision 1: Cormorant Garamond leaves the product, Urbanist takes
+    // the display tier. Asserting the @font-face too, not just the token: a
+    // --font-display naming a family with no @font-face would render only for
+    // viewers who happen to have it installed locally, so the app would look
+    // different per machine and nothing would fail.
+    const fonts = read("./tokens/fonts.css");
+    expect(fonts).toMatch(/--font-display:\s*"Urbanist"/);
+    expect(fonts).toContain('font-family: "Urbanist"');
+    expect(fonts).toContain("/fonts/Urbanist-Variable-latin.woff2");
+    expect(fonts).toContain("/fonts/Urbanist-Variable-latin-ext.woff2");
+    // `sans-serif` legitimately contains "serif" — the lookbehind is what makes
+    // this assert an ACTUAL serif rather than every sans stack in the file.
+    expect(fonts).not.toMatch(/--font-display:[^;]*((?<!sans-)serif|Cormorant|Georgia)/);
+    expect(fonts).not.toContain('font-family: "Cormorant Garamond"');
+  });
+
+  it("the --erp-* compatibility aliases stay pure references", () => {
+    // 660 CSS uses across 238 files read these names, so retiring them is a
+    // rename, not a cleanup — and it is not worth doing, because an alias that
+    // holds only a var() reference has no value of its own and therefore cannot
+    // drift when the token it points at is re-pointed. This guard is what makes
+    // that argument true: the moment someone gives an alias a literal, the
+    // no-drift property is gone and the build says so.
+    const globals = read("./globals.css");
+    const aliases = [...globals.matchAll(/(--erp-[a-z0-9-]+):\s*([^;]+);/g)];
+    expect(aliases.length).toBeGreaterThan(5);
+    const literal = aliases
+      .filter(([, name]) => name !== "--erp-ease") // motion curve, not a colour
+      .filter(([, , value]) => !value.trim().startsWith("var(--"));
+    expect(literal.map(([, n]) => n)).toEqual([]);
+  });
+
+  it("print strips glass and the ambient gradient", () => {
+    // Standing rule, written ahead of the gold-glass token layer: a backdrop
+    // blur over a white sheet prints as grey mush, and the theme's ambient
+    // accent gradient is a full-page background image that
+    // print-color-adjust: exact would ink onto every page.
+    const print = read("./tokens/colors.css").slice(read("./tokens/colors.css").indexOf("@media print"));
+    expect(print).toMatch(/backdrop-filter:\s*none\s*!important/);
+    expect(print).toMatch(/background-image:\s*none\s*!important/);
   });
 
   // ---- Interactive/brand decoupling (Phase 1, 2026-08-22) -----------------

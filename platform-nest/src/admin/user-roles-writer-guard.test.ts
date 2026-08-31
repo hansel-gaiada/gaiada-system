@@ -179,6 +179,15 @@ const TRUSTED_WRITERS: Record<string, string> = {
 // sweeps above) and then pick the origin that skips every invariant. Adding a file here is a
 // deliberate, reviewed act with a stated reason, exactly like TRUSTED_WRITERS.
 const TRUSTED_INTERNAL_CALLERS: Record<string, string> = {
+  "src/admin/provision-client-portal-logins.ts":
+    "A CLI one-off with no request path and no inputs beyond --dry-run. role_id resolves ONLY to " +
+    "the GLOBAL `client` role by name - hardcoded in the query, never supplied - and the script " +
+    "refuses outright if that role is absent rather than falling back to something weaker. The " +
+    "scope is always 'company', scoped to the agency tenant the script looked up itself by name. " +
+    "Neither the role nor the scope can be steered by anyone, which is exactly the condition this " +
+    "origin exists for. It also grants strictly LESS trust than the path it replaces: " +
+    "seed/client-logins.ts does the raw INSERT under TRUSTED_WRITERS and skips assertGrantAllowed " +
+    "entirely, where this one runs it.",
   "src/admin/service-reconciler.ts":
     "role_id resolves ONLY to <module>_staff/<module>_manager via moduleRoleId(), derived from the " +
     "service assignment's OWN module contract — never from request input — and scope_type/scope_id " +

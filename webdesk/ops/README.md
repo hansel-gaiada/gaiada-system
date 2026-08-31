@@ -48,3 +48,29 @@ whole ticket lives inside of.
 this dev machine, observed once. `DEV-VERIFIED` — driven against the real thing and observed;
 **nothing in this directory reaches that bar**, because the real thing (Zone B's actual box) does
 not exist. Never read a clean parse or a green selftest here as more than what it is.
+
+## Compose-overlay lessons (carried over from the WITHDRAWN helios overlay, 2026-08-29)
+
+`docker-compose.helios.yml` and `nginx/webdesk-vhost.conf.template` were deleted when the owner
+ruled Zone B onto `sumopod` instead of `helios` (WSK-D27; see `webdesk-design.md` §14). The
+direction is withdrawn — **these mechanics are not**, and the next overlay (sumopod) needs every
+one of them:
+
+- **`ports:` merges ADDITIVELY across compose files.** An overlay cannot remove a published port by
+  redeclaring the list. Use `ports: !reset []` to clear the base file's publication. The base file
+  publishes every backing service on `0.0.0.0`, which is correct for a throwaway dev stack and
+  dangerous on any box with neighbours.
+- **`!reset` REMOVES a key; it cannot reset-and-replace.** Written as `ports: !reset` with a list
+  underneath, Compose discards the list too — the first draft of that overlay resolved to a proxy
+  with NO published port and services with NO command, and `docker compose config` **exited 0 on
+  it**. Replacement needs `!override`. Same reasoning applies to `profiles: !reset []`, since the
+  base file gates services behind the `dev` profile and a production overlay must be unconditional.
+- **Audit the RESOLVED config, never the overlay.** `docker compose ... config | grep -A3 ports:`
+  and confirm the only published port is the proxy's, bound to `127.0.0.1`.
+- **Topology to reproduce:** one public listener only; `postgres`, `redis`, `minio`, the Payload
+  internal listener, the public gateway and `api` all on the private compose network with **no host
+  ports at all**; the Payload admin reachable only through an SSH tunnel (design D-5 / WSK-D20).
+- **Say what is deliberately absent.** That overlay omitted `worker` (no worker entrypoint exists
+  yet — shipping the base file's `sleep infinity` stub to production would be a container that
+  prints a sentence), plus `clamav`, `imgproxy`, `otel-collector` and `status-page`. Absence stated
+  is a decision; absence unstated is a gap.

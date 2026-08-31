@@ -1,0 +1,98 @@
+/* =====================================================================
+   Luxury Minimalist Design System — Typography Scale
+   Display family : Cormorant Garamond (H1–H3, serif heritage)
+   Utility family : Inter (body, eyebrows, labels, UI)
+   Letter-spacing : Normal = 0em · Wide = 0.30em (editorial tracking)
+   ===================================================================== */
+
+:root {
+  /* ---- Families ---------------------------------------------------- */
+  --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --font-body:    "Inter", system-ui, -apple-system, sans-serif;
+
+  /* ---- Weights (Figma → CSS) -------------------------------------- */
+  --weight-regular: 400;   /* Regular — global baseline */
+  --weight-bold:    700;   /* Bold */
+
+  /* ---- Tracking --------------------------------------------------- */
+  --track-normal: 0em;
+  --track-wide:   0.10em;
+
+  /* ---- Scale matrix (size / line-height) -------------------------- */
+  --h1-size: 40px;  --h1-line: 60px;   /* Hero title           */
+  --h2-size: 32px;  --h2-line: 50px;   /* Section title        */
+  --h3-size: 24px;  --h3-line: 40px;   /* Subsection / card    */
+
+  --body-lg-size:   18px;  --body-lg-line:   30px;  /* subtitles / openers   */
+  --body-md-size:   16px;  --body-md-line:   25px;  /* descriptions / cards  */
+  --body-sm-size:   14px;  --body-sm-line:   25px;  /* nav, buttons, labels  */
+  --caption-size:   12px;  --caption-line:   18px;  /* tags, errors, ©       */
+}
+
+/* ---- Type primitives (utility classes mirroring the matrix) ------- */
+.type-h1 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--h1-size);
+  line-height: var(--h1-line);
+  letter-spacing: var(--track-normal);
+  color: var(--text-primary);
+}
+.type-h2 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--h2-size);
+  line-height: var(--h2-line);
+  letter-spacing: var(--track-normal);
+  color: var(--text-primary);
+}
+.type-h3 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  font-size: var(--h3-size);
+  line-height: var(--h3-line);
+  letter-spacing: var(--track-normal);
+  color: var(--text-primary);
+}
+.type-body-lg {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-lg-size);
+  line-height: var(--body-lg-line);
+  color: var(--text-primary);
+}
+.type-body-md {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-md-size);
+  line-height: var(--body-md-line);
+  color: var(--text-primary);
+}
+.type-body-sm {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--body-sm-size);
+  line-height: var(--body-sm-line);
+  color: var(--text-primary);
+}
+.type-caption {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-primary);
+}
+
+/* ---- Editorial eyebrow — Inter, wide tracking, uppercase ---------- */
+.type-eyebrow {
+  font-family: var(--font-body);
+  font-weight: var(--weight-regular);
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+/* ---- Wide-tracking modifier (apply to any body/caption element) --- */
+.is-wide { letter-spacing: var(--track-wide); }

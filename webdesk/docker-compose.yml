@@ -134,6 +134,31 @@ services:
       DATABASE_URL: ${APP_DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      # ── THE PASSTHROUGH TRAP, closed 2026-08-29 (found by the first real production boot) ──
+      # A var in `.env` does NOTHING unless the service lists it here. Everything below is read by
+      # api/src/**, and four of them are `requireInProd` — without them the container crash-loops
+      # with "… is not set — refusing to boot in production" on a .env that defines all of them.
+      # This block is why `api` could never have booted in production from this file before.
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
+      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
+      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
+      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
+      WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
+      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # Control channel (WSK-22). The CA is a multi-line PEM, so it must NOT live in `.env`:
+      # `docker run --env-file` is a flat parser and dies on it, which silently breaks every
+      # ad-hoc verification container while the stack itself works. Keep it in its own env file.
+      WEBDESK_CONTROL_MTLS_CA_PEM: ${WEBDESK_CONTROL_MTLS_CA_PEM:-}
+      WEBDESK_CONTROL_MTLS_ALLOWED_CN: ${WEBDESK_CONTROL_MTLS_ALLOWED_CN:-platform-nest-webdesk}
+      WEBDESK_CONTROL_OIDC_ISSUER: ${WEBDESK_CONTROL_OIDC_ISSUER:-}
+      WEBDESK_CONTROL_OIDC_AUDIENCE: ${WEBDESK_CONTROL_OIDC_AUDIENCE:-webdesk-control-plane}
+      WEBDESK_CONTROL_OIDC_JWKS_URI: ${WEBDESK_CONTROL_OIDC_JWKS_URI:-}
       CLAMAV_HOST: ${CLAMAV_HOST}
       CLAMAV_PORT: ${CLAMAV_PORT}
       TENANT_GUC_NAME: ${TENANT_GUC_NAME}

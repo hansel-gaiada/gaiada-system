@@ -546,24 +546,6 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s
           --health-timeout 5s --health-retries 10
-      minio:
-        image: minio/minio:RELEASE.2024-01-01T16-36-33Z
-        # The upstream image's ENTRYPOINT is the `minio` binary itself, so a `services:` container
-        # (which cannot pass a custom `command:`, same limitation the platform-nest job's own
-        # comment on Postgres/Cerbos explains) needs the server subcommand baked into `ENTRYPOINT`
-        # or supplied via `options` — `options` reaches `docker create`'s flags, not the image's
-        # own args, so the working form here is the env-only server-default invocation.
-        env:
-          MINIO_ROOT_USER: webdesk_minio
-          MINIO_ROOT_PASSWORD: changeme_minio_password
-        ports: ["9000:9000"]
-        # No curl/wget/mc in this image (verified 2026-08-27: RHEL-minimal base, coreutils + bash
-        # only) — a curl-based healthcheck would never pass and hang the job until timeout. bash's
-        # own /dev/tcp is guaranteed present and proves the same thing a curl probe would (the port
-        # is accepting connections), same technique this ticket's own live delphi/helios probe used.
-        options: >-
-          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'"
-          --health-interval 5s --health-timeout 5s --health-retries 20
     defaults:
       run:
         working-directory: webdesk/api
@@ -586,6 +568,45 @@ jobs:
           for i in $(seq 1 30); do
             docker exec webdesk-postgres pg_isready -U webdesk_owner -d webdesk && break || sleep 1
           done
+      - name: Start MinIO as a STEP, not a service container
+        # A `services:` container cannot pass the `server /data` subcommand this image needs, and
+        # `options:` reaches `docker create`'s flags rather than the image's own args — so as a
+        # service it started, found no subcommand, and exited: "Failed to initialize container
+        # minio/minio". The job then failed before a single test ran, on every run since it was
+        # added. Fixed the way THIS JOB ALREADY SOLVES THE SAME PROBLEM one step below for
+        # Postgres: run it as a step, where arguments are expressible.
+        run: |
+          docker run -d --name webdesk-minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=webdesk_minio -e MINIO_ROOT_PASSWORD=changeme_minio_password \
+            minio/minio:RELEASE.2024-01-01T16-36-33Z server /data
+          # The image is RHEL-minimal: no curl, no wget, no mc. bash's own /dev/tcp proves the same
+          # thing a curl probe would — the port is accepting connections.
+          for i in $(seq 1 30); do
+            bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000' 2>/dev/null && break || sleep 1
+          done
+      - name: Start ClamAV and Mailpit (the last two fixtures webdesk-api's suites need)
+        # Both are STEPS rather than `services:` for the same reason MinIO and Postgres above are:
+        # arguments and container NAMES are expressible here and not there. `mail-retry-backoff`
+        # looks for a container literally named `wsk11-mailpit` (MAILPIT_CONTAINER_NAME), which a
+        # service container cannot provide.
+        #
+        # Without these, 8 tests fail in a way that reads like application bugs rather than a
+        # missing fixture: ClamAV-dependent uploads return 503 where the suite asserts 403/201,
+        # and the Mailpit delivery test reports a bare "fetch failed".
+        run: |
+          docker run -d --name wsk11-mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit:latest
+          docker run -d --name webdesk-clamav -p 3310:3310 \
+            -e CLAMAV_NO_FRESHCLAMD=true clamav/clamav:stable
+          # Mailpit is up in about a second; ClamAV loads its signature database first and needs
+          # far longer, so it gets its own generous budget. Both probes use bash's /dev/tcp for the
+          # same reason the MinIO one does: neither image ships curl.
+          for i in $(seq 1 30); do
+            bash -c 'exec 3<>/dev/tcp/127.0.0.1/8025' 2>/dev/null && break || sleep 1
+          done
+          for i in $(seq 1 90); do
+            bash -c 'exec 3<>/dev/tcp/127.0.0.1/3310' 2>/dev/null && break || sleep 2
+          done
+          docker ps --format '  {{.Names}} {{.Status}}'
       - name: Create the 4 MinIO buckets the storage adapter expects (media/video/uploads/artifacts)
         run: |
           docker run --rm --network host --entrypoint sh minio/mc:latest -c "
@@ -605,13 +626,74 @@ jobs:
       - run: npm test
         env:
           APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          # test/helpers/fixtures.ts reads THIS name and falls back to localhost:55450 without it
+          # — the single variable behind the first wave of AggregateError failures.
+          MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
           WSK05_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
           REDIS_URL: redis://localhost:6379
           API_KEY_PEPPER: ci-throwaway-pepper
-          MINIO_ENDPOINT: http://localhost:9000
-          STORAGE_ENDPOINT: http://localhost:9000
+          # 127.0.0.1, NOT localhost. `docker run -p 9000:9000` binds IPv4 only, while `localhost`
+          # on the runner resolves to ::1 first. `pg` degrades gracefully across address families;
+          # undici (which the S3 client's fetch uses) does not — it reports the combined failure as
+          # a bare `AggregateError`, which surfaced here as every storage-touching create returning
+          # 500 instead of 201, with nothing naming the port. Redis keeps `localhost` because it is
+          # a real service container on the job network, not a published port.
+          MINIO_ENDPOINT: http://127.0.0.1:9000
+          STORAGE_ENDPOINT: http://127.0.0.1:9000
           MINIO_ROOT_USER: webdesk_minio
           MINIO_ROOT_PASSWORD: changeme_minio_password
+          # ── THE PER-TICKET ENV FRAGMENTATION, paid off here ────────────────────────────────
+          # The suites read SEVEN different names for "the test database URL" — APP_, MIGRATE_,
+          # WSK05_, WSK21_x2, WSK25_x3, WSK33_x2 — each with its OWN hardcoded localhost:555xx
+          # fallback baked into the spec file. Any name this block misses does not fail loudly:
+          # the spec silently falls back to a port nothing listens on, and the failure surfaces as
+          # `AggregateError` / `expected 500 to be 201` with no host or port anywhere in it. That
+          # cost a full debugging pass to trace back to a missing variable.
+          #
+          # They all point at the ONE Postgres this job starts. The tracker already flagged the
+          # naming as needing normalisation (WSK-M0); until that happens, every alias must be
+          # listed here or the job cannot pass.
+          WSK21_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK21_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          WSK25_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK25_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          WSK25_TARGET_APP_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK25_TARGET_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          WSK33_TEST_DATABASE_URL: postgres://webdesk_app:throwaway_app@localhost:5432/webdesk
+          WSK33_MIGRATE_DATABASE_URL: postgres://webdesk_migrator:throwaway_migrator@localhost:5432/webdesk
+          # Storage credentials the S3 adapter requires by name (MINIO_ROOT_* is the server's view;
+          # STORAGE_* is the client's, and the adapter reads the latter).
+          STORAGE_ACCESS_KEY_ID: webdesk_minio
+          STORAGE_SECRET_ACCESS_KEY: changeme_minio_password
+          MINIO_BUCKET_MEDIA: media
+          MINIO_BUCKET_VIDEO: video
+          MINIO_BUCKET_UPLOADS: uploads
+          MINIO_BUCKET_ARTIFACTS: artifacts
+          # Throwaway secrets. Real values live only on the box; these exist so the suites that
+          # assert on hashing/signing BEHAVIOUR have deterministic inputs.
+          TENANT_WEBHOOK_SECRET_PEPPER: ci-throwaway-webhook-pepper
+          WEBDESK_EVENT_SECRET: ci-throwaway-event-secret
+          WEBDESK_APPROVAL_ASSERTION_KEY: ci-throwaway-ws4-key
+          # ClamAV + Mailpit, matching the containers started above.
+          CLAMAV_HOST: 127.0.0.1
+          CLAMAV_PORT: "3310"
+          MAIL_ENABLED: "true"
+          MAIL_PROVIDER: smtp
+          MAIL_SMTP_HOST: 127.0.0.1
+          MAIL_SMTP_PORT: "1025"
+          # MAIL_FROM_ADDRESS / MAIL_FROM_NAME are deliberately NOT set. WSK-11's identity rule is
+          # that `resolveFromIdentity()` takes zero arguments — the sending identity is structural
+          # and must not be overridable from outside. Setting them here made the delivery test fail
+          # with `expected 'WebDesk CI' to be 'Gaiada WebDesk Forms'`, which is that test doing
+          # precisely its job: catching an environment that tried to override the identity.
+          MAILPIT_HTTP_URL: http://127.0.0.1:8025
+          MAILPIT_CONTAINER_NAME: wsk11-mailpit
+          # 64 KB, deliberately well UNDER Fastify's 1 MB default body limit. The oversize-upload
+          # test builds a body just over this cap and asserts the application's own 400. Left
+          # unset, the cap defaults to 8 MB, Fastify rejects the body itself with 413 before the
+          # handler runs, and the app's error envelope never gets the chance to fire — the test
+          # then fails on 413-vs-400 and looks like an assertion bug rather than a missing value.
+          WEBDESK_MEDIA_MAX_UPLOAD_BYTES: "65536"
 
   # webdesk/payload (Zone B Payload 3 app — WSK-00/02/04/04b/06). Deliberately NOT running the full
   # WSK-00/02 spike-style verification here (dual internal/public listeners, dev-push guard, a
@@ -621,15 +703,20 @@ jobs:
   # build`'s own type-checker, which reads this project's `.ts`-extension-import tsconfig correctly
   # where a bare `tsc --noEmit` invocation (tried first) did not.
   #
-  # ⚠ HONEST STATE, recorded 2026-08-27: this build is RED today. `next build`'s type-check fails
-  # with TS2578 "Unused '@ts-expect-error' directive" in 4 files (app/(payload)/admin/
-  # [[...segments]]/page.tsx:7, app/(payload)/api/[...slug]/route.ts:11, collections/db.ts:13,
-  # payload.config.ts:12+18) — a mechanical drift (the suppression comments predate a TypeScript
-  # version where the `.mjs` import they guard no longer errors) that this ticket did NOT fix:
-  # `webdesk/payload/` is outside this ticket's file ownership (`.github/workflows/`, `mcp-hub/`,
-  # `webdesk/deploy/`). Reported per this ticket's own "need a change outside your area? STOP and
-  # report it" rule, not silently patched. Left wired anyway — same "red here costs nothing, silence
-  # costs more" reasoning as webdesk-api above.
+  # ⚠ SUPERSEDED 2026-08-30. This comment used to record the build as RED with TS2578
+  # "Unused '@ts-expect-error' directive" in 4 files. That is no longer true — those suppressions
+  # were fixed by later work, and `next build` completes and produces a bootable image (verified on
+  # real Linux, twice). The comment outlived the defect, which is its own lesson: a stale RED note
+  # costs the next person a day of not trying.
+  #
+  # What DID break this job afterwards was mine: the generated Payload migration under
+  # `src/migrations/` does not type-check, because two physically duplicated copies of the SAME
+  # drizzle-orm version (0.45.2, nested under @payloadcms/db-postgres and @payloadcms/drizzle)
+  # give `SQL<unknown>` two distinct nominal types. `overrides` pins the version but does not
+  # collapse the nesting. Those migrations are executed by Payload's own CLI and never by the Next
+  # build, so `tsconfig.json` now excludes them — the phantom is out of scope rather than
+  # suppressed file-by-file in generated output that regeneration would overwrite.
+
   webdesk-payload:
     runs-on: ubuntu-latest
     defaults:

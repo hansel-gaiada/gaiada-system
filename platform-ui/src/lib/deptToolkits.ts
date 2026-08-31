@@ -145,6 +145,12 @@ const WEB_DEV: DeptToolkit = {
         // honestly rather than pretending Zone B is live (WSK-21 ships no live status/release/
         // submission endpoint yet — see components/webdesk/DegradeBanner.tsx).
         { key: "sites", label: "Sites", path: "sites", icon: "server", blurb: "Provisioned WebDesk sites, contract pins, submissions, and releases." },
+        // The ESTATE portfolio, distinct from "Sites" above and listed after it on purpose. "Sites"
+        // is the Zone B registry — only what WebDesk itself provisioned, which is legitimately
+        // empty today. This is every site we build or operate, including the ones hosted elsewhere
+        // that we only track. Shipping the page without this entry left it reachable only by typing
+        // the URL, which is the same as not shipping it.
+        { key: "portfolio", label: "Portfolio", path: "sites/portfolio", icon: "server", blurb: "Every site we build or operate, by client and project - including ones we only track." },
       ],
     },
     CONNECTIONS_GROUP,

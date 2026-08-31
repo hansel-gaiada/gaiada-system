@@ -11,6 +11,242 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.44.0` - client portal logins, and the seed roster retired (2026-08-31) - PROTOTYPED
+
+The four demo clients that populated the portal were retired now that 19 real ones exist —
+**13,112 rows** soft-deleted, far more than the ~80 the `client_id` counts suggested, because the
+demo projects carried 6,517 `pm_tasks` and 6,491 `time_entries`. Soft-delete rather than DELETE:
+all 40 FKs into `clients`/`projects` are `NO ACTION`, and the user-facing reads all filter
+`deleted_at IS NULL` (the only unguarded ones are a seed script and an admin backfill), so there are
+no ghosts and it reverses with one UPDATE.
+
+`provision-client-portal-logins.ts` then gives every real client a placeholder contact. It derives
+its targets **from the database**, not from a hardcoded list like the seed it replaces — that list
+would go stale the first time a client was added.
+
+**The IAM guard caught this twice and was right both times.** First, the copied raw
+`INSERT INTO user_roles` was rejected as the IAM-SEC-05 class — a new writer minting a grant outside
+the one guarded path. Allowlisting was permitted (a CLI is not a request path) but the choke point
+was there, and `insertGrantRow` runs `assertGrantAllowed` where the raw INSERT skips it, so this
+grants strictly **less** trust than the seed path it replaces. Second, `origin: "trusted_internal"`
+demanded explicit registration with a reason; it genuinely qualifies — the role resolves only to the
+global `client` role by name and the scope is the agency tenant the script looks up itself, so
+neither can be steered.
+
+Addresses are `portal@<slug>.test` (RFC 2606 — can never route, cannot be mistaken for a real
+person), with a **distinct** random password each: one shared password across 19 portals means one
+leak exposes every client.
+
+### platform-ui `0.61.1` - Portfolio reachable from the nav (2026-08-31) - PROTOTYPED
+
+The estate portfolio page shipped with **no navigation to it** — reachable only by typing the URL,
+which is the same as not shipping it. The owner opened the Build group, found *Sites* (the Zone B
+registry, legitimately empty because nothing has been provisioned through WebDesk) and reasonably
+concluded the work had not landed.
+
+*Sites* and *Portfolio* stay separate entries rather than one merged view: Sites answers "what has
+WebDesk provisioned", Portfolio answers "what does the estate consist of", including the ~20 sites
+we only track and will never provision. Merging them would put a permanently-degraded Zone B read
+in front of facts held locally.
+
+`deptToolkits.test.ts` pins the exact tab key set and caught the addition. The pin was **updated,
+not loosened** — a set assertion relaxed the first time it fires stops being a guard.
+
+### platform-ui `0.61.0` - the site portfolio page (2026-08-30) - PROTOTYPED
+
+The estate inventory in the ERP: every site we build or operate — including the ones hosted
+elsewhere that we only track — grouped by project, with each environment as its own row.
+
+**No degrade banner, deliberately.** `SiteRegistryPanel` renders one because Zone B's control plane
+has no live reads and that data is permanently `stale:true`. This page reads Zone A's own tables, so
+there is nothing to be stale about, and a banner "for consistency" would teach people to ignore it
+on the panel where it means something.
+
+Three things it is careful about, because most rows describe sites we must not touch: a null stack
+renders as an em dash with an explanation rather than "Unknown" — *not surveyed* and *surveyed,
+could not tell* are different claims; **probe consent gets a column, not a footnote**, because a
+site nobody may probe looks identical to a healthy one in any monitoring list; and a project with no
+production row renders as a fact, not an error.
+
+A forbidden read renders `ReadRefusal`, never an empty list — on this page an empty portfolio would
+read as "we operate no sites" when the truth is "you cannot see them".
+
+Verified with `next build`, not `tsc` alone: this repo has a documented case of `tsc` passing while
+the build broke.
+
+### platform-nest `0.43.1` - webdev_sites.origin accepts 'probe' (2026-08-30) - PROTOTYPED
+
+Found the moment real survey data met the constraint. The registry's `origin` CHECK allowed
+`(nexus-import, provisioned, manual)` while `search_properties.topology_source` — added the same
+afternoon, for the same purpose — allowed `(nexus-import, probe, manual)`. Two provenance
+vocabularies for one concept, disagreeing on the value that matters most.
+
+`probe` is the honest label for the estate survey and for everything MON-01 produces: observed from
+outside, never read off a server. The alternative was seeding ~20 real rows as `manual`, recording a
+human assertion where there was a measurement — exactly the distinction the column exists to keep.
+
+Widen-only and idempotent; no existing row can violate a superset.
+
+### platform-nest `0.43.0` - site environments, GitHub wiring, and the portfolio read model (2026-08-30) - PROTOTYPED
+
+The registry shipped with no way to say **which environment** a domain is, and a survey of the live
+estate made that untenable: one project routinely owns several — `bali-girls.com` plus eight
+`baligirls-*.gaiada2.online` variants, `blossomsteakhouse.com` plus `sst.` and `preview-sst.`,
+`essentialbali.com` plus its `gaiada2.online` alias. Without `environment`, "the production URL for
+this project" is not a query, it is a guess from a naming convention — and the conventions run four
+deep (`gaiada.online`, `gaiada1.online`, `gaiada2.online`, per-project slots). A console built on
+that guess shows a client their staging site.
+
+`preview` is separate from `staging` deliberately: staging is durable and client-visible, preview
+slots are ephemeral and machine-generated (delphi serves ~11 right now). A partial unique index
+enforces **one production per project**, itself three-way partial so an internal site with no
+project stays unconstrained — there is nothing for it to be the production *of*.
+
+A `site_environments` child table was considered and rejected: each environment here **is** a
+distinct domain with its own host, TLS, adoption state and audit history, which is precisely a
+`webdev_sites` row. The grouping already existed — `project_id`.
+
+`GET console/portfolio` is a **separate endpoint from `console/sites`** on purpose. That one answers
+"which Zone B tenants exist" and is honestly `stale:true` because the control plane is write-mostly.
+This answers "what does the estate consist of", including the sites we neither host nor control —
+and it reads Zone A tables only, so it carries no `DegradeMeta` and cannot degrade when Zone B is
+unreachable. It left-joins `search_properties` for hosting topology and the crawl-consent flag
+rather than duplicating either.
+
+### platform-nest `0.42.1` / infra - SM-74 hosting topology + MON-01 probe generator (2026-08-30) - PROTOTYPED
+
+~63 managed client properties are monitored by nobody, and the program had this recorded as blocked
+behind the observe-only ruling on `delphi`/`helios`. **It is not.** That ruling forbids *changing
+things on* those hosts; an HTTP GET changes nothing. Re-probed 2026-08-30 — SSH to both is
+filtered, HTTP and HTTPS answer. Observation was never the blocked half; deployment was.
+
+**SM-74** adds the hosting-topology field set to `search_properties` rather than `webdev_sites`,
+split by ownership and not convenience: `search_properties` already owns domain identity, the
+crawl-**consent** gate, the audit history and the crawler, so anything true of the domain *as an
+observable thing on the internet* belongs there. `webdev_sites` owns how we deliver it. One domain,
+one row, one consent gate, one crawler — a second registry would fork consent, which is the one
+thing that must never be ambiguous.
+
+**Every column is nullable on purpose.** Most of these properties have never been surveyed, and
+`NOT NULL DEFAULT 'unknown'` would render as a measurement in every console that reads it. NULL
+means "not surveyed"; `'unknown'` would mean "surveyed and could not tell". Same reason
+`plugin_surface` distinguishes NULL from `[]`, and why `topology_checked_at` exists at all — without
+it a 2025 fingerprint is indistinguishable from this morning's.
+
+**MON-01's generator puts the consent gate in the SQL, not in a comment.** Only verified, active,
+non-deleted properties become probe targets; an unverified property is *absent*, not throttled. It
+also refuses private, loopback and link-local hosts — a property row is client-supplied data, and a
+generator that will happily probe `169.254.169.254` because a row said so is an SSRF with a cron
+attached. Selftest 8/8 including that case; skipped rows are logged rather than silently dropped.
+
+The scrape job is **proposed, not applied**: wiring it decides which host makes standing outbound
+requests to 63 client domains — whose IP appears in their logs, and whose egress posture a
+compromise inherits. Not the ERP box. It also sets 60s rather than the global 15s, because 63
+properties at 15s is ~15k requests an hour from a single IP.
+
+### platform-nest `0.42.0` - webdev_sites, the site portfolio registry (2026-08-30) - PROTOTYPED
+
+v2.0 §04/§07. The design assumed every client site becomes a Zone B tenant; most never will. The
+requirement is two-sided — **future projects must use the unified backend; past and current ones
+must never be touched**, only tracked, with adoption optional and per site.
+
+`webdev_provisioned_sites` (0090) cannot hold these rows and must not be widened to: its
+`framework CHECK IN ('vite','nextjs')` refuses everything else *by design* (D-P7) and its status
+column models a provisioning lifecycle, not the life of a site. It stays the record of how a site
+was **born**, for the subset we provisioned. This is the record of what **exists**.
+
+**Two rules matter more than the columns.** It lives in Zone A and never in Zone B — a tracked site
+must not require a Zone B tenant row, or the internet-facing backend ends up holding an inventory
+of the entire client estate, including the sites on clients' own infrastructure that we cannot
+defend. And it *references* credentials without storing them: `vault_ref` is a pointer and there is
+deliberately no column a password could occupy.
+
+**Hosting and adoption are independent axes, on purpose.** `/v1` is HTTPS with a scoped key, so a
+site on a client's own cPanel can be `linked` (its forms POST to WebDesk) or fully `adopted` (built
+static uploaded by FTP, content read from `/v1`). What a client-owned host costs us is deploy
+automation, not the platform — one combined column would have quietly ruled that out.
+
+`kind` is nullable rather than defaulting to `unknown`: for a legacy site whose stack is
+unsurveyed, `unknown` is a claim and NULL is an admission.
+
+Lints: names · RLS no unguarded backfills · immutability, all clean. CI green, which for this
+change means the migration applied against a real database in the platform-nest shards.
+
+### mcp-hub `0.12.0` / platform-nest `0.41.0` - pipeline.artifacts.get, the rail's missing link (2026-08-30) - PROTOTYPED
+
+`code.scaffold` v2's frozen envelope carries `prdArtifact` and `prototypeArtifact` — both
+`pipeline_stages.artifact_ref` — and **nothing could dereference either**. The consumer adapter
+(`ai-agents/src/code-scaffold/artifact-fetcher.ts`) was written against the tool name
+`pipeline.artifacts.get`, and its own header records that no hub contract answered it. That is the
+reason PRD-driven scaffolding could not run live: the scaffolder was handed references into a
+system with no read side.
+
+**The ref must be stage-referenced, and that is the security property.** Resolving a
+caller-supplied id straight to file bytes would make this a generic file reader wearing a pipeline
+name — any automation principal holding `pipeline_run:read` could then read any file in the tenant.
+The platform side first requires the ref to be referenced by a real stage in that tenant and only
+then resolves it. The stage lookup is the authorization boundary, not a convenience.
+
+Reuses `pipeline_run:read` rather than minting a Cerbos kind: a new kind costs six coupled
+artifacts (catalog, groups, seeding migration, both bundle resolvers, the regenerated bundle), and
+this read genuinely is "read a pipeline run's own output", which the existing kind already means.
+
+Returns `{resolvable:false, reason}` instead of failing when a ref is a URL, a repo or an external
+link rather than stored text — a scaffolder must tell "cannot fetch this" apart from "this was
+empty". Non-UUID refs are rejected before the query, so a legitimate non-file ref cannot surface as
+a Postgres `invalid input syntax for type uuid`.
+
+Added to `wf:delivery`'s allowlist, which is the identity the scaffolder runs under.
+
+Verified: platform-nest `tsc` clean · mcp-hub `tsc` clean · mcp-hub 380/380 · CI all green.
+
+### webdesk `0.2.0` - Zone B is deployed and running, and main is green again (2026-08-30) - DEV-VERIFIED
+
+Zone B runs on a real Linux host: 7 services in their own compose project, **exactly one published
+port and it is on loopback**, proven against the RESOLVED compose config rather than the overlay.
+Payload's admin is reachable only through an SSH tunnel. Nothing is exposed to the internet — no
+vhost, no TLS — deliberately.
+
+**No longer provisional, because it was re-run on Linux:** migrations 8/8 from scratch plus an
+idempotent re-run · role split confirmed NOSUPERUSER/NOBYPASSRLS · RLS integrity 20/20 tenant-scoped
+tables · **WSK-04 cross-path suite ALL PATHS OK** · **WSK-02 lockdown 11/11** · **WSK-15 codegen
+double-run determinism 3/3 including its negative control**.
+
+**Four defects that only a real boot could find**, all fixed here: the base compose could never boot
+`api` in production (its block forwarded one storage var; the code requires four and reads eight
+more) · `payload/Dockerfile` claimed it was RED and unbuildable, which had stopped being true ·
+Payload's tables could not be created in a production-shaped environment at all, now closed with
+Payload's own migration mechanism plus `init:prod` = migrate → reapply-tenant-rls → check-rls-
+integrity, three links because Payload migrations do not re-arm RLS · a multi-line PEM in `.env`
+silently broke every ad-hoc verification container while the stack itself worked, since
+`docker run --env-file` is a flat parser and Compose's is not.
+
+**The estate internal CA existed nowhere** — gateway and hub both had TLS off and no `gaiada_*`
+volume held cert material — while three designs were written against it. It exists now
+(`CN=gaiada-internal-ca`, ECDSA P-256, key never off-host), and the A→B control channel is proven to
+discriminate three ways: no cert → 401 at Layer 1 · right CN signed by a foreign CA → 401 at Layer 1
+· the issued cert → 401 *"Layer 2: no Bearer token"*, i.e. it passed mTLS. A channel answering all
+three identically would have proven nothing, which is exactly what the placeholder did.
+
+**CI is green for the first time in more than a dozen commits.** `webdesk-api` had never once passed:
+MinIO was declared as a `services:` container, which cannot take the `server /data` argument it
+needs, so the job died before a test ran. Beyond that, the suites read 58 environment variables
+against nine supplied, with **seven different names for "the test database URL"**, each carrying its
+own hardcoded `localhost:555xx` fallback — so a missing name produced `AggregateError` and
+`expected 500 to be 201` with no host or port named anywhere. 56 → 8 → 2 → 0.
+
+Also: the `overrideAccess` lint WSK-D25 asked for and nobody built (Payload runs its access function
+only when `overrideAccess` is falsy, and the Local API defaults it true — so an un-opted-in call
+runs on RLS alone) · Cloudflare Tunnel as the exposure path, gated behind its own profile so
+exposure is never a side effect of a restart · `aire` decommissioned from the box after verifying it
+serves publicly from its own VPS, backed up first · 87 GB reclaimed.
+
+**Design v2.0 supersedes v1.1 and the provision seam design.** Zone B moved to the ERP-operational
+tier under a two-tier estate rule, Payload was recorded as editorial-only at last, the portfolio
+adoption ladder was added so live client sites are tracked and never touched, and §03's containment
+claim was rewritten rather than repeated — v1.1 said a Zone B compromise cannot reach Zone A, and on
+a co-tenanted box that is no longer true.
+
 ### platform-ui `0.60.0` - the AP credit-note and write-off surface (2026-08-27) - PROTOTYPED
 
 The payables half of `finance 0.16.0`: `IssueVendorCreditForm`, `VendorCreditsTable` with a per-row
