@@ -16,57 +16,67 @@ so scripts and Dockerfiles can read it without parsing markdown.
 
 ---
 
-## App version format
+## App version format — SemVer 2.0.0
+
+**Ruling (2026-08-31): the app version is [Semantic Versioning 2.0.0](https://semver.org), with the
+stage as a pre-release identifier.** The modules already use SemVer; this makes the app agree with
+them and with every tool that reads a version.
 
 ```
-Alpha 01.001.0001a
- │     │   │   │ │
- │     │   │   │ └─ revision letter
- │     │   │   └─── module-reference counter
- │     │   └─────── app release counter
- │     └─────────── milestone
- └───────────────── stage
+/VERSION   1.0.0-alpha.302
+tag        v1.0.0-alpha.302
+            │ │ │  │      │
+            │ │ │  │      └─ pre-release counter — +1 on every cut, never reused
+            │ │ │  └──────── stage: alpha -> beta -> rc -> (none)
+            │ │ └─────────── PATCH
+            │ └───────────── MINOR
+            └─────────────── MAJOR
 ```
 
-### `Alpha` — stage
+The stage ladder needs no rules of its own — SemVer's precedence gives it for free:
 
-Where this build is meant to run. **Not** a quality claim about any single module — a module can be
-`DEV-VERIFIED` inside an `Alpha` app.
+```
+1.0.0-alpha.302  <  1.0.0-beta.1  <  1.0.0-rc.1  <  1.0.0
+```
 
-| Stage | Meaning |
-|---|---|
-| `Alpha` | Early prototype. The trial box. Data is disposable; migrations may be re-run from scratch. |
-| `Beta` | Staging. Real-shaped data, no destructive resets, deploys rehearsed as if production. |
-| *(production stage TBD)* | See "Open question" below. |
+...because a pre-release always sorts below the release it precedes, alphanumeric identifiers
+compare alphabetically (`alpha` < `beta` < `rc`) and numeric ones numerically. "Which build is
+newer?" is answerable by any SemVer library, by `sort -V`, and by every package manager — instead of
+by reading a bespoke table.
 
-### `01` — milestone
+### What this replaces, and why
 
-Ground-breaking change only: a re-architecture, a new trust zone, the first real-customer cutover.
-Expect this to sit still for months. Bumping it **resets** the app release counter to `001` and the
-module-reference counter to `0001a`.
+The previous format was `Alpha 01.071.0301a` — stage, milestone, *app release counter*,
+*module-reference counter*, revision letter. Two of those fields were fiction:
 
-### `001` — app release counter
+| Old field | Documented rule | What actually happened |
+|---|---|---|
+| app release counter | "+1 for every app version cut" | **frozen at `071` for 65 consecutive cuts** |
+| module-reference counter | derived: advance by the number of module bumps | **+1 per release regardless** — 33 cuts moved *no* module, 13 moved several |
+| revision letter | `a → b → c` for a re-cut of the same module set | used twice in 149 tags |
 
-`+1` for **every app version that gets cut**, whether or not it is deployed. This is the number that
-makes two builds comparable at a glance: `001` is older than `014`, always. Never reused, never
-decremented. Three digits; roll to four when you get there rather than wrapping.
+So the third field was already a plain monotonic release counter and the second was dead. Rather
+than rule one of two fictions authoritative, both are retired: `1.0.0-alpha.N` keeps exactly the one
+counter that was really in use, and gets ordering, tooling and comparability as a side effect.
 
-### `0001` — module-reference counter
+A *derived* counter was the deeper mistake. It made the version a function of bookkeeping that
+nobody maintained (the App release log went 69 cuts without an entry), so it silently degraded into
+a counter anyway. A version should be cheap to produce correctly.
 
-The **cumulative count of module version bumps**, across every module in the registry. It is
-derived, not chosen: if a release bumps `platform-nest` and `platform-ui`, the counter advances
-by 2. The first app version is the baseline `0001` — counting starts from that manifest, so the
-number is only ever meaningful as a *difference* between two releases, never as an absolute.
+### Migration
 
-That makes the number meaningful — the gap between two app versions tells you how much module churn
-sits between them, which `001 → 002` alone would hide.
+Continuity is preserved: legacy `…0301a` was the last of the old line, and the first SemVer cut is
+`1.0.0-alpha.302`. The counter never restarts and no number is reused, so builds stay comparable
+across the cutover.
 
-### `a` — revision letter
+`deploy.yml` accepts **both** spellings during the transition — several sessions cut releases here
+concurrently and one may have a legacy-format release in flight; a hard switch would fail *their*
+deploy on a tag they pushed correctly. Drop the legacy branch once none can still be in flight.
 
-Same module set, cut again: a rebuild, an infra-only fix, a re-tag after a failed deploy. Goes
-`a → b → c`. **Resets to `a`** whenever the module-reference counter moves.
-
-An infra/CI change that touches no module is exactly this case: bump the letter, not the counter.
+MAJOR/MINOR/PATCH stay at `1.0.0` until the first non-alpha cut; moving to Beta is
+`1.0.0-beta.1`, and the first production release is `1.0.0`. That also settles the old
+"production stage name" open question below — there is no production stage *name*, there is simply
+the absence of a pre-release identifier.
 
 ---
 
@@ -77,11 +87,13 @@ An infra/CI change that touches no module is exactly this case: bump the letter,
 2. **Every app version records its module manifest** — the exact version of all 14 modules — in
    the App release log in `CHANGELOG.md`. Without the manifest the app version is just a number;
    with it, any deployed build is fully reconstructible.
-3. **Major module change ⇒ significant app move.** A module minor bump (`0.6.x → 0.7.0`) is a
-   feature; several in one release should read as a big release. That is what the module-reference
-   counter conveys — don't flatten it by batching bumps into one.
-4. **The deployed tag matches the app version.** Git tag = the app version, lowercased and
-   hyphenated: `Alpha 01.001.0001a` → `alpha-01.001.0001a`.
+3. **The app version does not encode how much changed.** *(Rewritten 2026-08-31 — this rule used to
+   say a release's size should show in the module-reference counter. It never did: 33 cuts moved no
+   module at all and still advanced it.)* Scale of change is what `CHANGELOG.md` and the module
+   SemVer numbers are for. The app version answers one question — **which build is this, and is it
+   newer than that one** — and answers it for machines as well as people.
+4. **The deployed tag is the app version with a `v`.** `1.0.0-alpha.302` → `v1.0.0-alpha.302`.
+   Tags are immutable here: never move a pushed tag, cut the next version instead.
 5. **`/VERSION` is the single source.** CI reads it; the running app reports it. If they disagree,
    the running app is wrong and the deploy is suspect.
 6. **Never pick the number by hand.** Run `node scripts/next-version.mjs`; it derives the next free
@@ -130,7 +142,24 @@ its version should say so loudly instead of lying quietly.
 
 ---
 
-## Open question — the production stage name
+## ~~Open question~~ — SETTLED by the SemVer ruling (2026-08-31)
+
+Adopting SemVer answers this: **there is no production stage *name*.** Production is the absence of
+a pre-release identifier.
+
+```
+1.0.0-alpha.302  →  1.0.0-beta.1  →  1.0.0-rc.1  →  1.0.0
+```
+
+That is exactly the recommendation below (`RC` → then the real thing), and it needs no local
+convention to enforce it — `1.0.0` sorts above every `1.0.0-*` by the spec. The rehearsal step the
+recommendation wanted is `1.0.0-rc.N`, and Gate 1 still gates reaching it.
+
+The original discussion is kept below for the reasoning.
+
+---
+
+### Original discussion (superseded)
 
 `Alpha` and `Beta` are settled. For production, the usual options:
 

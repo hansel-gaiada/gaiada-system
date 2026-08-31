@@ -71,12 +71,20 @@ jobs:
         run: |
           set -euo pipefail
           APP_VERSION="$(tr -d '\r' < VERSION | head -1 | xargs)"
-          expected="$(echo "$APP_VERSION" | tr '[:upper:] ' '[:lower:]-')"
+          # TWO ACCEPTED FORMS during the SemVer cutover (2026-08-31, VERSIONING.md).
+          #   semver  : /VERSION `1.0.0-alpha.302`      -> tag `v1.0.0-alpha.302`
+          #   legacy  : /VERSION `Alpha 01.071.0301a`   -> tag `alpha-01.071.0301a`
+          # Both stay valid deliberately: several sessions cut releases against this repo
+          # concurrently, and one of them may already have a legacy-format release in flight. A hard
+          # switch would fail THEIR deploy at this very step, on a tag they pushed correctly.
+          # Drop the legacy branch once no legacy-format release can still be in flight.
+          legacy_expected="$(echo "$APP_VERSION" | tr '[:upper:] ' '[:lower:]-')"
+          semver_expected="v${APP_VERSION}"
           echo "VERSION file : $APP_VERSION"
-          echo "expected tag : $expected"
+          echo "accepted tags: $semver_expected (semver) | $legacy_expected (legacy)"
           echo "actual tag   : $TAG"
-          if [ "$TAG" != "$expected" ]; then
-            echo "::error::Tag '$TAG' does not match /VERSION ('$APP_VERSION' => '$expected'). Bump /VERSION or retag."
+          if [ "$TAG" != "$semver_expected" ] && [ "$TAG" != "$legacy_expected" ]; then
+            echo "::error::Tag '$TAG' does not match /VERSION ('$APP_VERSION'). Expected '$semver_expected' (semver) or '$legacy_expected' (legacy). Bump /VERSION or retag."
             exit 1
           fi
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
