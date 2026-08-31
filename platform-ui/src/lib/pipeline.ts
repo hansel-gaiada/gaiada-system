@@ -140,8 +140,8 @@ export async function listPipelineRuns(
   });
 }
 
-/** A list row with its gates attached — `GET /pipeline/runs?include=gates` (platform-nest 0.42.0).
- *  `null` means the platform answered WITHOUT gates (a platform older than 0.42.0): the UI then says
+/** A list row with its gates attached — `GET /pipeline/runs?include=gates` (platform-nest 0.46.0).
+ *  `null` means the platform answered WITHOUT gates (a platform older than 0.46.0): the UI then says
  *  "open the run to see its approvals" rather than reading an absent array as "no approvals". */
 export type PipelineRunWithGates = PipelineRun & { gates: PipelineGate[] | null };
 

@@ -46,7 +46,7 @@ export default async function PrdStudioPage({ params }: { params: Params }) {
 
   // AGN-3: the run list is this page's subject, so a refusal is stated rather than rendered as an
   // empty list — "nothing produced" and "you may not see it" are different claims.
-  // One read, gates included (`?include=gates`, platform-nest 0.42.0) — the approval chips need them.
+  // One read, gates included (`?include=gates`, platform-nest 0.46.0) — the approval chips need them.
   const runsResult = await listPipelineRunsWithGates(userId, tenant);
   if (runsResult.kind === "forbidden") return <ReadRefusal subject="this department's delivery runs" kind="forbidden" />;
   if (runsResult.kind === "unavailable") return <ReadRefusal subject="This department's delivery runs" kind="unavailable" reason={runsResult.reason} />;

@@ -166,7 +166,7 @@ export async function ProjectWorkspaceView({
   ]);
 
   // Meetings tab = the PRD Studio flow for this project: its runs with their gates in one read
-  // (`?include=gates`, platform-nest 0.42.0) — read only when that tab is shown.
+  // (`?include=gates`, platform-nest 0.46.0) — read only when that tab is shown.
   let projectRuns: Array<{ run: import("@/lib/pipeline").PipelineRun; gates: PipelineGate[] | null }> = [];
   if (view === "meetings") {
     const runsRes = await listPipelineRunsWithGates(userId, tenant, { projectId });

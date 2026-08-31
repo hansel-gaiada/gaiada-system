@@ -1,6 +1,6 @@
 # Web Dev lineage fields — briefings, runs and repos carry their department / client / project
 
-**Date:** 2026-08-26 · **Status:** PROTOTYPED — all three changes landed on `reva/ui` 2026-08-27 (platform-nest `0.40.0`–`0.42.0`); DEV-VERIFIED against the local host platform pending its restart · **Owner:** Reva · **Branch:** `reva/ui`
+**Date:** 2026-08-26 · **Status:** PROTOTYPED — all three changes landed on `reva/ui` 2026-08-27 (platform-nest `0.44.0`–`0.47.0` after the 2026-08-31 merge renumber; they landed on `reva/ui` as `0.40.0`–`0.43.0`); DEV-VERIFIED against the local host platform pending its restart · **Owner:** Reva · **Branch:** `reva/ui`
 
 ## Why
 

@@ -59,7 +59,7 @@ describe("buildRepoInventory — one row per repo, joined to its run, client and
     expect(row).toMatchObject<Partial<RepoRow>>({ id: "s3", name: "marketing-microsite", run: null, clientName: null, projectName: null });
   });
 
-  it("a standalone repo that carries its own client/project (0.41.0) shows them, and a project in this department attributes it", () => {
+  it("a standalone repo that carries its own client/project (0.45.0) shows them, and a project in this department attributes it", () => {
     const rows = buildRepoInventory([
       site({ id: "own", pipelineRunId: null, slug: "cedar-brand", clientId: "cl-2", projectId: "p-seo-1" }),   // SEO project → not Web Dev's
       site({ id: "mine", pipelineRunId: null, slug: "nw-micro", clientId: "cl-1", projectId: "p-web-1" }),

@@ -65,7 +65,7 @@ export function buildRepoInventory(
   const rows: RepoRow[] = [];
   for (const s of sites) {
     // Attribution. A run's site follows its run. A standalone site (no run) follows its own
-    // project when it has one (platform-nest 0.41.0); with no project at all it is still listed —
+    // project when it has one (platform-nest 0.45.0); with no project at all it is still listed —
     // the webdev module owns it and only Web Dev has this tab — marked as unlinked.
     const run = s.pipelineRunId ? runById.get(s.pipelineRunId) : null;
     if (s.pipelineRunId && (!run || !runInDept(run))) continue;

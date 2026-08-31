@@ -312,7 +312,7 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
     if (projectId) rows = rows.filter((r) => (r as { project_id?: string | null }).project_id === projectId);
     // C4: the list SELECT now DOES return client_id/project_id (it used to omit them, which is why
     // the page had to cross-reference the recordings registry). Returned in full to match.
-    // `?include=gates` (platform-nest 0.42.0): each run with its gates, [] when none.
+    // `?include=gates` (platform-nest 0.46.0): each run with its gates, [] when none.
     const include = (params.get("include") ?? "").split(",").map((x) => x.trim());
     if (include.includes("gates")) return ok(rows.map((r) => ({ ...r, gates: GATES.filter((g) => g.run_id === r.id) })));
     return ok(rows);

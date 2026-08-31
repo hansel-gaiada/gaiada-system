@@ -23,7 +23,7 @@ export interface LineageProject { id: string; name: string; client_id: string | 
 
 export function CreateRepoForm({ runs, clients = [], projects = [], actions, prdHref, onCreated }: {
   runs: EligibleRun[];
-  /** Optional lineage for a standalone repo (platform-nest 0.41.0 stores it on the site). */
+  /** Optional lineage for a standalone repo (platform-nest 0.45.0 stores it on the site). */
   clients?: LineageClient[];
   projects?: LineageProject[];
   actions: CreateRepoFormActions;

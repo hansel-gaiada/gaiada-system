@@ -44,7 +44,7 @@ describe("demoPipeline — C1 server-side filters", () => {
   });
 });
 
-describe("demoPipeline — ?include=gates (platform-nest 0.42.0)", () => {
+describe("demoPipeline — ?include=gates (platform-nest 0.46.0)", () => {
   it("without the parameter no row carries gates; with it every run has gates[] grouped by run_id", () => {
     const plain = pipelineDemo("GET", "/api/t1/pipeline/runs", q())!.json as Array<{ id: string; gates?: unknown }>;
     expect(plain.length).toBeGreaterThan(0);

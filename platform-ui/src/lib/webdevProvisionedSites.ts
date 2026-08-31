@@ -59,7 +59,7 @@ export interface ProvisionedSite {
   lastReconciledAt: string | null;
   createdAt: string;
   updatedAt: string;
-  /** Lineage (platform-nest 0.41.0): copied from the run when there is one, supplied by the caller
+  /** Lineage (platform-nest 0.45.0): copied from the run when there is one, supplied by the caller
    *  for a standalone site; null for rows that pre-date the columns. */
   clientId: string | null;
   projectId: string | null;
