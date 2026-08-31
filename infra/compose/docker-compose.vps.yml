@@ -440,6 +440,30 @@ services:
       # variable, which is a better failure than refusing to start the whole stack on a box that does
       # not use these features.
       INTEGRATION_TOKEN_KEY: ${INTEGRATION_TOKEN_KEY:-}
+      # ── GH-01/06/07 — GitHub App integration (docs/blueprints/github-integration-foundation.md) ──
+      # NON-SECRET identifiers only. The credential itself (the App private key) is NEVER an env var:
+      # it is sealed into `integration_connections` by `npm run seed:github-apps`, which is the ONLY
+      # thing that reads GITHUB_*_PEM_FILE — the runtime loads the sealed row from the DB, so those
+      # two paths are needed for the one-time seal and are absent here on purpose.
+      #
+      # All `:-` and therefore fail-closed: `githubAppIdentity()` returns null unless BOTH the app id
+      # and installation id are set (a half-configured role can mint nothing), and every GitHub call
+      # then refuses with a typed error rather than the stack failing to boot.
+      GITHUB_ERP_APP_ID: ${GITHUB_ERP_APP_ID:-}
+      GITHUB_ERP_INSTALLATION_ID: ${GITHUB_ERP_INSTALLATION_ID:-}
+      GITHUB_AGENTS_APP_ID: ${GITHUB_AGENTS_APP_ID:-}
+      GITHUB_AGENTS_INSTALLATION_ID: ${GITHUB_AGENTS_INSTALLATION_ID:-}
+      # GH-07 webhook receiver. Unset ⇒ EVERY delivery is rejected 401 (the signature is the only
+      # authentication this internet-facing endpoint has, so no secret means no trust, by design).
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      GITHUB_WEBHOOK_MAX_BYTES: ${GITHUB_WEBHOOK_MAX_BYTES:-26214400}
+      # GH-06 background reconcile sweep. DARK unless _ENABLED is exactly "true" AND _TENANT_ID names
+      # the operating company that owns the org (blueprint §5.2 — never a client tenant).
+      # Interval default 6h: a detailed pass is ~3-4 calls per repo, so ~850 for 221 repos against a
+      # 12,500/hr installation bucket. Four passes a day is ~7% of one hour's budget; hourly is not.
+      GITHUB_REPO_SYNC_ENABLED: ${GITHUB_REPO_SYNC_ENABLED:-false}
+      GITHUB_REPO_SYNC_TENANT_ID: ${GITHUB_REPO_SYNC_TENANT_ID:-}
+      GITHUB_REPO_SYNC_INTERVAL_MS: ${GITHUB_REPO_SYNC_INTERVAL_MS:-21600000}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.
