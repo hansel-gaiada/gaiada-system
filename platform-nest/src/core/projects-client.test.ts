@@ -59,6 +59,21 @@ describe.skipIf(!TEST_URL)("projects belong to a client (lineage spec 4/4)", () 
     expect(String(r.json().error)).toMatch(/clientId required/);
   });
 
+  // ORDERING, not shape. The gate above is thrown from inside the handler, so it only says what it
+  // means if `authorize` has already run. When it did not, a caller with no rights on `co` received
+  // a field-level description of the create contract instead of a denial — and, worse, every
+  // denial-path test that posts an incomplete payload silently degraded from asserting 403 to
+  // asserting a payload 400 (seed/automation.test.ts's unseeded-workflow probe did exactly that).
+  // rivalAdmin is a real, resolvable principal — company_admin of `rival`, nothing on `co`.
+  it("a caller who may not create here is denied on identity, not handed the clientId contract", async () => {
+    const r = await app.inject({
+      method: "POST", url: `/api/${co}/projects`, headers: asUser(rivalAdmin),
+      payload: { name: "Orphan" }, // invalid on purpose: no clientId, no isInternal
+    });
+    expect(r.statusCode).toBe(403);
+    expect(JSON.stringify(r.json())).not.toMatch(/clientId/);
+  });
+
   it("a client's project stores the client and is not internal", async () => {
     const r = await create({ name: "Northwind relaunch", clientId: client });
     expect(r.statusCode).toBe(201);

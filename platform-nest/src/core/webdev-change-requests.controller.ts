@@ -297,6 +297,11 @@ export class WebdevChangeRequestsController {
     @Body() body: { action?: string; route?: string; reason?: string; kindOverride?: string; severity?: string },
   ) {
     const { action, route: requestedRoute, kindOverride, severity } = body ?? {};
+    // AUTHORIZE BEFORE VALIDATE — see core.controller's createProject for the same fix and why.
+    // A caller who may not triage learns only that; and no future required field can quietly demote
+    // a denial test here to a payload 400 (which is exactly what the `severity` gate below did to
+    // webdev-cr-race.test.ts's MI-03 probe). Nothing above depends on the body.
+    await authorize(req.principal, { kind: "webdev_change_request", tenantId, id, module: "webdev" }, "triage");
     if (!action || !TRIAGE_ACTIONS.has(action)) throw new BadRequestException("action must be decline|convert");
     if (kindOverride !== undefined && !KINDS.has(kindOverride)) {
       throw new BadRequestException("kindOverride must be content|design|feature|bug");
@@ -311,7 +316,6 @@ export class WebdevChangeRequestsController {
     // reason into the state machine, so it is required rather than optional.
     const reason = action === "decline" ? scrubText(String(body?.reason ?? "")).text.trim().slice(0, REASON_CAP) : null;
     if (action === "decline" && !reason) throw new BadRequestException("reason required when declining");
-    await authorize(req.principal, { kind: "webdev_change_request", tenantId, id, module: "webdev" }, "triage");
 
     const result = await withTenants([tenantId], async (c) => {
       // 1 · SERIALIZE on the change request. First statement in the transaction, before any read whose

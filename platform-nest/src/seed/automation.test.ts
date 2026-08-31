@@ -112,9 +112,11 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
   it("wf:webdesk-zoneb-intake resolves to a real, non-anonymous principal (was ANONYMOUS before this seed row existed)", async () => {
     const anonymous = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      // isInternal so the lineage-4/4 `clientId` check — a 400 thrown before `authorize` — cannot
-      // pre-empt the authz denial this test is actually asserting.
-      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403", isInternal: true },
+      // Deliberately an INCOMPLETE payload (no clientId, no isInternal). `createProject` authorizes
+      // before it validates, so an unresolvable principal is denied on identity and never told what
+      // the create contract wants. If this ever reads 400, the ordering regressed and this test has
+      // stopped proving anything about the identity chain.
+      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403" },
     });
     expect(anonymous.statusCode).toBe(403); // the OLD behaviour for an unseeded/unknown workflow id
 

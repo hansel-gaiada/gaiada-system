@@ -135,6 +135,20 @@ export class CoreController {
     @Body() body: { name?: string; clientId?: string | null; isInternal?: boolean; departmentId?: string; customFields?: Record<string, unknown> },
   ) {
     const { name, clientId, isInternal, departmentId, customFields = {} } = body ?? {};
+    // AUTHORIZE BEFORE VALIDATE. A caller who may not create a project must be told exactly that,
+    // and must learn nothing else — with the payload checks first, an unauthorized caller got a
+    // field-level 400 describing the create contract before ever being denied. It also made every
+    // denial test fragile to a new required field: adding the `clientId` gate below silently turned
+    // seed/automation.test.ts's "unseeded workflow id -> 403" probe into a 400, so it stopped
+    // exercising the identity chain it exists to pin while still looking like a payload problem.
+    // Nothing here depends on the body — `ownerId` is the principal's own id.
+    //
+    // The controller always sets owner_id = the creating user on insert (below) — pass that same
+    // intended ownerId into the authz check so Cerbos's member "create own project" rule
+    // (resource_project.yaml's `owns` condition) can actually be satisfied. Without this, a brand
+    // new resource's ownerId attr was always "" (never equal to principal.id), so the member rule
+    // was structurally unreachable and only company_admin/manager/team_lead could ever create.
+    await authorize(req.principal, { kind: "project", tenantId, ownerId: req.principal.userId ?? undefined }, "create");
     if (!name) throw new BadRequestException("name required");
     // Lineage spec 4/4 — a project belongs to a client (client hasMany projects). The one sanctioned
     // client-less shape is the company's OWN work, and it has to be declared (`isInternal: true`) —
@@ -147,12 +161,6 @@ export class CoreController {
     if (clientId && isInternal === true) {
       throw new BadRequestException({ message: "a project is either a client's or internal, not both", field: "isInternal" });
     }
-    // The controller always sets owner_id = the creating user on insert (below) — pass that same
-    // intended ownerId into the authz check so Cerbos's member "create own project" rule
-    // (resource_project.yaml's `owns` condition) can actually be satisfied. Without this, a brand
-    // new resource's ownerId attr was always "" (never equal to principal.id), so the member rule
-    // was structurally unreachable and only company_admin/manager/team_lead could ever create.
-    await authorize(req.principal, { kind: "project", tenantId, ownerId: req.principal.userId ?? undefined }, "create");
     const id = newId();
     await withTenants([tenantId], async (c) => {
       const cfError = await validateCustomFields(c, tenantId, "project", customFields);
