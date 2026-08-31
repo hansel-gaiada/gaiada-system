@@ -38,6 +38,7 @@ So: use the stand-in to unblock, record it here, and retire it before anyone rel
 | P-01 | `hansel@gaiada.com` | **Accountant** — the person who actually keeps the books | `finance_manager` on D & A Syrowatka, Gaia Digital Agency, Viceroy Bali | 2026-08-25 | Before any real transaction is posted |
 | P-02 | `hansel@gaiada.com` | **Finance manager** — approves, signs off periods | same grant as P-01 | 2026-08-25 | **Before the first period sign-off** |
 | P-03 | 19 × `portal@<slug>.test` (one per client) | **The client's own representative** — a real person at that company | Global `client` role, `company` scope = Gaia Digital Agency; `client_contacts.capability = 'signer'` | 2026-08-31 | **Before the first contract is sent to any of these clients** |
+| P-04 | `hansel@gaiada.com` | **Each client's own representative** — the person on the client side who signs | Client-wide `client_contacts` row, `capability='signer'`, on **all 19** live clients | 2026-08-31 | **Before any real client contract is signed, and before real client reps get portal logins** |
 
 ### Not placeholders — real, and deliberately so
 
@@ -127,6 +128,46 @@ in someone remembering.
 Follow *Retiring a stand-in* above, plus: soft-delete the `client_contacts` row and disable the
 Keycloak account. Leave the `users` row — it may already be referenced by portal activity, and
 `kind='client'` keeps it out of employee-facing reads.
+
+## P-04: the owner as a signer on every client
+
+Owner ruling (2026-08-31): *"ensure hansel@gaiada.com can see and sign for all. as this is
+superadmin. its good to try all."*
+
+**Why this needed data and not a role.** The portal has **no superadmin bypass**, by design.
+`portal-scope.ts`'s `callerClientIds()` throws `not a portal client` for anyone with no active
+`client_contacts` row, whatever they hold — the portal is the one surface where staff standing buys
+nothing, because layer 3 asks "whose data is this", not "how senior are you". Cerbos already lets him
+through (`resource_portal` grants `platform_admin` `actions: ["*"]`), so the only missing piece was
+19 contact rows. He was **not** given the `client` role: he does not need it, and `isClientOnly()` is
+`isClient && !isStaff`, so his staff surface is unaffected either way. Verified after the change —
+19/19 clients visible, `canSign: true`, `/api/me` still returning his five staff roles.
+
+### This one CAN write an irreversible attribution, and the owner accepted that
+
+Unlike P-03 (which was downgraded to `viewer` precisely to remove this), P-04 holds `signer`. If he
+signs, `contracts.status='signed'` and a `contract_signatures` row permanently records **Clement
+Hansel** as the *client-side* signatory. Removing the row later does not re-attribute it. The owner
+asked for this knowingly and it is fine while contracts are test data — there are **zero** live
+contracts today. It must be revoked before a real one is signed.
+
+### ⚠ Side effect: every client can see him in their own contact list
+
+`GET /portal/profile` returns the contacts of the caller's clients so a client can see who their
+stakeholders are — and it does **not** filter out staff. So each client's portal now lists:
+
+```
+Clement Hansel | hansel@gaiada.com | signer
+<their own contact>
+```
+
+Today that discloses nothing, because all 19 "clients" are placeholder accounts whose credentials
+only the owner holds. **It becomes a real disclosure the moment a real client representative logs
+in**: they would see an agency email presented as an authorised signatory on their own account.
+
+This is not purely an artefact of P-04 — `lib/rbac.ts` notes that adding a PM as a contact on their
+own client is "an ordinary thing to do", so *any* staff contact leaks the same way. The durable fix
+is for the portal contact list to exclude staff users; until then, retiring P-04 also closes it.
 
 ## Rules for adding a new stand-in
 
