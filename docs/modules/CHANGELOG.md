@@ -11,6 +11,21 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.61.1` - Portfolio reachable from the nav (2026-08-31) - PROTOTYPED
+
+The estate portfolio page shipped with **no navigation to it** — reachable only by typing the URL,
+which is the same as not shipping it. The owner opened the Build group, found *Sites* (the Zone B
+registry, legitimately empty because nothing has been provisioned through WebDesk) and reasonably
+concluded the work had not landed.
+
+*Sites* and *Portfolio* stay separate entries rather than one merged view: Sites answers "what has
+WebDesk provisioned", Portfolio answers "what does the estate consist of", including the ~20 sites
+we only track and will never provision. Merging them would put a permanently-degraded Zone B read
+in front of facts held locally.
+
+`deptToolkits.test.ts` pins the exact tab key set and caught the addition. The pin was **updated,
+not loosened** — a set assertion relaxed the first time it fires stops being a guard.
+
 ### platform-ui `0.61.0` - the site portfolio page (2026-08-30) - PROTOTYPED
 
 The estate inventory in the ERP: every site we build or operate — including the ones hosted
