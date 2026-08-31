@@ -293,8 +293,17 @@ html:not([data-sidebar="collapsed"]) .erp-navgroup__items .erp-navbtn { padding:
    from .erp-railtip on hover/focus — which is why the drawer breakpoint still
    gets an off-canvas panel instead: touch has no hover. */
 /* Floated out of the flow so the wordmark/tagline keep the full header width. */
-.erp-sidetoggle { position: absolute; top: 18px; right: 12px; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: none; background: transparent; color: var(--ink-subtle); cursor: pointer; transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease); }
-.erp-sidetoggle:hover { color: var(--text-primary); background: var(--tint-hover); }
+/* The design hangs the collapse control OFF the panel's right edge as a
+   small disc, rather than sitting it beside the wordmark. It is positioned
+   against .erp-side__head, whose right edge is the sidebar's right edge, so
+   a negative offset puts it half outside — which is only safe because
+   .erp-side deliberately has no `overflow: hidden` (see the note above the
+   glass rules for why that was left off). */
+.erp-sidetoggle { position: absolute; top: 24px; right: -13px; z-index: 40; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; border-radius: 50%; background: var(--surface-raised); box-shadow: var(--elev-2); color: var(--ink-body); cursor: pointer; transition: color 0.2s var(--erp-ease), background 0.2s var(--erp-ease); }
+.erp-sidetoggle:hover { color: var(--ink-on-accent-fill); background: var(--accent-fill); }
+/* The glyph points left to close, right to re-open. */
+.erp-sidetoggle svg { transform: rotate(180deg); transition: transform 0.2s var(--erp-ease); }
+.erp-sidetoggle--collapsed svg { transform: none; }
 .erp-railtip { position: fixed; z-index: 200; transform: translateY(-50%); padding: 7px 12px; border-radius: var(--radius-pill); background: var(--surface-inverse); color: var(--text-on-inverse); font: 500 12.5px var(--font-body); white-space: nowrap; pointer-events: none; box-shadow: var(--elev-overlay); }
 
 /* Rail category flyout: one icon per group, children in a floating panel.
@@ -319,7 +328,7 @@ html[data-sidebar="collapsed"] .erp-railmenu .erp-navbtn span { display: inline;
   html[data-sidebar="collapsed"] .erp-side__mark { display: flex; }
   /* Toggle above the mark, both centred — the rail has no room for a row. */
   html[data-sidebar="collapsed"] .erp-side__head { flex-direction: column-reverse; align-items: center; gap: 12px; padding: 16px 0 14px; }
-  html[data-sidebar="collapsed"] .erp-sidetoggle { position: static; }
+  html[data-sidebar="collapsed"] .erp-sidetoggle { position: static; box-shadow: none; background: transparent; }
   html[data-sidebar="collapsed"] .erp-side__brand { flex: none; }
   html[data-sidebar="collapsed"] .erp-side__nav { padding: 12px 6px; }
   html[data-sidebar="collapsed"] .erp-navbtn { justify-content: center; gap: 0; padding: 10px 0; }

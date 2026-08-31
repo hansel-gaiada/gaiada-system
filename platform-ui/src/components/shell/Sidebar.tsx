@@ -5,6 +5,7 @@ import { navFor } from "./nav";
 import { NavLink } from "./NavLink";
 import { NavGroupSection } from "./NavGroupSection";
 import { NewMenu } from "./NewMenu";
+import { Icon } from "./icons";
 import { can } from "@/lib/rbac";
 import { CompanyContext } from "./CompanyContext";
 import { SidebarToggle } from "./SidebarToggle";
@@ -29,7 +30,10 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
       <aside className="erp-side" id="app-nav">
         <div className="erp-side__head">
           <Link href="/" className="erp-side__brand" aria-label="Home">
-            <span className="erp-side__mark" aria-hidden="true">S</span>
+            {/* The design's brand mark is a pulse glyph on the accent disc, not the
+              letter S. `icons.tsx` has no "use client", so this stays a server
+              component. */}
+            <span className="erp-side__mark" aria-hidden="true"><Icon name="pulse" size={17} /></span>
             <div className="erp-side__wordmark">Syrowatka</div>
             <Eyebrow className="erp-side__tagline">Operating Platform</Eyebrow>
           </Link>

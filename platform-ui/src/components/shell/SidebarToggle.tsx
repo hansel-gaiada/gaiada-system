@@ -13,14 +13,16 @@ export function SidebarToggle() {
     <>
       <button
         type="button"
-        className="erp-sidetoggle"
+        className={`erp-sidetoggle${collapsed ? " erp-sidetoggle--collapsed" : ""}`}
         aria-label={label}
         aria-expanded={!collapsed}
         aria-controls="app-nav"
         onClick={toggle}
         {...triggerProps}
       >
-        <Icon name="panelLeft" size={19} />
+        {/* A chevron on the panel edge, per the design — it points the way
+            the panel will travel, so it flips with the state. */}
+        <Icon name="chevron" size={13} />
       </button>
       {tip}
     </>
