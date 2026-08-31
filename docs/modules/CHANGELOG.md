@@ -4112,6 +4112,14 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 > quietly editing either the doc or a version — decide which is authoritative and record it in the
 > decision log.
 
+> **⚠ DELIBERATE JUMP 0210a → 0300a (2026-08-31).** Not 89 lost releases: the counter was
+> advanced on purpose to leave headroom, because concurrent sessions were colliding on the next
+> number faster than a release could be cut (`0208a` was claimed twice within minutes, and `0210a`
+> landed while the tooling below was being written). Nothing exists between `0210a` and `0300a`
+> and nothing ever will. From here, `node scripts/next-version.mjs` derives the next free version
+> from the TAGS, and a `version-gate` CI job fails any PR that edits `/VERSION` to a version whose
+> tag already exists.
+
 | App version | Cut | Module versions moved (vs the previous cut) |
 |---|---|---|
 | `Alpha 01.068.0144a` | 2026-08-23 | platform-ui `0.44.0`→`0.45.0` |
@@ -4185,6 +4193,8 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 | `Alpha 01.071.0207a` | 2026-08-31 | platform-nest `0.44.0`→`0.47.0`, platform-ui `0.61.1`→`0.62.0`, mcp-hub `0.12.0`→`0.12.1` |
 | `Alpha 01.071.0208a` | 2026-08-31 | *(no module version moved)* |
 | `Alpha 01.071.0209a` | 2026-08-31 | platform-nest `0.47.0`→`0.48.0` |
+| `Alpha 01.071.0210a` | 2026-08-31 | *(no module version moved)* |
+| `Alpha 01.071.0300a` | 2026-08-31 | *(no module version moved — headroom seed, see below)* |
 
 ### `Alpha 01.067.0144a` - 2026-08-23 - the work that was finished but never left the laptop
 
