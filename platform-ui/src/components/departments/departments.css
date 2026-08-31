@@ -696,7 +696,7 @@ a.dept-proj__name:hover { opacity: 0.6; }
 .serviced-block__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .serviced-block__row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); }
 .serviced-block__company { font: 400 13px var(--font-body); color: var(--text-primary); flex: 1 1 auto; }
-.serviced-block__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--erp-ink-50); }
+.serviced-block__module { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--erp-ink-50); }
 
 /* Projects tab header: count + the "New project" entry point (a project no longer needs a PRD run first). */
 .dept-proj__head { display: inline-flex; align-items: center; gap: 12px; }
@@ -709,7 +709,7 @@ a.dept-proj__name:hover { opacity: 0.6; }
 .dept-proj__group { border: 0.5px solid var(--erp-hairline); border-radius: var(--radius-md); background: var(--surface-card); overflow: hidden; }
 .dept-proj__group-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; background: var(--surface-page); border-bottom: 0.5px solid var(--erp-hairline); }
 .dept-proj__group-title { display: inline-flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.dept-proj__group-kicker { font: 700 10px var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--erp-accent); }
+.dept-proj__group-kicker { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-accent); }
 .dept-proj__group--internal .dept-proj__group-kicker { color: var(--ink-subtle); }
 .dept-proj__client { font: 600 15px/1.3 var(--font-body); color: var(--text-primary); text-decoration: none; }
 .dept-proj__group--internal .dept-proj__client { color: var(--erp-ink-50); }

@@ -55,7 +55,7 @@
 .pm-meta { display: flex; align-items: center; gap: 12px 28px; flex-wrap: wrap; margin: 12px 0 18px; }
 .pm-meta__prog { flex: 1 1 220px; min-width: 160px; display: flex; align-items: center; }
 .pm-meta__item { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 13px var(--font-body); color: var(--text-primary); }
-.pm-meta__label { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50); }
+.pm-meta__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .pm-meta__muted { color: var(--erp-ink-50); }
 .pm-tabsrow { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; border-bottom: 0.5px solid var(--pm-line); margin-bottom: 20px; }
 .pm-tabsrow .pm-tabs { border-bottom: 0; margin-bottom: 0; }

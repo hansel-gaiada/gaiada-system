@@ -86,7 +86,7 @@
   border-color: color-mix(in srgb, var(--erp-accent) 86%, var(--text-primary));
 }
 
-.lux-badge { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.lux-badge { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.01em; }
 .lux-badge__dot { width: 6px; height: 6px; border-radius: 50%; } /* the dot is the system's one sanctioned circle */
 
 .lux-kpi { position: relative; background: transparent; border: none; border-radius: var(--radius-lg); padding: var(--card-padding); display: flex; flex-direction: column; gap: 12px; }

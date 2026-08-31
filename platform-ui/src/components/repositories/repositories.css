@@ -53,7 +53,7 @@ a.repo-cell__name:hover { text-decoration: underline; }
 .repo-create__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
 .repo-field {
   display: flex; flex-direction: column; gap: 6px; min-width: 0;
-  font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-50);
+  font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50);
 }
 .repo-field select, .repo-field input {
   width: 100%; min-width: 0;

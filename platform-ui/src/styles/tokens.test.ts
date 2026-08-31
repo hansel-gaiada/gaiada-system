@@ -182,6 +182,28 @@ describe("design tokens", () => {
   });
 
   // ---- Gold-glass (owner decisions, 2026-08-30) --------------------------
+  it("no component CSS shouts — the design has no uppercase", () => {
+    // The gold-glass design contains zero uppercase runs in either artboard,
+    // and a sweep removed 140 `text-transform: uppercase` declarations across
+    // 33 stylesheets to match. THIS GUARD EXISTS BECAUSE THE SWEEP DID NOT
+    // HOLD: a `Merge branch 'main' into reva/ui` resurrected the rule in
+    // .lux-badge from the stale side of the merge, and two stylesheets added
+    // after the sweep (prd-studio.css, repositories.css) were written in the
+    // old idiom because nothing told their author otherwise. A sweep is a
+    // one-off; only a test survives a merge.
+    //
+    // app/print/print.css is outside src/components and so outside this scan
+    // anyway — its provenance banner ("AD HOC · UNSEALED") is a legal marker,
+    // not a style choice, and deliberately keeps its caps.
+    const offenders: string[] = [];
+    for (const path of componentCssFiles([])) {
+      const stripped = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      const hits = stripped.match(/text-transform:\s*uppercase/g);
+      if (hits) offenders.push(`${path.replace(/\\/g, "/").split("/").slice(-2).join("/")}: ${hits.length}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("glass stays inside its boundary — chrome and top-level cards only", () => {
     // Decision 3. Stacked translucency stops being legible after two layers and
     // this app stacks routinely, so the cap is enforced rather than documented.
