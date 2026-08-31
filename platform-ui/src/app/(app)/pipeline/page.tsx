@@ -105,7 +105,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: SP 
       <div style={{ marginBottom: 26 }}>
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Delivery Pipeline" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Delivery</Eyebrow>
-        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>Delivery Pipeline</h1>
+        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "-0.015em", lineHeight: 1.06 }}>Delivery Pipeline</h1>
         <p style={{ margin: "9px 0 0", font: "400 15px/1.5 var(--font-body)", color: "var(--ink-muted)", maxWidth: 620 }}>
           Every meeting-to-delivery run and its three tracks (delivery · report · scope). Reviews awaiting your
           decision appear below; client sign-offs happen in the client portal.

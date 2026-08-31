@@ -111,7 +111,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Search
           <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>
             {manager ? "Command center" : "Your workspace"}
           </Eyebrow>
-          <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 34, lineHeight: 1.1 }}>
+          <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 32, letterSpacing: "-0.015em", lineHeight: 1.04 }}>
             Good {timeOfDay()}, {firstName}
           </h1>
         </div>

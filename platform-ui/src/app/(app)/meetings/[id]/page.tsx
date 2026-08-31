@@ -76,7 +76,7 @@ export default async function MeetingDetailPage({ params }: { params: Promise<{ 
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Meetings", href: "/meetings" }, { label: rec.title ?? rec.meeting_id }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 8, display: "block" }}>Recording</Eyebrow>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, lineHeight: 1.1 }}>
+          <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "-0.015em", lineHeight: 1.06 }}>
             {rec.title ?? rec.meeting_id}
           </h1>
           <StatusBadge label={STATUS_LABEL[rec.status] ?? rec.status} />

@@ -47,7 +47,7 @@ export default async function AssistantPage({ searchParams }: { searchParams: SP
       <div style={{ marginBottom: 18 }}>
         <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Assistant" }]} />
         <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 6, display: "block" }}>Intelligence</Eyebrow>
-        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 30, lineHeight: 1.1 }}>Assistant</h1>
+        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "-0.015em", lineHeight: 1.06 }}>Assistant</h1>
       </div>
       <AssistantWorkspace
         initialThreads={initial.items}

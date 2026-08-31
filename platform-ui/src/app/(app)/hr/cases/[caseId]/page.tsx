@@ -57,7 +57,7 @@ export default async function HrCaseDetailPage({ params, searchParams }: {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, margin: "14px 0 20px" }}>
         <div>
           <Eyebrow style={{ color: "var(--erp-accent)", marginBottom: 6, display: "block" }}>{kase.kind}</Eyebrow>
-          <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, lineHeight: 1.15 }}>{kase.title}</h1>
+          <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "-0.015em", lineHeight: 1.065 }}>{kase.title}</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <StatusBadge label={kase.status} />

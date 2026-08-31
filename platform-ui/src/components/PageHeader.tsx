@@ -36,7 +36,12 @@ export function PageHeader({ title, actions, breadcrumbs }: {
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 24, flexWrap: "wrap", marginBottom: 18 }}>
       <div>
         {trail.length > 2 && <Breadcrumbs items={trail} />}
-        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 26, lineHeight: 1.15 }}>
+        {/* The design's sub-page title spec, transcribed: Urbanist 700 at 28px,
+            -0.015em, 1.06. 73 pages inherit it from here. The seven that write
+            their own <h1> are aligned to the same numbers rather than being
+            rewritten onto this component — that would be markup surgery on
+            pages with working layouts, for no visual gain. */}
+        <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 28, letterSpacing: "-0.015em", lineHeight: 1.06 }}>
           {title}
         </h1>
       </div>
