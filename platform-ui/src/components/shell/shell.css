@@ -200,6 +200,9 @@
 .erp-app[data-density="compact"] .erp-special { padding-top: 7px; padding-bottom: 7px; }
 
 /* ---- Display preferences (data-attributes set on .erp-app by the Shell) ---- */
+/* Opt-in full-bleed. `margin: 0 auto` is kept alongside it (inherited from the
+   base rule) so that if a cap ever applies again the column centres rather
+   than hugging the left edge. */
 .erp-app[data-width="wide"] .erp-main__inner { max-width: none; }
 
 /* ---- Density modes (Phase 1, 2026-08-22) — a REAL token-level mode.

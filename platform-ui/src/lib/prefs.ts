@@ -32,7 +32,14 @@ export interface Prefs {
 // grids, which the 1180px reading measure squeezed into needless horizontal scrolling on a normal
 // desktop. "standard" stays available in Account -> Content width for anyone who prefers the
 // narrower measure for the prose-shaped pages.
-export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "wide", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit" };
+// width: "standard" (a 1160px centred column), not "wide". VERIFIED IN A REAL
+// SESSION 2026-08-31: the shell renders data-width="wide" by default, and
+// `.erp-app[data-width="wide"] .erp-main__inner { max-width: none }` outranks
+// the centred rule — so the 1160px cap and `margin: 0 auto` shipped in
+// 1.0.0-alpha.301 were INERT for every user on the default. The design draws a
+// centred column; "standard" is that. "wide" survives untouched as the opt-in
+// full-bleed mode for anyone who wants it.
+export const DEFAULT_PREFS: Prefs = { density: "comfortable", width: "standard", theme: "auto", assistantRailCollapsed: false, officeZoom: "fit" };
 const COOKIE = "gaiada_prefs";
 
 const DENSITIES: Density[] = ["comfortable", "compact"];
