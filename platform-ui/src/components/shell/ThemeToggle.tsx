@@ -68,6 +68,10 @@ export function ThemeToggle({ theme }: { theme: Theme }) {
           onKeyDown={(e) => onKeyDown(e, i)}
         >
           <Icon name={opt.icon} size={15} />
+          {/* The design shows the CURRENT theme as a labelled gold pill. All
+              three options stay reachable — dropping to a two-state toggle
+              would remove "Match device", which is a behaviour, not a style. */}
+          {current === opt.value && <span className="erp-theme__label">{opt.label}</span>}
         </button>
       ))}
     </div>

@@ -40,3 +40,11 @@
 @media (max-width: 560px) {
   .erp-app:has(.asst-fab) .erp-main__inner { padding-bottom: 92px; }
 }
+/* GOLD-GLASS: a filled accent disc, matching the design's launcher. */
+.asst-fab {
+  background: var(--accent-fill);
+  color: var(--ink-on-accent-fill);
+  border-color: var(--accent-fill);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--glow), var(--elev-overlay);
+}

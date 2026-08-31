@@ -4,30 +4,20 @@ import type { Theme } from "@/lib/prefs";
 import { listNotifications } from "@/lib/entities";
 import { Icon } from "./icons";
 import { Eyebrow } from "@/components/ui";
-import { NewMenu } from "./NewMenu";
+import { UserMenu } from "./UserMenu";
 import { NavToggle } from "./NavToggle";
 import { CommandPaletteTrigger } from "./CommandPaletteTrigger";
 import { ThemeToggle } from "./ThemeToggle";
-import { can } from "@/lib/rbac";
 
 export async function TopBar({ me, tenantId, moduleLabel, theme }: { me: Me; tenantId: string | null; moduleLabel: string; theme: Theme }) {
   const dateLine = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+  const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
   // Unread notification count for the bell badge — degrades to 0 if the feed
   // is unavailable (never blocks the shell).
   const unread = tenantId
     ? (await listNotifications(me.userId, tenantId, true).catch(() => [])).length
     : 0;
-
-  // RBAC-gated global create menu.
-  const newItems = [
-    { label: "Project", href: "/projects/new" },
-    { label: "Task", href: "/tasks/new" },
-    { label: "Campaign", href: "/agency/new" },
-    ...(can(me, "pm.manage", tenantId) ? [{ label: "Client", href: "/clients/new" }, { label: "Deliverable", href: "/deliverables/new" }] : []),
-    ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/invoices/new" }] : []),
-    ...(can(me, "admin.access", tenantId) ? [{ label: "Employee", href: "/people/new" }] : []),
-  ];
 
   return (
     <header className="erp-top">
@@ -47,7 +37,10 @@ export async function TopBar({ me, tenantId, moduleLabel, theme }: { me: Me; ten
       <CommandPaletteTrigger />
       <ThemeToggle theme={theme} />
       <div className="erp-top__actions">
-        <NewMenu items={newItems} />
+        {/* The design puts the account control in the TOP BAR and the global
+            create action at the SIDEBAR FLOOR — the reverse of where they
+            used to sit. Both moved wholesale; neither lost an item. */}
+        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} compact />
         <Link href="/notifications" className="erp-top__bell" aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}>
           <Icon name="bell" size={19} />
           {unread > 0 && <span className="erp-top__badge" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}

@@ -4,7 +4,8 @@ import { getSidebarState } from "@/lib/prefs";
 import { navFor } from "./nav";
 import { NavLink } from "./NavLink";
 import { NavGroupSection } from "./NavGroupSection";
-import { UserMenu } from "./UserMenu";
+import { NewMenu } from "./NewMenu";
+import { can } from "@/lib/rbac";
 import { CompanyContext } from "./CompanyContext";
 import { SidebarToggle } from "./SidebarToggle";
 import { SidebarState } from "./sidebarState";
@@ -13,6 +14,16 @@ import { Eyebrow } from "@/components/ui";
 export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[] }) {
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const collapsed = (await getSidebarState()) === "collapsed";
+  // RBAC-gated global create menu. Moved here from TopBar with the button:
+  // the design puts it at the sidebar floor. Identical item list.
+  const newItems = [
+    { label: "Project", href: "/projects/new" },
+    { label: "Task", href: "/tasks/new" },
+    { label: "Campaign", href: "/agency/new" },
+    ...(can(me, "pm.manage", tenantId) ? [{ label: "Client", href: "/clients/new" }, { label: "Deliverable", href: "/deliverables/new" }] : []),
+    ...(can(me, "company.manage", tenantId) ? [{ label: "Company", href: "/companies/new" }, { label: "Invoice", href: "/invoices/new" }] : []),
+    ...(can(me, "admin.access", tenantId) ? [{ label: "Employee", href: "/people/new" }] : []),
+  ];
   return (
     <SidebarState initial={collapsed}>
       <aside className="erp-side" id="app-nav">
@@ -44,7 +55,9 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
             ),
           )}
         </nav>
-        <UserMenu name={me.name} secondary={me.title ?? me.email} initials={initials} />
+        <div className="erp-side__new">
+          <NewMenu items={newItems} />
+        </div>
       </aside>
     </SidebarState>
   );

@@ -92,8 +92,9 @@
 .erp-side__mark { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-fill); box-shadow: var(--glow); font-family: var(--font-display); font-weight: 700; font-size: 15px; letter-spacing: 0.01em; color: var(--ink-on-accent-fill); }
 .erp-side__wordmark { font-family: var(--font-display); font-weight: 700; font-size: 20px; line-height: 1.1; letter-spacing: 0.01em; color: var(--text-primary); }
 /* Company scope block (moved from the top bar into the sidebar). */
-.erp-side__company { margin: 4px 12px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); transition: border-color 0.2s var(--erp-ease); }
-.erp-side__company:hover { border-color: var(--accent-fg); }
+/* Not a bordered control — the design draws a gold kind label over the
+   company name with a rule beneath it. The box was my addition last pass. */
+.erp-side__company { padding: 4px 20px 16px; border-bottom: 1px solid var(--glass-divider); }
 .erp-side__company .erp-company__select, .erp-side__company .erp-company__name { max-width: 200px; white-space: normal; }
 .erp-side__division { font: 400 11px var(--font-body); color: var(--erp-ink-50); padding: 3px 12px 2px 39px; }
 .erp-side__nav { flex: 1; overflow-y: auto; padding: 14px 12px; min-height: 0; }
@@ -128,7 +129,14 @@
 .erp-usermenu { position: relative; }
 .erp-usermenu__trigger { width: 100%; background: transparent; border: none; border-top: 0.5px solid var(--line-soft); cursor: pointer; color: var(--text-primary); font-family: var(--font-body); transition: background 0.2s var(--erp-ease); }
 .erp-usermenu__trigger:hover { background: var(--tint-hover); }
-.erp-usermenu__pop { position: absolute; left: 12px; right: 12px; min-width: 180px; bottom: calc(100% + 6px); background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); display: flex; flex-direction: column; z-index: 50; box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
+.erp-usermenu__pop { position: absolute; left: 12px; right: 12px; min-width: 180px; bottom: calc(100% + 6px); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; display: flex; flex-direction: column; z-index: 50; box-shadow: var(--elev-overlay); animation: erp-toast 0.18s var(--erp-ease); }
+/* Top-bar placement: the popover has room BELOW it, not above, and the
+   trigger shrinks to the avatar plus a chevron. */
+.erp-usermenu--top .erp-usermenu__pop { top: calc(100% + 8px); bottom: auto; left: auto; right: 0; width: 200px; }
+.erp-usermenu--top .erp-usermenu__trigger { border: 1px solid var(--line); border-radius: var(--radius-md); height: 36px; padding: 0 8px 0 5px; gap: 6px; }
+.erp-usermenu--top .erp-usermenu__trigger:hover { border-color: var(--accent-fg); }
+.erp-usermenu--top .erp-side__avatar { width: 26px; height: 26px; font-size: 11px; }
+.erp-usermenu--top .erp-usermenu__trigger > div + div { display: none; }
 .erp-usermenu__item { display: block; width: 100%; text-align: left; background: transparent; border: none; cursor: pointer; padding: 11px 14px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; transition: background 0.2s var(--erp-ease); }
 .erp-usermenu__item + .erp-usermenu__item, .erp-usermenu__pop form { border-top: 0.5px solid var(--erp-hairline-soft); }
 .erp-usermenu__item:hover { background: var(--tint-hover); }
@@ -160,6 +168,12 @@
    the latter is cream, which on a #F5D560 fill lands around 1.3:1. */
 .erp-new__btn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--accent-fill); border-radius: var(--radius-md); background: var(--accent-fill); color: var(--ink-on-accent-fill); padding: 7px 12px; font: 600 13px var(--font-body); cursor: pointer; }
 .erp-new__btn:hover { opacity: 0.92; box-shadow: var(--glow); }
+/* Sidebar-floor placement (the design). Full width, 44px, and the menu
+   opens UPWARD because there is no room below it. */
+.erp-side__new { flex-shrink: 0; padding: 10px 14px 14px; }
+.erp-side__new .erp-new, .erp-side__new .erp-new__btn { width: 100%; }
+.erp-side__new .erp-new__btn { height: 44px; justify-content: center; font-size: 14px; }
+.erp-side__new .erp-new__menu { top: auto; bottom: calc(100% + 6px); left: 0; right: 0; }
 .erp-new__menu { box-shadow: var(--elev-overlay); position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; background: var(--surface-raised); border: 0.5px solid var(--erp-hairline); z-index: 40; display: flex; flex-direction: column; padding: 4px; }
 .erp-new__item { padding: 9px 12px; font: 400 13px var(--font-body); color: var(--text-primary); text-decoration: none; }
 .erp-new__item:hover { background: var(--tint-hover); }
