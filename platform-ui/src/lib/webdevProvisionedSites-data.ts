@@ -37,3 +37,20 @@ export async function listProvisionedSitesForRun(
     throw e;
   }
 }
+
+/** Every provisioned site in the company (the endpoint is tenant-wide when `runId` is omitted —
+ *  `provisioning.service.ts::listProvisionedSites` only adds the WHERE when a run id is given; newest
+ *  first, capped at 200 server-side). The Repositories tab's read; scoping to a department happens
+ *  in `lib/repoInventory.ts` through each site's run → project. Same three-way result as the
+ *  run-scoped reader: `not_enabled` (404, webdev module off for this company) and `refused` (403)
+ *  stay distinguishable from "no sites". */
+export async function listProvisionedSites(userId: string, tenant: string): Promise<ListSitesResult> {
+  try {
+    const sites = await platformFetch<ProvisionedSite[]>(`/api/${tenant}/modules/webdev/provisioned-sites`, userId);
+    return { ok: true, sites };
+  } catch (e) {
+    if (e instanceof PlatformError && e.status === 404) return { ok: false, reason: "not_enabled" };
+    if (e instanceof PlatformError && e.status === 403) return { ok: false, reason: "refused" };
+    throw e;
+  }
+}

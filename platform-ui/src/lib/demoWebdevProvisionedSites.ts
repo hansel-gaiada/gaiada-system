@@ -37,11 +37,14 @@ import "server-only";
 //                                      (`pending` -> `provisioned` -> `live`), matching the real
 //                                      certbot-after-DNS wait
 import type { SiteFramework, SiteStatus } from "./webdevProvisionedSites";
+import { runLineageForDemo } from "./demoPipeline";
 
 interface DemoSite {
   id: string;
   tenantId: string;
   pipelineRunId: string | null;
+  clientId: string | null;
+  projectId: string | null;
   provider: string;
   providerRef: string | null;
   slug: string;
@@ -66,7 +69,7 @@ const err = (status: number, error: string): DemoResult => ({ status, json: { er
 const STORE_KEY = Symbol.for("gaiada.demoWebdevProvisionedSites.sites");
 const SITES: DemoSite[] = ((globalThis as Record<symbol, unknown>)[STORE_KEY] ??= [
   {
-    id: "wps-demo-1a", tenantId: "co-agency", pipelineRunId: "run-demo-1",
+    id: "wps-demo-1a", tenantId: "co-agency", pipelineRunId: "run-demo-1", clientId: "cl-1", projectId: "p-web-1",
     provider: "provision", providerRef: null,
     slug: "northwind-site-redesign-kickoff-old", framework: "vite",
     repoUrl: null, stagingUrl: null,
@@ -76,7 +79,7 @@ const SITES: DemoSite[] = ((globalThis as Record<symbol, unknown>)[STORE_KEY] ??
     _reconcileCount: 0,
   },
   {
-    id: "wps-demo-1b", tenantId: "co-agency", pipelineRunId: "run-demo-1",
+    id: "wps-demo-1b", tenantId: "co-agency", pipelineRunId: "run-demo-1", clientId: "cl-1", projectId: "p-web-1",
     provider: "provision", providerRef: "prov-proj-1001",
     slug: "northwind-site-redesign-kickoff", framework: "vite",
     repoUrl: "https://github.com/Gaia-Digital-Agency/northwind-site-redesign-kickoff",
@@ -127,16 +130,21 @@ export function webdevProvisionedSitesDemo(
 
   const provisionM = p.match(/^\/api\/[^/]+\/modules\/webdev\/provision$/);
   if (provisionM && m === "POST") {
-    const b = JSON.parse(body || "{}") as { runId?: string; framework?: SiteFramework; slug?: string };
+    const b = JSON.parse(body || "{}") as { runId?: string; framework?: SiteFramework; slug?: string; clientId?: string; projectId?: string };
     const runId = b.runId?.trim() || null;
-    if (!runId) return err(400, "invalid_slug");
+    // Mirror the real service: a run's site copies the run's client/project; a standalone one takes the caller's.
+    const lineage = runId ? (runLineageForDemo(runId) ?? { clientId: null, projectId: null }) : { clientId: b.clientId?.trim() || null, projectId: b.projectId?.trim() || null };
+    // Mirror the real controller: a run OR an explicit slug (standalone, off-pipeline) is required.
+    if (!runId && !b.slug?.trim()) return err(400, "invalid_slug");
     const framework: SiteFramework = b.framework === "nextjs" ? "nextjs" : "vite";
     const slug = (b.slug?.trim() || `run-${runId}`).toLowerCase();
 
     // Idempotency mirror of the real precondition: a non-failed row already active for this run
-    // gets handed BACK (200), never a second egress.
-    const active = SITES.find((s) => s.pipelineRunId === runId && s.status !== "failed");
-    if (active) return ok(toRow(active), 200);
+    // gets handed BACK (200), never a second egress. Standalone rows key on the slug instead.
+    const active = runId
+      ? SITES.find((s) => s.pipelineRunId === runId && s.status !== "failed")
+      : SITES.find((s) => s.slug === slug && s.status !== "failed");
+    if (active) return runId ? ok(toRow(active), 200) : err(409, "slug_taken");
 
     if (!/^[a-z0-9-]{1,40}$/.test(slug)) return err(400, "invalid_slug");
     if (slug.includes("taken")) return err(409, "slug_taken");
@@ -144,7 +152,7 @@ export function webdevProvisionedSitesDemo(
     const now = new Date().toISOString();
     if (slug.includes("conflict")) {
       const site: DemoSite = {
-        id: nid(), tenantId: "co-agency", pipelineRunId: runId, provider: "provision", providerRef: null,
+        id: nid(), tenantId: "co-agency", pipelineRunId: runId, clientId: lineage.clientId, projectId: lineage.projectId, provider: "provision", providerRef: null,
         slug, framework, repoUrl: null, stagingUrl: null,
         status: "failed", failureReason: "slug_conflict_foreign",
         requestedBy: userId, approvalId: null, lastReconciledAt: null, createdAt: now, updatedAt: now,
@@ -157,7 +165,7 @@ export function webdevProvisionedSitesDemo(
     if (slug.includes("crash")) {
       // Egress never runs — the "stays requested" edge (design §03's unavailability contract).
       const site: DemoSite = {
-        id: nid(), tenantId: "co-agency", pipelineRunId: runId, provider: "provision", providerRef: null,
+        id: nid(), tenantId: "co-agency", pipelineRunId: runId, clientId: lineage.clientId, projectId: lineage.projectId, provider: "provision", providerRef: null,
         slug, framework, repoUrl: null, stagingUrl: null,
         status: "requested", failureReason: null,
         requestedBy: userId, approvalId: null, lastReconciledAt: null, createdAt: now, updatedAt: now,
@@ -170,7 +178,7 @@ export function webdevProvisionedSitesDemo(
     // Normal / "timeout" path — egress "succeeds" immediately (mirrors the real 201: "mirror row
     // created, egress begun"), landing `pending` with a provider handle.
     const site: DemoSite = {
-      id: nid(), tenantId: "co-agency", pipelineRunId: runId, provider: "provision",
+      id: nid(), tenantId: "co-agency", pipelineRunId: runId, clientId: lineage.clientId, projectId: lineage.projectId, provider: "provision",
       providerRef: `prov-proj-${seq}`,
       slug, framework, repoUrl: null, stagingUrl: null,
       status: "pending", failureReason: null,

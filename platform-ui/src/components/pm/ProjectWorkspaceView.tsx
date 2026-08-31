@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -8,8 +9,12 @@ import { postEntityComment, attachFileAction, deleteFileAction } from "@/lib/col
 import { CommentThread } from "@/components/pm/CommentThread";
 import { Attachments } from "@/components/Attachments";
 import { PendingLink } from "@/components/PendingLink";
-import { listRecordings, STATUS_LABEL, formatDuration } from "@/lib/meetings";
-import { RecordControls } from "@/components/meetings/RecordControls";
+import { listRecordings } from "@/lib/meetings";
+import { listPipelineRunsWithGates, type PipelineGate } from "@/lib/pipeline";
+import { decideGateAction } from "@/lib/pipelineActions";
+import { createBriefingAction, startRunManuallyAction } from "@/lib/prdActions";
+import { ingestAction, retryAudioAction, setTranscriptAction, uploadAudioAction } from "@/lib/meetingsActions";
+import { ProjectBriefings } from "@/components/prd/ProjectBriefings";
 import { formatDate, formatDateTime } from "@/lib/format";
 import {
   getPmProject, listPmTasks, listMilestones, listDocs, assignableUnits, listTags,
@@ -80,6 +85,9 @@ export type ProjectWorkspaceSearch = {
 // stops polluting the board"). It used to be a "Group by" axis on the Board tab below; see
 // `ProjectSwimlane`'s doc comment just below for what replaced it.
 const VIEWS = ["board", "ball", "list", "timeline", "charts", "milestones", "docs", "files", "discussion", "meetings"] as const;
+// The tag/ball/responsible filter panel applies to the task-list views only — not Milestones, Docs,
+// Files, Discussion or Meetings, where it rendered as an empty "Filters" box.
+const TASK_VIEWS = new Set<string>(["board", "ball", "list", "timeline"]);
 type View = (typeof VIEWS)[number];
 
 // The project board only groups by axes that make sense scoped to ONE
@@ -156,6 +164,22 @@ export async function ProjectWorkspaceView({
     // silent-empty defect spread in the first place.
     listRecordings(userId, tenant, { projectId }).then((r) => (r.kind === "ok" ? r.data : [])),
   ]);
+
+  // Meetings tab = the PRD Studio flow for this project: its runs with their gates in one read
+  // (`?include=gates`, platform-nest 0.46.0) — read only when that tab is shown.
+  let projectRuns: Array<{ run: import("@/lib/pipeline").PipelineRun; gates: PipelineGate[] | null }> = [];
+  if (view === "meetings") {
+    const runsRes = await listPipelineRunsWithGates(userId, tenant, { projectId });
+    projectRuns = runsRes.kind === "ok" ? runsRes.data.map(({ gates, ...run }) => ({ run, gates })) : [];
+  }
+  const deptMatch = backHref.match(/^\/departments\/([^/]+)/);
+  const prdHref = deptMatch ? `/departments/${deptMatch[1]}/prd` : "/pipeline";
+  const workspacePath = `${backHref.replace(/\/$/, "")}/${projectId}?view=meetings`;
+  async function onDecideGate(formData: FormData) {
+    "use server";
+    await decideGateAction(formData);
+    revalidatePath(workspacePath);
+  }
   // Burndown overlay (P2-08, design spec §4 phase-2) — only fetched when the Timeline or Charts
   // tab is actually being rendered, same lazy pattern as everything else view-scoped on this page.
   const burndownSeries = (view === "timeline" || view === "charts") ? await getBurndown(userId, tenant, projectId) : [];
@@ -271,11 +295,25 @@ export async function ProjectWorkspaceView({
             into one date. */}
         <span className="pm-meta__item">
           <span className="pm-meta__label">Range</span>
-          <span>{projectStartDate ? formatDate(projectStartDate) : "—"} → {projectDueDate ? formatDate(projectDueDate) : "—"}</span>
-          <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
-            Tasks span {taskEnvelope.start ? formatDate(taskEnvelope.start) : "—"} → {taskEnvelope.end ? formatDate(taskEnvelope.end) : "—"}
-          </span>
+          {projectStartDate || projectDueDate ? (
+            <span>{projectStartDate ? formatDate(projectStartDate) : "—"} → {projectDueDate ? formatDate(projectDueDate) : "—"}</span>
+          ) : (
+            <span className="pm-meta__muted">No dates set</span>
+          )}
+          {(taskEnvelope.start || taskEnvelope.end) && (
+            <span style={{ font: "400 11px var(--font-body)", color: "var(--erp-ink-50)" }}>
+              Tasks span {taskEnvelope.start ? formatDate(taskEnvelope.start) : "—"} → {taskEnvelope.end ? formatDate(taskEnvelope.end) : "—"}
+            </span>
+          )}
           <UrgencyChip tier={projectUrgencyRoll.tier} variant="chip" count={projectUrgencyRoll.counts[projectUrgencyRoll.tier] || undefined} />
+        </span>
+        <span className="pm-meta__item">
+          <span className="pm-meta__label">Client</span>
+          {base?.client_id ? (
+            <Link href={`/clients/${base.client_id}`} style={{ color: "inherit" }}>{base.client_name ?? base.client_id}</Link>
+          ) : (
+            <span className="pm-meta__muted">None</span>
+          )}
         </span>
         <span className="pm-meta__item">
           <span className="pm-meta__label">Owner</span>
@@ -303,18 +341,20 @@ export async function ProjectWorkspaceView({
           FacetFilters.tsx). Applies to Board/Ball/List/Timeline uniformly (Milestones/Docs aren't
           task-list views) — same bookmarkable-GET-form idiom this used to hand-roll as two
           separate blocks. */}
-      <FacetFilters
-        basePath={basePath}
-        hidden={{ view, swimlane: swimlane !== "status" ? swimlane : undefined }}
-        groups={[
-          {
-            key: "tags", label: PM_TERMS.tags, selected: selectedTagIds,
-            options: tags.map((tg) => ({ id: tg.id, label: tg.label, swatch: <span className="pm-col__dot" aria-hidden style={{ background: TAG_COLOR_HEX[tg.color]?.onLight ?? "currentColor" }} /> })),
-          },
-          { key: "ball", label: PM_TERMS.ball, selected: selectedBallIds, options: ballOptions },
-          { key: "responsible", label: PM_TERMS.responsible, selected: selectedResponsibleIds, options: responsibleOptions },
-        ]}
-      />
+      {TASK_VIEWS.has(view) && (
+        <FacetFilters
+          basePath={basePath}
+          hidden={{ view, swimlane: swimlane !== "status" ? swimlane : undefined }}
+          groups={[
+            {
+              key: "tags", label: PM_TERMS.tags, selected: selectedTagIds,
+              options: tags.map((tg) => ({ id: tg.id, label: tg.label, swatch: <span className="pm-col__dot" aria-hidden style={{ background: TAG_COLOR_HEX[tg.color]?.onLight ?? "currentColor" }} /> })),
+            },
+            { key: "ball", label: PM_TERMS.ball, selected: selectedBallIds, options: ballOptions },
+            { key: "responsible", label: PM_TERMS.responsible, selected: selectedResponsibleIds, options: responsibleOptions },
+          ]}
+        />
+      )}
 
       {view === "board" && (
         filteredTasks.length === 0 ? (
@@ -527,23 +567,22 @@ export async function ProjectWorkspaceView({
       {/* WD-07 (Web Dev Phase 1 §12) — capture a briefing straight from this project so it lands
           scoped (`projectId` + this project's own `client_id`), and shows here once recorded. */}
       {view === "meetings" && (
-        <>
-          <RecordControls projectId={projectId} clientId={base?.client_id ?? undefined} />
-          {meetings.length > 0 && (
-            <div style={{ marginTop: 18 }}>
-              <HairlineTable
-                columns={[{ label: "Meeting" }, { label: "Status" }, { label: "Length" }, { label: "Recorded", align: "right" }]}
-                rows={meetings.map((r) => [
-                  <Link key="t" href={`/meetings/${r.id}`} style={{ color: "inherit", fontWeight: 600 }}>{r.title ?? r.meeting_id}</Link>,
-                  <StatusBadge key="s" label={STATUS_LABEL[r.status] ?? r.status} />,
-                  formatDuration(r.duration_sec),
-                  formatDateTime(r.created_at),
-                ])}
-                tcols="2fr 1fr .8fr 1fr"
-              />
-            </div>
-          )}
-        </>
+        <ProjectBriefings
+          project={{ id: projectId, name: pm?.name ?? base?.name ?? "Project", clientId: base?.client_id ?? null, clientName: base?.client_name ?? null }}
+          recordings={meetings}
+          runs={projectRuns}
+          mayDecide={can(me, "approvals.decide", tenant)}
+          actions={{
+            createBriefing: createBriefingAction,
+            upload: uploadAudioAction,
+            retry: retryAudioAction,
+            setTranscript: setTranscriptAction,
+            ingest: ingestAction,
+            startRunManually: startRunManuallyAction,
+            decideGate: onDecideGate,
+          }}
+          prdHref={prdHref}
+        />
       )}
 
     </>

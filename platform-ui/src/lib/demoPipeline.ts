@@ -24,9 +24,16 @@ interface DemoGate {
   decision: string | null; note: string | null;
   decided_by: string | null; decided_at: string | null; created_at: string;
 }
+// demoMeetings registers this so createRun can derive a run's department from its source meeting the
+// way the real controller does — without demoPipeline importing demoMeetings (the dependency runs
+// demoMeetings → demoPipeline, see pipelineRunIdForMeeting).
+let meetingDepartmentLookup: (meetingId: string) => string | null = () => null;
+export function registerMeetingDepartmentLookup(fn: (meetingId: string) => string | null): void { meetingDepartmentLookup = fn; }
+function departmentForMeeting(meetingId: string): string | null { return meetingDepartmentLookup(meetingId); }
+
 interface DemoRun {
   id: string; title: string | null; status: string; source_meeting_id: string | null;
-  client_id: string | null; mom_ref: string | null; created_by: string | null;
+  client_id: string | null; project_id?: string | null; department_id?: string | null; mom_ref: string | null; created_by: string | null;
   created_at: string; updated_at: string;
 }
 interface DemoResult { status: number; json: unknown }
@@ -87,6 +94,8 @@ const RUNS: DemoRun[] = [
     status: "scope_pending",
     source_meeting_id: "mtg-northwind-kickoff", // matches demoMeetings.ts rec-demo-1.meeting_id
     client_id: "cl-1", // Northwind Traders
+    project_id: "p-web-1", // WD-30 populates this from the source meeting — the Web Dev "Client site redesign"
+    department_id: "dept-1",
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-07-18T03:10:00Z",
@@ -98,10 +107,27 @@ const RUNS: DemoRun[] = [
     status: "delivery_active",
     source_meeting_id: null, // exercises "no source meeting" as well as "no client" in the same run
     client_id: null, // KNOWN GAP: the dispatcher currently drops client context on some ingests
+    project_id: null, // no project either — so this run is NOT a Web Dev PRD Studio row (only /pipeline shows it)
+    department_id: null,
     mom_ref: null,
     created_by: "demo-hansel",
     created_at: "2026-07-23T01:00:00Z",
     updated_at: "2026-07-23T02:30:00Z",
+  },
+  // Repositories tab "Create repository": a Web Dev run (p-web-2, Lumen) with NO provisioned site, so
+  // the create form has an eligible run in DEMO_MODE. Not started from a briefing.
+  {
+    id: "run-demo-3",
+    title: "Lumen — portfolio discovery",
+    status: "extracting",
+    source_meeting_id: null,
+    client_id: "cl-3",
+    project_id: "p-web-2",
+    department_id: "dept-1",
+    mom_ref: null,
+    created_by: "demo-hansel",
+    created_at: "2026-08-20T08:00:00Z",
+    updated_at: "2026-08-20T08:00:00Z",
   },
 ];
 
@@ -286,6 +312,9 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
     if (projectId) rows = rows.filter((r) => (r as { project_id?: string | null }).project_id === projectId);
     // C4: the list SELECT now DOES return client_id/project_id (it used to omit them, which is why
     // the page had to cross-reference the recordings registry). Returned in full to match.
+    // `?include=gates` (platform-nest 0.46.0): each run with its gates, [] when none.
+    const include = (params.get("include") ?? "").split(",").map((x) => x.trim());
+    if (include.includes("gates")) return ok(rows.map((r) => ({ ...r, gates: GATES.filter((g) => g.run_id === r.id) })));
     return ok(rows);
   }
 
@@ -293,16 +322,25 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
   const createRunM = p.match(/^\/api\/[^/]+\/pipeline\/runs$/);
   if (createRunM && m === "POST") {
     const b = JSON.parse(body || "{}") as {
-      title?: string; clientId?: string; projectId?: string;
+      title?: string; clientId?: string; projectId?: string; departmentId?: string; sourceMeetingId?: string;
       stages?: { track: string; name: string; status?: string }[];
     };
     if (!b.title) return { status: 400, json: { error: "title required" } };
+    // Mirror the real controller: a run started FROM a briefing (PRD Studio's by-hand path) carries
+    // its meeting id and project, and a second create for the same meeting returns the existing run
+    // (`deduped: true`). A run started with neither is the hand-started, no-meeting case.
+    if (b.sourceMeetingId) {
+      const existing = RUNS.find((r) => r.source_meeting_id === b.sourceMeetingId);
+      if (existing) return { status: 201, json: { id: existing.id, deduped: true } };
+    }
     const id = nid("run-demo");
     RUNS.push({
       id, title: b.title, status: "extracting",
-      // Null on purpose: a hand-started run has no meeting, which is exactly what distinguishes it.
-      source_meeting_id: null,
+      source_meeting_id: b.sourceMeetingId ?? null,
       client_id: b.clientId ?? null,
+      project_id: b.projectId ?? null,
+      // Mirror the real derivation: caller → source meeting's department (demoMeetings exposes it).
+      department_id: b.departmentId ?? (b.sourceMeetingId ? departmentForMeeting(b.sourceMeetingId) : null),
       mom_ref: null, created_by: "demo-hansel", created_at: now(), updated_at: now(),
     } as DemoRun);
     for (const st of b.stages ?? []) {
@@ -321,6 +359,12 @@ export function pipelineDemo(method: string, p: string, params: URLSearchParams,
 /** The run started from this meeting id, if any. Exported for demoMeetings' B6 relink sweep, which
  *  needs the same meeting_id -> run mapping the real endpoint joins on. demoPipeline owns RUNS, so the
  *  lookup lives here and the dependency runs one way (demoMeetings -> demoPipeline). */
+/** A run's client/project, for the demo provisioning store to copy the way the real service does. */
+export function runLineageForDemo(runId: string): { clientId: string | null; projectId: string | null } | null {
+  const r = RUNS.find((x) => x.id === runId);
+  return r ? { clientId: r.client_id ?? null, projectId: r.project_id ?? null } : null;
+}
+
 export function pipelineRunIdForMeeting(meetingId: string): string | null {
   return RUNS.find((r) => r.source_meeting_id === meetingId)?.id ?? null;
 }

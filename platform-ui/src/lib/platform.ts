@@ -77,13 +77,11 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
 // (`POST /api/:t/meetings/recordings/:id/audio`). Deliberately separate from platformFetch:
 // that helper always forces `content-type: application/json` whenever a body is present,
 // which would corrupt a multipart body's boundary. This omits any content-type header so
-// fetch/undici sets `multipart/form-data; boundary=…` itself from the FormData instance.
-// Same auth-header resolution as platformFetch (OIDC session first, dev bearer+x-user-id
-// fallback); callers are expected to handle DEMO_MODE themselves (a real binary upload has
-// no meaningful demo fixture path — see meetingsActions.ts).
-export async function platformUpload<T>(path: string, userId: string, form: FormData): Promise<T> {
-  const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
-  let authHeaders: Record<string, string>;
+/** The auth headers every egress to the platform carries: the OIDC session's access token when
+ *  there is one, else the dev path (service bearer + x-user-id). Shared by `platformUpload` and the
+ *  streaming upload route (`app/api/meetings/[id]/audio`), which cannot use FormData because it
+ *  forwards the browser's multipart body as a stream. */
+export async function platformAuthHeaders(userId: string): Promise<Record<string, string>> {
   let oidc: { accessToken: string } | null = null;
   try {
     const { getSession } = await import("./session-server");
@@ -92,11 +90,17 @@ export async function platformUpload<T>(path: string, userId: string, form: Form
   } catch {
     oidc = null;
   }
-  if (oidc) {
-    authHeaders = { authorization: `Bearer ${oidc.accessToken}` };
-  } else {
-    authHeaders = { authorization: `Bearer ${process.env.PLATFORM_SERVICE_TOKEN ?? ""}`, "x-user-id": userId };
-  }
+  if (oidc) return { authorization: `Bearer ${oidc.accessToken}` };
+  return { authorization: `Bearer ${process.env.PLATFORM_SERVICE_TOKEN ?? ""}`, "x-user-id": userId };
+}
+
+// fetch/undici sets `multipart/form-data; boundary=…` itself from the FormData instance.
+// Same auth-header resolution as platformFetch (OIDC session first, dev bearer+x-user-id
+// fallback); callers are expected to handle DEMO_MODE themselves (a real binary upload has
+// no meaningful demo fixture path — see meetingsActions.ts).
+export async function platformUpload<T>(path: string, userId: string, form: FormData): Promise<T> {
+  const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
+  const authHeaders = await platformAuthHeaders(userId);
   const res = await fetch(`${base}${path}`, { method: "POST", headers: authHeaders, body: form, cache: "no-store" });
   if (!res.ok) {
     let msg = `platform ${res.status}`;

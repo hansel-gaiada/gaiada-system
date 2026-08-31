@@ -111,7 +111,7 @@ export class WebdevController {
     @Req() req: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
     @Param("tenantId") tenantId: string,
-    @Body() body: { runId?: string; framework?: string; slug?: string; stack?: string },
+    @Body() body: { runId?: string; framework?: string; slug?: string; stack?: string; clientId?: string; projectId?: string },
   ): Promise<SiteDto> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "provision");
     const runId = body?.runId?.trim() || null;
@@ -126,6 +126,8 @@ export class WebdevController {
       framework: body?.framework,
       slug: body?.slug,
       stack: body?.stack,
+      clientId: body?.clientId?.trim() || null,
+      projectId: body?.projectId?.trim() || null,
       requestedBy: actorId,
       requestedByName: await displayNameFor(actorId),
       // A human acting through this endpoint IS the approval (design §04's secondary trigger, gated

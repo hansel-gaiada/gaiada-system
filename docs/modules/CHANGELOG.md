@@ -11,31 +11,243 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.44.0` - client portal logins, and the seed roster retired (2026-08-31) - PROTOTYPED
+> **Renumbered at merge (2026-08-31):** the five `reva/ui` entries below landed there as
+> platform-nest `0.40.0`–`0.43.0`, platform-ui `0.55.0`, mcp-hub `0.11.2`; `main` had already used
+> those numbers for other work, so they are `0.44.0`–`0.47.0`, `0.62.0` and `0.12.1` here. The
+> `reva/ui` commit messages keep the old numbers.
 
-The four demo clients that populated the portal were retired now that 19 real ones exist —
-**13,112 rows** soft-deleted, far more than the ~80 the `client_id` counts suggested, because the
-demo projects carried 6,517 `pm_tasks` and 6,491 `time_entries`. Soft-delete rather than DELETE:
-all 40 FKs into `clients`/`projects` are `NO ACTION`, and the user-facing reads all filter
-`deleted_at IS NULL` (the only unguarded ones are a seed script and an admin backfill), so there are
-no ghosts and it reverses with one UPDATE.
+### platform-nest `0.47.0` - a project belongs to a client (2026-08-27) - DEV-VERIFIED
 
-`provision-client-portal-logins.ts` then gives every real client a placeholder contact. It derives
-its targets **from the database**, not from a hardcoded list like the seed it replaces — that list
-would go stale the first time a client was added.
+**Changed**
+- `POST /api/:t/projects` requires `clientId`. The one client-less shape is the company's own work,
+  declared with `isInternal: true` (sets the existing `projects.is_internal`, which the CC-1
+  `?clientId=internal` facet and the money page already read). Neither → 400 `{error, field:"clientId"}`;
+  both → 400 on `isInternal`; a client outside the caller's tenant or a malformed id → 400 on
+  `clientId` (checked on the tenant-scoped connection, compared as text — never a 500 on a uuid cast).
+- `PATCH /api/:t/projects/:id` with `clientId: null` is a 400 — it used to fall into `COALESCE` and
+  look like success. Setting a client on an internal project converts it (`is_internal → false`).
+  A PATCH that does not mention the client is unchanged, so legacy client-less rows can still be
+  archived.
+- Why: `client_id IS NULL` meant two things on the live estate (9 clientless rows, 7 flagged internal —
+  `client-filter.ts`). Owner decision 2026-08-27: a project is a client's; spec
+  `2026-08-26-webdev-lineage-fields-design.md` §4. No migration — the 8 local / 9 live legacy rows
+  are a data gap (the UI edit form requires a client, so they get one when next touched), and a
+  `NOT NULL` would block archiving them.
+- Every actor, same rule: UI `ProjectForm` (Client required since 0.62.0), hub `projects.create`
+  (forwards `isInternal`; the platform stays the authority), n8n `on-client-created-seed` (already
+  passes `clientId`). 15 test scaffolding projects across 9 suites now say `isInternal: true`.
+- Tests: new `core/projects-client.test.ts` (10: refuse orphan, store client, internal flagged, both
+  refused, foreign client, malformed id, PATCH detach refused, PATCH converts internal, PATCH foreign
+  refused, PATCH without client untouched).
 
-**The IAM guard caught this twice and was right both times.** First, the copied raw
-`INSERT INTO user_roles` was rejected as the IAM-SEC-05 class — a new writer minting a grant outside
-the one guarded path. Allowlisting was permitted (a CLI is not a request path) but the choke point
-was there, and `insertGrantRow` runs `assertGrantAllowed` where the raw INSERT skips it, so this
-grants strictly **less** trust than the seed path it replaces. Second, `origin: "trusted_internal"`
-demanded explicit registration with a reason; it genuinely qualifies — the role resolves only to the
-global `client` role by name and the scope is the agency tenant the script looks up itself, so
-neither can be steered.
+### platform-nest `0.46.0` - the runs list can carry its gates (2026-08-27) - DEV-VERIFIED
 
-Addresses are `portal@<slug>.test` (RFC 2606 — can never route, cannot be mistaken for a real
-person), with a **distinct** random password each: one shared password across 19 portals means one
-leak exposes every client.
+**Added**
+- `GET /api/:t/pipeline/runs?include=gates` — each run comes back with `gates: PipelineGate[]`
+  (the detail endpoint's row shape plus `run_id`), fetched in ONE grouped query
+  (`run_id = ANY($1::uuid[])`) inside the same tenant-scoped call. A run with no gates answers `[]`.
+  Without the parameter the response is byte-for-byte what it was.
+- Why: PRD Studio's approval chips and a project's Meetings tab read `GET /runs/:id` per run behind a
+  12-run cap because the list carried no gates — the cap was a frontend workaround for a missing read.
+  Spec `2026-08-26-webdev-lineage-fields-design.md` (3/3).
+- Tests: `pipeline.test.ts` (+1: no `gates` key without the parameter; grouped per run with it,
+  `[]` for the gateless run); suite 34/34, `lint:withtenants` OK.
+
+### platform-nest `0.45.0` - a provisioned site knows its client and project (2026-08-27) - DEV-VERIFIED
+
+**Added**
+- `webdev_provisioned_sites.client_id` / `project_id` (nullable FKs). Migration
+  `202608270659_webdev_sites_client_project.sql` adds them, indexes them, and backfills rows that have
+  a run from the run — per tenant AND with `app.scopes = webdev` set, because this table sits behind the
+  third RLS wall (`app_module_allowed`) and a backfill without both GUCs matches zero rows and reports
+  success.
+- `POST /api/:t/modules/webdev/provision` accepts `clientId` / `projectId` for a STANDALONE site (no
+  `runId`). With a `runId` the run's own client/project are copied and the caller's are ignored — a
+  caller cannot file a run's repo under another client. The DTO gains `clientId` / `projectId` (the
+  idempotency suite's exact-key allowlist updated deliberately).
+- Why: a standalone repo could only ever read "not linked to a project" in the Repositories tab.
+  Spec `2026-08-26-webdev-lineage-fields-design.md` (2/3).
+- Tests: `webdev-controller-http.test.ts` (+1 lineage: run copy, standalone supplied, bare null,
+  list returns both); webdev suites 103/103.
+
+### platform-nest `0.44.0` - briefings and PRD runs know their department (2026-08-27) - DEV-VERIFIED
+
+**Added**
+- `meeting_recordings.department_id` and `pipeline_runs.department_id` (org-node id, free text —
+  the shape `projects.department_id` already uses; nullable). Migration
+  `202608270652_department_lineage_on_recordings_and_runs.sql` adds both, indexes them, and
+  backfills existing rows through their project per tenant (the `set_config` pattern from 0051/0074;
+  `lint:migration-rls` green). Rows with neither project nor department stay NULL — honestly unknown.
+- `POST /api/:t/meetings/recordings/start` accepts `departmentId`; the list and detail reads return
+  `department_id`.
+- `POST /api/:t/pipeline/runs` accepts `departmentId` and derives it like `client_id`/`project_id`:
+  the caller's value wins, else the source meeting's, else the project's. List and detail return it.
+- Why: the Web Dev console inferred department ownership through the project, which fails for a
+  briefing that has no project yet — and a briefing usually exists before its project. Spec:
+  `docs/superpowers/specs/2026-08-26-webdev-lineage-fields-design.md` (1/3).
+- Tests: `meetings.test.ts` (+1), `pipeline.test.ts` (+2) against the disposable test Postgres +
+  live Cerbos — 79/79.
+
+
+### platform-ui `0.62.0` - PRD Studio reads as one flow: create, record, convert, approve (2026-08-26) - PROTOTYPED
+
+**Changed**
+- ★ `/departments/[deptId]/prd` was three unrelated forms (record now / register for the helper /
+  upload) above a bare run table, with the "dispatch into the pipeline" button living on a different
+  page and no trace of the approvals. It is now ONE flow with four numbered beats, and each beat
+  shows only what that beat needs: **1 Create a briefing** (title, client — required, because the
+  client sign-off needs one — project, audio/video; nothing records yet) → **2 Add the recording**
+  (per-briefing card; the three capture methods appear only while there is no recording, one at a
+  time) → **3 Convert to PRD run** (the only button once the transcript exists; ingest failures are
+  said in plain words) → **4 Get it approved** (per run: a `GM review` chip from `prd_review` and a
+  `Client sign-off` chip from `prd_sign`, one sentence saying who holds it; a GM approves / requests
+  changes inline via the existing `decideGateAction`; the client beat is read-only and says it is
+  signed in the portal).
+- A flow strip at the top carries live counts per beat ("2 waiting for a recording · 1 with the GM").
+- Frontend only, against endpoints that already exist. New: `lib/prdFlow.ts` (pure status→copy
+  mapping, 15 tests), `components/prd/{PrdFlowHeader,BriefingComposer,BriefingCard,RunApprovalRow}`
+  + `prd-studio.css` (tokens only). `RecordControls` is untouched — the client/project workspaces
+  still use it. Demo store gains `rec-demo-4` (a briefing with no recording) so the capture step is
+  drivable; two Playwright tests cover the strip, the per-state cards and creating a briefing.
+- Driven in a browser under `DEMO_MODE=1` (all four beats, convert included) — not yet against a
+  live platform, hence PROTOTYPED. Two console errors seen on the page pre-date it and live in the
+  shell: a duplicate `pipeline:<gateId>` key from `lib/queue.ts` (work rail) and a hydration
+  attribute mismatch under `(app)/layout`'s `<link>`.
+
+- **Web Dev only.** The route is the generic `/departments/[deptId]/prd`, so the page now 404s for any
+  department whose toolkit has no `prd` tab, and everything it lists is scoped
+  (`lib/prdFlow.ts::scopeToDepartment`). **2026-08-27:** the stored `department_id` (platform-nest
+  `0.44.0`) decides first — PRD Studio and a project's Meetings tab send `departmentId` on
+  `/recordings/start`, and runs derive it — and the PROJECT inference is now only the fallback for
+  rows that pre-date the column: a briefing belongs iff its project is this department's; a run iff
+  its own `project_id` is (WD-30) or its source briefing's project is. Same rule in the Repositories
+  inventory (`buildRepoInventory`).
+  Consequence: every briefing needs a project (it is the only recording→department link) — and since
+  in Reva's flow the project does not exist yet when the call happens, **the project is created WITH
+  the briefing**: `lib/prdActions.ts::createBriefingAction` does `POST /projects` (name = briefing
+  title, this client, this department) then `POST /recordings/start` under it, in one action; "Link
+  an existing project" is the optional alternative. If the second write fails the message names the
+  project that was created, so nothing is silently orphaned (6 action tests). Recordings and runs are
+  tenant-wide on the backend — the SEO scope call in the demo store no longer appears as a Web Dev
+  briefing, and the e2e asserts that. Demo `POST /projects` now adds the project to the list (it
+  used to return an id that nothing could see).
+
+- **Fourth capture method — "Upload a transcript".** Whether a transcription service (whisper) is
+  hosted at all is still open, so a briefing can take its transcript directly: pasted, or from the
+  file a call tool exported (`.txt`/`.md` as-is; `.srt`/`.vtt` with cue numbers, timestamps, cue ids
+  and inline tags stripped — `components/prd/transcriptText.ts`, 6 tests). Saves through the existing
+  `POST /:id/transcript` via `setTranscriptAction`; the row goes straight to `transcribed` and the card
+  offers Convert. Also offered as "Upload a transcript instead" when transcription failed.
+  **Speakers survive:** Teams/Meet `<v Name>` voice tags and Zoom `Name: …` lines become
+  `Name: …` paragraphs, consecutive cues by one speaker merge, turns are blank-line separated — so
+  the meeting tool's own transcript (the best free, speaker-labelled source; whisper cannot label
+  speakers) reaches the PRD pipeline with who-said-what intact.
+
+- **"Start the run without the AI draft."** "Convert to PRD run" = the platform's `ingest`, which
+  hands the transcript to n8n's `mtg-dispatcher` (LLM summarize + 3 extractions) — and on a platform
+  with no n8n / no LLM key it answers `bridge_not_configured` and nothing happens. The card now says
+  that in plain words and offers the same run started by hand: `lib/prdActions.ts::startRunManuallyAction`
+  → `POST /pipeline/runs` (source meeting, client, project, three PENDING stages; dedupes on the
+  meeting id) → `PATCH /recordings/:id {status:"ingested"}` → best-effort `relink-orphans`. The run
+  then reads "No PRD review yet — the PRD is drafted (by the pipeline, or written by hand) in the run
+  workspace, then GM review is opened there", and the workspace's artifact editor + open-gate form
+  carry it from there. Offered ONLY after `ingest` answers `bridge_not_configured`; other dispatcher
+  errors stay errors. 5 action tests; demo `rec-demo-6` (meeting id `*-nobridge`) drives it in e2e.
+
+- **Repositories tab is real.** It was a placeholder ("No repositories connected → Go to
+  Connections") that read no data — and connecting GitHub there produces no repos anyway (that
+  connection is an identity string; the GitHub App is WD-21/22, an owner action). It is now the
+  department's **code inventory**: every repository the delivery pipeline provisioned
+  (`webdev_provisioned_sites`, read tenant-wide via `GET /modules/webdev/provisioned-sites` with no
+  `runId` — the endpoint already behaves that way — then attributed run → project → department,
+  PRD Studio's rule; `lib/repoInventory.ts`, 6 tests). A `HairlineTable` (the same primitive the Projects,
+  admin and finance surfaces use), one row per repo: name → GitHub (framework underneath), client ·
+  project, status in environment words (`Provisioning` / `Staging` / `Live` / `Failed` —
+  `REPO_STATUS_LABEL`; the run workspace keeps the finer "Provisioned (SSL pending)"), with the
+  failure reason under the badge behind a "why?" disclosure, URL, the PRD run it came from, last
+  check, and an Action column that exists only when a row has one (no column of dashes). Problems first; a failed row
+  carries the plain-language reason from `webdevProvisionedSites.ts` and offers "Check status now"
+  (existing `reconcileSiteAction`) or a link to the run to re-provision. Empty state says where repos
+  come from (a provisioned run), not "connect GitHub". A GitHub line states the viewer's connection
+  and that commit/PR activity needs the App. Module-off and refused reads are stated, not blanked.
+  `components/repositories/RepoInventory` (7 tests); e2e drives the demo store's failed + live pair.
+  **Create repository** (people with `webdev.provision`), two modes on the same endpoint
+  (`POST /modules/webdev/provision`, which already accepted an explicit slug with no run —
+  off-pipeline, `pipeline_run_id: null`): **Standalone** (default) — a name and a framework, no PRD
+  run, no client/project, listed as "Not linked to a project · standalone"; **For a PRD run** — the
+  run brings client and project (this department's runs with no active site; a failed-only run is
+  offered again as a retry — `runsEligibleForRepo`), name pre-filled from the run title
+  (`suggestSlug`). Both validate the name live against provision's slug grammar and call
+  `provisionSiteAction` (now accepts no `runId` when a slug is given); the row lands as Provisioning.
+  Direct GitHub creation outside provisioning stays fail-closed on the backend (WS11); this is the
+  sanctioned manual path. `components/repositories/CreateRepoForm` (7 tests); e2e creates a standalone
+  repo and provisions demo `run-demo-3`. **2026-08-27:** a standalone repo can carry its lineage —
+  platform-nest `0.45.0` stores `clientId`/`projectId` on the site — so Standalone mode gains optional
+  Client → Project pickers (that client's projects in this department; "client and project are
+  optional") and `provisionSiteAction` forwards them; the inventory reads the site's own client ·
+  project first and falls back to the run's, and a standalone site whose project belongs to another
+  department is no longer listed here (`buildRepoInventory`, 2 more tests; `CreateRepoForm` +3; e2e
+  creates a Northwind-linked standalone repo and sees "Northwind Traders · Client site redesign").
+- **A project's Meetings tab is now the PRD Studio flow, filed under that project.** It used to be
+  the old capture trio (record / register for the helper / upload) over a bare recordings table.
+  `components/prd/ProjectBriefings` composes the same pieces PRD Studio uses — `BriefingComposer`
+  with the client and project fixed ("Filed under …"), `BriefingCard`s in the same action order
+  (`lib/prdFlow.ts::orderBriefings`, now shared with PRD Studio), and `RunApprovalRow`s for the
+  project's runs with their GM / client beats — so the two surfaces cannot drift apart. Runs + gates
+  are read only when that tab is shown. `RecordControls` remains for the client workspace.
+- **A project belongs to a client; a client has many projects — shown that way.** The department's
+  Projects tab groups projects under their client (clients A→Z, "Internal — no client" last;
+  `page-helpers.ts::groupProjectsByClient`, tested), each client name linking to its hub. The project
+  form gains a required **Client** picker (`?clientId=` pre-selects it; the old "no clients-list
+  endpoint yet" comment was stale — `listClients` exists), and the project header shows **CLIENT**
+  beside range/owner/tags. Frontend only: `POST/PATCH /projects` already carried `clientId`.
+- **New project from the Projects tab.** A project no longer has to come out of a PRD run: the
+  department's Projects tab has a "New project" button that opens the existing `/projects/new` form
+  with the owning department pre-selected (`?departmentId=`).
+  **`?preview=sample`** renders five sample rows (every status) behind a loud "Sample data — nothing
+  here is from your platform" banner, offered from the empty and module-off states so the layout can
+  be reviewed on a platform where nothing has been provisioned; real reads are skipped in preview so
+  sample and real rows can never mix, and sample rows offer no actions.
+
+**Fixed**
+- **61 unstyled buttons.** `className="btn"` / `"btn btn-primary"` is used in 27 components (pipeline
+  gates, PM forms, meetings, IT/HR actions…) and no stylesheet ever defined those classes — git has
+  no `.btn` in its history — so they rendered as the browser's default grey button. Defined once in
+  `components/ui.css` as the sentence-case sibling of `.lux-btn` (same hairline, radius token, accent,
+  easing). New work should still use `.lux-btn--*`.
+- ★ **Uploads over 1 MB failed** with `Body exceeded 1 MB limit` before anything reached the platform:
+  every upload path went through a Server Action, and Next caps action bodies at 1 MB by default.
+  Two-layer fix. `next.config.ts` raises `serverActions.bodySizeLimit` to 520 MB (the platform's
+  `MEETING_VIDEO_MAX_BYTES` cap plus multipart overhead) for the paths that stay on actions — the
+  in-browser take (`LiveRecorder` → `uploadAudioAction`) and `registerAndUploadAudioAction`. PRD
+  Studio's "Upload a file" leaves actions entirely: the browser POSTs the file itself over
+  XMLHttpRequest (the one API with upload progress) to the new BFF route
+  `POST /api/meetings/[id]/audio`, which streams the multipart body to the platform unchanged
+  (`duplex: "half"`, no buffering, platform's 413/415 passed straight back) — and the card shows
+  `43% · 86 MB of 200 MB` while it goes. `components/prd/uploadWithProgress.ts` (6 tests, XHR
+  injected); DEMO_MODE branch in the route updates the demo store like the action does.
+  **Driven against the live host platform with a 170 MB video — three more walls fell on the way:**
+  (1) forwarding the browser's `content-length` on a streamed hop → `UND_ERR_REQ_CONTENT_LENGTH_MISMATCH`;
+  (2) piping `req.body` as a stream reached the platform truncated → the route now reads the body in
+  full and sends one buffer (memory = file size, bounded by the 500 MB cap, same as `platformUpload`);
+  (3) the real cut: **`experimental.middlewareClientMaxBodySize` defaults to 10 MB** — because the app
+  has a `middleware.ts`, Next buffers every request body for middleware and truncates it there; the
+  route received exactly 10,485,248 of 178,258,106 bytes and the platform's busboy error was reported
+  as "exceeds the 524288000-byte cap". Raised to 520 MB alongside `bodySizeLimit`. The route now also
+  refuses a body shorter than its `content-length` with a message naming that limit, instead of
+  handing the platform a truncated multipart. Verified: 5 MB and 170 MB → 202 via the route.
+
+**Known gap (frontend) — closed 2026-08-27**
+- Gate chips needed `GET /pipeline/runs/:id` per active run (the LIST carried no gates) — capped at 12;
+  runs past the cap said "open the run to see its approvals". platform-nest `0.46.0` added
+  `GET /pipeline/runs?include=gates`; PRD Studio and a project's Meetings tab now read
+  `lib/pipeline.ts::listPipelineRunsWithGates` — one request, no cap, no per-run detail reads
+  (`GATE_DETAIL_CAP` deleted). `RunApprovalRow` keeps its `gates: null` rendering for a refused read.
+  Demo fixture honours the parameter (`demoPipeline.test.ts` +2).
+- **2026-08-27, lineage spec 4/4:** a project belongs to a client on the backend too (platform-nest
+  `0.47.0`). The UI already required it (`ProjectForm` Client picker, PRD Studio's composer); the demo
+  `POST /projects` fixture now mirrors the 400 `{error, field:"clientId"}` and `isInternal`, so demo
+  mode cannot create the orphan the platform refuses.
 
 ### platform-ui `0.61.1` - Portfolio reachable from the nav (2026-08-31) - PROTOTYPED
 

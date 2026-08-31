@@ -693,9 +693,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     // The DTO is an explicit column list — assert its exact key set so a future column cannot ride
     // along silently.
     expect(Object.keys(r.site).sort()).toEqual([
-      "approvalId", "createdAt", "failureReason", "framework", "id", "lastReconciledAt",
-      "pipelineRunId", "provider", "providerRef", "repoUrl", "requestedBy", "slug", "stagingUrl",
-      "status", "tenantId", "updatedAt",
+      "approvalId", "clientId", "createdAt", "failureReason", "framework", "id", "lastReconciledAt", "pipelineRunId", "projectId", "provider", "providerRef", "repoUrl", "requestedBy", "slug", "stagingUrl", "status", "tenantId", "updatedAt",
     ]);
   });
 });

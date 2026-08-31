@@ -40,7 +40,7 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
   it("wf:new-client-seed (manager role) can create a project via its OBO envelope", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asWorkflow("wf:new-client-seed"), payload: { name: "Onboarding — Acme" },
+      headers: asWorkflow("wf:new-client-seed"), payload: { isInternal: true, name: "Onboarding — Acme" },
     });
     expect(r.statusCode).toBe(201);
   });
@@ -48,7 +48,7 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
   it("an UNSEEDED workflow id resolves to anonymous and is denied (proves the link is what grants access)", async () => {
     const r = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asWorkflow("wf:not-seeded"), payload: { name: "Nope" },
+      headers: asWorkflow("wf:not-seeded"), payload: { isInternal: true, name: "Nope" },
     });
     expect(r.statusCode).toBe(403);
   });
@@ -112,7 +112,9 @@ describe.skipIf(!TEST_URL)("automation service accounts (WS4 §3)", () => {
   it("wf:webdesk-zoneb-intake resolves to a real, non-anonymous principal (was ANONYMOUS before this seed row existed)", async () => {
     const anonymous = await app.inject({
       method: "POST", url: `/api/${co}/projects`,
-      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403" },
+      // isInternal so the lineage-4/4 `clientId` check — a 400 thrown before `authorize` — cannot
+      // pre-empt the authz denial this test is actually asserting.
+      headers: asWorkflow("wf:webdesk-zoneb-intake-typo-unseeded"), payload: { name: "should 403", isInternal: true },
     });
     expect(anonymous.statusCode).toBe(403); // the OLD behaviour for an unseeded/unknown workflow id
 

@@ -75,7 +75,7 @@ describe.skipIf(!TEST_URL)("GET /api/approvals — unified cross-origin + cross-
 
   it("setup: seed an agency approval (pending) and a pipeline gate (pending) in coA", async () => {
     const proj = await app.inject({
-      method: "POST", url: `/api/${coA}/projects`, headers: asUser(manager), payload: { name: "WSUX1 Project" },
+      method: "POST", url: `/api/${coA}/projects`, headers: asUser(manager), payload: { isInternal: true, name: "WSUX1 Project" },
     });
     expect(proj.statusCode).toBe(201);
     const projectId = proj.json().id;

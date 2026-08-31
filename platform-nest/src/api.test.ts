@@ -74,7 +74,7 @@ describe.skipIf(!TEST_URL)("platform API", () => {
       method: "POST",
       url: `/api/${tenantA}/projects`,
       headers: asUser(manager),
-      payload: { name: "Website relaunch" },
+      payload: { isInternal: true, name: "Website relaunch" },
     });
     expect(r.statusCode).toBe(201);
     const acts = await withTenants([tenantA], (c) =>

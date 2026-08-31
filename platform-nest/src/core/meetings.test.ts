@@ -135,6 +135,23 @@ describe.skipIf(!TEST_URL)("meeting-recordings registry + ingest proxy (WS11 cap
     expect(meetingId).toMatch(/^mtg-/);
   });
 
+  it("department lineage: /start stores departmentId and list + detail return it (NULL when omitted)", async () => {
+    const withDept = await app.inject({
+      method: "POST",
+      url: `/api/${co}/meetings/recordings/start`,
+      headers: asUser(member),
+      payload: { title: "Web Dev intake", kind: "audio", departmentId: "dept-web" },
+    });
+    expect(withDept.statusCode).toBe(201);
+    const list = await app.inject({ method: "GET", url: `/api/${co}/meetings/recordings`, headers: asUser(member) });
+    expect(list.statusCode).toBe(200);
+    const rows = list.json() as Array<{ id: string; department_id: string | null }>;
+    expect(rows.find((r) => r.id === withDept.json().id)?.department_id).toBe("dept-web");
+    expect(rows.find((r) => r.id === id)?.department_id).toBeNull(); // the first recording above was started without one
+    const detail = await app.inject({ method: "GET", url: `/api/${co}/meetings/recordings/${withDept.json().id}`, headers: asUser(member) });
+    expect(detail.json().department_id).toBe("dept-web");
+  });
+
   it("emitted meeting.recording.created to the outbox", async () => {
     const rows = await adminPool().query(
       `SELECT 1 FROM outbox_events WHERE entity_id = $1 AND event_type = 'meeting.recording.created'`,

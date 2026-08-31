@@ -54,3 +54,29 @@ export function tallyProjectTasks(
   }
   return byProject;
 }
+
+/** A client has many projects; the Projects tab reads that way. Groups a department's projects by
+ *  client (clients A→Z by name, projects in the order given), with project-less ones last under
+ *  "Internal — no client". A client id the names map does not know still gets its own group, named
+ *  by id, rather than being folded into Internal. */
+export interface ClientProjectGroup<P> { clientId: string | null; clientName: string; projects: P[] }
+
+export function groupProjectsByClient<P extends { client_id: string | null }>(
+  projects: P[],
+  clientNames: Map<string, string>,
+): ClientProjectGroup<P>[] {
+  const byClient = new Map<string | null, P[]>();
+  for (const p of projects) {
+    const key = p.client_id ?? null;
+    (byClient.get(key) ?? byClient.set(key, []).get(key)!).push(p);
+  }
+  const groups: ClientProjectGroup<P>[] = [];
+  for (const [clientId, ps] of byClient) {
+    if (clientId === null) continue;
+    groups.push({ clientId, clientName: clientNames.get(clientId) ?? clientId, projects: ps });
+  }
+  groups.sort((a, b) => a.clientName.localeCompare(b.clientName, "en"));
+  const internal = byClient.get(null);
+  if (internal && internal.length) groups.push({ clientId: null, clientName: "Internal — no client", projects: internal });
+  return groups;
+}

@@ -65,12 +65,12 @@ describe.skipIf(!TEST_URL)("custom-field registry (D17)", () => {
   it("the defined field is enforced on entity writes", async () => {
     const ok = await app.inject({
       method: "POST", url: `/api/${co}/projects`, headers: asUser(manager),
-      payload: { name: "Bali Launch", customFields: { region: "bali" } },
+      payload: { isInternal: true, name: "Bali Launch", customFields: { region: "bali" } },
     });
     expect(ok.statusCode).toBe(201);
     const bad = await app.inject({
       method: "POST", url: `/api/${co}/projects`, headers: asUser(manager),
-      payload: { name: "Paris Launch", customFields: { region: "paris" } },
+      payload: { isInternal: true, name: "Paris Launch", customFields: { region: "paris" } },
     });
     expect(bad.statusCode).toBe(400);
   });
