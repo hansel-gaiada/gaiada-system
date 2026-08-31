@@ -15,6 +15,11 @@ Opened 2026-08-22. Scope: `platform-ui/` only.
 > Garamond leaves the product entirely, not just card titles. Decision #1 (dark-first) survives.
 > Rollout plan: https://claude.ai/code/artifact/51d0879e-04ed-4592-bfa7-c1766f936e10
 >
+> **Tracked register: `GOLD-GLASS-PORT.md` in this folder.** Every release, what it
+> touched, the symptom to look for if it is wrong, the guards that hold it, measured
+> adoption per route, and the open items. Read it before changing anything in the
+> shell or the token layer.
+>
 > Phases 1 (vendor the bundle) and 2 (print path) of that plan are **IMPLEMENTED, not yet
 > DEV-VERIFIED** — the CSS half is covered by three new assertions in `styles/tokens.test.ts`,
 > but no PDF has been rendered since the change and the suite has not run on the server. The
