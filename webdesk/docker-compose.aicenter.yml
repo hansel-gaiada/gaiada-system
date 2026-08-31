@@ -1,0 +1,195 @@
+# WebDesk Zone B — gda-aicenter overlay (2026-08-31 re-zoning, supersedes the sumopod target for
+# WebDesk specifically).
+#
+# Used WITH the base file, never alone:
+#   docker compose -f docker-compose.yml -f docker-compose.aicenter.yml <cmd>
+#
+# WHY THIS FILE EXISTS: the owner's 2026-08-31 estate re-zoning replaced the Zone A/B tier model.
+# The new rule is purpose-based, not spare-capacity-based: "system lives in aicenter" — the ERP
+# control plane AND everything operational to it (WebDesk included) now belong on `gda-aicenter`.
+# `docker-compose.sumopod.yml` remains in the repo as the record of the superseded 2026-08-29
+# ruling (WSK-D27); do not delete it, and do not run both overlays against the same box.
+#
+# Design: ../docs/blueprints/webdesk-design-v2.md §03 (co-tenancy cost, restated for THIS box —
+# it is materially worse than the sumopod case: gda-aicenter runs the ERP's own host Postgres,
+# Keycloak and Cerbos on the SAME kernel, not merely "neighbours"). Runbook:
+# ../docs/plans/2026-08-31-workload-consolidation-to-aicenter.md.
+#
+# =============================================================================================
+# WHAT THIS OVERLAY ENFORCES, restated per the sumopod file's own precedent
+# =============================================================================================
+#   * Its OWN compose project (`name: webdesk` — unchanged), so the estate's `--remove-orphans`
+#     trap (scoped to project `gaiada`) cannot reach it.
+#   * Its OWN docker network (`webdesk_default`, created implicitly since this project declares
+#     none of its own). NEVER add `networks: [gaiada_default]` to any service below — that
+#     single line would be the whole isolation story failing silently. There is no route from
+#     this project's network to the ERP's `gaiada_default` (172.18.0.0/16) by construction, as
+#     long as that line is never added.
+#   * NO host ports at all except `proxy`, bound to 127.0.0.1. A NEW public nginx vhost
+#     (`../infra/nginx/webdesk.aicenter.conf`) is the actual public listener — nginx already
+#     owns 0.0.0.0:80/:443 on this box, so Caddy structurally cannot be. See that file.
+#   * Own Postgres, own Redis, own MinIO — no reuse of the host Postgres instance the ERP uses.
+#     Collapsing WebDesk into the ERP's host Postgres would destroy the credential separation
+#     that is the one containment property the design has left after co-tenancy (v2.0 §03: "Zone
+#     B holds no Zone A credential"). Never do this regardless of how tempting the ops
+#     simplicity looks.
+#   * `cpus` + `mem_limit` + `pids_limit` on EVERY service — the estate's own "empty env var
+#     becomes zero" trap (`${VAR:-}` + a busy loop at 46% CPU) means these must be literal
+#     numbers below, never left to an interpolated default that could resolve empty.
+#   * `no-new-privileges` + full cap-drop + read-only rootfs where the process can tolerate it
+#     (Payload/api/payload-gateway need a writable /tmp for Node — given as an explicit tmpfs,
+#     never a writable rootfs).
+#
+# ALWAYS AUDIT THE RESOLVED CONFIG, NEVER THE OVERLAY (same trap as the sumopod file: `!reset`
+# on an empty `ports:` block still exits 0 if written wrong):
+#   docker compose -f docker-compose.yml -f docker-compose.aicenter.yml config | grep -A3 'ports:'
+# The only published port must be proxy's, on 127.0.0.1.
+#
+# =============================================================================================
+# CAPACITY — sized against gda-aicenter AS MEASURED 2026-08-31, not against sumopod's numbers
+# =============================================================================================
+# 4 vCPU / 15.6 GiB total, ~10 GiB available, load ~2.1/4, 27 containers already running. This is
+# a SHARED, TIGHTER budget than the sumopod file's headroom (12 GiB / 4 vCPU dedicated to that
+# project alone) — see the capacity verdict in the runbook. WebDesk's own ceilings here sum to
+# ~4.35 GiB / ~4.75 vCPU; that is a WORST-CASE, not a reservation, but see the runbook for why the
+# worst-case sum across all three incoming workloads is the number that actually matters on a
+# 4-vCPU box.
+#
+# =============================================================================================
+# WHAT IS DELIBERATELY ABSENT (same reasoning as the sumopod file)
+# =============================================================================================
+# * `worker` — no real entrypoint exists yet (api/package.json has one start script). Shipping
+#   the base file's stub here would be a container that prints a sentence and sleeps.
+# * `clamav`, `imgproxy`, `otel-collector`, `status-page`, `wd-backup-sentinel` — additive, none
+#   on the /v1, /forms or /media request path. Land them in a follow-up ticket once the base
+#   three services are DEV-VERIFIED on this box.
+
+services:
+
+  # --- the one published listener, loopback only ------------------------------------------------
+  proxy:
+    profiles: !reset []
+    ports: !override
+      - "127.0.0.1:${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
+    depends_on: !override
+      - api
+      - payload-gateway
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.50
+    mem_limit: 256m
+    pids_limit: 128
+
+  # --- Payload: admin + authoring ONLY. Not the read path (WSK-D24). ----------------------------
+  # Reachable ONLY from inside the compose network — i.e. an SSH tunnel to gda-aicenter, same as
+  # the design's D-5 rule everywhere else. No vhost, no published port, ever.
+  payload:
+    profiles: !reset []
+    image: !reset null
+    build:
+      context: ./payload
+      dockerfile: Dockerfile
+    command: !override ["node", "server.js"]
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+    ports: !reset []
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cpus: 1.00
+    mem_limit: 1024m
+    pids_limit: 256
+
+  # --- the public read path: /v1 + /healthz, denylist before allowlist --------------------------
+  payload-gateway:
+    profiles: !reset []
+    image: !reset null
+    build:
+      context: ./payload
+      dockerfile: Dockerfile
+    command: !override ["node", "src/public-gateway.mjs"]
+    ports: !reset []
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cpus: 0.50
+    mem_limit: 512m
+    pids_limit: 128
+
+  # --- forms . mail . media . control plane -----------------------------------------------------
+  api:
+    profiles: !reset []
+    image: !reset null
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: !override ["node", "dist/main.js"]
+    ports: !reset []
+    # Same passthrough-trap fix as the sumopod overlay: these are `requireInProd` in
+    # api/src/storage/storage.config.ts and are NOT in the base file's `api` block.
+    environment:
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
+      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
+      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
+      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
+      WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
+      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+    # Control-channel trust material (WSK-22) — own env file, NOT `.env` (multi-line PEM; see the
+    # sumopod overlay's comment on the same line, unchanged reasoning). On THIS box the file is
+    # `/etc/webdesk/.env.control`, owned by the dedicated `webdesk-svc` unix user, mode 0600 — see
+    # the runbook's filesystem/secrets section. Never root:root, never world-readable, never in
+    # the release image.
+    env_file:
+      - .env.control
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cpus: 1.00
+    mem_limit: 768m
+    pids_limit: 256
+
+  # --- datastores: private network only, own containers (never the ERP's host Postgres) ---------
+  postgres:
+    profiles: !reset []
+    ports: !reset []
+    security_opt:
+      - no-new-privileges:true
+    cpus: 1.00
+    mem_limit: 1024m
+    pids_limit: 256
+
+  redis:
+    profiles: !reset []
+    ports: !reset []
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.25
+    mem_limit: 256m
+    pids_limit: 128
+
+  minio:
+    profiles: !reset []
+    ports: !reset []
+    security_opt:
+      - no-new-privileges:true
+    cpus: 0.50
+    mem_limit: 512m
+    pids_limit: 128
+
+  # No `cloudflared` service here — this box already has a public listener (nginx) that the
+  # sumopod box lacked for this purpose. Exposure is `../infra/nginx/webdesk.aicenter.conf`
+  # (a vhost) plus the loopback `proxy` above, not a tunnel. Do not port the sumopod file's
+  # tunnel service here; it would be a second, redundant public entry point to reason about.

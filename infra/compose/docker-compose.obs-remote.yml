@@ -61,9 +61,26 @@ services:
     volumes:
       - ../observability/prometheus/prometheus.remote.yml:/etc/prometheus/prometheus.yml:ro
       - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - ../observability/prometheus/targets:/etc/prometheus/targets:ro
       - prometheus-data:/prometheus
     ports:
       - "${OBS_BIND_ADDR:-127.0.0.1}:19090:9090"
+    depends_on:
+      - blackbox-exporter
+
+  # 2026-08-31 rollout (docs/plans/2026-08-31-helios-delphi-plane-a-rollout.md). Probes helios/
+  # delphi (Plane A, observe-only — MSO-11) and client properties (Plane B — MON-01) from THIS
+  # host, never from gda-aicenter (Zone A). Publishes nothing: only this box's own Prometheus
+  # (job blackbox-estate / client-properties in prometheus.remote.yml) reaches it, over the
+  # project's internal compose network.
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    restart: unless-stopped
+    volumes:
+      - ../observability/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    # No `ports:` block — deliberately. This estate's rule is that a bind address is a safety
+    # control, not a preference (header note above); the exporter needs no host-side access at
+    # all, so the safest bind is none.
 
   loki:
     image: grafana/loki:3.3.2
@@ -125,6 +142,10 @@ services:
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://ntfy/gaiada-alerts}
       DEADMANSSWITCH_URL: ${DEADMANSSWITCH_URL:-}
+      # 2026-08-31 rollout: the account-managers receiver's transports, kept separate from the
+      # engineering ALERT_* vars above on purpose — different audience, different credential.
+      AM_ALERT_WEBHOOK_URL: ${AM_ALERT_WEBHOOK_URL:-}
+      AM_ALERT_EMAIL_TO: ${AM_ALERT_EMAIL_TO:-}
     entrypoint:
       - /bin/sh
       - -c

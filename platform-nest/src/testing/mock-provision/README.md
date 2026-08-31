@@ -142,7 +142,7 @@ expect(conflict.doc.isOurs).toBe(true);  // It's ours → adopt only
 mock.seedProject({
   id: "proj-foreign-123",
   name: "foreign-site",
-  repoUrl: "https://github.com/Gaia-Digital-Agency/foreign-site",
+  repoUrl: "https://github.com/gaiadabali/foreign-site",
   stagingUrl: "https://foreign-site.gaiada.online",
   status: "live",
   isOurs: false,

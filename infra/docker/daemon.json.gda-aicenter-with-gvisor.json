@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "REFERENCE FILE — not applied. This is the exact merge the runbook",
+    "(docs/plans/2026-08-31-workload-consolidation-to-aicenter.md, Phase 3) asks a human to",
+    "apply to /etc/docker/daemon.json on gda-aicenter, so the review happens on a diff in this",
+    "repo rather than on a live edit. Confirm the box's CURRENT /etc/docker/daemon.json first —",
+    "`cat /etc/docker/daemon.json` was empty/absent as of 2026-08-31 (default runtime config,",
+    "runtimes reported by `docker info` were only runc and io.containerd.runc.v2). If that file",
+    "is non-empty by the time this runs, MERGE this runtimes block into it — do not overwrite",
+    "whatever else is there.",
+    "",
+    "This adds gVisor (runsc) as a NON-DEFAULT runtime, exactly the shape already proven on the",
+    "SumoPod box for this same lab-runner service (lab-runner/README.md, 'Deployed (SumoPod,",
+    "2026-08-25)'): default-runtime stays runc for every existing container (Cerbos, Keycloak,",
+    "platform-nest, etc. — none of them should ever run under gVisor, and none of them need to),",
+    "and lab-runner opts in per-container via `docker run --runtime runsc` (see",
+    "infra/systemd/gaiada-lab-runner.service and lab-runner/dist/config.js's LAB_RUNNER_RUNTIME).",
+    "",
+    "APPLY (human, on the box, during a confirmed maintenance window — restarting the Docker",
+    "daemon restarts every container's PID namespace and is disruptive to a live box running 27",
+    "containers, even though `restart: unless-stopped` means compose brings them back):",
+    "  1. sudo apt-get update && sudo apt-get install -y ca-certificates",
+    "  2. curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg",
+    "  3. echo 'deb [signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main' | sudo tee /etc/apt/sources.list.d/gvisor.list",
+    "  4. sudo apt-get update && sudo apt-get install -y runsc",
+    "  5. Merge this file's `runtimes` key into /etc/docker/daemon.json (back up the original first:",
+    "     sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak-$(date -u +%Y%m%dT%H%M%SZ) — or,",
+    "     if the file did not exist, note that instead so rollback knows to delete rather than restore).",
+    "  6. sudo dockerd --validate --config-file /etc/docker/daemon.json   # syntax check BEFORE restart",
+    "  7. sudo systemctl restart docker",
+    "  8. docker info --format '{{json .Runtimes}}' | grep -o runsc   # expect a hit",
+    "  9. docker ps -a --format '{{.Names}}\\t{{.Status}}'   # diff against the pre-restart baseline",
+    "     (docker ps -a taken in step 0) — every gaiada-* container should be Up/healthy again",
+    "     within its own start_period; none should show a NEW restart count above its baseline.",
+    "",
+    "ROLLBACK: restore the timestamped .bak (or remove the file if it did not exist before),",
+    "`sudo systemctl restart docker`, re-run step 9's diff. This does not touch any container",
+    "definition or image — only the daemon's runtime registry — so a clean rollback returns the",
+    "box to exactly its pre-change state."
+  ],
+  "runtimes": {
+    "runsc": {
+      "path": "/usr/bin/runsc"
+    }
+  }
+}

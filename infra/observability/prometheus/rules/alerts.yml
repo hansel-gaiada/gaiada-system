@@ -15,8 +15,17 @@ groups:
           description: "Always-firing. Its ABSENCE at the external dead-man's-switch means the estate is dark."
 
       # --- A service's synthetic probe is failing outright.
+      #
+      # 2026-08-31 — SCOPED to job="blackbox-http" (this is WS9's own-endpoint probe job, defined
+      # in prometheus.yml / the collector's prometheus/scrape config). Two more blackbox jobs land
+      # on this estate the same day (rules/alerts-estate.yml): `blackbox-estate` (Plane A hosts,
+      # helios/delphi reachability) and `client-properties` (Plane B — clients' own websites,
+      # someone else's uptime). Both also emit `probe_success`, and an unscoped `probe_success == 0`
+      # here would have fired THIS alert — page-all, our on-call — for a client's WordPress site
+      # timing out. That is exactly the audience-conflation the rollout is designed to prevent:
+      # our infra pages engineering, client sites page account managers, never the same pager.
       - alert: ServiceDown
-        expr: probe_success == 0
+        expr: probe_success{job="blackbox-http"} == 0
         for: 2m
         labels:
           severity: page

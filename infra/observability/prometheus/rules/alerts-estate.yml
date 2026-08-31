@@ -1,0 +1,97 @@
+# 2026-08-31 — alert rules for the two NEW blackbox probe jobs added by this rollout.
+# Status: PLANNED. Not yet loaded on any Prometheus. See
+# docs/plans/2026-08-31-helios-delphi-plane-a-rollout.md for the full design and
+# infra/runbooks/enable-estate-blackbox-and-alert-routing.md for the exact apply steps.
+#
+# WHY A SEPARATE FILE: these two jobs answer two structurally different questions and MUST route
+# to two different audiences (docs/plans/2026-08-31-helios-delphi-plane-a-rollout.md §4):
+#
+#   `blackbox-estate`    — Plane A. Is OUR box (helios/delphi) reachable. Owned by engineering.
+#                           Routes through the SAME production/staging split every other Plane A
+#                           alert in alerts.yml already uses (severity=page + env label) — no new
+#                           receiver needed, no new routing rule needed, it rides the existing tree.
+#   `client-properties`  — Plane B. Is a CLIENT'S website reachable. Owned by account managers,
+#                           who have a different SLA and are not on the engineering pager. These
+#                           use two NEW severities (`client_page`/`client_ticket`, deliberately NOT
+#                           `page`/`ticket`) so they physically cannot fall into the engineering
+#                           routes in alertmanager.yml by matcher collision.
+#
+# Both jobs are probed from the SumoPod hub (10.88.0.2), never from gda-aicenter — see the
+# provenance note in prometheus.remote.yml for why.
+
+groups:
+  # ════════════════════════════════════════════════════════════════════════════════════════════
+  # Plane A — blackbox tier for OBSERVE-ONLY hosts (helios, delphi). Owner ruling 2026-08-22/23
+  # (docs/plans/2026-08-21-multi-server-observability.md §12): we may collect information FROM
+  # these hosts, never install/modify anything ON them. This is the entire signal set available
+  # for them until a future, separately-dated owner ruling grants "full control" (§12.0).
+  # ════════════════════════════════════════════════════════════════════════════════════════════
+  - name: gaiada_estate_blackbox
+    rules:
+      # --- Reachability. NEVER derived from a scrape target's `up` (that only proves the
+      # blackbox-exporter itself answered the hub, not that helios/delphi answered blackbox-exporter
+      # — design doc §12.3's "the trap MSO-10's unit tests must pin"). probe_success is the only
+      # correct signal, exactly as ServiceDown above uses it for our own endpoints.
+      #
+      # Routes via the EXISTING severity=page + env split in alertmanager.yml: `env` here comes
+      # from the static label on each target in targets/blackbox-estate.json (owner-named
+      # endpoints only, OQ-6) — `helios` carries env=production (pages engineering), `delphi`
+      # carries env=staging (ticket-only). No new receiver, no new route: this is the same tree
+      # RemoteWriteStalled/DiskSpaceLow/PostgresDown already use.
+      - alert: EstateProbeDown
+        expr: probe_success{job="blackbox-estate"} == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $labels.host }} ({{ $labels.instance }}) is unreachable from the estate"
+          description: "Blackbox probe to {{ $labels.instance }} (host={{ $labels.host }}, env={{ $labels.env }}) has failed for 5m. This is an OBSERVE-ONLY host (docs/plans/2026-08-21-multi-server-observability.md §12) — we cannot fix anything on it remotely; this page is 'the owner needs to know his box is unreachable', not a dispatchable engineering task on the box itself. Check DNS/CDN/the provider's own status page before assuming the box is down."
+
+      # --- The estate-wide freshness alert (RemoteWriteStalled, alerts.yml) already covers a
+      # stalled PIPELINE for any host with `host`/`env` labels, blackbox-estate's series included
+      # (they carry both from the target file). No separate freshness rule is needed here — adding
+      # one would just re-implement RemoteWriteStalled for a subset of jobs and risk disagreeing
+      # with it (the same trap that produced RemoteWriteStalledLegacySingleHost).
+
+      # --- TLS cert expiry. http_2xx already exports probe_ssl_earliest_cert_expiry for any https
+      # target with no extra module (blackbox.yml comment) — same mechanism MON-01 uses for client
+      # properties below. Ticket, not page: a cert 21 days out is not an outage.
+      - alert: EstateProbeCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox-estate"} - time()) / 86400 < 21
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "TLS cert for {{ $labels.instance }} ({{ $labels.host }}) expires in <21d"
+          description: "{{ $labels.instance }} on host={{ $labels.host }} (env={{ $labels.env }}) has {{ $value | printf \"%.1f\" }} day(s) left on its TLS certificate."
+
+  # ════════════════════════════════════════════════════════════════════════════════════════════
+  # Plane B — MON-01 client-property probing (infra/observability/prometheus/proposed-client-
+  # properties-job.yml, now wired into prometheus.remote.yml by this rollout). Severities are
+  # DELIBERATELY NOT `page`/`ticket`: a client's WordPress site timing out is not an engineering
+  # incident and must never ring the same pager as PostgresDown. `client_page`/`client_ticket`
+  # route to the `account-managers` receiver in alertmanager.yml, added by this rollout.
+  # ════════════════════════════════════════════════════════════════════════════════════════════
+  - name: gaiada_client_properties
+    rules:
+      # --- for: 5m (not ServiceDown's 2m): these are OTHER PEOPLE'S servers on OTHER PEOPLE'S
+      # networks, scraped at 60s intervals (proposed-client-properties-job.yml — 15s would look
+      # like an attack to a client's WAF). A 2m window is 2 scrape cycles; 5m gives real margin
+      # against a single slow/blip response before an account manager gets paged over nothing.
+      - alert: ClientPropertyDown
+        expr: probe_success{job="client-properties"} == 0
+        for: 5m
+        labels:
+          severity: client_page
+        annotations:
+          summary: "Client property {{ $labels.property_domain }} is unreachable"
+          description: "Blackbox probe to {{ $labels.instance }} (domain={{ $labels.property_domain }}, tenant={{ $labels.tenant_id }}, client={{ $labels.client_id }}) has failed for 5m. This is a CLIENT'S site, not our infrastructure — routes to account managers, never the engineering pager."
+
+      - alert: ClientPropertyCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="client-properties"} - time()) / 86400 < 21
+        for: 1h
+        labels:
+          severity: client_ticket
+        annotations:
+          summary: "TLS cert for client property {{ $labels.property_domain }} expires in <21d"
+          description: "{{ $labels.property_domain }} (tenant={{ $labels.tenant_id }}, client={{ $labels.client_id }}) has {{ $value | printf \"%.1f\" }} day(s) left on its TLS certificate. Renewal is the client's/hosting provider's responsibility to trigger — this is an account-manager follow-up, not an engineering task."

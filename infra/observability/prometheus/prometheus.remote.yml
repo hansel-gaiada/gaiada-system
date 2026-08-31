@@ -51,3 +51,61 @@ scrape_configs:
         labels:
           host: sumopod
           env: ops
+
+  # ══════════════════════════════════════════════════════════════════════════════════════════
+  # 2026-08-31 rollout — docs/plans/2026-08-31-helios-delphi-plane-a-rollout.md.
+  # Two blackbox jobs, BOTH probed FROM THIS HOST (the hub), never from gda-aicenter:
+  #   - gda-aicenter is Zone A — it holds the platform DB and has no business making standing
+  #     outbound connections to third-party/observe-only infrastructure on a schedule
+  #     (proposed-client-properties-job.yml's own §"THE ONE DECISION" already ruled this).
+  #   - This hub is already the estate's egress point for telemetry and already runs a
+  #     Prometheus with local scrape capability, so adding one blackbox-exporter here reuses an
+  #     established pattern instead of inventing a second egress point.
+  # blackbox-exporter itself is added to docker-compose.obs-remote.yml (this rollout).
+  # ══════════════════════════════════════════════════════════════════════════════════════════
+
+  # --- Plane A, OBSERVE-ONLY hosts (helios/delphi). MSO-11
+  # (docs/plans/2026-08-21-multi-server-observability.md §12.6). Target file starts EMPTY —
+  # populating it requires owner-named endpoints (OQ-6); see targets/README.md. Until it has
+  # entries this job scrapes nothing and fires nothing, which is the correct state, not a bug.
+  - job_name: blackbox-estate
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    scrape_interval: 60s
+    scrape_timeout: 15s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/blackbox-estate.json
+        refresh_interval: 5m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # --- Plane B, client-property monitoring (MON-01). Same job definition as
+  # proposed-client-properties-job.yml, applied here rather than left proposed. Target file is
+  # GENERATED (infra/observability/scripts/gen-client-property-targets.mjs), never hand-written —
+  # see infra/runbooks/enable-estate-blackbox-and-alert-routing.md §4 for how it reaches this path.
+  - job_name: client-properties
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    # 60s, not the global 15s — these are OTHER PEOPLE'S servers; 15s across ~63 properties reads
+    # as hostile traffic to a client's own WAF.
+    scrape_interval: 60s
+    scrape_timeout: 15s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/client-properties.json
+        refresh_interval: 5m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

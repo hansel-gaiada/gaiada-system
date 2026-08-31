@@ -41,7 +41,7 @@ Status values: **DONE** · **IN PROGRESS** · **NOT DONE**
 | 34 | Avatars stood a pace behind their desk, not at it | DONE |
 | 35 | Make the floor read as ONE building, not detached rooms | DONE |
 | 38 | Seated avatars faced the viewer, not their desk | DONE |
-| 39 | Idle wandering + joke bubbles | **RULED 2026-08-26 — AGENTS AND AUTOMATIONS ONLY.** Bots wander and emit bubbles; human avatars stay still. Keeps plan §3/§6 intact where it matters: an idling human avatar reads as "this person is at their desk", which is the presence claim the data cannot support — the same reasoning that stops a human card carrying a working/idle badge. ⚠ Implementation must route through the existing `emoteKindFor` gate, NOT a second animation switch, or the canvas and the roster can disagree. Cost accepted: a permanent two-class animation model |
+| 39 | Idle wandering + joke bubbles — conflicts with plan §3/§6 | BLOCKED — needs owner decision |
 | 36 | Vacant seat renders as an odd dark cross | NOT DONE |
 | 37 | Every person wears the same sprite outfit | NOT DONE |
 

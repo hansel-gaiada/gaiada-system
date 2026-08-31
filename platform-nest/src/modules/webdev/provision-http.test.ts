@@ -48,7 +48,7 @@ describe("PRV-02 — provision-http driver (real sockets vs the PRV-00 mock)", (
     expect(r.project.id).toBeTruthy();
     expect(r.project.name).toBe("acme-site-a");
     expect(r.project.status).toBe("pending");
-    expect(r.project.repoUrl).toBe("https://github.com/Gaia-Digital-Agency/acme-site-a");
+    expect(r.project.repoUrl).toBe("https://github.com/gaiadabali/acme-site-a");
     expect(r.project.stagingUrl).toBe("https://acme-site-a.gaiada.online");
   });
 
@@ -99,7 +99,7 @@ describe("PRV-02 — provision-http driver (real sockets vs the PRV-00 mock)", (
 
   it("returns `conflict` (never throws) when the name is taken, and reads back the far-side record", async () => {
     mock.seedProject({
-      id: "proj-foreign-9", name: "taken-name", repoUrl: "https://github.com/Gaia-Digital-Agency/taken-name",
+      id: "proj-foreign-9", name: "taken-name", repoUrl: "https://github.com/gaiadabali/taken-name",
       stagingUrl: "https://taken-name.gaiada.online", status: "live", isOurs: false,
     });
     const d = driverFor();

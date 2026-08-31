@@ -1,0 +1,79 @@
+[Unit]
+# gaiada-lms-lab-runner on gda-aicenter (2026-08-31 retarget from SumoPod).
+#
+# STATUS: PLANNED. Not installed. Part of the workload-consolidation runbook:
+# ../../docs/plans/2026-08-31-workload-consolidation-to-aicenter.md.
+#
+# Deliberately a bare `docker run` under systemd, NOT a compose project — same reasoning as the
+# SumoPod deployment (lab-runner/README.md: "It is a bare docker run, deliberately not a compose
+# project, so no other project's --remove-orphans can delete it"). On gda-aicenter that reasoning
+# is stronger, not weaker: the ERP's OWN deploy pipeline runs `--remove-orphans` scoped to
+# project `gaiada` on every release, and this container must never be a candidate for it.
+#
+# WHAT THIS SERVICE ACTUALLY IS: a long-running Node process that talks to the HOST Docker
+# daemon over the mounted socket and spawns SIBLING containers per lab attempt
+# (lab-runner/dist/sandbox.js builds each `docker run` invocation). It is not itself a sandbox —
+# it is the thing that launches sandboxes. Depends on docker.service; must start after it.
+Description=Gaiada LMS lab-runner (untrusted-code execution sidecar, gVisor-isolated)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Non-root deploy identity, same convention as the estate's other hand-run services (see the
+# runbook's filesystem/secrets section for why this user also owns the env file).
+User=webdesk-svc
+Group=webdesk-svc
+
+# TMPDIR must be a HOST path that also appears as the bind-mount source below, byte-identical —
+# this is THE trap the Dockerfile's own header warns about: the daemon resolves bind-mount
+# sources on the HOST, not inside this container, so a mismatch here silently mounts an empty
+# directory and every submission "does nothing" with no error anywhere.
+Environment=TMPDIR=/var/lib/gaiada-lab/tmp
+EnvironmentFile=/etc/gaiada-lab-runner/lab-runner.env
+
+ExecStartPre=/usr/bin/mkdir -p /var/lib/gaiada-lab/tmp
+ExecStartPre=-/usr/bin/docker rm -f gaiada-lms-lab-runner
+
+# ── Every flag below mirrors lab-runner/dist/sandbox.js's OWN hardening list, applied one level
+# up (this is the RUNNER container; sandbox.js hardens the PER-ATTEMPT lab containers it spawns).
+# The runner itself does not execute untrusted code directly, but it DOES hold the Docker socket,
+# which is root-equivalent on the host — so it gets the same posture everywhere it can tolerate
+# it, and the two exceptions (the docker socket mount, and NOT read-only rootfs because the
+# docker-cli binary + npm-installed deps need a normal filesystem) are named, not silent.
+ExecStart=/usr/bin/docker run --rm --name gaiada-lms-lab-runner \
+  --user 65534:65534 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --pids-limit 256 \
+  --cpus 1.0 \
+  --memory 512m \
+  --memory-swap 512m \
+  -p 127.0.0.1:4310:4310 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/gaiada-lab/tmp:/var/lib/gaiada-lab/tmp \
+  --env-file /etc/gaiada-lab-runner/lab-runner.env \
+  -e LAB_RUNNER_RUNTIME=runsc \
+  -e LAB_RUNNER_HOST=0.0.0.0 \
+  -e LAB_RUNNER_CONCURRENCY=1 \
+  -e LAB_RUNNER_MAX_CPUS=1 \
+  -e LAB_RUNNER_MAX_MEMORY_MB=768 \
+  -e TMPDIR=/var/lib/gaiada-lab/tmp \
+  gaiada-lab-runner:0.1.1
+
+# ── WHY LAB_RUNNER_CONCURRENCY=1, not the SumoPod value of 2 ──────────────────────────────────
+# SumoPod's "2 on a 4-vCPU box" was itself already a tight call, made against a box carrying 50
+# containers at load 6.39. gda-aicenter is ALSO 4 vCPU, already at load ~2.1/4 from 27 containers
+# that are the ERP's own control plane (Cerbos, Keycloak, host Postgres) — services this estate
+# cannot afford to starve. One concurrent lab (up to 1 vCPU / 768 MB, both clamped below the
+# defaults in lab-runner/dist/config.js) is the conservative starting point; the runbook's
+# capacity verdict is where this trade-off is argued in full, and it recommends the e2-standard-8
+# resize before raising this back to 2.
+
+ExecStop=/usr/bin/docker stop gaiada-lms-lab-runner
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

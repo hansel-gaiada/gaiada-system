@@ -33,6 +33,20 @@ route:
       group_interval: 1m
       repeat_interval: 1m
       continue: false
+    # 2026-08-31 rollout (docs/plans/2026-08-31-helios-delphi-plane-a-rollout.md §4) — the second
+    # audience split, alongside the env split below. `client_page`/`client_ticket` are severities
+    # used ONLY by alerts-estate.yml's `gaiada_client_properties` group (a CLIENT's website is
+    # unreachable / its cert is expiring) — deliberately spelled differently from `page`/`ticket`
+    # so they cannot collide with any engineering matcher below by accident. Grouped by
+    # property_domain (not instance) so a flapping client site produces one notification thread,
+    # not one per probe target if a property ever has multiple monitored URLs.
+    - matchers: ['severity=~"client_page|client_ticket"']
+      receiver: account-managers
+      group_by: ["alertname", "property_domain"]
+      group_wait: 30s
+      group_interval: 10m
+      repeat_interval: 4h
+      continue: false
     # MSO-02 / OQ-2 (owner: "use the best way n safest", answered 2026-08-21): production PAGES,
     # staging/dev/ops are TICKET-ONLY — never a page. Alert fatigue is the failure mode that makes
     # real pages get ignored: a staging box waking someone at 3am does not make the estate safer,
@@ -119,6 +133,21 @@ receivers:
     webhook_configs:
       - url: "${DEADMANSSWITCH_URL}"
         send_resolved: false
+
+  # 2026-08-31 rollout — client-site health (Plane B, MON-01) goes to whoever owns the client
+  # relationship, not to engineering. Deliberately a DIFFERENT transport set from page-all/
+  # default-multi: no Telegram leg to the on-call engineer's phone. If AM_ALERT_WEBHOOK_URL/
+  # AM_ALERT_EMAIL_TO are unset this receiver fails loudly in the Alertmanager log — same
+  # "fail loud, not silent" posture as ALERT_WEBHOOK_URL's own comment above; do not let this
+  # receiver go live without both wired, per the alerting-wire-a-real-receiver.md lesson (a
+  # receiver with no real transport is indistinguishable from no alerting at all).
+  - name: account-managers
+    webhook_configs:
+      - url: "${AM_ALERT_WEBHOOK_URL}"
+        send_resolved: true
+    email_configs:
+      - to: "${AM_ALERT_EMAIL_TO}"
+        send_resolved: true
 
 templates:
   - /etc/alertmanager/templates/*.tmpl

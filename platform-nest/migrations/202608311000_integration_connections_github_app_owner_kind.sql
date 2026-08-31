@@ -45,7 +45,24 @@
 -- they are read exclusively via credential-store.ts's own service-layer calls. This migration does
 -- not touch RLS or any GRANT.
 
+-- ⚠ REGRESSION FIXED 2026-08-31, BEFORE this migration ever ran anywhere. The first version of the
+-- statement below rebuilt the CHECK from a hardcoded three-value list:
+--
+--     CHECK (owner_kind IN ('user', 'company', 'github_app'))
+--
+-- 0033 created the CHECK as ('user','company'), but **0035 had already widened it to add 'client'**
+-- (per-client search-provider OAuth links, owner_id -> clients.id). Dropping and re-adding from a
+-- list written against 0033 therefore SILENTLY REMOVED 'client', and every future per-client OAuth
+-- link would have failed on a constraint violation — nowhere near this file, and long after the
+-- change that caused it. `src/db/module-search-rls.test.ts` caught it ("integration_connections
+-- widen is additive"); a GitHub-scoped test run never exercised that file, which is precisely why
+-- the blast radius of a DROP CONSTRAINT is wider than the ticket that motivates it.
+--
+-- THE LESSON, worth more than the fix: a DROP + ADD on a shared CHECK re-declares the whole
+-- allow-list from whatever the author happened to know. Enumerate every value that any prior
+-- migration added, or derive it — never retype it from the table's original definition.
 ALTER TABLE integration_connections DROP CONSTRAINT IF EXISTS integration_connections_owner_kind_check;
 ALTER TABLE integration_connections
   ADD CONSTRAINT integration_connections_owner_kind_check
-  CHECK (owner_kind IN ('user', 'company', 'github_app'));
+  -- 'user' + 'company' from 0033, 'client' from 0035, 'github_app' new here. All four, deliberately.
+  CHECK (owner_kind IN ('user', 'company', 'client', 'github_app'));

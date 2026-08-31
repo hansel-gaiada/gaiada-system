@@ -1,31 +1,57 @@
 # Gaiada — the SMM department's publishing engine (Postiz, AGPL-3.0, CONTAINED).
 #
 # STATUS: PROTOTYPED. Verified on local Docker by SMM-04 (2026-08-13). NOT deployed anywhere.
-# Read `docs/superpowers/plans/2026-08-13-smm-04-containment-spike.md` BEFORE starting this
-# anywhere, and `infra/runbooks/deploy-vps.md` §"Postiz / SMM" for the operational steps.
+# Read `docs/superpowers/plans/2026-08-13-smm-04-containment-spike.md` and
+# `infra/runbooks/deploy-vps.md` §"Postiz / SMM" for the ORIGINAL containment analysis — still
+# valid reading — then read the retarget note immediately below, which supersedes the HOST.
 #
-# ─── ⚠ THIS STACK DOES NOT RUN ON `gda-aicenter`. IT TARGETS THE SumoPod VPS. ───
-# Owner decision 2026-08-13 (addendum §A4k, retargeted in §A4l), superseding §A4d. The
-# footprint tripwire fired against `gda-aicenter` (~3.4 GiB needed, ~4.0 GB available and
-# already 2.45 GB into swap). The stack now targets **150.109.15.108** (Ubuntu 24.04, user
-# `ubuntu`, 12 GiB RAM available, 169 GB disk free).
+# ─── ⚠ RETARGETED to `gda-aicenter` — owner re-zoning, 2026-08-31. Supersedes the SumoPod ───
+# ─── target set 2026-08-13/18 (addenda §A4k/§A4l). Do not revert without a new owner ruling. ───
 #
-# THAT HOST IS NOT OURS ALONE. It runs **19 containers of the owner's private production
-# projects** (project-hug among them) in other compose projects. Treat every one of them as
-# untouchable. The concrete rules, in full, are in the runbook — the two that get people:
-#   * NEVER run a Docker command on that box that is not scoped to `-p gaiada-social`.
-#     No `docker system prune`, no `docker image prune -a`, no bare `--remove-orphans`.
-#   * NEVER publish a port on `0.0.0.0` here. Docker inserts its own DNAT/FORWARD rules that
-#     BYPASS ufw, so a `0.0.0.0` bind is internet-reachable even with a "deny" firewall. The
-#     `SOCIAL_BIND_ADDR` var below is the control, and its default is loopback for that reason.
+# The 2026-08-31 estate re-zoning replaced the old capacity-driven Zone A/B model with a
+# purpose-based one: "system lives in aicenter" — the ERP control plane AND everything
+# operational to it, `gaiada-social` included, now belong on `gda-aicenter`. Observability
+# (`gaiada-obs-*`) is the one thing that STAYS on SumoPod, deliberately — a monitor co-located
+# with what it monitors dies with it.
 #
-# ─── The ERP now reaches this over a WireGuard point-to-point link, not over loopback ───
-# `platform-nest` runs on `gda-aicenter` (35.240.135.48, GCP); this runs on the SumoPod VPS.
-# The REST hop therefore leaves the machine. It is carried by a two-peer WireGuard tunnel
-# (10.88.0.1 = gda-aicenter, 10.88.0.2 = this host) — mutually key-authenticated and
-# encrypted, with NO public listener on this box at all. Postiz's published port binds to the
-# tunnel address; the tunnel is the new loopback. Measured RTT between the two hosts:
-# **2.6 ms** (8/8 ICMP, 2026-08-13, from gda-aicenter). Setup + verification: the runbook.
+# The original 2026-08-13 footprint tripwire (~3.4 GiB needed against ~4.0 GB available, already
+# 2.45 GB into swap) does not apply to the box as it stands 2026-08-31: measured then, `gda-
+# aicenter` is a GCE e2-standard-4 (4 vCPU / 15.6 GiB, ~10 GiB available, load ~2.1/4, 52 GB disk
+# free) with headroom this stack's ~1.8 GiB actual RSS fits inside on its own — see the capacity
+# verdict in `../../docs/plans/2026-08-31-workload-consolidation-to-aicenter.md`, which also
+# covers what changes when this stack lands ALONGSIDE the other two workloads that ruling moved.
+#
+# THIS HOST IS NOT "OURS ALONE" EITHER, just for a different reason than SumoPod's. It runs the
+# ERP's own host Postgres (not containerized), Keycloak and Cerbos on the SAME kernel — the
+# control plane's own trust anchors. The rules below are unchanged in spirit (never an unscoped
+# Docker command against this project) and the isolation requirement is, if anything, more load-
+# bearing than it was on SumoPod:
+#   * NEVER run a Docker command that is not scoped to `-p gaiada-social`. No `docker system
+#     prune`, no `docker image prune -a`, no bare `--remove-orphans` (the ERP's own deploy
+#     pipeline already scopes its `--remove-orphans` to project `gaiada`, which structurally
+#     cannot see this project — see the "separate compose project" note below — but a human at
+#     a shell on this box can still get it wrong by typing a bare command).
+#   * NEVER publish a port on `0.0.0.0` here. Same DNAT-before-firewall reasoning as always.
+#     `SOCIAL_BIND_ADDR` is the control, and its default is loopback for that reason.
+#   * NEVER attach any service in this file to network `gaiada_default` (172.18.0.0/16 — the
+#     ERP's own compose network). This project intentionally declares no external network
+#     reference, so it gets its own isolated `gaiada-social_default` bridge; adding a
+#     `networks: [gaiada_default]` line to any service below would be the single line that
+#     defeats that isolation, and nothing here should ever need it — Postiz talks to
+#     `platform-nest` over HTTP on loopback now (see below), not by joining the ERP's network.
+#
+# ─── The ERP now reaches this over LOOPBACK — the WireGuard hop is retired ───
+# `platform-nest` and Postiz now run on the SAME machine (`gda-aicenter`). The WireGuard tunnel
+# this section used to require (`10.88.0.1` <-> `10.88.0.2`, cross-host) no longer has a reason
+# to exist for this hop and is NOT part of this retarget — do not stand it up here. `SOCIAL_
+# BIND_ADDR` stays `127.0.0.1` (the default below), and `platform-nest`'s `SocialPublisher`
+# adapter calls `http://127.0.0.1:${SOCIAL_POSTIZ_PORT:-4007}` directly, same-host, same as every
+# other loopback-bound sidecar on this box (e.g. `report-renderer`). One consequence worth
+# recording: `MAIN_URL`/`FRONTEND_URL` already point at `https://erp.gaiada.online/social` —
+# a path `platform-ui` serves on THIS SAME box — so the OAuth callback strings that matter for
+# already-connected accounts are UNCHANGED by this retarget (see the env block below); only the
+# transport between `platform-nest` and Postiz's backend changes, from a cross-host tunnel to
+# loopback.
 #
 # ─── Why this is a SEPARATE compose project, not a profile in docker-compose.vps.yml ───
 # `name: gaiada-social` puts these containers in their own compose project. The deploy
@@ -66,19 +92,19 @@ services:
     restart: unless-stopped
     # MEASURED at 2.27-2.83 GiB RSS (SMM-04), and STILL DRIFTING UPWARD when the measurement
     # ended (2.27 -> 2.75 GiB in ~45s) — treat that range as a floor, not a settled figure.
+    # Node is not told about this limit, so hitting it is an OOM-kill, not graceful degradation.
     #
-    # RAISED 3g -> 4g on the retarget to the VPS, deliberately, and for a reason that is worth
-    # keeping: 3g was a 6% margin over a measured peak on a still-climbing process, chosen when
-    # the target box had 4.0 GB total to give. On a host with 12 GiB available, a limit that
-    # tight converts a normal soak into a routine OOM-kill and destroys the signal — a kill
-    # should mean "something is wrong", not "Tuesday". 4g keeps a real margin AND keeps the
-    # blast-radius bound, which is now the limit's ACTUAL job: this box runs 19 containers of
-    # the owner's private production, so what this cap protects is THEIR services, not the ERP
-    # (the ERP is on a different machine now and cannot be OOM-killed by anything here).
-    # All five limits together sum to ~5.97 GiB of ~12 GiB available — half the headroom, by
-    # design. Node is not told about this limit, so hitting it is an OOM-kill, not graceful
-    # degradation. Revisit with soak evidence, not with a guess.
-    mem_limit: 4g
+    # HISTORY: 3g at SMM-04 (2026-08-13, sized for the original ~4 GB `gda-aicenter` footprint
+    # tripwire) -> 4g on the 2026-08-18 SumoPod retarget (12 GiB available there justified a
+    # wider margin) -> back to 3g here on the 2026-08-31 retarget to `gda-aicenter`, which has
+    # only ~10 GiB available shared with the ERP's own containers AND the other two workloads
+    # this same ruling moved (webdesk, lab-runner). 3g restores the ORIGINAL SMM-04 figure — a
+    # 6% margin over the measured 2.83 GiB peak — because a box this tight cannot afford the
+    # wider margin SumoPod's spare 12 GiB allowed. Revisit again only with fresh soak evidence on
+    # THIS host, not by copying either old number forward.
+    mem_limit: 3g
+    cpus: 1.50
+    pids_limit: 256
     environment:
       # --- URLs. MAIN_URL/FRONTEND_URL are load-bearing: Postiz builds each network's OAuth
       # redirect_uri as `${FRONTEND_URL}/integrations/social/<provider>` (verified in
@@ -86,16 +112,16 @@ services:
       # and replayed in the token exchange. Changing it invalidates every connected account.
       # See the spike report §7 for why this SHOULD point at a path WE serve, not at Postiz.
       #
-      # ↳ THE HOST MOVE DOES NOT CHANGE THESE STRINGS, and that is the point. FRONTEND_URL
-      #   still names `https://erp.gaiada.online/social` — a path `platform-ui` serves on
-      #   gda-aicenter, i.e. on the OTHER machine. That is fine and in fact ideal: the OAuth
-      #   callback is a browser redirect to a public URL, so it belongs at the edge that is
-      #   already public, already TLS-terminated, already rate-limited and already reviewed.
-      #   The VPS therefore needs NO public inbound door of its own. `platform-ui` catches the
-      #   `code` and hands it to Postiz's backend over the WireGuard link instead of over
-      #   loopback — same call, different transport. Because the redirect_uri string is
-      #   unchanged by the retarget, moving hosts CANNOT invalidate an already-connected
-      #   account; that hazard is real but this change does not trip it.
+      # ↳ NEITHER HOST MOVE CHANGES THESE STRINGS, and that is the point. FRONTEND_URL still
+      #   names `https://erp.gaiada.online/social` — a path `platform-ui` serves, and since the
+      #   2026-08-31 retarget that is now the SAME machine this file runs on. That remains ideal
+      #   for the same reason it was when the two were separate machines: the OAuth callback is a
+      #   browser redirect to a public URL, so it belongs at the edge that is already public,
+      #   already TLS-terminated, already rate-limited and already reviewed — `platform-ui`
+      #   catches the `code` and hands it to Postiz's backend over loopback now (previously over
+      #   the WireGuard link to SumoPod; same call, simpler transport). Because the redirect_uri
+      #   string is unchanged by either retarget, moving hosts CANNOT invalidate an already-
+      #   connected account; that hazard is real but this change does not trip it.
       MAIN_URL: ${SOCIAL_POSTIZ_MAIN_URL:?}
       FRONTEND_URL: ${SOCIAL_POSTIZ_FRONTEND_URL:?}
       NEXT_PUBLIC_BACKEND_URL: ${SOCIAL_POSTIZ_BACKEND_URL:?}
@@ -144,17 +170,17 @@ services:
       # internet, because Docker publishes ports by writing its own DNAT + FORWARD rules that
       # are evaluated BEFORE ufw's. A `0.0.0.0` bind here is reachable from the internet even
       # on a box whose firewall says "deny incoming", and the firewall will report success.
-      # On the target VPS that would expose an AGPL engine holding live client OAuth tokens,
-      # on a host running someone else's production. There is no scenario in which this value
-      # is `0.0.0.0`.
+      # On `gda-aicenter` that would expose an AGPL engine holding live client OAuth tokens on
+      # the SAME box as the ERP's host Postgres, Keycloak and Cerbos. There is no scenario in
+      # which this value is `0.0.0.0`.
       #
-      # Two legitimate values only:
-      #   127.0.0.1   — local/dev, and the default here so a missing var fails SAFE.
-      #   10.88.0.2   — the VPS's WireGuard address, for the cross-host deploy. The tunnel is
-      #                 the new loopback: two peers, mutually key-authenticated, no public
-      #                 listener. `platform-nest` on gda-aicenter (10.88.0.1) is the only
-      #                 caller that can reach it, and it is authenticated by KEY, not by a
-      #                 source-address rule that a routing change could quietly satisfy.
+      # One legitimate value since the 2026-08-31 retarget to gda-aicenter, and it is also the
+      # default so a missing var fails SAFE:
+      #   127.0.0.1   — `platform-nest` now runs on the SAME box and reaches this over loopback.
+      #                 The former `10.88.0.2` WireGuard-address option (for the cross-host
+      #                 SumoPod deploy) is retired along with that target — do not reintroduce it
+      #                 here; a stray WireGuard peer address bound to a port on THIS box would be
+      #                 a meaningless, silently-wrong value now that there is no tunnel to bind to.
       #
       # Nothing else about the exposure model changed: Temporal still publishes no port at all,
       # and both Postgres instances remain network-internal.
@@ -166,9 +192,11 @@ services:
       timeout: 10s
       retries: 10
       # MEASURED: ~90-150s to healthy on a 16 GB dev box with the image already local.
-      # The VPS is comparable (12 GiB available, 4 vCPU, not swapping), so expect similar
-      # rather than worse — but the FIRST boot also pulls ~1.9 GB compressed and expands it to
-      # 5.66 GB, which is not covered by this window. Do not tighten without re-measuring there.
+      # `gda-aicenter` has less headroom (~10 GiB available, 4 vCPU, load already ~2.1/4) and is
+      # NOT idle the way a dev box is — 27 other containers are competing for the same 4 cores.
+      # Expect this window to be tighter than the dev-box figure, not looser, and the FIRST boot
+      # also pulls ~1.9 GB compressed and expands it to 5.66 GB, which is not covered by this
+      # window either. Do not tighten without re-measuring on the real box.
       start_period: 240s
     depends_on:
       social-postgres: {condition: service_healthy}
@@ -182,6 +210,8 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     mem_limit: 512m
+    cpus: 0.50
+    pids_limit: 128
     environment:
       POSTGRES_USER: postiz
       POSTGRES_PASSWORD: ${SOCIAL_POSTIZ_DB_PASSWORD:?}
@@ -203,6 +233,8 @@ services:
     image: redis:7.2-alpine
     restart: unless-stopped
     mem_limit: 320m
+    cpus: 0.25
+    pids_limit: 128
     command: ["redis-server", "--save", "60", "1", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - social-redis-data:/data
@@ -236,6 +268,8 @@ services:
     image: temporalio/auto-setup:1.28.1
     restart: unless-stopped
     mem_limit: 768m
+    cpus: 0.50
+    pids_limit: 256
     environment:
       DB: postgres12
       DB_PORT: '5432'
@@ -261,16 +295,24 @@ services:
     # for the bootstrap step instead of opening a port for it.
 
   # ── Temporal's OWN Postgres — a SECOND Postgres instance, on a different major than Postiz's.
-  # Upstream uses postgres:16 (debian, 642 MB); alpine is 420 MB. NOTE, changed by the retarget:
-  # SMM-04 counted this as zero new bytes because `gda-aicenter` already had the image. On the
-  # VPS it is 420 new MB (as is postgres:17-alpine's 424 MB and redis:7.2-alpine's 57 MB), so
-  # the day-one disk figure there is ~7.6 GB, not ~6.7 GB. Against 169 GB free that is noise —
-  # recorded so the number is right, not because it is a constraint. Packaging only.
+  # Upstream uses postgres:16 (debian, 642 MB); alpine is 420 MB.
+  #
+  # DISK HISTORY, since the number moved with each retarget and the box matters this time:
+  # SMM-04 (2026-08-13, on `gda-aicenter`) counted this image as zero new bytes because the box
+  # already had it. The 2026-08-18 SumoPod retarget made it 420 new MB there (`postiz:latest`'s
+  # own postgres:17-alpine + redis:7.2-alpine added another ~480 MB), day-one total ~7.6 GB
+  # against 169 GB free — noise. Back on `gda-aicenter` since 2026-08-31, the image is again
+  # already local (SMM-04 pulled it here originally) — but free disk on THIS box is 52 GB, not
+  # 169 GB, and the runbook's capacity verdict is where that budget is actually spent, not here.
+  # Packaging only; this comment exists so the number is traceable, not because it is load-
+  # bearing in this file.
   social-temporal-postgres:
     profiles: [social]
     image: postgres:16-alpine
     restart: unless-stopped
     mem_limit: 384m
+    cpus: 0.50
+    pids_limit: 128
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: ${SOCIAL_TEMPORAL_DB_PASSWORD:?}

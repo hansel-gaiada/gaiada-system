@@ -1,33 +1,14 @@
 # Runbook — the estate internal CA (custody, issuance, rotation)
 
-**Status: the CA EXISTS as of 2026-08-30.** §1 and §2 have been run; §3 is done for Zone B.
+**Status: the CA DOES NOT EXIST YET.** Verified on `gda-aicenter` 2026-08-29:
+`GATEWAY_TLS_MODE=off`, `HUB_TLS_MODE=off`, and **no cert material in any `gaiada_*` volume** —
+`gaiada_gateway-data` holds only `egress-audit.jsonl`. `ai-gateway-go` writes the CA only when TLS
+is enabled, and it never has been.
 
-    CN=gaiada-internal-ca · ECDSA P-256 · CA:TRUE + keyCertSign · valid 2026-08-30 → 2036-08-27
-    gaiada_gateway-data:/app/data/ca-cert.pem (644) · ca-key.pem (600, has never left the host)
-    issued: CN=platform-nest-webdesk · clientAuth · → 2028-12-02 · `openssl verify` OK
-
-**Proven end to end, not assumed.** Zone B now pins this CA, and the control channel discriminates
-three ways — the middle case is the one that matters:
-
-| Request to `/control/v1/...` | Result |
-|---|---|
-| no client certificate | `401` — refused at Layer 1 |
-| certificate with the **correct CN** but signed by a **different CA** | `401` — refused at Layer 1; the pin is real and CN spoofing does not help |
-| the **issued** certificate | `401 "Layer 2 (service token) refused: no Bearer token presented"` |
-
-The third row is the proof: it **passed mTLS** and failed at the *next* layer. A channel that
-returned the same 401 to all three would have told us nothing.
-
-### Why this existed as a gap at all
-
-Before 2026-08-30 there was no CA anywhere: `GATEWAY_TLS_MODE=off`, `HUB_TLS_MODE=off`, and no cert
-material in any `gaiada_*` volume — `gaiada_gateway-data` held one file, an egress audit log.
-`ai-gateway-go` writes the CA only when TLS is enabled, and it never had been. Meanwhile three
-separate designs were written against it as if it were there: WebDesk §03's A→B control channel
-("mTLS from the synccert internal CA"), `mcp-hub`'s compose comment ("enroll with synccert, then set
-`HUB_TLS_MODE: enforced`"), and `sync-central`'s one-time provisioning note. **A trust root that
-three designs assume and nobody generated is the shape this class of gap takes** — worth leaving
-recorded rather than quietly deleting now that it is closed.
+That matters beyond one ticket: several designs already lean on this CA as if it were there.
+WebDesk's §03 A→B control channel specifies "mTLS from the synccert internal CA"; `mcp-hub`'s own
+compose comment says "enroll with synccert, then set `HUB_TLS_MODE: enforced`"; `sync-central`
+carries a one-time cert-provisioning comment. **None of that can happen until this file's §1 runs.**
 
 Owner ruled 2026-08-29: **generate the estate CA properly**, rather than a throwaway per-channel CA.
 
@@ -126,11 +107,6 @@ same instant.
 
 ## 5. What is still not true after §1–§3
 
-Generating the CA did **not** enable mTLS everywhere. **Zone B's control channel IS enrolled and
-verified** (see the status block). Everything else is not: `GATEWAY_TLS_MODE` and `HUB_TLS_MODE`
-are still `off` and stay off until each service is separately enrolled and flipped, and
-`sync-central` still has no issued node certs. This runbook makes those flips *possible*; only
-the Zone B one is *done*.
-
-**And the backup row in §0 is still OPEN.** The CA now has a real dependent, which is exactly
-when losing the key starts to cost something.
+Generating the CA does **not** enable mTLS anywhere by itself. `GATEWAY_TLS_MODE` and
+`HUB_TLS_MODE` are both `off` and stay off until each service is separately enrolled and flipped.
+This runbook makes those flips *possible*; it does not make them *done*.

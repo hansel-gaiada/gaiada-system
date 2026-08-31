@@ -160,7 +160,7 @@ describe.skipIf(!TEST_URL)("PRV-05 — webdev.controller HTTP error-contract pin
   it("409 slug_conflict_foreign: the TOKEN arrives verbatim (not \"Conflict Exception\"), `site` IS forwarded", async () => {
     mock.seedProject({
       id: "proj-http-foreign", name: "http-pin-foreign-conflict",
-      repoUrl: "https://github.com/Gaia-Digital-Agency/http-pin-foreign-conflict",
+      repoUrl: "https://github.com/gaiadabali/http-pin-foreign-conflict",
       stagingUrl: "https://http-pin-foreign-conflict.gaiada.online", status: "live", isOurs: false,
     });
     const { r } = await createRunViaHttp("Http Pin Foreign Conflict");

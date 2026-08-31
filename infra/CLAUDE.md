@@ -50,22 +50,30 @@ Also: a var in `.env` does nothing unless the service's `environment:` block lis
 compose files sharing one mtime means *a deploy synced the directory* — not that another session
 edited them under you.
 
-### `docker-compose.social.yml` targets a DIFFERENT HOST
+### `docker-compose.social.yml` — RETARGETED to `gda-aicenter` (2026-08-31, supersedes SumoPod)
 
-One of the ten is not about `gda-aicenter` at all. The SMM publishing engine (Postiz, AGPL,
-contained) runs on the **SumoPod VPS `150.109.15.108`** — owner decision 2026-08-13, addendum
-§A4k/§A4l — as its own compose project `gaiada-social`, digest-pinned, outside the release path.
-Three things that will bite whoever touches it next:
+⚠ **STALE UNTIL EXECUTED.** The owner's 2026-08-31 estate re-zoning ("system lives in aicenter")
+moved the SMM publishing engine (Postiz, AGPL, contained) from the SumoPod VPS back onto
+`gda-aicenter`, superseding the 2026-08-13/18 SumoPod decision (addenda §A4k/§A4l) this section
+used to describe. Plan + runbook: `../docs/plans/2026-08-31-workload-consolidation-to-aicenter.md`.
+As of that plan's authoring, **nothing has been executed on either box** — the compose file is
+retargeted in the repo; the live SumoPod containers have not been touched or migrated yet.
 
-- **That box runs 19 containers of the owner's PRIVATE PRODUCTION.** Never run a Docker command
-  there that is not scoped to `-p gaiada-social`. No `system prune`, no `image prune -a`, no
-  bare `--remove-orphans`. Read `runbooks/deploy-vps.md` §"Postiz / SMM" first — it has the rules.
-- **The `SOCIAL_*` block in `.env.example` belongs on that host, not on this one.** Filling it
-  into `gda-aicenter`'s `.env` does nothing and scatters the group's app secrets.
-- `platform-nest` reaches it over a **WireGuard** link (`10.88.0.1` ↔ `10.88.0.2`), not over
-  loopback and not over a public listener. Postiz's port binds to the tunnel address —
-  `SOCIAL_BIND_ADDR` is never `0.0.0.0`, because Docker's port rules are evaluated *before*
-  ufw's and a `0.0.0.0` bind is internet-reachable on a box whose firewall says otherwise.
+It is still its own compose project (`gaiada-social`), digest-pinned, outside the release path —
+that part is unchanged. What changed:
+
+- **It now runs on `gda-aicenter`, the SAME box as the ERP.** The old "19 containers of someone
+  else's private production" caution is retired for this file specifically (SumoPod still applies
+  to observability, which stays there); the caution that replaces it is sharper: this box runs the
+  ERP's own host Postgres, Keycloak and Cerbos on the SAME kernel, so `docker-compose.social.yml`'s
+  own header now carries the isolation rules in full — read it before touching this stack.
+- **The `SOCIAL_*` block in `.env.example` now belongs on `gda-aicenter`'s `.env`.** Do not leave
+  it filled on a SumoPod checkout after the migration runs; that would be secrets scattered onto
+  a box with no use for them, the inverse of the old warning.
+- **`platform-nest` reaches it over LOOPBACK now, not WireGuard.** The `10.88.0.1` ↔ `10.88.0.2`
+  tunnel is retired for this hop (see the compose file's header for the full reasoning).
+  `SOCIAL_BIND_ADDR` is still never `0.0.0.0` for the same DNAT-before-firewall reason as always —
+  that rule outlives the specific box.
 
 ## Deploy
 
