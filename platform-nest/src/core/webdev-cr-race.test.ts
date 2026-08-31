@@ -425,7 +425,9 @@ describe.skipIf(!TEST_URL)("MI-03 — change-request triage idempotency under a 
     const cr = await newCr("bug");
     const release = await holdCrLock(cr.id);
     try {
-      const flights = [0, 1].map(() => triage(cr.id, { action: "convert", route: "pm_task" }));
+      // `severity` is required to convert a BUG (wcr_bug_has_severity); without it the triage 400s
+      // on the payload and never reaches the advisory-lock race this test exists to pin.
+      const flights = [0, 1].map(() => triage(cr.id, { action: "convert", route: "pm_task", severity: "high" }));
       await waitForAdvisoryWaiters(2);
       await release();
       const results = await Promise.all(flights);
