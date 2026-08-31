@@ -4183,6 +4183,8 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 | `Alpha 01.071.0205a` | 2026-08-31 | platform-ui `0.61.0`→`0.61.1` |
 | `Alpha 01.071.0206a` | 2026-08-31 | platform-nest `0.43.1`→`0.44.0` |
 | `Alpha 01.071.0207a` | 2026-08-31 | platform-nest `0.44.0`→`0.47.0`, platform-ui `0.61.1`→`0.62.0`, mcp-hub `0.12.0`→`0.12.1` |
+| `Alpha 01.071.0208a` | 2026-08-31 | *(no module version moved)* |
+| `Alpha 01.071.0209a` | 2026-08-31 | platform-nest `0.47.0`→`0.48.0` |
 
 ### `Alpha 01.067.0144a` - 2026-08-23 - the work that was finished but never left the laptop
 
