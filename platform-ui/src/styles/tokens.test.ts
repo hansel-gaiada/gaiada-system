@@ -182,6 +182,41 @@ describe("design tokens", () => {
   });
 
   // ---- Gold-glass (owner decisions, 2026-08-30) --------------------------
+  it("a gold fill always carries gold ink, everywhere", () => {
+    // --accent-fill is the BRIGHT gold; --text-on-accent is the ink for
+    // --accent, which in LIGHT is the DEEP gold and therefore takes CREAM.
+    // Pair the bright fill with the deep gold's ink and you get cream on
+    // #F5D560: about 1.3:1.
+    //
+    // This shipped on `.auth-btn--primary` — the sign-in button, on the one
+    // page every single user must get through — and survived because it reads
+    // CORRECTLY IN DARK. That is the whole hazard: the mismatch is invisible
+    // in half the app, so no amount of looking finds it in the other half.
+    //
+    // Scans src/**/*.css, not just src/components: login.css lives under
+    // src/app, which every other guard here misses. The token layer is skipped
+    // because it DECLARES these tokens rather than consuming them.
+    const roots = [resolve(process.cwd(), "src/app"), resolve(process.cwd(), "src/components")];
+    const files = roots.flatMap((dir) =>
+      readdirSync(dir, { recursive: true, encoding: "utf8" })
+        .filter((f) => f.endsWith(".css"))
+        .map((f) => join(dir, f)),
+    );
+    const offenders: string[] = [];
+    for (const path of files) {
+      const stripped = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const block of stripped.match(/\{[^{}]*\}/g) ?? []) {
+        if (!/background:\s*var\(--accent-fill\)/.test(block)) continue;
+        // The lookbehind matters: `border-color:` also ends in "color:".
+        const ink = block.match(/(?<![a-z-])color:\s*var\((--[a-z-]+)\)/);
+        if (ink?.[1] !== "--ink-on-accent-fill") {
+          offenders.push(`${path.replace(/\\/g, "/").split("/").slice(-2).join("/")}: ${ink?.[1] ?? "no colour set"}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("no component CSS shouts — the design has no uppercase", () => {
     // The gold-glass design contains zero uppercase runs in either artboard,
     // and a sweep removed 140 `text-transform: uppercase` declarations across
