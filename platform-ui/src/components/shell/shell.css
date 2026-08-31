@@ -148,7 +148,11 @@
 .erp-top__date { font: 400 13px var(--font-body); color: var(--erp-ink-60); white-space: nowrap; }
 /* A bare underline reads as an artefact on a glass panel; the design draws
    every top-bar control as a bordered 12px-radius box at 36px. */
-.erp-top__search { margin-left: 8px; flex: 1; max-width: 420px; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 13px; border: 1px solid var(--line); border-radius: var(--radius-md); transition: border-color 0.2s var(--erp-ease); }
+/* The design draws search as a COMPACT control sitting beside Jump To, not a
+   420px field that dominates the bar. Kept as a real input rather than the
+   design's button — the zero-JS form is a deliberate feature (see
+   CommandPaletteTrigger.tsx on why both exist) — just sized to match. */
+.erp-top__search { margin-left: 8px; flex: 0 1 260px; min-width: 150px; display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 13px; border: 1px solid var(--line); border-radius: var(--radius-md); transition: border-color 0.2s var(--erp-ease); }
 .erp-top__search:focus-within { border-color: var(--accent-fg); }
 .erp-top__search input { border: none; background: transparent; outline: none; width: 100%; font: 400 14px var(--font-body); color: var(--text-primary); }
 .erp-top__actions { margin-left: auto; display: flex; align-items: center; gap: 18px; }
@@ -245,7 +249,16 @@
 .erp-app[data-density="compact"] .erp-navbtn { padding-top: 7px; padding-bottom: 7px; }
 
 /* ---- Sidebar eyebrows (class-based so media queries can reach them) ---- */
-.erp-side__tagline { flex-basis: 100%; display: block; margin-top: 2px; opacity: 0.6; font-size: 11px; }
+/* The design has neither the tagline nor a "Company" eyebrow — the brand row
+   is mark + wordmark, and the company block is the company name. Hidden in
+   CSS rather than cut from the markup, so nothing is lost and a single rule
+   brings either back. */
+.erp-side__tagline { display: none; }
+/* The company block KEEPS its small label — the design has one there too
+   ("Agency", the company's kind). Ours reads "Company", which is less
+   informative but is the data we have; what it needed was the design's
+   treatment: gold, readable, not a 9px half-opacity whisper. */
+.erp-side__company .type-eyebrow { font-size: 12px; opacity: 1; color: var(--accent-fg); }
 .erp-side__grouplabel { display: block; flex: 1; min-width: 0; padding: 0; opacity: 1; font: 400 13px var(--font-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- Collapsible nav groups ---- */

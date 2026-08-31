@@ -22,7 +22,10 @@ export function CompanyContext({ me, tenantId }: { me: Me; tenantId: string | nu
 
   return (
     <div className="erp-company">
-      <Eyebrow style={{ fontSize: 9, opacity: 0.5 }}>Company</Eyebrow>
+      {/* Sizing lives in shell.css (.erp-side__company .type-eyebrow), not
+          inline: an inline style beats the stylesheet, so the 9px/0.5 here
+          silently won over every attempt to restyle this label. */}
+      <Eyebrow>Company</Eyebrow>
       {canSwitchCompany(me) ? (
         <TenantSwitcher
           companies={companies.map((c) => ({ id: c.id, name: c.name, badge: servedCompanyBadge(me, c.id) }))}
