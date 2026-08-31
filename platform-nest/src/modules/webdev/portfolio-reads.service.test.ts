@@ -22,14 +22,18 @@ async function insertSite(
   tenantId: string,
   domain: string,
   environment: string,
+  // The owner. Defaults to null so the pre-existing 3-argument call sites are unchanged; the
+  // grouping suite below needs it, because "a site with a known owner but no project" is the whole
+  // shape under test and it cannot be set up without writing `client_id`.
+  clientId: string | null = null,
 ): Promise<void> {
   await withTenants(
     [tenantId],
     (c) =>
       c.query(
-        `INSERT INTO webdev_sites (tenant_id, domain, environment, host_kind, access, adoption, origin, origin_site)
-         VALUES ($1, $2, $3, 'unknown', 'none', 'tracked', 'manual', 'portfolio-test')`,
-        [tenantId, domain, environment],
+        `INSERT INTO webdev_sites (tenant_id, domain, environment, host_kind, access, adoption, origin, origin_site, client_id)
+         VALUES ($1, $2, $3, 'unknown', 'none', 'tracked', 'manual', 'portfolio-test', $4)`,
+        [tenantId, domain, environment, clientId],
       ),
     { modules: ["webdev"] },
   );
