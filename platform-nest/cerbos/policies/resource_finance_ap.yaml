@@ -88,3 +88,32 @@ resourcePolicy:
         match:
           expr: >-
             variables.inTenant && request.principal.attr.assurance == "high"
+
+    # Reducing a payable because it was never really owed — a purchase return, an over-bill, an
+    # agreed discount. NOT held by finance_staff: the AP clerk enters bills, and letting the same
+    # person cancel them is the seeded `ap_bill_entry + ap_credit_writeoff_approve` conflict,
+    # structurally rather than by configuration.
+    #
+    # No high-assurance gate, unlike write_off and payment_release, and the reason is frequency
+    # rather than risk — the same argument as finance_ar.credit_note. A step-up in front of every
+    # purchase return gets the step-up granted away permanently.
+    #
+    # ⚠ This action unwinds WITHHOLDING as well as input VAT, which can make an already-issued bukti
+    # potong overstate what was withheld. The policy does not gate on that: owner ruling 2026-08-27
+    # option (c) is to post, record and FLAG (`finance_ap_bupot_amendment_exceptions()`), never to
+    # block a routine return on a pending tax filing.
+    - actions: ["credit_note"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Cancelling a debt outright. High assurance, like payment_release — it is the half of the
+    # `ap_credit_writeoff_approve + ap_payment_release` pair that leaves nothing outstanding to
+    # chase, and unlike a payment it produces no bank line anyone will reconcile.
+    - actions: ["write_off"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && request.principal.attr.assurance == "high"

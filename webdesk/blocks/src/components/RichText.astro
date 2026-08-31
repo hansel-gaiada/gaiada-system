@@ -1,0 +1,25 @@
+---
+// webdesk/blocks/src/components/RichText.astro — vocabulary block type "richText".
+// `content` is a RichTextValue: a Lexical-shaped `{ root: ... }` document OR a plain string
+// fallback (../vocabulary/primitives.ts's own jsonShape for "richtext"). v0 renders the plain-
+// string case directly and the Lexical case as its raw JSON, flagged for a follow-up: a real
+// Lexical-to-HTML serializer is a bigger, separable piece of work this ticket's block-per-type
+// scope does not stretch to (see the WSK-16 ticket report).
+import type { RichTextProps } from '../types.ts'
+
+export interface Props extends RichTextProps {}
+
+const { content } = Astro.props
+const isLexicalDoc = typeof content === 'object' && content !== null && 'root' in content
+---
+<section class="wd-block wd-block-richtext" data-block-type="richText">
+  {typeof content === 'string' && <div class="wd-richtext-body" set:html={content} />}
+  {isLexicalDoc && (
+    <div class="wd-richtext-body wd-richtext-lexical-raw" data-lexical-unserialized="true">
+      <!-- v0: Lexical JSON is not yet serialized to HTML — rendered as an inert data payload so a
+           host can hydrate it client-side (or a later ticket adds server-side serialization)
+           rather than either crashing or silently dropping the content. -->
+      <script is:inline type="application/json" set:html={JSON.stringify(content)} />
+    </div>
+  )}
+</section>

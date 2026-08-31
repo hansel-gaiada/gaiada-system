@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/fonts.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/colors.css">
+<link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/typography.css">
+<link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/components/components.css">
+<link rel="stylesheet" href="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/styles.css">
+<script src="_ds/luxury-minimalist-design-system-c156e5b1-7edc-4777-82f1-e102cdc8a274/_ds_bundle.js"></script>
+<style>
+  /* Token layer derived from the Homies Lab reference: warm cream page, white cards, generous
+     radii, and yellow used as a bold fill rather than a tint. The one non-obvious consequence of
+     a yellow primary is that it is a LIGHT colour — anything sitting on it takes near-black ink,
+     never white, so --fd-on-accent carries ink in both themes. Dark mode is the same composition
+     on warm charcoal: the neutrals keep the reference's warmth instead of going blue-grey. */
+  .fd {
+    --fd-bg: #000000;
+    --fd-bg-blur: rgba(0, 0, 0, 0.86);
+    --fd-panel: #050504;
+    --fd-card: rgba(32, 31, 28, 0.28);
+    --fd-raised: #292418;
+    --fd-overlay: #322C1E;
+    --fd-line: rgba(245, 241, 228, 0.09);
+    --fd-line-2: rgba(245, 241, 228, 0.17);
+    --fd-hover: rgba(245, 213, 96, 0.07);
+    --fd-text: #F6F2E6;
+    --fd-text-2: rgba(246, 242, 230, 0.88);
+    --fd-text-3: rgba(246, 242, 230, 0.68);
+    --fd-text-4: rgba(246, 242, 230, 0.52);
+    --fd-accent: var(--ac, #F5D560);
+    --fd-accent-soft: color-mix(in srgb, var(--fd-accent) 16%, transparent);
+    --fd-accent-line: color-mix(in srgb, var(--fd-accent) 44%, transparent);
+    --fd-on-accent: #23200F;
+    --fd-accent-ink: var(--fd-accent);
+    --fd-accent-active: var(--fd-accent);
+    --fd-accent-2: #E8D5A0;
+    --fd-accent-2-line: color-mix(in srgb, var(--fd-accent-2) 38%, transparent);
+    --fd-ok: #7BC79B;
+    --fd-warn: #E8B04B;
+    --fd-bad: #E8837A;
+    --fd-on-bad: #23200F;
+    --fd-count: var(--fd-bad);
+    --fd-info: #85AEDC;
+    --fd-violet: #BFA3D8;
+    --fd-pink: #E294B4;
+    --fd-ambient: 10%;
+    --fd-ambient-2: 19%;
+    --fd-ambient-3: 5%;
+    --fd-glass: rgba(32, 31, 28, 0.28);
+    --fd-glass-line: rgba(246, 242, 230, 0.06);
+    --fd-glass-line-top: rgba(246, 242, 230, 0.07);
+    --fd-glass-divider: rgba(246, 242, 230, 0.15);
+    --fd-glass-inner: inset 0 1px 0 rgba(246, 242, 230, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+    --fd-blur: blur(34px) saturate(1.7);
+    --fd-glass-sheen: rgba(246, 242, 230, 0.05);
+    --fd-shadow: 0 18px 44px -22px rgba(0, 0, 0, 0.7);
+    --fd-glow: 0 8px 24px -10px color-mix(in srgb, var(--fd-accent) 60%, transparent);
+    --fd-r-card: 18px;
+    --fd-r-ctl: 12px;
+    --fd-r-pill: 999px;
+    color-scheme: dark;
+  }
+  .fd { background: var(--fd-bg); }
+  .fd button:focus { outline: none; }
+  .fd button:focus-visible { outline: 2px solid var(--fd-accent-line); outline-offset: 2px; }
+  .fd[data-fd-theme="light"] { --fd-accent-active: #7C671D;
+    --fd-bg: #F1EEE5;
+    --fd-bg-blur: rgba(241, 238, 229, 0.9);
+    --fd-panel: #F3F1E9;
+    --fd-card: rgba(255, 255, 255, 0.34);
+    --fd-raised: #FFFFFF;
+    --fd-overlay: #FFFFFF;
+    --fd-line: rgba(28, 25, 16, 0.09);
+    --fd-line-2: rgba(28, 25, 16, 0.17);
+    --fd-hover: rgba(28, 25, 16, 0.045);
+    --fd-text: #1C1910;
+    --fd-text-2: rgba(28, 25, 16, 0.9);
+    --fd-text-3: rgba(28, 25, 16, 0.78);
+    --fd-text-4: rgba(28, 25, 16, 0.66);
+    --fd-accent: var(--ac, #F5D560);
+    --fd-accent-soft: color-mix(in srgb, var(--fd-accent) 30%, #FFFFFF);
+    --fd-accent-line: color-mix(in srgb, var(--fd-accent) 38%, #6E5A20);
+    --fd-on-accent: #23200F;
+    --fd-accent-ink: color-mix(in srgb, var(--fd-accent) 42%, #241C00);
+    --fd-accent-2: #7F6A2E;
+    --fd-ok: #256B4C;
+    --fd-warn: #92590C;
+    --fd-bad: #C0443C;
+    --fd-on-bad: #FFFFFF;
+    --fd-count: var(--fd-bad);
+    --fd-info: #35699E;
+    --fd-violet: #75589E;
+    --fd-pink: #B2567F;
+    --fd-ambient: 52%;
+    --fd-ambient-2: 40%;
+    --fd-ambient-3: 26%;
+    --fd-glass: rgba(255, 255, 255, 0.34);
+    --fd-glass-line: rgba(255, 255, 255, 0.9);
+    --fd-glass-line-top: rgba(255, 255, 255, 1);
+    --fd-glass-divider: rgba(28, 25, 16, 0.1);
+    --fd-glass-inner: inset 0 1px 0 rgba(255, 255, 255, 1), inset 0 -1px 0 rgba(28, 25, 16, 0.06), inset 0 0 70px rgba(245, 213, 96, 0.1);
+    --fd-blur: blur(34px) saturate(1.5);
+    --fd-glass-sheen: rgba(255, 255, 255, 0.6);
+    --fd-shadow: 0 12px 28px -18px rgba(40, 34, 16, 0.28);
+    --fd-glow: 0 8px 22px -10px color-mix(in srgb, var(--fd-accent) 70%, transparent);
+    color-scheme: light;
+  }
+  html, body { margin: 0; padding: 0; background: #F1EEE5; }
+  html:has(.fd[data-fd-theme="dark"]), html:has(.fd[data-fd-theme="dark"]) body { background: #000000; }
+  * { box-sizing: border-box; }
+  button, input, select, textarea { font-family: inherit; }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: rgba(245, 213, 96, 0.45); }
+  input::placeholder, textarea::placeholder { color: var(--fd-text-4); }
+  @keyframes gv-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes gv-fade { from { opacity: 0; } to { opacity: 1; } }
+  .gv-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .gv-scroll::-webkit-scrollbar-thumb { background: var(--fd-line-2); border-radius: 999px; }
+  .gv-scroll::-webkit-scrollbar-track { background: transparent; }
+  /* The header date is all-or-nothing: a half-shown date carries no information,
+     and its text lives inside the interpolation wrapper, so text-overflow can never
+     ellipsize it. Below the width where it fits whole, it leaves. */
+  @media (max-width: 1080px) { .fd-hdr-date { display: none !important; } }
+</style>
+</helmet>
+
+<div class="fd" data-fd-theme="{{ mode }}" style="--ac: {{ ac }}; position: relative; min-height: 100vh; background: var(--fd-bg); font-family: Inter, system-ui, sans-serif; color: var(--fd-text)">
+  <div aria-hidden="true" style="position: fixed; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(48vw 48vh at 100% 0%, color-mix(in srgb, var(--fd-accent) var(--fd-ambient), transparent), transparent 68%), radial-gradient(54vw 54vh at 0% 100%, color-mix(in srgb, var(--fd-accent) var(--fd-ambient-2), transparent), transparent 68%), radial-gradient(26vw 30vh at 78% 12%, color-mix(in srgb, var(--fd-accent) var(--fd-ambient-3), transparent), transparent 72%)"></div>
+  <section data-screen-label="Sign in" style="position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); min-height: 100vh; padding: clamp(10px, 1vw, 14px)">
+    <div style="position: relative; margin-right: clamp(40px, 3.4vw, 56px); display: flex; flex-direction: column; justify-content: center; background: var(--fd-glass); backdrop-filter: var(--fd-blur); -webkit-backdrop-filter: var(--fd-blur); border: none; border-radius: 22px; box-shadow: var(--fd-shadow), var(--fd-glass-inner); overflow: hidden; padding: clamp(36px, 6vh, 64px) clamp(28px, 3.4vw, 56px)">
+      <div style="position: relative; z-index: 4; width: 100%; max-width: 490px">
+      <p style="font-size: 12px; font-weight: 700; letter-spacing: 0.01em; text-transform: none; color: var(--fd-text-3); margin: 0 0 26px">D &amp; A Syrowatka</p>
+      <h1 style="font-family: Urbanist, system-ui, sans-serif; font-weight: 500; font-size: clamp(30px, 3.1vw, 46px); line-height: 1.06; letter-spacing: -0.012em; margin: 0; color: var(--fd-text); text-wrap: pretty">Every company, <em style="font-style: italic; color: var(--fd-accent-2)">one</em> set of books.</h1>
+      <p style="font-size: 14px; line-height: 1.62; color: var(--fd-text-2); margin: 26px 0 0; max-width: 400px; text-wrap: pretty">One ledger, one directory, one set of permissions — across every company the holding operates, from the digital agency to the resort.</p>
+      <div style="margin-top: clamp(40px, 5vw, 76px)">
+        <sc-for list="{{ entities }}" as="e" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 45px; padding: 12px 0; border-top: 1px solid var(--fd-line)">
+          <span style="display: flex; align-items: center; gap: 13px; min-width: 0">
+            <span style="width: 2px; height: 15px; background: {{ e.rail }}; flex-shrink: 0"></span>
+            <span style="font-size: 13px; color: var(--fd-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ e.name }}</span>
+          </span>
+          <span style="font-size: 13px; color: var(--fd-text-3); white-space: nowrap">{{ e.kind }}</span>
+        </div>
+        </sc-for>
+      </div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; justify-content: center; padding: clamp(36px, 6vh, 64px) clamp(24px, 3vw, 56px)">
+      <div style="position: relative; z-index: 4; width: 100%; max-width: 380px">
+        <h2 style="font-size: 26px; font-weight: 700; line-height: 1.2; letter-spacing: -0.012em; margin: 0 0 10px; color: var(--fd-text)">Sign in</h2>
+      <p style="font-size: 15px; line-height: 1.6; color: var(--fd-text-2); margin: 0 0 26px">Use your workspace identity to continue.</p>
+      <a href="Dashboard Page.dc.html" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 42px; text-decoration: none; background: var(--fd-accent); color: var(--fd-on-accent); border: 1px solid var(--fd-accent); border-radius: var(--fd-r-ctl); font-size: 13px; font-weight: 700; letter-spacing: 0.01em; cursor: pointer; transition: opacity 0.2s cubic-bezier(0.22, 0.61, 0.36, 1)" style-hover="opacity: 0.62">Sign in with SSO</a>
+      <p style="font-size: 12.5px; line-height: 1.58; color: var(--fd-text-3); margin: 22px 0 0; text-wrap: pretty">Can&apos;t get in? That&apos;s almost always a position that hasn&apos;t been set up for you yet, not a password problem — ask whoever manages your team&apos;s roster to check it.</p>
+          </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#F5D560&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Palette&quot;,&quot;options&quot;:[&quot;#F5D560&quot;,&quot;#E8B04B&quot;,&quot;#9FB9AC&quot;,&quot;#8AA3BE&quot;]}}">
+class Component extends DCLogic {
+  state = { mode: "light" };
+
+  componentDidMount() {
+    // The theme lives across both files, so the choice made in the workspace is the
+    // one the sign-in screen honours; with none stored we follow the device.
+    this._mq = window.matchMedia("(prefers-color-scheme: dark)");
+    this._sync = () => {
+      let saved = null;
+      try { saved = window.localStorage.getItem("gaiada-theme"); } catch (e) { saved = null; }
+      // A stored choice always wins. With none: standalone follows the device, but
+      // inside the design host we render light so the two pages agree — the
+      // dashboard's own default is light regardless of the device.
+      let embedded = false;
+      try { embedded = window.self !== window.top; } catch (e) { embedded = true; }
+      const mode = saved === "light" || saved === "dark"
+        ? saved
+        : (embedded ? "light" : (this._mq.matches ? "dark" : "light"));
+      if (mode !== this.state.mode) this.setState({ mode });
+    };
+    this._sync();
+    this._mq.addEventListener("change", this._sync);
+    window.addEventListener("storage", this._sync);
+  }
+
+  componentWillUnmount() {
+    if (this._mq) this._mq.removeEventListener("change", this._sync);
+    window.removeEventListener("storage", this._sync);
+  }
+
+  renderVals() {
+    return {
+      mode: this.state.mode,
+      ac: this.props.accent ?? "#F5D560",
+      entities: [
+        { name: "D & A Syrowatka", kind: "Holding", rail: "var(--fd-text-4)" },
+        { name: "Gaia Digital Agency", kind: "Agency", rail: "var(--fd-accent)" },
+        { name: "Viceroy", kind: "Resort", rail: "var(--fd-ok)" },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

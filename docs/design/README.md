@@ -3,6 +3,23 @@
 Status: **PLANNED**. Owner sign-off pending on the two open decisions below.
 Opened 2026-08-22. Scope: `platform-ui/` only.
 
+> **SUPERSEDED IN PART (2026-08-30) — the gold-glass theme.** A new design handoff landed from
+> the team, vendored at `design/gaiada-erp-gold-glass/` (see `design/README.md`). It is a reskin,
+> not a re-architecture: the IA, nav model, page archetypes and route mapping in
+> `2026-08-22-ui-redesign-ia-and-migration.md` all still stand, and the token-layer-first rollout
+> mechanic below is exactly how it lands. What it overrides in
+> `2026-08-22-ui-redesign-design-language.md` is the *values*: a gold `#F5D560` accent, a glass
+> surface material, Urbanist in place of Cormorant Garamond, and larger radii.
+>
+> **Open decision #2 below is now CLOSED**, in the direction of dropping the serif — Cormorant
+> Garamond leaves the product entirely, not just card titles. Decision #1 (dark-first) survives.
+> Rollout plan: https://claude.ai/code/artifact/51d0879e-04ed-4592-bfa7-c1766f936e10
+>
+> Phases 1 (vendor the bundle) and 2 (print path) of that plan are **IMPLEMENTED, not yet
+> DEV-VERIFIED** — the CSS half is covered by three new assertions in `styles/tokens.test.ts`,
+> but no PDF has been rendered since the change and the suite has not run on the server. The
+> token layer is Phase 3 and has not started.
+
 ## The four decisions taken by the owner (2026-08-22)
 
 1. **Dark-first luxury.** Dark is the primary designed theme; light is derived. The warm

@@ -90,6 +90,23 @@ Never write "built", "done", "complete", or "production-ready". The vocabulary i
   Corollary: a generated file has **no meaningful three-way merge**. Two sessions regenerating MAP
   concurrently produced a merge that matched neither side and silently dropped a route. On any
   conflict in a generated file, regenerate from the merged tree rather than resolving hunks.
+- **Never delegate an edit to `docs/modules/CHANGELOG.md` (or any shared append-only doc) to a
+  subagent.** On 2026-08-26 a subagent asked to "append an entry" instead *consolidated* the work
+  into another session's in-flight `platform-ui 0.54.0` entry, **deleted a committed
+  `platform-nest 0.39.2` entry outright** (23 lines), and flipped that other session's status from
+  PROTOTYPED to DEV-VERIFIED — citing verification evidence that belonged to a different ticket.
+  `tsc`, vitest and `next build` are all blind to it. Write changelog entries yourself, take the
+  NEXT free version rather than joining an existing entry, and check `git diff --numstat` says
+  **N insertions, 0 deletions** before you believe you only appended.
+  ⚠ **That numstat check is necessary but NOT sufficient, and trusting it alone caused a second
+  incident the same day.** A DUPLICATION is pure insertion, so "0 deletions" passes while the file
+  silently grows a second copy of a third of itself. What happened: an entry was spliced in with
+  `text[index(startHeading):index(endHeading)]`, the start marker was a version string **another
+  session had already used**, it matched THEIR entry earlier in the file, and the slice ran on and
+  swallowed 30 entries — finance, lms, hr, platform-nest — which were then inserted into a file that
+  already held them. So also verify **every heading still appears exactly once**
+  (`grep -oE '^### ' file | sort | uniq -d`) — and never key a text slice on a version number, which
+  is precisely the thing another session may have taken while you were not looking.
 - **A missing field reads exactly like NULL.** An omitted column in a SELECT is
   indistinguishable from a NULL value — this produced two wrong conclusions. Check the select
   list before concluding "the data is empty".

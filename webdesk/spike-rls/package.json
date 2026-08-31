@@ -1,0 +1,11 @@
+{
+  "name": "webdesk-spike-rls",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe:raw": "node probes/raw.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

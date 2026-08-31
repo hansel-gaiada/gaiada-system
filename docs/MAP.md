@@ -22,6 +22,7 @@
 | `simulation/` | node | `gaiada-simulation` | `start` | yes | yes |
 | `sync-engine-go/` | go | `gaiada/sync-engine-go` | `cmd/sync · cmd/synccert` | yes | yes |
 | `wa-chat-bot/` | node | `gaiada-wa-bot` | `dev · start` | yes | yes |
+| `webdesk/` | node | `webdesk` | — | — | **missing** |
 
 Node scripts per component:
 
@@ -30,11 +31,12 @@ Node scripts per component:
 - `hermes-gateway` — `start`, `test`
 - `lab-runner` — `dev`, `start`, `test`, `typecheck`
 - `mcp-hub` — `dev`, `start`, `test`, `typecheck`
-- `platform-nest` — `build`, `check:shards`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-demo`, `seed:finance-live-defaults`, `seed:hr-config`, `seed:lms-creative-social`, `seed:lms-general-track`, `seed:lms-hr-it`, `seed:lms-seo-gm`, `seed:lms-webdev-curriculum`, `seed:lms-webdev-labs`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `test:perf`, `typecheck`
+- `platform-nest` — `build`, `check:function-drift`, `check:shards`, `gen:role-bundles`, `gen:scope-constrained-roles`, `iam:backfill`, `import:nexus`, `lint:migration-immutable`, `lint:migration-names`, `lint:migration-rls`, `lint:postiz-deps`, `lint:withtenants`, `lms:assign-mandatory`, `lms:reset-training`, `mail:replay-inbound`, `migrate`, `provision:roster`, `seed:agency`, `seed:automation`, `seed:claude-seats`, `seed:client-logins`, `seed:departments`, `seed:employee-files`, `seed:finance-config`, `seed:finance-demo`, `seed:finance-live-defaults`, `seed:hr-config`, `seed:hr-statutory-ratify`, `seed:lms-creative-social`, `seed:lms-general-track`, `seed:lms-hr-it`, `seed:lms-seo-gm`, `seed:lms-webdev-curriculum`, `seed:lms-webdev-labs`, `seed:org-structure-refresh`, `seed:own-brand-social`, `seed:owner-grant`, `seed:personas`, `seed:portal-clients`, `seed:purge-retired-history`, `seed:reassign-retired`, `seed:retire-persona-principals`, `seed:retire-placeholder-hr`, `seed:roster-access`, `seed:search`, `seed:social-content-brief-automation`, `start`, `test`, `test:iam-chain-alignment`, `test:mail-corpus`, `test:perf`, `typecheck`
 - `platform-ui` — `build`, `dev`, `e2e`, `e2e:a11y`, `gen:office-credits`, `start`, `test`, `test:watch`, `typecheck`
 - `report-renderer` — `dev`, `start`, `test`, `typecheck`
 - `simulation` — `build`, `start`, `typecheck`
 - `wa-chat-bot` — `dev`, `gateway`, `media-worker`, `start`, `test`, `typecheck`
+- `webdesk` — `check:rls`, `check:rls:selftest`, `lint:migrations`, `migrate`, `test`
 
 ## Compose
 
@@ -162,14 +164,15 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `search` | `search` | yes |
 | `social` | `social` | yes |
 | `webdev` | `webdev` | yes |
+| `webdev-contracts` | — | — |
 
 ## platform-nest — migrations
 
-- Head: `202608261030_rename_billing_module_to_invoice.sql`
+- Head: `202608272010_iam_finance_ap_credit_writeoff.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 189 (121 legacy `NNNN_`, 68 timestamped)
+- Applied files on disk: 204 (121 legacy `NNNN_`, 83 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -181,6 +184,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | _(root)_ | `platform-nest/src/modules/reports/print-payload.controller.ts` |
 | _(root)_ | `platform-nest/src/modules/search/search-google-oauth.controller.ts` |
 | _(root)_ | `platform-nest/src/modules/search/search.controller.ts` |
+| _(root)_ | `platform-nest/src/modules/webdev-contracts/contract-snapshots.controller.ts` |
+| _(root)_ | `platform-nest/src/modules/webdev/console-reads.controller.ts` |
+| _(root)_ | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
 | `/api` | `platform-nest/src/admin/admin-identity.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-admin.controller.ts` |
 | `/api` | `platform-nest/src/admin/company-crud.controller.ts` |
@@ -244,7 +250,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social-reports.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/social.controller.ts` |
 | `/api/:tenantId/modules/social` | `platform-nest/src/modules/social/youtube-oauth.controller.ts` |
+| `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev-contracts/contract-snapshots.controller.ts` |
+| `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/console-reads.controller.ts` |
 | `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/webdev.controller.ts` |
+| `/api/:tenantId/modules/webdev` | `platform-nest/src/modules/webdev/zoneb-events.controller.ts` |
+| `/api/:tenantId/modules/webdev/control` | `platform-nest/src/modules/webdev/webdesk-control.controller.ts` |
 | `/api/:tenantId/reports` | `platform-nest/src/modules/reports/reports.controller.ts` |
 | `/api/admin` | `platform-nest/src/admin/admin-systems.controller.ts` |
 | `/api/admin/bot` | `platform-nest/src/admin/bot-admin.controller.ts` |
@@ -345,13 +355,18 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/requests`
 - `/departments/[deptId]/review`
 - `/departments/[deptId]/search-terms`
+- `/departments/[deptId]/sites`
+- `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
 - `/finance`
 - `/finance/[...unbuilt]`
 - `/finance/accounts`
+- `/finance/assets`
 - `/finance/close`
+- `/finance/consolidation`
+- `/finance/cutover`
 - `/finance/journals`
 - `/finance/journals/[entryId]`
 - `/finance/ledger`
@@ -361,6 +376,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/finance/reports`
 - `/finance/settings`
 - `/finance/tax`
+- `/finance/treasury`
 - `/hr`
 - `/hr/analytics`
 - `/hr/attendance`
@@ -414,6 +430,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring/new`
 - `/notifications`
 - `/office`
+- `/office-lab`
 - `/office/credits`
 - `/organization`
 - `/organization/access`
@@ -515,15 +532,17 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 | `stale-approval-chaser.json` | — | stale-approval-chaser (CRON) |
 | `summarize-via-mcp.json` | — | summarize-via-mcp (template) |
 | `task-sla.json` | — | task-sla (CRON) |
+| `wd-contract-watch.json` | `wswdcontractwatch1` | wd-contract-watch (CRON) — 'site pinned older contract' notice |
 | `wd-digests.json` | `wswddigests00001` | wd-digests (CRON) |
 | `wd-provision.json` | `wswdprovision0001` | Subworkflow: webdev.provisionSite (PRV-03 provision<->ERP seam) |
 | `wd-stale-nag.json` | `wswdstalenag0001` | wd-stale-nag (CRON) |
+| `wd-zoneb-intake.json` | `wswdzonebintake1` | wd-zoneb-intake -> webdev_zoneb_event_log (WEBHOOK ingest, HMAC-gated) |
 
 ## Docs, runbooks, guides
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`
+Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-mfa.md`, `internal-ca.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `test-all.sh`, `wire-env.sh`
 

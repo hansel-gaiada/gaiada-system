@@ -187,11 +187,37 @@ The guard test fails the build on all of these, deliberately:
 - Brand strings (`SYROWATKA`, bronze `#6E5A43`) intact.
 
 Also: hairline borders, opacity-only hovers, one easing curve (`--erp-ease`), the uppercase
-0.30em-tracking `.type-eyebrow` signature. Fonts are self-hosted **variable** woff2 (Cormorant
-Garamond display, Inter body, 400–700) split latin / latin-ext by `unicode-range` and preloaded
-in `app/layout.tsx` — the old static .ttf/.woff pairs were deleted (1.66 MB → ~85 KB, and
-weights 500/600 stopped being browser-synthesised). A11y: skip link, `:focus-visible` ring,
-`prefers-reduced-motion` kill-switch, mobile nav toggle in `shell/Sidebar.tsx`.
+0.30em-tracking `.type-eyebrow` signature. Fonts are self-hosted **variable** woff2 split
+latin / latin-ext by `unicode-range` and preloaded in `app/layout.tsx`. A11y: skip link,
+`:focus-visible` ring, `prefers-reduced-motion` kill-switch, mobile nav toggle in
+`shell/Sidebar.tsx`.
+
+### Gold-glass theme (2026-08-30) — what changed and what is still open
+
+Source: `../design/gaiada-erp-gold-glass/`. Three owner decisions, all enforced by the guard test.
+
+- **Gold is the accent, bronze stays the brand.** `--accent` is gold; `--brand-color-primary`
+  is still bronze. Gold is a LIGHT colour, so **light and dark carry different accents on
+  purpose**: light `--accent` is the DEEP gold (`#7C671D`, safe as text on cream), dark
+  `--accent` is the bright gold. The bright tone is `--accent-fill` in both themes, and
+  anything sitting on it takes **`--ink-on-accent-fill`**, never `--text-on-accent`. Writing
+  `background: var(--accent-fill); color: var(--text-on-accent)` reads fine in dark and is
+  invisible in light — that is the trap this token pair exists to close.
+- **Glass caps at chrome + top-level cards.** Opt in by naming `--surface-glass` /
+  `--blur-glass`; everything nested reads `--surface-card-solid`. The guard fails any component
+  CSS outside `shell/shell.css` and `ui.css` that references `--blur-glass`.
+- **The serif is gone.** No Cormorant Garamond anywhere. ⚠ **`--font-display` currently resolves
+  to the Inter stack as a documented interim — Urbanist's woff2 files are not in this repo.**
+  See the blocked note at the top of `styles/tokens/fonts.css` for exactly what to add. Until
+  then every heading renders in the body face and the design's display/body contrast is absent.
+  `public/fonts/CormorantGaramond-*.woff2` are now orphaned and can be deleted.
+- Radii stepped up one notch (`--radius-sm` 4→8, `md` 8→12, `lg` 16→18). The numbered
+  primitives did **not** move, so anything pinned to a number stayed put.
+
+**CSS class prefixes.** Five are in use and they are not interchangeable: `lux-` = `ui.tsx`
+primitives, `erp-` = shell and app chrome, `rc-` = the reports/charts kit, `pm-` = the PM
+island, `tr20-` = the print route. New component CSS takes the prefix of the surface it belongs
+to; a genuinely new surface gets a new prefix, never a bare class name.
 
 ## Traps that have burned real tickets
 
@@ -228,6 +254,6 @@ weights 500/600 stopped being browser-synthesised). A11y: skip link, `:focus-vis
 - `../docs/modules/MODULES.md` + `CHANGELOG.md` — module status/version. Bump `platform-ui` and
   append an entry on a notable change. Vocabulary: `PLANNED · IN PROGRESS · PROTOTYPED ·
   DEV-VERIFIED`; nothing is production.
-- Design source `../design/erp-suite-dashboard-handoff/`; spec
+- Design source `../design/gaiada-erp-gold-glass/` (current; `erp-suite-dashboard-handoff/` is superseded); spec
   `../docs/superpowers/specs/2026-07-05-gaiada-erp-ui-design.md`.
 - `README.md` here covers run steps only.

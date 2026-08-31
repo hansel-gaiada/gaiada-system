@@ -118,6 +118,16 @@ export function JournalEntryForm({ accounts }: { accounts: Account[] }) {
       </div>
 
       <table className="fin-lines">
+        {/* ── EVERY GRID CONTROL CARRIES ITS OWN NAME ──────────────────────────────────────────
+            A <th scope="col"> names a COLUMN in a data table; it does NOT name a control sitting
+            inside a cell. axe rated the omission CRITICAL (select-name x4, label x2), and the
+            lived version is worse than the rule: a screen-reader user tabbing this grid heard
+            "combo box" twice and "edit text" twice per row, with nothing to say which was the
+            account and which the side — on the one surface in this workspace where a mistake
+            writes an immutable journal.
+
+            The name includes the LINE NUMBER because the controls repeat down the grid, and four
+            identically-named controls are only marginally better than four unnamed ones. */}
         <thead>
           <tr>
             <th scope="col">Account</th>
@@ -130,7 +140,11 @@ export function JournalEntryForm({ accounts }: { accounts: Account[] }) {
           {lines.map((l, i) => (
             <tr key={i}>
               <td>
-                <select value={l.accountCode} onChange={(e) => setLine(i, { accountCode: e.target.value })}>
+                <select
+                  aria-label={`Line ${i + 1} account`}
+                  value={l.accountCode}
+                  onChange={(e) => setLine(i, { accountCode: e.target.value })}
+                >
                   <option value="">Select an account…</option>
                   {accounts
                     // Only postable accounts. A heading like "1000 ASET" exists to group the chart,
@@ -146,16 +160,30 @@ export function JournalEntryForm({ accounts }: { accounts: Account[] }) {
                 </select>
               </td>
               <td>
-                <select value={l.side} onChange={(e) => setLine(i, { side: e.target.value as "debit" | "credit" })}>
+                <select
+                  aria-label={`Line ${i + 1} side`}
+                  value={l.side}
+                  onChange={(e) => setLine(i, { side: e.target.value as "debit" | "credit" })}
+                >
                   <option value="debit">Debit</option>
                   <option value="credit">Credit</option>
                 </select>
               </td>
               <td className="fin-lines__num">
-                <input value={l.amount} onChange={(e) => setLine(i, { amount: e.target.value })} inputMode="decimal" />
+                <input
+                  aria-label={`Line ${i + 1} amount`}
+                  value={l.amount}
+                  onChange={(e) => setLine(i, { amount: e.target.value })}
+                  inputMode="decimal"
+                />
               </td>
               <td>
-                <input value={l.memo} onChange={(e) => setLine(i, { memo: e.target.value })} placeholder="optional" />
+                <input
+                  aria-label={`Line ${i + 1} memo`}
+                  value={l.memo}
+                  onChange={(e) => setLine(i, { memo: e.target.value })}
+                  placeholder="optional"
+                />
               </td>
             </tr>
           ))}

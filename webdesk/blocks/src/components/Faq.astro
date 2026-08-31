@@ -1,0 +1,20 @@
+---
+// webdesk/blocks/src/components/Faq.astro — vocabulary block type "faq". Same relation-pointer
+// posture as FeatureGrid.astro: `items` point at the conceptual `faqItem` collection
+// (BLOCKS.faq.fields[1].relationTo) and are rendered as pointers, not resolved content.
+import type { FaqProps } from '../types.ts'
+
+export interface Props extends FaqProps {}
+
+const { heading, items } = Astro.props
+---
+<section class="wd-block wd-block-faq" data-block-type="faq">
+  {heading && <h2 class="wd-faq-heading">{heading}</h2>}
+  <ul class="wd-faq-items">
+    {items.map((item) => (
+      <li class="wd-faq-item" data-relation-collection={item.collection} data-relation-slug={item.slug}>
+        {item.slug}
+      </li>
+    ))}
+  </ul>
+</section>

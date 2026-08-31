@@ -22,8 +22,7 @@
 
 .office__demo-badge {
   font: 700 11px var(--font-body);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--status-warning-fg);
   background: var(--status-warning-bg, transparent);
   padding: var(--space-4) var(--space-8);
@@ -252,7 +251,6 @@
 .office__roster-kind {
   font: 600 10px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--erp-ink-60);
 }
 .office__roster-name { font: 500 13px var(--font-body); color: var(--ink-strong); }
@@ -261,7 +259,6 @@
   align-self: flex-start;
   font: 700 10px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--accent-fg);
 }
 /* The roster's non-canvas equivalent of the emote bubble's loudest treatment (req #2:
@@ -302,7 +299,6 @@
 .office__assurance {
   display: inline-block;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 11px;
 }
@@ -363,7 +359,6 @@
   text-align: left;
   font: 600 11px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--erp-ink-60);
   padding: var(--space-8) var(--space-12);
   border-bottom: 1px solid var(--erp-hairline);
@@ -377,3 +372,104 @@
 .office-credits__table code { font: 500 12px var(--font-mono, monospace); }
 .office-credits__table a { color: var(--accent); }
 .office-credits__licence { color: var(--status-ok-fg); }
+
+/* ── Rail tabs (2026-08-26) ───────────────────────────────────────────────────────────────────
+   The rail used to stack legend + roster + detail in one column. On a real floor that pushed the
+   detail panel below the fold, so selecting an avatar appeared to do nothing. Tabs are pure
+   presentation: every panel shows something the page already had, and none of them implies a
+   capability that is not built. */
+.office__tabs {
+  display: flex;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--erp-hairline);
+}
+
+.office__tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-8) var(--space-8);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--erp-ink-60);
+  cursor: pointer;
+  transition: opacity 120ms var(--erp-ease);
+}
+
+.office__tab:hover { opacity: 0.7; }
+
+.office__tab--active {
+  color: var(--ink-strong);
+  border-bottom-color: var(--accent);
+}
+
+.office__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-height: 0;
+}
+
+/* ── Floor-wide movement list (the Activity tab) ───────────────────────────────────────────── */
+.office__activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.office__activity-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: var(--space-8);
+  border-bottom: 1px solid var(--erp-hairline-soft);
+  font-size: 0.8125rem;
+}
+
+.office__activity-who { font-weight: 600; color: var(--ink-strong); }
+.office__activity-reason { color: var(--erp-ink-60); }
+.office__activity-list time { color: var(--erp-ink-60); font-size: 0.75rem; }
+
+/* ── Fullscreen (2026-08-26) ──────────────────────────────────────────────────────────────────
+   Deliberately a CSS state rather than the Fullscreen API. The app shell stays mounted underneath,
+   so leaving fullscreen returns the user exactly where they were with the sidebar intact; the
+   browser API takes over the whole document and fights the shell's own focus handling. Escape
+   exits (bound in OfficeCanvas.tsx), which is the behaviour the API would have given us anyway. */
+.office--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  margin: 0;
+  padding: var(--space-16);
+  background: var(--surface-page);
+  overflow: auto;
+}
+
+/* The floor should absorb the extra height a fullscreen window gives it, rather than leaving the
+   plate the same size with a band of empty page beneath. */
+.office--fullscreen .office__viewport { height: calc(100vh - 320px); }
+
+.office__fs-btn {
+  appearance: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--erp-hairline);
+  color: var(--ink-strong);
+  padding: var(--space-8) var(--space-12);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 120ms var(--erp-ease);
+}
+
+.office__fs-btn:hover { opacity: 0.7; }
+
+@media (prefers-reduced-motion: reduce) {
+  .office__tab,
+  .office__fs-btn { transition: none; }
+}

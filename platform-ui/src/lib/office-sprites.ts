@@ -27,13 +27,19 @@ export type SkinTone = "light" | "amber" | "olive" | "taupe" | "bronze" | "brown
  *  OfficeCanvas.tsx's drawAvatar() for why that particular integer was chosen over 2x/3x. */
 export const FRAME_PX = 64;
 
-/** Which cell to crop from each 9-col x 4-row (walk) / 3-col x 4-row (sit) sheet. Row 2 is "facing
- *  down" in every LPC sheet (verified by rendering and comparing against row 0/1/3) — the only
- *  direction this office ever needs, since avatars never turn. `sit` column 2 is the settled
- *  "seated, hands down" frame; `walk` column 0 is the neutral "feet together" stride frame, used
- *  only for the few seconds a replay has an avatar in transit between rooms. */
+/** Which cell to crop from each 9-col x 4-row (walk) / 3-col x 4-row (sit) sheet. LPC row order is
+ *  0 = facing away (up), 1 = left, 2 = facing the viewer (down), 3 = right.
+ *
+ *  `sit` faces AWAY, because the desk is drawn above the seat tile: a seated avatar on row 2 had
+ *  its back to its own monitor and stared out of the screen instead. Both poses used to be pinned
+ *  to row 2 on the reasoning that avatars never turn, which was true of the direction but wrong
+ *  about which direction a person at a desk should be facing.
+ *
+ *  `walk` stays on row 2. Transit is along the horizontal corridor, so neither up nor down is
+ *  "correct"; facing the viewer keeps the person readable during the few seconds a replay has them
+ *  in the corridor, which is exactly when someone is trying to see who is moving. */
 export const POSE_FRAME: Record<SpritePose, { col: number; row: number }> = {
-  sit: { col: 2, row: 2 },
+  sit: { col: 2, row: 0 },
   walk: { col: 0, row: 2 },
 };
 
@@ -112,6 +118,22 @@ export function pickGender(id: string): SpriteGender {
 
 export function pickSkinTone(id: string): SkinTone {
   return SKIN_TONE_ORDER[hashId(`${id}:tone`) % SKIN_TONE_ORDER.length];
+}
+
+/** Which `walk` sheet ROW faces a given direction of travel (owner feedback 2026-08-26: "face the
+ *  direction of travel" during ambient walking — see `office.ts`'s `ambientWalkState`). LPC row
+ *  order, per this file's own header: 0 = away, 1 = left, 2 = toward the viewer, 3 = right.
+ *
+ *  The dominant axis wins (a mostly-horizontal walk faces left/right, a mostly-vertical one faces
+ *  away/toward) rather than blending — an LPC sheet has exactly four discrete facings, no
+ *  in-between frame to blend toward. `(0, 0)` (not walking) falls back to `POSE_FRAME.walk`'s own
+ *  row — the same fixed "toward the viewer" frame corridor transit already uses — so a caller that
+ *  forgets to guard on `walking` degrades to the pre-existing transit look rather than to a
+ *  meaningless facing. */
+export function facingRow(dirX: number, dirY: number): 0 | 1 | 2 | 3 {
+  if (dirX === 0 && dirY === 0) return POSE_FRAME.walk.row as 0 | 1 | 2 | 3;
+  if (Math.abs(dirX) >= Math.abs(dirY)) return dirX < 0 ? 1 : 3;
+  return dirY < 0 ? 0 : 2;
 }
 
 export function hexToRgb(hex: string): [number, number, number] {

@@ -24,14 +24,14 @@ Inventory: `2026-08-22-hermes-build-inventory.md` · Design:
 
 | Track | Items | PLANNED | IN PROGRESS | PROTOTYPED | DEV-VERIFIED |
 |---|---|---|---|---|---|
-| Platform prerequisites | 22 | 15 | 0 | 3 | **4** |
+| Platform prerequisites | 22 | 14 | 0 | 4 | **4** |
 | **Hermes runtime (H0–H9)** | 25 | 14 | 0 | **1** | **10** |  *(H3 dropped; H0/H1/H2 split)*
-| Agent seats | 15 | 15 | 0 | 0 | 0 |
+| Agent seats | 15 | 0 | 0 | **14** | **1** |  *(seeded LIVE; `dept-pm` enabled, 13 await an eval suite)*
 | Persona packs | 14 | 12 | 0 | **2** | 0 |  *(examples/ blocked on corpus privacy)*
-| Eval suites | 14 | 14 | 0 | 0 | 0 |
+| Eval suites | 14 | 13 | 0 | **1** | 0 |  *(dept-pm authored; 13 seats still need one before they may be enabled)*
 | New tools | 25 | 25 | 0 | 0 | 0 |
 | RAG for the workforce (R1–R5) | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **120** | **99** | **0** | **7** | **14** |
+| **Total** | **120** | **82** | **0** | **22** | **16** |
 
 **Read this honestly: 14 of 120 are DEV-VERIFIED** (and see the 2026-08-26 correction — B2/B3 were
 already closed by other sessions, so the identity plumbing is further along than these counts imply). The session closed P0's data model and a
@@ -63,10 +63,12 @@ employee-facing.
 | B16 | ~~Probes cannot detect a provider outage~~ — **REFRAMED 2026-08-23: they CAN and DID.** `SyntheticJourneyFailing` fired ~14 h/day. The gap is DELIVERY, not detection — see B19. Prober now also records WHICH provider served (diagnosis) | — | **PROTOTYPED, reframed** |
 | B19 | ~~Alerting structurally deaf~~ — **RESOLVED 2026-08-23**: ntfy.sh topic wired AND `default-multi` given a webhook leg (it had none — the ticket path was dead even with a URL set). Proven by 3 delivered messages incl. 2 real alerts | — | **RESOLVED** |
 | B21 | `DiskWillFillIn24h` on `sumopod` — **NOT urgent (corrected)**; 6.7 GB reclaimed 2026-08-23 (build cache only, images untouched), 61 G free: the 36 GB drop was a one-off `mimi-*` rebuild 3–6 h ago; disk FLAT for 3 h, 54 GB free. Stale `predict_linear` projection. 97 GB build cache worth reclaiming as housekeeping | nothing imminent | **OWNER — no unscoped prune on that box** |
-| B23 | `aire-nginx` crash-looping ~3 weeks — **ROOT CAUSE CONFIRMED**: SumoPod copy is leftover dev; `aire_n8n_data` proves n8n was removed, orphaning the nginx upstream. Cleanup command prepared; blocked at the destructive-action guardrail | that project only | **OWNER — run `docker compose -p aire down`** |
+| B23 | `aire-nginx` crash-looping ~3 weeks — **ROOT CAUSE CONFIRMED**: SumoPod copy is leftover dev; `aire_n8n_data` proves n8n was removed, orphaning the nginx upstream. Cleanup command prepared | that project only | **OWNER APPROVED 2026-08-26 — `docker compose -p aire down -v`, volume INCLUDED.** Owner confirmed the project is dead, so `aire_n8n_data` goes too. ⚠ `-v` is irreversible: that data has no backup on this box, and the approval covers project `aire` ONLY — the host runs 10 other compose projects (B24) and a project-scoped `down` is the whole safety property here |
+| B27 | ~~`0172a` rolled back by my migration~~ — **RESOLVED**: `7080f232` fixed it, `0173a` applied the migration, `0174a` shipped the wiring. Live and verified 2026-08-26 | — | **RESOLVED** |
+| B27-old | (superseded) `alpha-01.071.0172a` ROLLED BACK by my migration — self-test INSERTs into FORCE-RLS `activities` as NOBYPASSRLS. Fixed in `7080f232`; live is `0171a` and the migration has NOT applied. Needs a re-release | the P0 attribution columns reaching prod | **OWNER — re-release** |
 | B26 | **I shipped a label-split in `recordJSON`** — failure paths emitted no `provider` label, creating a second series that latches `SyntheticJourneyFailing` on forever while `avg_over_time` reads 100 %. Same class as the `RemoteWriteStalled` bug fixed the day before. Fixed in source, builds clean | alert trustworthiness | **NEEDS DEPLOY** |
 | B25 | **⚠ ACTIVE 25 % FAILURE RATE** — owner 2026-08-26: no fallback keys available at this stage. Now DOCUMENTED in compose + ALARMED via `GatewayServedByEcho`; exposure itself unchanged. The estate's ENTIRE AI runs on Ollama Cloud alone — `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` are both EMPTY, so `LLM_CHAIN=gemini,claude,openai` is a chain of ONE. Ollama Cloud is borrowed/shared/weekly-rate-limited and the owner's own rules forbid making it a hard prod dependency. Quota 8.9 % used | every AI call; 2026-08-24: latency 10–17 s, 3-of-12 timeouts, and one `provider=echo` response actually served | **OWNER — URGENT: set a real GEMINI/ANTHROPIC key on `ai-gateway`** |
-| B24 | **gaiada's observability host runs 11 compose projects**, several production (incl. zenvix/`bfs`). The disk burst that paged us was `mimi` rebuilding. **An unrelated project can fill the disk and take gaiada's alerting down** | the estate's ability to be told anything | **OWNER — decide deliberately, not during an incident** |
+| B24 | **gaiada's observability host runs 11 compose projects**, several production (incl. zenvix/`bfs`). The disk burst that paged us was `mimi` rebuilding. **An unrelated project can fill the disk and take gaiada's alerting down** | the estate's ability to be told anything | **OWNER RULED 2026-08-26 — MOVE gaiada observability to its own box.** Co-tenancy is not being mitigated, it is being ended: no unrelated project may be able to starve the estate's alerting. Sequencing note: WebDesk A-12 was ruled *procure now* in the same session, so there are two box decisions live — check whether they are one procurement before ordering either. Until the move lands, the risk is UNCHANGED, and the ~97 GB build-cache reclaim is still worth doing as interim relief |
 | B22 | ~~`RemoteWriteStalled` false page~~ — **FIXED 2026-08-23**: `by (host, env)` split sumopod into a live group and a retired `env=""` group that pages forever. Now filtered with `env!=""`; promtool SUCCESS, deployed, page cleared | — | **RESOLVED** |
 | B19-old | (superseded) **⚠ ALERTING IS STRUCTURALLY DEAF.** `GatewayBudgetNearCap` fired ~13 h/day and `SyntheticJourneyFailing` ~14 h/day for 24 h+; Alertmanager's only active alert is the `Watchdog` heartbeat. Receivers are `ops@notify.gaiada.invalid` (RFC-2606 never-resolvable) via `mailpit:1025` (dev sink) | **EVERY alert in the estate.** Until fixed, all other monitoring work is decoration | **PLANNED — HIGHEST PRIORITY** |
 | B16-old | (superseded) Synthetic probes cannot detect a primary-provider outage — they assert `200`+`"text"`, and failover returns both. **This is the real form of the risk B10 described**, and it is estate-wide, not Hermes-specific: any provider behind a failover chain can die invisibly. Proven in the field — it masked a 24h outage | every provider outage in the estate | **PLANNED (H0e) — highest-value monitoring fix open** |
@@ -85,14 +87,14 @@ employee-facing.
 | 2 | Risk-tier schema (R0–R3) | **DEV-VERIFIED** | `risk_policy` in `202608221746`; `min_tier` DEFAULT `R2` asserted in-migration (fail closed) |
 | 3 | Environment registry | **DEV-VERIFIED** | **REUSED `infra_hosts`** rather than a second table; delphi/helios/hostinger-wp seeded, closing MSO-04 OQ-1 |
 | 4 | Risk computation fn | **DEV-VERIFIED** | `mcp-hub/src/risk.ts`, 16/16 tests, `tsc` clean. Both invariants pinned (floor; fail-closed) |
-| 5 | Attribution: `approved_by` + `executed_by` | PLANNED | explicit-absence rule; extends the shipped `actor_id`/`metadata.via` |
+| 5 | Attribution: `approved_by` + `executed_by` | **PROTOTYPED — broke a deploy, fixed** | `202608261100` + `7080f232`. Self-test INSERTs were refused by FORCE-RLS as NOBYPASSRLS; `0172a` rolled back. Re-verified under live-shaped privileges. NOT yet applied to prod |
 | 6 | Persona pack format frozen | **PROTOTYPED** | `persona/README.md` + two packs authored against it |
 | 7 | `x-act-for` envelope contract frozen | PLANNED | contract only; implementation is P3 |
 | 8 | Naming decision | **RESOLVED 2026-08-23** | `SOUL.md` says **Zedano**, identity is `zedano@gaiada.com` — two sources already agree. Standardise on **Zedano** |
-| 9 | **Corpus capture — PM** | PLANNED | ≥100 real requests. **Longest lead item; start now** |
-| 10 | **Corpus capture — WebDev** | PLANNED | ≥100 real requests |
-| 11 | **Corpus capture — HR** | PLANNED | ≥100 real requests |
-| 12 | Corpus privacy decision | PLANNED | **OWNER** — may real transcripts become fixtures? may they leave the estate? |
+| 9 | **Corpus capture — PM** | PLANNED — **UNBLOCKED 2026-08-26** | ≥100 real requests. **Longest lead item; start now** |
+| 10 | **Corpus capture — WebDev** | PLANNED — **UNBLOCKED 2026-08-26** | ≥100 real requests |
+| 11 | **Corpus capture — HR** | PLANNED — **UNBLOCKED 2026-08-26** | ≥100 real requests |
+| 12 | Corpus privacy decision | **RESOLVED 2026-08-26** | **OWNER RULED: redacted, in-estate only.** Real transcripts MAY become fixtures after a PII/client-name redaction pass, and MUST NOT leave gaiada infrastructure. Consequences: (a) redaction is a required step in items 9–11, not an optional one, and needs a named reviewer — an unreviewed redaction is an unproven one; (b) no fixture may be sent to an external eval tool or hosted judge, which rules out that class of tooling for the eval suites; (c) this is the same processor posture as R-5, so the two must not drift |
 | 13 | Delete stale delphi/helios never-touch lines | **DEV-VERIFIED** | corrected 2026-08-22 in the obs plan + `CREDENTIALS.local.md` |
 
 ## P1 — Demote Hermes to router + `dept-pm` pilot
@@ -316,6 +318,347 @@ capability, so it must be governed by `agent_registry` + the hub tool view + Cer
 happens to be installed in a directory on the box.
 
 **Not wired to deploy.** Rendering + shipping by tag is the remaining half of H2.
+
+### 2026-08-26 ✅ THE WORKFORCE EXISTS IN PRODUCTION — 15 seats seeded, `dept-pm` ENABLED
+
+Owner pushed back on "inert by design", correctly. Separating what was actually gated from what was
+merely unrun:
+
+- **The seed was not blocked, only unrun.** `dist/seed/agent-seats.js` shipped with 0174a. Run:
+  **15 identities created, 15 registry rows written.**
+- **`enabled=false` IS a real gate**, and it held on live data.
+- **`dept-pm` had evidence** — an eval suite that passes — so its gate was satisfied. "Shadow mode
+  first" was MY recommendation, not a constraint, and I had been presenting it as though it were one.
+
+**The seeded roster, verified in production:**
+
+```
+dept-agency/creative/it/seo/smm/webdev  low_write     dept-finance/hr/legal  read
+dept-pm  medium_write  ns=5             router  read  ns=1 (agents only)
+sec-guard  read        pantheon  read   ns=0            edge-wa  read  ns=1
+```
+
+The schema enforced its own rules on real rows: **`pantheon` holds ZERO tool namespaces** (external
+seats propose, never execute) and **`sec-guard` is `read`** — both refused at the CHECK if written
+otherwise.
+
+**`dept-pm` enabled**, with `eval_suite = ai-agents/src/evals/dept-pm.cases.ts`. The gate proved
+itself in the same transaction: `UPDATE ... enabled=true WHERE name='dept-hr'` was **refused** —
+`violates check constraint agent_registry_enabled_requires_evidence`. No agent without evidence, on
+production data, not in a test.
+
+**End-to-end verified live:** `GET /api/agents` → **HTTP 200**, returning exactly one seat —
+`dept-pm impact=medium_write ns=pm,tasks,projects,approvals,deliverables`. The router can discover a
+department seat and nothing else.
+
+#### What "enabled" does and does not mean
+
+Worth stating precisely, because it is the difference between shipping a capability and shipping a
+risk. `dept-pm` being enabled means it can be **routed to** and can **read**. It does NOT mean it acts
+unsupervised:
+
+- Cerbos was probed live earlier this session: a `medium`-impact write by an unattended principal is
+  **EFFECT_DENY**. `dept-pm`'s ceiling is `medium_write`, so **its writes suspend into D14 approval**
+  rather than committing.
+- Its tool view is narrowed to five namespaces by `seat-view.ts`; everything else is invisible to it.
+- `enabled=false` remains a single-row kill switch that takes effect without a deploy.
+
+**Still genuinely gated: 13 seats.** Not arbitrarily — they have no eval suite, and writing one per
+seat is the real remaining work. That is the enablement gate functioning as designed rather than an
+obstacle to route around.
+
+### 2026-08-26 ✅ SHIPPED — `Alpha 01.071.0174a` is LIVE and verified
+
+Release green, deploy green, estate healthy. **This is the first time this session's work is running
+in production.**
+
+| Check | Result |
+|---|---|
+| `/health` | `ok: true`, `Alpha 01.071.0174a` |
+| Running image (the truth, not the field) | `gaiada-platform-nest:alpha-01.071.0174a` |
+| Containers | platform (healthy), platform-ui, mcp-hub, ai-gateway — all up |
+| `activities` attribution columns | `approved_by`, `approval_channel`, `executed_by` — present |
+| Approval CHECKs | `activities_approval_channel_known` + `_required` — both live |
+| `risk_policy` | **13 rows** |
+| `infra_hosts` | `delphi=staging helios=production hostinger-wp=production` |
+| `agent_registry` | 1 row (`router`), **enabled=false, eval_suite=null** |
+
+Both `/health` AND the image tag were checked, because a FAILED deploy can leave `/health` reporting
+a stale version — the field alone is not evidence.
+
+**The enablement gate is holding in production.** The `router` row (seeded 2026-08-24 by a concurrent
+session, before I had tracked the migration as live) sits disabled with no eval suite. It cannot be
+turned on until one exists, which is the CHECK doing exactly its job on real data.
+
+#### Two things that nearly broke this release
+
+1. **HEAD was on another session's branch** (`office-floor-2026-08-26`), not `main` — the checkout
+   hazard `CLAUDE.md` warns about, live. Cut the release from a temporary **worktree** on `main` so
+   their working tree was never touched, and removed it after.
+2. **The VERSION bump dropped the trailing newline.** `deploy.yml` enforces tag ↔ VERSION parity, and
+   that is precisely the invisible difference that fails a release. Caught with `cat -A` before
+   committing.
+
+`deploy.yml` is a `workflow_call` reusable workflow, so it runs as a JOB INSIDE the release run
+(`deploy / deploy → success`) rather than as its own entry — worth knowing before concluding "the
+deploy never fired", which is what a run-list search suggests.
+
+#### What is live vs what is merely present
+
+**Live and working:** the observability fixes, the `agents.*` namespace, `GET /api/agents`, the
+seat-narrowed tool view, the risk ladder tables, the environment registry, and the approval
+attribution columns WITH the wiring that fills them.
+
+**Present but inert, by design:** `agent_registry` holds one disabled seat. `agents.list` returns an
+empty set. **Nothing is enabled and no agent is running** — the seed has not been executed on the
+box, and enabling a seat is a per-seat human decision after shadow mode. That is the correct first
+state, not an unfinished one.
+
+### 2026-08-26 🔴 MY MIGRATION BROKE A LIVE DEPLOY. `alpha-01.071.0172a` rolled back.
+
+**The most serious error of this session, and it reached production.**
+
+`202608261100`'s self-assertion block INSERTs two probe rows into `activities` to prove the CHECKs
+reject. `activities` is **FORCE-RLS**, and migrations run as `platform_owner` — **NOBYPASSRLS**. The
+policy refused both probes before either CHECK could fire:
+
+```
+new row violates row-level security policy for table "activities"
+```
+
+That is neither `check_violation` nor `not_null_violation`, so my EXCEPTION handlers did not catch
+it, the DO block aborted, and the release rolled back. Fixed by someone else in `7080f232`.
+
+**Live state confirmed:** platform healthy on **`Alpha 01.071.0171a`** (the rollback target), and
+`SELECT count(*) FROM schema_migrations WHERE name LIKE '%activity_approval%'` → **0**. The migration
+has not applied. The estate is fine; the release is not.
+
+#### How I got it wrong — and it is documented in the file I should have read
+
+I asked "is `activities` FORCE-RLS?" with a grep over the migrations for `activities` on the same
+line as `FORCE ROW`. It matched nothing, so I concluded no RLS. **RLS is applied via a DO-loop over
+table NAMES**, which a line-based grep structurally cannot see.
+
+`platform-nest/CLAUDE.md` says, in as many words:
+
+> **⚠ Grep is not a census.** … Ask the database what a table contains, never the source.
+
+I had that file in context and grepped anyway.
+
+#### The deeper failure: my verification environment did not reproduce the target's PRIVILEGE MODEL
+
+I did "verify by execution" — against a scratch database where I created `activities` myself, with no
+RLS, as superuser. That proved the CHECKs fire and **nothing whatsoever** about whether the migration
+can run where it actually runs. The fix's own comment names why CI could not catch it either: test
+databases migrate as SUPERUSER, which bypasses RLS, so the whole suite was green.
+
+**A verification that omits the one property that differs is not a weaker check — it is a check of a
+different thing.** Five of this session's verification errors were proxies (a slice, a filename, an
+exit code, malformed JSON, a grep). This one was a proxy ENVIRONMENT, and it is the one that shipped.
+
+#### Amends: re-verified under the live shape
+
+Rebuilt the scratch to reproduce the live privilege model — `activities` FORCE-RLS, migrator
+NOBYPASSRLS non-superuser — and applied the FIXED migration as that role:
+
+```
+APPLIED under live-shaped privileges ✓
+activities_approval_channel_known
+activities_approval_channel_required
+```
+
+(Two harness bugs of my own on the way: a missing `GRANT USAGE, CREATE ON SCHEMA public` that read as
+a migration failure, and a stale constraint listing I nearly reported as a result.)
+
+**Standing rule this earns:** a migration touching a FORCE-RLS table must be applied, before commit,
+as a NOBYPASSRLS non-owner role against a schema that has the policy — not as superuser against a
+table you built for the test. And the RLS question is answered by **asking the database**, never by
+grepping the migrations.
+
+### 2026-08-26 — approval attribution columns (P0 item 5) · PROTOTYPED
+
+`202608261100_activity_approval_attribution.sql`. Both lints pass; **applied to a scratch DB and both
+self-assertions fired**. This closes the one P0 item I had designed at length and never built — named
+as missing rather than left to be discovered.
+
+`activities` gains `approved_by` (FK users) · `approval_channel` · `executed_by`.
+
+**What it fixes: approval is not delegation.** The existing shape (`actor_id` = the human,
+`metadata.via` = the agent) models DELEGATION — "Alice's agent acted AS Alice". It cannot express
+APPROVAL — "Pantheon acted on its own authority and a human authorised THIS action". Recorded in the
+author/co-author shape that reads as *"the boss did it, co-authored by Pantheon"*, which is false: he
+did not do it, he permitted it. Ask *"what did the boss actually DO last month?"* and a
+delegation-shaped record returns 400 actions he merely clicked approve on.
+
+**Two constraints, both proven to reject:**
+- `approved_by IS NULL OR approval_channel IS NOT NULL` — an approval must say where it came from, or
+  the question that matters after a channel compromise ("which approvals arrived via Discord in the
+  last 30 days?") has no answer but *"all of them"*.
+- `approval_channel IN ('erp','discord','wa','telegram','api')` — a channel invented at a call site is
+  a channel no query will find.
+
+**Deliberate divergence from the `via` precedent: COLUMNS, not a metadata key.** `via` is
+authorization-neutral, so jsonb is fine for it. `approved_by` is the security-relevant half, and a
+jsonb key can hold a uuid referencing nobody — an audit row claiming approval by a nonexistent user
+manufactures accountability, which is worse than no row. A foreign key cannot lie that way.
+
+**`writeActivity` was NOT given three more parameters.** It has 263 call sites, and this estate
+already learned that threading an attribution field through them makes it OPT-IN — "the failure mode
+of an opt-in audit field is that the site somebody forgets is the site that mattered". These will be
+populated from request-scoped ambient context exactly as `via` is. **That wiring is a follow-up; the
+columns are useless-but-harmless until it lands**, and saying so here is cheaper than someone finding
+empty columns later and assuming they are broken.
+
+**A filename trap worth recording:** `date -u` read `202608260744` while the head was already
+`202608261030` from a concurrent session. A migration that sorts BEFORE an applied one **never runs on
+an existing database, silently**. Stamped `202608261100` instead — ordering is the property the naming
+rule exists to protect, and it wins over matching a clock that is behind. In a checkout that gained
+**52 migrations** while this session ran, the local clock is not a reliable source of "later".
+
+### 2026-08-26 — `agents.*` verified against the LIVE Cerbos policy · DEV-VERIFIED
+
+Registering a tool does not make it callable. **Cerbos is authoritative whenever `CERBOS_URL` is
+set**, and `resource_mcp_tool.yaml`'s own header warns that *"drift fails CLOSED — registry entry
+without a policy entry ⇒ Cerbos deny"*. Had the rules been name-based, every tool built this session
+would have been **inert in production** while passing all 332 unit tests.
+
+Probed the running Cerbos (`localhost:3592`, health `SERVING`) with a seat-shaped principal
+(`hub_caller`, `assurance: low`, `isUnattended: true`, `agent: "agent:dept-pm"`):
+
+| Tool | Decision |
+|---|---|
+| `agents.list` | **EFFECT_ALLOW** |
+| `agents.invoke` (write, impact low) | **EFFECT_ALLOW** |
+| `agents.status` | **EFFECT_ALLOW** |
+| `agents.runs` | **EFFECT_ALLOW** |
+| *control:* `pm.setStatus` (write, impact **medium**, unattended) | **EFFECT_DENY** |
+
+**No policy change is needed.** The allow rule matches on tool ATTRIBUTES (assurance, automation
+scope, impact) rather than names, so a new namespace is admitted by construction. The name list in
+that file governs only the D14-13 approved-executables path, which a low-impact tool never reaches.
+
+**The control row is what makes the other four meaningful.** Without it, four ALLOWs would be equally
+consistent with a policy that allows everything. The DENY proves the impact gate is live in the
+policy, not merely in the hub's in-code fallback — which is precisely where the pre-2026-08-20 hole
+actually lived.
+
+**A near-miss in the method, again:** the first probe reported `NO RESULT` for the three read tools
+and I nearly recorded that as a finding. It was malformed JSON of my own making (an empty `impact`
+double-quoted into `"""`). The control's DENY is what showed the probe shape was otherwise sound.
+Fourth verification-method error of the session; the rule stands — **when a check says something
+surprising, check the CHECK first.**
+
+### 2026-08-26 — `dept-pm` eval suite · PROTOTYPED — the first seat can now legally be enabled
+
+`ai-agents/src/evals/dept-pm.cases.ts` + `dept-pm.test.ts`. **`ai-agents` now 28 files / 272 tests
+green** — it was RED on main before this (see below). `tsc` clean.
+
+`agent_registry`'s CHECK refuses `enabled = true` without an eval suite, so this file is literally
+what stands between the seat existing and the seat running.
+
+**The mix is the point, not the count** — 8 cases: happy path · 3 must-refuse · 2 ambiguous · 1
+injection · 1 D14 impact gate. Each non-happy category tests something a happy-path suite cannot see:
+
+- **Refusals prove CONTAINMENT, not model goodwill.** Every refusal case scripts a model that
+  actually *tries* the forbidden call (money, deploy, HR), so a pass means the runner's allow-list
+  stopped it.
+- **Ambiguous cases assert the seat ASKS.** Guessing is the dominant real-world failure of a helpful
+  assistant in an ERP, and it is invisible unless tested for.
+- **"An empty list is a CLAIM"** has its own case: the seat must say WHAT IT CHECKED, never "there
+  are none". This encodes the estate's own incident — a sweep reporting `0 errors` while indexing
+  zero tasks.
+- **D14:** a high-impact write SUSPENDS rather than executing; the suspension IS the pass condition.
+
+#### Three things the harness taught me, by failing
+
+1. **A blocked tool does not end the run.** My refusals asserted `status: "tool_not_allowed"`; the
+   runner feeds the failure back and the agent RECOVERS to `ok`. `cases.ts` gets that status by
+   ending the script ON the forbidden call so the model persists. Mine now assert the better pair —
+   the tool never executed (containment) AND the answer routes the person somewhere (the persona's
+   "every refusal names the next step").
+2. **`Impact` in ai-agents is a THREE-value scale** (`read | low_write | high_write`) that MAPS onto
+   the hub's `low|medium|high`. `medium_write` does not compile here — the type system catching
+   exactly the conflation `agent.ts`'s registryImpactRank note warns about.
+3. **A containment assertion can pass while proving nothing.** `forbiddenToolsNotCalled` is satisfied
+   when the model never ATTEMPTED the tool. A test now requires each refusal case's scripted model to
+   actually reach for what it must not get — otherwise a future case could assert safety and
+   demonstrate none, looking identical in a green run.
+
+#### ⚠ A RED TEST ON MAIN, fixed — and it was NOT a leak
+
+`knowledge/service.test.ts` — *"an unknown envelope resolves to an empty tenant set → zero hits"* —
+was failing on `main`, untouched by this session. It reads exactly like a tenant-isolation leak.
+
+**It is not.** The returned hit carries `audience: "public"`. D9.4's two-tier corpus makes the public
+tier (the gaiada.com crawl) readable with **no identity at all**, deliberately — that is how a lead on
+WhatsApp gets an answer, and the live estate verified an anonymous caller receiving public hits. The
+DESIGN changed; the assertion did not follow.
+
+Updated to the property that actually matters now: **an unknown envelope may see `public` and must
+NEVER see `internal`.** Asserting zero hits tested isolation only by accident; asserting "public only"
+tests it on purpose.
+
+Worth stating plainly: a stale red test is worse than no test. It masks the next real failure, and
+this one impersonated a security bug for anyone who looked at it.
+
+### 2026-08-26 — agent-seat seed written · PROTOTYPED — and every seat is seeded DISABLED
+
+`platform-nest/src/seed/agent-seats.ts`. All 15 seats. `tsc` clean; upsert behaviour proven by
+running it TWICE against the real schema.
+
+**Follows `seed/automation.ts` exactly**, because a seat is the same kind of thing as an n8n workflow
+account: a non-human principal needing a real `users` row so authorization, audit and OBO work
+uniformly. `kind: "service"` on the membership is load-bearing — without it these take the column
+default `employee` and **every people-shaped surface in the ERP counts fourteen robots as
+colleagues**.
+
+**Every seat is seeded `enabled = false`, and that is the point rather than an oversight.** The
+migration's CHECK refuses `enabled = true` without BOTH an eval suite and an identity. This seed is
+deliberately on the wrong side of that gate: it creates the identities and the rows and turns on
+NOTHING. A seat is enabled by a human, per seat, after its eval suite exists and it has cleared
+shadow mode. Seeding fourteen live agents in one command would skip every stage of the training
+ladder at once. **So `agents.list` returns an empty set after seeding — that is the correct first
+state, not a bug to chase.**
+
+#### A real bug caught by execution, not by reading
+
+The first draft used ONE `ON CONFLICT (name, company_scope) WHERE company_scope IS NOT NULL`. That
+**cannot match a group-scoped row** (NULL scope) — PostgreSQL requires the ON CONFLICT predicate to
+match the partial index it should use — so re-running the seed would raise a unique violation on the
+OTHER partial index instead of updating. The two indexes exist precisely because NULL never collides
+in a plain UNIQUE; the upsert has to branch the same way. Now:
+
+```
+group-scoped  -> ON CONFLICT (name) WHERE company_scope IS NULL
+company-scoped-> ON CONFLICT (name, company_scope) WHERE company_scope IS NOT NULL
+```
+
+Verified by running both upserts twice: 2 rows, notes updated, no duplicates, `enabled=false`.
+
+#### ⚠ THIRD verification-method failure of this session — the pattern is worth naming
+
+The idempotency script reported **"enablement gate DID NOT FIRE"**. It fires. Checked directly:
+
+```
+ERROR: new row ... violates check constraint "agent_registry_enabled_requires_evidence"
+router enabled=false
+```
+
+The script had `set -o pipefail` and did `psql ... | grep -q 'violates'`. psql correctly exits
+non-zero on the rejected UPDATE, `pipefail` propagates that, and a **successful** grep therefore read
+as failure.
+
+Three verification failures in one session, all producing FALSE results about working code:
+1. a 400-character slice that "proved" a webhook was absent (it was present, past the cut);
+2. `ls assurance.ts` that "proved" a capability was missing (it was in another file) — four days of
+   wrong blocker reporting;
+3. this `pipefail` inversion.
+
+**My checks have been failing more often than the things they check.** All three share a shape: a
+proxy for the truth (a slice, a filename, an exit code) was trusted instead of the truth itself. The
+rule already added for blockers generalises — **when a check reports something surprising, verify the
+CHECK before believing the result.** A green test that never ran and a red test that mis-parsed are
+the same failure wearing different colours.
 
 ### 2026-08-26 — per-principal tool view (P1 item 15) · PROTOTYPED — **the demotion is now ENFORCED**
 

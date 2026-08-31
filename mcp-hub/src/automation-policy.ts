@@ -28,6 +28,8 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // Webhook ingest (§ step 4) — inbound lead/form -> a task in the intake project. LOW write.
   // Kept inert by the workflow's INGEST_ENABLED gate until legal Gate 1 + the day-one gate pass.
   "wf:inbound-lead-intake": ["tasks.create"],
+  // WSK-12 (coordinator): the Zone B signed-fact bridge. Records the dedup row and may notify.
+  "wf:webdesk-zoneb-intake": ["webdev.recordZoneBEvent", "notify"],
   // WS11 meeting-to-delivery pipeline. n8n opens gates + advances stages (all LOW writes) and
   // extracts artifacts; it NEVER decides a gate or records a signature (those are human/UI actions).
   // meeting.recordingContext (F-1): reads the meeting_recordings row's client/project context by
@@ -43,7 +45,7 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   // exactly like deploy.*, and resource_mcp_tool.yaml's executable list is the only thing that lets
   // an approved re-drive land (see that policy's PRV-03 note). Do not widen this entry to cover any
   // other webdev tool without its own gate — same house rule deploy.* already established.
-  "wf:delivery": ["pipeline.getRun", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "notify", "approvals.request"],
+  "wf:delivery": ["pipeline.getRun", "pipeline.artifacts.get", "pipeline.createStage", "pipeline.updateStage", "pipeline.updateRun", "pipeline.openGate", "design.prototype", "code.scaffold", "github.repoStatus", "deploy.staging", "deploy.production", "webdev.provisionSite", "notify", "approvals.request"],
   "wf:scope": ["pipeline.getRun", "pipeline.openGate", "notify"],
   // pm.createDoc / pm.createTask (WD-06, D-4): the report-track sink — a PM doc + review task
   // under the run's project, scoped to wf:report ONLY (invisible to wf:scope/wf:delivery/etc).
@@ -61,6 +63,17 @@ export const AUTOMATION_ALLOWLIST: Record<string, readonly string[]> = {
   "wf:wd-digests": ["workActivity.feed", "projects.get", "llm.summarize", "notify", "workActivity.relink"],
   // WD-26: stale-task nag (no work_activity in N=5 days -> assignee; >=2N -> also project owner).
   "wf:wd-stale-nag": ["workActivity.staleTasks", "notify"],
+  // WSK-29 — wd-contract-watch (automation/workflows/wd-contract-watch.json): surfaces a "site
+  // pinned older contract" console notice per site whenever a WebDesk (Zone B) tenant publishes a
+  // new /v1 contract snapshot (webdev D-5: never auto-upgrades). Pre-registered BEFORE
+  // `webdev.listPendingContractNotices` exists — same precedent WSK-12 set for
+  // `wf:webdesk-zoneb-intake` -> `webdev.recordZoneBEvent` (added here before WSK-19/31 built the
+  // tool). Deny-by-default already protects this: the workflow's own gate + this allow-list
+  // together mean a call to a tool that doesn't exist yet 404s, never silently succeeds. The read
+  // tool itself is a platform-nest (webdev module) registration this ticket flagged, not built —
+  // see the workflow file's own "MCP webdev.listPendingContractNotices" node `notes` for the
+  // contract it must satisfy.
+  "wf:wd-contract-watch": ["webdev.listPendingContractNotices", "notify"],
   // TR-11: the three reports/check-in flows. All three call platform-nest's checkin service reads
   // (pending-reminders / missed-yesterday) and `facts/recompute` DIRECTLY with the platform's own
   // service token (never through the hub — recompute is deliberately not an MCP tool, §9.2), so

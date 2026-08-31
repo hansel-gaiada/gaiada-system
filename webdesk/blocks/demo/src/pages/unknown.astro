@@ -1,0 +1,33 @@
+---
+// webdesk/blocks/demo/src/pages/unknown.astro — the renderer-invariant proof (WSK-16 scope item
+// 2), from the installed tarball, as a REAL consumer would exercise it: a draft item, one page
+// behind the vocabulary (a `pricingTable` block this pinned renderer version does not know),
+// sandwiched between two known blocks. Wires a CUSTOM onUnknownBlock hook (in addition to the
+// package's own default console.warn) and writes what it saw to a build-time JSON file, so this
+// build's output can be inspected afterwards without needing to capture the astro build log.
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { ItemRenderer } from '@gaiada/webdesk-blocks'
+import envelope from '../data/unknown-envelope.json'
+
+const qaReports: unknown[] = []
+
+function onUnknownBlock(report: { type: string; index: number; collection?: string; slug?: string }) {
+  // Written INSIDE the hook (not after rendering the component tree) — a page's own frontmatter
+  // runs before its child components render, so writing after would race an empty array. This is
+  // "a reporting hook a host can wire to QA" (WSK-16 ticket text) exercised exactly as a host
+  // would: append-and-persist, so a CI QA job could fail the build on a non-empty report file.
+  qaReports.push(report)
+  mkdirSync('./qa-reports', { recursive: true })
+  writeFileSync('./qa-reports/unknown-block-reports.json', JSON.stringify(qaReports, null, 2))
+}
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WSK-16 demo — unknown block invariant</title>
+  </head>
+  <body>
+    <ItemRenderer envelope={envelope} onUnknownBlock={onUnknownBlock} />
+  </body>
+</html>
+<script is:inline type="application/json" id="qa-reports" set:html={JSON.stringify(qaReports)} />

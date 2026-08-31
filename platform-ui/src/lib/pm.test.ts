@@ -618,11 +618,22 @@ describe("getBurndown reader", () => {
     if (prevDemo === undefined) delete process.env.DEMO_MODE; else process.env.DEMO_MODE = prevDemo;
   });
 
+  // ⚠ EXPLICIT TIMEOUT, because this case is the first to touch the DEMO_MODE fixture chain in this
+  // file and therefore pays for loading it. MEASURED across runs on a shared machine:
+  // 634 · 1099 · 1381 · 3198 · 3233 · 5007 ms — the last one against vitest's default 5 s budget, so
+  // it FAILED, six times, while passing in isolation every time. The work is unchanged; only the
+  // machine's load varies (this repo is a checkout shared by dozens of concurrent agent sessions,
+  // each running its own builds).
+  //
+  // A 5 s budget on a 0.6–3.2 s fixture read has no headroom, and the failure it produces is
+  // indistinguishable from a real regression — which is worse than a slow test, because it teaches
+  // people to re-run rather than investigate. 20 s is ~6x the slowest honest measurement: still tight
+  // enough to catch a genuine hang, wide enough that load alone cannot fail it.
   it("returns a non-empty series for a seeded demo project, ending at the fixed demo 'today'", async () => {
     const rows = await getBurndown("demo-hansel", "co-agency", "p-web-1");
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.at(-1)?.date).toBe("2026-07-16");
-  });
+  }, 20_000);
 
   it("applies from/to as an inclusive date-range filter", async () => {
     const rows = await getBurndown("demo-hansel", "co-agency", "p-web-1", "2026-07-15", "2026-07-16");

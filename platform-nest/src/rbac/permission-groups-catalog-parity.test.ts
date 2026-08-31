@@ -81,7 +81,7 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
   // module adds no relationship-class permission, so the Ruling-3 bypass-exempt set is exactly where
   // it was. If a future social ticket moves this number, that is the change to justify, not the
   // grantable one. Prior movement: HIER-3, 2026-08-11 — core.team.* retired (215 -> 211).
-  it("sanity: 267 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM Phase 2 P2-02, 2026-08-13: 249 -> 267 [+18 across role_grant/position/employee/it_account], relationship set untouched; prior: IAM-GAP-01, 2026-08-13: 247 -> 249; SMM-30, 2026-08-12: 211 -> 247; HR-FULL, 2026-08-24: 287 -> 305 [+18 across hr_policy/hr_recruitment/hr_payroll], relationship set untouched, +11 authoring groups; FINANCE-F0, 2026-08-24: 305 -> 318 [+13 across finance_config/finance_period/finance_control], relationship set untouched, +4 authoring groups; UI-01b, 2026-08-25: +3 across the NEW finance_ownership kind (the cap table), role-arm only, advancedOnly for all three because writing an edge confers scope)", () => {
+  it("sanity: 267 grantable / 15 relationship catalog permissions (this suite's fixed inputs; IAM Phase 2 P2-02, 2026-08-13: 249 -> 267 [+18 across role_grant/position/employee/it_account], relationship set untouched; prior: IAM-GAP-01, 2026-08-13: 247 -> 249; SMM-30, 2026-08-12: 211 -> 247; HR-FULL, 2026-08-24: 287 -> 305 [+18 across hr_policy/hr_recruitment/hr_payroll], relationship set untouched, +11 authoring groups; FINANCE-F0, 2026-08-24: 305 -> 318 [+13 across finance_config/finance_period/finance_control], relationship set untouched, +4 authoring groups; UI-01b, 2026-08-25: +3 across the NEW finance_ownership kind (the cap table), role-arm only, advancedOnly for all three because writing an edge confers scope; WSK-12, 2026-08-27: 363 -> 365 [+2 across the NEW webdev_zoneb_event kind, the Zone B signed-fact bridge], relationship set untouched, no new authoring group -- `read` joins webdev_provisioning, `record` is advancedOnly)", () => {
         // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
     // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
@@ -91,7 +91,11 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // +3 grantable, 283 -> 286.
     // IAM-14c (2026-08-23): +1 grantable — `core.integration_connection.manage`, the company
     // tier's own key (301 -> 302 pairs, 286 -> 287 grantable). Deliberate pin update, not a silence.
-    expect(grantable.length).toBe(363);
+    // WSK-19 (2026-08-27): +2 grantable — webdev.contract_snapshot.{read,refresh}, 365 -> 367.
+    // WSK-31 (2026-08-27): +2 grantable — webdev.provisioned_site.{operate,promote} (the §07 WebDesk
+    // control-plane MCP tool set's Zone A authz, on the EXISTING webdev_provisioned_site kind — no
+    // new authoring group; both advancedOnly, same reasoning webdev.zoneb_event.record used), 367 -> 369.
+    expect(grantable.length).toBe(372);
     expect(relationshipKeys.size).toBe(15);
   });
 

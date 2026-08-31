@@ -11,7 +11,12 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.43.0` - a project belongs to a client (2026-08-27) - DEV-VERIFIED
+> **Renumbered at merge (2026-08-31):** the five `reva/ui` entries below landed there as
+> platform-nest `0.40.0`–`0.43.0`, platform-ui `0.55.0`, mcp-hub `0.11.2`; `main` had already used
+> those numbers for other work, so they are `0.44.0`–`0.47.0`, `0.62.0` and `0.12.1` here. The
+> `reva/ui` commit messages keep the old numbers.
+
+### platform-nest `0.47.0` - a project belongs to a client (2026-08-27) - DEV-VERIFIED
 
 **Changed**
 - `POST /api/:t/projects` requires `clientId`. The one client-less shape is the company's own work,
@@ -28,14 +33,14 @@ local stack). None of these mean "production-done".
   `2026-08-26-webdev-lineage-fields-design.md` §4. No migration — the 8 local / 9 live legacy rows
   are a data gap (the UI edit form requires a client, so they get one when next touched), and a
   `NOT NULL` would block archiving them.
-- Every actor, same rule: UI `ProjectForm` (Client required since 0.55.0), hub `projects.create`
+- Every actor, same rule: UI `ProjectForm` (Client required since 0.62.0), hub `projects.create`
   (forwards `isInternal`; the platform stays the authority), n8n `on-client-created-seed` (already
   passes `clientId`). 15 test scaffolding projects across 9 suites now say `isInternal: true`.
 - Tests: new `core/projects-client.test.ts` (10: refuse orphan, store client, internal flagged, both
   refused, foreign client, malformed id, PATCH detach refused, PATCH converts internal, PATCH foreign
   refused, PATCH without client untouched).
 
-### platform-nest `0.42.0` - the runs list can carry its gates (2026-08-27) - DEV-VERIFIED
+### platform-nest `0.46.0` - the runs list can carry its gates (2026-08-27) - DEV-VERIFIED
 
 **Added**
 - `GET /api/:t/pipeline/runs?include=gates` — each run comes back with `gates: PipelineGate[]`
@@ -48,7 +53,7 @@ local stack). None of these mean "production-done".
 - Tests: `pipeline.test.ts` (+1: no `gates` key without the parameter; grouped per run with it,
   `[]` for the gateless run); suite 34/34, `lint:withtenants` OK.
 
-### platform-nest `0.41.0` - a provisioned site knows its client and project (2026-08-27) - DEV-VERIFIED
+### platform-nest `0.45.0` - a provisioned site knows its client and project (2026-08-27) - DEV-VERIFIED
 
 **Added**
 - `webdev_provisioned_sites.client_id` / `project_id` (nullable FKs). Migration
@@ -65,7 +70,7 @@ local stack). None of these mean "production-done".
 - Tests: `webdev-controller-http.test.ts` (+1 lineage: run copy, standalone supplied, bare null,
   list returns both); webdev suites 103/103.
 
-### platform-nest `0.40.0` - briefings and PRD runs know their department (2026-08-27) - DEV-VERIFIED
+### platform-nest `0.44.0` - briefings and PRD runs know their department (2026-08-27) - DEV-VERIFIED
 
 **Added**
 - `meeting_recordings.department_id` and `pipeline_runs.department_id` (org-node id, free text —
@@ -84,59 +89,7 @@ local stack). None of these mean "production-done".
   live Cerbos — 79/79.
 
 
-### platform-nest `0.39.2` - the finance seed counted calls, not writes (2026-08-26) - DEV-VERIFIED
-
-**Fixed**
-- ★ The seed reported **"11 posted"** on a run that created **4** journal entries. `posted` counted
-  CALLS that did not raise, and `finance_post_journal` is idempotent on `source_event_id` - it
-  returns the existing entry instead of raising, so a re-run tallied writes it never made. On a seed
-  that writes to REAL, APPEND-ONLY books that reads as a double-post, and the only way to find out
-  otherwise is to go and count the ledger by hand. Which is what happened: the ledger was correct
-  (12 -> 16 entries, 8 distinct `demo-seed:` ids, no duplicates), the counter was lying.
-- The ledger is now counted before and after, and the measured DELTA leads the output. The call
-  tallies follow, explicitly labelled as steps that ran rather than as rows written.
-
-**Verified on live after the AR/AP run**
-- AR aging lands in TWO different buckets, as the differing payment terms intend: 46,600,000 at
-  1-30 days (66.6m invoice less the 20m allocated, due 12 Mar) and 27,750,000 current (due 3 Apr).
-- AP 38,150,000 = 35,000,000 + 3,850,000 PPN - 700,000 PPh 23, to the rupiah.
-- `finance_ar_reconcile` and `finance_ap_reconcile` BOTH return zero problems - the subledgers tie
-  to the general ledger.
-- AR position: open 74,350,000 / on account 10,000,000 / net 64,350,000 - the unallocated remainder
-  showing up as the three-part position exists to show.
-
----
-
-### platform-nest `0.39.1` - the finance demo seed reaches the AR/AP subledgers (2026-08-26) - DEV-VERIFIED
-
-**Fixed**
-- ★ **The seed's central claim was FALSE.** Its header said every journal it posts carries
-  `source_event_id` beginning `demo-seed:`, making the set reversible as a batch. Running it on live
-  proved otherwise: 12 entries, 8 tagged, 4 NOT - three asset capitalisations and a depreciation
-  charge, posted by `finance_capitalise_asset()`/`finance_run_depreciation()`, which mint their own
-  `fa-acquire:`/`fa-depreciation:` ids. Cleaning up on the documented filter would have silently
-  left those behind, the largest a 380,000,000 vehicle. The header and the CLI output now give the
-  three queries actually required, and note that `finance_assets`/`finance_instruments` rows are not
-  journals at all so a reversal does not touch them.
-- The seed posted only CASH and direct GL entries, so `finance_ar_invoices` and `finance_ap_bills`
-  stayed at zero and the Receivables/Payables tabs rendered empty beside a populated ledger. It now
-  creates real subledger documents: two issued invoices on different payment terms, a receipt that
-  is PARTLY allocated (30,000,000 banked, 20,000,000 allocated, 10,000,000 left on account - which
-  is the case the three-part position exists to show), and an approved vendor bill with PPh 23.
-
-**Notes**
-- ⚠ A HEADER IS NOT AN INVOICE: `finance_ar_issue_invoice` refuses one with no lines
-  (`FINANCE_AR_EMPTY_INVOICE`). Caught by dry-running the SQL against the LIVE schema inside a
-  rolled-back transaction before it ever ran for real - not by a test, and not on live.
-- Verified the same way: aging returns a row and `finance_ar_reconcile` returns ZERO problems, so
-  the subledger ties to the general ledger.
-- Live books after the first run: 12 entries, debits = credits = 1,509,000,000, zero unbalanced
-  entries, P&L revenue 150,000,000 / expense 144,500,000 / net 5,500,000, of which 8,500,000 is
-  exactly one month's depreciation on the three seeded assets.
-
----
-
-### platform-ui `0.55.0` - PRD Studio reads as one flow: create, record, convert, approve (2026-08-26) - PROTOTYPED
+### platform-ui `0.62.0` - PRD Studio reads as one flow: create, record, convert, approve (2026-08-26) - PROTOTYPED
 
 **Changed**
 - ★ `/departments/[deptId]/prd` was three unrelated forms (record now / register for the helper /
@@ -164,7 +117,7 @@ local stack). None of these mean "production-done".
 - **Web Dev only.** The route is the generic `/departments/[deptId]/prd`, so the page now 404s for any
   department whose toolkit has no `prd` tab, and everything it lists is scoped
   (`lib/prdFlow.ts::scopeToDepartment`). **2026-08-27:** the stored `department_id` (platform-nest
-  `0.40.0`) decides first — PRD Studio and a project's Meetings tab send `departmentId` on
+  `0.44.0`) decides first — PRD Studio and a project's Meetings tab send `departmentId` on
   `/recordings/start`, and runs derive it — and the PROJECT inference is now only the fallback for
   rows that pre-date the column: a briefing belongs iff its project is this department's; a run iff
   its own `project_id` is (WD-30) or its source briefing's project is. Same rule in the Repositories
@@ -229,7 +182,7 @@ local stack). None of these mean "production-done".
   Direct GitHub creation outside provisioning stays fail-closed on the backend (WS11); this is the
   sanctioned manual path. `components/repositories/CreateRepoForm` (7 tests); e2e creates a standalone
   repo and provisions demo `run-demo-3`. **2026-08-27:** a standalone repo can carry its lineage —
-  platform-nest `0.41.0` stores `clientId`/`projectId` on the site — so Standalone mode gains optional
+  platform-nest `0.45.0` stores `clientId`/`projectId` on the site — so Standalone mode gains optional
   Client → Project pickers (that client's projects in this department; "client and project are
   optional") and `provisionSiteAction` forwards them; the inventory reads the site's own client ·
   project first and falls back to the run's, and a standalone site whose project belongs to another
@@ -286,15 +239,840 @@ local stack). None of these mean "production-done".
 
 **Known gap (frontend) — closed 2026-08-27**
 - Gate chips needed `GET /pipeline/runs/:id` per active run (the LIST carried no gates) — capped at 12;
-  runs past the cap said "open the run to see its approvals". platform-nest `0.42.0` added
+  runs past the cap said "open the run to see its approvals". platform-nest `0.46.0` added
   `GET /pipeline/runs?include=gates`; PRD Studio and a project's Meetings tab now read
   `lib/pipeline.ts::listPipelineRunsWithGates` — one request, no cap, no per-run detail reads
   (`GATE_DETAIL_CAP` deleted). `RunApprovalRow` keeps its `gates: null` rendering for a refused read.
   Demo fixture honours the parameter (`demoPipeline.test.ts` +2).
 - **2026-08-27, lineage spec 4/4:** a project belongs to a client on the backend too (platform-nest
-  `0.43.0`). The UI already required it (`ProjectForm` Client picker, PRD Studio's composer); the demo
+  `0.47.0`). The UI already required it (`ProjectForm` Client picker, PRD Studio's composer); the demo
   `POST /projects` fixture now mirrors the 400 `{error, field:"clientId"}` and `isInternal`, so demo
   mode cannot create the orphan the platform refuses.
+
+### platform-ui `0.61.1` - Portfolio reachable from the nav (2026-08-31) - PROTOTYPED
+
+The estate portfolio page shipped with **no navigation to it** — reachable only by typing the URL,
+which is the same as not shipping it. The owner opened the Build group, found *Sites* (the Zone B
+registry, legitimately empty because nothing has been provisioned through WebDesk) and reasonably
+concluded the work had not landed.
+
+*Sites* and *Portfolio* stay separate entries rather than one merged view: Sites answers "what has
+WebDesk provisioned", Portfolio answers "what does the estate consist of", including the ~20 sites
+we only track and will never provision. Merging them would put a permanently-degraded Zone B read
+in front of facts held locally.
+
+`deptToolkits.test.ts` pins the exact tab key set and caught the addition. The pin was **updated,
+not loosened** — a set assertion relaxed the first time it fires stops being a guard.
+
+### platform-ui `0.61.0` - the site portfolio page (2026-08-30) - PROTOTYPED
+
+The estate inventory in the ERP: every site we build or operate — including the ones hosted
+elsewhere that we only track — grouped by project, with each environment as its own row.
+
+**No degrade banner, deliberately.** `SiteRegistryPanel` renders one because Zone B's control plane
+has no live reads and that data is permanently `stale:true`. This page reads Zone A's own tables, so
+there is nothing to be stale about, and a banner "for consistency" would teach people to ignore it
+on the panel where it means something.
+
+Three things it is careful about, because most rows describe sites we must not touch: a null stack
+renders as an em dash with an explanation rather than "Unknown" — *not surveyed* and *surveyed,
+could not tell* are different claims; **probe consent gets a column, not a footnote**, because a
+site nobody may probe looks identical to a healthy one in any monitoring list; and a project with no
+production row renders as a fact, not an error.
+
+A forbidden read renders `ReadRefusal`, never an empty list — on this page an empty portfolio would
+read as "we operate no sites" when the truth is "you cannot see them".
+
+Verified with `next build`, not `tsc` alone: this repo has a documented case of `tsc` passing while
+the build broke.
+
+### platform-nest `0.43.1` - webdev_sites.origin accepts 'probe' (2026-08-30) - PROTOTYPED
+
+Found the moment real survey data met the constraint. The registry's `origin` CHECK allowed
+`(nexus-import, provisioned, manual)` while `search_properties.topology_source` — added the same
+afternoon, for the same purpose — allowed `(nexus-import, probe, manual)`. Two provenance
+vocabularies for one concept, disagreeing on the value that matters most.
+
+`probe` is the honest label for the estate survey and for everything MON-01 produces: observed from
+outside, never read off a server. The alternative was seeding ~20 real rows as `manual`, recording a
+human assertion where there was a measurement — exactly the distinction the column exists to keep.
+
+Widen-only and idempotent; no existing row can violate a superset.
+
+### platform-nest `0.43.0` - site environments, GitHub wiring, and the portfolio read model (2026-08-30) - PROTOTYPED
+
+The registry shipped with no way to say **which environment** a domain is, and a survey of the live
+estate made that untenable: one project routinely owns several — `bali-girls.com` plus eight
+`baligirls-*.gaiada2.online` variants, `blossomsteakhouse.com` plus `sst.` and `preview-sst.`,
+`essentialbali.com` plus its `gaiada2.online` alias. Without `environment`, "the production URL for
+this project" is not a query, it is a guess from a naming convention — and the conventions run four
+deep (`gaiada.online`, `gaiada1.online`, `gaiada2.online`, per-project slots). A console built on
+that guess shows a client their staging site.
+
+`preview` is separate from `staging` deliberately: staging is durable and client-visible, preview
+slots are ephemeral and machine-generated (delphi serves ~11 right now). A partial unique index
+enforces **one production per project**, itself three-way partial so an internal site with no
+project stays unconstrained — there is nothing for it to be the production *of*.
+
+A `site_environments` child table was considered and rejected: each environment here **is** a
+distinct domain with its own host, TLS, adoption state and audit history, which is precisely a
+`webdev_sites` row. The grouping already existed — `project_id`.
+
+`GET console/portfolio` is a **separate endpoint from `console/sites`** on purpose. That one answers
+"which Zone B tenants exist" and is honestly `stale:true` because the control plane is write-mostly.
+This answers "what does the estate consist of", including the sites we neither host nor control —
+and it reads Zone A tables only, so it carries no `DegradeMeta` and cannot degrade when Zone B is
+unreachable. It left-joins `search_properties` for hosting topology and the crawl-consent flag
+rather than duplicating either.
+
+### platform-nest `0.42.1` / infra - SM-74 hosting topology + MON-01 probe generator (2026-08-30) - PROTOTYPED
+
+~63 managed client properties are monitored by nobody, and the program had this recorded as blocked
+behind the observe-only ruling on `delphi`/`helios`. **It is not.** That ruling forbids *changing
+things on* those hosts; an HTTP GET changes nothing. Re-probed 2026-08-30 — SSH to both is
+filtered, HTTP and HTTPS answer. Observation was never the blocked half; deployment was.
+
+**SM-74** adds the hosting-topology field set to `search_properties` rather than `webdev_sites`,
+split by ownership and not convenience: `search_properties` already owns domain identity, the
+crawl-**consent** gate, the audit history and the crawler, so anything true of the domain *as an
+observable thing on the internet* belongs there. `webdev_sites` owns how we deliver it. One domain,
+one row, one consent gate, one crawler — a second registry would fork consent, which is the one
+thing that must never be ambiguous.
+
+**Every column is nullable on purpose.** Most of these properties have never been surveyed, and
+`NOT NULL DEFAULT 'unknown'` would render as a measurement in every console that reads it. NULL
+means "not surveyed"; `'unknown'` would mean "surveyed and could not tell". Same reason
+`plugin_surface` distinguishes NULL from `[]`, and why `topology_checked_at` exists at all — without
+it a 2025 fingerprint is indistinguishable from this morning's.
+
+**MON-01's generator puts the consent gate in the SQL, not in a comment.** Only verified, active,
+non-deleted properties become probe targets; an unverified property is *absent*, not throttled. It
+also refuses private, loopback and link-local hosts — a property row is client-supplied data, and a
+generator that will happily probe `169.254.169.254` because a row said so is an SSRF with a cron
+attached. Selftest 8/8 including that case; skipped rows are logged rather than silently dropped.
+
+The scrape job is **proposed, not applied**: wiring it decides which host makes standing outbound
+requests to 63 client domains — whose IP appears in their logs, and whose egress posture a
+compromise inherits. Not the ERP box. It also sets 60s rather than the global 15s, because 63
+properties at 15s is ~15k requests an hour from a single IP.
+
+### platform-nest `0.42.0` - webdev_sites, the site portfolio registry (2026-08-30) - PROTOTYPED
+
+v2.0 §04/§07. The design assumed every client site becomes a Zone B tenant; most never will. The
+requirement is two-sided — **future projects must use the unified backend; past and current ones
+must never be touched**, only tracked, with adoption optional and per site.
+
+`webdev_provisioned_sites` (0090) cannot hold these rows and must not be widened to: its
+`framework CHECK IN ('vite','nextjs')` refuses everything else *by design* (D-P7) and its status
+column models a provisioning lifecycle, not the life of a site. It stays the record of how a site
+was **born**, for the subset we provisioned. This is the record of what **exists**.
+
+**Two rules matter more than the columns.** It lives in Zone A and never in Zone B — a tracked site
+must not require a Zone B tenant row, or the internet-facing backend ends up holding an inventory
+of the entire client estate, including the sites on clients' own infrastructure that we cannot
+defend. And it *references* credentials without storing them: `vault_ref` is a pointer and there is
+deliberately no column a password could occupy.
+
+**Hosting and adoption are independent axes, on purpose.** `/v1` is HTTPS with a scoped key, so a
+site on a client's own cPanel can be `linked` (its forms POST to WebDesk) or fully `adopted` (built
+static uploaded by FTP, content read from `/v1`). What a client-owned host costs us is deploy
+automation, not the platform — one combined column would have quietly ruled that out.
+
+`kind` is nullable rather than defaulting to `unknown`: for a legacy site whose stack is
+unsurveyed, `unknown` is a claim and NULL is an admission.
+
+Lints: names · RLS no unguarded backfills · immutability, all clean. CI green, which for this
+change means the migration applied against a real database in the platform-nest shards.
+
+### mcp-hub `0.12.0` / platform-nest `0.41.0` - pipeline.artifacts.get, the rail's missing link (2026-08-30) - PROTOTYPED
+
+`code.scaffold` v2's frozen envelope carries `prdArtifact` and `prototypeArtifact` — both
+`pipeline_stages.artifact_ref` — and **nothing could dereference either**. The consumer adapter
+(`ai-agents/src/code-scaffold/artifact-fetcher.ts`) was written against the tool name
+`pipeline.artifacts.get`, and its own header records that no hub contract answered it. That is the
+reason PRD-driven scaffolding could not run live: the scaffolder was handed references into a
+system with no read side.
+
+**The ref must be stage-referenced, and that is the security property.** Resolving a
+caller-supplied id straight to file bytes would make this a generic file reader wearing a pipeline
+name — any automation principal holding `pipeline_run:read` could then read any file in the tenant.
+The platform side first requires the ref to be referenced by a real stage in that tenant and only
+then resolves it. The stage lookup is the authorization boundary, not a convenience.
+
+Reuses `pipeline_run:read` rather than minting a Cerbos kind: a new kind costs six coupled
+artifacts (catalog, groups, seeding migration, both bundle resolvers, the regenerated bundle), and
+this read genuinely is "read a pipeline run's own output", which the existing kind already means.
+
+Returns `{resolvable:false, reason}` instead of failing when a ref is a URL, a repo or an external
+link rather than stored text — a scaffolder must tell "cannot fetch this" apart from "this was
+empty". Non-UUID refs are rejected before the query, so a legitimate non-file ref cannot surface as
+a Postgres `invalid input syntax for type uuid`.
+
+Added to `wf:delivery`'s allowlist, which is the identity the scaffolder runs under.
+
+Verified: platform-nest `tsc` clean · mcp-hub `tsc` clean · mcp-hub 380/380 · CI all green.
+
+### webdesk `0.2.0` - Zone B is deployed and running, and main is green again (2026-08-30) - DEV-VERIFIED
+
+Zone B runs on a real Linux host: 7 services in their own compose project, **exactly one published
+port and it is on loopback**, proven against the RESOLVED compose config rather than the overlay.
+Payload's admin is reachable only through an SSH tunnel. Nothing is exposed to the internet — no
+vhost, no TLS — deliberately.
+
+**No longer provisional, because it was re-run on Linux:** migrations 8/8 from scratch plus an
+idempotent re-run · role split confirmed NOSUPERUSER/NOBYPASSRLS · RLS integrity 20/20 tenant-scoped
+tables · **WSK-04 cross-path suite ALL PATHS OK** · **WSK-02 lockdown 11/11** · **WSK-15 codegen
+double-run determinism 3/3 including its negative control**.
+
+**Four defects that only a real boot could find**, all fixed here: the base compose could never boot
+`api` in production (its block forwarded one storage var; the code requires four and reads eight
+more) · `payload/Dockerfile` claimed it was RED and unbuildable, which had stopped being true ·
+Payload's tables could not be created in a production-shaped environment at all, now closed with
+Payload's own migration mechanism plus `init:prod` = migrate → reapply-tenant-rls → check-rls-
+integrity, three links because Payload migrations do not re-arm RLS · a multi-line PEM in `.env`
+silently broke every ad-hoc verification container while the stack itself worked, since
+`docker run --env-file` is a flat parser and Compose's is not.
+
+**The estate internal CA existed nowhere** — gateway and hub both had TLS off and no `gaiada_*`
+volume held cert material — while three designs were written against it. It exists now
+(`CN=gaiada-internal-ca`, ECDSA P-256, key never off-host), and the A→B control channel is proven to
+discriminate three ways: no cert → 401 at Layer 1 · right CN signed by a foreign CA → 401 at Layer 1
+· the issued cert → 401 *"Layer 2: no Bearer token"*, i.e. it passed mTLS. A channel answering all
+three identically would have proven nothing, which is exactly what the placeholder did.
+
+**CI is green for the first time in more than a dozen commits.** `webdesk-api` had never once passed:
+MinIO was declared as a `services:` container, which cannot take the `server /data` argument it
+needs, so the job died before a test ran. Beyond that, the suites read 58 environment variables
+against nine supplied, with **seven different names for "the test database URL"**, each carrying its
+own hardcoded `localhost:555xx` fallback — so a missing name produced `AggregateError` and
+`expected 500 to be 201` with no host or port named anywhere. 56 → 8 → 2 → 0.
+
+Also: the `overrideAccess` lint WSK-D25 asked for and nobody built (Payload runs its access function
+only when `overrideAccess` is falsy, and the Local API defaults it true — so an un-opted-in call
+runs on RLS alone) · Cloudflare Tunnel as the exposure path, gated behind its own profile so
+exposure is never a side effect of a restart · `aire` decommissioned from the box after verifying it
+serves publicly from its own VPS, backed up first · 87 GB reclaimed.
+
+**Design v2.0 supersedes v1.1 and the provision seam design.** Zone B moved to the ERP-operational
+tier under a two-tier estate rule, Payload was recorded as editorial-only at last, the portfolio
+adoption ladder was added so live client sites are tracked and never touched, and §03's containment
+claim was rewritten rather than repeated — v1.1 said a Zone B compromise cannot reach Zone A, and on
+a co-tenanted box that is no longer true.
+
+### platform-ui `0.60.0` - the AP credit-note and write-off surface (2026-08-27) - PROTOTYPED
+
+The payables half of `finance 0.16.0`: `IssueVendorCreditForm`, `VendorCreditsTable` with a per-row
+apply, `BupotExceptionsCard` with a per-row amend action, and `WriteOffBillForm` behind
+`ConfirmAction` on the bill number. Plus the fourth `unappliedCredits` KPI tile.
+
+The three domain points are stated as COPY on the forms, not left implicit, because a user who
+assumes AP mirrors AR will misread their tax position: a vendor credit reverses **input** VAT and
+needs a buyer-issued nota retur; the withholding it unwinds can invalidate an issued bukti potong,
+which is flagged rather than blocking; and an AP write-off credits **other income**, increasing
+taxable profit — the opposite of the AR write-off.
+
+`bupot-exceptions` is a first-class card rather than a footnote. Owner ruling (c) makes the credit
+post regardless, so the only thing standing between a reversed withholding and a wrong filing is
+somebody seeing the chase list.
+
+⚠ **The FE work caught a backend bug during it**, which is why the review order matters:
+`apReconcile` did not SELECT `unapplied_credits` even though `finance_ap_position()` returns it — the
+SQL computed the number and the handler discarded it, invisible to `tsc` because a query is a string.
+Reported rather than typed around (that agent was barred from `platform-nest`), and the KPI was made
+to degrade to `—` so it would fail visibly against a backend that had not caught up. Fixed in
+`finance 0.16.0`, and now pinned by a test asserting all four fields are on the WIRE.
+
+### finance `0.16.0` - AP vendor credits and write-offs (2026-08-27) - PROTOTYPED
+
+The payables mirror of F4b, and deliberately NOT a sign flip. Three differences each carry money:
+
+| | AR (F4b) | AP (F5b) |
+|---|---|---|
+| credit reverses | output VAT — `2140`, a liability we owed | **input VAT — `1170`, an asset we CLAIMED** |
+| validated by | our own faktur | a **nota retur the BUYER issues** (PMK 65/2010) |
+| withholding | no analogue | **unwound**, which can invalidate an issued bukti potong |
+| write-off posts | DR bad-debt expense `6950` → reduces profit | **CR other income `7300` → INCREASES taxable profit** |
+
+That last row is the one a mirror-image implementation gets wrong. Released debt (*pembebasan utang*)
+is taxable income under UU PPh; booking it as a negative expense understates taxable profit — the
+same class of error as reclaiming VAT on a bad debt, in the opposite direction.
+
+The withholding arithmetic is not optional either. `finance_ap_approve_bill` credits AP with
+`amount_payable` (= total − withholding) and the PPh liability separately, because the company never
+owed the vendor the withheld part. A credit must unwind BOTH legs or the journal does not balance:
+
+```
+DR AP control            credit.amount_payable
+DR withholding account   credit.withholding_amount
+    CR expense           credit.subtotal
+    CR 1170 PPN Masukan  credit.tax_total
+```
+
+**Owner ruling (c), 2026-08-27 — the ledger is corrected here; the FILING is not.** If a bukti potong
+was already issued, the credit makes it overstate what was withheld, and fixing that is an amended
+e-Bupot — a statement to DJP. Auto-amending would have this system silently restate a filing;
+blocking would make a routine purchase return impossible until a tax officer acted. So the credit
+posts, `requires_bupot_amendment` is set, `finance_ap_bupot_amendment_exceptions()` is the chase
+list, and `AP_BUPOT_AMENDMENT_PENDING` surfaces on the reconciliation — the one screen somebody reads
+every close. `POST .../vendor-credits/:id/bupot-amended` records the resolution, and demands a
+reference: marking it resolved with none cannot be told apart from nobody having filed it.
+
+- `202608272000` — `finance_ap_vendor_credits` (+ lines, + a SEPARATE applications table, or
+  `finance_ap_reconcile`'s `amount_paid = sum(allocations)` check breaks on every credited bill),
+  `finance_ap_writeoffs`, three posting functions, `amount_credited`/`amount_written_off` on the
+  bill (measured against `amount_payable`, never `total`), and the tie-outs re-defined — an unapplied
+  vendor credit DEBITS the AP control account exactly as an unallocated payment does, so
+  `control = open bills − payments on account − unapplied vendor credits`.
+- `202608272010` — `finance.ap.credit_note` + `finance.ap.write_off`, and a NEW duty
+  `ap_credit_writeoff_approve` with two blocking pairs: *enter a bill then credit it away*, and
+  *divert the payment then write off the debt*. AR needed no new duty because `ar_writeoff_approve`
+  was seeded already naming credit notes; the AP side was never anticipated. Not held by
+  `finance_staff` — the clerk who enters bills must not be able to cancel them.
+
+DEV-VERIFIED by replay against the LIVE schema in a rolled-back transaction on a real bill carrying
+both PPN Masukan and PPh 23: the credit produced `CR 1170` with no `2140` and `DR AP` equal to
+`amount_payable` not the gross; the write-off produced `CR 7300` (revenue) with no VAT leg; the
+bukti potong flag fired; aging netted 38,150,000 − 3,815,000 − 1,000,000 = 33,335,000. 8 new tests
+cover both VAT assertions, the income assertion, both tier denials, the confirmation gate, the flag
+lifecycle and the tie-out. finance.test.ts 81/81.
+
+⚠ Also restored `finance.ar.credit_note`, which commit `f6a29bbf` deleted from BOTH
+`permission-catalog.json` and `permission-groups.json` while `202608270910` still inserts it into the
+database — artifact and DB disagreeing, 13 suites red on `main`. Recovered verbatim from the commit
+that introduced it. This is the third time in one day a concurrent wave has broken `main` through
+these six hand-maintained IAM artifacts; the pattern is structural, not bad luck.
+
+### platform-ui `0.59.1` - every table with more than 4 columns was wrapping (2026-08-27) - DEV-VERIFIED
+
+`.lux-table__head/__row` fall back to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — FOUR tracks — and
+`HairlineTable` set that variable only when a caller passed `tcols`. Any table with more columns put
+N grid items into 4 tracks, so every row wrapped onto extra lines and the columns rendered out of
+visual order.
+
+On the **live** receivables aging the header read `61–90 / Current 90+ / 1–30 Total / 31–60`, with
+each customer's figures split across two rows. That is the schedule that has to tie to the control
+account, and it was unreadable in production.
+
+A scan found **62** such tables — finance, HR, IT, learning, monitoring, PM, search, meetings. Not a
+finance bug, an app-wide one, so the fix is in the primitive rather than at 62 call sites (which
+would still leave the 63rd broken the day someone adds it): the template is now DERIVED from
+`columns.length` when the caller gives none. Callers passing `tcols` are unaffected, 4-column tables
+render identically, and 2–3 column tables stop emitting phantom empty tracks.
+
+⚠ **Nothing in the pipeline could see this.** The markup is correct and every cell is present in DOM
+order, so `tsc`, vitest, `next build` and the axe sweep all pass — wrapping is neither a type error
+nor a contrast failure. It reached production and was found by opening the page. That is the case for
+a browser pass before calling a surface delivered.
+
+DEV-VERIFIED against a local DEMO_MODE render: the aging head reports 7 grid tracks for 7 header
+cells on ONE visual row, labels in order. Before: 4 tracks, two rows, scrambled.
+
+### finance `0.15.1` / platform-nest — IAM: zoneb_event.record must be ui_grantable (2026-08-27) - PROTOTYPED
+
+`202608271400` inserted `webdev.zoneb_event.record` with `ui_grantable = false` AND bundled it onto
+`manager` and `company_admin`. Both cannot stand: `position_roles_guard()` clause (b) refuses to
+attach a role carrying a non-ui_grantable permission to a position, so `seedPositions()` threw and
+took NINE files red on `main` — four seed suites, the positions controller, the IAM guard, two
+catalog pins and the permission-chain sweep. One flag; eight files that never mention it.
+Reproduced on a clean `origin/main` checkout before the fix, so it was not a merge artifact.
+
+`true` is the correct side. `ui_grantable = false` is a narrow carve-out with a pinned composition —
+"exactly 22 rows (15 relationship + 7 `portal.*`)", documented as "everything else true". `record` is
+grantable-class and not `portal.*`, and its sibling `.read` is true. The alternative (dropping it
+from the bundles) was rejected: the policy grants it to those roles deliberately, as the
+`wd-zoneb-intake` intake endpoint pinned `impact: "low"`. Fixed in a NEW migration (`202608271600`)
+rather than by editing an already-deployed one, and it ASSERTS — failing loudly if the key is absent,
+if the update matches no row, or if any non-relationship non-portal key is still false.
+
+Also regenerated `CAPABILITY-INVENTORY.md`, stale from WSK-12's new mcpTool (+1 low-impact write).
+
+⚠ Two of the nine were NOT that defect: the zoneb HTTP suite and the permission-chain sweep failed
+against a Cerbos container started *before* the merge added the policy file. Cerbos does not reliably
+hot-reload; restarting fixed both with no code change. Recorded so nobody re-chases it.
+
+### platform-ui `0.59.0` - finance write surfaces: credit notes, write-offs, and five wire-ups (2026-08-27) - PROTOTYPED
+
+Six finance surfaces whose backends existed and which nothing could reach: consolidation runs +
+eliminations, period reopen, instrument creation + accrual posting, AR customer and AP vendor
+creation, and the fiscal-year close. Plus the new AR credit-note and write-off forms for
+`finance 0.15.0`.
+
+**Credit notes and write-offs are two forms on purpose, not one adjustment form with a reason
+dropdown.** A credit note says the customer never owed it and reverses output VAT; a write-off says
+they owed it and will not pay, and reverses nothing, because the PPN was properly due and has been
+remitted. Choosing wrong is not a wrong button — it produces a wrong VAT return — so both forms state
+the consequence rather than leaving it to be inferred from the name. Line accounts are filtered from
+the real chart (contra-revenue 4300/4200), never hardcoded, because an accountant may renumber it.
+
+- Period reopen requires the period NAME as confirmation and a reason; a HARD_LOCK period is refused
+  with the server's own wording rather than a generic failure.
+- Accrual posting is keyed on the schedule `seq` — the 1-based instalment, picked from a live
+  dropdown — not on a fiscal period. An instrument whose payment months do not align with the fiscal
+  calendar has no unambiguous "accrual for August".
+- Fiscal-year close is disabled while the year still has open periods, showing the count. Learning
+  that from a refusal AFTER typing a confirmation is a worse surface than seeing it on the row.
+
+⚠ **Fixed a defect that made DEMO_MODE lie.** `demoFinance.ts`'s header comments described a "second
+group" of plain writes that had NO dispatch code at all — every one of those endpoints would have
+404'd in demo mode. The build gate and e2e both run in DEMO_MODE, so this was a surface claiming
+capabilities nothing served, invisible to `tsc` and to vitest. Same bug class as the earlier
+"financeDemo never received the request body". Dispatch added for all of them; the FISCAL_YEARS
+fixture now derives its period counts from the existing PERIODS array rather than hand-maintained
+numbers that would drift from the table rendered beside them.
+
+Every stale "not built yet" claim for these surfaces was removed from the receivables, payables,
+close and cutover pages. Gates verified independently of the agent that wrote the code: typecheck
+clean, 177 files / 3445 tests, `DEMO_MODE=1 next build` exit 0.
+
+### finance `0.15.0` - AR credit notes and write-offs, and the tax return lifecycle (2026-08-27) - PROTOTYPED
+
+Two ways a receivable legitimately shrinks with no cash arriving. They were deferred from F4 on
+purpose — `finance_ar_invoices` still carries the comment "(Credit balances are deferred with credit
+memos.)" — and everything except the accounting already existed: the Cerbos `write_off` action, the
+`finance.ar.write_off` catalog key, and the seeded SoD duty `ar_writeoff_approve`, whose name has
+read "AR credit note / write-off approval" since 202608241013.
+
+**The distinction the whole design turns on, because it is money:**
+
+| | ledger posting | output VAT |
+|---|---|---|
+| Credit note (nota retur) | DR contra-revenue (4300/4200) + DR 2140 PPN Keluaran, CR AR control | **reversed** |
+| Write-off (piutang tak tertagih) | DR 6950 or 1131, CR AR control | **NOT reversed** |
+
+Indonesian PPN gives no relief for a bad debt. Treating a write-off like a credit note reclaims VAT
+the company is not entitled to, understates tax payable, and surfaces in a Coretax reconciliation as
+a difference DJP will ask about. So they are separate documents, separate tables, separate postings
+and separate rights — not two `reason` values on one adjustment table, which is how this normally
+gets built and is precisely how the VAT ends up wrong.
+
+- `202608270900` — `finance_ar_credit_notes` (+ lines, + a SEPARATE `finance_ar_credit_applications`
+  table, because putting credit applications into `finance_ar_allocations` would break
+  `finance_ar_reconcile`'s `amount_paid = sum(allocations)` check on every invoice that ever receives
+  a credit); `finance_ar_writeoffs`; `finance_ar_issue_credit_note` / `finance_ar_apply_credit` /
+  `finance_ar_write_off`; `amount_credited` + `amount_written_off` on the invoice; a
+  `bad_debt_method` company setting (`direct` | `allowance`, default `direct`); and account
+  **6950 Beban Kerugian Piutang**, added to the CoA template AND backfilled into every existing
+  chart — the template shipped the allowance (1131) but never a bad-debt expense.
+- `finance_ar_aging` / `finance_ar_reconcile` / `finance_ar_position` are **re-defined in the new
+  migration, not edited in place** — 202608241019 is applied on every estate, and editing it would
+  reach fresh databases only. The reconciliation identity grows a third term: an unapplied credit
+  note credits the AR control account exactly as an unallocated receipt does, so
+  `control = open invoices - payments on account - unapplied credit notes`. Omitting that term would
+  report a permanent mismatch for as long as any credit note sits unapplied, which is its normal
+  state. `position()` gains a fourth number and is therefore DROPped first (OUT params changed).
+- `202608270910` — one grantable key, `finance.ar.credit_note`, on the existing `finance_ar` kind.
+  A separate ACTION from `write_off` but the SAME duty: the control is unchanged, only the capability
+  splits, because `write_off` demands `assurance == "high"` and a sales return is routine traffic.
+  A step-up in front of every return gets `write_off` granted permanently, which destroys the control
+  for the case that needs it. Frequency is the argument, not risk. Not held by `finance_staff`.
+- `202608271230` — the tax return lifecycle: `finance_tax_prepare_return` / `file_return` /
+  `amend_return` / `return_figures` / `return_period`, plus **`finance_tax_return_drift`**. F7 already
+  had the data (`finance_tax_returns`, the PPN/PPh summaries, Coretax reconciliation) and lacked only
+  the lifecycle. Filed figures are SNAPSHOTTED at filing and never recomputed — the gap between "what
+  we filed on the 20th" and "what the data says now" is exactly what an auditor asks about, and
+  `finance_tax_return_drift` is what measures it: one row per filed return the ledger no longer
+  agrees with, meaning a journal was posted into a period already declared to DJP. Same problem-list
+  shape as `finance_ar_reconcile`. Filing requires a `filingReference` (the ASP/PJAP NTPN) — a return
+  marked filed with no receipt cannot be told apart from one nobody sent. Still does not transmit
+  (ruling D-F2). Endpoints: `GET/POST /finance/tax/returns`, `POST .../:id/file`,
+  `GET /finance/tax/returns/drift`.
+
+  ⚠ **This migration was written by a CONCURRENT session** that was handed this session's
+  continuation summary at a context boundary and built the same work before noticing. Its AR half
+  was discarded (it sorted after 202608270900 and re-defined the same three tie-out functions, so it
+  would have silently overwritten them); its tax half was better than the controller-side TypeScript
+  this session had written — the lifecycle belongs in SQL where automation and agents reach it, and
+  the drift check did not exist here at all — so it was adopted unchanged and the endpoints rewired
+  onto it.
+
+**Verification is not uniform across this entry, and the halves differ.** The AR half is
+DEV-VERIFIED: replayed against the LIVE schema in a rolled-back transaction, posting a real credit
+note and a real write-off against real data — the credit note produced a 2140 debit, the write-off
+produced none, and `finance_ar_reconcile` returned zero problems at every step. 7 new tests cover
+both VAT assertions, both tier denials, the confirmation gate and the tie-out; `finance.test.ts` is
+66/66 and the finance+rbac suites are 857/857 together. The TAX half is PROTOTYPED only: endpoints
+typecheck and have no tests and no UI yet.
+
+Also fixed: `accounts?q=` was pinned to assert every "Piutang" match sits in 11xx/12xx, which encoded
+a chart-layout assumption rather than a filter property; 6950 is a correct counter-example. It now
+asserts the filter's real contract — every row matches the query — and that it still narrows.
+
+### webdesk `0.1.0` - Zone B exists: a contained content engine with its own RLS ledger (2026-08-26) - DEV-VERIFIED
+
+**Added**
+- `webdesk/` — the Zone B project: a Payload 3 content engine plus a NestJS read API, its own
+  Postgres, its own migration ledger (`migrations/0001-0005`) and its own owner/migrator/app role
+  split. All three roles are NOSUPERUSER NOBYPASSRLS, so no role in Zone B can read across tenants
+  even by mistake.
+- Payload runs as TWO listeners on purpose: an internal one carrying `/admin` and the raw
+  collection REST, bound to localhost, and a public gateway that is the only process the public
+  vhost may reach. The split is structural — a misrouted vhost cannot expose the admin panel.
+- `api/` — API keys stored as `sha256(key + pepper)` with the pepper out of the DB, scope guards,
+  per-tenant read quotas, tenant-scoped pools and an audit trail.
+- `spike-rls/` — the WSK-00 layer-1 findings the design rests on, kept in-tree because the design's
+  fail-closed claims are only as good as the probes that proved them.
+
+**★ Containment, and why it is enforced by absence**
+- Zone B carries ZERO Zone A credentials or hostnames — not the ERP host, not a Keycloak realm, not
+  a Zone A connection string. The control-channel values in `.env.example` are local placeholders
+  for work that lands at WSK-21/22. This is a hard rule, not a convention, and it is checkable by
+  grep precisely because there is nothing to find.
+- Payload's dev schema push DISABLES row security and drops policies while leaving
+  `relforcerowsecurity=true` — fail-OPEN and invisible. Both opt-in flags are left unset, and the
+  second one is named so that setting it is a deliberate act.
+
+**Known gaps**
+- Read quota enforcement is in-memory/single-process: it under-enforces the moment the api service
+  runs more than one replica. Redis-backed impl is a drop-in.
+- Not in any server compose profile. Nothing about this ships to the live estate in this release.
+
+---
+
+### platform-ui `0.58.0` - The Office: one building, the art actually used, and two tiers of movement (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- ★ **The floor reads as one building.** `drawOuterShell` was a 3px `strokeRect` and nothing else,
+  so the PAGE background showed between rooms and the plate read as detached islands. It now fills
+  the plate with a tiled building floor and outer wall; `ROOM_GAP_TILES` 2 -> 0 and
+  `OUTER_MARGIN_TILES` 2 -> 1 so rooms abut into shared partitions instead of leaving strips of
+  empty interior.
+- ★ **The art pack is actually used.** ~70 of the 75 assets in `public/office-env/` were never
+  loaded - only the 5 floor textures. Walls, desks, chairs, monitors and per-room dressing now draw
+  from it. Wall texture alpha 0.55 -> 1 (at 0.55 the tile averaged back into the flat bar it was
+  meant to replace). The desk sprite is a 32x32 source that was being squashed into ~30x9px, which
+  is why it read as a plank; it now draws on its own aspect with the monitor standing on it.
+- **Seated avatars face their desk** (LPC row 0, away) instead of the viewer. The desk is drawn
+  above the seat, so a row-2 avatar had its back to its own monitor.
+- **Geometry**: `DESK_ROW_TILES` splits the vertical row pitch from the horizontal
+  `DESK_SPACING_TILES` - at a shared 3.0 pitch a row's name labels painted across the desks of the
+  row below. `DESK_TOP_TILES` 3.6 -> 4.7 to clear the nameplate now the desk art is taller.
+- **The side rail is tabbed** (Cast / Detail / Activity / Legend); stacked, the detail panel fell
+  below the fold so selecting an avatar looked inert. **Fullscreen** is a CSS state, not the
+  Fullscreen API, so the app shell stays mounted and Escape returns you where you were.
+
+**Added**
+- `OfficeCastStrip` - a bottom strip, one card per person/agent/automation. ⚠ A human card never
+  carries a working/idle badge: people have no activity feed comparable to an agent run, so a badge
+  would be a presence claim the data cannot support. Absence of status is never rendered as "idle".
+- ★ **Movement now has two tiers** (owner decision 2026-08-26). Room-to-room stays DERIVED from
+  recorded handovers. Movement WITHIN a room is ambient and means nothing about the person. What
+  makes that honest is that drift is **unconditional** - `ambientDriftOffset(avatarId, nowMs)` has
+  no parameter through which `activeRunId`/`busyUntil`/`automationSignal` could enter, and a test
+  pins its arity so a future change threading one in fails loudly rather than quietly turning
+  decoration into surveillance. Speech lines come from a fixed curated bank, never generative
+  (plan §6). `prefers-reduced-motion` kills it outright. The toolbar hint states both tiers, because
+  the old text promised ALL movement was derived.
+- Dev-only: `office-fixture.ts`, `office-snapshot.ts` and `/office-lab` (404s in production) - a
+  harness for the renderer with no backend, able to render a snapshot captured from the live server.
+  `next.config.ts` honours `NEXT_DIST_DIR`; several dev servers share this working copy and all
+  wrote the same `.next`, serving 500s whenever one recompiled.
+
+**Notes**
+- ⚠ Open, belongs to platform-nest: the live org structure returns DUPLICATE person ids (four people
+  in GM share `p-019fb652`). `steadyPositions` no longer depends on their uniqueness - an id-keyed
+  lookup was stacking four people on one desk and teleporting others cross-department - but the data
+  is still wrong.
+- Verified: `tsc --noEmit` clean; `vitest run` 177 files / 3427 tests; `DEMO_MODE=1 npm run build`
+  green; driven in a browser against a live-server snapshot in both themes, with drift observed
+  across three differing frame checksums.
+
+---
+
+### platform-ui - finance UI: zero axe violations across all 11 routes (2026-08-26) - DEV-VERIFIED
+
+**Method**
+- Rendered every finance route in a real browser (Playwright + axe-core, WCAG 2.0/2.1 A+AA) rather
+  than reasoning about the CSS. This is the first time these pages have been looked at in a browser
+  at all - the standing gap in every previous report.
+
+**Fixed - CRITICAL**
+- `JournalEntryForm`'s grid controls had NO accessible names (`select-name` x4, `label` x2). A
+  `<th scope="col">` names a COLUMN; it does not name a control inside a cell. A screen-reader user
+  tabbing the grid heard "combo box" twice and "edit text" twice per row with nothing distinguishing
+  account from side - on the one surface here where a mistake writes an immutable journal. Names now
+  include the LINE NUMBER, because four identically-named controls are barely better than four
+  unnamed ones.
+
+**Fixed - SERIOUS (contrast, every route)**
+- `.fin-page__asof`, `.fin-muted` and `.fin-verdict__note` stacked `opacity` on top of a ramp colour.
+  The ink ramp's own header says it is "the ONLY source of text color" and each tier is chosen to
+  clear AA on its worst-case surface; multiplying the alpha again threw that away. Moved to
+  `--ink-muted` (5.14:1). That covered most of the explanatory prose on the surface - 25 failing
+  nodes on the overview alone.
+- `HairlineTable` column labels used inline `opacity: 0.5` - the last violation left, and shared by
+  EVERY table in the app. Now `--ink-subtle` (4.54:1), which the ramp documents for exactly this
+  ("small caps labels"). Deliberately NOT `--ink-faint` (2.62:1, "decorative only"): these labels are
+  the only thing saying which column holds the amount.
+
+**Fixed - the overview had no title**
+- `/finance`'s `<h1>` was the fiscal period plus its badge, rendering as "Aug 2026 Open". The
+  department's landing page never said what it was, it was the only tab whose heading changed as the
+  calendar moved, and screen readers/bookmarks got "Aug 2026 Open" as the page name. The heading is
+  now "Overview"; the period moved to the context line where every sibling tab puts its scope.
+
+**Checked and found NOT broken**
+- Tab strip renders all 11 with the active one correctly marked (the `sec-tab--active` fix holds).
+- Sidebar nav is identical across routes - an earlier "nav differs between routes" reading was an
+  artifact of truncating the probe output at 220 chars, not a defect.
+- No page errors, no console errors, no horizontal overflow on any route.
+
+**⚠ An audit that lies is worse than none**
+- A mid-run version reported ONE contrast violation per route, all of them the word "or" on the
+  sign-in form: the login had silently failed and every route redirected to `/login`. That reads as
+  "finance is nearly clean" - the most misleading possible result. The audit script now refuses to
+  run unless it is actually authenticated.
+
+**Verified**: 3416 UI tests, typecheck clean, design-token guard green, DEMO_MODE build green.
+
+---
+
+### platform-nest - lint:migration-rls now catches the kind that broke a deploy (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- `lint:migration-rls` flags plain `INSERT ... VALUES` into a FORCE-RLS table, not only the
+  silent-no-op shapes (UPDATE / DELETE / INSERT..SELECT).
+
+**Why it was excluded, and why that reasoning was wrong**
+- The lint's own header argued a literal-values INSERT is NOT in the bug class because it "fails
+  LOUDLY... migrate.ts surfaces that as a startup/CI failure". The first half is true; the second is
+  FALSE in this repo. ★ CI runs migrations as a SUPERUSER, which BYPASSES RLS -- so the statement
+  inserts happily in every test and shard, and is loud only on the live estate. That is how
+  `202608261100` passed all four platform-nest shards and then aborted the deploy of
+  `alpha-01.071.0172a`.
+- The failure mode is not "silent zero rows". It is "green everywhere you look, red in the only
+  place that counts", which is strictly harder to catch and so more deserving of an authoring-time
+  gate, not less.
+
+**How it avoids becoming an ignored gate**
+- The new kind carries its OWN, later cutoff (`INSERT_VALUES_CUTOFF`). ~137 already-enforced
+  migrations were written under the previous rule and cannot be edited (README rule 4); enforcing
+  over them would make the lint permanently red, and a permanently red gate is an ignored one. The
+  original silent-no-op checks still apply to those files unchanged.
+
+**Verified, not assumed**
+- A green run proves nothing about a rule that never fires, so the rule was exercised: a throwaway
+  migration with a bare INSERT into `activities` IS flagged, at the right line and under the right
+  kind, and the ledger returns green once removed.
+- The failure message was stale - it described only the silent class and said "touches EXISTING
+  rows", which is wrong for an INSERT and points the reader at the wrong fix. It now separates the
+  two modes, gives the remedy for both (including `app.scopes` for module-owned tables), and warns
+  against the tempting wrong fix: widening an EXCEPTION handler to swallow the RLS error makes the
+  assertion pass while proving nothing, because the row never reaches the CHECK.
+
+---
+
+### platform-nest - a migration self-test that CI structurally could not fail (2026-08-26) - DEV-VERIFIED
+
+**Fixed**
+- `202608261100_activity_approval_attribution.sql` aborted the deploy of `alpha-01.071.0172a`:
+  `new row violates row-level security policy for table "activities"`. Its self-assertion block
+  INSERTs two probe rows to prove both new CHECK constraints REJECT - but `activities` is FORCE-RLS
+  and migrations run as `platform_app`, which is NOBYPASSRLS, so the POLICY refused the rows before
+  either CHECK could fire. That error is neither `check_violation` nor `not_null_violation`, so the
+  block's handlers did not catch it. Fixed by setting `app.current_tenant_ids` before the probes.
+
+**★ Why CI was green and live was not**
+- Test databases run migrations as a SUPERUSER, which BYPASSES RLS. The probes inserted happily and
+  all four shards passed. The privilege difference between the test harness and the live migrator is
+  the entire bug and it is invisible from the test side - no amount of test-suite green could have
+  caught it.
+- `lint:migration-rls` did not catch it either: it flags UPDATE/DELETE/INSERT..SELECT backfills over
+  a FORCE-RLS table's existing rows, not a plain `INSERT .. VALUES`. Worth widening, but that is its
+  own change.
+- Verified the fix the only way that is meaningful: replayed the migration against the LIVE schema as
+  `platform_owner` (NOBYPASSRLS, table owner) inside a transaction that was ROLLED BACK. Clean run,
+  `DO` block completed - so both CHECKs fired - and zero columns left behind afterwards.
+
+**⚠ Widening the EXCEPTION handler would have been the wrong fix**
+- Catching the RLS error would make both assertions "pass" while proving NOTHING: the row is rejected
+  by the policy and never reaches the CHECK the block exists to exercise. A constraint that is never
+  exercised is indistinguishable from one that is absent - which is that block's own stated argument.
+
+**Deploy state**
+- `alpha-01.071.0172a` rolled back cleanly. Production stayed healthy on `alpha-01.071.0171a`
+  throughout; the failed migration was NOT recorded and left no partial columns.
+- `docs/MAP.md` regenerated - stale again from concurrent commits.
+
+---
+
+### platform-nest `0.40.1` - one content-brief sweep, not two: the decision, recorded (2026-08-26) - PROTOTYPED
+
+**Decided**
+- Two implementations of the SMM-26 follow-up sweep existed. `content-brief-job.ts` - the one
+  `main.ts` has always wired - SURVIVES. `content-brief-sweep-job.ts` is retired.
+- The files themselves were already deleted by a concurrent session inside `0194f26b` (an otherwise
+  unrelated IAM commit), so this change adds no deletion. What it adds is the REASONING, in the
+  surviving file's header, because a removal with no recorded rationale invites the same design back
+  in six months with the same argument and nobody able to say why it lost the first time.
+
+**Why the per-tenant identity won**
+- The retired file MINTED its own automation principal and auto-granted it a membership in every
+  opted-in tenant, reconciling that set each tick. The surviving one LOOKS UP a per-tenant principal
+  an operator provisions via `seed:social-content-brief-automation`, and REFUSES - counted, never
+  silent - any opted-in tenant without one.
+- Owner decision: self-minting and self-granting is ambient authority, and this program states the
+  opposite rule plainly ("cross-service authority is never ambient - every scope grant is an
+  explicit, visible act"). The retired file's counter-argument was sound as far as it went - WS8's
+  second wall, the per-(tenant,client) ACL scope computed server-side, holds independently of the
+  tenant set - but it traded a BY-CONSTRUCTION guarantee for a defence that has to keep being true.
+
+**⚠ What was given up, and the orphan left behind**
+- Restart-safety. The retired file tracked `social_engagements.content_brief_last_run_at` so a
+  re-tick could not double-draft. The surviving sweep does NOT track its own last run, and a re-tick
+  CAN double-draft. Now stated in that file's header so nobody infers otherwise from the column's
+  existence.
+- Migration `202608231830` is APPLIED on the live estate and its column is now unused. Left in place
+  deliberately - an applied migration is not a file to delete - and it is the right storage if
+  anyone ports restart-safety onto the surviving job.
+
+**Context**
+- The feature is entirely dormant: zero principals provisioned, zero engagements opted in,
+  `SOCIAL_CONTENT_BRIEF_SWEEP_ENABLED` unset. Nothing changes behaviour today, which is what made
+  this the cheapest possible moment to choose.
+- 746 tests across 63 files green.
+
+---
+
+### platform-nest `0.40.0` + platform-ui `0.55.0` - receivables can be WRITTEN (2026-08-26) - DEV-VERIFIED
+
+**Added**
+- `POST /api/:t/finance/ar/invoices` - raises and ISSUES a customer invoice. Draft-then-issue is two
+  steps in the database; it is one call here because a draft with no UI to finish it is a row nobody
+  can act on, and an invoice that never posts makes the aging disagree with what the customer was
+  told.
+- `POST /api/:t/finance/ar/receipts` - banks a receipt, with OPTIONAL allocation. Banking money and
+  deciding which debt it settles are two acts (`finance_ar_allocate` posts nothing), so money can be
+  banked before anyone knows what it pays for and the remainder shows as `payments on account`.
+- `GET /api/:t/finance/ar/customers` and `.../ar/open-invoices` - so a form offers a picker instead
+  of asking for a uuid.
+- `components/finance/ArForms.tsx` + both forms wired into `/finance/receivables`.
+
+**Notes**
+- ★ Every write goes through the SUBLEDGER FUNCTION, never a hand-written journal. A manual journal
+  to the AR control account is barred in the database, and that bar is the only reason the aging can
+  be trusted to tie to the balance sheet. The handlers assemble rows and call the function.
+- `issue` and `receipt` authorize as SEPARATE Cerbos actions on the same kind, because
+  `ar_receipt_posting` + `ar_writeoff_approve` is a seeded BLOCKING conflict (take the cash, then
+  write off the debt) and that is only enforceable if the actions are separately grantable.
+- PPN is computed server-side as 12% of 11/12 of the base. The form shows a preview and SAYS the
+  server recomputes it - a form that quietly re-implemented Indonesian VAT would be a second copy
+  free to drift, and the copy users see is always the one that drifts.
+- The account pickers are built from the REAL chart, not hardcoded codes: which codes exist differs
+  per company, and offering one that does not exist fails at submit with an error nobody can act on.
+- 9 new tests drive the endpoints over real HTTP with real Cerbos. The assertion that matters is not
+  the 201 - it is that `finance_ar_reconcile` still returns CLEAN afterwards. A 201 with a broken
+  tie-out would be worse than a 500. Also pinned: an empty-lines invoice is a 400 not a
+  mid-transaction `FINANCE_AR_EMPTY_INVOICE`, over-allocation is refused by amount, and a plain
+  member gets 403 on both writes.
+- Demo fixtures added for both new GETs. Without them the forms render with EMPTY dropdowns in demo
+  mode and the build gate still passes - the page would look built and be unusable.
+
+**Still not built on this page**
+- Credit notes and write-offs (write-off is a separate grant, deliberately), and adding a customer.
+
+---
+
+### platform-nest `0.39.2` - the finance seed counted calls, not writes (2026-08-26) - DEV-VERIFIED
+
+**Fixed**
+- ★ The seed reported **"11 posted"** on a run that created **4** journal entries. `posted` counted
+  CALLS that did not raise, and `finance_post_journal` is idempotent on `source_event_id` - it
+  returns the existing entry instead of raising, so a re-run tallied writes it never made. On a seed
+  that writes to REAL, APPEND-ONLY books that reads as a double-post, and the only way to find out
+  otherwise is to go and count the ledger by hand. Which is what happened: the ledger was correct
+  (12 -> 16 entries, 8 distinct `demo-seed:` ids, no duplicates), the counter was lying.
+- The ledger is now counted before and after, and the measured DELTA leads the output. The call
+  tallies follow, explicitly labelled as steps that ran rather than as rows written.
+
+**Verified on live after the AR/AP run**
+- AR aging lands in TWO different buckets, as the differing payment terms intend: 46,600,000 at
+  1-30 days (66.6m invoice less the 20m allocated, due 12 Mar) and 27,750,000 current (due 3 Apr).
+- AP 38,150,000 = 35,000,000 + 3,850,000 PPN - 700,000 PPh 23, to the rupiah.
+- `finance_ar_reconcile` and `finance_ap_reconcile` BOTH return zero problems - the subledgers tie
+  to the general ledger.
+- AR position: open 74,350,000 / on account 10,000,000 / net 64,350,000 - the unallocated remainder
+  showing up as the three-part position exists to show.
+
+---
+
+### platform-nest `0.39.1` - the finance demo seed reaches the AR/AP subledgers (2026-08-26) - DEV-VERIFIED
+
+**Fixed**
+- ★ **The seed's central claim was FALSE.** Its header said every journal it posts carries
+  `source_event_id` beginning `demo-seed:`, making the set reversible as a batch. Running it on live
+  proved otherwise: 12 entries, 8 tagged, 4 NOT - three asset capitalisations and a depreciation
+  charge, posted by `finance_capitalise_asset()`/`finance_run_depreciation()`, which mint their own
+  `fa-acquire:`/`fa-depreciation:` ids. Cleaning up on the documented filter would have silently
+  left those behind, the largest a 380,000,000 vehicle. The header and the CLI output now give the
+  three queries actually required, and note that `finance_assets`/`finance_instruments` rows are not
+  journals at all so a reversal does not touch them.
+- The seed posted only CASH and direct GL entries, so `finance_ar_invoices` and `finance_ap_bills`
+  stayed at zero and the Receivables/Payables tabs rendered empty beside a populated ledger. It now
+  creates real subledger documents: two issued invoices on different payment terms, a receipt that
+  is PARTLY allocated (30,000,000 banked, 20,000,000 allocated, 10,000,000 left on account - which
+  is the case the three-part position exists to show), and an approved vendor bill with PPh 23.
+
+**Notes**
+- ⚠ A HEADER IS NOT AN INVOICE: `finance_ar_issue_invoice` refuses one with no lines
+  (`FINANCE_AR_EMPTY_INVOICE`). Caught by dry-running the SQL against the LIVE schema inside a
+  rolled-back transaction before it ever ran for real - not by a test, and not on live.
+- Verified the same way: aging returns a row and `finance_ar_reconcile` returns ZERO problems, so
+  the subledger ties to the general ledger.
+- Live books after the first run: 12 entries, debits = credits = 1,509,000,000, zero unbalanced
+  entries, P&L revenue 150,000,000 / expense 144,500,000 / net 5,500,000, of which 8,500,000 is
+  exactly one month's depreciation on the three seeded assets.
+
+---
+
+### platform-ui `0.55.0` - The Office: the floor fits, the labels read, and Operations stops swamping it (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- ★ **Operations seats an AGENT, not a GOAL.** `lib/office.ts` gained `groupAgentSeats` /
+  `describeAgentSeat`; `lib/office-data.ts` uses them. Per-goal desks were unbounded and grew with
+  every goal ever run - against the live agency tenant that was **51 desks against 8 in the largest
+  real department**, all carrying the same name (`pm-reporter`). Grouping is the correct model, not
+  just a smaller number: the office models the org, and an agent is the worker while a goal is the
+  work - which is how humans are already modelled. Live floor: 51 -> 2 desks, 2061x1798 -> 1965x934 px.
+- **"Fit" may now be fractional.** `fitScale`, `nearestZoomLevel`, `MIN_FIT_SCALE` (0.45);
+  `Camera.scale` widened from `ZoomLevel` to `number`. Fit floored at 1x, so any plate wider than
+  the window stayed clipped inside an overflow-hidden viewport - a control labelled "Fit" that did
+  not fit. Every user-driven zoom step stays integer and pixel-exact; only Fit may go fractional.
+  This consciously softens the art below 1x and supersedes the integer-only note in `office.ts`.
+  Owner decision 2026-08-26.
+- **Delegation labels are legible mid-replay.** `drawTransitLabel` renders the in-transit reason on
+  a plate with MEASURED truncation, and overlapping labels alternate into two lanes. It previously
+  drew bare low-contrast text straight onto the floor, and passed `maxWidth` to `fillText` - which
+  CONDENSES glyphs rather than truncating.
+
+**Fixed**
+- ★ **Duplicate person ids no longer corrupt the floor.** `steadyPositions()` keys its maps by the
+  avatar OBJECT rather than `avatar.id`. Two distinct defects, both only visible on real data:
+  `groups.indexOf(a.id)` returns the FIRST match, so four people stacked onto ONE desk and drew over
+  each other with no error; and an id-keyed resting-room map kept only the last writer, teleporting
+  people out of their own department. ⚠ The duplicate ids themselves are a REAL upstream defect -
+  the live org structure returns four different people in GM sharing node id `p-019fb652` (2
+  distinct ids for 5 people). This layer no longer depends on their uniqueness, but the data is
+  still wrong and anything else keying on that id is suspect. Belongs to platform-nest / the
+  org-structure seed.
+
+**Added (dev-only, not product surface)**
+- `lib/office-fixture.ts`, `lib/office-snapshot.ts` and the `/office-lab` route (`notFound()` in
+  production, absent from nav) - a harness for working on the renderer with no backend, able to
+  render a snapshot captured from the live server. A snapshot is passed by absolute path via
+  `OFFICE_SNAPSHOT` and is never committed: it carries real employees' names.
+- `next.config.ts` honours `NEXT_DIST_DIR` (default `.next`, unchanged). Several dev servers are
+  routinely run against this one working copy; they all wrote the same `.next` and served 500s on a
+  missing `routes-manifest.json` whenever one recompiled.
+
+**Notes**
+- Movement is STILL demo-gated and unchanged. On real data nothing animates at all: 0 of 50 goals
+  had an open run, so no avatar receives an `activeRunId`. The O4 path is inert in production until
+  O0 (the event/presence spine) exists. The only live animation is automations awaiting approval.
+- Verified: `tsc --noEmit` clean; `vitest run` 177 files / 3222 tests; `DEMO_MODE=1 npm run build`
+  green; and the real page driven in a browser against a live-server snapshot, with every
+  department rendering its true headcount.
+
+---
 
 ### platform-ui `0.54.0` - the five remaining finance tabs are real pages (2026-08-26) - PROTOTYPED
 
@@ -404,7 +1182,7 @@ local stack). None of these mean "production-done".
   equal its credits is not a report with a small problem.
 - **An unbuilt tab states what already works behind it.** A 404 reads as "the app is broken".
 
-### platform-ui `0.53.0` — 2026-08-26 — GM console: the money tier (GM-09), and the block that dissolved
+### platform-ui `0.57.0` — 2026-08-26 — GM console: the money tier (GM-09), and the block that dissolved
 
 **Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build; not against live platform-nest.
 Tracking: [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md).
@@ -453,37 +1231,6 @@ banner is not a stalling tactic — it is a position that stays correct while th
    when one fails, so a single stale assertion reported "1 failed, 21 did not run" and hid the rest.
    Replaced with `fullyParallel: false` on the `gm` project: same single-worker sequencing, independent
    pass/fail.
-
-### platform-ui `0.52.0` - a finance WORKSPACE, not a dashboard (2026-08-25) - PROTOTYPED
-
-**Added**
-- `(app)/finance/layout.tsx` + `FinanceTabs` - the workspace shell.
-- `/finance/journals` + `/journals/[entryId]` - post, list, open, reverse.
-- `/finance/ledger` - one account's movements with a running balance.
-- `/finance/reports` - trial balance, P&L, balance sheet.
-- `/finance/[...unbuilt]` - an honest surface for a tab whose page is not built.
-
-**Why**
-- The owner's assessment: */finance* was *"a mash of info put into a page"*. One scrolling console
-  carried KPIs, three verdicts, two agings, the close gate, the calendar and a config card.
-  Everything was on screen and nothing was findable - the cap-table links sat below three tables
-  nobody scrolls to. More importantly **there was no way to POST anything**: the engine has had a
-  hash-chained double-entry ledger since F1 and nothing could reach it.
-
-**Notes**
-- ★ **The journal form's running totals are an AID, NOT A GATE.** It shows the difference but does
-  not block on its own arithmetic: if it did, any rounding difference between JS floats and Postgres
-  numeric would make a valid entry permanently unsubmittable. The database decides what balances.
-- **The badge reads `status`, not `kind`.** "reversed" (this entry WAS undone) and "reversal" (this
-  entry UNDOES another) are different facts; collapsing them renders a cancelled entry identically
-  to its canceller.
-- **The general ledger's running balance comes from the SERVER.** Accumulating it in the component
-  is trivial and is exactly the temptation to refuse - `finance_account_movement()` uses the
-  account's own `normal_balance` for direction, so credit-normal accounts (accumulated depreciation,
-  payables) run the right way without the page knowing anything about contra accounts.
-- **Each statement says whether it balances ABOVE the figures.** A trial balance whose debits do not
-  equal its credits is not a report with a small problem.
-- **An unbuilt tab states what already works behind it.** A 404 reads as "the app is broken".
 
 ### platform-ui `0.51.0` - the cap table and accounting settings become editable (2026-08-25) - PROTOTYPED
 
@@ -1530,1149 +2277,7 @@ math, run against a live test Postgres · platform-ui **172 files / 2795 tests**
 `DEMO_MODE=1 next build` green with all three hub routes · Playwright drove the hub in a browser.
 No migration in this slice.
 
-### platform-ui `0.53.0` — 2026-08-26 — GM console: the money tier (GM-09), and the block that dissolved
-
-**Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build; not against live platform-nest.
-Tracking: [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md).
-
-**GM-09 was blocked for the entire build, correctly, and then the ground moved.** The only money data
-in the estate was `GET engagements/:id/ledger` — one department's search-marketing provider spend —
-and OQ-3 forbade summing it into a company figure, so the money half shipped behind an honest
-`BackendPending` banner. A real double-entry finance module then landed (`finance_profit_and_loss()`
-in Postgres, Cerbos-authorized statements, AR/AP aging), and revenue and margin became available from
-the BOOKS at exactly the grain the cockpit needed.
-
-Worth stating plainly, because the temptation recurs: **had the engagement-ledger shortcut been
-shipped, the console would now carry a figure that disagrees with the general ledger**, and the fix
-would be a migration away from a number people had started quoting in reviews. A `BackendPending`
-banner is not a stalling tactic — it is a position that stays correct while the estate changes.
-
-- `lib/gmMoney.ts` — pure, 13 tests. Reads the P&L's own `TOTAL_REVENUE`/`TOTAL_EXPENSE`/`NET_PROFIT`
-  rows rather than re-summing lines (re-summing would agree with the ledger only until the first
-  contra-revenue account). Money parses at the edge and may fail to `null`; **never 0**, because "we
-  earned nothing" is the most expensive wrong answer this surface can give. Margin on zero revenue is
-  `null`, not 0% — undefined, not a value.
-- `GmMoneyCard` — three states that must not look alike, behind the `listPeriods` gate read (the one
-  finance reader that distinguishes 403 from 404): **forbidden** / **no fiscal calendar or module not
-  enabled** / **real books**. Compact on the cockpit, full on the tab.
-- Cockpit renders it **last**, below both operating tiers — the cadence rule this console follows puts
-  financials at the end of the deck. It first shipped in the middle by mistake; the e2e ordering
-  assertion caught it.
-- New `finance.statement.view` + `finance.ar.view` capability mirrors, accepted by the 1151-pair
-  parity guard.
-- Owner rulings: money answers **"are we making money?"** first; **compose and link out** to
-  `/finance`, never a second finance console; **active company only**.
-
-**Findings carried out of this work**
-
-1. **Three finance roles have no UI `Role` member.** `finance.statement.read` is held by
-   `company_admin`, `finance_manager`, `finance_staff`, `owner`, `platform_admin` — but the middle
-   three do not exist in `rbac.ts`'s union, so they resolve to **zero capabilities** across the whole
-   app. Same defect class as that file's own Gap 1/2/3 comments. It affects the entire `/finance`
-   console, not the GM tier, so it is reported rather than widened inside a GM ticket.
-2. **DEMO_MODE modelled no finance authz whatever** — `financeDemo` did not take a `userId`, so a
-   plain member was served the company's books. Fixed with a holder set returning **403**, not empty
-   fixtures: `lib/finance.ts` deliberately distinguishes refusal from absence and empty fixtures would
-   have destroyed that distinction. Third fixture-fidelity gap this session; worth treating as a
-   pattern.
-3. **`mode: "serial"` (added the day before) was the wrong fix** — it skips every later test in a group
-   when one fails, so a single stale assertion reported "1 failed, 21 did not run" and hid the rest.
-   Replaced with `fullyParallel: false` on the `gm` project: same single-worker sequencing, independent
-   pass/fail.
-
-### platform-ui `0.52.0` — 2026-08-25 — GM console: the narrowed department-lead view (GM-02b)
-
-**Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build; not against live platform-nest.
-Tracking doc: [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md).
-
-**The headline is a corrected assumption, not a feature.** GM-02b was parked as blocked: "the UI cannot
-identify a department lead" — `Me` carries no position or leadership signal and the P2-05 reconciler is
-unbuilt. All true, and all irrelevant. `reports.department.view`'s own declaration in `CAPABILITIES`
-reads *"department-grain (Cerbos `read_department`) — **SERVER narrows to the led unit subtree**"*. The
-console asks for department grain and Cerbos decides which units come back; determining leadership in
-the browser would have been precisely the "second opinion" the mirror rule forbids. **The blocker was
-created by reaching for the wrong mechanism.** Worth generalising: when a UI blocker is "we cannot
-determine X about the principal", check whether the server already determines X and narrows for you.
-
-- `lib/gm.ts` — `gmAccessFor` returns `full` / `narrowed` / `none`. Company tier checked FIRST, so a
-  principal holding both capabilities is not narrowed by the more specific-sounding check. Still
-  company-scoped, so a `manager` of one tenant cannot read another's departments by editing the URL.
-- `GmCockpit` — a narrowed lead gets **no company read at all** (not requested, not
-  requested-and-discarded: firing it would log a guaranteed 403 per page view and invite a future
-  refactor to render whatever came back), a banner stating the absence, provenance sourced from
-  whichever read answered, and the period toggle **relocated** onto the Departments card — it normally
-  rides the company card, so without the move a narrowed reader would have no route to a month view
-  except hand-editing the URL.
-- `gmTab.tsx` — `companyGrainOnly` opt-in and a third refusal state. The Business Review uses it and
-  refuses with its own wording; "limited to group executives" alone would imply the reader does not
-  belong in the console at all when every other tab is theirs.
-- New **manager-tier demo identity** (`manager@gaiada.com` -> `dept-manager`, exactly one `manager`
-  grant) + a `manager` row in `e2e/personas.ts`. An authorization tier that cannot be driven is a tier
-  nobody verifies — neither `demo-hansel` (full) nor `gede-ic` (refused) exercises this one.
-- `demoReports.ts` — **the fixture denied department grain to every non-superadmin** (`elevated =
-  userId === "demo-hansel"`), contradicting §8. Fixed *including the narrowing*: a `LED_UNITS` map means
-  the manager sees one department where the GM sees five. All-or-nothing would have let the narrowed
-  console look correct while never exercising the behaviour it is built on.
-- e2e 18 -> **25 tests**, all green.
-
-**Two deliberate expectation flips**, both recorded in their test bodies so neither reads as a
-regression to "fix" back: `gm.test.ts`'s "refuses a department manager" became "admits a department
-manager — narrowed", and the e2e `REFUSAL` regex tightened from `/limited to group executives/i` to the
-denial's distinctive opening clause — the loose pattern matched the narrowed banner and the
-company-only refusal too, since that phrase is the true boundary in all three cases. Three states need
-three distinguishable strings.
-
-**GM-09 (the money tier) is deliberately still blocked.** The only cost data in the estate is
-per-engagement search-marketing spend, so a "group spend" endpoint built on it would produce exactly
-the misleading figure OQ-3 ruled out. That is a **data** gap needing an owner ruling, not an
-endpoint-writing chore; writing it first would move the ambiguity into the backend.
-
-### platform-ui `0.51.0` - the cap table and accounting settings become editable (2026-08-25) - PROTOTYPED
-
-**Added**
-- `/finance/ownership` (UI-01c) and `/finance/settings` (UI-02b), `lib/financeActions.ts`,
-  `components/finance/{OwnershipEditor,SettingsEditor}.tsx`, demo fixtures.
-
-**Notes**
-- ★ **`listOwnership` returns `null` on 403, never an empty list.** `finance_ownership:read` is a
-  narrower grant than the rest of finance - a `finance_staff` clerk is denied outright - so a 403 is
-  the COMMON case here. Folding it to `{edges:[],problems:[]}` would render "this company has no
-  recorded owners", an active false statement about the cap table rather than a missing one.
-- **`problems[]` renders beside the rows, not behind a tab.** A cap table totalling 85% or 140% has
-  to say so where it is read; anywhere else and the common case - glance, believe it - shows a
-  register that looks authoritative and is not.
-- **`STAKE_INCOMPLETE` is a note, `STAKE_EXCEEDS_100` is a problem.** Same shape of data, different
-  treatment: one is ignorance, the other is wrong. A partially-recorded cap table is the normal
-  state of a real one.
-- **Neither form re-validates a server rule.** The 15/16-digit NPWP check and the posted-VAT guard
-  live in the database and their messages surface verbatim. A second copy drifts, and the copy that
-  drifts is the one the user sees.
-- **The settings page shows the fiscal year start read-only WITH the reason.** A field that exists
-  and then fails is worse than one never offered: the field implies permission and the refusal
-  arrives after the user has decided what they want.
-- **Configuration links from the console, not the sidebar.** `nav.ts` renders exactly one Finance
-  row on purpose; two more top-level rows would fight that dedupe.
-- The demo cap table totals **85%**, deliberately, so the incomplete-table copy is reachable in a
-  browser. A demo that adds up perfectly hides the reason the validation exists.
-
-### finance `0.14.1` - FinanceErrorFilter no longer swallows other modules' database faults (2026-08-25) - PROTOTYPED
-
-**Fixed**
-- `finance-error.filter.ts` delegates a NON-`FINANCE_*` `DatabaseError` to
-  `LastResortExceptionFilter` instead of answering in its place.
-- `provider-dispatch-error.filter.test.ts` - `FinanceErrorFilter` added to the pinned filter order.
-- `finance-error.filter.test.ts` - 5 tests, one of which is the regression guard.
-
-**Notes**
-- ★ **The bug was invisible by construction.** The filter is `@Catch(DatabaseError)`, so it
-  intercepts EVERY pg error in the estate, not only finance's. It replied 500 with exactly the body
-  `LastResortExceptionFilter` uses - but LastResort ALSO writes `[unhandled-exception]` to stderr
-  and records the fault on the active OTel span. So every non-finance database fault became a
-  SILENT 500: identical response, no log line, no trace. Nothing about the response could reveal it.
-- Delegating keeps ONE implementation of "what do we do with an unhandled fault", so a later change
-  there cannot drift from a copy hiding in the finance module.
-- **The order-pin test was right to fail.** `provider-dispatch-error.filter.test.ts` asserts the
-  EXACT registered filter list precisely so a filter added to `main.ts` cannot ship unreviewed. It
-  caught this one. The fix records the addition and states why this filter's `@Catch` type is NOT
-  disjoint from the others - it is the entry that needed reasoning about, which is what the test is
-  for.
-
-### finance `0.14.0` - F8 complete + F9 consolidation begins (2026-08-25) - PROTOTYPED
-
-**Added**
-- `202608251130` capitalisation, the depreciation run, the register/GL tie-out.
-- `202608251230` disposal, impairment, deferred tax (PSAK 46), the close interlock.
-- `202608251330` the fixed-asset movement schedule.
-- `202608251430` intercompany tagging.
-- `202608251530` control determination, the consolidation group, a SEPARATE consolidation ledger,
-  and the first elimination.
-- 45 tests across five suites.
-
-**Notes**
-- ★ **Tax depreciation is recorded and never posted.** Book depreciation is an entry in the books;
-  tax depreciation is a figure on a computation. Posting both would give statements that look
-  plausible and are wrong in a way no reconciliation could catch - both sides consistently wrong.
-- ★ **Deferred tax ADJUSTS TO A TARGET**, it does not post the computed figure. Posting the figure
-  each period accumulates it: by year three the sheet carries three times the real balance while
-  every individual entry looks correct.
-- ★ **Eliminations never touch an entity's books.** An elimination is true of the GROUP and false of
-  the ENTITY. Posting one into a subsidiary would make its standalone statements and its tax return
-  wrong, and leave an auditor looking at entries with no supporting transaction.
-- **The intercompany counterparty lives on the ACCOUNT, not the journal** - the ledger is immutable,
-  so a journal tag could only be set at posting time via a 13th parameter on a 313-line function
-  with seven callers. An account must be CHOSEN, so a mis-posted related-party balance is visible.
-- **Two real defects the suites caught.** (1) Intercompany account codes took the FIRST 4 hex chars
-  of a uuid v7, whose leading digits are a millisecond timestamp - companies created in the same
-  millisecond collided and `ON CONFLICT DO NOTHING` silently returned another counterparty's
-  account. Now uses the random tail and refuses on collision. (2) Both finance seeds wrote
-  `user_roles` outside the P2-04 choke point without being on the TRUSTED allowlist.
-- **Consolidation is bounded by `root_company_id`** - `withTenants` refuses a tenant set spanning
-  two roots, and reading both sides of an intercompany balance is a two-tenant read. Correct: two
-  unrelated holdings must never consolidate.
-
-### platform-ui `0.51.0` - network security console: traffic, threats, isolation, occupancy (2026-08-25) - PROTOTYPED
-
-**Added**
-- `src/lib/network.ts` - data layer + the BFF contract for `GET /api/:t/it/network/{traffic,threats,rules,presence}`
-  and `POST .../isolate`, plus pure helpers (`topTalkers`, `egressByCountry`, `summarizeThreats`,
-  `isFeedStale`, `describeExpiry`, `canProposeIsolation`). 25 tests in `network.test.ts`.
-- `src/lib/demoNetwork.ts` - labelled fixture fallback, seeded from the 2026-08-25 office survey.
-- `/it/network` (Traffic), `/it/network/threats`, `/it/network/rules` (Isolation),
-  `/it/network/presence` (Occupancy), under a new `Network` tab in the IT console.
-- `components/it/network.css`, `components/it/NetworkBanners.tsx`.
-- Explicit `demoFixtures.ts` routes for the four endpoints.
-- Design: `docs/superpowers/specs/2026-08-25-network-security-console-design.md`.
-
-**Notes**
-- ★ **The fourth plane.** `/it/topology` answers "what exists on the network" and
-  `/systems/observability` answers "what are we running". Neither can answer "what moves, and can we
-  stop it" - device inventory says nothing about who a device talks to. That needs flow + IDS data,
-  a different source with different volume and a different retention policy.
-- ★ **A fixture must never pass for live data.** Every response carries a `source` discriminator and
-  every page renders a loud banner on `"fixture"`. This is the direct countermeasure to the 8
-  invented devices at a nonexistent "Bali Office" that sat in the live tenant for months reading as
-  a topology bug. **In production these pages render fixtures + banner until the Phase 3 backend
-  exists** - deliberate, so the surface can be reviewed, but see the design doc if that trade should
-  be reversed to an empty state.
-- **No staff-identifying data in a committed fixture.** ~25 of the 40 client hosts have hostnames
-  naming the employee holding the phone. Corporate asset names are real; every personal device is
-  collapsed into an unnamed aggregate - which is also how the shipped product must treat them.
-- **`demoFixtures.ts` routes are explicit, not incidental.** That file's final GET catch-all answers
-  unmatched paths with `ok([])` - an empty ARRAY - and these readers expect an OBJECT, so falling
-  through would hand the pages `rollups: undefined` and crash the render instead of degrading.
-- **Occupancy is a facilities tool, worded as one.** Zones, occupancy, sensors - never "detection",
-  never "intruder", never a name. `PresenceZone` has nowhere to put a person; the wording is the
-  reminder, the shape is the guarantee.
-- **Enforcement renders read-only.** Isolation will ride D14 (`approval-executables.ts`), be
-  quarantine-scoped only, refuse four protected targets server-side including the approver's own
-  host, and auto-expire. None of it is built, so the page states that rather than offering a button
-  that would 404.
-- `HairlineTable`'s grid has no column gap: a right-aligned header renders flush against the next
-  left-aligned one and the two read as a single word. Found only by driving the page in a browser,
-  after four green builds. Every right-aligned column now sits at the end of the table.
-
-### finance `0.13.0` - F8 fixed assets: book AND tax depreciation (2026-08-25) - PROTOTYPED
-
-**Added**
-- `202608251030_finance_fixed_assets.sql` - `finance_asset_classes`, `finance_assets`,
-  `finance_depreciation_runs`/`_lines`, `finance_tax_golongan_params()`,
-  `finance_asset_depreciation_schedule()`.
-- `src/db/finance-f8-fixed-assets.test.ts` - 14 tests.
-- CoA template gains `1260` / `2250` (deferred tax balances), `6750` (impairment), `7400`
-  (disposal result).
-
-**Notes**
-- ★ **Two schedules, deliberately.** Tax depreciation is statutory (golongan fixes life and
-  permitted method); book depreciation is a PSAK 16 management estimate. They routinely disagree,
-  and that difference IS the temporary difference feeding deferred tax - not an inconsistency to
-  reconcile away. Keeping one number would move the other into a spreadsheet outside the ERP.
-- **The final period absorbs rounding.** 10,000,000 over 3 months rounds to 3,333,333.33 x 3 =
-  9,999,999.99. Charging the rounded figure every month strands a cent of book value on a fully
-  depreciated asset forever, and it never reconciles against the GL.
-- **Declining balance terminates.** Saldo menurun approaches zero asymptotically; the final period
-  writes off the remainder. Without it an asset depreciates past its life by amounts small enough
-  that nobody notices for years.
-- **Buildings on saldo menurun are refused by CHECK**, not by the UI - the method is not permitted
-  for them and a wrong tax return is not something anything downstream would catch.
-- **Idempotency is a UNIQUE INDEX**, not a code path: one depreciation run per period, which is the
-  only version that survives a retried job or two concurrent operators.
-- The new CoA accounts are added to the TEMPLATE only. `finance_instantiate_coa()` reads
-  tenant-scoped tables behind `app_module_allowed('finance')` and a migration has no such scope, so
-  a back-instantiate loop there would write ZERO rows and report success. Re-run
-  `seed:finance-config` (idempotent by code) to pick them up.
-
-### finance `0.12.0` - live defaults: PKP, a finance seat, and the ownership edge (2026-08-25) - PROTOTYPED
-
-**Added**
-- `seed:finance-live-defaults` - PKP status, a finance seat, and the default ownership edge.
-- `docs/PLACEHOLDER-PRINCIPALS.md` - the register of stand-in principals in the LIVE estate.
-
-**Notes**
-- ★ **Anthony gets ONE ownership row, not three.** The obvious reading of "Anthony 100%" is one
-  row per company, and it is wrong in a way that quietly misstates the cap table. `kind='holding'`
-  confers the company **plus every descendant** through `finance_owner_company_ids()`, and both
-  operating companies are children of the holding - so a single edge already reaches all three.
-  Three `shareholder` rows would resolve to the same set while asserting he holds the operating
-  companies directly rather than through the holding vehicle, and `shareholder` deliberately
-  carries no group reach. One edge says what is actually true.
-- **`anthony@gaiada.com` is a real active account**, so ownership is NOT a placeholder.
-- **The finance seat IS a stand-in** and is registered as P-01/P-02. A grant made without that
-  register entry is a defect: a stand-in grant is invisible once made - `hansel@gaiada.com` already
-  holds platform-wide access, so a finance grant on top produces no warning and looks identical to
-  a correct assignment.
-- ⚠ **SoD is not in force in the live estate.** The accountant and the finance manager are the same
-  account. Acceptable while the books are empty; not once real transactions are posted - the ledger
-  is append-only, so entries posted under a stand-in stay attributed to that person permanently and
-  reassigning the role later does not re-attribute history.
-- **Every value here is a DEFAULT and never overwrites one already set.** PKP is guarded on
-  `is_pkp IS DISTINCT FROM true`, so a company an accountant deliberately marked non-PKP is not
-  silently flipped back by a re-run.
-- The seed refuses to CREATE users. Inventing a principal in a live estate is how a fictional
-  employee ends up holding a finance grant.
-
-### finance `0.11.0` - the seed can configure a LIVE estate (2026-08-25) - PROTOTYPED
-
-**Added**
-- `seed:finance-config` takes `--company=` (repeatable), `--year=` and **`--no-seats`**.
-
-**Notes**
-- ★ **`--no-seats` is the point.** The two `.local` seats exist so dev is not blocked on a hire.
-  Seeding them into a live estate would put two fictional employees into production IAM holding
-  real finance grants - in the one module where a principal has money attached. Config (chart,
-  calendar, settings) is safe to seed anywhere; principals are not.
-- Defaults are unchanged (`Gaia Digital Agency`, seats ON, current year) so the documented dev
-  invocation and `finance-config.db.test.ts` behave exactly as before. Verified: 4/4 green.
-- The live estate is seeded through this script rather than hand-rolled SQL deliberately. Every
-  `finance_*` table composes `app_module_allowed('finance')`, so a statement run without the module
-  scope set writes **zero rows and reports success**. The seed sets it; a psql session would not.
-
-### platform-nest `0.38.1` - platform boots in seconds, not minutes (2026-08-25) - IN PROGRESS
-
-**Fixed**
-- `src/main.ts` - `runWorkActivityBackfill()` is no longer `await`ed ahead of `app.listen()`.
-- `src/core/work-activity-backfill.ts` - the history scan skips already-ingested rows.
-- `infra/compose/docker-compose.vps.yml` - platform healthcheck `start_period` 10s -> 300s.
-
-**Why (the 2026-08-24 502)**
-- platform took ~129s to reach "Server listening" on the live box. Its healthcheck allowed
-  10s + 20x5s = 110s, so compose called it unhealthy **19 seconds before it was ready** and
-  aborted `up -d` with "dependency failed to start". The abort is the damage: it leaves
-  platform-ui, mcp-hub, knowledge, report-renderer and agent-runner in the **CREATED** state,
-  never started. nginx and platform were both healthy; platform-ui simply was not running, so
-  every public request 502'd. Both automatic rollbacks failed identically, for this reason.
-- ~117s of that 129s was one statement: the work-activity backfill re-read the **entire**
-  `activities` history for every company on every boot, then did three sequential round-trips per
-  row (fallbackTitle, hintPayload, ingestWorkActivity) purely for ingest's `ON CONFLICT` to throw
-  the result away.
-
-**Notes**
-- ★ **Two independent defects, fixed independently.** The healthcheck budget was too tight AND the
-  boot was too slow; either alone would have caused this again. Raising the budget without fixing
-  the boot just moves the cliff.
-- The anti-join preserves semantics exactly. `work_activity`'s dedupe key is
-  `(tenant_id, source, source_ref)` and `source_ref` IS the activity's id, so an existing row means
-  already-ingested. The rerun contract was already "every row dedupes and reports 0" - it now
-  reaches the same end state without doing the work. `source_ref` is TEXT and `activities.id` is
-  UUID; the suite caught the missing cast (`operator does not exist: text = uuid`). The UUID side
-  is cast, never `source_ref`, so the index stays usable.
-- **Backfill -> consumer ordering is still load-bearing** and preserved. The consumer advances the
-  stream position, so starting it first could carry it past the history the backfill replays. On
-  failure the chain retries with capped backoff rather than starting the consumer - the old
-  crash-and-restart intent, without taking the whole API down to retry a background job.
-- Not fixed: `report-renderer` carries the same 10s `start_period`. It currently reaches healthy in
-  ~20s so it is not biting, but it is the same latent shape.
-
-### finance `0.10.0` - the /finance console + the config seed (2026-08-25) - PROTOTYPED
-
-**Added**
-- `platform-ui/src/lib/finance.ts` - the data layer, with TWO deliberate degradation strategies.
-- `platform-ui/src/app/(app)/finance/page.tsx` - the overview console: position KPIs, the four
-  integrity verdicts, the close gate, AR/AP aging and the fiscal calendar.
-- `platform-ui/src/lib/demoFinance.ts` - DEMO_MODE fixtures (the build gate runs in demo mode).
-- `platform-nest/src/seed/finance-config.ts` + `.db.test.ts` - `npm run seed:finance-config`.
-- `docs/FRONTEND-BFF-CONTRACT.md` - the finance section.
-
-**Notes**
-- ★ **A verdict must never degrade to a pass.** Four figures on this page are checks that mean
-  "problems found; empty = pass". The estate's usual `skipUnavailable(p, [])` would render a green
-  tick for a check that never ran. So `lib/finance.ts` has `financeData` (may degrade) and
-  `financeVerdict` (returns null), and the page renders "not checked" as visually distinct from a
-  pass. This is the single most important line in the UI work.
-- **The nav dedupes Finance.** An org structure frequently contains a department called Finance
-  (nav.test.ts's own wide-estate fixture has one), so appending a functional row the way HR and IT
-  are appended would render "Finance" twice, pointing at two different screens. The org row is
-  re-pointed at the console instead; a functional row is added only when no department claims the
-  name. Pinned by test.
-- **`listPeriods` distinguishes 403 from 404**, because the page keys its empty state off it - and
-  "you have no finance access" and "this company has no calendar" need opposite sentences. The
-  first draft told a member with no access to go and run a seed script.
-- **The demo fixture is deliberately not all-green**: one subledger does not tie and the current
-  period is unsigned, so the "does not tie" badge, the problem table and the close blockers are
-  reachable in a browser. A books-perfect demo cannot exercise the parts of this console that
-  matter.
-- **The seed does NOT sign off a period.** It seats a finance_manager and a finance_staff, enables
-  the module, instantiates the chart and cuts the calendar - but stamping `signed_off_by` with a
-  seeded persona would satisfy the D-F5 control while destroying the only thing it protects.
-  Nothing else is blocked by it.
-
-### finance `0.9.0` - FA Application Layer (2026-08-24) - PROTOTYPED
-
-The surface a person can actually reach. Until this, the whole program was schema + SQL + policy.
-
-**Added**
-- `src/modules/finance/index.ts` - the module contract, registered in `main.ts` and `app.module.ts`.
-  21 declared permissions; 6 MCP tools, all READ-ONLY.
-- `src/modules/finance/finance.controller.ts` - 19 endpoints under `/api/:tenantId/finance/*`.
-- `src/modules/finance/finance-error.filter.ts` - maps the `FINANCE_*` refusal family onto HTTP.
-- `src/modules/finance/finance.test.ts` - 19 tests against live Postgres + RLS + Cerbos.
-- `docs/modules/CAPABILITY-INVENTORY.md` regenerated (generated artifact).
-
-**Notes**
-- **The controller computes no accounting.** Every figure comes from a SQL function; it authorizes,
-  scopes and shapes JSON. The invariants stay next to the data where a script cannot walk past them.
-- **`withFinance()` is the only database path.** Every finance table is module-walled, so a plain
-  `withTenants()` returns zero rows with a 200 and looks like it worked. The first API test exists
-  to fail if that helper ever loses its module scope.
-- ★ **The fifth body-less 500 in this estate.** An unbalanced journal returned
-  `500 {"error":"internal error"}` - the database had computed `debits (100) <> credits (90)` and
-  the transport discarded it, because plpgsql errors arrive as pg `DatabaseError` and
-  `HttpErrorFilter` only catches `HttpException`. Fixed with a typed filter scoped to
-  `@Catch(DatabaseError)` - NOT a bare `@Catch()`, which broke the controller's own 400s because
-  re-throwing from inside a filter does not reach the next filter. Unrecognised `FINANCE_*` codes
-  default to 409 with their own message, so future refusals map by construction.
-- **MCP is read-only this wave.** An agent may inspect the trial balance, the aging and the close
-  blockers. No tool posts a journal: under D14 that must be a proposal a human approves, and the
-  finance approval surface does not exist yet.
-- **Rollup providers deliberately empty** - a group-level finance metric would be a cross-company
-  money figure, and a naive sum double-counts intercompany (blueprint 10.3a). Needs F9.
-
-### lms `0.7.0` + lab-runner `0.2.1` — L6 and L7 (2026-08-25) — DEV-VERIFIED
-
-**Added**
-- L6a: companion-target support in the runner (`buildTargetArgs`), plus the deliberately
-  vulnerable `lab-runner/targets/webapp-cmdi` image.
-- L6b: a DevOps lab graded on real `nginx -t` output. L6c: a Cyber lab against the target.
-- L7: `lms-creative-social-curriculum.ts`, `lms-seo-gm-curriculum.ts`, `lms-hr-it-curriculum.ts` —
-  20 courses, 12 paths, 64 activities across six departments.
-
-**Fixed**
-- **gVisor does not proxy Docker's embedded DNS on `--internal` networks**, so an attacker could
-  never resolve its target by alias. Resolved via `--add-host` with the target's real IP.
-- **`buildLabRequest` dropped `target`** — the Cyber lab would have been gradeable in isolation
-  and dead on arrival for a learner.
-- **The Cyber flag was hardcoded in the seed and the test.** Caught before push. Now read from
-  `LMS_CYBER_FLAG`, refused if unset, and asserted by shape rather than value — the first version
-  of that assertion printed the flag on failure, which is the same leak by a slower route.
-- **`spec-redaction.ts` now strips the WHOLE `gradingSpec`**, not just `answer`. A Cyber lab's
-  pass condition is "did you get the flag", so the flag lives in a `stdoutMatches` pattern.
-
-**Notes**
-- The target is as hardened as the attacker and never publishes a port.
-- No DevOps/Cyber lab existed before the runner could grade them: a required activity nothing can
-  pass makes its whole path permanently uncompletable.
-- Suites were re-run SERIALLY. Four agents against one test Postgres produced a `57P01` failure
-  that was contention, not a defect — a green or red number gathered under that load is not
-  evidence either way.
-
-Driven: 95/95 across 9 suites. Runner 31/31.
-
-### lms `0.5.0` + lab-runner `0.1.1` — L5 complete: labs run on a real host (2026-08-25) — DEV-VERIFIED
-
-**Added**
-- `202608250950_lms_l5_lab_runs.sql` — the dispatch record and its rate-limit index; plus the
-  `ux_lms_attempts_id_tenant` that every other lms_* table already had.
-- `src/modules/lms/lab-dispatch.ts` + the lab branch of `submitAttempt`.
-- `src/seed/lms-webdev-labs.ts` + `seed:lms-webdev-labs` — FE, BE and QA labs.
-- Tests: `lab-dispatch.test.ts` (7), `lms-webdev-labs.db.test.ts` (9).
-
-**Verified on the deployed runner, both directions**
-- Every REFERENCE solution scores 100 under gVisor on SumoPod.
-- Every untouched STARTER scores 0 (QA: 14.29). A lab whose starter passes teaches nothing.
-
-**Notes**
-- The graded test file is a challenge FIXTURE, never a starter. A learner file cannot displace a
-  fixture — overwriting test.js with `process.exit(0)` is the obvious full-marks exploit.
-- The QA lab inverts the usual exercise: the implementation is given and broken, and the learner
-  is graded on whether their tests FAIL against it and PASS against a correct one — the only
-  definition of a useful test.
-- No DevOps or Cyber lab is authored. Both need runner capability that does not exist until L6.
-### lab-runner `0.1.0` — L5a The lab execution sidecar (2026-08-25) — PROTOTYPED
-
-A new standalone service. Executes a learner's submission in a capped, unprivileged,
-network-less container and returns a graded result. `lab-runner/README.md` is its own guide.
-
-**Added**
-- `lab-runner/` — `config.ts` (every default chosen against SumoPod as measured), `sandbox.ts`
-  (the docker argument list — the security boundary), `queue.ts` (hard concurrency cap, bounded
-  backlog, refusal rather than an unbounded wait), `grade.ts` (four check kinds, server-side),
-  `runner.ts`, `server.ts` (three routes, no framework).
-- 25 unit tests: `sandbox.test.ts` pins every isolation flag; `grade.test.ts` pins the grader.
-
-**Fixed during the end-to-end drive — neither was visible to the unit tests**
-- A plain `--tmpfs /work` is created ROOT-OWNED, so `--user 65534` could not write a byte to it.
-  Every run failed with `cp: can't create '/work/...': Permission denied`.
-- A docker VOLUME chowned by a prep container looked like the fix and is not portable: Docker
-  Desktop masks volume ownership per container, so the chown appears to take and the next
-  container still sees `root`. `chmod 0777` behaves the same way. Verified directly.
-  Fix: `--tmpfs /work:rw,nosuid,size=128m,mode=1777,uid=65534,gid=65534`.
-
-**Notes**
-- **NO KVM on the target host.** Containers are the only boundary, on a box sharing a kernel with
-  19 containers of the owner's private production.
-- **`image` is a KEY into an allow-list**, never a reference. Honouring a caller-supplied image
-  there would turn the endpoint into "run anything as that image's entrypoint".
-- **`fileExists` is forgeable and says so.** The artefact listing comes from inside the learner's
-  own container; pair it with a `stdoutMatches` on the real tool's output for anything that
-  matters. No artefact report can be non-forgeable while the learner controls the producer.
-- Limits are CLAMPED, never honoured. A spec with no checks scores zero, never 100.
-
-**Not yet true:** not deployed. No platform-side dispatch (L5b), no labs (L5c), and nothing on
-SumoPod has been touched.
-
-### lms `0.4.0` — L4 The Web Dev curriculum (2026-08-25) — PROTOTYPED
-
-Six disciplines, ordered, foundation through lead. Structure and theory; the hands-on labs are L5.
-
-**Added**
-- `src/seed/lms-webdev-curriculum.ts` + `seed:lms-webdev-curriculum` — 8 paths, 14 courses,
-  42 activities, 14 graded quizzes. FE · BE · UI/UX · DevOps · Cyber Security · QA, plus a shared
-  foundation path and a lead path.
-- `src/seed/lms-webdev-curriculum.db.test.ts` — 7 tests.
-
-**Notes**
-- **No `lab` is authored, deliberately.** The runner arrives at L5; a required activity nothing
-  can grade makes its whole path permanently uncompletable. The seed refuses to finish if it finds
-  one and the test asserts zero.
-- **`requires_previous` throughout** — "steps so difficulties are in order", enforced in data.
-- **Mixed grading by discipline**: UI/UX and the lead track use reviewed `scenario` activities
-  with a rubric; the objective disciplines auto-grade.
-- Answers are option INDEXES, not text: an author fixing a typo in an option must not silently
-  invalidate every correct answer already recorded against it.
-
-**Not yet true:** nobody is enrolled — these are department paths the head assigns, not mandatory
-ones. No labs, no runner.
-
-### lms `0.3.0` — L3 The HOD authoring surface (2026-08-25) — PROTOTYPED
-
-"Later each HOD should make more" — the surface that makes it true. NO new backend: L1b already
-had every endpoint, so this is the write layer and the pages.
-
-**Added**
-- `platform-ui/src/lib/lmsActions.ts` — createCourse / updateCourse / publish / retire, modules,
-  activities, paths. The `ctx()` + `send()` shape every other actions file uses.
-- `/learning/authoring` and `/learning/authoring/[courseId]`; `components/lms/CourseForm.tsx`,
-  `AuthoringForms.tsx`, `LmsActionButton.tsx`; an Authoring nav row gated on `lms.authoring`.
-- `getCourse(..., { includeAnswers: true })` — the authoring read, re-authorized for `update`.
-- `e2e/lms-authoring.spec.ts` — 5 assertions driven against the rendered app, including the
-  negative control (a plain member is refused and pointed at the catalogue).
-- `lib/demoLms.ts` is now STATEFUL for authoring and implements fork-on-publish.
-
-**Notes**
-- **The authoring bound is not in this layer.** `resource_lms_course.yaml`'s `org_unit_lead` arm
-  matches on server-resolved `unitAncestors`; the department select is a convenience. `can(me,
-  "lms.authoring")` answers "may ask", never "may touch this course".
-- **Every mutating action surfaces `versioned`.** Editing a published course forks a new draft,
-  and an author who does not see that sentence believes they fixed live training and did not.
-- **Publish and retire are `lms.publish`, not `lms.authoring`.** Publishing freezes what people
-  will be certified against; retiring withdraws material somebody may be part-way through.
-- **e2e locators are name-based, not `getByLabel`.** getByLabel substring-matches the accessible
-  name, and "Title" collided with the course-key hint ("...it survives title changes..."). A
-  locator that breaks when someone edits help text is a locator that will break.
-
-**Not yet true:** attempt submission has no demo fixture and the lab runner does not exist (L5).
-Path authoring has server actions but no page yet — paths are listed, not built, in the UI.
-
-### lms `0.2.0` — L2 The general track and the training tenant (2026-08-25) — PROTOTYPED
-
-The wave with the widest reach and no execution risk: content every employee takes, and the
-isolated place ERP exercises are practised in.
-
-**Added**
-- `202608241550_lms_l2_general_track_and_training_tenant.sql` — `companies.is_training` with a
-  partial unique index (at most ONE, ever), `lms_cohorts` / `lms_cohort_members`,
-  `lms_training_reset_tables` (the allow-list, as DATA) and the append-only `lms_training_resets`.
-- `src/seed/lms-general-track.ts` + `seed:lms-general-track` — three published courses and one
-  mandatory path. Sixteen assessed questions.
-- `src/modules/lms/mandatory-assignment.ts` + `lms:assign-mandatory` — the enrolment sweep,
-  dry-run by default.
-- `src/modules/lms/training-tenant-reset.ts` + `lms:reset-training` — the bounded reset. Dry-run
-  by default; `--execute` additionally requires `--i-have-read-the-plan`.
-- `src/modules/lms/spec-redaction.ts`, `spec-redaction.test.ts` (7), `lms-l2.db.test.ts` (16),
-  and 4 new HTTP assertions in `lms-l1-acceptance.test.ts` (21 total).
-
-**Fixed — both silent, neither would have thrown**
-- **The quiz answer key was readable by every learner.** `GET /courses/:id` returned
-  `lms_activities.spec` verbatim and `resource_lms_course.yaml` names `member` in its read rule
-  deliberately. High scores on a mandatory track look exactly like training that works. Redacted
-  by default now, stripped by FIELD NAME at any depth rather than by knowing each kind's shape —
-  the kinds L5/L6 add are precisely what a shape-aware stripper would miss. `?includeAnswers=1`
-  re-authorizes for `update`; a learner asking is refused rather than quietly redacted.
-- **The training-tenant reset left the membership door open.** `revokeCohortAccess` deleted
-  `company_memberships` under `withGlobal`, but that table carries FORCE RLS — zero rows, success
-  reported. `user_roles` has no RLS, so the other half of the same function worked. Caught by an
-  assertion that the REAL company's membership survived, not by anything failing.
-
-**Notes**
-- **Reset, not delete, and the bound is in the database.** 186 tables carry `tenant_id` and there
-  is no hard-delete path for a company. The runner reads an allow-list table and NEVER derives one
-  from `information_schema`; the tenant is resolved from `is_training` and cannot be passed in.
-- **Per-table row counts, never a total.** A total hides the table that matched zero rows when it
-  should have matched hundreds — which is how the RLS zero-row trap presents.
-- **An unrecognised `applies_to` matches NOBODY.** 'unit' and 'discipline' arrive with L4; reading
-  an unknown scope as "all" would enrol the whole company in one department's path.
-- An employee with no `users` row is NAMED in the sweep output, never counted — a hole in
-  coverage reported as a number is one nobody closes.
-
-**Not yet true:** no company carries `is_training`, so the reset refuses outright; nothing is
-deployed and `lms` is enabled on no live company.
-### lms `0.1.0` — L1 Learning foundation (2026-08-24) — PROTOTYPED
-
-The LMS the owner asked for: **all departments, all levels**, operational and management alike.
-Its **own module key**, not filed under `hr` — filing a company-wide capability under one
-department would have made Creative's or SEO's training silently depend on `hr` being served to
-them. Design: `docs/blueprints/lms-foundation.md`.
-
-**Added**
-- `202608241322_module_lms_l1.sql` — 9 tables behind the `lms` third wall: `lms_courses`
-  (versioned by `(course_key, version)`), `lms_modules`, `lms_activities` (polymorphic
-  `read|watch|quiz|scenario|lab`), `lms_paths`, `lms_path_courses`, `lms_enrollments`,
-  `lms_progress`, `lms_attempts`, `lms_completions`.
-- `cerbos/policies/resource_lms_course.yaml` + `resource_lms_enrollment.yaml`;
-  `202608241340_iam_lms_l1_permissions.sql` — `lms_staff`/`lms_manager` roles, 12 permissions,
-  68 bundle rows. See `docs/PERMISSION-CONTRACT.md`.
-- `src/modules/lms/` — catalogue + learn controllers, 5 rollup metrics, 3 read-only MCP tools,
-  `lms-l1-acceptance.test.ts` (20 assertions over `buildApp()` + `app.inject()`).
-- **platform-ui (L1c):** `/learning`, `/learning/catalogue`, `/learning/courses/[id]`,
-  `/learning/compliance`, a `/me/learning` tab, `lib/lms.ts`, 7 mirrored capabilities in
-  `lib/rbac.ts`, a `learning` mortarboard icon, `lib/demoLms.ts` fixtures,
-  `src/lib/lms-readers.test.ts` and `e2e/lms-learning.spec.ts` (6/6 driven against the rendered
-  app under DEMO_MODE).
-
-**Fixed**
-- **`lib/lms.ts` called `platformFetch(userId, path)` — arguments swapped — in every reader.**
-  Both parameters are `string`, so `tsc` and 3,110 vitest assertions all passed while the LMS
-  paths were never requested: the demo catch-all answered `[]` and the catalogue rendered
-  "nothing published yet". A confident wrong answer with nothing thrown — the frontend-first
-  drift class this repo keeps getting bitten by. Caught only by driving the rendered page;
-  `lms-readers.test.ts` now runs each reader against the fixture store and asserts CONTENT, so
-  a wrong path fails instead of degrading.
-- `gradeAttempt` never passed `unitAncestors` to Cerbos, so every department head 403'd on
-  grading — the derived role could not resolve.
-
-**Notes**
-- **Editing a PUBLISHED course forks a new version** rather than rewriting it. A completion points
-  at the exact material that was assessed — the same freeze discipline as a payslip.
-- **A waiver is not a completion**, and a path with zero required courses reports NULL, not 100%.
-- **One dual-scope call in the whole module** (`{ modules: ["lms", "hr"] }`), for the certification
-  write onto the employee's HR file. Every other query declares `["lms"]` alone.
-- `lab` activities share the row shape but have no runner yet (L5/L6, the owner's SumoPod VPS).
-  Theory does not wait on the sandbox.
-
-**Not yet true:** nothing LMS is deployed, and the `lms` module is **not enabled on any live
-company**. No content exists — the mandatory general track is L2, HOD authoring L3, the Web Dev
-curriculum L4.
-
-### finance `0.8.0` - F2 Posting Rules (2026-08-24) - PROTOTYPED
-
-The seam other departments post through. **Business modules emit events in their own vocabulary;
-finance owns the mapping to accounts.**
-
-**Added**
-- `202608241027_finance_posting_rules.sql` - `finance_posting_rules` + rule lines,
-  `finance_ledger_events` (the inbox), `finance_process_event()`,
-  `finance_process_pending_events()`, `finance_event_backlog()`.
-- `202608241028_iam_finance_f2_posting_rule_permissions.sql` +
-  `resource_finance_posting_rule.yaml` - 4 keys. See `docs/PERMISSION-CONTRACT.md` section 24.
-- `src/db/finance-f2-posting-rules.test.ts` - 16 tests.
-
-**Notes**
-- **There is no expression language, and that is the most important decision here.** A rule line
-  takes an amount from a NAMED PATH in the payload times an optional fixed multiplier. Nothing else.
-  The moment a rule can compute, the chart of accounts becomes a programming language with no
-  debugger, no tests and no review - and "why did this post there?" stops having a short answer. If
-  a mapping needs logic, the emitting module computes the number and puts it in the payload, where
-  it is ordinary code with ordinary tests.
-- **Adds no second way into the ledger.** `finance_process_event()` builds a line array and hands it
-  to `finance_post_journal()`, so balance validation, period guards, account guards, the hash chain
-  and idempotency all apply unchanged. Pinned by tests: an unbalanced rule and a locked period both
-  fail through F1's own errors.
-- **Accounts are named BY CODE, resolved at post time.** A stored account id would keep posting
-  silently after an accountant re-codes an account; a code breaks loudly, which is the correct
-  failure. Pinned by test.
-- **A failed event stays VISIBLE with its reason.** Unposted revenue is the thing nobody notices -
-  the books simply look smaller and everything still reconciles. Each event is swept in its own
-  subtransaction so one bad event cannot roll back the batch AND so its failure record survives.
-- `RULE_NOT_EFFECTIVE` is distinguished from `NO_ACTIVE_RULE`. The first draft reported both as "no
-  active rule", which the test suite hit immediately: a rule created today cannot post an event
-  dated in February, and the message named a rule that was sitting there plainly active.
-
-### finance `0.7.0` - F7 Tax and Statutory (2026-08-24) - PROTOTYPED
-
-F4 and F5 already recorded the tax. F7 turns it into returns.
-
-**Added**
-- `202608241025_finance_tax_and_returns.sql` - `finance_tax_codes` (rate + base multiplier,
-  effective-dated), `finance_tax_returns` (filing record with as-filed snapshots),
-  `finance_coretax_extracts`; `finance_tax_compute()`, `finance_tax_ppn_summary()`,
-  `finance_tax_pph_summary()`, `finance_tax_efaktur_exceptions()`,
-  `finance_tax_coretax_reconcile()`.
-- `202608241026_iam_finance_f7_tax_permissions.sql` + `resource_finance_tax.yaml` - 4 keys.
-  See `docs/PERMISSION-CONTRACT.md` section 23.
-- `src/db/finance-f7-tax.test.ts` - 14 tests.
-
-**Notes**
-- **Input VAT with no e-Faktur is NOT creditable** - the rule with a direct money consequence. It is
-  EXCLUDED from the claim and reported separately rather than silently netted: the company pays it
-  and cannot reclaim it, so the amount lost has to be visible while somebody can still chase the
-  vendor for the faktur.
-- **A single `rate` column cannot express Indonesian PPN.** Since 2025-01-01 the statutory rate is
-  12% applied to ELEVEN TWELFTHS of the base - an effective 11%. Storing "11%" loses what the tax
-  office cares about; storing "12%" alone overstates by ~9%. Codes carry `rate` AND
-  `base_multiplier`, and are effective-dated so a 2024 supply keeps its full-base 11%.
-- **`finance_tax_efaktur_exceptions()` reports two kinds, deliberately not merged.**
-  `AR_MISSING_EFAKTUR` is a compliance failure (the customer cannot credit it either);
-  `AP_INPUT_VAT_LOST` is a money loss. Same symptom, opposite consequence, different person to
-  chase.
-- **A return snapshots its figures AS FILED.** A late invoice booked after filing moves the live
-  figure; the filed figure must not move, because an auditor asks about exactly that gap. Pinned by
-  test.
-- **Transmission to Coretax is NOT built and must not be** (blueprint section 6, D-F2 carve-out) -
-  that goes through a licensed ASP/PJAP. What F7 owns is the harder half: correct tax data, and the
-  monthly reconciliation between our ledger and DJP's pre-populated extract.
-
-### finance `0.6.0` - F6 Bank Reconciliation and the Close (2026-08-24) - PROTOTYPED
-
-**Added**
-- `202608241023_finance_bank_and_close.sql` - bank statements, transaction lines, statement/ledger
-  matches; `finance_bank_automatch()`, `finance_bank_reconcile()`, and
-  **`finance_period_close_readiness()`** - the capstone that aggregates F1 ledger integrity, F3
-  statement balance, F4/F5 subledger tie-outs, F6 bank reconciliation and the D-F5 sign-off into one
-  answer.
-- `202608241024_iam_finance_f6_bank_permissions.sql` + `resource_finance_bank.yaml` - 4 keys.
-  See `docs/PERMISSION-CONTRACT.md` section 22.
-- `src/db/finance-f6-bank-close.test.ts` - 13 tests.
-
-**Notes**
-- **The auto-matcher is deliberately conservative.** It matches only on an exact amount + direction
-  + near-date triple, and REFUSES to match where two ledger lines are equally plausible. An
-  aggressive matcher clears the queue and produces a reconciliation that looks complete while
-  pairing the wrong payment with the wrong invoice - surfacing months later as a customer chasing
-  money we recorded against someone else. An unmatched item costs a minute; a wrong match costs a
-  relationship and an audit finding.
-- **There is no plug.** `finance_bank_reconcile()` reports a position - GL balance, statement
-  balance, each class of item in flight, and the unexplained residue. No adjustment field exists,
-  because a difference nobody can explain is the finding.
-- **The statement is never edited to match the ledger.** No function updates a transaction row. The
-  test proves the right way to clear an unrecorded bank charge is to POST it.
-- `finance_period_close_readiness()` does NOT close anything. It says whether you should; F0's state
-  machine still governs who may, and still refuses OPEN -> HARD_LOCK and an unsigned hard lock.
-- **Bank feed / API import is not included.** Lines arrive as data; the source (CSV, OFX, API) is an
-  integration concern with its own credentials and changes none of the reconciliation logic.
-
-### finance `0.5.0` - F5 Accounts Payable (2026-08-24) - PROTOTYPED
-
-The mirror of F4, plus Indonesian withholding tax.
-
-**Added**
-- `202608241021_finance_ap_subledger.sql` - vendors, bills + lines (input VAT per line, withholding
-  at bill level), payments, allocations; `finance_ap_approve_bill()`, `finance_ap_record_payment()`,
-  `finance_ap_allocate()`, `finance_ap_aging()`, `finance_ap_position()`, `finance_ap_reconcile()`.
-- `202608241022_iam_finance_f5_ap_permissions.sql` + `resource_finance_ap.yaml` - 6 keys.
-  See `docs/PERMISSION-CONTRACT.md` section 21.
-- `src/db/finance-f5-ap.test.ts` - 14 tests.
-
-**Notes**
-- **Withholding is the thing AP has that AR does not.** On a 100m services bill with PPh 23 at 2%:
-  the expense is 100m, the VENDOR is owed 98m, and DJP is owed 2m. Two real liabilities, different
-  creditors, different due dates. Booked at BILL APPROVAL, not at payment - the liability to DJP
-  arises when the expense is recognised, and it keeps `amount_payable` equal to what the vendor is
-  actually owed, which is what the aging must show. An aging listing gross bills overstates the cash
-  that will leave.
-- Allocation is capped at `amount_payable`, never `total`: the withheld tax was never the vendor's
-  to be paid, and allocating against the gross would let a payment "overpay" by the withholding.
-- **The reconciliation identity was reused from F4, second term and all** - open bills minus
-  payments on account = control balance. F4's suite had to discover that; this one pinned it from
-  the start, and the AP tests exercise a genuine vendor prepayment to prove it.
-- `npwp` on a vendor is load-bearing, not decorative: its absence changes the withholding rate under
-  Indonesian rules.
-- **3-way matching (PO / goods receipt / bill) is NOT included.** It needs a purchase order and a
-  goods-receipt document and there is no procurement module - a "match" against documents that do
-  not exist would be theatre. Recorded as a dependency.
-
-### finance `0.4.0` — F4 Accounts Receivable (2026-08-24) · PROTOTYPED
-
-The first subledger. Schema + functions only.
-
-**Added**
-- `202608241019_finance_ar_subledger.sql` — customers, invoices + lines (tax as data per line),
-  receipts, allocations; `finance_ar_issue_invoice()` (DR AR control / CR revenue / CR PPN
-  Keluaran), `finance_ar_record_receipt()`, `finance_ar_allocate()`, `finance_ar_aging()`,
-  `finance_ar_position()`, and `finance_ar_reconcile()` — the subledger-to-GL tie-out.
-- `202608241020_iam_finance_f4_ar_permissions.sql` + `resource_finance_ar.yaml` — 6 keys, actions
-  mapped onto SoD duties. See `docs/PERMISSION-CONTRACT.md` §20.
-- `src/db/finance-f4-ar.test.ts` — 16 tests, reconciliation asserted empty after every state change.
-
-**Changed**
-- `202608241015` — `finance_post_journal()` gains `p_subledger`. Control accounts stay barred to
-  manual journals, but the subledger that OWNS one may post to it. Deliberately narrow: it unlocks
-  only control accounts whose `control_subledger` matches, so an AR posting is still refused on the
-  AP control account.
-
-**Notes**
-- ⚠ **The reconciliation identity is NOT "open invoices == control account".** The test suite caught
-  that on its first run. A receipt credits AR the moment the money lands, before allocation, so a
-  customer who prepays leaves a credit inside the control account. The identity is
-  **open invoices − payments on account = control balance**, exposed by `finance_ar_position()` so
-  no caller re-derives it differently. The naive version reports a mismatch on every prepayment,
-  which teaches people to ignore the reconciliation — the exact failure it exists to prevent.
-- **Aging buckets by DAYS OVERDUE, not invoice age.** An invoice on 60-day terms issued 45 days ago
-  is current; ageing by issue date makes a healthy book look distressed.
-- **Allocation posts no journal.** The money moved when the receipt was recorded; allocation only
-  says which debt it settles. Asserted by counting journal entries before and after.
-- **Credit limits, dunning and credit memos are NOT included** — policy layers on top of a working
-  subledger. `credit_limit` is stored but deliberately unread; a silently unchecked limit is worse
-  than an absent one.
-
-### finance `0.3.0` — F3 Statements (2026-08-24) · PROTOTYPED
-
-**The phase project-hug never reached.** Its `FINANCE_PHASE_ROADMAP.md` §8 is entirely unchecked,
-including its own "Total Assets must equal Liabilities + Equity" checkpoint — so this was walked
-from first principles and verified by test.
-
-**Added**
-- `202608241017_finance_statements.sql` — `finance_account_movement()` (the shared engine, so no two
-  statements can disagree about what a balance is), `finance_trial_balance()`,
-  `finance_general_ledger()` with a continuous running balance and correct opening balance,
-  `finance_profit_and_loss()`, `finance_net_profit()`, `finance_balance_sheet()`, and
-  `finance_verify_statements()` (one row per problem; empty = pass).
-- `202608241018_iam_finance_f3_statement_permissions.sql` + `resource_finance_statement.yaml` — the
-  `finance_statement` kind, `read` + `export`. See `docs/PERMISSION-CONTRACT.md` §19.
-- `src/db/finance-f3-statements.test.ts` — 13 tests, including A = L + E surviving a reversal.
-
-**Notes**
-- **A = L + E only holds because current-period profit is carried into equity.** Revenue and expense
-  are temporary accounts that close into retained earnings at year end; before that close their net
-  is still equity, just unmoved. Omit it and the sheet is out by exactly the year-to-date profit.
-  `p_fy_start` is therefore a required argument, not a defaulted one — "profit so far" is meaningless
-  without knowing when the year began, and not every company's year starts in January.
-- **Contra accounts derive their sign from `normal_balance`, never from a hardcoded code list.**
-  Both directions are pinned: a sales return (revenue/debit-normal) nets negative against revenue,
-  and accumulated amortisation (asset/credit-normal) presents negative under assets.
-- **Reversed entries are NOT excluded from statements.** A reversed entry and its reversal both
-  appear and net to zero — the auditable answer. Filtering them would disagree with the trial
-  balance and hide a correction.
-- **Implemented as functions over the ledger, not materialised projections.** A projection can drift
-  from the ledger (a whole failure class project-hug needed an integrity service to manage); an
-  aggregation cannot, because it IS the ledger. The signatures are what must stay stable — the
-  projection can land behind them when measurement calls for it, and these tests become the oracle
-  proving it agrees.
-- **Cash Flow is deliberately NOT included.** The indirect method needs each account classified as
-  operating/investing/financing — CoA metadata that does not exist yet. Inventing it inside a query
-  would hide a modelling decision; it gets its own ticket.
-
-### finance `0.2.0` — F1 Ledger Core (2026-08-24) · PROTOTYPED
-
-The book of record. Schema + functions only — still no HTTP surface, no statements (F3), no
-subledgers (F4/F5).
-
-**Added**
-- `202608241015_finance_ledger_core.sql` — `finance_journal_entries` / `_lines` /
-  `_line_dimensions`, immutable by trigger; `finance_post_journal()` (the one way in — idempotent on
-  `source_event_id`, totals computed FROM the lines, per-company advisory lock so the sequence and
-  hash chain cannot fork); `finance_reverse_journal()` (correction is a mirrored entry, never an
-  edit); `finance_verify_ledger_chain()` (returns one row per PROBLEM — an empty result is the pass
-  condition); SHA-256 chain with one canonical serialisation shared by writer and verifier.
-- `202608241016_iam_finance_f1_ledger_permissions.sql` + `resource_finance_ledger.yaml` — 4 keys on
-  the new `finance_ledger` kind, role-arm only. See `docs/PERMISSION-CONTRACT.md` §18.
-- `src/db/finance-f1-ledger.test.ts` — 25 tests through the NOBYPASSRLS app role.
-
-**Changed**
-- `202608241011` CoA seed: **bank, cash and tax accounts are no longer flagged as control
-  accounts.** Control means "reconciled against a subledger that POSTS INTO IT" (AR, AP, inventory,
-  fixed assets), not "reconciled" in general — bank and cash reconcile against a *statement*.
-  Driving the first real posting rejected a rent payment from `1120 Bank`, which was the correct
-  behaviour for the flag and the wrong flag for the account. 16 control accounts → 5.
-
-**Notes**
-- The reversal link points FORWARD ONLY (`reversal_of_id` on the reversing entry). A `reversed_by_id`
-  on the original would require updating a posted journal — the exact thing the table forbids — so
-  status is derived via `finance_journal_entry_status()`. `finance_reverse_journal()` performs zero
-  updates on the ledger.
-- The immutability trigger's entries-only column check had to be NESTED, not a flat AND-chain:
-  plpgsql resolves `OLD` against the triggering table, so `OLD.entry_hash` raised
-  `record "old" has no field "entry_hash"` when firing on lines. Still fail-closed, but surfacing as
-  an internal error instead of the ledger's own message. Pinned by a regression test.
-
-### finance `0.1.0` — F0 Foundations (2026-08-24) · PROTOTYPED
-
-First code for the Finance & Accounting department. **Schema and authz only — nothing posts yet.**
-Design: `docs/blueprints/finance-accounting-foundation.md`. Tracker:
-`docs/plans/2026-08-24-finance-PROGRESS.md`.
-
-**Added**
-- `202608241010_finance_ownership_and_scope.sql` — `company_ownership` graph + the scope resolver
-  (`finance_owner_company_ids`, cycle-guarded `finance_company_descendants`) implementing owner
-  ruling D-F8: a holding owner reaches every descendant, a company shareholder reaches only their
-  own company. Establishes the `finance` third wall.
-- `202608241011_finance_coa_and_dimensions.sql` — chart of accounts as **editable data** (ruling
-  D-F5) with a 69-line PSAK-aligned Indonesian template incl. PPN Masukan/Keluaran and PPh
-  21/23/4(2); accounting dimensions with per-account `required/optional/forbidden` rules; a freeze
-  trigger making an account's code/type/normal-balance immutable once posted.
-- `202608241012_finance_fiscal_calendar_and_currency.sql` — fiscal calendar with the
-  `OPEN → SOFT_LOCK → HARD_LOCK` state machine (HARD_LOCK terminal; refuses without a named
-  accountant sign-off), currencies, exchange rates carrying their `basis` (spot/closing/average),
-  and `finance_period_accepts_posting()`.
-- `202608241013_finance_sod_and_elevation.sql` — 12 finance duties and the 6 blocking
-  segregation-of-duties pairs; elevation grants that cannot be approved without an expiry and lapse
-  on their own; append-only finance access log.
-- `202608241014_iam_finance_f0_permissions.sql` — 13 grantable permissions across 3 new Cerbos kinds
-  (`finance_config` / `finance_period` / `finance_control`), the `finance_staff` / `finance_manager`
-  roles, and 48 generated bundle rows. Role-arm only, no `perm_*` mirror. See
-  `docs/PERMISSION-CONTRACT.md` §17.
-- `cerbos/policies/resource_finance_{config,period,control}.yaml`.
-- `src/db/finance-f0-foundations.test.ts` — 35 tests through the NOBYPASSRLS app role.
-
-**Notes**
-- The scope resolvers are `SECURITY DEFINER` **by necessity**: they read tenant-walled tables in
-  order to COMPUTE the tenant set, so as INVOKER they returned the empty set for everyone —
-  including the holding owner — silently. Caught by the test suite on its first run.
-- Four new authoring groups in `permission-groups.json`; pinned tallies updated in
-  `cerbos-catalog-alignment`, `permission-groups-catalog-parity`, `iam-215-boundary-pin` and
-  `ui-grantable-catalog` (320/81 → 333/84 pairs/kinds, 305 → 318 grantable).
-- **No handlers, endpoints or UI.** F1 (ledger core) is the next phase; the IAM arm is deliberately
-  role-arm only until those handlers exist and their holders are audited.
-
-### hr `0.4.0` + platform-nest `0.38.0` + platform-ui `0.49.0` — 2026-08-24 — HR-FULL: the department, waves A–D
-
-**Status: MIXED, and the mix is the point.** Schema/RLS and the pure engines are **DEV-VERIFIED**;
-handlers and UI are **PROTOTYPED**. See the per-layer table in
-[`MODULES.md`](./MODULES.md#hr--people--hiring--pay--040--in-progress) — nothing here was driven
-end-to-end against a running stack, and "the unit suite is green" is not that.
-
-Owner ask (2026-08-24): finish the HR department — research the best HR ERPs, find what was not yet
-planned, and build it. Scope confirmed as all four waves **including payroll**, and PII posture
-confirmed as label-only per 0109's precedent.
-
-**What the audit found.** `docs/blueprints/hr-department-foundation.md` §3 listed seven candidate
-capabilities. Measured against the standard HCM capability map, **five more gaps existed that the
-blueprint did not name at all** — and they were the load-bearing ones:
-
-- `hr_leave_balances.allocated_minutes` had **nothing that computed it**. It was a number somebody
-  typed, and nothing in the system could restate how it was reached.
-- **There was no holiday calendar.** A five-calendar-day leave request spanning a weekend was charged
-  as five days.
-- `employees` held CURRENT state only, so every promotion, transfer and status change **OVERWROTE the
-  previous fact**. Tenure, turnover and any statutory severance calculation were unanswerable from
-  the database.
-- `hr_records` had no validity. **An expired work permit and a current one were byte-identical to
-  every query in the system.**
-- Nothing modelled what anyone is paid.
-
-#### Added
-
-- **33 tables across four migrations** (`202608240140`–`0143`), every one behind the byte-identical
-  0028 third-wall predicate, applied through the same DO-loop shape so it cannot drift per table.
-  - **A** — holiday calendars (with Indonesian *cuti bersama*, which is not worked but IS charged —
-    two facts that needed two counters), leave policies + assignments + an append-only accrual ledger,
-    `hr_job_events` (the effective-dated worker history), document expiry + a reminder ledger, review
-    cycles + participants, and an append-only case timeline.
-  - **B** — the ATS. `hr_candidates` is a population **deliberately separate from `employees`**:
-    different legal basis, its own retention clock, and nothing that provisions access may reach it.
-    Hiring is an explicit CONVERSION, and `ck_hr_offer_conversion` makes "converted ⟺ has an
-    employee_id" a database invariant rather than a convention.
-  - **C** — pay grades, effective-dated compensation, allowances, BPJS enrolment, PPh 21 tax profiles.
-  - **D** — statutory parameter sets, payroll runs, frozen payslips + itemized lines, per-period
-    inputs, separations.
-- **Four pure engines**, no database and no clock: `working-days.ts`, `leave-accrual.ts`,
-  `payroll-calc.ts` (PPh 21 TER + progressive reconciliation + BPJS + THR), `severance.ts`
-  (PP 35/2021's three components). **109 unit tests.**
-- **Three Cerbos kinds** — `hr_policy` (read deliberately WIDE), `hr_recruitment` (wider than
-  `hr_case` on read, narrower on write, with an attribute-gated panel arm), `hr_payroll` (a step
-  ABOVE `hr_record`) — plus 18 catalog permissions, 11 authoring groups, role bundles, and migration
-  `202608240144`.
-- **Four controllers**, eight read-only MCP tools, five new rollup metrics, seven console pages and
-  `/me/pay`.
-
-#### Fixed / corrected
-
-- **`app_module_allowed()` returns NULL, not `false`, on an unset GUC.** 0028's header says "false".
-  Verified against a live Postgres. The wall is unaffected (RLS admits only TRUE), but anything
-  OUTSIDE a policy is affected — `IF NOT app_module_allowed(...)` never fires on NULL. Corrected in
-  `202608240140`'s header and pinned by the test as NOT-TRUE rather than as false.
-- **Four Cerbos resource attributes were silently dropped.** `resourcePayload()` in `cerbos.ts` is an
-  explicit allow-list, and `published` / `panelistUserIds` / `hiringManagerUserId` /
-  `recruiterUserId` were not in it. Two of them arrive through an object spread, where TypeScript's
-  excess-property check does not fire — so the type alone would not have caught it, and every
-  panelist would have been denied for no visible reason.
-- **Seeding `member` was tried as an exclusion and reverted.** Omitting `member`'s self/panel-scoped
-  bundle rows broke `role-permission-parity.db.test.ts`, correctly: Cerbos genuinely grants them. The
-  safety argument is the ABSENT `perm_*` mirror, not an absent row — which is exactly what 0094
-  already established for `hr_case`.
-
-#### Caught by the FULL suite, after the touched-file suites were already green
-
-Recorded because it is the argument for the whole gate. Three failures, none in an HR suite:
-
-- **Cerbos had not reloaded** the three new policy files, so the live PDP denied all 18 new keys
-  (`authz-permissions.controller.test.ts`). Restarted, then **probed with real decisions** rather
-  than trusting health: own PUBLISHED payslip ALLOW / own DRAFT DENY / another's DENY; panelist
-  read+create ALLOW but update+delete DENY; non-panelist all DENY; hiring manager read+update ALLOW
-  but approve DENY; member on `hr_policy` read ALLOW but update+ratify DENY.
-- **A real routing regression** (`override-request-decide.test.ts`). `routeFor()` counts a role's
-  sensitive, non-self-scoped HR permissions to pick an override approver; `member`'s three
-  panel-gated `hr_recruitment` keys were unmarked, so a NON-HR override began routing to hr_manager
-  instead of company_admin. Two causes: the panel conditions had been factored into
-  `variables.local`, making them opaque to the self-scope classifier, and the classifier had no
-  vocabulary for membership (`principal.id in attr.X`) regardless. Fixed by inlining the conditions
-  and teaching both twin predicates the membership form — blast radius measured first: that form
-  appears in exactly ONE resource policy, so no pre-existing role's classification moved.
-- **`CAPABILITY-INVENTORY.md` drifted** once 8 MCP tools were added. Regenerated.
-
-⚠ An earlier draft of this entry called the marker gap "not exploitable — the ceiling governs
-granting, not acting." **That was wrong** — the marker also feeds override routing. Corrected rather
-than deleted, because the wrong reasoning is the useful part.
-
-#### The acceptance drive (added after the first pass, and it found two things)
-
-`src/modules/hr/hr-full-acceptance.test.ts` — the whole department over REAL HTTP (`buildApp()` +
-`app.inject()`, live Postgres + live Cerbos), following one employee end to end: configure →
-requisition → candidate → interview → scorecard → offer → convert → payroll
-calculate/ratify/approve/publish/pay → the subject reads their OWN published payslip → accrue leave →
-separate → analytics. **19 assertions, 0 skips.** Handlers move PROTOTYPED → DEV-VERIFIED.
-
-Two findings, both in the TEST rather than the code, and both worth recording because a green run
-would have hidden them:
-
-- **The fixture conflated the panelist with the hiring manager.** One user held both roles, so the
-  hiring-manager rule granted `update` and the assertion "a panelist cannot reject a candidate"
-  passed against the wrong rule — proving nothing. Split into two users; the panel arm and the
-  hiring-manager arm are now proven separately.
-- **The test's own arithmetic was wrong** on service years (asserted 1.75 for a 2026-10-01 →
-  2027-06-30 span, which is nine months). The engine said 0.746 and the engine was right.
-
-#### Seeding — `npm run seed:hr-config`
-
-Holiday calendar (Indonesian 2026 incl. *cuti bersama*), three leave policies encoding UU 13/2003
-art. 79, the 9-stage funnel, 7 pay grades, 6 allowance types, all five BPJS programs as SEPARATE
-plans, and an UNRATIFIED statutory parameter set. Idempotent (proven to a third run) and asserted to
-write **zero personal data** — which is what lets it run pre-Gate-1.
-
-#### DEPLOYED — `alpha-01.071.0150a`, 2026-08-24 10:05 UTC
-
-Live on `erp.gaiada.online`. Evidence from the deploy job's own log, not from the green tick:
-
-- **6 database backups taken BEFORE any migration** (gaiada_platform, knowledge, keycloak, n8n, bot,
-  waha-sessions).
-- **All five migrations applied to the live database:** `202608240140_hr_time_and_lifecycle`,
-  `…0141_hr_recruitment`, `…0142_hr_compensation_benefits`, `…0143_hr_payroll`,
-  `…0144_iam_hr_full_permissions`.
-- **Cerbos went `Restarting` and came back healthy** — it recompiles its whole policy repo at
-  startup, so that transition IS the three new resource policies loading on the live PDP. The health
-  gate now uses `ps -a`, so the crash loop this program hid once before would have been caught.
-- `all services healthy` after the wait.
-
-#### SEEDED on live — 2026-08-24
-
-`seed:hr-config` run against the live database. Surveyed BEFORE (all eight config tables at zero;
-23 employees / 41 records / 39 cases / 17 leave requests already present) and verified AFTER **as
-superuser**, independently of the seed's own read — because a seed that reports success having
-written nothing is this program's signature failure, and its own count is not evidence.
-
-| | before | after |
-|---|---|---|
-| holiday calendar / holidays | 0 / 0 | 1 / 17 (15 public + 2 *cuti bersama*, both `deducts=true`) |
-| leave policies / assignments | 0 / 0 | 3 / 3 |
-| pipeline stages | 0 | 9 |
-| pay grades · allowance types · benefit plans | 0 · 0 · 0 | 7 · 6 · 5 |
-| statutory set / parameters | 0 / 0 | 1 / 24 |
-| **employees · records · cases · leave** | **23 · 41 · 39 · 17** | **23 · 41 · 39 · 17 (untouched)** |
-| candidates · compensation · payslips · requisitions | 0 | 0 (zero personal data written) |
-
-The vacation policy landed as `upfront / 5760min / wait=12mo` — UU 13/2003 art. 79. Sick and unpaid
-are `none`, because Indonesian sick leave is a paid-wage rule and not a counted entitlement.
-
-**Idempotence proven ON LIVE, not just in a test:** a second run created nothing (`existing=` for
-every section) and every count was identical afterwards. That matters because this seed will re-run
-on future deploys.
-
-**The statutory set is UNRATIFIED** (`ratified_by=NULL`), confirmed by direct query. Payroll
-calculates against it and refuses to finalize without a recorded override.
-
-⚠ **A concurrent session's release commit swept this work in.** `c4f6198` is titled for that
-session's agent/bot changes but contains all 59 HR-FULL files. The tag `alpha-01.071.0150a` is
-therefore accurate about the code and misleading about the subject — worth knowing when reading the
-history. `docs-map` went red on it (MAP.md is filesystem-derived and was not regenerated); fixed in
-`c22ea0e`.
-
-#### Flagged, not resolved
-
-1. **The statutory set is UNRATIFIED on live.** Payroll calculates but refuses to finalize without a
-   recorded override. Finance/counsel ratifies in-app from `/hr/settings` (company admin, high
-   assurance) once the PPh 21 / BPJS / PTKP figures are confirmed.
-3. **The statutory figures are UNRATIFIED.** They express the structure of PP 58/2023 and PP 35/2021
-   and are not legal advice. The engine hard-codes nothing, every run records the set it used, and
-   finalizing against an unratified set demands a permanently-recorded override — that is the
-   employee-portal §6 gate, re-expressed as data so the engine could be built without waiting on it.
-4. **Payroll sequencing overrides a written plan.** `employee-portal-foundation.md` §6 assigned the
-   engine elsewhere. Owner-directed, recorded in the migration header rather than left for a future
-   reader to discover as a contradiction.
-5. **No seeds** for calendars, policies, pipeline stages or a parameter set. Every affected surface
-   renders an empty state that says what is missing instead of inventing a default.
-6. **The `HR` nav entry remains ungated**, predating this work. The two money tabs are
-   capability-gated inside the console, so this does not widen it.
-
-### platform-nest `0.37.0` + platform-ui `0.48.0` — 2026-08-24 — client-centric ERP, slice 1: the client hub + the `clientId` facet (CC-01..03)
-
-**Status: DEV-VERIFIED** (browser-driven against a DEMO_MODE build; the SQL additionally validated
-against the LIVE estate before deploy). Design: `docs/plans/2026-08-24-client-centric-erp-design.md`.
-Contract: `docs/FRONTEND-BFF-CONTRACT.md` §22.
-
-Owner ask: read the ERP client-first — tasks, projects and everything else shown and filtered to the
-client. The measurement that shaped the design: **`client_id` is already on 12 tables, so no new
-columns were needed** — what was missing was the read surface. And **26 of 71 tasks / 9 of 20 projects
-have no client at all**, so "everything starts with a client" needed an explicit answer for the
-clientless third of the estate rather than a filter that quietly loses it.
-
-**The finding worth keeping:** the client portal has always shown a client everything they own on one
-surface, while `/clients/[id]` on the staff side showed contacts and a calendar and none of the
-client's work — **staff had a worse client-centric view than the client did.** This slice is the staff
-mirror of `/portal`.
-
-#### Added
-- **`core/client-filter.ts`** — the `?clientId=` facet: absent / `<uuid>` / `internal`. `internal`
-  resolves to `client_id IS NULL`, **not** `is_internal = true`: the two disagree on the live estate
-  (9 clientless projects, 7 flagged) and keying on the flag would leave 2 projects reachable from no
-  scope at all.
-- **Facet on `GET /projects`, `GET /pm/tasks`, `GET /invoices`** — all additive; omitting the
-  parameter is unchanged behaviour. The task facet joins through `projects` (no `pm_tasks.client_id`,
-  by decision) and turned out cheaper than designed: that CTE already joins `projects`.
-- **`GET /:t/clients/:clientId/overview`** — the hub aggregate, one round trip, mirroring
-  `/portal/overview`. Carries **`needsUs`** alongside `needsClient`.
-- **`/clients/[id]` hub** — Overview + Work tabs, tab strip, `clientHub.css`. The former client page
-  moved verbatim to `/clients/[id]/details`; nothing was deleted.
-
-#### Fixed
-- The client page fetched **every project in the tenant** and narrowed in the browser — which stops
-  being a filter past one page of rows. Now server-side.
-
-#### Notes / non-obvious
-- **The facet is a CONVENIENCE FILTER, not a boundary, and both files now say so pointing at each
-  other.** `portal-scope.ts` fails CLOSED (an external client must not reach another's rows); this
-  fails OPEN (a bad value shows everything), because a filter that fails closed hides real work and
-  looks exactly like "there is nothing here". Merging them into one "client scope" abstraction is how
-  a filter silently becomes load-bearing for isolation — pinned by a unit test that says so.
-- **`needsUs` is the reason the aggregate exists.** Nothing in the ERP rendered it before, which is
-  precisely how a client-recorded payment sat `pending` with no screen saying anyone had to confirm
-  it. Verified on the live estate: Nusa Coffee Co has **2** items waiting on us (an IDR 10,000,000
-  payment awaiting confirmation, one untriaged change request) against 7 waiting on the client.
-- The aggregate runs with `{ modules: ["social"] }`: the post-review join carries the `social` third
-  wall and without the scope that SELECT returns **zero rows and raises nothing** — the hub would have
-  reported "no post reviews outstanding" for a client with ten.
-- Unlike the portal layout, the hub layout lets a fetch failure **throw**. A hub rendering zeroes tells
-  a manager their client has no work, nothing owed and nobody waiting; this is the screen people act
-  on, so an empty state must mean "empty", never "we could not ask".
-- Demo fixtures mirror the facet, `internal` included. A fixture that ignored `?clientId=` would make
-  every client-scoped surface look right in DEMO_MODE while showing the whole tenant — and would have
-  lit up the Work tab's data-integrity card with other clients' tasks.
-
-#### Known gaps (tracked, not implicit)
-- The **six endpoints that already had `clientId`** (`deliverables`, `contracts`, `pipeline/runs`,
-  `meetings/recordings`, `webdev/change-requests`, `social/*`) accept a uuid only — `internal` matches
-  nothing there. Slice 2.
-- **No facet yet** on `invoice-payments` or `time-entries`; **no `/approvals` list endpoint exists**.
-- **Still no staff write UI** for contracts or payment confirmation (§16e). This slice makes both
-  VISIBLE in `needsUs`; the Commercial tab that calls `send`/`countersign`/`decide` is slice 2.
-- Slices 3-5 (Delivery / Requests / People tabs, the staff timeline, `<ClientPicker>` on the
-  object-first lists) are PLANNED.
-
-#### Gates
-`tsc --noEmit` clean in both projects · `lint:withtenants` + `lint:migration-rls` OK · 9 unit tests
-for the filter (incl. the fail-open contract) · **10 real-DB tests** for the facet and the money
-math, run against a live test Postgres · platform-ui **172 files / 2795 tests** green ·
-`DEMO_MODE=1 next build` green with all three hub routes · Playwright drove the hub in a browser.
-No migration in this slice.
-
-### platform-ui `0.52.0` — 2026-08-25 — GM console: the narrowed department-lead view (GM-02b)
+### platform-ui `0.56.0` — 2026-08-25 — GM console: the narrowed department-lead view (GM-02b)
 
 **Status: PROTOTYPED.** Driven in a browser against a DEMO_MODE build; not against live platform-nest.
 Tracking doc: [`../plans/2026-08-24-gm-console-PROGRESS.md`](../plans/2026-08-24-gm-console-PROGRESS.md).

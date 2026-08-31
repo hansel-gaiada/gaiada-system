@@ -1,0 +1,16 @@
+{
+  "name": "webdesk",
+  "private": true,
+  "type": "module",
+  "description": "WebDesk Zone B project skeleton (WSK-01) \u2014 standalone compose stack + its own migration ledger. See README.md.",
+  "scripts": {
+    "migrate": "node migrations/migrate.mjs",
+    "lint:migrations": "node scripts/lint-migration-rls.mjs",
+    "test": "npm run lint:migrations && npm run check:rls:selftest",
+    "check:rls": "node scripts/check-rls-integrity.mjs",
+    "check:rls:selftest": "node scripts/check-rls-integrity.mjs --selftest"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

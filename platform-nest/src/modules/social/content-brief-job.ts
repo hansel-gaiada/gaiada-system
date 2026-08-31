@@ -6,6 +6,29 @@
 // (`../../seed/social-content-brief-automation.ts` — read its header FIRST; it has the tested
 // argument for why per-tenant, never one global principal, is the only safe shape here).
 //
+// ── A SECOND IMPLEMENTATION EXISTED, AND WAS RETIRED ON PURPOSE (2026-08-26) ────────────────────
+// `content-brief-sweep-job.ts` solved this same ticket a different way: it MINTED one automation
+// principal itself and auto-granted it a membership in every opted-in tenant, reconciling that set
+// each tick. It also had something this file does not: restart-safety, via the
+// `social_engagements.content_brief_last_run_at` column (migration 202608231830).
+//
+// It was removed rather than wired, by owner decision, because the identity shape contradicted a
+// standing rule this program states plainly in the seed's own header: cross-service authority is
+// NEVER AMBIENT — every scope grant is an explicit, visible act. A job that mints its own identity
+// and grants itself tenant access on first tick is ambient authority, however well-reasoned the
+// mitigations. Its argument was not unreasonable (WS8's second wall, the per-(tenant,client) ACL
+// scope computed server-side, does hold independently of the tenant set) — but it traded a
+// by-construction guarantee for a defence that has to keep being true, and the by-construction one
+// is what the seed was written to provide.
+//
+// ⚠ THE MIGRATION IS APPLIED AND ITS COLUMN IS NOW UNUSED. `content_brief_last_run_at` exists on
+// every `social_engagements` row on the live estate and nothing reads or writes it. It is left in
+// place deliberately — an applied migration is not a file to delete — and it is the right storage
+// for restart-safety if anyone ports that property onto THIS file, which is the one genuine
+// capability the retirement gave up. Until then, treat the column as reserved, not as evidence that
+// this sweep tracks its own last run: it does not, and a reader who assumed otherwise would
+// conclude a re-tick cannot double-draft. It can.
+
 // SHAPE mirrors `best-time-job.ts`/`inbox-triage-job.ts` deliberately: `withGlobal` for the tenant
 // list, per-tenant work, per-tenant AND per-engagement failures caught and logged so one bad
 // tenant/engagement can never abort the sweep for anyone else.

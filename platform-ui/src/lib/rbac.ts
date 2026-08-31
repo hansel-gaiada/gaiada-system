@@ -90,7 +90,24 @@ export type Role =
   // (Cerbos matches `g.scopeId in resource.attr.unitAncestors` off IAM-09's closure), which the
   // browser cannot and must not replicate. So these capabilities are correct for "should the UI
   // offer this at all", never for "may this lead see THAT unit".
-  | "org_unit_lead";
+  | "org_unit_lead"
+  // F17 (2026-08-26) — THREE roles that Cerbos grants and this union did not name, so every holder
+  // resolved to ZERO capabilities in the UI. Same defect class as Gap 1/2/3 above; found while
+  // mirroring the finance read tier for the GM console's money card (GM-09), and fixed as its own
+  // change because it is estate-wide, not GM-scoped.
+  //
+  // `finance_staff` / `finance_manager` — the WSD-2 module_staff/module_manager pair for
+  // `resource.attr.module === "finance"`, exactly like hr_*/search_*/social_*/reports_*. Both derive
+  // the SAME two capabilities today, because those are the only two finance capabilities this file
+  // models; their remaining 19 and 38 backend permissions have no UI surface yet. That is honest, not
+  // a gap in this change — a capability is added when a UI reads it, never speculatively.
+  | "finance_staff" | "finance_manager"
+  // `owner` — the holding-wide BUSINESS authority, granted per owned company (see the IAM-15 note on
+  // `group_executive` above, which `owner` replaced). It carries 330 permissions in the bundles,
+  // deriving 61 capabilities here. **This was the most consequential omission of the three:** an
+  // owner previously saw nothing — no Settings, no company management, no reports, no HR — while
+  // Cerbos would have authorized all of it.
+  | "owner";
 
 // The single source of truth for every capability the platform knows about. `Capability` is
 // DERIVED from this tuple (below) rather than hand-declared as a separate union, and `ALL` (the
@@ -600,6 +617,33 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // reader diffing `manager` (0 of 3) against `agency_approver` (1 of 3, both non-zero-but-partial)
   // should not conclude either grant is wrong from that shape alone.
   agency_approver: ["approvals.decide"],
+  // ── F17 ─────────────────────────────────────────────────────────────────────────────────────────
+  // DERIVED, not authored. Each list is exactly the set of capabilities whose `CAPABILITY_MAP` entry
+  // is satisfied by that role's bundle in `platform-nest/src/rbac/role-permission-bundles.json`, so
+  // `rbac-capability-parity.test.ts`'s biconditional holds by construction. To regenerate after a
+  // policy change: for each capability, evaluate its map entry ("all" = every permission held, "any"
+  // = at least one) against the role's bundle. Do NOT hand-edit these to "look right" — a guess here
+  // is precisely what the parity guard exists to catch.
+  finance_staff: ["finance.statement.view", "finance.ar.view"],
+  // Identical to finance_staff today. The manager tier's extra reach (post, reverse, close, approve,
+  // write-off, waive) is real in Cerbos but has no capability in this file yet, because no UI reads
+  // it — see the union comment.
+  finance_manager: ["finance.statement.view", "finance.ar.view"],
+  owner: [
+    "admin.access", "appraisal.read", "approvals.decide", "approvals.retry", "checkin.excuse",
+    "checkin.read", "company.manage", "finance.ar.view", "finance.statement.view", "hr.manage",
+    "hr.payroll.approve", "hr.payroll.manage", "hr.payroll.view", "hr.policy.manage", "hr.policy.ratify",
+    "hr.policy.view", "hr.recruitment.approve", "hr.recruitment.manage", "hr.recruitment.view", "hr.view",
+    "it.manage", "knowledge.review", "lms.assign", "lms.authoring", "lms.catalogue.view", "lms.grade",
+    "lms.progress.view", "lms.publish", "lms.waive", "org.edit", "people.directory", "pipeline.manage",
+    "pipeline.write", "pm.contribute", "pm.manage", "reports.company.view", "reports.department.view",
+    "reports.facts.admin", "reports.ops.poll", "reports.period.seal", "reports.person.view",
+    "reports.project.view", "search.campaign.launch", "search.ledger.admin", "search.manage",
+    "search.report.approve", "search.scope.write", "search.view", "social.client_review.read",
+    "social.client_review.request", "social.client_review.withdraw", "social.inbox.assign",
+    "social.inbox.escalate", "social.inbox.read", "social.inbox.reply", "social.ledger.read",
+    "social.manage", "social.post.delete", "social.scope.write", "social.view", "webdev.provision",
+  ],
 };
 
 type Grant = Me["roles"][number];

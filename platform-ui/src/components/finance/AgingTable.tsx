@@ -75,6 +75,19 @@ export function AgingTable({
         <EmptyNote>{emptyNote}</EmptyNote>
       ) : (
         <HairlineTable
+          // SEVEN columns, so the template MUST be declared.
+          //
+          // `.lux-table__head/__row` default to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — four columns.
+          // Omitting `tcols` put seven grid items into four tracks, so every row WRAPPED onto a
+          // second line and the buckets rendered out of order: the header read
+          // "61–90 / Current 90+ / 1–30 Total / 31–60", and each customer's figures split across two
+          // visual rows. The aging schedule is the page's headline number and it was unreadable.
+          //
+          // Nothing could catch this except looking: the markup is correct, every cell is present
+          // and in DOM order, `tsc` and the build are blind to it, and the a11y sweep passes because
+          // wrapping is not a contrast or a label problem. It survived to production and was found by
+          // driving the live page in a browser.
+          tcols="2.2fr repeat(6, 1fr)"
           columns={[
             { label: partyLabel },
             { label: "Current", align: "right" },

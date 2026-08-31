@@ -31,7 +31,7 @@
 .obs-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .obs-chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
-  font: 600 11px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase;
+  font: 600 11px var(--font-body); letter-spacing: 0.04em;
   color: var(--erp-ink-50); background: none; border: 0.5px solid var(--erp-hairline); cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
@@ -53,7 +53,7 @@
 .obs-table tbody tr.obs-row--selected td { background: var(--tint-active); }
 .obs-table tbody tr:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: -2px; }
 .obs-table--right { text-align: right; }
-.obs-sort { border: none; background: transparent; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); display: inline-flex; align-items: center; gap: 5px; padding: 0; }
+.obs-sort { border: none; background: transparent; cursor: pointer; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); display: inline-flex; align-items: center; gap: 5px; padding: 0; }
 .obs-sort:hover { color: var(--text-primary); }
 .obs-sort:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
 .obs-sort__arrow { font-size: 8px; color: var(--erp-accent); width: 8px; display: inline-block; }
@@ -85,7 +85,7 @@
 .obs-env-wrap { display: inline-flex; align-items: center; gap: 6px; }
 .obs-env { display: inline-flex; align-items: center; padding: 2px 8px; font: 600 11px var(--font-body); letter-spacing: 0.03em; border: 0.5px solid var(--erp-hairline); color: var(--text-primary); text-transform: capitalize; }
 .obs-env--unregistered { border-style: dashed; border-color: var(--status-warning); color: var(--status-warning-fg); font-style: italic; text-transform: none; }
-.obs-env-drift { display: inline-flex; align-items: center; padding: 1px 6px; font: 700 10px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--status-warning-fg); border: 0.5px dashed var(--status-warning); }
+.obs-env-drift { display: inline-flex; align-items: center; padding: 1px 6px; font: 700 10px var(--font-body); letter-spacing: 0.04em; color: var(--status-warning-fg); border: 0.5px dashed var(--status-warning); }
 
 .obs-role { display: inline-block; margin-left: 8px; font: 400 11px var(--font-body); color: var(--erp-ink-50); font-style: italic; }
 
@@ -104,7 +104,7 @@
    `dark`/`never`/`unregistered` host can be health-tier "unknown" (nothing to measure) while still
    being the single most important row on the board. Text-only differences from StatusBadge's
    family palette would be too subtle here; these get their own left-accent treatment on the row. */
-.obs-alarm-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; font: 700 10px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; border: 0.5px solid currentColor; }
+.obs-alarm-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; font: 700 10px var(--font-body); letter-spacing: 0.04em; border: 0.5px solid currentColor; }
 .obs-alarm-badge--stopped-reporting { color: var(--status-critical-fg); }
 .obs-alarm-badge--unregistered { color: var(--status-warning-fg); }
 .obs-alarm-badge--expected-pending { color: var(--status-idle-fg); }
@@ -125,7 +125,7 @@
    critical row, but it must never look like blank/absent-and-therefore-fine either, hence the
    explicit dashed rust-free border plus the "NOT MEASURED" dot reused from the tier vocabulary. */
 .obs-limitation { margin: 0; padding: 12px 14px; border: 0.5px dashed var(--erp-hairline); background: color-mix(in srgb, var(--status-idle) 6%, transparent); font: 400 13px/1.55 var(--font-body); color: var(--text-primary); }
-.obs-limitation__head { display: flex; align-items: center; gap: 8px; font: 700 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-idle-fg); margin-bottom: 6px; }
+.obs-limitation__head { display: flex; align-items: center; gap: 8px; font: 700 11px var(--font-body); letter-spacing: 0.06em; color: var(--status-idle-fg); margin-bottom: 6px; }
 
 /* ── Refresh control ──────────────────────────────────────────────────────────────────────────── */
 .obs-refresh { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -138,4 +138,4 @@
 .obs-alert-list__item--active { border-left: 3px solid var(--status-critical); }
 .obs-alert-list__item--suppressed { border-left: 3px solid var(--erp-hairline); opacity: 0.7; }
 .obs-alert-list__name { font-weight: 700; color: var(--text-primary); }
-.obs-alert-list__meta { font: 400 11px var(--font-body); text-transform: uppercase; letter-spacing: 0.04em; color: var(--erp-ink-50); }
+.obs-alert-list__meta { font: 400 11px var(--font-body); letter-spacing: 0.04em; color: var(--erp-ink-50); }

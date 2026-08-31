@@ -110,9 +110,25 @@ export const DESK_MARGIN_TILES = 1.6;
  *  mounted there (WALL_TILES + ~1.35 tiles of plate, in OfficeCanvas.tsx's drawNamePlate) PLUS the
  *  desk furniture's own header (a desk box sits visually above its seat tile, in the furniture
  *  pass) — 2.6 left the desk box overlapping the nameplate text on every room whose door faces
- *  south (nameplate stays up top); 3.6 was verified against a real render to clear it. */
-export const DESK_TOP_TILES = 3.6;
+ *  south (nameplate stays up top); 3.6 cleared it while the desk was a 0.55-tile plate.
+ *
+ *  Raised to 4.7 on 2026-08-26 when the desk began drawing on its real 32x32 aspect instead of
+ *  squashed: the sprite now reaches ~2.83 tiles above its seat rather than ~1.79, i.e. about one
+ *  tile higher, and at 3.6 the first row overlapped the room nameplate again. This number is a
+ *  function of the desk ART's height — change one and re-check the other against a real render. */
+export const DESK_TOP_TILES = 4.7;
 export const DESK_SPACING_TILES = 3.0;
+/** VERTICAL pitch between desk rows — deliberately larger than the horizontal `DESK_SPACING_TILES`
+ *  and deliberately a separate constant.
+ *
+ *  A desk cell has to stack three things that a column does not: the desk furniture, the person
+ *  standing at it, and that person's name label. At the shared 3.0 pitch there was not room for all
+ *  three, so every row's name label was painted across the desks of the row BELOW it. Flat grey
+ *  plates hid that; real desk sprites made it obvious.
+ *
+ *  Columns stay at 3.0 because a column only has to fit the label's WIDTH (`NAME_SLOT_TILES`), and
+ *  widening them would inflate every room's footprint for no legibility gain. */
+export const DESK_ROW_TILES = 4.6;
 /** The real, gutter-safe width a desk's name label may use before it risks touching its neighbour
  *  — DERIVED from `DESK_SPACING_TILES` (never an independent literal chosen by eye in the canvas
  *  file) so the two can never drift apart. 0.3 tiles of clearance either side of a label is enough
@@ -143,7 +159,7 @@ export function roomSizeTiles(occupantCount: number): { wTiles: number; hTiles: 
   const seats = Math.max(occupantCount, 1); // an empty room still draws one row of vacant desks
   const rows = Math.max(1, Math.ceil(seats / deskCols));
   const w = DESK_MARGIN_TILES * 2 + (deskCols - 1) * DESK_SPACING_TILES + 1.4;
-  const h = DESK_TOP_TILES + rows * DESK_SPACING_TILES + 1.0;
+  const h = DESK_TOP_TILES + rows * DESK_ROW_TILES + 1.0;
   return { wTiles: Math.max(ROOM_MIN_W_TILES, w), hTiles: Math.max(ROOM_MIN_H_TILES, h), deskCols };
 }
 
@@ -154,9 +170,17 @@ export function roomSizeTiles(occupantCount: number): { wTiles: number; hTiles: 
 // walking from one room to another means walking the corridor, because the corridor is the only
 // walkable path between rooms (see buildWalkableGrid/findPath below).
 export const CORRIDOR_W_TILES = 4;
-export const OUTER_MARGIN_TILES = 2;
+/** Border between the outermost room and the building's own outer wall. Kept tight (1) since the
+ *  shell began drawing a real floor: at 2 the surplus read as a band of unfinished interior rather
+ *  than as the edge of the building. */
+export const OUTER_MARGIN_TILES = 1;
 /** Gap between two adjacent rooms on the same side of the same corridor. */
-export const ROOM_GAP_TILES = 2;
+/** Gap between neighbouring rooms. ZERO on purpose: each room draws its own wall, so abutting
+ *  rooms produce a shared partition — which is what a real floor plan looks like. A positive gap
+ *  used to be invisible because the page background showed through it, but once `drawOuterShell`
+ *  began filling the plate with a real floor, every gap became a strip of empty interior between
+ *  rooms and the floor stopped reading as one building again. */
+export const ROOM_GAP_TILES = 0;
 /** When placing the next room would push a floor's corridor past this length, close the floor and
  *  start a new one (req #2: "if not enough make another screen"). Chosen so a small/medium
  *  tenant's real department count comfortably fits one floor, while a large one visibly splits. */
@@ -244,6 +268,81 @@ export function buildFloors(inputs: OfficeRoomInput[]): OfficeFloor[] {
   return floors;
 }
 
+/** The subset of an agent goal this grouping needs. Structural on purpose: `AgentGoal` lives in
+ *  the server-only `admin.ts`, and office.ts must stay client-safe (see platform-ui/CLAUDE.md's
+ *  module-trio rule), so the shape is restated rather than imported. */
+export interface AgentSeatGoal {
+  id: string;
+  goal: string;
+  status: string;
+  agent?: string;
+}
+
+/** One Operations desk — an AGENT, with the goals it has run folded into it. */
+export interface AgentSeat {
+  /** Stable per-agent key, used to build the avatar id. */
+  key: string;
+  /** The agent's name, as the backend reports it. */
+  name: string;
+  goalCount: number;
+  /** Goal statuses for this agent, highest count first — the note reports these verbatim rather
+   *  than collapsing them into a health verdict the office has no business inventing. */
+  statusCounts: { status: string; count: number }[];
+  /** A goal id to link the desk at — the in-flight one when there is one, else the first seen. */
+  linkGoalId: string;
+  /** Set only when one of this agent's goals genuinely has an open run right now. */
+  activeRunId?: string;
+}
+
+/** Folds a tenant's agent goals into ONE desk per agent.
+ *
+ *  It used to be one desk per GOAL. On real data that is unbounded and it swamps the floor: the
+ *  live agency tenant had 50 goals from a single agent (`pm-reporter`), so Operations rendered 51
+ *  desks against 8 in the largest real department, every one of them carrying the same name — and
+ *  it grows forever, because a goal is never retired from the list.
+ *
+ *  Grouping by agent is not merely a cap, it is the correct model: the office models the ORG (plan
+ *  §6), and in an org an agent is the worker while a goal is the work. Humans are already modelled
+ *  that way — a person gets a desk and their tasks do not — so this makes agents consistent with
+ *  them instead of special. Per-goal detail is not lost; it moves to the goal tree the desk links
+ *  to, which is where a list of 50 goals is actually readable.
+ *
+ *  Ordering is by goal count (descending) then name, so the busiest agent is leftmost and the
+ *  layout does not reshuffle just because a new goal arrived. */
+export function groupAgentSeats(
+  goals: AgentSeatGoal[], activeRunByGoal: Map<string, string>,
+): AgentSeat[] {
+  const byAgent = new Map<string, AgentSeat>();
+  for (const g of goals) {
+    // A goal with no `agent` is a real shape (older rows predate the field). It groups under one
+    // honest "Unattributed" desk rather than being dropped or given a fabricated agent name.
+    const name = g.agent?.trim() || "Unattributed";
+    let seat = byAgent.get(name);
+    if (!seat) {
+      seat = { key: name, name, goalCount: 0, statusCounts: [], linkGoalId: g.id };
+      byAgent.set(name, seat);
+    }
+    seat.goalCount += 1;
+    const found = seat.statusCounts.find((sc) => sc.status === g.status);
+    if (found) found.count += 1;
+    else seat.statusCounts.push({ status: g.status, count: 1 });
+    const runId = activeRunByGoal.get(g.id);
+    // An in-flight run wins the link and lights the desk — that is the goal worth looking at.
+    if (runId && !seat.activeRunId) { seat.activeRunId = runId; seat.linkGoalId = g.id; }
+  }
+  for (const seat of byAgent.values()) {
+    seat.statusCounts.sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
+  }
+  return [...byAgent.values()].sort((a, b) => b.goalCount - a.goalCount || a.name.localeCompare(b.name));
+}
+
+/** "12 goals — 7 ok, 5 failed", or "1 goal — 1 ok". Plain counts, no verdict. */
+export function describeAgentSeat(seat: AgentSeat): string {
+  const goals = `${seat.goalCount} goal${seat.goalCount === 1 ? "" : "s"}`;
+  if (seat.statusCounts.length === 0) return goals;
+  return `${goals} — ${seat.statusCounts.map((sc) => `${sc.count} ${sc.status}`).join(", ")}`;
+}
+
 export function allRooms(floors: OfficeFloor[]): OfficeRoom[] {
   return floors.flatMap((f) => f.rooms);
 }
@@ -253,6 +352,19 @@ export function allRooms(floors: OfficeFloor[]): OfficeRoom[] {
 export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: number; h: number } {
   return { x: room.x, y: room.y, w: room.wTiles, h: room.hTiles };
 }
+
+/** Pods, not a spreadsheet (owner feedback 2026-08-26: "identical desks on a perfect grid... reads
+ *  as GENERATED"). The SECOND desk of every column pair (1, 3, 5, ...) nudges a few tenths of a
+ *  tile off its row's own Y — the "facing pair" read a real pod has — while the FIRST desk of every
+ *  pair (0, 2, 4, ... — including column 0 itself, which an existing test pins to exactly
+ *  `DESK_TOP_TILES` off the nameplate wall, see the describe block below) stays on the untouched
+ *  grid line. X spacing is NEVER touched by this, on either desk, so `NAME_SLOT_TILES` (derived
+ *  from `DESK_SPACING_TILES`) still guarantees the exact label gutter it always did — a pod cannot
+ *  make two names collide. Alternating the nudge's SIGN by pair GROUP (pair 0 leans one way, pair 1
+ *  the other) keeps a 4+-column room from reading as one row uniformly shifted down rather than as
+ *  pods. `DESK_ROW_TILES` (4.6) is more than six times `POD_PAIR_OFFSET_TILES`, so a pod can never
+ *  reach the row above or below it. */
+export const POD_PAIR_OFFSET_TILES = 0.35;
 
 /** Centre of the Nth avatar's "desk" inside a room, in TILE units — uses the room's OWN deskCols
  *  (variable per room, from roomSizeTiles), never a fixed constant, so a wide 9-person room's
@@ -267,14 +379,23 @@ export function roomTileRect(room: OfficeRoom): { x: number; y: number; w: numbe
  *  the corridor-facing wall opposite it), so desks start `DESK_TOP_TILES` down from there and grow
  *  toward the door. A "south" room's nameplate is on its FAR edge (`room.y + hTiles`), so desks
  *  start `DESK_TOP_TILES` UP from there and grow toward the door at the top — the mirror image,
- *  not a re-run of the same formula. */
+ *  not a re-run of the same formula.
+ *
+ *  Deterministic per (room, index) exactly like the grid it replaces — the ARRANGEMENT (see
+ *  `POD_PAIR_OFFSET_TILES` above) varies, but the index -> desk mapping never does: `index` is the
+ *  stable per-person slot `steadyPositions` (OfficeCanvas.tsx) assigns, and a room's real headcount
+ *  is bound to specific desks, never merely to a count — so the same index must always land on the
+ *  same seat, pod nudge and all. */
 export function deskSlotTile(room: OfficeRoom, index: number): { x: number; y: number } {
   const cols = Math.max(1, room.deskCols);
   const col = index % cols;
   const row = Math.floor(index / cols);
-  const y = room.side === "north"
-    ? room.y + DESK_TOP_TILES + row * DESK_SPACING_TILES
-    : room.y + room.hTiles - DESK_TOP_TILES - row * DESK_SPACING_TILES;
+  const yBase = room.side === "north"
+    ? room.y + DESK_TOP_TILES + row * DESK_ROW_TILES
+    : room.y + room.hTiles - DESK_TOP_TILES - row * DESK_ROW_TILES;
+  const isSecondOfPair = col % 2 === 1;
+  const pairGroup = Math.floor(col / 2);
+  const y = isSecondOfPair ? yBase + (pairGroup % 2 === 0 ? 1 : -1) * POD_PAIR_OFFSET_TILES : yBase;
   return {
     x: room.x + DESK_MARGIN_TILES + col * DESK_SPACING_TILES,
     y,
@@ -465,7 +586,12 @@ export type ZoomLevel = 1 | 2 | 3;
 export const ZOOM_LEVELS: readonly ZoomLevel[] = [1, 2, 3];
 
 export interface Camera {
-  scale: ZoomLevel;
+  /** The rendered scale. INTEGER for every user-driven zoom step (`ZOOM_LEVELS`), which is what
+   *  keeps the sprite art pixel-exact per the note above. It is a free `number` rather than a
+   *  `ZoomLevel` for exactly one reason: "Fit" may need to shrink BELOW 1x to honour its own label
+   *  on a floor plate wider than the window (see `fitScale`). Nothing else may write a fractional
+   *  value here. */
+  scale: number;
   /** The content-space (css px, i.e. the SAME space `tilesToPx` already produces — pre-camera-
    *  scale) point currently centred in the viewport. */
   centerX: number;
@@ -482,6 +608,41 @@ export function fitZoomLevel(contentW: number, contentH: number, viewportW: numb
   let best: ZoomLevel = 1;
   for (const z of ZOOM_LEVELS) {
     if (contentW * z <= viewportW && contentH * z <= viewportH) best = z;
+  }
+  return best;
+}
+
+/** How far "Fit" is allowed to shrink. Below roughly this, a 16px tile is under 6px on screen and
+ *  the floor stops being readable as an office at all — at that point a clipped-but-legible plate
+ *  is the better answer than an unclipped smear, so the clamp holds and panning covers the rest,
+ *  exactly as it did before fractional fit existed. */
+export const MIN_FIT_SCALE = 0.45;
+
+/** The scale "Fit" actually renders at — the one that shows the WHOLE plate.
+ *
+ *  This is deliberately NOT `fitZoomLevel`. That function can only return 1, 2 or 3, so on any
+ *  floor plate wider than the window it returns 1 and leaves the plate clipped: a control labelled
+ *  "Fit" that does not fit. The integer-only rule above is still right for every zoom step a person
+ *  drives (it is what keeps the art pixel-exact), and this function preserves it — whenever an
+ *  integer step genuinely fits, that integer is what comes back and nothing is resampled. The
+ *  fractional path exists only for the case the integer ladder cannot express, and it is bounded by
+ *  `MIN_FIT_SCALE`. Owner decision, 2026-08-26. */
+export function fitScale(contentW: number, contentH: number, viewportW: number, viewportH: number): number {
+  if (contentW <= 0 || contentH <= 0 || viewportW <= 0 || viewportH <= 0) return 1;
+  const integer = fitZoomLevel(contentW, contentH, viewportW, viewportH);
+  // An integer step that really fits wins outright — crisp art, previous behaviour, no resampling.
+  if (contentW * integer <= viewportW && contentH * integer <= viewportH) return integer;
+  const exact = Math.min(viewportW / contentW, viewportH / contentH);
+  return Math.max(MIN_FIT_SCALE, Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length - 1], exact));
+}
+
+/** The nearest INTEGER step to an arbitrary current scale — how a +/- press or a wheel tick leaves
+ *  a fractional "Fit" scale and rejoins the integer ladder. Without this, `ZOOM_LEVELS.indexOf(0.85)`
+ *  is -1 and the first zoom press would jump to 1x regardless of direction. */
+export function nearestZoomLevel(scale: number): ZoomLevel {
+  let best: ZoomLevel = ZOOM_LEVELS[0];
+  for (const z of ZOOM_LEVELS) {
+    if (Math.abs(z - scale) < Math.abs(best - scale)) best = z;
   }
   return best;
 }
@@ -509,7 +670,7 @@ export function clampCamera(camera: Camera, contentW: number, contentH: number, 
  *  the same behaviour every pixel-editor/map app's scroll-zoom has. Pure: does not clamp its own
  *  result (callers run it through `clampCamera` after, same as any other camera mutation). */
 export function zoomCameraAtPoint(
-  camera: Camera, nextScale: ZoomLevel, pointerVX: number, pointerVY: number, viewportW: number, viewportH: number,
+  camera: Camera, nextScale: number, pointerVX: number, pointerVY: number, viewportW: number, viewportH: number,
 ): Camera {
   if (nextScale === camera.scale) return camera;
   const contentX = camera.centerX + (pointerVX - viewportW / 2) / camera.scale;
@@ -844,4 +1005,155 @@ export function automationColorToken(settingToken: string | null | undefined, de
   if (settingToken) return settingToken;
   if (deptId) return catToken(deptId);
   return AUTOMATION_GREY_TOKEN;
+}
+
+// ── Ambient drift — decorative motion WITHIN a room (owner decision 2026-08-26) ─────────────────
+// See docs/superpowers/plans/2026-08-23-virtual-office-plan.md §2/§3/§6. The plan bans motion that
+// implies activity the data cannot support ("motion is a claim"), and everything above this point
+// in the file is that claim: `buildReplaySteps`/`replayPositions` walk an avatar ONLY because a
+// real recorded handover said so. Ambient drift is the deliberate second tier the owner asked for —
+// small motion INSIDE a room, with zero informational content — and the only way it can coexist
+// with the honesty rule is if it is UNCONDITIONAL: a function of (avatarId, wall-clock time) alone,
+// nothing else. `ambientDriftOffset` below therefore does not accept `activeRunId`, `busyUntil`,
+// `automationSignal`, or any working/kind state — not even as an optional parameter — because the
+// day someone adds one "to make busy people move more", the drift stops being decoration and starts
+// being a claim, which is exactly what this section exists to prevent.
+//
+// The bound is DERIVED, not a free literal chosen by eye: half of the tighter of the two desk
+// pitches (`DESK_SPACING_TILES` horizontal, `DESK_ROW_TILES` vertical), pulled well inside that
+// half so two neighbours drifting straight at each other can never meet, let alone overlap a desk
+// seat. Both pitches are already sized (via `roomSizeTiles`) with margins to the room's own walls
+// several times this radius, so the same bound keeps every avatar off the walls too, regardless of
+// which room or slot it occupies — see that function's margins above.
+export const AMBIENT_DRIFT_RADIUS_TILES = Math.min(DESK_SPACING_TILES, DESK_ROW_TILES) / 5;
+
+/** Base period of the slower of the two drift axes, in ms — "small, slow, unhurried" per the plan.
+ *  Deliberately measured in tens of seconds: this is background life, not a game loop. */
+const AMBIENT_PERIOD_BASE_MS = 9_000;
+
+/** Deterministic small offset (tile units) from an avatar's desk/seat. Same `avatarId` + same
+ *  `nowMs` always returns the same offset — no per-avatar state, nothing to reset, and a fixed
+ *  instant is reproducible in a test exactly like `restingRoomKey`'s `asOfMs` is.
+ *
+ *  Two out-of-phase sine waves, period and phase both seeded from the id hash so 80 avatars don't
+ *  drift in lockstep, trace a slow lissajous loop that keeps passing back through zero — "settles
+ *  back at its desk" (req #1) is therefore not a special case to code, it's just where the curve
+ *  periodically is. Bounded to `AMBIENT_DRIFT_RADIUS_TILES` on both axes by construction (a sine
+ *  never exceeds amplitude 1), so the "never leaves the room / never overlaps a neighbour's desk"
+ *  guarantee holds for every caller without this function needing to know the room at all. */
+export function ambientDriftOffset(avatarId: string, nowMs: number): { dx: number; dy: number } {
+  const h = hashId(avatarId);
+  const phaseX = ((h % 1000) / 1000) * Math.PI * 2;
+  const phaseY = (((h >>> 10) % 1000) / 1000) * Math.PI * 2;
+  const periodX = AMBIENT_PERIOD_BASE_MS + (h % 5) * 900;
+  const periodY = AMBIENT_PERIOD_BASE_MS * 1.4 + ((h >>> 6) % 5) * 700;
+  const dx = Math.sin((nowMs / periodX) * Math.PI * 2 + phaseX) * AMBIENT_DRIFT_RADIUS_TILES;
+  const dy = Math.sin((nowMs / periodY) * Math.PI * 2 + phaseY) * AMBIENT_DRIFT_RADIUS_TILES;
+  return { dx, dy };
+}
+
+// ── Ambient WALKING — discrete short walks with pauses (owner feedback 2026-08-26: "movement can
+// really look like walking" / current motion is "too rigid") ───────────────────────────────────
+// `ambientDriftOffset` above is UNTOUCHED — its own arity/boundedness tests keep pinning it, and
+// nothing here changes its contract or its behaviour. This is a SECOND, alternative decorative-
+// motion function `OfficeCanvas.tsx` now calls INSTEAD, because a continuous lissajous curve makes
+// every avatar glide continuously, which reads as sliding rather than walking — exactly the
+// complaint. It carries the identical (avatarId, nowMs)-ONLY contract non-negotiably: no
+// `activeRunId`, `busyUntil`, `automationSignal` or working state, ever (see `ambientDriftOffset`'s
+// own doc above for why — the reasoning is identical here and is not repeated).
+//
+// A real person at a desk mostly sits still and OCCASIONALLY gets up, takes a few short steps, and
+// sits back down. This reproduces that shape on a per-avatar CYCLE: a long pause at the desk, a
+// short walk to one nearby point, a shorter pause there, and a short walk back — never a third
+// destination, never a route that leaves the desk's own small neighbourhood. Cycle length, target
+// point and leg speed are all seeded from the id hash so 80 avatars never move in lockstep, and the
+// walk target is bounded by the exact same `AMBIENT_DRIFT_RADIUS_TILES` the old function used, for
+// the exact same reason: it is derived to never risk a neighbour's desk regardless of room or slot.
+export interface AmbientWalk {
+  /** Tile-space offset from the avatar's desk — same frame `ambientDriftOffset` already used. */
+  dx: number;
+  dy: number;
+  /** True only during the two short walk legs; false while paused at the desk or at the point. */
+  walking: boolean;
+  /** Direction of the CURRENT walk leg (0,0 while paused) — for choosing a facing LPC row ("face
+   *  the direction of travel"). Not a velocity — never used to move the avatar further than `dx/dy`
+   *  above already places it. */
+  dirX: number;
+  dirY: number;
+}
+
+const AMBIENT_WALK_CYCLE_BASE_MS = 14_000;
+const AMBIENT_WALK_LEG_MS = 1_100;
+const AMBIENT_WALK_POINT_PAUSE_BASE_MS = 1_800;
+
+/** Deterministic discrete-walk state (tile units + a facing direction) for an avatar at a given
+ *  instant. Same `avatarId` + same `nowMs` always returns the same result — no per-avatar state,
+ *  nothing to reset, reproducible in a test exactly like `ambientDriftOffset` already is.
+ *
+ *  The cycle is four phases, in order: pause at desk (the majority of the cycle — a person is
+ *  seated most of the time) -> walk out -> pause at the point -> walk back. `pauseAtDeskEnd` is
+ *  computed as "whatever's left of the period" rather than its own hashed value, so the two walk
+ *  legs and the point-pause can vary per avatar without the four phases ever needing to be kept in
+ *  sync by hand; `Math.max` only guards against a future constant change accidentally shrinking it
+ *  to zero or negative, it is never reached at the ranges below (minimum ~7.2s of 14s). */
+export function ambientWalkState(avatarId: string, nowMs: number): AmbientWalk {
+  const h = hashId(avatarId);
+  const period = AMBIENT_WALK_CYCLE_BASE_MS + (h % 7) * 1_400; // 14.0s .. 22.4s, varied per person
+  const legMs = AMBIENT_WALK_LEG_MS + (h % 5) * 90; // slight per-person walking-speed variance
+  const pointPauseMs = AMBIENT_WALK_POINT_PAUSE_BASE_MS + ((h >>> 8) % 5) * 500;
+  const angle = ((h >>> 4) % 360) * (Math.PI / 180);
+  const radius = AMBIENT_DRIFT_RADIUS_TILES * (0.55 + ((h >>> 12) % 5) / 10); // a real few-step walk
+  const px = Math.cos(angle) * radius;
+  const py = Math.sin(angle) * radius;
+  // Stagger so 80 avatars don't all start their cycle on the same frame — the discrete-cycle
+  // equivalent of ambientDriftOffset's own sine phase.
+  const phaseMs = ((h % 1000) / 1000) * period;
+  const t = ((nowMs + phaseMs) % period + period) % period;
+  const pauseAtDeskEnd = Math.max(200, period - 2 * legMs - pointPauseMs);
+
+  if (t < pauseAtDeskEnd) return { dx: 0, dy: 0, walking: false, dirX: 0, dirY: 0 };
+  if (t < pauseAtDeskEnd + legMs) {
+    const tt = (t - pauseAtDeskEnd) / legMs;
+    return { dx: lerp(0, px, tt), dy: lerp(0, py, tt), walking: true, dirX: px, dirY: py };
+  }
+  if (t < pauseAtDeskEnd + legMs + pointPauseMs) {
+    return { dx: px, dy: py, walking: false, dirX: 0, dirY: 0 };
+  }
+  const tt = (t - (pauseAtDeskEnd + legMs + pointPauseMs)) / legMs;
+  return { dx: lerp(px, 0, tt), dy: lerp(py, 0, tt), walking: true, dirX: -px, dirY: -py };
+}
+
+// ── Ambient speech bubbles — a curated bank, and nothing else (plan §6: "LLM-generated jokes cause
+// an HR incident. Curated bank only. No generative text in the office.") ────────────────────────
+// Fixed, hand-authored, workplace-safe lines. Nothing here may name a real project, record, client
+// or task — that would make a decorative bubble read as a real statement by the person it floats
+// over, which is the one thing this bank must never do. `OfficeCanvas.tsx` fires at most one or two
+// of these at a time, briefly, on avatars chosen at random — never on one with a REAL activity
+// bubble already showing (`emoteKindFor`), so the two kinds of bubble never stack.
+export const AMBIENT_LINES: readonly string[] = [
+  "Anyone seen the good stapler?",
+  "Coffee run in five?",
+  "Is it Friday yet?",
+  "Just stretching the legs.",
+  "This plant is doing better than me.",
+  "Someone left a pen on my desk. Thanks, mystery person.",
+  "Quick lap before the next thing.",
+  "Standing desk life.",
+  "Who keeps changing the thermostat?",
+  "Almost lunchtime.",
+  "Found a good podcast for the commute.",
+  "The printer is fine today. Suspicious.",
+  "Long week, good week.",
+  "Water break.",
+  "Nice light in here this afternoon.",
+  "Chair finally stopped squeaking.",
+];
+
+/** Deterministic pick from `AMBIENT_LINES` — same `seed` always returns the same line, so a fixed
+ *  seed is reproducible in a test. Callers derive `seed` from BOTH the avatar id and a coarse time
+ *  bucket (never the avatar id alone, which would give one avatar a single line for its whole life;
+ *  never wall-clock time alone, which would give every avatar on screen the same line at once). */
+export function pickAmbientLine(seed: number): string {
+  const idx = Math.abs(seed) % AMBIENT_LINES.length;
+  return AMBIENT_LINES[idx];
 }

@@ -67,6 +67,41 @@ resourcePolicy:
       derivedRoles: ["module_staff"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
+    # ══════════ WSK-31 (docs/blueprints/webdesk-design.md §07/§09) — TWO NEW ACTIONS, additive ══════
+    # only; nothing above this block is touched. §09 names the REAL, eventual resource kind for the
+    # WebDesk control surface as `resource_webdesk_site (read/operate/promote)` — owned by WSK-23, not
+    # built yet. This ticket needs SOME company-scoped authz for its own Zone A stub control-plane
+    # endpoints (`webdesk-control.controller.ts` — every route there is an honest 501, see that file's
+    # header for why) and reusing THIS kind, the closest already-registered, already-tested sibling,
+    # avoids the SIX-artifact cost of standing up a brand-new kind for a controller that is itself a
+    # placeholder. Action names are taken VERBATIM from §09's own description so WSK-23 can re-point
+    # the controller at the real kind later with NO action-name rewrite, only a kind-name change.
+    #   operate — the §07 MEDIUM-impact control-plane commands (schema.apply, site.provision (the
+    #             WebDesk/Zone-B one, distinct from this kind's own `provision` action above),
+    #             deploy.staging). Same tier as `provision`/`reconcile` above — a manager-level act.
+    #   promote — the §07 HIGH-impact, always-WS4 commands (site.promote/rollback/setDomain,
+    #             key.mint/rotate/revoke, site.archive). Company-scoped authz here is NECESSARY but
+    #             NOT SUFFICIENT for these: it only answers "is this principal a webdev operator in
+    #             this tenant at all". What makes them suspend for WS4 regardless of caller
+    #             attendance is mcp-hub's `ALWAYS_WS4_TOOLS` gate (policy.ts) + its mirror in
+    #             resource_mcp_tool.yaml's always-WS4 conjunct, enforced BEFORE the hub ever calls
+    #             into this endpoint.
+    - actions: ["operate", "promote"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["operate", "promote"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # NO IAM-04-ROLLOUT-B12 PERMISSION-MIRROR ARM for `operate`/`promote` (deliberate, flagged — same
+    # call resource_webdev_zoneb_event.yaml already made for its own `record` action): a mirror rule
+    # would need `perm_webdev_provisioned_site_operate`/`_promote` hand-registered in
+    # `derived_roles.yaml` first, which is an existing file outside this ticket's owned scope for a
+    # controller that is itself a placeholder. The role arms above already give full coverage without
+    # the catalog arm. Reported in the ticket output as the exact addition to make if/when the B12
+    # mirror is wanted for these two actions.
+
     # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
     # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
     # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the

@@ -90,7 +90,7 @@
 .pm-board { display: flex; gap: 14px; align-items: flex-start; min-width: min-content; }
 .pm-col { flex: 0 0 280px; width: 280px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); min-height: 120px; display: flex; flex-direction: column; overflow: hidden; }
 .pm-col__head { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 0.5px solid var(--pm-line-soft); position: sticky; top: 0; background: var(--pm-surface-card); z-index: 1; }
-.pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-col__title { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-dim); }
 .pm-col__count { font: 700 10px var(--font-body); color: var(--pm-text-faint); }
 /* Density tokens (Phase 3, §9.2): `calc(var(--card-gap) * N)` keeps the ratio
    scaling with compact/spacious while landing EXACTLY on the pre-existing
@@ -117,7 +117,7 @@
 /* The label sits on the selects' baseline, not above them — it names the strip, it is not a field. */
 .pm-boardbar__label { align-self: flex-end; padding-bottom: 7px; color: var(--pm-text-dim); font-size: 10px; }
 .pm-boardbar__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 0; }
-.pm-boardbar__field { display: flex; flex-direction: column; gap: 5px; font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-boardbar__field { display: flex; flex-direction: column; gap: 5px; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-dim); }
 .pm-boardbar__field select {
   border: none;
   border-bottom: 0.5px solid var(--line-control);
@@ -186,7 +186,7 @@
 .pm-card-wrap { position: relative; }
 .pm-card__move {
   position: absolute; top: 6px; right: 6px; z-index: 2;
-  font: 700 9px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase;
+  font: 700 9px var(--font-body); letter-spacing: 0.04em;
   color: var(--pm-text-dim); background: var(--pm-surface-card); border: 0.5px solid var(--pm-line);
   border-radius: var(--pm-radius);
   padding: 3px 6px; cursor: pointer; opacity: 0; pointer-events: none;
@@ -211,7 +211,7 @@
 /* WD-28: the CODE-SEQ short-code badge (e.g. "WEB-142") prefixing a task's title on the board card. */
 .pm-card__code { font: 700 10px var(--font-mono, monospace); letter-spacing: 0.03em; color: var(--pm-text-faint); margin-right: 6px; }
 .pm-card__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pm-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); padding: 2px 6px; }
+.pm-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-faint); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); padding: 2px 6px; }
 .pm-who { font: 400 11px var(--font-body); color: var(--pm-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- subtasks / checklist ---- */
@@ -229,12 +229,12 @@
 .pm-comment__author { font: 700 12px var(--font-body); color: var(--pm-text); }
 .pm-comment__time { font: 400 11px var(--font-body); color: var(--pm-text-faint); }
 .pm-comment__body { font: 400 13px/1.5 var(--font-body); color: var(--pm-text); white-space: pre-wrap; }
-.pm-ai-badge { font: 700 8px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-accent); border: 0.5px solid var(--pm-accent); border-radius: var(--pm-radius-pill); padding: 1px 5px; }
+.pm-ai-badge { font: 700 8px var(--font-body); letter-spacing: 0.01em; color: var(--pm-accent); border: 0.5px solid var(--pm-accent); border-radius: var(--pm-radius-pill); padding: 1px 5px; }
 
 /* ---- AI tracker panel ---- */
 .pm-sugg { border: 0.5px solid var(--pm-line); border-left: 2px solid var(--pm-accent); border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: calc(var(--card-gap) * 0.75) calc(var(--card-gap) * 0.875); display: flex; flex-direction: column; gap: calc(var(--card-gap) * 0.5); }
 .pm-sugg__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.pm-sugg__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-sugg__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-dim); }
 .pm-docs { display: flex; flex-wrap: wrap; gap: 8px; }
 .pm-doc { font: 400 12px var(--font-body); color: var(--pm-text); border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: 4px 9px; text-decoration: none; }
 .pm-doc:hover { border-color: var(--pm-accent); color: var(--pm-accent); }
@@ -245,7 +245,7 @@
 .pm-gantt__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .pm-gantt__zoomgroup { display: inline-flex; }
 .pm-gantt__zoom {
-  font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim);
+  font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-dim);
   background: transparent; border: 0.5px solid var(--pm-line); padding: 5px 11px; cursor: pointer;
 }
 .pm-gantt__zoom + .pm-gantt__zoom { margin-left: -0.5px; }
@@ -271,7 +271,7 @@
 .pm-gantt__window-clear:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 
 .pm-gantt { display: flex; flex-direction: column; gap: 8px; min-width: 620px; position: relative; }
-.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); padding-left: 232px; }
+.pm-gantt__axis { display: flex; justify-content: space-between; font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-faint); padding-left: 232px; }
 .pm-gantt__row { display: grid; grid-template-columns: 232px 1fr; align-items: center; gap: 12px; }
 /* P4-L3: label cell now stacks two lines — the title link, then a meta line (project · tags ·
    due date) — instead of one bare <a>. The width bump (200px -> 232px, propagated to every
@@ -334,7 +334,7 @@
 
 /* milestone diamonds lane + dashed guidelines */
 .pm-gantt__msrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; }
-.pm-gantt__mslabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-gantt__mslabel { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-faint); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pm-gantt__mstrack { position: relative; height: 12px; }
 .pm-gantt__milestone { position: absolute; top: 1px; width: 8px; height: 8px; background: var(--pm-accent); transform: translateX(-4px) rotate(45deg); border: 0.5px solid var(--pm-surface-card); }
 .pm-gantt__guides { position: absolute; left: 244px; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
@@ -343,10 +343,10 @@
 /* P4-L3 — day/week header (dense spans only; see Gantt.tsx `dense`). Same 232px+12px column
    contract as every other row type above, so its ticks land exactly under the bars they label. */
 .pm-gantt__daxis { display: grid; grid-template-columns: 232px 1fr; align-items: end; gap: 12px; }
-.pm-gantt__daxis-head { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); padding-bottom: 4px; }
+.pm-gantt__daxis-head { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-faint); padding-bottom: 4px; }
 .pm-gantt__daxis-track { position: relative; height: 26px; }
 .pm-gantt__daxis-tick { position: absolute; bottom: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
-.pm-gantt__daxis-wd { font: 700 8px var(--font-body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--pm-text-faint); }
+.pm-gantt__daxis-wd { font: 700 8px var(--font-body); letter-spacing: 0.04em; color: var(--pm-text-faint); }
 .pm-gantt__daxis-d { font: 700 10px var(--font-body); color: var(--pm-text-dim); }
 
 /* Weekend banding — a decorative fill (no 4.5:1 duty, it is never text), so a plain tint of
@@ -387,7 +387,7 @@
    (decision 12). Reuses `.pm-gantt__row`/`.pm-gantt__track` for the same 232px+12px grid every
    task bar below it shares, so the two bars land under the exact same day columns. */
 .pm-gantt__projectbar-row { margin-bottom: 2px; }
-.pm-gantt__projectbar-label { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); }
+.pm-gantt__projectbar-label { display: inline-flex; align-items: center; gap: 6px; font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-faint); }
 .pm-gantt__projectbar-track { height: 26px; }
 .pm-gantt__projectbar { position: absolute; height: 8px; border-radius: var(--pm-radius); }
 /* Authored (solid fill) sits above derived (dashed outline only) within the same track — fill vs
@@ -436,7 +436,7 @@
 }
 .pm-gantt__addtask input[type="text"]:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 .pm-gantt__bdrow { display: grid; grid-template-columns: 232px 1fr; gap: 12px; align-items: center; animation: erp-toast 0.18s var(--erp-ease); }
-.pm-gantt__bdlabel { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); text-align: right; white-space: nowrap; }
+.pm-gantt__bdlabel { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-faint); text-align: right; white-space: nowrap; }
 .pm-gantt__bdtrack { position: relative; height: 48px; border: 0.5px solid var(--pm-line-soft); border-radius: var(--pm-radius); background: var(--pm-surface-sunken); }
 .pm-gantt__bdsvg { width: 100%; height: 100%; display: block; }
 .pm-gantt__bdline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
@@ -455,7 +455,7 @@
 .pm-deps { display: flex; flex-direction: column; gap: 8px; }
 .pm-dep { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(var(--row-height) * 0.2) 10px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); }
 .pm-dep__title { font: 400 13px var(--font-body); color: var(--pm-text); }
-.pm-blocked-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-urgency-overdue-fg); border: 0.5px solid var(--pm-urgency-overdue-graphic); border-radius: var(--pm-radius-pill); padding: 2px 6px; }
+.pm-blocked-chip { font: 700 9px var(--font-body); letter-spacing: 0.06em; color: var(--pm-urgency-overdue-fg); border: 0.5px solid var(--pm-urgency-overdue-graphic); border-radius: var(--pm-radius-pill); padding: 2px 6px; }
 
 /* ---- board error toast + a11y live region (P1-03) ---- */
 .pm-board__toast { margin: 0 0 10px; font: 700 12px var(--font-body); color: var(--pm-accent); border: 0.5px solid var(--pm-accent); border-radius: var(--pm-radius); background: var(--pm-surface-card); padding: 8px 12px; animation: erp-toast 0.18s var(--erp-ease); }
@@ -526,7 +526,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
    descendant rule styles text/select controls (border-bottom, min-width:150px)
    which would mangle a checkbox. Own wrapper, own reset. */
 .pm-tagfilter { display: flex; flex-direction: column; gap: 6px; }
-.pm-tagfilter__label { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-faint); }
+.pm-tagfilter__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-faint); }
 .pm-tagfilter__options { display: flex; flex-wrap: wrap; gap: 10px; }
 .pm-tagfilter__opt { display: inline-flex; align-items: center; gap: 6px; font: 400 13px var(--font-body); color: var(--pm-text); cursor: pointer; }
 .pm-tagfilter__opt input[type="checkbox"] { width: 14px; height: 14px; min-width: 0; border: 0; padding: 0; accent-color: var(--pm-accent); cursor: pointer; }
@@ -616,8 +616,8 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-dropmenu__item:last-child { border-bottom: 0; }
 .pm-dropmenu__item:hover, .pm-dropmenu__item:focus-visible { background: color-mix(in srgb, var(--pm-accent) 10%, transparent); }
 /* P2-09 — keyboard "⇅ Move" menu's two axis sections (BoardGrid: Status + Division/Assignee). */
-.pm-dropmenu__group-label { padding: 8px 12px 4px; font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--pm-text-faint); background: var(--pm-surface-card); }
-.pm-dropmenu__select-label { display: flex; flex-direction: column; gap: 6px; padding: 12px; font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-dim); }
+.pm-dropmenu__group-label { padding: 8px 12px 4px; font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-faint); background: var(--pm-surface-card); }
+.pm-dropmenu__select-label { display: flex; flex-direction: column; gap: 6px; padding: 12px; font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-dim); }
 .pm-dropmenu__select { font: 400 13px var(--font-body); padding: calc(var(--control-height) * 0.15) 8px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); background: var(--pm-surface-card); color: var(--pm-text); }
 
 /* ---- custom statuses (P2-05, design spec §7) ---- */
@@ -641,7 +641,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-statusmgr__nudge:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 1px; }
 .pm-statusmgr__label { flex: 1 1 auto; min-width: 90px; }
 .pm-statusmgr__flags { display: inline-flex; gap: 4px; }
-.pm-statusmgr__flag { font: 700 9px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 7px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); background: transparent; color: var(--pm-text-faint); cursor: pointer; }
+.pm-statusmgr__flag { font: 700 9px var(--font-body); letter-spacing: 0.06em; padding: 3px 7px; border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius-pill); background: transparent; color: var(--pm-text-faint); cursor: pointer; }
 /* Fixed-01 (Phase 3 a11y audit): was `color: var(--pm-accent-fg)` — see
    tokens/pm.css's --pm-text-on-accent comment for why that was invisible text. */
 .pm-statusmgr__flag--on { color: var(--pm-text-on-accent); background: var(--pm-accent); border-color: var(--pm-accent); }
@@ -665,7 +665,7 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
 .pm-grid__colhead {
   position: sticky; top: 0; z-index: 2; background: var(--pm-surface-card);
   border: 0.5px solid var(--pm-line); border-radius: var(--pm-radius); padding: 11px 13px;
-  font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--pm-text-dim);
+  font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--pm-text-dim);
   display: inline-flex; align-items: center; gap: 7px;
 }
 .pm-grid__rowhead {
@@ -695,12 +695,12 @@ button.pm-tag--btn:focus-visible .pm-tag { outline: 2px solid var(--pm-accent); 
   padding: 8px 10px; font: 400 11px var(--font-body); color: var(--pm-text);
   pointer-events: none; z-index: 4; white-space: nowrap;
 }
-.pm-chart__tooltip-date { font: 700 10px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); margin-bottom: 5px; }
+.pm-chart__tooltip-date { font: 700 10px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-faint); margin-bottom: 5px; }
 .pm-chart__tooltip-row { display: flex; align-items: center; gap: 7px; justify-content: space-between; padding: 1px 0; }
 .pm-chart__tooltip-row strong { font-weight: 700; margin-left: 10px; }
 .pm-chart__tooltip-key { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; }
 .pm-chart__data { margin-top: 2px; }
-.pm-chart__data summary { cursor: pointer; font: 700 11px var(--font-body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--pm-text-faint); }
+.pm-chart__data summary { cursor: pointer; font: 700 11px var(--font-body); letter-spacing: 0.06em; color: var(--pm-text-faint); }
 .pm-chart__data summary:hover { color: var(--pm-text); }
 .pm-chart__data > .lux-table { margin-top: 10px; }
 

@@ -1,0 +1,18 @@
+---
+// webdesk/blocks/demo/src/pages/unknown-default-hook.astro — same fixture as unknown.astro, but
+// deliberately passes NO onUnknownBlock override, so the package's DEFAULT reporting channel
+// (defaultUnknownBlockReport in src/renderer/report.ts, a console.warn) is what fires. Proves the
+// "console warning" half of "renders nothing and reports (a console warning plus a reporting hook
+// a host can wire to QA)" independently of the custom-hook page.
+import { ItemRenderer } from '@gaiada/webdesk-blocks'
+import envelope from '../data/unknown-envelope.json'
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WSK-16 demo — default console.warn reporting</title>
+  </head>
+  <body>
+    <ItemRenderer envelope={envelope} />
+  </body>
+</html>

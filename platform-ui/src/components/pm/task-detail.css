@@ -65,8 +65,7 @@
 .pm-prop--stack { grid-template-columns: minmax(0, 1fr); align-items: start; gap: 6px; }
 .pm-prop__label {
   font: 700 10px var(--font-body);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--pm-text-faint);
 }
 /* Flex + wrap so a control that brings its own button (progress, status) folds inside the column
@@ -91,8 +90,7 @@
 .pm-detail__head { padding-bottom: 16px; }
 .pm-detail__code {
   font: 700 10px var(--font-body);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--pm-accent);
 }
 .pm-detail__title {
@@ -131,7 +129,6 @@
 .pm-history__when {
   font: 700 10px var(--font-body);
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--pm-text-faint);
 }
 .pm-history__body { font: 400 13px/1.5 var(--font-body); color: var(--pm-text); }
@@ -202,8 +199,7 @@
   background: transparent;
   color: var(--pm-text-dim);
   font: 700 10px var(--font-body);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   padding: 4px 10px;
   cursor: pointer;
 }

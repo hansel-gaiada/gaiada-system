@@ -7,6 +7,7 @@ import type { ReportOverview, ReportOverviewScope } from "@/lib/reports-data";
 import { GM_PERIOD_KINDS, GM_TIER1_LIMIT, GM_NARROWED_NOTICE, type GmAccess, type GmPeriodKind } from "@/lib/gm";
 import { GmProvenance } from "./GmProvenance";
 import { GmMoneyCard } from "./GmMoneyCard";
+import { GmMonitoringCard } from "./GmMonitoringCard";
 import { GmDeptStrip } from "./GmDeptStrip";
 
 // The GM cockpit — Home of the GM console (GM-03).
@@ -226,6 +227,12 @@ export async function GmCockpit({
           />
         )}
       </Card>
+
+      {/* Client monitoring sits with the OPERATING tiers, above money: it is an input signal about
+          work already sold, not a financial outcome. Ungated deliberately — `monitoring.read` on the
+          backend is the boundary and the sidebar row is ungated for the same reason, so a narrowed
+          department lead sees it too. Plane B only; our own infrastructure is not in the ERP. */}
+      <GmMonitoringCard userId={userId} tenantId={tenantId} />
 
       {/* Money LAST, below both operating tiers — the operating-cadence rule this console follows
           puts financial metrics at the end of the deck, after the input and output metrics that

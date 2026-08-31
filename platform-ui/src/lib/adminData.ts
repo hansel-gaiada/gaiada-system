@@ -193,7 +193,7 @@ export interface ModuleCatalogEntry {
 
 /** Mirrors main.ts's registerModule() calls — only used when the backend predates the endpoint. */
 export const MODULE_CATALOG_FALLBACK: ModuleCatalogEntry[] = [
-  "agency", "pm", "it", "billing", "clients", "knowledge", "automation-console", "hr", "search", "reports",
+  "agency", "pm", "it", "invoice", "clients", "knowledge", "automation-console", "hr", "search", "reports",
 ].map((key) => ({ key, label: key, paths: [] }));
 
 export const listModuleCatalog = (u: string) =>

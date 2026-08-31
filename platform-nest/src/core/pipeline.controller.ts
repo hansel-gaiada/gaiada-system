@@ -16,6 +16,7 @@ import { config } from "../config";
 import { authorize, writeActivity } from "./http";
 import { emitEvent } from "../events/outbox.service";
 import { AuthGuard } from "../auth/guards";
+import { storage } from "./storage";
 import { lockPipelineRun } from "./pipeline-lock";
 import { clientNotifyKindForGate, notifyBestEffort, notifyScopeSignedBothSides, resolveClientRecipients } from "./client-notify";
 
@@ -332,6 +333,80 @@ export class PipelineController {
       for (const g of gates.rows) (byRun.get(g.run_id) ?? byRun.set(g.run_id, []).get(g.run_id)!).push(g);
       // Every run answers with an array — [] is "no gates", not "not asked".
       return rows.rows.map((r) => ({ ...r, gates: byRun.get(r.id) ?? [] }));
+    });
+  }
+
+  // The rail's missing link. `code.scaffold` v2's envelope carries `prdArtifact` and
+  // `prototypeArtifact` — both `pipeline_stages.artifact_ref` — and until this endpoint existed
+  // NOTHING could dereference them, so PRD-driven scaffolding could not run live at all. The
+  // consumer adapter (`ai-agents/src/code-scaffold/artifact-fetcher.ts`) was written against the
+  // tool name `pipeline.artifacts.get` and its own header records that no hub contract answered it.
+  //
+  // ── WHY THE REF MUST BE STAGE-REFERENCED, AND NOT JUST A FILE ID ──────────────────────────────
+  // Resolving an arbitrary caller-supplied id straight to file bytes would make this a GENERIC FILE
+  // READER wearing a pipeline name — any automation principal holding `pipeline_run:read` could
+  // read any file in the tenant. So the ref is first required to be referenced by a real stage in
+  // this tenant; only then is it resolved. The stage lookup is the authorization boundary, not a
+  // convenience.
+  //
+  // Reuses `pipeline_run:read` deliberately: a new Cerbos kind costs six coupled artifacts
+  // (catalog, groups, seed migration, both bundle resolvers, the regenerated bundle) and this read
+  // is genuinely "read a pipeline run's own output" — the existing kind already means that.
+  @Get(":tenantId/pipeline/artifacts/content")
+  async artifactContent(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Query("ref") ref?: string) {
+    await authorize(req.principal, { kind: "pipeline_run", tenantId }, "read");
+    const artifactRef = (ref ?? "").trim();
+    if (!artifactRef) throw new BadRequestException("ref is required");
+
+    return withTenants([tenantId], async (c) => {
+      const stage = await c.query<{ run_id: string; track: string; name: string }>(
+        `SELECT run_id, track, name FROM pipeline_stages WHERE artifact_ref = $1 LIMIT 1`,
+        [artifactRef],
+      );
+      if (!stage.rows[0]) {
+        throw new NotFoundException("no pipeline stage in this tenant references that artifact");
+      }
+
+      // Only a UUID-shaped ref can be a `files` row. Anything else (a URL, a repo name, a prototype
+      // link) is a legitimate artifact_ref that simply is not stored text — say so precisely rather
+      // than letting Postgres raise "invalid input syntax for type uuid" from a bad cast.
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(artifactRef);
+      if (!isUuid) {
+        return {
+          artifactRef,
+          runId: stage.rows[0].run_id,
+          stage: { track: stage.rows[0].track, name: stage.rows[0].name },
+          resolvable: false,
+          reason: "artifact_ref is not a stored file id (it may be a URL, repo or external reference)",
+          content: null,
+        };
+      }
+
+      const f = await c.query<{ storage_key: string; content_type: string }>(
+        `SELECT storage_key, content_type FROM files WHERE id = $1 AND deleted_at IS NULL`,
+        [artifactRef],
+      );
+      const row = f.rows[0];
+      if (!row || !row.storage_key) {
+        return {
+          artifactRef,
+          runId: stage.rows[0].run_id,
+          stage: { track: stage.rows[0].track, name: stage.rows[0].name },
+          resolvable: false,
+          reason: row ? "file row has no stored content (reference attachment)" : "no file row for that id",
+          content: null,
+        };
+      }
+
+      const bytes = await storage().get(row.storage_key);
+      return {
+        artifactRef,
+        runId: stage.rows[0].run_id,
+        stage: { track: stage.rows[0].track, name: stage.rows[0].name },
+        resolvable: true,
+        contentType: row.content_type || "text/plain",
+        content: Buffer.from(bytes).toString("utf8"),
+      };
     });
   }
 

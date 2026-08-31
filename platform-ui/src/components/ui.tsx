@@ -175,12 +175,42 @@ export function HairlineTable({ columns, rows, tcols }: {
   rows: ReactNode[][];
   tcols?: string;
 }) {
-  const style = tcols ? ({ "--lux-tcols": tcols } as CSSProperties) : undefined;
+  // DERIVE the grid template from the column count when the caller does not give one.
+  //
+  // `.lux-table__head/__row` fall back to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — FOUR tracks. Any
+  // table with more columns than that and no `tcols` put N items into 4 tracks, so every row wrapped
+  // onto extra lines and the columns rendered out of order. On the receivables aging the header read
+  // "61–90 / Current 90+ / 1–30 Total / 31–60" and each customer's figures split across two visual
+  // rows — the page's headline number, unreadable, in production.
+  //
+  // A scan found 62 such tables across finance, HR, IT, learning, monitoring, PM and search. Fixing
+  // them one by one would leave the 63rd broken the day someone adds it, so the default moves here:
+  // first column wide, the rest even, which is exactly what the old 4-track literal encoded.
+  //
+  // Nothing in the pipeline could see this. The markup is correct and every cell is present in DOM
+  // order, so `tsc`, vitest, `next build` and the axe sweep all pass — wrapping is neither a type
+  // error nor a contrast failure. It was found by opening the page.
+  //
+  // Callers that pass `tcols` are unaffected. Tables with 4 columns get `2fr 1fr 1fr 1fr`, identical
+  // to before; tables with 2 or 3 stop rendering phantom empty tracks.
+  const template = tcols ?? `2fr repeat(${Math.max(columns.length - 1, 1)}, 1fr)`;
+  const style = { "--lux-tcols": template } as CSSProperties;
   return (
     <div className="lux-table" style={style}>
       <div className="lux-table__head">
         {columns.map((c) => (
-          <Eyebrow key={c.label} style={{ fontSize: 10, opacity: 0.5, ...(c.align === "right" ? { justifySelf: "end" } : {}) }}>
+          // `--ink-subtle`, not `opacity: 0.5`.
+          //
+          // The ink ramp exists so every text tier clears WCAG AA on its worst-case surface, and
+          // `--ink-subtle` (4.54:1) is documented for precisely this — "small caps labels". Halving
+          // the alpha on top of it discarded that: axe rated these column headers a SERIOUS contrast
+          // failure on EVERY table in the app, and they were the last violation left across all ten
+          // finance routes once the finance-owned rules were moved onto the ramp.
+          //
+          // These labels are not decoration. They are the only thing saying which column holds the
+          // amount and which the account, so `--ink-faint` (2.62:1, "decorative only") would be the
+          // wrong tier even though it looks closer to the old rendering.
+          <Eyebrow key={c.label} style={{ fontSize: 10, color: "var(--ink-subtle)", ...(c.align === "right" ? { justifySelf: "end" } : {}) }}>
             {c.label}
           </Eyebrow>
         ))}

@@ -93,10 +93,17 @@
 
   /* Repsona is rounded; the house style now is too (Phase 1 retires the
      zero-radius law app-wide) — PM's OWN radius scale is redundant and
-     collapses onto the house one. Values are near-identical (4px/8px stay
-     4px/8px) so the board's corners barely move. */
-  --pm-radius:      var(--radius-sm);
-  --pm-radius-lg:   var(--radius-md);
+     collapses onto the house one.
+
+     CORRECTED 2026-08-30 (gold-glass): --pm-radius-lg used to point at
+     --radius-MD and --pm-radius at --radius-SM. That was harmless only while
+     the two scales happened to line up numerically (4px/8px both ways). The
+     gold-glass pass moves the named tiers up a notch — sm 4->8, md 8->12,
+     lg 16->18 — at which point PM's "large" corner would have silently taken
+     the house MEDIUM value and PM would have drifted a step tighter than every
+     other surface. Each PM tier now points at its own house tier by name. */
+  --pm-radius:      var(--radius-md);   /* PM's base corner == a house control */
+  --pm-radius-lg:   var(--radius-lg);   /* was --radius-md — the mis-map */
   --pm-radius-pill: var(--radius-pill);
 
   /* ---- Urgency: overdue · almost late · in time ----------------------------

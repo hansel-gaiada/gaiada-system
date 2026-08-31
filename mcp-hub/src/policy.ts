@@ -13,6 +13,46 @@ import { resolveSeatView, filterToolsForSeat } from "./seat-view";
 
 const RANK: Record<Assurance, number> = { anonymous: 0, low: 1, verified: 2 };
 
+/**
+ * WSK-31 (docs/blueprints/webdesk-design.md §07) — tools that must suspend for WS4 approval
+ * REGARDLESS of caller attendance.
+ *
+ * ── WHY THIS EXISTS AS A NARROW, TOOL-NAMED OVERRIDE, NOT A CHANGE TO THE ESTATE-WIDE RULE ────────
+ * The impact gate below this constant is deliberately built on `isUnattended`, and the reasoning is
+ * sound and load-bearing estate-wide: "a human on an interactive surface is attended by definition
+ * and does not need their own approval to do what they just asked for" (see the D14 header a few
+ * lines down, and `agent-impact-gate.test.ts`'s own "the SAME high-impact write is ALLOWED for the
+ * same human without an agent" case, which pins exactly this). Widening that rule globally — making
+ * EVERY high-impact write suspend even for an attended human — would be a massive, cross-cutting
+ * change to every high-impact tool in the estate (deploy.production, social.publishPost,
+ * iam.grantRole, …), decided nowhere and owed to nobody's ticket.
+ *
+ * §07's blueprint C-05 rule asks for something narrower and specific: SEVEN WebDesk commands
+ * (site.promote/rollback/setDomain, key.mint/rotate/revoke, site.archive) are public-facing and/or
+ * irreversible enough that even a human calling them through an attended channel (chat, a future
+ * agent-mediated console action) must still produce a named, auditable approval — not because the
+ * ESTATE's attendance doctrine is wrong, but because THESE SEVEN commands are the ones §03's Layer-4
+ * WS4 assertion already names as needing a human decision independent of who is asking. This
+ * constant is that narrow override, scoped to exactly those tool names, leaving every other tool's
+ * behavior — including every OTHER high-impact tool's attended-human exemption — untouched.
+ *
+ * Mirrored in `platform-nest/cerbos/policies/resource_mcp_tool.yaml`'s always-WS4 conjunct — Cerbos
+ * is authoritative whenever CERBOS_URL is set, so fixing only this in-code branch would leave every
+ * live deployment's attended-human call through unsuspended. Drift between the two fails CLOSED
+ * (same discipline the D14-13 grant-lift bracket list already established): a name listed here but
+ * not there is merely a stricter-than-necessary in-code fallback; a name listed there but not here
+ * would be caught by the in-code fallback denying what Cerbos would allow — never the reverse.
+ */
+export const ALWAYS_WS4_TOOLS: ReadonlySet<string> = new Set([
+  "webdesk.site.promote",
+  "webdesk.site.rollback",
+  "webdesk.site.setDomain",
+  "webdesk.key.mint",
+  "webdesk.key.rotate",
+  "webdesk.key.revoke",
+  "webdesk.site.archive",
+]);
+
 export function permits(principal: Principal, tool: HubTool): boolean {
   if (RANK[principal.assurance] < RANK[tool.minAssurance]) return false;
   // Automation (n8n) principals are scoped to their workflow's allow-list, not assurance alone.
@@ -71,12 +111,31 @@ export function authorize(principal: Principal, toolName: string, grant?: Verifi
   //
   // `isUnattended` is the right predicate: n8n OR agent-driven. A human on an interactive surface is
   // attended by definition and does not need their own approval to do what they just asked for.
-  if (isUnattended(principal) && tool.write && tool.impact !== "low" && !grantAuthorizesTool(grant, toolName)) {
+  // WSK-31: a tool in ALWAYS_WS4_TOOLS gates on attendance TOO, not only when the caller happens to
+  // be unattended — see that constant's own header for the full reasoning. Kept as a SEPARATE
+  // boolean (not folded into `isUnattended(principal)`) so the reason text below can tell an
+  // attended caller's refusal apart from an automation/agent one; the underlying suspend condition
+  // is identical either way.
+  const alwaysGated = ALWAYS_WS4_TOOLS.has(toolName);
+  if (
+    (isUnattended(principal) || alwaysGated) &&
+    tool.write &&
+    tool.impact !== "low" &&
+    !grantAuthorizesTool(grant, toolName)
+  ) {
     const tier = tool.impact ?? "unclassified";
-    const who = principal.agent ? `agent ${principal.agent}` : "automation";
+    if (isUnattended(principal)) {
+      const who = principal.agent ? `agent ${principal.agent}` : "automation";
+      return {
+        allow: false,
+        reason: `suspend: ${toolName} is a ${tier}-impact write; ${who} requires human approval (only low-impact writes run unattended)`,
+      };
+    }
+    // alwaysGated and ATTENDED: the estate's normal "attended = no approval needed" exemption does
+    // not apply to this tool by name (§07 C-05 rule) — every principal class needs a named approval.
     return {
       allow: false,
-      reason: `suspend: ${toolName} is a ${tier}-impact write; ${who} requires human approval (only low-impact writes run unattended)`,
+      reason: `suspend: ${toolName} always requires human approval (${tier}-impact, WS4-gated regardless of caller — §07 C-05 rule)`,
     };
   }
   return { allow: true, tool };

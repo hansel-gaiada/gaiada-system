@@ -5,13 +5,13 @@
 /* ---- status dot + pill ---- */
 .it-dot { display: inline-flex; align-items: center; gap: 7px; }
 .it-dot__mark { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
-.it-dot__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.it-dot__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; }
 
 /* ---- device tiles (topology + grids) ---- */
 .it-tile { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; background: var(--surface-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 150px; text-decoration: none; transition: background 0.2s var(--erp-ease); }
 .it-tile:hover { background: var(--tint-hover); }
 .it-tile__name { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.it-tile__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.it-tile__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .it-tile--online { border-left-color: var(--status-ok); }
 .it-tile--degraded { border-left-color: var(--status-critical); }
 .it-tile--offline { border-left-color: var(--status-critical); opacity: 0.7; }
@@ -22,11 +22,11 @@
 .it-site { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
 .it-site__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; background: var(--surface-inverse); }
 .it-site__name { font: 400 14px var(--font-body); color: var(--text-on-inverse); }
-.it-site__count { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-on-inverse-muted); }
+.it-site__count { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--ink-on-inverse-muted); }
 .it-net { padding: 14px 16px; border-top: 0.5px solid var(--erp-hairline-soft); }
 .it-net:first-of-type { border-top: 0; }
 .it-net__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.it-net__name { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--erp-ink-60); border-left: 2px solid var(--erp-accent); padding-left: 8px; }
+.it-net__name { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-60); border-left: 2px solid var(--erp-accent); padding-left: 8px; }
 .it-net__devices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 
 /* ---- real network topology tree (IT-06): gateway → AP/switch → client ----
@@ -48,11 +48,11 @@
 .it-tree__row--offline { border-left-color: var(--status-critical); opacity: 0.7; }
 .it-tree__row--unknown { border-left-color: var(--status-idle); }
 .it-tree__name { font: 400 13px var(--font-body); color: var(--text-primary); }
-.it-tree__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.it-tree__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .it-tree__spacer { flex: 1 1 auto; }
 
 /* ---- small labels: discovery source, device class, link medium ---- */
-.it-badge { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-60); white-space: nowrap; }
+.it-badge { font: 700 9px var(--font-body); letter-spacing: 0.01em; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-60); white-space: nowrap; }
 .it-badge--discovered { border-color: var(--erp-accent); color: var(--erp-accent); }
 .it-badge--infrastructure { background: var(--surface-inverse); color: var(--text-on-inverse); border-color: transparent; }
 
@@ -62,7 +62,7 @@
 .it-sync { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); margin-bottom: 16px; font: 400 12px var(--font-body); color: var(--erp-ink-60); }
 .it-sync--stale { border-left: 2px solid var(--status-critical); }
 .it-sync--ok { border-left: 2px solid var(--status-ok); }
-.it-sync__label { font: 700 10px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.it-sync__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 
 /* ---- n8n workflow canvas ---- */
 .it-wf-wrap { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; align-items: start; }
@@ -82,7 +82,7 @@
 .it-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .it-node { position: absolute; border: 0.5px solid var(--erp-hairline); border-top: 2px solid var(--erp-accent); background: var(--surface-card); padding: 7px 10px; width: 150px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; }
 .it-node__name { font: 400 12px var(--font-body); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.it-node__type { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.it-node__type { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 900px) {
   .it-wf-wrap { grid-template-columns: 1fr; }
@@ -105,7 +105,7 @@
   user-select: all; padding: 6px 8px; background: var(--wash); border: 0.5px solid var(--erp-hairline); }
 .acct-password__hint { font: 400 11px var(--font-body); color: var(--erp-ink-50); max-width: 46ch; }
 
-.acct-state { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.acct-state { font: 700 9px var(--font-body); letter-spacing: 0.01em; }
 .acct-state--finding { color: var(--status-critical-fg); }
 .acct-state--todo { color: var(--erp-accent); }
 .acct-state--ok { color: var(--erp-ink-50); }

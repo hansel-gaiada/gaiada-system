@@ -1,0 +1,31 @@
+# WSK-17 — the proof-rebuild site's DERIVED artifacts. Deliberately untracked.
+#
+# This site exists to prove one thing: that a real site can be rebuilt purely from the generated
+# SDK plus the shared blocks package. So the generated inputs are, by definition, outputs of the
+# rail — not source. Committing them would freeze a snapshot of the rail's output next to the lock
+# that is supposed to determine it, and the two would drift silently. That is the same failure the
+# program already guards against for docs/MAP.md ("generated from the filesystem ... if it
+# disagrees with the repo, regenerate it — never hand-patch it").
+#
+# What IS tracked, and should be: CONTRACT.lock and CONTENT-CONTRACT.md (the pinned contract this
+# site builds against), plus the site's own source. Everything below is reproducible from those by
+# running the rail — see README.md and scripts/.
+#
+# Practical reason this file exists at all: these four paths showed up as untracked in a shared
+# checkout that several agent sessions write to, which made a genuine "is anything unpushed?" check
+# require sifting them out of 242 phantom entries. Untracked build output in a shared tree is not
+# free; it costs the next person a search.
+
+# Generated contract artifacts (produced by webdesk/api's codegen — WSK-15)
+/openapi.v1.json
+/hash-manifest.json
+/src/sdk/
+
+# The shared blocks package, vendored as a tarball at build time (WSK-16). A binary blob whose
+# canonical source is webdesk/blocks; `npm pack`ed on demand, never reviewed as a diff.
+/vendor/
+
+# Astro/Node build output
+/dist/
+/.astro/
+/node_modules/

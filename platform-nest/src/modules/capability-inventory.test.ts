@@ -194,6 +194,27 @@ function driversFor(family: string, sources: { path: string; text: string }[]): 
     //  2. The family must start a PATH SEGMENT. Without the leading `/`, family `it` matched inside
     //     `audit` and inflated it to 17 suites. An over-count is not a harmless cosmetic error here:
     //     this table's whole purpose is to be believed about coverage.
+    //
+    // (!) KNOWN FLAW, MEASURED 2026-08-26, DELIBERATELY NOT FIXED HERE. The regex is tested against
+    //   the WHOLE FILE TEXT, and the negated class excludes quotes but neither the path separator
+    //   nor newlines. So the api prefix followed ANYWHERE later in the same file by a family segment
+    //   matches, even across lines. Observed consequence: when the finance module gained an AR
+    //   endpoint whose last segment is the same word as the invoice module's route family, the
+    //   finance suite began counting as a driver for the INVOICE module and pushed it from 2 suites
+    //   to 3 — crediting one department with another department's coverage.
+    //
+    //   Bounding the gap to a single path segment was tried and is WORSE: it collapsed agency 7 to
+    //   0, social 12 to 0, search 16 to 2 and hr 11 to 2, because real suites build their URLs from
+    //   variables, so the family is rarely adjacent to a literal api prefix.
+    //
+    //   Both bounds are wrong in opposite directions. Read this column as an UPPER BOUND on suites
+    //   that mention a family, not as a count of suites that drive the module. A proper fix matches
+    //   per injection CALL SITE rather than per file — a real change to this generator, which wants
+    //   its own ticket rather than a rushed edit that silently moves nine numbers.
+    //
+    //   ALSO NOTE, for whoever edits this file: because matching reads file text, adding an example
+    //   path to a COMMENT here changes the generated artifact. The note above deliberately spells
+    //   paths out in prose for that reason.
     .filter(
       (s) =>
         s.text.includes("app.inject") && new RegExp(`/api/(?:[^"\`']*/)?${family}\\b`).test(s.text),

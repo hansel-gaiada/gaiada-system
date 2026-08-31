@@ -1,0 +1,19 @@
+---
+// webdesk/blocks/src/components/Testimonial.astro — vocabulary block type "testimonial".
+import type { TestimonialProps } from '../types.ts'
+
+export interface Props extends TestimonialProps {}
+
+const { quote, author, role, avatar } = Astro.props
+const quoteText = typeof quote === 'string' ? quote : null
+---
+<section class="wd-block wd-block-testimonial" data-block-type="testimonial">
+  <blockquote class="wd-testimonial-quote">
+    {quoteText ?? <script is:inline type="application/json" set:html={JSON.stringify(quote)} />}
+  </blockquote>
+  <footer class="wd-testimonial-attribution">
+    {avatar && <img class="wd-testimonial-avatar" src={avatar.url} alt={avatar.alt ?? ''} />}
+    <span class="wd-testimonial-author">{author}</span>
+    {role && <span class="wd-testimonial-role">{role}</span>}
+  </footer>
+</section>

@@ -34,10 +34,10 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.43.0` | IN PROGRESS | WS1 | 2026-08-27 |
-| platform-ui | `0.55.0` | IN PROGRESS | WS5 | 2026-08-26 |
+| platform-nest | `0.47.0` | IN PROGRESS | WS1 | 2026-08-31 |
+| platform-ui | `0.62.0` | IN PROGRESS | WS5 | 2026-08-31 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
-| mcp-hub | `0.11.2` | PROTOTYPED | WS2 | 2026-08-27 |
+| mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
@@ -47,14 +47,14 @@ versions below; the running build reports it at `GET /health`.
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
-| webdesk | `0.0.0` | PLANNED | Web Dev | 2026-07-23 |
+| webdesk | `0.2.0` | DEV-VERIFIED | Web Dev | 2026-08-30 |
 | search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | monitoring | `0.2.0` | IN PROGRESS | Monitoring | 2026-08-19 |
-| finance | `0.14.1` | PROTOTYPED | Finance & Accounting | 2026-08-25 |
+| finance | `0.16.0` | PROTOTYPED | Finance & Accounting | 2026-08-27 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
 | reports | `0.3.2` | PROTOTYPED | Cross-cutting | 2026-08-23 |
@@ -156,7 +156,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.55.0` Â· IN PROGRESS
+## platform-ui â€” ERP Suite Â· `0.58.0` Â· IN PROGRESS
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the
@@ -500,7 +500,7 @@ Phase 1; Phase 3 (external wiring â€” GitHub App, Drive OAuth, Claude Admin
 decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
 webdesk's own P3 codegen lands.
 
-## webdesk â€” Website Platform Â· `0.0.0` Â· PLANNED
+## webdesk â€” Website Platform Â· `0.1.0` Â· PROTOTYPED
 
 **What exists:** blueprint only (approved 2026-07-23) â€” see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation â†’ P2 Forms+Mail â†’ P3 Contract/codegen â†’ P4 ERP control+envs â†’

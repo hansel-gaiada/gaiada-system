@@ -333,6 +333,36 @@ export function registerPipelineTools(): void {
     handler: (args, principal) => platformGet(`/api/${String(args.tenantId)}/pipeline/runs/${String(args.runId)}`, principal),
   });
 
+  // The rail's demand end. `code.scaffold` v2 is handed `prdArtifact`/`prototypeArtifact` — both
+  // `pipeline_stages.artifact_ref` — and had no way to dereference either, which is what kept
+  // PRD-driven scaffolding from running live. `ai-agents/src/code-scaffold/artifact-fetcher.ts`
+  // already calls exactly this name; it was written against a contract that did not exist yet.
+  //
+  // Read-only, `low` assurance, and NOT a file reader: the platform side refuses any ref that no
+  // pipeline stage in the tenant references, so holding this tool does not confer arbitrary file
+  // access. It answers `{ resolvable: false, reason }` rather than failing when a ref is a URL or a
+  // repo rather than stored text — a scaffolder needs to tell "cannot fetch" apart from "empty".
+  registerTool({
+    name: "pipeline.artifacts.get",
+    description:
+      "Resolve a pipeline stage's artifact_ref to its stored text (the signed PRD, the accepted " +
+      "design). Returns resolvable:false with a reason when the ref is not stored content.",
+    minAssurance: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        artifactRef: { type: "string", description: "pipeline_stages.artifact_ref" },
+      },
+      required: ["tenantId", "artifactRef"],
+    },
+    handler: (args, principal) =>
+      platformGet(
+        `/api/${String(args.tenantId)}/pipeline/artifacts/content?ref=${encodeURIComponent(String(args.artifactRef))}`,
+        principal,
+      ),
+  });
+
   registerTool({
     name: "pipeline.listGates",
     description: "List pipeline gates (default pending). Filter by status, actorSide, kind.",

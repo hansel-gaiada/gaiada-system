@@ -1,11 +1,28 @@
 # WebDesk — Architect Design (Zone B Website Platform · the One Rail, Supply Side)
 
+> # ⛔ SUPERSEDED — 2026-08-29
+>
+> **Build from [`webdesk-design-v2.md`](./webdesk-design-v2.md), not from this file.**
+> v2.0 was written after four architecture reversals this document does not reflect: Zone B
+> moved to `sumopod` under a two-tier estate rule (WSK-D27), Payload became editorial-only
+> (WSK-D24), the portfolio/adoption ladder was added (WSK-D30/D31), and repo provisioning moved
+> inside the ERP (WSK-D29). **This file remains the source for every section v2.0 marks
+> "carried unchanged"** — vocabulary v1, the composition layer, the codegen chain, the
+> versioning semantics, the Zone B schema, and the rail. Read it for those; trust v2.0 for
+> everything else, and never for hosting, containment, or sequencing.
+
 > **Status:** Design blueprint — turns the approved WebDesk Engineering Blueprint (v1.2) into an
 > operational design + /army-ready ticket program. **webdesk stays `0.0.0 · PLANNED` in
 > [`../modules/MODULES.md`](../modules/MODULES.md) until the first ticket merges** (status-language
 > rule: the first merged ticket flips it `IN PROGRESS` + CHANGELOG; approving this doc bumps
 > nothing).
-> **Version:** v1.0 · **Date:** 2026-08-07 · **Author:** System Architect (Claude)
+> **Version:** v1.1 · **Date:** 2026-08-26 (v1.0: 2026-08-07) · **Author:** System Architect (Claude)
+> **v1.1 amends v1.0** with the five rulings of the industry-standard reassessment — see
+> [`webdesk-design-reassessment.md`](./webdesk-design-reassessment.md) for the full rationale and
+> [`../plans/2026-08-26-webdesk-PROGRESS.md`](../plans/2026-08-26-webdesk-PROGRESS.md) for live
+> status. Amendments are marked **➕ v1.1** inline and logged as WSK-D16…D22 in §14. Nothing in
+> v1.0 was deleted; where a ruling supersedes a v1.0 statement the old text is struck in place so
+> the reasoning stays readable.
 > **Primary inputs:**
 > [`webdesk-blueprint.html`](./webdesk-blueprint.html) (**v1.2 HTML is authoritative** — the PDF
 > sibling and hosted artifact are stale at v1.0, per [`../BLUEPRINTS.md`](../BLUEPRINTS.md) §2; the
@@ -39,13 +56,14 @@ department. The architecture in six moves:
    own Cerbos sidecar and policy set. Only the Zone A mirror tables (§04) enter the platform-nest
    ledger — at **next-unused at merge time** (head was `0087` when this was written; it drifts
    fast and is racing with concurrent programs).
-2. **Dev-first, procurement-honest.** The two KVM8 boxes (staging + live) do not exist yet. This
-   design is cut so that **29 of 36 tickets are fully buildable today** on the dev estate (the
-   whole of P1–P3 + the rail, P5, P6, and most of P4's logic), 4 more build now with a live-fire
-   leg deferred, and only **3 tickets are hard procurement-gated** (preview slots, custom
-   domains/TLS, box ops baseline) plus the full P4 QA gate. The trust boundary is *logical* until
-   the boxes land; every zone-split QA item re-runs at procurement (D-2). Recommended owner
-   action: order the **staging box at P3 exit**, the live box before the P4 gate (OQ-W1).
+2. **Dev-first, procurement-honest.** The KVM8 box(es) do not exist yet. This design is cut so
+   that almost everything is buildable today on the dev estate (the whole of P1–P3 + the rail,
+   P5, P6, and most of P4's logic). The trust boundary is *logical* until the box lands; every
+   zone-split QA item re-runs at procurement (D-2).
+   **➕ v1.1 (WSK-D17):** with client frontends on Cloudflare Pages, the procurement-gated set
+   collapses from three tickets to **one** (WSK-28, box ops baseline) plus the full P4 QA gate —
+   previews and custom domains/TLS are no longer ours to host. Only the **backend** box is gated,
+   which makes OQ-W1 a smaller and later decision than v1.0 assumed.
 3. **The trust boundary made operational (§03).** Exactly one channel crosses A→B (the
    control-plane call: mTLS from the synccert internal CA + a Keycloak client-credentials token
    verified **offline** in Zone B against the public issuer JWKS, + a single-use WS4 approval
@@ -68,8 +86,11 @@ department. The architecture in six moves:
    snapshot-derived code in Zone A** (D-6). The webdev-design §05 job envelope is frozen and
    restated here (§06) so a reader of this doc alone can build to it. The mirror and the
    scaffolder keep their pre-flagged **opus·medium** ratings.
-6. **36 tickets, 6 phases + the rail, 4 Opus flags, a QA gate on every Zone-B-touching ticket
-   (§12).** P1 Foundation (9) → P2 Forms & Mail (4) → P3 Contract/codegen + rail (7) → P4 Control
+6. **35 tickets, 6 phases + the rail, 4 Opus flags, a QA gate on every Zone-B-touching ticket
+   (§12).** **➕ v1.1:** 36 → 35 — **+1** (WSK-00, the RLS feasibility spike the R-1 ruling
+   requires), **−1** (WSK-26+27 merge under Pages), **−1** (P1/P2 gates merge into one
+   Milestone-0 gate). Two further tickets (WSK-37 tenant webhooks, WSK-38 data-subject requests)
+   enter from the reassessment. See the §12 delta table. P1 Foundation (9) → P2 Forms & Mail (4) → P3 Contract/codegen + rail (7) → P4 Control
    plane + environments (10) → P5 AI + approvals (3) → P6 WordPress headless (3). Opus flags:
    WSK-04 **opus·high** (RLS/tenancy under Payload's query layer — the single place a mistake is a
    client-data breach), WSK-19/WSK-20 **opus·medium** (the pre-flagged mirror + scaffolder),
@@ -216,11 +237,12 @@ JWKS fetch from the issuer is read-only public key material.
 | Destination | Purpose | Credential in Zone B | If stolen |
 |---|---|---|---|
 | Brevo (SMTP/API) | C-03 forms mail stream | `forms.gaiada.online` stream key **only** (D14: per-stream keys) | Burns the forms sending identity — **cannot** touch `notify.`/`auth.gaiada.com` (Zone A streams, separate keys/relay) |
-| R2/B2 | Encrypted backups + video | Backup-writer creds to **versioned/immutable** buckets (WSK-28) | Can write garbage versions; cannot destroy history (bucket versioning + separate lifecycle admin held in Zone A) |
+| ~~R2/B2~~ **➕ v1.1 (WSK-D23): none for now.** Storage is fully self-hosted; there is no external object-storage egress. The offsite copy is pulled *by* the backup target, not pushed *by* Zone B (see §11) | — | — | **Nothing.** Removing this credential from Zone B entirely is a containment improvement over v1.0, not a compromise: a compromised box cannot reach the offsite copy at all, because it holds no credential for it. |
 | Cloudflare API | Cache purge by tag | **Purge-scoped** token only | Cache thrash. DNS/zone-level tokens live in Zone A only (WSK-27) |
-| ACME | Cert issuance (Caddy) | — | — |
+| ACME | Cert issuance (Caddy) — **control/admin vhosts only** since v1.1 | — | — |
 | GHCR / release artifacts | Pull **signed** FE/site builds for deploy (WS10 pipeline) | Read-only pull token | Read of our published artifacts; Zone B holds **no GitHub write credential** — it cannot push code |
 | Public Keycloak issuer | JWKS fetch | none | — |
+| **➕ Cloudflare Pages deploy API** (v1.1, WSK-D17) | Frontend deploys + preview builds | **none — the Pages-scoped deploy token is held in ZONE A**; Zone B never calls it | n/a. A Zone B compromise cannot deploy or deface a client frontend, because Zone B holds no deploy credential. This is *stronger* containment than the v1.0 self-hosted-FE model, where the box serving previews also served live. |
 
 ### What a Zone B compromise can and cannot reach (the containment statement, concrete)
 
@@ -242,9 +264,33 @@ snapshot artifacts are unpacked as files into the generated repo; `npm install`/
 happens only in the repo's GitHub CI and on Zone B previews — a poisoned SDK can therefore attack
 the built site (caught by Submission review + conformance tests + CI), never the ERP process.
 
+### §03a · WSK-D26 collisions — what must be resolved before a frontend can ship (2026-08-26)
+
+WSK-D26 sends client frontends to `delphi` (staging) and `helios` (production). Two verified facts
+block that today. Neither is a design opinion; both were established by direct inspection.
+
+| # | Blocker | Evidence | What resolves it |
+|---|---|---|---|
+| 1 | **`delphi` and `helios` are OBSERVE-ONLY.** The owner's 2026-08-22 ruling says we may collect information FROM them and may **NOT install, configure, restart, or modify anything ON them**. Deploying a client frontend is, unavoidably, modifying them. | `docs/plans/2026-08-21-multi-server-observability.md` §12; `infra/runbooks/onboard-server.md` §0 — that runbook explicitly no longer applies to them | An owner ruling **lifting observe-only for deployment purposes** on these two hosts. Until then WSK-D26 cannot be executed, only planned. Note this is narrower than re-authorising the monitoring agent tier — the two can be decided separately |
+| 2 | **Neither host is reachable from the dev machine.** SSH (port 22) and HTTP both time out for `delphi` `72.61.142.88` and `helios` `187.77.116.133` — firewalled to specific sources, or tunnel-only. | Probed 2026-08-26; `~/.ssh/config` has entries for both, so access is *intended* to exist | A working deploy path: source-IP allowlist, the WireGuard tunnel, or a CI-side deploy identity. This is also what WSK-29's deploy tooling will need |
+
+**Also settled by the same inspection:** `gaiada.com` is a **WordPress site on Hostinger shared
+hosting** (`platform: hostinger`, `wp-json` discovery link; nameservers `dns-parking.com`). Under
+WSK-D26's routing rule it therefore **stays on the WP host** — which makes tenant zero a
+**headless-WordPress** case, i.e. Phase 6 (WSK-34/35) work, not the Astro/Node path Milestone 0
+assumed. Hostinger is shared hosting with no shell-access model, so nothing server-side is possible
+there either way.
+
 ### Dev-topology honesty (D-2)
 
-Until the KVM8 boxes exist, Zone B runs as a compose project on the dev estate: the boundary is
+**➕ v1.1 — GDA-AI01 is NOT a candidate for the Zone B box.** A second server now exists in the
+estate, and it will be proposed as a way to skip procurement. It hosts OpenClaw multi-tenant
+workloads; co-tenanting Zone B beside unrelated internet-facing services destroys the containment
+statement this whole section is built on — the blast-radius table above becomes fiction the moment
+a neighbour on the same box is compromised. Zone B gets a dedicated box or stays logical on the
+dev estate. Naming this here so nobody "saves money" on it in six months.
+
+Until the KVM8 box exists, Zone B runs as a compose project on the dev estate: the boundary is
 **logical** (separate compose networks, separate Postgres/Redis/MinIO instances, all three auth
 layers real) but not physical. That is sufficient to build and dev-verify every mechanism above —
 and insufficient to *claim* the containment invariant. Every probe in this section re-runs on the
@@ -261,10 +307,12 @@ zone-boundary behavior before that gate.
   its own migrator role against the Zone B Postgres. Platform-nest's ledger, lints, and README
   rules do not govern it (Zone B replicates the *patterns*: FORCE RLS, owner/migrator/runtime role
   split per the estate DB-topology doctrine, NOBYPASSRLS runtime).
-- **Zone A mirror tables enter the platform-nest ledger** at **next-unused at merge time**
-  (README rule 5). Head was `0087` on 2026-08-07 (itself an uncommitted concurrent-session file) —
-  **never inherit a number from this doc**; the D-12 lesson in webdev-design (its `0041+`
-  assumption went stale in six days, twice) is standing policy.
+- **Zone A mirror tables enter the platform-nest ledger.** ~~At next-unused-at-merge (README
+  rule 5); head was `0087` on 2026-08-07.~~ **➕ v1.1 (WSK-D21):** the ledger moved to
+  **timestamp-named migrations** (`YYYYMMDDHHMM_*.sql`) on 2026-08-25. There is no next number to
+  look up and no numbering race to lose — name the mirror migration
+  `<timestamp>_webdev_contract_snapshots.sql`. The `automation_approvals.origin` widen-only
+  DO-block advice is unaffected and still stands.
 
 ### Zone B schema (own ledger; DDL sketch — refined at WSK-03/04)
 
@@ -413,12 +461,41 @@ FE's compile depend on.
   vocabulary package, consumed by Payload config, codegen, and the block-renderer library.
 - **One response envelope**, identical for every tenant and collection (frozen at the `/v1` path):
 
+**➕ v1.1 (WSK-D18) — the envelope gains four axes BEFORE it freezes.** v1.0 froze a shape with
+no locale, no list-pagination contract, and no error contract. Gaiada's clients are Indonesian and
+ID/EN sites are the norm; adding a locale axis after the freeze would have forced a `/v2` and a
+re-pin of every live site. Payload supports localization natively, so the cost lands almost
+entirely in the (still unbuilt) vocabulary package and renderer. **This is the last cheap moment,
+and WSK-06 is where it closes.**
+
 ```jsonc
+// item response
 { "collection": "case-study", "slug": "acme-rebrand",
+  "locale": "id-ID",                       // NEW — required; tenant default when unspecified
+  "localizations": [                        // NEW — sibling links, never inlined content
+    { "locale": "en-US", "slug": "acme-rebrand-en" } ],
   "seo":  { "title": "…", "description": "…", "ogImage": "…" },
-  "meta": { "publishedAt": "…", "updatedAt": "…" },
+  "meta": { "publishedAt": "…", "updatedAt": "…", "draft": false,
+             "x": { } },                    // NEW — reserved extension namespace; additive forever
   "blocks": [ { "type": "hero", "props": { } }, { "type": "richText", "props": { } } ] }
+
+// collection-list response — NEW; cursor-based, never offset (stable under concurrent publish)
+{ "collection": "case-study", "locale": "id-ID",
+  "items": [ /* item responses, minus blocks unless ?expand=blocks */ ],
+  "page": { "cursor": "…", "hasMore": true, "limit": 25 } }
+
+// error response — NEW; RFC 9457 problem details, one shape for every failure
+{ "type": "https://webdesk.gaiada.online/errors/tenant-key-scope",
+  "title": "Key not authorised for this environment",
+  "status": 403, "detail": "…", "instance": "/v1/case-study/acme-rebrand",
+  "requestId": "…" }
 ```
+
+**Locale rules.** A tenant declares its locale set and a default at provisioning; every content
+read resolves to exactly one locale (`?locale=`, else the tenant default) and never mixes.
+A missing translation **falls back to the default locale and says so** in `meta.x.localeFallback`
+— silently serving the wrong language is worse than an honest fallback flag the renderer can act
+on. Locale coverage is a console-visible status (§08).
 
 ### Layer 2 — composition (per-tenant; data, not code)
 
@@ -427,10 +504,38 @@ A tenant's collections are arrangements of Layer-1 primitives stored as schema d
 vocabulary version. The blueprint's deploy matrix holds: new page / new arrangement = data only;
 new structured collection or new block type = approved, versioned deploy.
 
+**➕ v1.1 — three table-stakes capabilities v1.0 omitted**, all landing in WSK-06 as vocabulary/
+engine work rather than per-tenant invention:
+
+- **Redirects + sitemap + robots as a standard collection.** Every real site migration arrives with
+  a redirect map, and the SEO department will ask on day one. Modelled as data in a fixed
+  `redirect` collection (from-path, to-path, status, active) plus a generated `sitemap.xml` per
+  locale — not as bespoke per-tenant code.
+- **Scheduled publishing.** `publish_at` / `unpublish_at` honoured by the worker; Payload supports
+  it and editors expect it. Without it every timed campaign becomes a human awake at midnight.
+- **Content search.** Postgres `tsvector` per locale over title/slug/rich-text, exposed through
+  `/v1` with the same envelope and cursor pagination. Basic, but its absence forces every site to
+  ship a client-side hack or a third-party index.
+
 ### Layer 3 — codegen (deterministic; the contract artifacts)
 
 Per tenant, the pipeline (WSK-15) compiles composition × vocabulary into: **TS SDK** ·
-**`openapi.v1.json`** · **`CONTENT-CONTRACT.md`** (PHP SDK joins at P6, D-10). Determinism is a
+**`openapi.v1.json`** · **`CONTENT-CONTRACT.md`** (PHP SDK joins at P6, D-10).
+
+**➕ v1.1 (WSK-D19) — one hand-authored artifact, the rest derived.** ~~Three hand-built
+generators, four with PHP.~~ The pipeline hand-authors **`openapi.v1.json` only**; the TS SDK
+comes from `openapi-typescript`, the PHP SDK from `openapi-generator`, and `CONTENT-CONTRACT.md`
+from a spec-to-Markdown renderer. Tool versions pin in the WS10-signed generator image, so the
+double-run byte gate covers the whole chain and proves *more* than a hand-rolled generator would.
+We stop owning a codegen product; WSK-34 (PHP SDK) becomes near-free.
+
+**Companion lockdown (WSK-D20).** Payload exposes GraphQL and its own REST automatically. Either,
+reachable with a tenant key, lets a site query raw collections — unversioned, unpinned,
+uncontracted — which silently defeats the snapshot pin, the semver rules, and the whole one-rail
+discipline. **Both are disabled on the public listener** (AC on WSK-02, grep-proven, probed in the
+Milestone-0 gate exactly like the no-Zone-A-credentials sweep). `/v1` REST is the only contract a
+client site ever sees. GraphQL, if ever wanted for the console, stays internal-only behind the
+BFF and never behind a tenant key. Determinism is a
 tested property, not an aspiration: canonical serialization (sorted keys, no timestamps in
 artifact bodies, toolchain versions pinned in the generator image — which ships through the WS10
 signed-image pipeline), and a **CI gate that runs codegen twice and fails on any byte
@@ -587,8 +692,18 @@ its route exists):
 
 - **Registry:** per-tenant site list — kind, envs, domains, status chips (live proxy read;
   degrades to last-known facts with a staleness banner when Zone B is unreachable).
+  **➕ v1.1:** content and frontend now promote **independently**, so the row splits into two
+  columns — *backend env* (staging/production content) and *frontend deployments* (Pages
+  previews + production), each with its own state. A single merged env chip would hide the most
+  common real question: "is the content live, or just the build?"
 - **Contract card:** pinned `contract@X.Y` vs latest published, per site (snapshot rows ×
   `contract.published` facts); "refresh snapshot" action.
+  **➕ v1.1:** plus a **locale coverage** row ("id-ID complete · en-US 3 of 5 pages") — the
+  status an account manager actually asks for, and the one thing the locale axis is invisible
+  without.
+- **➕ Data & Privacy card (v1.1, WSK-D22 — NEW surface):** retention setting, consent-notice
+  version in force, and the **data-subject request** action — find / export / delete one
+  person's submissions across the tenant. WS4-gated and audited like any irreversible command.
 - **Provisioning flow:** PRD-drafted proposal → diff + summary → WS4 approve → progress from
   tracked control-plane jobs.
 - **Keys:** mint/rotate/revoke (shown-once modal, never re-displayable — hash-only at rest).
@@ -619,7 +734,7 @@ its route exists):
 
 | Subsystem | Integration (concrete) |
 |---|---|
-| **platform-nest** | NEW `webdev` `ModuleContract` (key `webdev`, `@Controller("api/:tenantId/modules/webdev")`, `ModuleEnabledGuard`) — **registered by WSK-19** (verified absent today) — owning contracts (mirror) + the webdesk BFF proxy (WSK-23). The control egress client (mTLS + KC client-credentials + assertion minting) lives in this module. Bridge-consumer writes ride core services via the event log table. |
+| **platform-nest** | **➕ v1.1 CORRECTION (2026-08-26, found by WSK-12):** the `webdev` module **NO LONGER NEEDS CREATING — it already exists.** A concurrent session shipped `platform-nest/src/modules/webdev/**` (ModuleContract shell + provisioning + slug parity, committed), and its own header names WSK-19 as the next legitimate extender via additive arrays. **WSK-19's scope therefore shrinks from "register the module" to "extend it"**, and every earlier "verified absent" claim in this doc about that module is stale. WSK-12 already extended it one step early (event-log table + controller + Cerbos policy) because the third wall needs module membership. Original text follows: NEW `webdev` `ModuleContract` (key `webdev`, `@Controller("api/:tenantId/modules/webdev")`, `ModuleEnabledGuard`) — **registered by WSK-19** (still verified absent 2026-08-26; **➕ v1.1:** the module registry has since grown `finance`, `lms`, `monitoring`, `billing`, `agency`, `assistant` — copy the **`finance`** module's `contract.ts` + `impact-registry.test.ts` shape, which is the most recent, not `hr`) — owning contracts (mirror) + the webdesk BFF proxy (WSK-23). The control egress client (mTLS + KC client-credentials + assertion minting) lives in this module. Bridge-consumer writes ride core services via the event log table. |
 | **BFF contract doc** | New §-block in [`../FRONTEND-BFF-CONTRACT.md`](../FRONTEND-BFF-CONTRACT.md) at the next free § (the §15+ region is racing — claim at ticket time, same rule as migration numbers): contracts refresh/read, sites/status/submissions proxy reads, releases, keys. Shapes canonical in a new `platform-ui/src/lib/webdesk.ts`. |
 | **mcp-hub** | §07 tool table, aggregated via `GET /mcp/tool-defs` (nothing hub-side hardcoded); `wf:webdesk` account + allowlist entry. |
 | **ai-gateway-go** | `llm.extract(kind=webdesk_schema)` + summaries; no new capability classes. |
@@ -662,14 +777,53 @@ its route exists):
   **No standing staging→live credential exists.** Snapshot-first is mandatory (release row +
   content dump + media manifest) — rollback restores it one-click; WSK-30 rehearses rollback as a
   gate item, not a hope.
-- **Backups:** PG logical dump + WAL and MinIO replication to **versioned/immutable** external
-  buckets (Zone B holds writer creds only; lifecycle/delete admin is Zone A custody); quarterly
-  restore drill per the estate's drill precedent. Single-disk MinIO means the external replica IS
-  the redundancy (blueprint caveat carried).
+- **Backups ➕ v1.1 (WSK-D23) — rewritten for the fully-self-hosted ruling.** PG logical dump +
+  WAL and a MinIO mirror, with **MinIO bucket versioning + object lock (WORM) enabled locally**
+  so a same-box compromise cannot silently rewrite history. Single-disk MinIO still means **one
+  copy of everything on one disk**, so the offsite copy is what makes it a backup at all:
+  - **Now (zero new cost):** a nightly **pull** to a second estate box — the target initiates the
+    transfer over its own credential; Zone B holds no credential for the backup destination and
+    cannot reach, overwrite, or delete it. This is a *stronger* posture than v1.0's push model.
+  - **At staging:** company **Google Workspace** becomes the offsite target (Drive/Shared Drive
+    via a dedicated service account, still pull-model). Already paid for, so still no new line
+    item. Caveat to design around: Drive is not object-lock storage — its protection is version
+    history and trash retention, which is a cushion, not immutability. Encrypt before upload.
+  - **Target state:** local server + NAS. RAID gives redundancy the single VPS disk cannot — but
+    **RAID is not a backup**; the offsite copy stays mandatory in every phase.
+  - Quarterly restore drill per the estate's drill precedent, unchanged. `wd-backup-sentinel`
+    alerts on staleness — backups that silently stop are the failure mode that matters.
 - **Form-submission PII retention:** `form_defs.retention_days` (default 180) + a worker purge
   job + `submissions.expires_at`; submission payloads are schema-validated and size-capped at
   intake; exports to Zone A carry only the slim projection. The day-one-scrub doctrine applies to
   anything that later crosses into Zone A processing.
+- **➕ v1.1 (WSK-D22) — data protection is a role, not a retention setting.** This platform
+  holds **our clients' customers'** personal data: names, phones, emails, message bodies, and
+  (once form uploads land) documents. v1.0 modelled that as `retention_days` alone, which cannot
+  answer a deletion request and does not describe who is responsible for what. The posture:
+  **(a) We are a processor; each client is the controller.** That belongs in the client contract,
+  not only the architecture — Indonesia's **UU PDP No. 27/2022**, and GDPR-shaped obligations for
+  any client with EU end-users. **(b) A DSR path exists:** find / export / delete a single data
+  subject's submissions across a tenant, as a WS4-gated audited control-plane command surfaced in
+  the console (WSK-38). Time-based retention is a floor, not a rights mechanism. **(c) Consent is
+  recorded per submission:** which notice text and which version the submitter accepted, stored
+  alongside the payload — consent you cannot evidence is consent you do not have. **(d) A
+  residency statement per tenant** says where content, media, and backups physically sit; the
+  MinIO / R2 / Cloudflare split needs one real answer, and clients ask for it during procurement.
+- **➕ v1.1 §11a — what makes self-hosted media viable (WSK-D23 preconditions).** Serving client
+  site media from our own box means **their visitors' traffic lands on our bandwidth and our
+  disk**. Three rules keep that from becoming the platform's first scaling incident:
+  **(a) The CDN is mandatory.** Every public asset serves through Cloudflare with a long
+  `Cache-Control` and the §05 cache tags. A cache hit never touches the origin, which is what
+  makes one box able to serve many sites. A media path that bypasses the CDN is a defect.
+  **(b) Video does not live on the box by default.** Video is the worst bandwidth-per-byte case
+  we have. Short hero clips: self-host, CDN-cached, size-capped. Anything long-form: **embed
+  YouTube/Vimeo**, which is free, is what most agency client sites do anyway, and keeps hours of
+  video off our disk entirely. Self-hosted video libraries are a NAS-era decision, not a
+  VPS-era one.
+  **(c) Disk and bandwidth become box-sizing inputs (A-12).** Media is now part of what the
+  backend box must be sized for — a fact for procurement, not an argument against the ruling.
+  Per-tenant storage quotas (§15) are the enforcement, and the storage-usage card in the console
+  (§08) is how we see it coming.
 - **Payload admin exposure (D-5):** never public. `/admin` vhost is proxy-allowlisted (office
   egress IP now; tailnet later) + Payload's own auth; live-box admin stays enabled for post-launch
   editorial (D-4) under the same allowlist. Keycloak-OIDC-into-Payload is deferred (revisit with
@@ -696,8 +850,40 @@ its route exists):
 - **[NOW→PROC]** — build + dev-verify now; a named live-fire leg re-runs at procurement.
 - **[PROC]** — cannot meaningfully start before the KVM8 boxes / DNS / Cloudflare exist.
 
-**Totals: 36 tickets** — P1: 9 · P2: 4 · P3: 7 (incl. both rail tickets) · P4: 10 · P5: 3 ·
-P6: 3. **[NOW] 29 · [NOW→PROC] 4 (WSK-11, 25, 29, 30) · [PROC] 3 (WSK-26, 27, 28).**
+~~**Totals: 36 tickets** — P1: 9 · P2: 4 · P3: 7 · P4: 10 · P5: 3 · P6: 3. [NOW] 29 ·
+[NOW→PROC] 4 · [PROC] 3 (WSK-26, 27, 28).~~
+
+### ➕ v1.1 §12 delta — authoritative over the tables below
+
+**Totals: 35 build tickets + 2 from the reassessment = 37.** `[PROC]` is now **WSK-28 alone**.
+Live status for every row: [`../plans/2026-08-26-webdesk-PROGRESS.md`](../plans/2026-08-26-webdesk-PROGRESS.md).
+
+| Change | Ticket(s) | Why |
+|---|---|---|
+| **NEW — WSK-00 RLS feasibility spike** (`senior-db`, ≤2 days, runs before WSK-04) | WSK-00 | The R-1 ruling keeps RLS under shared Payload. Risk accepted ⇒ buy the cheapest possible early answer. Prove a per-request tenant GUC survives Payload Local API, REST, admin, jobs, and migrations on a pooled connection. Deliverable is a **probe suite**, not a design. **Exit: if any path cannot carry the GUC without patching `@payloadcms/db-postgres`, it returns to the ruling with evidence** — not to a workaround invented mid-ticket. |
+| **WSK-04 gains app-layer scoping alongside RLS** | WSK-04 | Defence in depth: a GUC gap becomes a bug, not a breach. The Milestone-0 battery probes both layers independently — disable one, the other must still return zero rows. Rating stays `opus·high`. |
+| **WSK-02 gains a GraphQL/raw-REST lockdown AC** | WSK-02 | WSK-D20. Grep-proven, gate-probed. |
+| **WSK-06 absorbs the envelope amendments** | WSK-06 | Locale, localizations, cursor pagination, RFC 9457 errors, `meta.x`; plus a redirects/sitemap collection, tsvector search, and scheduled publishing. **The freeze happens in this ticket.** |
+| **WSK-26 + WSK-27 merge → WSK-26′ "Pages deploy + domain adapter"** (`senior-integrator`, now `[NOW]`) | WSK-26, 27 | Cloudflare Pages supplies per-branch previews, custom domains, and TLS as product. D-8's gate machinery is unchanged — only the URL source changes. |
+| **WSK-25 shrinks** — drops FE-artifact deploy, TLS activation, purge/warm; keeps snapshot-first, migrate, content export/import, and a Pages deploy hook. Rollback = content restore + Pages rollback. **Re-rate from `opus·medium` at ticket time.** | WSK-25 | Most of what made it Opus-hard was cross-box FE movement we no longer perform. |
+| **WSK-08 → WSK-08′**: the proof site becomes **gaiada.com live on Pages**, not a dev-stack fixture | WSK-08 | Milestone 0 (below). |
+| **P1 + P2 QA gates merge → one Milestone-0 gate** | WSK-09, 13 | One vertical slice, one gate. |
+| **WSK-15 becomes OpenAPI-first**; **WSK-34 becomes near-free** | WSK-15, 34 | WSK-D19. |
+| **WSK-28 gains** stated RTO/RPO, a status page, and R2-for-media-from-day-one | WSK-28 | Backups without a recovery objective are a hope; R2 removes the single-disk MinIO risk rather than backing it up. |
+| **NEW — WSK-37 per-tenant outbound webhooks** (`medior`) | WSK-37 | Clients want submissions in their own CRM; without it every integration is bespoke. Reuses the WSK-12 HMAC emitter. |
+| **NEW — WSK-38 Data & Privacy / DSR command + console card** (`senior-be`) | WSK-38 | WSK-D22. |
+| **Sequencing: Milestone 0 first** | — | See the re-sequencing note below. |
+
+### ➕ v1.1 — Milestone 0: "gaiada.com lives on WebDesk"
+
+v1.0 reached the first *production* value at P2's deferred leg and real hosted sites after wave 20;
+everything before that was proven on the dev stack only. v1.1 pulls a thin vertical slice to the
+front — **WSK-00 → 01 → 02 → 03 → 04 → 05 → 06 → 07 → 10 → 11 → 12 → 08′ → M0 gate** — ending with our
+own site on our own platform and our own forms off web3forms, with the walls real. Everything after
+generalizes something already in production instead of something proven in a compose file. It also
+makes the procurement question concrete: one real site's load, on the backend box only.
+P3–P6 keep their content and order; they simply follow Milestone 0.
+
 **Opus flags: 4** — WSK-04 opus·high; WSK-19, WSK-20 (pre-flagged, carried), WSK-25 opus·medium.
 All other tickets ride seat defaults (agent-army standard: seniors Sonnet·high, medior
 Sonnet·medium, junior Haiku, qa Sonnet·medium). ⚡ = QA gate + architect design-review on the
@@ -792,8 +978,8 @@ WSK-26/27/28/30 only.
 |---|---|---|---|
 | OQ-5 *(carried from webdev-design §13)* | Preview visibility: previews only via gate rows; TTL 7d post-decision; 2 concurrent non-static slots — confirm clients never get a free-browse preview list | WSK-26 | **Adopt D-8 as proposed** |
 | OQ-6 *(carried)* | SDK distribution: pinned tarballs out of files storage vs a private npm registry on Zone B | WSK-16/20 | **Tarballs from the snapshot; revisit at >10 active sites** |
-| OQ-W1 | **KVM8 procurement timing** — the single hard gate on WSK-26/27/28 + the full WSK-30 gate. Two boxes per the blueprint topology (staging + live) | the 3 [PROC] tickets + the P4 gate | **Order the staging box at P3 exit** (previews + real-boundary verification start), **the live box before WSK-30** — staggered spend, nothing idle |
-| OQ-W2 | Zone B domain scheme + Cloudflare: staging wildcard + Turnstile keys + zone ownership (owner actions at procurement) | WSK-26/27; real-Turnstile leg of WSK-10 | **`*.stg.gaiada.online` wildcard on the staging box**; client production domains onboard via `setDomain`; existing CF account, new zone entries; `forms.gaiada.online` stays the C-03 identity (locked D14) |
+| OQ-W1 **➕ v1.1: narrower** — under WSK-D17 only the **backend** box is gated (previews, domains, and TLS left with Pages), and Milestone 0 gives it a real load figure to size against. Decide against M0's exit, not P3's. | **KVM8 procurement timing** — the single hard gate on WSK-26/27/28 + the full WSK-30 gate. Two boxes per the blueprint topology (staging + live) | the 3 [PROC] tickets + the P4 gate | **Order the staging box at P3 exit** (previews + real-boundary verification start), **the live box before WSK-30** — staggered spend, nothing idle |
+| OQ-W2 **➕ v1.1: mostly moot** — preview wildcard DNS is Pages' problem now; what remains is the Turnstile keys and zone ownership. | Zone B domain scheme + Cloudflare: staging wildcard + Turnstile keys + zone ownership (owner actions at procurement) | WSK-26/27; real-Turnstile leg of WSK-10 | **`*.stg.gaiada.online` wildcard on the staging box**; client production domains onboard via `setDomain`; existing CF account, new zone entries; `forms.gaiada.online` stays the C-03 identity (locked D14) |
 | OQ-W3 | Content-sync doctrine (blueprint §14 open item) | WSK-25 | **Adopt D-4:** first-launch/explicit-flag copy at promote; post-launch authoring directly on the target env |
 | OQ-W4 | Payload admin exposure | WSK-02 (bind), WSK-28 (allowlist) | **Adopt D-5:** never public; proxy allowlist + Payload auth; OIDC-into-Payload deferred |
 | OQ-W5 | Block-library governance — who admits a new block to the vocabulary | WSK-14 (encodes the process) | **Web-dev lead approves via WS4 + architect design-review on the vocabulary diff**; MINOR-only between majors |
@@ -834,7 +1020,35 @@ green-or-override), D-10 (tool-contract preservation), and its §13 OQ-5/OQ-6 de
 
 ---
 
-*Cross-references:* [WebDesk blueprint (HTML, v1.2 — authoritative)](./webdesk-blueprint.html) ·
+### ➕ v1.1 decisions (2026-08-26 — the reassessment rulings)
+
+| # | Decision | Why |
+|---|---|---|
+| WSK-D16 | **Tenant isolation stays RLS under a shared Payload instance (R-1 — owner-ruled).** The 2026-07-23 single-shared-instance lock stands; WSK-04 keeps `opus·high` and its zero-rows-via-every-path AC. Because the risk is **accepted rather than removed**, four mitigations attach: the WSK-00 spike; any required adapter patch must be a **named, pinned, CI-checked** artifact with an owner and an upgrade runbook; **app-layer scoping ships alongside**; and a written fallback — spike failure or 2× overrun moves the program to per-tenant Payload schemas **without a fresh design round**. | The owner weighed a real architectural risk and chose the isolation model with the strongest guarantee *if it holds*. What a design doc owes an accepted risk is not a re-argument but an early, cheap test and a pre-agreed exit — an unnamed fork discovered at month four is how this becomes a permanent tax silently. |
+| WSK-D17 | **Client frontends deploy to Cloudflare Pages; Zone B boxes host the backend only (R-2).** The Pages deploy token is **Zone A custody** — Zone B never deploys a frontend. | Previews, custom domains, TLS, atomic deploy, and rollback are Pages' product, and Cloudflare was already the edge. Building them made two boxes a hard gate. It also *tightens* §03: the box that serves previews can no longer deface live sites, because it holds no deploy credential. |
+| WSK-D18 | **The `/v1` envelope gains `locale`, `localizations`, cursor pagination, an RFC 9457 error shape, and a reserved `meta.x` namespace before it freezes (R-4).** | v1.0 froze forever a shape with no locale, for Indonesian clients who routinely need ID/EN. Post-freeze that costs a `/v2` and a re-pin of every live site. Payload localizes natively and the renderer is unbuilt — this was the last cheap moment. |
+| WSK-D19 | **`openapi.v1.json` is the single hand-authored contract artifact; TS and PHP SDKs and the Markdown contract are derived by standard tooling (R-3).** | The determinism gate was the valuable half; the generator was the expensive half. Pinning tool versions in the signed generator image makes the double-run byte gate cover the whole chain, and we stop maintaining a codegen product forever. |
+| WSK-D20 | **Payload's GraphQL and raw REST are disabled on the public listener; `/v1` is the only contract a client site sees. No GraphQL in the ERP either — the estate stays single-paradigm REST + BFF.** | A tenant key reaching raw collections is unversioned, unpinned, uncontracted access that silently defeats the snapshot pin and the semver rules — the exact discipline the one rail exists to enforce. In Zone A, REST endpoints map 1:1 onto Cerbos resources, which is what makes the permission contract auditable; GraphQL collapses that into per-resolver authz and would fight the role-bundle parity tooling and the 50-item Cerbos batch limit. |
+| WSK-D21 | **Zone A migrations are timestamp-named**, superseding every next-unused-number instruction in v1.0. | The ledger changed under the doc on 2026-08-25. The numbering race this design spent paragraphs defending against no longer exists. |
+| WSK-D22 | **Data protection is modelled as a role, not a retention setting:** processor/controller split in the client contract, a WS4-gated audited DSR command, per-submission consent records, and a per-tenant residency statement. | We hold our clients' customers' PII. `retention_days` cannot answer a deletion request, and consent that cannot be evidenced is consent we do not have. UU PDP 27/2022 applies today; GDPR-shaped duties follow any client with EU end-users. |
+
+| WSK-D23 | **Storage stays fully self-hosted (MinIO) — owner-ruled 2026-08-26.** No new recurring cost is accepted at this stage. R2/S3/GCS remain a **config swap, not a rewrite**, protected by an abstraction test (WSK-07) so the option stays real. Cloudflare CDN in front is **mandatory, not optional**. Sequence: VPS disk now → Google Workspace as the offsite backup target when it lands at staging → local server + NAS as target-state. | Cost discipline at the stage where the platform has no revenue yet, and the swap cost later is genuinely a config change — so deferring is cheap and reversible, which is exactly when deferring is correct. Two things must be true for it to stay safe, and they are now ACs rather than assumptions: the CDN must absorb the read traffic (§11a), and the offsite copy must exist and be pull-model (§11). **Bonus the cloud option did not have:** data residency (WSK-D22) becomes trivially answerable — "your data is on our server, in this region, and nowhere else" — where R2's global distribution would have needed a jurisdiction configuration and a longer answer. |
+
+| WSK-D24 | **Payload is the EDITORIAL layer, not the read path — owner-ruled 2026-08-26.** `/v1` content reads are served by our own tenant-aware SQL path (`payload/collections/*` + `app/(payload)/v1/[...slug]/route.ts`); Payload owns the admin panel, authoring, and the schema. | Payload's REST dispatcher only consults `config.endpoints` under `routes.api` (`/api`), so `/v1` could only have been served as `/api/v1/...`; re-pointing `routes.api` at `/v1` would have put Payload's **unscoped automatic collection REST** on the public prefix — precisely the WSK-D20 leak. Serving reads ourselves closes that by construction and gives us byte-control of the frozen envelope. **Accepted costs:** we own the read side of localization/drafts/versions rather than inheriting Payload's, and the api-key hash algorithm is duplicated in two services (documented; must change in both). |
+| WSK-D25 | **Payload collections get their own app-layer tenant predicate — owner-ruled 2026-08-26.** WSK-04 proved WSK-D16's mutual independence on `webdesk/api` only; Payload's collections had the GUC and nothing else. | Defence in depth is only a guarantee where BOTH layers exist. On the Payload side a GUC gap was a **breach**, not a bug — the one remaining place where a single mechanism failing means client-data exposure. Cheapest to close while `payload.config.ts` is fresh. **⚠️ Closed only PARTIALLY, and the limit is structural:** Payload runs an `access` function only `if (!overrideAccess)`, and the **Local API defaults `overrideAccess: true`** (verified in `payload/dist/collections/operations/find.js`). So the predicate fires on **REST** (two walls) but is **skipped on the default Local API path** (RLS alone). Client-facing content reads are unaffected — WSK-D24 means `/v1` never traverses Payload at all — so the residue is staff/admin/seed code. **Required follow-up:** a lint or convention forcing project Local API callers to pass `overrideAccess: false`, or a future author silently reintroduces exactly the gap this decision closed. |
+| WSK-D26 | **SUPERSEDES WSK-D17 / R-2 — owner-ruled 2026-08-26 (later same day). Client frontends deploy to the EXISTING estate, NOT Cloudflare Pages.** Routing is by project type: **WordPress projects → the Hostinger WP host** · **non-WP STAGING → `delphi`** · **non-WP PRODUCTION → `helios`**. Cloudflare Pages is not used for hosting, and no domain's nameservers move. | "Respect the current" — the estate already has the hosts, and the earlier ruling was made believing FE hosting had to be built or bought. **This is a net WIN on procurement:** the FE side needs no new box at all, so OQ-W1/A-12 shrinks to the Zone B *backend* only. **But it reinstates work D17 had deleted** (see the reversal table) and it collides with two facts on the ground, both of which are now blockers rather than details — the observe-only ruling and reachability (§03a). |
+| WSK-D27 | **The two-tier estate rule, and Zone B lands on `sumopod` — owner-ruled 2026-08-29.** Every host belongs to one tier by PURPOSE: **client project delivery** (`helios` production · `delphi` staging · Hostinger WP) or **this ERP and everything operational to it** (`gda-aicenter` · `sumopod`). WebDesk is our platform — an ERP capability — so Zone B runs on **`sumopod`, hardened**. **The undocumented 2026-08-27 helios direction is WITHDRAWN**: `webdesk/docker-compose.helios.yml` and `webdesk/ops/nginx/webdesk-vhost.conf.template` were deleted (their compose mechanics survive in `webdesk/ops/README.md`); nothing was ever run against helios and nothing on it was touched. D26's *client frontend* routing is unaffected and still stands. | It replaces per-question host haggling with one principle, and it resolves the contradiction the helios overlay created — that file deployed Zone B beside 23 live third-party client sites while §03 forbade exactly that co-tenancy (the same reason GDA-AI01 was ruled out). **The ruling is not free of cost and §03 must say so:** `sumopod` carries 48 containers across 12 unrelated projects, the estate's whole observability store, a gVisor sandbox that executes employee-written code, and **the WireGuard hub with a live peer to `gda-aicenter`** — so an internet-facing Zone B there has a standing private path toward Zone A. That is a **documented exception** with named hardening (compose-network binds only, nothing on `0.0.0.0`, admin via SSH tunnel), not an oversight, and v2.0 rewrites §03's blast-radius table around it rather than leaving the old claim standing. **Standing rule earned here: no ruling exists outside this log.** The helios overlay's only record was a comment on line 1 of the file it justified. |
+
+> **Standing:** WSK-D16 and D17 were ruled by the owner on 2026-08-26. D18, D19, D20, D22 were
+> adopted from the reassessment's recommendations on the same date with no counter-argument
+> raised; they are **open to overturn on cause** like any decision here, but WSK-D18's cost rises
+> sharply the moment WSK-06 merges. D21 is a fact about the estate, not a choice.
+
+---
+
+*Cross-references:* [reassessment (rationale record)](./webdesk-design-reassessment.md) ·
+[PROGRESS tracker (live status)](../plans/2026-08-26-webdesk-PROGRESS.md) ·
+[WebDesk blueprint (HTML, v1.2 — authoritative)](./webdesk-blueprint.html) ·
 [BLUEPRINTS index](../BLUEPRINTS.md) · [webdev design](./webdev-design.md) ·
 [webdev foundation](./webdev-foundation.md) ·
 [Zone A mail design v3](../superpowers/specs/2026-08-04-zone-a-mail-design.md) ·

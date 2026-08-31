@@ -9,7 +9,7 @@
    live tenant for months), and a DEAD collector reading as a quiet network.
    Both render as silence unless something says otherwise, so something does. */
 .nw-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border: 0.5px solid var(--erp-hairline); margin-bottom: 18px; }
-.nw-banner__label { font: 700 10px var(--font-body); letter-spacing: 0.1em; text-transform: uppercase; }
+.nw-banner__label { font: 700 10px var(--font-body); letter-spacing: 0.01em; }
 .nw-banner__text { font: 400 12px var(--font-body); color: var(--ink-muted); }
 .nw-banner--fixture { border-left: 2px solid var(--status-critical); background: var(--tint-hover); }
 .nw-banner--fixture .nw-banner__label { color: var(--status-critical-fg); }
@@ -24,7 +24,7 @@
 .nw-kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 20px; }
 
 /* ---- severity + state chips ---- */
-.nw-chip { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-60); white-space: nowrap; }
+.nw-chip { font: 700 9px var(--font-body); letter-spacing: 0.01em; padding: 2px 6px; border: 0.5px solid var(--erp-hairline); color: var(--erp-ink-60); white-space: nowrap; }
 .nw-chip--critical { border-color: var(--status-critical); color: var(--status-critical-fg); }
 .nw-chip--high { border-color: var(--status-critical); color: var(--status-critical-fg); opacity: 0.8; }
 .nw-chip--medium { border-color: var(--status-idle); color: var(--erp-ink-60); }
@@ -42,13 +42,13 @@
 .nw-chip--expired, .nw-chip--reverted { color: var(--erp-ink-50); }
 
 /* ---- direction arrow ---- */
-.nw-dir { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); white-space: nowrap; }
+.nw-dir { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); white-space: nowrap; }
 
 /* ---- volume bar (top talkers) ----
    A bar rather than a sparkline: the comparison here is between ROWS, not over
    time, and a length shared against one scale reads faster than 10 shapes. */
 .nw-share { display: flex; align-items: center; gap: 10px; }
-.nw-share__n { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); white-space: nowrap; }
+.nw-share__n { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); white-space: nowrap; }
 .nw-bar { display: block; height: 4px; background: var(--erp-hairline); position: relative; min-width: 60px; flex: 1 1 auto; }
 .nw-bar__fill { position: absolute; inset: 0 auto 0 0; background: var(--erp-accent); }
 .nw-bar__fill--out { background: var(--status-critical); }
@@ -58,7 +58,7 @@
 .nw-egress__row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 9px 0; border-top: 0.5px solid var(--erp-hairline-soft); }
 .nw-egress__row:first-child { border-top: 0; }
 .nw-egress__country { font: 400 13px var(--font-body); color: var(--text-primary); }
-.nw-egress__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.nw-egress__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 
 /* ---- presence zones ---- */
 .nw-zones { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
@@ -66,7 +66,7 @@
 .nw-zone--offline { border-left-color: var(--status-idle); opacity: 0.7; }
 .nw-zone__name { font: 400 13px var(--font-body); color: var(--text-primary); }
 .nw-zone__count { font: 400 30px var(--font-display, var(--font-body)); color: var(--text-primary); line-height: 1; }
-.nw-zone__meta { font: 700 9px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--erp-ink-50); }
+.nw-zone__meta { font: 700 9px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 
 /* ---- disabled-action note ----
    Phase 4 is not built. Rather than render a button that would 404, the page

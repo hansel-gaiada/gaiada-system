@@ -1,0 +1,389 @@
+# WebDesk (Zone B) — standalone project skeleton (WSK-01).
+#
+# This is its OWN compose PROJECT (name: webdesk), deliberately separate from every Zone A
+# project so the estate's `--remove-orphans` trap (any container in the SAME project whose
+# profile isn't in the current command gets deleted) cannot reach it — same precedent as the
+# n8n project split (see ../docs/blueprints/webdesk-design.md §09).
+#
+# Services here are STUBS per WSK-01's scope: the stack SHAPE is the deliverable (proxy · payload
+# · api · worker · postgres · minio · redis · clamav · otel-collector), not working application
+# code. Payload/api/worker become real at WSK-02/21/07; this file is what those tickets extend,
+# not replace.
+#
+# Everything runs under the `dev` profile — nothing starts on a bare `docker compose up` without
+# explicitly selecting it, mirroring the estate's COMPOSE_PROFILES convention:
+#   docker compose --profile dev up -d
+#
+# ZERO Zone A hostnames or credentials appear anywhere below (WSK-01 hard AC, grep-proven).
+
+name: webdesk
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    profiles: ["dev"]
+    # WSK-28: the CDN-bypass shared secret the Caddyfile checks on /media/* (compose-env-
+    # passthrough trap — a var in .env does nothing unless it is listed here). Empty/unset is a
+    # documented dev-only bypass; see .env.example's own comment on this var.
+    environment:
+      WEBDESK_EDGE_VERIFY_SECRET: ${WEBDESK_EDGE_VERIFY_SECRET:-}
+    ports:
+      - "${WEBDESK_PROXY_HTTP_PORT:-8380}:80"
+      - "${WEBDESK_PROXY_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # WSK-28: status page static output, written by the status-page service, served directly
+      # by Caddy's file_server (see Caddyfile /status/* route) — read-only here on purpose, this
+      # container never writes its own status data.
+      - webdesk_status:/srv/status:ro
+    depends_on:
+      - api
+      - payload
+      - status-page
+    restart: unless-stopped
+
+  # --- Payload 3 content engine --------------------------------------------------------------
+  # Vendored + rebranded at WSK-02 (PG adapter onto Zone B's own DB, tenancy columns, RLS GUC
+  # plumbing at WSK-04). Placeholder process only — no application code lands in this ticket.
+  payload:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] payload INTERNAL listener — admin + Payload REST. NEVER on the public vhost (WSK-D20/D-5). Real command: npm run start:internal' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${APP_DATABASE_URL}
+      # Payload reads DATABASE_URI; WSK-06's /v1 read path resolves it too.
+      DATABASE_URI: ${APP_DATABASE_URL}
+      # WSK-06's /v1 auth verifies api_keys hashes: sha256(key + pepper).
+      # MUST match the api service's API_KEY_PEPPER exactly (see WSK-06 coupling note).
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+      PAYLOAD_SECRET: ${PAYLOAD_SECRET}
+      PAYLOAD_TELEMETRY_DISABLED: ${PAYLOAD_TELEMETRY_DISABLED:-1}
+      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
+    ports:
+      # Bound to LOCALHOST only: the admin panel and Payload's raw REST live here.
+      # Caddy must not forward the public vhost to this service (WSK-D20).
+      - "127.0.0.1:${WEBDESK_PAYLOAD_INTERNAL_PORT:-8381}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- NestJS api (forms · mail · media · control-plane) -------------------------------------
+  # Real command surface lands at WSK-10/11/07/21. Placeholder process only.
+  # WSK-02: the ONLY Payload-side process the public vhost may reach. Hardcoded
+  # denylist (/admin, /api/graphql, /api/*) checked BEFORE any allowlist; this
+  # process never imports payload or next, so it cannot serve them even by mistake.
+  payload-gateway:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] payload PUBLIC gateway — /v1 + /healthz only. Real command: npm run gateway' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PAYLOAD_INTERNAL_HOST: payload
+      PAYLOAD_INTERNAL_PORT: 3000
+      DATABASE_URI: ${APP_DATABASE_URL}
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+      PAYLOAD_PUBLIC_PORT: 3000
+    ports:
+      - "${WEBDESK_PAYLOAD_PUBLIC_PORT:-8384}:3000"
+    depends_on:
+      - payload
+
+  api:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] api stub — control plane lands at WSK-21' && sleep infinity"
+    environment:
+      # WSK-37 tenant outbound webhooks (same passthrough trap).
+      TENANT_WEBHOOK_SECRET_PEPPER: ${TENANT_WEBHOOK_SECRET_PEPPER}
+      TENANT_WEBHOOK_QUEUE_NAME: ${TENANT_WEBHOOK_QUEUE_NAME:-webdesk-tenant-webhooks}
+      TENANT_WEBHOOK_MAX_ATTEMPTS: ${TENANT_WEBHOOK_MAX_ATTEMPTS:-5}
+      TENANT_WEBHOOK_BACKOFF_DELAY_MS: ${TENANT_WEBHOOK_BACKOFF_DELAY_MS:-2000}
+      TENANT_WEBHOOK_REQUEST_TIMEOUT_MS: ${TENANT_WEBHOOK_REQUEST_TIMEOUT_MS:-10000}
+      TENANT_WEBHOOK_MAX_REDIRECTS: ${TENANT_WEBHOOK_MAX_REDIRECTS:-3}
+      TENANT_WEBHOOK_MAX_PAYLOAD_BYTES: ${TENANT_WEBHOOK_MAX_PAYLOAD_BYTES:-262144}
+      # WSK-12 Zone B->A events (same passthrough trap).
+      WEBDESK_ZONEB_BRIDGE_URL: ${WEBDESK_ZONEB_BRIDGE_URL:-}
+      WEBDESK_ZONEB_ORIGIN_SITE: ${WEBDESK_ZONEB_ORIGIN_SITE:-webdesk}
+      WEBDESK_ZONEB_EVENT_TIMEOUT_MS: ${WEBDESK_ZONEB_EVENT_TIMEOUT_MS:-5000}
+      WEBDESK_ZONEB_EVENTS_ENABLED: ${WEBDESK_ZONEB_EVENTS_ENABLED:-true}
+      # WSK-11 mail. A var in .env does NOTHING unless it is listed here
+      # (the estate's compose-env-passthrough trap).
+      MAIL_ENABLED: ${MAIL_ENABLED:-true}
+      MAIL_PROVIDER: ${MAIL_PROVIDER:-smtp}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Gaiada}
+      MAIL_SMTP_HOST: ${MAIL_SMTP_HOST:-mailpit}
+      MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-1025}
+      MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
+      MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+      MAIL_QUEUE_NAME: ${MAIL_QUEUE_NAME:-webdesk-mail}
+      MAIL_QUEUE_MAX_ATTEMPTS: ${MAIL_QUEUE_MAX_ATTEMPTS:-5}
+      MAIL_QUEUE_BACKOFF_DELAY_MS: ${MAIL_QUEUE_BACKOFF_DELAY_MS:-2000}
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${APP_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      # ── THE PASSTHROUGH TRAP, closed 2026-08-29 (found by the first real production boot) ──
+      # A var in `.env` does NOTHING unless the service lists it here. Everything below is read by
+      # api/src/**, and four of them are `requireInProd` — without them the container crash-loops
+      # with "… is not set — refusing to boot in production" on a .env that defines all of them.
+      # This block is why `api` could never have booted in production from this file before.
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+      STORAGE_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID}
+      STORAGE_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_MEDIA: ${MINIO_BUCKET_MEDIA:-media}
+      MINIO_BUCKET_VIDEO: ${MINIO_BUCKET_VIDEO:-video}
+      MINIO_BUCKET_UPLOADS: ${MINIO_BUCKET_UPLOADS:-uploads}
+      MINIO_BUCKET_ARTIFACTS: ${MINIO_BUCKET_ARTIFACTS:-artifacts}
+      WEBDESK_MEDIA_MAX_UPLOAD_BYTES: ${WEBDESK_MEDIA_MAX_UPLOAD_BYTES:-26214400}
+      WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
+      WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
+      # Control channel (WSK-22). The CA is a multi-line PEM, so it must NOT live in `.env`:
+      # `docker run --env-file` is a flat parser and dies on it, which silently breaks every
+      # ad-hoc verification container while the stack itself works. Keep it in its own env file.
+      WEBDESK_CONTROL_MTLS_CA_PEM: ${WEBDESK_CONTROL_MTLS_CA_PEM:-}
+      WEBDESK_CONTROL_MTLS_ALLOWED_CN: ${WEBDESK_CONTROL_MTLS_ALLOWED_CN:-platform-nest-webdesk}
+      WEBDESK_CONTROL_OIDC_ISSUER: ${WEBDESK_CONTROL_OIDC_ISSUER:-}
+      WEBDESK_CONTROL_OIDC_AUDIENCE: ${WEBDESK_CONTROL_OIDC_AUDIENCE:-webdesk-control-plane}
+      WEBDESK_CONTROL_OIDC_JWKS_URI: ${WEBDESK_CONTROL_OIDC_JWKS_URI:-}
+      CLAMAV_HOST: ${CLAMAV_HOST}
+      CLAMAV_PORT: ${CLAMAV_PORT}
+      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+      # WSK-28: bearer token for the (proposed, not-yet-applied) Zone A write-only OTLP listener —
+      # see infra/runbooks/webdesk-zoneb-otel.md. Second independent gate alongside OTEL_ENABLED
+      # so the local dev-sink collector can keep running without also enabling the real push.
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      WEBDESK_OTEL_ZONEA_PUSH_ENABLED: ${WEBDESK_OTEL_ZONEA_PUSH_ENABLED:-false}
+      # Control-channel placeholders only — see .env.example's hard rule. Never a Zone A host.
+      CONTROL_CHANNEL_JWKS_ISSUER_URL: ${CONTROL_CHANNEL_JWKS_ISSUER_URL}
+      WEBDESK_EVENT_SECRET: ${WEBDESK_EVENT_SECRET}
+      WEBDESK_APPROVAL_ASSERTION_KEY: ${WEBDESK_APPROVAL_ASSERTION_KEY}
+    ports:
+      - "${WEBDESK_API_PORT:-8382}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- BullMQ worker ---------------------------------------------------------------------------
+  # Mail retry/backoff (WSK-11), media variants, purge sweeps. Placeholder process only.
+  worker:
+    image: node:20-alpine
+    profiles: ["dev"]
+    command:
+      - sh
+      - -c
+      - "echo '[webdesk] worker stub — queue consumers land at WSK-07/11' && sleep infinity"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${APP_DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      TENANT_GUC_NAME: ${TENANT_GUC_NAME}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- Postgres (Zone B's OWN database; own ledger, own role split) --------------------------
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["dev"]
+    environment:
+      # $POSTGRES_USER here is the Postgres-IMAGE's cluster-bootstrap superuser (used ONLY by
+      # docker-entrypoint-initdb.d, incl. postgres/init-roles.sh, to create webdesk_owner /
+      # webdesk_migrator / webdesk_app as ordinary NOSUPERUSER NOBYPASSRLS roles below). No
+      # application or migration ever connects as this identity — see init-roles.sh's header for
+      # why that distinction is the whole point of the role split.
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-changeme_superuser_password}
+      POSTGRES_DB: ${POSTGRES_DB:-webdesk}
+      # Read by postgres/init-roles.sh to create the owner/migrator/app roles. First-boot only —
+      # has no effect on a volume that already has a cluster initialized.
+      POSTGRES_OWNER_USER: ${POSTGRES_OWNER_USER:-webdesk_owner}
+      POSTGRES_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-changeme_owner_password}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-webdesk_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-changeme_migrator_password}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-webdesk_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-changeme_app_password}
+    ports:
+      - "${WEBDESK_POSTGRES_PORT:-8383}:5432"
+    volumes:
+      - webdesk_pgdata:/var/lib/postgresql/data
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/10-init-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-webdesk}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # --- MinIO (self-hosted object storage, WSK-D23) --------------------------------------------
+  minio:
+    # WSK-28: pinned (was :latest — estate rule "pin versions; no latest tags in committed
+    # config"). This exact tag was pulled and exercised against the mc/versioning/object-lock
+    # sequence in ../infra/runbooks/webdesk-zoneb-backups.md §7 on this dev machine.
+    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    profiles: ["dev"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-webdesk_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme_minio_password}
+    ports:
+      - "${WEBDESK_MINIO_API_PORT:-8385}:9000"
+      - "${WEBDESK_MINIO_CONSOLE_PORT:-8386}:9001"
+    volumes:
+      - webdesk_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # --- Redis (BullMQ) --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    profiles: ["dev"]
+    ports:
+      # WSK-28 fix: was :-8384, which WEBDESK_PAYLOAD_PUBLIC_PORT already claims. Two services in the
+      # SAME (dev) profile defaulting to one host port means `up` dies on a bind conflict, and
+      # `docker compose config` cannot see it — it validates schema, not port uniqueness. See
+      # scripts/check-compose-ports.mjs, added so this cannot recur.
+      - "${WEBDESK_REDIS_PORT:-8390}:6379"
+    volumes:
+      - webdesk_redisdata:/data
+    restart: unless-stopped
+
+  # --- ClamAV (media upload scanning, WSK-07) --------------------------------------------------
+  # WSK-07: on-the-fly image transforms. Sits BEHIND the api (never public directly);
+  # the api signs transform URLs, so imgproxy needs no bucket credentials of its own
+  # beyond read access to the public media bucket.
+  imgproxy:
+    image: darthsim/imgproxy:v3
+    profiles: ["dev"]
+    environment:
+      IMGPROXY_KEY: ${IMGPROXY_KEY}
+      IMGPROXY_SALT: ${IMGPROXY_SALT}
+      # Signed URLs only — an unsigned request must be refused.
+      IMGPROXY_ALLOW_UNSAFE_URL: "false"
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY_ID:-${MINIO_ROOT_USER}}
+      AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+    expose:
+      - "8080"
+    depends_on:
+      - minio
+
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["dev"]
+    ports:
+      - "${WEBDESK_CLAMAV_PORT:-8387}:3310"
+    restart: unless-stopped
+
+  # --- OTel Collector (fail-soft; local dev sink only — WSK-28 wires the real Zone A listener) -
+  otel-collector:
+    # WSK-28: pinned to match the estate's own otel-collector-contrib pin
+    # (infra/compose/docker-compose.observability.yml / docker-compose.otel-metrics.yml), was
+    # :latest.
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    profiles: ["dev"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "${WEBDESK_OTEL_GRPC_PORT:-8388}:4317"
+      - "${WEBDESK_OTEL_HTTP_PORT:-8389}:4318"
+    restart: unless-stopped
+
+  # --- wd-backup-sentinel (WSK-28) --------------------------------------------------------------
+  # Staleness alarm for webdesk-backup-local.sh (design §11 / infra/runbooks/webdesk-zoneb-
+  # backups.md). Runs the sentinel script on a loop; a stopped/failing backup job must read as a
+  # loud failure, not silence — see the runbook for the full alerting rationale. Own profile
+  # ("ops"), NOT "dev": the plain `dev` profile is what every other agent in this program brings
+  # up to work on the stack, and a sentinel alarming about a backup job that was never configured
+  # in a dev sandbox would just be noise. `docker compose --profile ops up -d wd-backup-sentinel`
+  # brings it up deliberately.
+  wd-backup-sentinel:
+    image: alpine:3.20
+    profiles: ["ops"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl bash coreutils >/dev/null 2>&1 || true
+        while true; do
+          sh /ops/scripts/wd-backup-sentinel.sh || true
+          sleep "${WD_BACKUP_SENTINEL_INTERVAL_SECONDS:-3600}"
+        done
+    environment:
+      WEBDESK_BACKUP_SENTINEL_FILE: ${WEBDESK_BACKUP_SENTINEL_FILE:-/var/lib/webdesk-backups/.last-run}
+      WD_BACKUP_MAX_AGE_HOURS: ${WD_BACKUP_MAX_AGE_HOURS:-26}
+      WEBDESK_MC_ALIAS: webdesk
+      WEBDESK_BACKUP_BUCKET: ${WEBDESK_BACKUP_BUCKET:-backups}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      DEADMANSSWITCH_URL: ${WD_BACKUP_DEADMANSSWITCH_URL:-}
+      TELEGRAM_BOT_TOKEN: ${WD_BACKUP_ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_CHAT_ID: ${WD_BACKUP_ALERT_CHAT_ID:-}
+      ALERT_EMAIL_TO: ${WD_BACKUP_ALERT_EMAIL_TO:-}
+    volumes:
+      - ./ops/scripts:/ops/scripts:ro
+      - webdesk_backups:/var/lib/webdesk-backups
+    restart: unless-stopped
+
+  # --- status-page (WSK-28) ---------------------------------------------------------------------
+  # Public status page GENERATOR only — it holds no listener of its own. It writes into the
+  # shared webdesk_status volume; Caddy (the proxy service) serves that volume's contents
+  # directly via file_server at /status/* (see ./proxy/Caddyfile). This keeps "the proxy is the
+  # only public listener" (design §03) literally true: no second published port, no second
+  # reverse-proxy hop, one writer + one (read-only) reader of a shared volume.
+  status-page:
+    image: node:20-alpine
+    profiles: ["dev"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          node /app/ops/scripts/gen-status-page.mjs || true
+          sleep "${WEBDESK_STATUS_REFRESH_SECONDS:-30}"
+        done
+    environment:
+      WEBDESK_STATUS_OUT_DIR: /srv/status
+      WEBDESK_STATUS_PROXY_URL: http://proxy:80/healthz
+      WEBDESK_STATUS_API_URL: http://api:3000/healthz
+      WEBDESK_STATUS_PAYLOAD_GATEWAY_URL: http://payload-gateway:3000/healthz
+      WEBDESK_STATUS_REFRESH_SECONDS: ${WEBDESK_STATUS_REFRESH_SECONDS:-30}
+    volumes:
+      - ./ops/scripts:/app/ops/scripts:ro
+      - webdesk_status:/srv/status:rw
+    restart: unless-stopped
+
+volumes:
+  webdesk_pgdata:
+  webdesk_miniodata:
+  webdesk_redisdata:
+  webdesk_backups:
+  webdesk_status:

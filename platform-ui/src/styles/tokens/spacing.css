@@ -54,11 +54,20 @@
   --radius-8:    8px;    /* button, form control, small card */
   --radius-12:   12px;   /* card, panel */
   --radius-16:   16px;   /* modal, large panel, popover */
+  --radius-18:   18px;   /* card — the gold-glass card corner (2026-08-30) */
   --radius-pill: 999px;  /* tags, status pills, avatars */
   --radius-none: 0;      /* intentional flat edges: table-inside-card, full-bleed banners */
-  --radius-sm: var(--radius-4);
-  --radius-md: var(--radius-8);
-  --radius-lg: var(--radius-16);
+  /* Gold-glass (2026-08-30) — the whole scale steps up one notch. The design
+     draws controls at 12px and cards at 18px; the old 4/8/16 read as a
+     different, tighter product next to it. The named tiers move, the numbered
+     primitives above do NOT, so any component that pinned a specific number
+     stays exactly where it was and only token consumers travel.
+       --radius-sm  4px -> 8px   small chip, tag, inline control
+       --radius-md  8px -> 12px  button, input, form control
+       --radius-lg 16px -> 18px  card, panel, modal */
+  --radius-sm: var(--radius-8);
+  --radius-md: var(--radius-12);
+  --radius-lg: var(--radius-18);
 
   /* ---- Canvas & section geometry (dead code — no consumer in src/app;
      kept unchanged, not part of this pass) --------------------------- */
@@ -94,7 +103,7 @@
      no rule change required there. --row-height/--control-height are new. */
   --card-padding:    var(--space-20);  /* ui.css previously hardcoded 22px independently — now unified onto this token */
   --card-gap:        var(--space-16);  /* was a fixed 20px */
-  --row-height:      40px;
+  --row-height:      52px;  /* gold-glass: the design draws 56 at Airy; 52 is that rhythm at our comfortable default */
   --control-height:  40px;
 
   /* ---- Motion — restrained, editorial (no bounce) ----------------- */
@@ -104,7 +113,13 @@
   --dur-slow:    520ms;  /* @kind other */
 
   /* ---- Elevation & blur (frosted-glass header, scrim overlay) ----- */
-  --blur-glass:      12px;  /* scrolled header backdrop blur */
+  /* Gold-glass: the design blurs at 34px WITH a saturation lift — the
+     saturate() is what stops a translucent panel reading as grey film over a
+     warm ground, so the two travel together. Consumers write
+     `backdrop-filter: blur(var(--blur-glass)) saturate(var(--glass-saturate))`.
+     Only the components named in tokens.test.ts's glass allow-list may do so. */
+  --blur-glass:      34px;  /* chrome + top-level card backdrop blur */
+  --glass-saturate:  1.7;   /* @kind other */
   --blur-overlay:    2px;   /* mobile drawer scrim blur     */
   --hairline-strong: 1px;   /* 1px structural micro-divider */
   --overlay-scrim:   color-mix(in srgb, var(--text-primary) 40%, transparent);  /* drawer dim */

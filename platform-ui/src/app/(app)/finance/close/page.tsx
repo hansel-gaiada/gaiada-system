@@ -4,10 +4,13 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import {
-  listPeriods, getCloseReadiness, PERIOD_STATE_LABEL, BLOCKER_LABEL, type FiscalPeriod,
+  listPeriods, getCloseReadiness, listFiscalYears,
+  PERIOD_STATE_LABEL, BLOCKER_LABEL, type FiscalPeriod,
 } from "@/lib/finance";
 import { Card, HairlineTable, StatusBadge, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
+import { ClosePeriodActions } from "@/components/finance/ClosePeriodActions";
+import { CloseFiscalYearAction } from "@/components/finance/CutoverActions";
 
 // Period close — the checklist that decides whether a month can be locked.
 //
@@ -51,6 +54,7 @@ export default async function FinanceClosePage({
     periods.find((p) => p.id === sp.periodId) ?? fallback;
 
   const readiness = await getCloseReadiness(userId, tenant, selected.id);
+  const fiscalYears = await listFiscalYears(userId, tenant);
 
   return (
     <div className="fin-page">
@@ -120,17 +124,69 @@ export default async function FinanceClosePage({
         />
       </Card>
 
-      <Card title="Signing off and locking" style={{ marginTop: 22 }}>
+      <Card title="Sign off and close" style={{ marginTop: 22 }}>
+        <ClosePeriodActions
+          periodId={selected.id}
+          periodName={selected.name}
+          state={selected.state}
+          signedOff={selected.signedOff}
+          ready={readiness?.ready ?? false}
+          blockerCount={readiness?.blockers.length ?? 0}
+          readinessUnknown={readiness == null}
+        />
+      </Card>
+
+      <Card title="Fiscal years" hint="Closing a year rolls its result into retained earnings — the last act in a year's life, and terminal." style={{ marginTop: 22 }}>
+        {fiscalYears.length === 0 ? (
+          <EmptyNote>No fiscal year is recorded for this company.</EmptyNote>
+        ) : (
+          <>
+            <HairlineTable
+              columns={[
+                { label: "Fiscal year" }, { label: "Dates" }, { label: "Periods", align: "right" },
+                { label: "Open periods", align: "right" }, { label: "Status" },
+              ]}
+              rows={fiscalYears.map((fy) => [
+                fy.code,
+                `${fy.startDate} – ${fy.endDate}`,
+                String(fy.periodCount),
+                String(fy.openPeriods),
+                fy.status,
+              ])}
+            />
+            <div style={{ marginTop: 18, display: "grid", gap: 22 }}>
+              {fiscalYears.map((fy) => (
+                <div key={fy.id}>
+                  <Eyebrow>{fy.code}</Eyebrow>
+                  {fy.status === "closed" ? (
+                    <p className="fin-muted">Already closed.</p>
+                  ) : (
+                    <CloseFiscalYearAction
+                      fiscalYearId={fy.id}
+                      fiscalYearCode={fy.code}
+                      openPeriods={fy.openPeriods}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card title="Reopening a period" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          The close ACTION is <strong>not built yet</strong>, and it is deliberately the most
-          cautious thing in this workspace to build: locking a period is terminal, and reopening one
-          is a separate permission that company administrators do not hold.
+          Wired above, behind the same typed-confirmation gate as sign-off and close. A soft-locked
+          period can be reopened by someone holding the <code>reopen</code> grant, which company
+          administrators deliberately do not have — a soft lock exists so the routine monthly close
+          is recoverable, but reversing it is somebody else&rsquo;s decision. A hard lock has no
+          reopen path at all, for anyone; that refusal comes from the server and is shown verbatim
+          rather than guessed at here.
         </p>
         <p className="fin-muted">
-          Everything on this page is live. The readiness checks above are the real gate — ledger
-          integrity, both subledger tie-outs, bank reconciliation, unrun depreciation and the
-          accountant sign-off — so a period showing green here is genuinely closeable; there is
-          simply no button yet to do it.
+          Editing the close checklist is not exposed here. The readiness gate above computes it, and
+          a hand-editable checklist beside a computed gate would give two answers to the same
+          question.
         </p>
       </Card>
     </div>

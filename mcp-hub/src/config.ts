@@ -89,4 +89,13 @@ export const config = {
   // prod-approval AND the client's staging sign-off before the workflow ever calls it.
   deployProductionUrl: process.env.DEPLOY_PRODUCTION_URL ?? "",
   deployProductionToken: process.env.DEPLOY_PRODUCTION_TOKEN ?? "",
+  // WSK-29 — the WebDesk (Zone A) frontend-deploy driver's own tiny HTTP service (webdesk/deploy/).
+  // A SEPARATE service from the WS11 deploy.staging/deploy.production pair above (those dispatch a
+  // generic repo/ref to a WS10 release-pipeline webhook; this one probes reachability of the two
+  // WSK-D26 frontend hosts, delphi/helios, that WebDesk's own pipeline deploys static builds to).
+  // Root CLAUDE.md's "no shared package layer" rule is why this is HTTP config, not an import.
+  // Empty URL => webdesk.deploy.probeReachability fails CLOSED with a clear message (same doctrine
+  // every other optional integration in this file uses), never silently reporting "unreachable".
+  webdeskDeployUrl: process.env.WEBDESK_DEPLOY_URL ?? "",
+  webdeskDeployToken: process.env.WEBDESK_DEPLOY_SERVICE_TOKEN ?? "",
 };

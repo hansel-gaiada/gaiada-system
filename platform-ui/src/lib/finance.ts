@@ -100,8 +100,27 @@ export interface ApAgingRow extends AgingRow { vendorCode: string; vendorName: s
 export interface Problem { problem: string; detail: string }
 export interface LedgerVerdict { problems: Array<Problem & { ledgerSequence: string; entryId: string }>; clean: boolean }
 export interface ReconcileVerdict<P> { position: P; problems: Problem[]; clean: boolean }
-export interface ArPosition { openInvoices: string; paymentsOnAccount: string; netReceivable: string }
-export interface ApPosition { openBills: string; paymentsOnAccount: string; netPayable: string }
+/** `openInvoices - paymentsOnAccount - unappliedCredits = the AR control balance`. An unapplied
+ *  credit note credits the control account exactly as an unallocated receipt does — it is a credit
+ *  note's NORMAL state until someone decides what it settles, not an edge case — so it is a fourth
+ *  figure here rather than folded into `netReceivable` unexplained. */
+export interface ArPosition {
+  openInvoices: string; paymentsOnAccount: string; unappliedCredits: string; netReceivable: string;
+}
+/** `openBills - paymentsOnAccount - unappliedCredits = the AP control balance` — the payables mirror
+ *  of `ArPosition` above, same reasoning: an unapplied vendor credit debits the AP control account
+ *  exactly as an unallocated payment does.
+ *
+ *  ⚠ VERIFIED AGAINST THE CONTROLLER, NOT ASSUMED: as of this file's own edit,
+ *  `finance.controller.ts::apReconcile`'s SELECT list does not yet alias
+ *  `unapplied_credits AS "unappliedCredits"` even though `finance_ap_position()` (migration
+ *  202608272000) returns it — the AR sibling's SELECT does carry the AR equivalent, this one does
+ *  not. A live response can therefore omit the field; `money()` renders `undefined` as "—" rather
+ *  than crashing, so the KPI tile degrades visibly instead of silently. Re-check the controller
+ *  before removing this note. */
+export interface ApPosition {
+  openBills: string; paymentsOnAccount: string; unappliedCredits: string; netPayable: string;
+}
 export interface CloseReadiness { blockers: Array<{ blocker: string; detail: string }>; ready: boolean }
 
 export interface PpnSummary {
@@ -352,6 +371,32 @@ export function fiscalYearStart(periods: FiscalPeriod[], asOf: string): string |
   return first?.startDate ?? null;
 }
 
+// ── Fiscal years (F3b) ──────────────────────────────────────────────────────────────────────────
+// `GET .../finance/fiscal-years` closed a real gap: `POST .../fiscal-years/:fiscalYearId/close`
+// keys on `finance_fiscal_years.id` (a random uuid), and no other read endpoint returns one —
+// `GET .../finance/periods` carries only the year's CODE. Before this existed, this file derived a
+// year summary from the period list, deliberately WITHOUT an id, and the close page named the gap
+// via `BackendPending` rather than guessing a uuid (passing a code, or any guess, where the server
+// expects a uuid does not degrade to a clean 404 — it surfaces a raw "invalid input syntax for type
+// uuid" dressed up as a working button). That derived helper is gone now that the real read exists;
+// keeping both would be two answers to "what fiscal years does this company have", free to drift.
+export interface FiscalYear {
+  /** The uuid `POST .../fiscal-years/:fiscalYearId/close` actually keys on. */
+  id: string;
+  code: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  periodCount: number;
+  /** A year with any period still OPEN is refused by the close engine. Shown on the row and used to
+   *  disable the close control BEFORE a confirmation is typed — see `CloseFiscalYearAction` — rather
+   *  than letting the reader discover it from a refusal after typing one. */
+  openPeriods: number;
+}
+
+export const listFiscalYears = (u: string, t: string) =>
+  financeData(platformFetch<FiscalYear[]>(`/api/${t}/finance/fiscal-years`, u), [] as FiscalYear[]);
+
 
 // ── Cap table + settings readers ────────────────────────────────────────────────────────────────
 
@@ -376,3 +421,308 @@ export async function listOwnership(u: string, t: string, asOf?: string): Promis
 /** Settings. `null` when unreachable — a settings page with invented defaults is worse than none. */
 export const getFinanceSettings = (u: string, t: string) =>
   financeData(platformFetch<FinanceSettings | null>(`/api/${t}/finance/settings`, u), null);
+
+// ── Receivables, the write side (F4) ────────────────────────────────────────────────────────────
+export interface ArCustomer {
+  id: string; code: string; name: string; paymentTermsDays: number; isPkp: boolean | null;
+}
+export interface ArOpenInvoice {
+  id: string; invoiceNo: string; invoiceDate: string; dueDate: string;
+  total: string; amountPaid: string; outstanding: string; customerName: string;
+}
+
+export const listArCustomers = (u: string, t: string) =>
+  financeData(platformFetch<ArCustomer[]>(`/api/${t}/finance/ar/customers`, u), [] as ArCustomer[]);
+
+export const listArOpenInvoices = (u: string, t: string, customerId?: string) =>
+  financeData(
+    platformFetch<ArOpenInvoice[]>(`/api/${t}/finance/ar/open-invoices${qs({ customerId })}`, u),
+    [] as ArOpenInvoice[],
+  );
+
+// ── The four engines that had no door: F8 assets · F11 treasury · F9 consolidation · F10 cutover ─
+//
+// Every one of these was built in SQL and tested, and none had an endpoint or a page. The readers
+// below degrade the same way the rest of this file does — `financeData` for lists, `financeVerdict`
+// for tie-outs, so an unreadable check stays distinguishable from a passing one.
+
+export interface FixedAsset {
+  id: string; code: string; name: string; status: string;
+  acquisitionDate: string; inServiceDate: string | null;
+  cost: string; classCode: string; className: string;
+  bookMethod: string | null; bookLifeMonths: number | null; taxGolongan: string | null;
+  /** Book side comes from what was POSTED; tax side from the SCHEDULE. The asymmetry is deliberate
+   *  and is why both are shown — tax depreciation is never posted to the ledger. */
+  bookAccum: string | null; bookNbv: string | null;
+  taxAccum: string | null; taxNbv: string | null;
+}
+export interface DepreciationScheduleRow {
+  seq: number; periodStart: string;
+  bookCharge: string; bookAccum: string; bookNbv: string;
+  taxCharge: string; taxAccum: string; taxNbv: string;
+}
+export interface DepreciationRun {
+  id: string; periodId: string; periodName: string; periodStart: string;
+  journalId: string | null; runAt: string;
+  assetCount: number; bookTotal: string; taxTotal: string;
+}
+
+export interface Instrument {
+  id: string; code: string; name: string;
+  kind: "loan_payable" | "loan_receivable" | "bond_issued" | "lease" | string;
+  counterpartyName: string | null; currencyCode: string;
+  principal: string; nominalRate: string | null; effectiveRate: string | null;
+  startDate: string; maturityDate: string | null;
+  repaymentMethod: string | null; paymentMonths: number | null;
+}
+export interface InstrumentScheduleRow {
+  seq: number; dueDate: string; opening: string; interest: string; principal: string; closing: string;
+}
+export interface MaturityRow {
+  instrumentId: string; code: string; kind: string; outstanding: string;
+  currentPortion: string; nonCurrentPortion: string; maturityDate: string | null;
+}
+
+export interface ConsolidationRun {
+  id: string; asOf: string; label: string | null; createdAt: string; entryCount: number;
+}
+export interface ConsolidatedTrialBalance {
+  rows: Array<{ accountCode: string; accountName: string; accountType: string; debit: string; credit: string }>;
+  totalDebit: string; totalCredit: string; balanced: boolean;
+}
+export interface CompletenessNote { note: string; detail: string }
+
+export interface Cutover {
+  id: string; cutoverDate: string; status: string;
+  journalId: string | null; committedAt: string | null; notes: string | null; lineCount: number;
+}
+export interface OpeningBalances {
+  rows: Array<{ id: string; accountCode: string; accountName: string | null; debit: string; credit: string; memo: string | null }>;
+  totalDebit: string; totalCredit: string; balanced: boolean;
+}
+
+export const listAssets = (u: string, t: string, asOf?: string) =>
+  financeData(platformFetch<FixedAsset[]>(`/api/${t}/finance/assets${qs({ asOf })}`, u), [] as FixedAsset[]);
+
+export const getAssetSchedule = (u: string, t: string, assetId: string) =>
+  financeData(
+    platformFetch<DepreciationScheduleRow[]>(`/api/${t}/finance/assets/${assetId}/schedule`, u),
+    [] as DepreciationScheduleRow[],
+  );
+
+export const reconcileAssets = (u: string, t: string) =>
+  financeVerdict(platformFetch<{ problems: Problem[]; clean: boolean }>(`/api/${t}/finance/assets/reconcile`, u));
+
+export const listDepreciationRuns = (u: string, t: string) =>
+  financeData(platformFetch<DepreciationRun[]>(`/api/${t}/finance/depreciation-runs`, u), [] as DepreciationRun[]);
+
+export const listInstruments = (u: string, t: string) =>
+  financeData(platformFetch<Instrument[]>(`/api/${t}/finance/instruments`, u), [] as Instrument[]);
+
+export const getInstrumentSchedule = (u: string, t: string, instrumentId: string) =>
+  financeData(
+    platformFetch<InstrumentScheduleRow[]>(`/api/${t}/finance/instruments/${instrumentId}/schedule`, u),
+    [] as InstrumentScheduleRow[],
+  );
+
+export const getTreasuryMaturity = (u: string, t: string, asOf?: string) =>
+  financeData(platformFetch<MaturityRow[]>(`/api/${t}/finance/treasury/maturity${qs({ asOf })}`, u), [] as MaturityRow[]);
+
+export const reconcileTreasury = (u: string, t: string, asOf?: string) =>
+  financeVerdict(
+    platformFetch<{ problems: Problem[]; clean: boolean }>(`/api/${t}/finance/treasury/reconcile${qs({ asOf })}`, u),
+  );
+
+export const listConsolidationRuns = (u: string, t: string) =>
+  financeData(platformFetch<ConsolidationRun[]>(`/api/${t}/finance/consolidation/runs`, u), [] as ConsolidationRun[]);
+
+export const getConsolidatedTrialBalance = (u: string, t: string, runId: string) =>
+  financeData(
+    platformFetch<ConsolidatedTrialBalance>(`/api/${t}/finance/consolidation/runs/${runId}/trial-balance`, u),
+    null,
+  );
+
+export const getConsolidationCompleteness = (u: string, t: string, runId: string) =>
+  financeData(
+    platformFetch<{ notes: CompletenessNote[]; complete: boolean }>(
+      `/api/${t}/finance/consolidation/runs/${runId}/completeness`, u,
+    ),
+    null,
+  );
+
+export const listCutovers = (u: string, t: string) =>
+  financeData(platformFetch<Cutover[]>(`/api/${t}/finance/cutovers`, u), [] as Cutover[]);
+
+export const getCutoverReadiness = (u: string, t: string, cutoverId: string) =>
+  financeVerdict(
+    platformFetch<{ blockers: Array<{ blocker: string; detail: string }>; ready: boolean }>(
+      `/api/${t}/finance/cutovers/${cutoverId}/readiness`, u,
+    ),
+  );
+
+export const getOpeningBalances = (u: string, t: string, cutoverId: string) =>
+  financeData(
+    platformFetch<OpeningBalances>(`/api/${t}/finance/cutovers/${cutoverId}/opening-balances`, u),
+    null,
+  );
+
+/** Instrument kinds spelled out. `loan_payable` and `loan_receivable` run in OPPOSITE directions and
+ *  a reader must never have to infer which from a raw enum. */
+export const INSTRUMENT_KIND_LABEL: Record<string, string> = {
+  loan_payable: "Loan (we owe)",
+  loan_receivable: "Loan (owed to us)",
+  bond_issued: "Bond issued",
+  lease: "Lease",
+};
+
+export interface AssetClass {
+  id: string; code: string; name: string;
+  bookMethod: string | null; bookLifeMonths: number | null; taxGolongan: string | null;
+}
+
+export const listAssetClasses = (u: string, t: string) =>
+  financeData(platformFetch<AssetClass[]>(`/api/${t}/finance/asset-classes`, u), [] as AssetClass[]);
+
+// ── Payables, the write side (F5) ───────────────────────────────────────────────────────────────
+// Mirrors the AR readers above. `defaultWithholdingRate` and the money fields on `ApOpenBill` come
+// through as STRINGS — pg numeric, same reasoning as everywhere else in this file: formatted for
+// display, never parsed into arithmetic here.
+export interface ApVendor {
+  id: string; code: string; name: string; npwp: string | null; isPkp: boolean | null;
+  /** A RATE (e.g. "0.02" for PPh 23 at 2%), not a percentage — matches the database column. */
+  defaultWithholdingCode: string | null; defaultWithholdingRate: string | null;
+  paymentTermsDays: number;
+}
+export interface ApOpenBill {
+  id: string; billNo: string; billDate: string; dueDate: string;
+  total: string; amountPayable: string; amountPaid: string; outstanding: string;
+  /** What was withheld from the vendor and is owed to DJP instead — not part of `outstanding`,
+   *  which already nets it out. Carried here so a payment form can show it, not compute it. */
+  withholdingAmount: string;
+  status: string; vendorName: string;
+}
+
+export const listApVendors = (u: string, t: string) =>
+  financeData(platformFetch<ApVendor[]>(`/api/${t}/finance/ap/vendors`, u), [] as ApVendor[]);
+
+export const listApOpenBills = (u: string, t: string, vendorId?: string) =>
+  financeData(
+    platformFetch<ApOpenBill[]>(`/api/${t}/finance/ap/open-bills${qs({ vendorId })}`, u),
+    [] as ApOpenBill[],
+  );
+
+export interface ApBill {
+  id: string; billNo: string; billDate: string; dueDate: string;
+  subtotal: string; taxTotal: string; total: string; withholdingAmount: string;
+  amountPayable: string; amountPaid: string; status: string;
+  vendorCode: string; vendorName: string;
+}
+
+/** Bills by status. `draft` is the approval queue — see the endpoint's own note on why a
+ *  session-scoped list cannot serve the cross-person workflow the duty split exists for. */
+export const listApBills = (u: string, t: string, status?: string) =>
+  financeData(platformFetch<ApBill[]>(`/api/${t}/finance/ap/bills${qs({ status })}`, u), [] as ApBill[]);
+
+// ── AR credit notes and write-offs (F4b) ────────────────────────────────────────────────────────
+// Two ways a receivable shrinks with no cash arriving, and they are NOT flavours of one thing:
+//
+//   credit note — the customer never owed it. Output VAT IS reversed (nota retur).
+//   write-off   — the customer owed it and will not pay. Output VAT is NOT reversed; the PPN was
+//                 properly due and has already been remitted.
+//
+// Only the credit note has a subledger — a write-off changes an invoice's own balance directly and
+// has no list of its own to read, which is why there is one interface and one reader here, not two.
+export interface ArCreditNote {
+  id: string;
+  creditNoteNo: string;
+  creditNoteDate: string;
+  customerCode: string;
+  customerName: string;
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+  amountApplied: string;
+  unapplied: string;
+  reasonCode: string;
+  reason: string;
+  status: "draft" | "issued" | "applied" | "void";
+  originalInvoiceNo: string | null;
+}
+
+export const listArCreditNotes = (u: string, t: string, status?: string) =>
+  financeData(
+    platformFetch<ArCreditNote[]>(`/api/${t}/finance/ar/credit-notes${qs({ status })}`, u),
+    [] as ArCreditNote[],
+  );
+
+// ── AP vendor credits and write-offs (F5b) ──────────────────────────────────────────────────────
+// The payables mirror of the pair above, and NOT a sign flip — see
+// `components/finance/ApCreditNotesForms.tsx`'s header note for the full reasoning. Three
+// consequences carry money and are why this is a second, deliberately different, type/form pair
+// rather than the AR one reused with a relabelled noun:
+//
+//   · a vendor credit reverses INPUT VAT (PPN Masukan, 1170) — VAT the company CLAIMED, not
+//     charged. Indonesian law (PMK 65/2010) validates that reversal with a nota retur the BUYER
+//     issues, not the supplier's own credit note — `notaReturNo` records it.
+//   · it unwinds WITHHOLDING, which can make an already-issued bukti potong overstate what was
+//     withheld. Owner ruling (c): the credit posts and is NOT blocked on this — the exposure is
+//     flagged instead. `requiresBupotAmendment` / `bupotAmendmentRef` / `bupotAmendedAt` are the
+//     flag-and-clear pair; `listApBupotExceptions` below is the chase list.
+//   · a write-off (no subledger reader — it mutates a bill's own balance directly, exactly like
+//     the AR side) credits OTHER INCOME (7300), not an expense: released debt (pembebasan utang)
+//     is taxable income, the opposite of the AR write-off's bad-debt expense.
+export interface ApVendorCredit {
+  id: string;
+  creditNo: string;
+  creditDate: string;
+  vendorId: string;
+  vendorCode: string;
+  vendorName: string;
+  subtotal: string;
+  taxTotal: string;
+  total: string;
+  withholdingCode: string | null;
+  withholdingAmount: string;
+  amountPayable: string;
+  amountApplied: string;
+  unapplied: string;
+  reasonCode: string;
+  reason: string;
+  status: "draft" | "issued" | "applied" | "void";
+  notaReturNo: string | null;
+  /** True the moment a credit with withholding posts — see the header note. Never gates the write;
+   *  only ever a flag for the chase list below. */
+  requiresBupotAmendment: boolean;
+  bupotAmendmentRef: string | null;
+  bupotAmendedAt: string | null;
+  originalBillId: string | null;
+  originalBillNo: string | null;
+}
+
+export const listApVendorCredits = (u: string, t: string, status?: string) =>
+  financeData(
+    platformFetch<ApVendorCredit[]>(`/api/${t}/finance/ap/vendor-credits${qs({ status })}`, u),
+    [] as ApVendorCredit[],
+  );
+
+/** The bukti potong chase list — every issued/applied vendor credit that unwound withholding and
+ *  has not yet had its amendment filed. Same shape as `EfakturException` above, and read the same
+ *  way: a list of things somebody still owes DJP, not a verdict, so it degrades to `[]` rather than
+ *  `null`. */
+export interface ApBupotException {
+  creditNo: string;
+  creditDate: string;
+  vendorCode: string;
+  vendorName: string;
+  npwp: string | null;
+  withholdingCode: string | null;
+  withholdingReversed: string;
+  originalBillNo: string | null;
+  detail: string;
+}
+
+export const listApBupotExceptions = (u: string, t: string) =>
+  financeData(
+    platformFetch<ApBupotException[]>(`/api/${t}/finance/ap/bupot-exceptions`, u),
+    [] as ApBupotException[],
+  );

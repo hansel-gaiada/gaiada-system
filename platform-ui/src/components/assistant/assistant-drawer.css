@@ -40,7 +40,7 @@
   border-bottom: 0.5px solid var(--erp-hairline);
   background: var(--surface-chrome);
 }
-.asst-drawer__crumb { font: 700 11px var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-subtle); }
+.asst-drawer__crumb { font: 700 11px var(--font-body); letter-spacing: 0.01em; color: var(--ink-subtle); }
 .asst-drawer__close {
   border: 0.5px solid var(--erp-hairline);
   background: transparent;

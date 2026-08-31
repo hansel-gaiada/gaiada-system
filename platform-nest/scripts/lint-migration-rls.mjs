@@ -18,12 +18,22 @@
 // src/db/index.ts `withTenants` uses for every ordinary request). See
 // docs/superpowers/plans/2026-07-30-migration-backfill-rls-audit.md for the full audit.
 //
-// NOTE ON PLAIN INSERT ... VALUES: a literal-values INSERT against a FORCE-RLS table without the
-// GUC set is NOT in this bug class — it fails LOUDLY (a WITH CHECK violation raises a hard error,
-// rolling back the whole migration transaction; migrate.ts surfaces that as a startup/CI failure).
-// The silent-zero-rows failure mode is specific to statements whose row-set is determined by a
-// SELECT/WHERE evaluated under RLS: UPDATE, DELETE, and INSERT ... SELECT. Those are what this
-// lint flags; a bare `INSERT INTO t (...) VALUES (...)` is left alone.
+// NOTE ON PLAIN INSERT ... VALUES: this WAS excluded, on the reasoning that a literal-values INSERT
+// against a FORCE-RLS table fails LOUDLY (a WITH CHECK violation raises, rolling back the migration)
+// and that "migrate.ts surfaces that as a startup/CI failure". The second half of that reasoning is
+// FALSE in this repository, and it cost a live deploy on 2026-08-26.
+//
+// ★ CI RUNS MIGRATIONS AS A SUPERUSER, WHICH BYPASSES RLS. So a plain INSERT into a FORCE-RLS table
+// is loud on the LIVE estate and completely silent in CI. `202608261100_activity_approval_
+// attribution.sql` ended with a self-assertion block that INSERTed two probe rows to prove its new
+// CHECK constraints reject; every shard passed, and the deploy of alpha-01.071.0172a then aborted
+// with "new row violates row-level security policy for table activities". The failure mode is not
+// "silent zero rows" — it is "green in every place you look, red in the only place that counts".
+//
+// So plain INSERT ... VALUES is now flagged too, under its own later cutoff (INSERT_VALUES_CUTOFF)
+// because the older enforced migrations were written against the previous rule and cannot be edited
+// (README rule 4). The two kinds are reported distinctly: UPDATE/DELETE/INSERT..SELECT fail SILENTLY
+// and are the original bug class; INSERT..VALUES fails LOUDLY BUT ONLY ON LIVE.
 //
 // WHAT THIS LINT DOES: pure static analysis over migrations/*.sql (no DB connection needed — the
 // whole point is to be loud at AUTHORING time, before a test DB or CI Postgres service is even
@@ -71,6 +81,15 @@ const MIGRATIONS_DIR = join(ROOT, "migrations");
 // Every filename lexically <= this cutoff is grandfathered (already applied to real databases,
 // rule 4 forbids editing them). New migrations sort after it and are fully enforced.
 const BASELINE_CUTOFF = "0051_pm_short_codes_backfill_fix.sql";
+
+// A SECOND, later cutoff for the INSERT ... VALUES rule only.
+//
+// That rule was added on 2026-08-26, after ~137 migrations had already been written and applied
+// under the previous rule that deliberately permitted a bare INSERT. Those files cannot be edited
+// (README rule 4), so enforcing the new rule over them would make this lint permanently red and
+// therefore ignored — the worst outcome for a gate. Everything lexically at or below this cutoff is
+// exempt from the INSERT..VALUES check ONLY; the original silent-no-op checks still apply to it.
+const INSERT_VALUES_CUTOFF = "202608261100_activity_approval_attribution.sql";
 
 function stripComments(raw) {
   const noLineComments = raw
@@ -195,8 +214,14 @@ function scanFile(text) {
     const tail = text.slice(m.index, m.index + 2000);
     const stmtEnd = tail.search(/;/);
     const stmt = stmtEnd >= 0 ? tail.slice(0, stmtEnd) : tail;
-    if (/\bSELECT\b/i.test(stmt) && !/\bVALUES\b/i.test(stmt.slice(0, stmt.search(/\bSELECT\b/i)))) {
+    const selectAt = stmt.search(/\bSELECT\b/i);
+    const valuesAt = stmt.search(/\bVALUES\b/i);
+    if (selectAt >= 0 && !(valuesAt >= 0 && valuesAt < selectAt)) {
       dmlEvents.push({ table: m[1].toLowerCase(), index: m.index, kind: "INSERT...SELECT" });
+    } else if (valuesAt >= 0) {
+      // The literal-values form. Loud on live, invisible in CI (superuser bypasses RLS) — see the
+      // header. Reported as its own kind so the message can say WHICH failure it prevents.
+      dmlEvents.push({ table: m[1].toLowerCase(), index: m.index, kind: "INSERT...VALUES" });
     }
   }
 
@@ -344,7 +369,12 @@ function main() {
   const allFindings = detect(migrations);
 
   // Baseline: grandfather everything at/under the cutoff (already applied, rule 4 forbids edits).
-  const findings = allFindings.filter((f) => f.file > BASELINE_CUTOFF);
+  const findings = allFindings.filter(
+    (f) =>
+      f.file > BASELINE_CUTOFF
+      // The INSERT..VALUES rule is newer than the lint itself and carries its own, later cutoff.
+      && (f.kind !== "INSERT...VALUES" || f.file > INSERT_VALUES_CUTOFF),
+  );
 
   if (findings.length > 0) {
     console.error(
@@ -355,14 +385,26 @@ function main() {
       console.error(`  ${f.file}:${f.line}  ${f.kind} on "${f.table}"`);
     }
     console.error(
-      "\nMigrations run as platform_owner (NOBYPASSRLS) -- see " +
-        "docs/superpowers/plans/2026-07-30-migration-backfill-rls-audit.md. Any UPDATE / DELETE / " +
-        "INSERT...SELECT that touches a FORCE-RLS table's EXISTING rows must wrap that statement " +
-        "with `PERFORM set_config('app.current_tenant_ids', <tenant>::text, true)` per tenant first " +
-        "-- see 0051_pm_short_codes_backfill_fix.sql for the reference pattern. If the table was " +
-        "CREATE TABLE'd in this SAME migration, there are zero pre-existing rows and this lint " +
-        "won't flag it -- if you believe this IS such a case and it's still flagging, check the " +
-        "CREATE TABLE regex actually matched your table name.",
+      "\nMigrations run as platform_owner / platform_app (NOBYPASSRLS) -- see " +
+        "docs/superpowers/plans/2026-07-30-migration-backfill-rls-audit.md.\n\n" +
+        "  UPDATE / DELETE / INSERT...SELECT  fail SILENTLY. The row-set is decided by a WHERE or " +
+        "SELECT evaluated under RLS, so with no GUC set they match ZERO rows and report success -- " +
+        "a backfill that did nothing looks exactly like one that had nothing to do.\n\n" +
+        "  INSERT...VALUES  fails LOUDLY, but ONLY on the live estate. CI runs migrations as a " +
+        "SUPERUSER, which BYPASSES RLS, so the statement inserts happily in every test and shard " +
+        "and then aborts the DEPLOY with 'new row violates row-level security policy'. This kind " +
+        "was added 2026-08-26 after exactly that cost a release (202608261100, whose self-assertion " +
+        "block probed two CHECK constraints by inserting into a FORCE-RLS table).\n\n" +
+        "FIX (both kinds): wrap the statement with `PERFORM set_config('app.current_tenant_ids', " +
+        "<tenant>::text, true)` per tenant first -- see 0051_pm_short_codes_backfill_fix.sql for the " +
+        "reference pattern. For a module-owned table add `PERFORM set_config('app.scopes', " +
+        "'<module>', true)` as well; either GUC unset fails the policy on its own.\n\n" +
+        "DO NOT 'fix' an INSERT...VALUES probe by widening its EXCEPTION handler to swallow the RLS " +
+        "error. The row is then rejected by the POLICY and never reaches the CHECK the probe exists " +
+        "to exercise, so the assertion passes while proving nothing.\n\n" +
+        "If the table was CREATE TABLE'd in this SAME migration, there are zero pre-existing rows " +
+        "and this lint won't flag it -- if you believe this IS such a case and it's still flagging, " +
+        "check the CREATE TABLE regex actually matched your table name.",
     );
     process.exit(1);
   }

@@ -295,3 +295,38 @@ test.describe("the money tier (GM-09)", () => {
     await expect(page.getByText("Client portfolio")).toBeVisible();
   });
 });
+
+test.describe("client monitoring (B3)", () => {
+  // Plane B — the CLIENT's properties and services, the work the agency sells. Our own
+  // infrastructure (Prometheus/Grafana/Loki/Tempo) is Plane A, lives outside the ERP behind an SSH
+  // tunnel, and is deliberately absent from this console. B3 sat "blocked: monitoring has no backend"
+  // all build; the module shipped one, which is the third stale blocker this program found this week.
+
+  test("the cockpit carries client health, above the money tier", async ({ page, context }) => {
+    await login(page, context, "superadmin");
+    await page.goto(GM);
+    await expect(page.getByRole("heading", { name: "Client monitoring" })).toBeVisible();
+    await expect(page.getByText("Needs attention")).toBeVisible();
+    await expect(page.getByText("Open incidents")).toBeVisible();
+
+    // Cadence order: operating signals before financial outcomes. Asserted on headings so a
+    // refactor cannot quietly reorder it — the same assertion style that caught the money card
+    // shipping in the wrong place.
+    const headings = await page.locator("h2, h3").allTextContents();
+    const at = (t: string) => headings.findIndex((h) => h.trim() === t);
+    expect(at("Client monitoring")).toBeGreaterThanOrEqual(0);
+    expect(at("Client monitoring")).toBeLessThan(at("Money"));
+    expect(at("Departments")).toBeLessThan(at("Client monitoring"));
+  });
+
+  test("a narrowed department lead sees it too — monitoring is not company-grain", async ({ page, context }) => {
+    // Deliberate asymmetry with the money tier: `monitoring.read` on the backend is the boundary and
+    // the sidebar row is ungated for every principal, so gating it here would hide a surface the
+    // server serves. Client health is not a company-grain financial figure.
+    await login(page, context, "manager");
+    await page.goto(GM);
+    await expect(page.getByRole("heading", { name: "Client monitoring" })).toBeVisible();
+    // …while money still stays out of their view.
+    await expect(page.getByText("Net margin")).toHaveCount(0);
+  });
+});

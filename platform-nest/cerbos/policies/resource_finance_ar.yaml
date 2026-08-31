@@ -8,7 +8,8 @@
 #   manage        maintain customers and DRAFT invoices (nothing has hit the books yet)
 #   issue         post an invoice to the ledger — it becomes a receivable
 #   receipt       record money arriving and allocate it to invoices
-#   write_off     void an issued invoice / forgive a receivable
+#   credit_note   raise/issue a credit note — the customer never owed it; reverses output VAT
+#   write_off     void an issued invoice / forgive a receivable — VAT is NOT reversed
 #   reconcile     run finance_ar_reconcile() — the subledger-vs-GL check
 #
 # ── WHY `issue`, `receipt` AND `write_off` ARE THREE SEPARATE RIGHTS ────────────────────────────
@@ -78,6 +79,21 @@ resourcePolicy:
     - actions: ["issue", "receipt"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # Reducing a receivable because it was never really owed — a return, an over-bill, an agreed
+    # discount. NOT held by finance_staff: it makes a receivable vanish, so the officer who banks
+    # receipts must not also be able to paper over a missing one. That is the same fraud pair as
+    # write_off, and it binds to the SAME duty (`ar_writeoff_approve`, seeded in 202608241013 as
+    # "AR credit note / write-off approval").
+    #
+    # No `assurance == "high"` here, unlike write_off, and the reason is frequency rather than risk:
+    # a credit note is routine commercial traffic. Putting a step-up in front of every sales return
+    # gets the step-up bypassed by granting write_off permanently, which destroys the control for the
+    # case that genuinely needs it. The SoD matrix is what actually constrains this.
+    - actions: ["credit_note"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager", "company_admin"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
 
     # Forgiving a debt. High assurance, and NOT held by finance_staff — the other half of the

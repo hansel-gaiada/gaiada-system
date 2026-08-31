@@ -68,6 +68,25 @@ describe("AGN-3 · EnvelopeBanner surfaces an incomplete result", () => {
     expect(document.body.textContent).not.toMatch(/incomplete/i);
   });
 
+  it("emits VALID html — the disclosure is not wrapped in a <p>", () => {
+    // Regression for a hydration bug that survived the whole build because this banner only renders
+    // when a read has actually FAILED, and in DEMO_MODE every fixture answers. It was a <p> wrapping
+    // <details>/<summary>/<ul>/<li>; `<p>` accepts only phrasing content, so the parser closed it
+    // early, reparented the rest, and React reported a mismatch on every render.
+    //
+    // Asserted structurally rather than by tag name alone: what must never be true is a block
+    // element sitting inside a paragraph, whatever the wrapper happens to be called.
+    const { container } = render(
+      <EnvelopeBanner companies={[co({ included: false, reason: "no_access" })]} />,
+    );
+    for (const tag of ["details", "summary", "ul", "li"]) {
+      expect(container.querySelector(`p ${tag}`), `<${tag}> must not be inside a <p>`).toBeNull();
+    }
+    // …and the disclosure really is present, so the assertion above cannot pass vacuously.
+    expect(container.querySelector("details")).not.toBeNull();
+    expect(container.querySelector("ul li")).not.toBeNull();
+  });
+
   it("isUnderstated() is true for either shape — the one predicate a caller needs", () => {
     expect(isUnderstated([co({})])).toBe(false);
     expect(isUnderstated([co({ partialSources: ["mentions"] })])).toBe(true);

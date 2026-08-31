@@ -56,6 +56,19 @@ app.post("/render", async (req, res) => {
   try {
     const b = await getBrowser();
     page = await b.newPage();
+    // A report PDF is ALWAYS light — never the viewer's dark theme (design decision, 2026-08-30).
+    // This was previously true only by accident: this sidecar never sends a session cookie, so
+    // platform-ui's root layout falls back to `theme: "auto"` and stamps no `data-theme`, which
+    // hands the decision to `@media (prefers-color-scheme: dark)` in tokens/colors.css — and that
+    // resolved light purely because Playwright's default colorScheme happens to be light. Nothing
+    // in our own code said so. Declaring it here makes the guarantee ours: a Playwright default
+    // change, a base-image swap, or any future authenticated render can no longer flip a
+    // customer-facing PDF to dark. The token layer carries the matching belt (the `@media print`
+    // block in tokens/colors.css re-declares the full light palette at a specificity that outranks
+    // a pinned `html[data-theme="dark"]`); this line and that block are meant to be redundant.
+    // `media: "print"` is what page.pdf() emulates anyway — stated explicitly so the two
+    // emulation settings live in one place rather than one being implicit.
+    await page.emulateMedia({ media: "print", colorScheme: "light" });
     await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
     const pdf = await page.pdf({
       format: "A4",

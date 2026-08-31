@@ -1,0 +1,71 @@
+# WSK-12 (docs/blueprints/webdesk-design.md §03/§04/§09) — authz for the NEW `webdev_zoneb_event`
+# resource kind. Nothing existed for this kind before this file landed; an unlisted kind/action is
+# a SILENT DENY that reads exactly like a logic bug (standing estate trap — restart
+# `gaiada-test-cerbos`/the real sidecar after adding this file; the bind-mount does not hot-reload).
+#
+# webdev_zoneb_event = the idempotency-ledger row for one Zone B fact
+# (202608261440_webdev_zoneb_event_log.sql). Handlers pass
+# resource.attr = {kind:"webdev_zoneb_event", tenantId, module:"webdev"} — same shape as the
+# sibling `webdev_provisioned_site` resource (resource_webdev_provisioned_site.yaml), which this
+# file is a byte-level sibling of.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read   — future console read-model (WSK-24's Sites tab, not built yet).
+#   record — POST …/modules/webdev/zoneb-events. The intake endpoint the `wd-zoneb-intake` n8n flow
+#            calls (via mcp-hub's `webdev.recordZoneBEvent` tool, once the automation service
+#            account for it is provisioned — WSK-31's job, flagged in the ticket report). ALWAYS a
+#            LOW-impact write per the §03 security invariant this whole table exists to enforce: it
+#            can create at most a notification and a log row, never a privileged transition, so
+#            there is deliberately no WS4/D14 suspension modeled here — the impact CLASSIFICATION
+#            (not this policy) is what the hub's D14 gate keys on, and it is pinned `impact: "low"`
+#            on the mcpTool definition itself (see this ticket's report for the exact
+#            `platform-nest/src/modules/webdev/index.ts` addition).
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ──────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately — same invariant every
+# staff-only webdev_* resource in this program states for itself. A Zone B fact is never
+# portal-readable; a principal holding only the `client` grant must DENY on every action here.
+#
+# ── TRAP #4 (repeated verbatim; this file is the Nth application of it) ─────────────────────────
+# `group_executive` is a GLOBAL cross-company grant. Folding it into the company_admin/manager rule
+# below would produce a global grant that never fires for an exec with no membership row in a given
+# company — the shipped correct shape is resource_webdev_provisioned_site.yaml's own, copied here.
+#
+# ── NO IAM-04-ROLLOUT-B12 PERMISSION-MIRROR ARM (deliberate, flagged) ───────────────────────────
+# The sibling `resource_webdev_provisioned_site.yaml` carries a `perm_webdev_provisioned_site_*`
+# arm because those derived roles are individually pre-registered in `cerbos/policies/
+# derived_roles.yaml` (grep confirms `perm_pm_task_*`/`perm_hr_case_*`/`perm_agency_*` etc. are
+# each hand-listed there, not generated dynamically). `perm_webdev_zoneb_event_read`/`_record` are
+# NOT registered, and `derived_roles.yaml` is an existing file outside this ticket's owned scope
+# (platform-nest edits are report-only per the ticket's hard constraints) — adding an unregistered
+# derivedRole reference here would either fail Cerbos policy compilation or silently never match,
+# neither of which this ticket can safely land. The base rules above (company_admin/manager/
+# module_manager/module_staff/platform_admin) already give full coverage without the catalog arm.
+# Reported in the ticket output as the exact addition to make in `derived_roles.yaml` +
+# `webdevModule.permissions` if/when the B12 mirror is wanted for this kind.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: webdev_zoneb_event
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read", "record"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # ORG-6 module tiers, string-composed from resource.attr.module — the webdev dept's own
+    # manager may record (mirrors the automation service account's own membership tier); staff may
+    # only read. Mirrors resource_webdev_provisioned_site.yaml's manager/staff split exactly.
+    - actions: ["read", "record"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }

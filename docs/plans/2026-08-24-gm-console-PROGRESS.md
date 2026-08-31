@@ -58,7 +58,7 @@ state rather than books (F24).
 |---|---|---|---|
 | ~~**B1**~~ | ~~The UI cannot identify a department LEAD.~~ `Me` (`lib/platform.ts`) carries `userId/name/email/title/assurance/companies/roles` and nothing about positions or unit leadership; `positions.is_lead` is display-and-backfill only server-side, and the P2-05 reconciler that would turn `position_roles` into real grants is **not built**. | ~~GM-02b~~ | **RESOLVED 2026-08-25 — the blocker was mis-framed.** The UI never needed to identify a lead: `reports.department.view`'s own declaration says the **SERVER narrows to the led unit subtree**. Asking for department grain and letting Cerbos decide is the standing rule; identifying the lead in the browser would have been the second opinion that rule forbids. See F10. |
 | ~~**B2**~~ | ~~**No tenant-level spend/margin endpoint exists.**~~ Only `GET engagements/:id/ledger` (engagement-scoped, search-marketing only). BFF contract §14 lists it PENDING under **SM-17 (tenant-scope remainder) / SM-22**. | ~~GM-09~~ | **RESOLVED 2026-08-26 — overtaken by events, not by a workaround.** A real double-entry finance module landed (`platform-nest/src/modules/finance`, Cerbos-authorized, `finance_profit_and_loss()` in Postgres). Revenue and margin now come from the BOOKS at company grain. The SEO engagement ledger — the thing OQ-3 forbade summing — is still the wrong source and is still not used. See F16. |
-| **B3** | Monitoring has **no backend at all** (BFF contract §20: "UI PROTOTYPED, BACKEND NOT STARTED — every row PENDING"). | a monitoring/health tile anywhere in the cockpit | **BLOCKED** — deliberately not attempted; a tile here must render `BackendPending`, never a zero. |
+| ~~**B3**~~ | ~~Monitoring has **no backend at all**.~~ | a monitoring/health tile in the cockpit | **RESOLVED 2026-08-26 — stale, like B1 and B2 before it.** `platform-nest/src/modules/monitoring` ships a real controller (`summary`, `monitors`, `incidents`, `maintenance`, `kinds`, heartbeat ingest) and the module is enabled. `GmMonitoringCard` reads `monitoring/summary`. **Third stale blocker this session** — see F28. |
 | ~~**B4**~~ | ~~Nothing here has been driven against live `platform-nest`.~~ | every row moving PROTOTYPED → DEV-VERIFIED | **LARGELY CLOSED 2026-08-26.** Driven against a real platform-nest built from source, on the real Postgres + Cerbos test containers, with the actual agency roster seeded into an ISOLATED database (`gaiada_gm_b4`). Full-access, narrowed and refused paths all exercised end to end. **One gap remains:** the money tier's *figures* — that estate has no fiscal calendar, so the card correctly rendered its setup state and the P&L/AR numbers themselves are still only demo-verified. See F21–F24. |
 
 ---
@@ -104,6 +104,33 @@ state rather than books (F24).
 | **D2** | `sidebar-nav-map.md` change-log entry for the GM hoist. | **PROTOTYPED** | Repo rule: a nav move with no entry there is treated as an accident, not a decision. |
 | **D3** | `modules/CHANGELOG.md` entry + `MODULES.md` version bump. | **PROTOTYPED** | platform-ui `0.46.0` → `0.47.0`. |
 | **D4** | Note the GM console as a consumer in `FRONTEND-BFF-CONTRACT.md` §15a, and record the new `checkins/compliance` consumer from GM-07. | **PROTOTYPED** | Both rows annotated. The `reports/overview` row now states it carries **no seal flag and no `generatedAt`**; the `checkins/compliance` row now states its three consumer traps (no-403 self-fallback, the `unit` echo, and `complianceRate: null ≠ 0%`). |
+
+---
+
+## Release / deploy status
+
+**All GM work is committed and pushed; NONE of it is live yet, and this session did not deploy.**
+
+| | |
+|---|---|
+| Commits | 8, all on `origin/main` (pushed by a concurrent session, not by this one) |
+| Staged release | `alpha-01.071.0174a` — cut by **another session**; tag exists LOCALLY, not pushed |
+| Contains the GM work? | **Yes** — including the last two fixes (`a7d64d91`, `2f1b63a6`) |
+| CI on that commit | `ci` + `docs-map` both **success** |
+| Live right now | **`Alpha 01.071.0171a`** |
+
+⚠ **Deploy deliberately NOT fired (owner decision 2026-08-26, option 1: let the owning session ship).**
+`git push --tags` is the single deploy trigger, so pushing `alpha-01.071.0174a` would have fired
+*someone else's* release on timing they did not choose — and done it **into an open incident**:
+`alpha-01.071.0172a` was rolled back earlier the same day when a migration's probe INSERTs hit
+FORCE-RLS as NOBYPASSRLS, live fell back to `0171a`, and the attribution migration has still not
+applied (`docs/superpowers/plans/2026-08-22-hermes-PROGRESS.md`, B27 — marked "OWNER — re-release").
+
+It would also have shipped two commits this session never reviewed: `f79bf817` (another session's IAM
+attribution feature) and `7080f232` (their fix for the migration that caused the rollback).
+
+**Nothing is stranded.** The GM console ships with `0174a` whenever its owner releases it — no
+re-tagging, no fresh release commit, no action from this program. The local tag was left untouched.
 
 ---
 
@@ -318,6 +345,143 @@ both while my own platform-nest and platform-ui dev servers were running alongsi
 work. Both passed cleanly the moment those servers were stopped. Third occurrence this session of the
 same lesson: **on a shared, loaded machine, check the machine before believing a red result.**
 
+**F26 — I duplicated 30 changelog entries and my own verification said it was clean.** Preparing
+`ad5c9f67` I rebuilt `CHANGELOG.md` from HEAD plus my entries, slicing each entry out with
+`text[index(startHeading):index(endHeading)]`. The GM-02b entry's start marker was
+``### platform-ui `0.52.0` `` — a version **another session had already used**, sorting earlier in the
+file — so the slice ran from their entry to the first `0.48.0` and swallowed ~30 entries (finance
+0.1.0-0.14.1, lms 0.1.0-0.7.0, lab-runner, hr 0.4.0, platform-nest 0.37.0/0.38.1). Inserting that
+block into a file that already contained it duplicated all thirty. **1173 lines.**
+
+I then ran `git diff --numstat`, saw **0 deletions**, and concluded I had only appended. True, and
+worthless: **a duplication IS pure insertion.** The repo's guidance (added the same day, for a
+different session's incident) prescribes exactly that check — it is necessary but not sufficient, and
+`CLAUDE.md` now carries the caveat plus the real invariant: verify every heading still appears exactly
+once, and never key a text slice on a version number, which is the one token another session may have
+claimed while you were not looking.
+
+Fixed in `6259b06c` by removing only byte-identical entry blocks, keeping the **last** copy of each —
+the duplicates were inserted at the TOP, so keeping the first would have stranded ~28 other sessions'
+entries out of chronological place. My two entries renumbered off the collision they caused
+(GM-02b -> 0.56.0, GM-09 -> 0.57.0). The same read-modify-write pattern touched three other docs;
+all three were checked and are clean, because only the changelog had markers that collided with
+another session's content.
+
+**F27 — F17 closed, and `owner` was the real damage.** The three roles Cerbos grants that `rbac.ts`
+never named are now mirrored. Capability sets were **derived**, not authored: for each role, the set is
+exactly the capabilities whose `CAPABILITY_MAP` entry its bundle satisfies, so
+`rbac-capability-parity.test.ts`'s biconditional holds by construction (1343 pairs green).
+
+  | Role | Caps | Note |
+  |---|---|---|
+  | `finance_staff` | 2 | `finance.statement.view`, `finance.ar.view` |
+  | `finance_manager` | 2 | identical today — its extra reach (post, reverse, close, approve, write-off) is real in Cerbos but no UI reads it yet |
+  | **`owner`** | **61** | previously **zero**: no Settings, no company management, no reports, no HR — while Cerbos would have authorized all of it |
+
+**`owner` also exposed a category the role-axis guard did not model.**
+`rbac-cerbos-parity.test.ts` asserts every mirrored role is granted in `derived_roles.yaml`, and
+flagged `owner` as STALE. It is the opposite of stale: `generate-role-bundles.mjs` declares it
+**permission-native** — *"Roles with NO Cerbos rules, whose reach is their bundle alone (IAM-04c §3).
+`owner` is the first."* — and emits 330 permissions for it. So it never appears as a
+`g.role == "owner"` literal and never will. The guard gained a `PERMISSION_NATIVE_ROLES` hook, third
+alongside literal grants and string-composed module roles, with the rule that every entry must be
+citable in the generator's own list — *an entry not named there is drift wearing an exemption*. The
+file had already been extended once for the same class of gap (HIER-3, module roles), so this
+completes its model rather than silencing it.
+
+**F28 — three "blocked" rows out of three turned out to be stale. That is a pattern, not luck.**
+B1 (the narrowed view) was a mis-framing; B2 (the money tier) dissolved when the finance module
+landed; B3 (monitoring) dissolved because the monitoring module shipped a backend while the row still
+said "BACKEND NOT STARTED — every row PENDING". **In an estate this active, a blocker is a claim with
+a shelf life.** The habit that keeps paying: re-read the blocker against the code before quoting it,
+especially before telling the owner something cannot be done. Every one of these three would have
+stayed closed if the note had been trusted.
+
+**F29 — F21 fixed in the SEED, where the defect actually was.** Owner ruling: *"Edward is the GM so it
+should be clean."* The `agency.ts` roster loop graded `gm | head | manager` all to `manager`, so the
+General Manager got no company-grain grant. Now `gm` additionally gets `company_admin` — scoped to the
+company he runs.
+
+`company_admin`, deliberately not `owner`: Edward **runs** the agency, he does not own it (the owner
+fixture is Ayu, "Managing Director"). `company_admin` is company-scoped and carries exactly the tier
+the console needs (`reports.company.view` + the finance read pair); `owner` is holding-wide business
+authority granted per OWNED company, which is a different claim about the same person.
+
+Verified by reseeding a fresh isolated database and driving it: `reports/overview?grain=company` went
+**403 → 200**, `positions` **403 → 200**, and the real Edward now renders the FULL cockpit — company
+tier, all five departments with real per-department figures, no narrowed banner.
+
+**F30 — Plane A vs Plane B, and why the monitoring card is Plane B only.** The card reads the
+**client's** properties and services — the work the agency sells. Our own infrastructure
+(Prometheus/Grafana/Loki/Tempo, containers, scrape targets) is Plane A: it lives outside the ERP behind
+an SSH tunnel and is deliberately not a nav row at all. The 2026-08-13 nav decision put Monitoring
+under *Business* rather than *Systems* for exactly this reason — filing it as internal plumbing would
+"quietly re-merge the two planes the design keeps apart". So the GM's question here is *"is the work we
+sell our clients healthy?"*, never *"are our containers up?"* — and a Plane A number on this card would
+be one the GM cannot act on commercially.
+
+Ungated, unlike the money tier: `monitoring.read` on the backend is the boundary and the sidebar row is
+ungated for every principal, so a narrowed department lead sees client health but still not the P&L.
+Pinned by an e2e test asserting exactly that asymmetry.
+
+**F31 — `pm.test.ts > getBurndown` has no timeout headroom, and it is not mine.** Measured across four
+runs: 1099 ms, 1381 ms, 3198 ms, 3233 ms, **5007 ms** — the last against a 5 s budget, so it fails.
+It passes in isolation every time and the file is untouched by this work. Not fixed here (raising
+another team's test budget is their call), but recorded because it will keep firing on a shared machine
+and reads exactly like a real regression.
+
+**F32 — the duplicate React key was a DROPPED APPROVAL, not a console nit.** F8 recorded a
+"pre-existing duplicate-key warning in the app shell" and cleared the nav change of it. Chased
+properly this time by reading React's warning ARGUMENTS rather than its format string
+(`page.on("console")` gives `%s` unexpanded; `msg.args()` has the substitution), the key was
+**`pipeline:gt-2-pmreview`** — a `QueueItem` id.
+
+`QueueItem.id` is documented as "this queue's own composite, globally-unique React key", and
+`getMyWorkQueue` **fans out per company**. Three of the six builders namespaced their id by company
+(`pmtask`, `task`, `mention`); three did not (`agency`, `automation`, `pipeline`). So any origin record
+whose id repeats across companies collided — and React does not merely warn, it **drops one of the
+colliding children**. On a "what needs me" queue that is a pending approval silently vanishing. All six
+are namespaced now, with a regression test that asserts BOTH uniqueness and that both copies survive
+(uniqueness must come from namespacing, never from one row being dropped).
+
+Two existing assertions flipped to the new id format, marked as deliberate in the test body.
+
+**F33 — I used an instrument that could not detect the bug, and nearly reported it clean.** For the
+other half of F8 — `<details>`/`<summary>`/`<ul>` rendered inside `<p>` — I swept 38 routes asking the
+DOM whether any `<p>` contained a block descendant. It returned **0**, and 0 was meaningless: the HTML
+parser CLOSES an open `<p>` when it meets a block element, so the invalid nesting can never appear in
+the resulting DOM. React warns at render time; the DOM is already corrected by the time a query runs.
+
+**Still open, and honestly so.** Those warnings reproduce only against the real backend with a
+member-tier identity (0 occurrences across both identities in DEMO_MODE, 38 routes). Candidates
+eliminated by inspection: `EmptyNote` callers, `StateScreen`/error-boundary bodies, `markdownLite`
+(its `<p>`/`<ul>` are correctly flushed as siblings), `ArtifactMarkdown`. Not converging by reading —
+it needs the real-data path re-stood to capture a component stack.
+
+**F34 — the invalid-`<p>`-nesting bug, found and fixed: `EnvelopeBanner`.** It wrapped its
+`<details>/<summary>/<ul>/<li>` disclosure in a **`<p>`**. `<p>` accepts only phrasing content, so the
+parser closes it at `<details>`, reparents everything after, and React reports a hydration mismatch —
+plus the inverse pairs (`<p>` inside `<ul>`, `<p>` inside `<summary>`) once the DOM has been
+restructured. Ten warnings per page load on the real backend.
+
+**Why it survived the entire build:** the banner renders ONLY when a read has actually failed
+(`excluded.length || partial.length`). In DEMO_MODE every fixture answers, so it never rendered once —
+0 occurrences across 38 routes and two identities. **The honest-failure surfaces are the ones fixtures
+exercise least, and they are exactly the surfaces that matter when something breaks.**
+
+Fixed to a `<div>` (`.sys-empty-note` is class-scoped, so the styling is byte-identical and
+`role="status"` is valid on either), and pinned by a test that asserts *structurally* — no block
+element inside a `<p>`, whatever the wrapper is called — plus a check that the disclosure is really
+present so the assertion cannot pass vacuously. **Verified against the real backend: 10 warnings → 0.**
+
+**F35 — F31 fixed rather than excused.** `pm.test.ts > getBurndown` measured
+634 · 1099 · 1381 · 3198 · 3233 · **5007** ms against vitest's default 5 s budget — so it failed six
+times across this session while passing in isolation every time. A 5 s budget on a 0.6–3.2 s fixture
+read has no headroom, and the failure it produces is **indistinguishable from a real regression**,
+which is worse than a slow test: it teaches people to re-run instead of investigate. Raised to 20 s
+(~6x the slowest honest measurement) with the measurements recorded in the test, so a future reader
+can tell a tuned budget from a guessed one.
+
 ## Session log
 
 - **2026-08-24** — Researched GM day-to-day needs + industry dashboard practice; wrote the foundation
@@ -393,3 +557,33 @@ same lesson: **on a shared, loaded machine, check the machine before believing a
 - **2026-08-26 (B4)** — Gates after the fix: `tsc` clean · **3222 tests / 177 files green** ·
   `DEMO_MODE=1 next build` clean. F21 (the GM has no company-grain grant) is an **owner decision**,
   not a code change, and is the one thing this work now waits on.
+- **2026-08-26** — Found and fixed my own CHANGELOG corruption (F26): 30 duplicated entries, 1173
+  lines, introduced in `ad5c9f67` and invisible to the numstat check I had trusted. `CLAUDE.md`'s new
+  append-only-doc trap gained the caveat that "0 deletions" cannot detect a duplication.
+- **2026-08-26** — **F17 closed.** `finance_staff`, `finance_manager` and `owner` mirrored into
+  `Role`/`ROLE_CAPS` with derived capability sets; the role-axis guard taught about permission-native
+  roles. Gates: `tsc` clean · **3414 tests / 177 files green** · `DEMO_MODE=1 next build` clean.
+  Remaining open: **F21** (the GM holds no company-grain grant — owner ruling), **B3** (monitoring has
+  no backend), and the pre-existing shell key/hydration warnings (F8).
+- **2026-08-26** — **F21 closed by owner ruling, B3 closed as stale.** `agency.ts`: `gm` level now
+  also gets `company_admin`. New `GmMonitoringCard` (Plane B client health) sits with the operating
+  tiers, above money, and is ungated — the asymmetry with the money tier is deliberate and e2e-pinned.
+  Verified on a fresh isolated DB: the real Edward now gets the full cockpit (company grain 403 → 200).
+  Gates: `tsc` clean · **3413/3414 tests** (the one failure is F31's pre-existing flake, passes in
+  isolation) · `DEMO_MODE=1 next build` clean · GM e2e **32/32**.
+- **2026-08-26** — Open after this: nothing in this program. Remaining items are other teams' — F17's
+  sibling gaps if any, F31's flaky budget, and the pre-existing shell key/hydration warnings (F8).
+- **2026-08-26** — F8 split and half-fixed. The duplicate-key half was a real defect with a real
+  consequence (a pending approval dropped from the queue) and is FIXED with a regression test (F32).
+  The invalid-`<p>`-nesting half is **still open**: reproducible only against real-backend data, and my
+  DOM-based search for it was invalid by construction (F33).
+- **2026-08-26** — **Both F8 halves now closed, and F31 with them.** The `<p>`-nesting half was
+  `EnvelopeBanner` (F34) — found by re-standing the real-backend path, since it cannot render in
+  DEMO_MODE at all. Verified 10 warnings → 0 against real data. `getBurndown`'s timeout given real
+  headroom (F35). Gates: `tsc` clean · **3416 tests / 177 files green** · `DEMO_MODE=1 next build`
+  clean.
+- **2026-08-26** — Asked to push and deploy. **Push: nothing to do** — all 8 commits were already on
+  `origin/main`. **Deploy: declined and escalated**, then owner chose option 1 (let the owning session
+  ship `0174a`). Reasons on the record above: it is another session's staged release, prod is mid-
+  incident on `0171a` after the `0172a` rollback, and it carries two commits this session never
+  reviewed. No tag was pushed. The GM work rides in `0174a`.

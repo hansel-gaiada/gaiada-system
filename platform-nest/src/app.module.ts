@@ -108,6 +108,22 @@ import { ReportsController } from "./modules/reports/reports.controller";
 // webdev surface to be module-scoped rather than core, because `webdev_provisioned_sites` (0090)
 // carries the third RLS wall and the client portal never touches it.
 import { WebdevController } from "./modules/webdev/webdev.controller";
+// WSK-12 (coordinator, additive): the Zone B signed-fact consumer.
+import { ZoneBEventsController } from "./modules/webdev/zoneb-events.controller";
+// WSK-19: the rail's Zone A end (the contract-snapshot mirror). Lives in the SIBLING directory
+// src/modules/webdev-contracts/, not src/modules/webdev/ — see
+// contract-fetch-provider.ts's header for why (egress-inventory.test.ts's scope). Still gated by
+// the SAME "webdev" module key (ModuleEnabledGuard("webdev")) and the same third-wall RLS.
+import { ContractSnapshotsController } from "./modules/webdev-contracts/contract-snapshots.controller";
+// WSK-23: /api/:t/modules/webdev/console/* (site registry · releases · submissions · contract
+// pin-vs-latest) — the ERP console's read model, NEW FILE under src/modules/webdev/ (the ticket's
+// hard constraint forbids editing any EXISTING file there except index.ts; this is not that).
+import { ConsoleReadsController } from "./modules/webdev/console-reads.controller";
+// WSK-31: /api/:t/modules/webdev/control/* — the §07 WebDesk control-plane MCP tool set's Zone A
+// HTTP surface. Every route is an honest 501 stub pending WSK-23's Zone B egress client (see that
+// file's own header). NEW FILE under src/modules/webdev/ (this ticket's hard constraint permits new
+// files there; it forbids editing an EXISTING one other than index.ts).
+import { WebdeskControlController } from "./modules/webdev/webdesk-control.controller";
 import { CheckinsController } from "./modules/reports/checkins.controller"; // TR-09
 import { AppraisalsController } from "./modules/reports/appraisals.controller"; // TR-24
 import { PrintPayloadController } from "./modules/reports/print-payload.controller"; // TR-21
@@ -172,6 +188,13 @@ import { MagicLinkController } from "./mail/magic-link/controller";
     SearchReportsController,
     // PRV-02: /api/:t/modules/webdev/* (provision · provisioned-sites · reconcile).
     WebdevController,
+    ZoneBEventsController,
+    // WSK-19: /api/:t/modules/webdev/contracts[/refresh] (the one-rail contract-snapshot mirror).
+    ContractSnapshotsController,
+    // WSK-23: /api/:t/modules/webdev/console/* (the ERP console's read model over WebDesk).
+    ConsoleReadsController,
+    // WSK-31: /api/:t/modules/webdev/control/* (the §07 MCP tool set's Zone A surface; honest 501s).
+    WebdeskControlController,
     // TR-07: reports admin/ops surface (facts recompute). §6.2 routes it at /api/:t/reports/*,
     // not /api/:t/modules/reports/*, so it is listed with the verticals but mounts top-level.
     ReportsController,

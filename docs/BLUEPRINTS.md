@@ -54,6 +54,11 @@ architecture, environments & promotion, observability/ops, and the phased roadma
   `forms.gaiada.online` identity simply activates at that reopen).
   ⚠️ HTML only — the committed PDF and the hosted artifact still show v1.0.
 - **Print:** A4/Letter, page-breaks per part.
+- **Downstream docs:** [`blueprints/webdesk-design.md`](./blueprints/webdesk-design.md) (v1.0,
+  2026-08-07 — the /army-ready design + 36-ticket program) ·
+  [`blueprints/webdesk-design-reassessment.md`](./blueprints/webdesk-design-reassessment.md)
+  (v1.0, 2026-08-26 — industry-standard reassessment; **R-1 and R-2 ruled**, R-3/R-4/R-5 open.
+  Its amendments apply to the design doc as a pending v1.1 revision).
 
 ## 3. GAIADA Search-Marketing — Engineering Blueprint
 

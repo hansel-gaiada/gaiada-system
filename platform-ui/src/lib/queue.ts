@@ -57,9 +57,20 @@ async function settle<T>(source: string, p: Promise<T[]>, lost: string[]): Promi
 }
 
 
+// ── WHY EVERY `id` CARRIES THE COMPANY ───────────────────────────────────────────────────────────
+// `QueueItem.id` is documented as "this queue's own composite, globally-unique React key" (see
+// queueUrgency.ts), and `getMyWorkQueue` FANS OUT PER COMPANY — every source below is read once per
+// accessible company. So any id built from the origin record alone collides the moment the same
+// record id appears under two companies, and React renders "Encountered two children with the same
+// key" while silently dropping one row from the queue.
+//
+// MEASURED 2026-08-26: `pipeline:gt-2-pmreview` collided across the three demo companies and one
+// pending gate vanished from "Waiting on me". `pmtask`/`task`/`mention` already namespaced by
+// company; `agency`/`automation`/`pipeline` did not. All six do now — a dropped approval is a
+// decision nobody is told about, which is the worst way for this surface to fail.
 function fromApproval(a: ApprovalItem, decidable: boolean): QueueItem {
   return {
-    id: `agency:${a.id}`,
+    id: `agency:${a.tenantId}:${a.id}`,
     type: "approval",
     origin: "agency",
     originId: a.id,
@@ -102,7 +113,7 @@ function toolDomain(tool: string): string | null {
 function fromAutomation(a: AutomationApproval, company: { id: string; name: string }, decidable: boolean): QueueItem {
   const domain = toolDomain(a.tool_name);
   return {
-    id: `automation:${a.id}`,
+    id: `automation:${company.id}:${a.id}`,
     type: "approval",
     origin: "automation",
     originId: a.id,
@@ -122,7 +133,7 @@ function fromAutomation(a: AutomationApproval, company: { id: string; name: stri
 
 function fromGate(g: PipelineGate, company: { id: string; name: string }, decidable: boolean): QueueItem {
   return {
-    id: `pipeline:${g.id}`,
+    id: `pipeline:${company.id}:${g.id}`,
     type: "gate",
     origin: "pipeline",
     originId: g.id,

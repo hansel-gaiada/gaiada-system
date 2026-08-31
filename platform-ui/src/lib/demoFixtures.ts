@@ -11,6 +11,7 @@ import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
+import { webdevConsoleDemo } from "./demoWebdevConsole";
 import { monitoringDemo } from "./demoMonitoring";
 import { portalDashboardDemo } from "./demoPortal";
 import { reportsDemo } from "./demoReports";
@@ -1991,11 +1992,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const lms = lmsDemo(method, p, url.searchParams, body);
   if (lms) return lms;
 
-  // Finance reads (/api/:t/finance/*) — read-only fixture store (lib/demoFinance.ts). Placed beside
+  // Finance (/api/:t/finance/*) — fixture store (lib/demoFinance.ts). Placed beside
   // LMS and for the same reason: high enough that no later `/api/:t/...` catch-all can answer a
   // finance path with a generic {ok:true}. A cheerful stub on THIS surface would render a balanced
   // trial balance and a clean reconciliation for a company that has neither.
-  const finance = financeDemo(method, p, url.searchParams, userId);
+  // `body` is forwarded, and that is load-bearing: the five terminal-action writes are gated on a
+  // typed confirmation carried in the body. Without it every one of them refuses "no confirmation
+  // supplied" no matter what the form sent — a demo that models the refusal and makes the success
+  // unreachable, which is a worse lie than not modelling the write at all.
+  const finance = financeDemo(method, p, url.searchParams, userId, body);
   if (finance) return finance;
 
   // Meeting-recordings registry (WS11 capture edge) — stateful store (lib/demoMeetings.ts).
@@ -2020,6 +2025,13 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // PRV-04 — Web Dev "Site & repo" card (run workspace) — stateful store (lib/demoWebdevProvisionedSites.ts).
   const webdevSites = webdevProvisionedSitesDemo(method, p, url.searchParams, body, userId);
   if (webdevSites) return webdevSites;
+
+  // WSK-24 — the WebDesk console read model (WSK-23): sites/releases/submissions/contract-pins.
+  // Read-only fixtures (lib/demoWebdevConsole.ts); placed here, before the generic `ok([])` GET
+  // fallback further down, so fetchSiteRegistry() et al. get a shaped `{sites,meta}`/etc. response
+  // rather than a bare array with no `.meta` to read staleness off of.
+  const webdevConsole = webdevConsoleDemo(method, p, url.searchParams);
+  if (webdevConsole) return webdevConsole;
 
   // MON — monitoring board (Plane B: client properties + services). Read-only fixtures
   // (lib/demoMonitoring.ts); seeded with a down/degraded/stale/maintenance/unknown spread so every

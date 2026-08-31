@@ -2,19 +2,27 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { getArAging, reconcileAr, listPeriods, money, type ArAgingRow } from "@/lib/finance";
+import {
+  getArAging, reconcileAr, listPeriods, listArCustomers, listArOpenInvoices, listAccounts,
+  listArCreditNotes, money, type ArAgingRow,
+} from "@/lib/finance";
 import { Card, KpiTile, Eyebrow } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { AgingTable } from "@/components/finance/AgingTable";
+import { IssueInvoiceForm, RecordReceiptForm, CreateCustomerForm } from "@/components/finance/ArForms";
+import { IssueCreditNoteForm, CreditNotesTable, WriteOffInvoiceForm } from "@/components/finance/CreditNotesForms";
 
 // Receivables — what customers owe, bucketed by age, and whether that agrees with the ledger.
 //
-// ── THE POSITION IS THREE NUMBERS, NOT ONE ─────────────────────────────────────────────────────
-// `netReceivable` alone hides the thing a controller actually chases: payments received on account
-// that have never been ALLOCATED to an invoice. Those reduce the net while the invoice they should
-// have settled still sits in the aging, so a healthy-looking net can coexist with a customer being
-// dunned for something they already paid. Open invoices, payments on account and the net are shown
-// as three separate figures for that reason.
+// ── THE POSITION IS FOUR NUMBERS, NOT ONE ──────────────────────────────────────────────────────
+// `netReceivable` alone hides two things a controller actually chases: payments received on account
+// that have never been ALLOCATED to an invoice, and credit notes issued but not yet applied. Both
+// reduce the net while the invoice they might settle still sits in the aging, so a healthy-looking
+// net can coexist with a customer being dunned for something already credited or paid. An unapplied
+// credit note credits the AR control account exactly as an unallocated receipt does — it is a credit
+// note's NORMAL state, not an edge case — so it gets its own figure rather than vanishing into the
+// net. Open invoices, payments on account, unapplied credits and the net are shown as four separate
+// figures for that reason.
 export default async function FinanceReceivablesPage({
   searchParams,
 }: {
@@ -36,10 +44,34 @@ export default async function FinanceReceivablesPage({
   const current = periods.find((p) => p.startDate <= today && p.endDate >= today);
   const asOf = sp.asOf ?? current?.endDate ?? periods[periods.length - 1]?.endDate ?? today;
 
-  const [rows, rec] = await Promise.all([
+  const [rows, rec, customers, openInvoices, accounts, creditNotes] = await Promise.all([
     getArAging(userId, tenant, asOf),
     reconcileAr(userId, tenant, asOf),
+    listArCustomers(userId, tenant),
+    listArOpenInvoices(userId, tenant),
+    listAccounts(userId, tenant),
+    listArCreditNotes(userId, tenant),
   ]);
+
+  // The pickers are built from the REAL chart, not a hardcoded list of codes. A form offering `4100`
+  // on a company whose chart does not carry it would fail at submit with an "unknown revenue
+  // account" the user cannot act on — and which codes exist genuinely differs per company, because
+  // the chart is instantiated from a template and then edited.
+  const revenueAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "revenue" && a.allowManualPosting && a.status === "active")
+    .map((a) => ({ code: a.code, name: a.name }));
+  const bankAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "asset" && a.allowManualPosting && a.status === "active"
+      && (a.code.startsWith("11") || /bank|kas/i.test(a.name)))
+    .map((a) => ({ code: a.code, name: a.name }));
+  // Contra-revenue, never the original revenue account — crediting revenue itself would net the
+  // credit away and hide a deteriorating return rate inside ordinary sales. 42xx/43xx is the
+  // Indonesian COA convention (Potongan/Retur Penjualan); the codes themselves still come from the
+  // real chart, only the prefix heuristic is fixed, matching the bank-account filter above.
+  const creditAccounts = (accounts ?? [])
+    .filter((a) => a.accountType === "revenue" && a.allowManualPosting && a.status === "active"
+      && (a.code.startsWith("42") || a.code.startsWith("43")))
+    .map((a) => ({ code: a.code, name: a.name }));
 
   return (
     <div className="fin-page">
@@ -56,6 +88,12 @@ export default async function FinanceReceivablesPage({
             label="Payments on account"
             value={money(rec.position.paymentsOnAccount)}
             foot="received but not allocated to an invoice"
+          />
+          <KpiTile
+            label="Unapplied credits"
+            value={money(rec.position.unappliedCredits)}
+            foot="issued but not yet applied to an invoice"
+            hint="A credit note credits the AR control account the moment it is issued — the same as an unallocated receipt. This is a credit note's NORMAL state until someone decides what it settles, not an edge case, which is why it is a figure of its own rather than folded silently into the net."
           />
           <KpiTile label="Net receivable" value={money(rec.position.netReceivable)} foot="what is actually owed" />
         </div>
@@ -76,17 +114,39 @@ export default async function FinanceReceivablesPage({
         />
       </Card>
 
-      <Card title="Raising an invoice and recording a receipt" style={{ marginTop: 22 }}>
+      <div style={{ marginTop: 22, display: "grid", gap: 22 }}>
+        <IssueInvoiceForm customers={customers} revenueAccounts={revenueAccounts} />
+        <RecordReceiptForm
+          customers={customers}
+          openInvoices={openInvoices}
+          bankAccounts={bankAccounts}
+        />
+        <CreateCustomerForm />
+      </div>
+
+      <Card
+        title="Credit notes"
+        hint="The customer never owed it. Reverses output VAT along with the sale."
+        style={{ marginTop: 22 }}
+      >
+        <CreditNotesTable notes={creditNotes} openInvoices={openInvoices} />
+      </Card>
+
+      <div style={{ marginTop: 22 }}>
+        <IssueCreditNoteForm customers={customers} openInvoices={openInvoices} creditAccounts={creditAccounts} />
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <WriteOffInvoiceForm openInvoices={openInvoices} />
+      </div>
+
+      <Card title="Design notes" style={{ marginTop: 22 }}>
         <p className="fin-muted">
-          Both are <strong>not built here yet</strong>. The subledger behind this page is complete —
-          invoices, receipts, allocations and the reconciliation above are all implemented and
-          tested — but the write endpoints are not exposed to the UI, so there is no form to raise an
-          invoice or apply a payment from here.
-        </p>
-        <p className="fin-muted">
-          Client invoicing for the agency lives at <a href="/invoices">Invoices</a>, which is a
-          different thing: that module produces the document a client receives. This page is the
-          accounting position it creates.
+          A write-off and a credit note both bind to the same segregation-of-duties grant
+          (<code>ar_writeoff_approve</code>) and both are a seeded blocking pair with
+          <code> ar_receipt_posting</code> — the person who banks a receipt must not also be the one
+          who writes off or credits the debt it might have settled (&ldquo;pocket the cash, then
+          write off the debt&rdquo;).
         </p>
       </Card>
     </div>

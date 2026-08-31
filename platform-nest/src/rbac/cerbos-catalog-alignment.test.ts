@@ -95,7 +95,7 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
   // (the client half of the post sign-off seam, addendum D-16), which is why the pair count grows by
   // 36 while the kind count grows by only 8. Prior movement: HIER-3, 2026-08-11 — team_lead/team
   // retired, resource_team.yaml deleted, core.team.* dropped (230/61 -> 226/60).
-  it("sanity: catalog headline numbers this suite depends on (282 pairs / 72 kinds — IAM Phase 2 P2-02, 2026-08-13: +18 grantable pairs across 4 NEW kinds [role_grant/position/employee/it_account], design §6.2; prior: IAM-GAP-01, 2026-08-13: +2 literal actions [invoice.approve, automation_approval.decide_leave] on EXISTING kinds, 264 pairs / 68 kinds; before that: SMM-30, 2026-08-12, the social module's 8 kinds + portal.approve_post; HR-FULL (2026-08-24): +18 grantable across 3 new HR kinds [hr_policy/hr_recruitment/hr_payroll], role-arm only, 302 -> 320 pairs / 78 -> 81 kinds)", () => {
+  it("sanity: catalog headline numbers this suite depends on (282 pairs / 72 kinds — IAM Phase 2 P2-02, 2026-08-13: +18 grantable pairs across 4 NEW kinds [role_grant/position/employee/it_account], design §6.2; prior: IAM-GAP-01, 2026-08-13: +2 literal actions [invoice.approve, automation_approval.decide_leave] on EXISTING kinds, 264 pairs / 68 kinds; before that: SMM-30, 2026-08-12, the social module's 8 kinds + portal.approve_post; HR-FULL (2026-08-24): +18 grantable across 3 new HR kinds [hr_policy/hr_recruitment/hr_payroll], role-arm only, 302 -> 320 pairs / 78 -> 81 kinds; WSK-12 (2026-08-27): +2 pairs on 1 NEW kind [webdev_zoneb_event: read + record] for the Zone B signed-fact bridge, 378 -> 380 pairs / 94 -> 95 kinds. `record` is deliberately NOT uiGrantable -- its only legitimate caller is the wd-zoneb-intake automation identity, and a human granting it could inject facts that look like they came from Zone B)", () => {
         // 2026-08-19 (P2-08 part B): +1 grantable pair — `core.role_grant.decide_override`, the routed
     // override decision right (migration 0115). This literal is a TALLY, not an invariant: it moves
     // legitimately whenever the estate grows, and the program's own rule is to derive tallies. Left
@@ -110,8 +110,13 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // FINANCE-F0 (2026-08-24): +13 pairs / +3 kinds (finance_config, finance_period,
     // finance_control), 320/81 -> 333/84. Deliberate pin update, not a silence.
     // FINANCE-F1 (2026-08-24): +4 pairs / +1 kind (finance_ledger) -> 349/87.
-    expect(catalog.length).toBe(378);
-    expect(catalogKindSet.size).toBe(94);
+    // WSK-19 (2026-08-27): +2 pairs / +1 kind (webdev_contract_snapshot), 380/95 -> 382/96.
+    // WSK-31 (2026-08-27): +2 pairs on 1 EXISTING kind [webdev_provisioned_site: operate + promote,
+    // the §07 WebDesk control-plane MCP tool set's Zone A authz] -- no new kind, 382 -> 384 pairs,
+    // 96 kinds unchanged. Both deliberately NOT uiGrantable (see permission-groups.json's
+    // advancedOnly note) -- the controller behind them is an honest 501 stub pending WSK-23.
+    expect(catalog.length).toBe(387);
+    expect(catalogKindSet.size).toBe(96);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

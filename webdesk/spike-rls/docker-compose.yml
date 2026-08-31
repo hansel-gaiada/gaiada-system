@@ -1,0 +1,17 @@
+# WSK-00 spike - isolated Postgres. Own compose project name; touches nothing else.
+name: webdesk-spike
+
+services:
+  spikedb:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: webdesk_owner
+      POSTGRES_PASSWORD: spike_owner_pw
+      POSTGRES_DB: webdesk_spike
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webdesk_owner -d webdesk_spike"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

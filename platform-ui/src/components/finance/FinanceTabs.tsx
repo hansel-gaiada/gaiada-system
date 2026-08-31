@@ -32,6 +32,13 @@ export const FINANCE_TABS: FinanceTab[] = [
   { segment: "ledger", label: "General ledger" },
   { segment: "accounts", label: "Chart of accounts" },
   { segment: "reports", label: "Reports" },
+  // F8/F11/F9/F10 — the four engines that were built in SQL and had no door until 2026-08-26.
+  // Placed after Reports and before the subledgers because that is the order an accountant meets
+  // them: the statements first, then what feeds them.
+  { segment: "assets", label: "Fixed assets" },
+  { segment: "treasury", label: "Treasury" },
+  { segment: "consolidation", label: "Consolidation" },
+  { segment: "cutover", label: "Cutover" },
   { segment: "receivables", label: "Receivables" },
   { segment: "payables", label: "Payables" },
   { segment: "tax", label: "Tax" },
