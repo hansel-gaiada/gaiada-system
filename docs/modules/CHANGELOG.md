@@ -11,6 +11,32 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.44.0` - client portal logins, and the seed roster retired (2026-08-31) - PROTOTYPED
+
+The four demo clients that populated the portal were retired now that 19 real ones exist —
+**13,112 rows** soft-deleted, far more than the ~80 the `client_id` counts suggested, because the
+demo projects carried 6,517 `pm_tasks` and 6,491 `time_entries`. Soft-delete rather than DELETE:
+all 40 FKs into `clients`/`projects` are `NO ACTION`, and the user-facing reads all filter
+`deleted_at IS NULL` (the only unguarded ones are a seed script and an admin backfill), so there are
+no ghosts and it reverses with one UPDATE.
+
+`provision-client-portal-logins.ts` then gives every real client a placeholder contact. It derives
+its targets **from the database**, not from a hardcoded list like the seed it replaces — that list
+would go stale the first time a client was added.
+
+**The IAM guard caught this twice and was right both times.** First, the copied raw
+`INSERT INTO user_roles` was rejected as the IAM-SEC-05 class — a new writer minting a grant outside
+the one guarded path. Allowlisting was permitted (a CLI is not a request path) but the choke point
+was there, and `insertGrantRow` runs `assertGrantAllowed` where the raw INSERT skips it, so this
+grants strictly **less** trust than the seed path it replaces. Second, `origin: "trusted_internal"`
+demanded explicit registration with a reason; it genuinely qualifies — the role resolves only to the
+global `client` role by name and the scope is the agency tenant the script looks up itself, so
+neither can be steered.
+
+Addresses are `portal@<slug>.test` (RFC 2606 — can never route, cannot be mistaken for a real
+person), with a **distinct** random password each: one shared password across 19 portals means one
+leak exposes every client.
+
 ### platform-ui `0.61.1` - Portfolio reachable from the nav (2026-08-31) - PROTOTYPED
 
 The estate portfolio page shipped with **no navigation to it** — reachable only by typing the URL,
