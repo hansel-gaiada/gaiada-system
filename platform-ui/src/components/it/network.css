@@ -62,7 +62,7 @@
 
 /* ---- presence zones ---- */
 .nw-zones { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
-.nw-zone { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; border-left-color: var(--status-ok); background: var(--surface-card); padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.nw-zone { border: 0.5px solid var(--erp-hairline); border-left-width: 2px; border-left-color: var(--status-ok); background: var(--surface-card-solid); padding: 14px; display: flex; flex-direction: column; gap: 6px; }
 .nw-zone--offline { border-left-color: var(--status-idle); opacity: 0.7; }
 .nw-zone__name { font: 400 13px var(--font-body); color: var(--text-primary); }
 .nw-zone__count { font: 400 30px var(--font-display, var(--font-body)); color: var(--text-primary); line-height: 1; }

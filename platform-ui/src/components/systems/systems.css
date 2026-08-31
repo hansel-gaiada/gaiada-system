@@ -70,7 +70,7 @@
 .bot-chat-badge--telegram { color: var(--status-info-fg); border-color: var(--status-info); }
 
 .bot-thread { display: flex; flex-direction: column; gap: 12px; }
-.bot-bubble { max-width: 78%; align-self: flex-start; background: var(--surface-card); border: 0.5px solid var(--erp-hairline); padding: 10px 14px; }
+.bot-bubble { max-width: 78%; align-self: flex-start; background: var(--surface-card-solid); border: 0.5px solid var(--erp-hairline); padding: 10px 14px; }
 .bot-bubble--bot { align-self: flex-end; background: var(--tint-hover); }
 .bot-bubble__meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
 .bot-bubble__sender { font: 700 11px var(--font-body); color: var(--erp-accent); }

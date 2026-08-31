@@ -37,7 +37,7 @@
   width: 176px;
   text-align: left;
   padding: var(--space-8) var(--space-12);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 0.5px solid var(--erp-hairline);
   cursor: pointer;
   font: inherit;

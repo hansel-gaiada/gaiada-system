@@ -48,7 +48,7 @@
 .office__zoom-btn {
   font: 700 14px var(--font-body);
   color: var(--ink-strong);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 1px solid var(--erp-hairline);
   width: 26px;
   height: 26px;
@@ -69,7 +69,7 @@
 .office__zoom-fit {
   font: 600 12px var(--font-body);
   color: var(--ink-strong);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 1px solid var(--erp-hairline);
   padding: var(--space-4) var(--space-8);
   cursor: pointer;
@@ -108,7 +108,7 @@
 .office__replay-btn {
   font: 600 13px var(--font-body);
   color: var(--ink-strong);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 1px solid var(--erp-hairline);
   padding: var(--space-8) var(--space-16);
   cursor: pointer;
@@ -127,7 +127,7 @@
 .office__floor-btn {
   font: 600 12px var(--font-body);
   color: var(--erp-ink-60);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: 1px solid var(--erp-hairline);
   padding: var(--space-4) var(--space-12);
   cursor: pointer;
@@ -238,7 +238,7 @@
   gap: 2px;
   text-align: left;
   padding: var(--space-8) var(--space-12);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   border: none;
   cursor: pointer;
   font: inherit;
@@ -272,7 +272,7 @@
 .office__detail {
   border: 0.5px solid var(--erp-hairline);
   padding: var(--card-padding);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   min-height: 120px;
 }
 

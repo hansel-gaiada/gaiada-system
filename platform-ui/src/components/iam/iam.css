@@ -5,7 +5,7 @@
 .iam-action { display: inline-flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 
 .iam-form { display: grid; gap: 8px; padding: 10px 12px; border: 0.5px solid var(--erp-hairline);
-  background: var(--surface-card); min-width: 260px; }
+  background: var(--surface-card-solid); min-width: 260px; }
 .iam-form__title { font: 700 10px var(--font-body); letter-spacing: 0.01em;
   color: var(--erp-ink-50); }
 .iam-form__field { display: grid; gap: 3px; }
@@ -17,7 +17,7 @@
    server is telling the operator what to do next, and colouring that as failure teaches them the
    system is broken when it is working exactly as designed. */
 .iam-outcome { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px;
-  font: 400 12px var(--font-body); border: 0.5px solid var(--erp-hairline); background: var(--surface-card);
+  font: 400 12px var(--font-body); border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid);
   max-width: 52ch; }
 .iam-outcome--ok { border-left: 2px solid var(--erp-accent); color: var(--text-primary); }
 .iam-outcome--guide { border-left: 2px solid var(--erp-accent); color: var(--text-primary); background: var(--wash); }
@@ -42,7 +42,7 @@
 
 .iam-scope-note { display: flex; gap: 8px; align-items: baseline; padding: 9px 12px; margin-bottom: 14px;
   border: 0.5px solid var(--erp-hairline); border-left: 2px solid var(--erp-accent);
-  background: var(--surface-card); font: 400 12px var(--font-body); color: var(--text-primary); }
+  background: var(--surface-card-solid); font: 400 12px var(--font-body); color: var(--text-primary); }
 
 .iam-grant { display: grid; gap: 2px; }
 .iam-grant__source { font: 400 10px var(--font-body); color: var(--erp-ink-50); }

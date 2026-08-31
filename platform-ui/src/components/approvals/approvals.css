@@ -7,7 +7,7 @@
   color: var(--erp-accent); border: 0.5px solid var(--erp-accent); padding: 2px 7px; flex-shrink: 0;
 }
 .approval-row__note {
-  font: 400 12px var(--font-body); border: 0.5px solid var(--erp-hairline); background: var(--surface-card);
+  font: 400 12px var(--font-body); border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid);
   color: var(--text-primary); padding: 5px 8px; width: 140px;
 }
 .approval-row__preview { color: var(--erp-accent); font: 400 12px var(--font-body); text-decoration: none; }

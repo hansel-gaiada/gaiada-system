@@ -9,9 +9,9 @@
 /* ---- Layout: chart on TOP (editable), list editor BOTTOM ---- */
 .org-stack { display: flex; flex-direction: column; gap: 20px; }
 
-.org-canvas { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
+.org-canvas { border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); }
 /* Inspector bar (click-to-edit) pinned above the chart, always visible. */
-.org-inspector { border-bottom: 0.5px solid var(--erp-hairline-soft); padding: 10px 14px; min-height: 48px; display: flex; align-items: center; background: var(--surface-card); position: sticky; top: 0; z-index: 2; }
+.org-inspector { border-bottom: 0.5px solid var(--erp-hairline-soft); padding: 10px 14px; min-height: 48px; display: flex; align-items: center; background: var(--surface-card-solid); position: sticky; top: 0; z-index: 2; }
 .org-hint { font: 400 12px var(--font-body); color: var(--erp-ink-50); }
 .org-insp { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
 .org-insp__name { flex: 1 1 180px; min-width: 120px; border: none; border-bottom: 0.5px solid var(--erp-accent); background: transparent; outline: none; padding: 4px 2px; font: 400 15px var(--font-body); color: var(--text-primary); }
@@ -22,7 +22,7 @@
 .org-chartscroll { overflow: auto; padding: 26px 18px; max-height: 58vh; }
 .org-readonly .org-chartscroll { max-height: none; }
 
-.org-listwrap { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); }
+.org-listwrap { border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); }
 .org-listwrap__head { padding: 10px 14px; border-bottom: 0.5px solid var(--erp-hairline-soft); font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .org-editor { padding: 12px 14px; max-height: 44vh; overflow: auto; min-width: 0; }
 
@@ -40,7 +40,7 @@
 .org-grip--locked { cursor: default; opacity: 0.2; }
 
 /* ---- Connect-service panel (ORG-13, A9 button/confirm-sheet flow) ---- */
-.connect-svc { border: 0.5px solid var(--erp-accent); background: var(--surface-card); padding: 14px 16px; margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
+.connect-svc { border: 0.5px solid var(--erp-accent); background: var(--surface-card-solid); padding: 14px 16px; margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
 .connect-svc__head { display: flex; align-items: center; justify-content: space-between; }
 .connect-svc__title { font: 700 13px var(--font-body); color: var(--text-primary); }
 .connect-svc__eyebrow { display: block; font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); margin-bottom: 6px; }
@@ -77,14 +77,14 @@
 .org-chart li:last-child::before { border-right: 0.5px solid var(--erp-hairline); }
 .org-chart ul ul::before { content: ""; position: absolute; top: 0; left: 50%; border-left: 0.5px solid var(--erp-hairline); width: 0; height: 20px; }
 
-.org-box { position: relative; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 8px 14px; text-align: center; min-width: 120px; display: inline-flex; flex-direction: column; gap: 2px; }
+.org-box { position: relative; border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); padding: 8px 14px; text-align: center; min-width: 120px; display: inline-flex; flex-direction: column; gap: 2px; }
 /* interactive (editable) chart boxes */
 .org-box--live { cursor: grab; transition: border-color 0.15s var(--erp-ease), background 0.15s var(--erp-ease); }
 .org-box--live:hover { border-color: var(--erp-accent); }
 .org-box--live:active { cursor: grabbing; }
 .org-box--sel { outline: 2px solid var(--erp-accent); outline-offset: 2px; }
 .org-box--drop { border-color: var(--erp-accent); background: var(--tint-active); }
-.org-box__add { position: absolute; right: -10px; bottom: -10px; width: 20px; height: 20px; border-radius: 50%; border: 0.5px solid var(--erp-hairline); background: var(--surface-card); color: var(--erp-ink-60); font-size: 13px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s var(--erp-ease); z-index: 1; }
+.org-box__add { position: absolute; right: -10px; bottom: -10px; width: 20px; height: 20px; border-radius: 50%; border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); color: var(--erp-ink-60); font-size: 13px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s var(--erp-ease); z-index: 1; }
 .org-box:hover .org-box__add, .org-box--sel .org-box__add { opacity: 1; }
 .org-box__add:hover { color: var(--erp-accent); border-color: var(--erp-accent); }
 .org-box__name { font: 400 13px var(--font-body); color: var(--text-primary); white-space: nowrap; }

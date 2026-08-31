@@ -20,12 +20,29 @@
 }
 
 /* ── Header ────────────────────────────────────────────────────────────────────────────────────── */
+/* GOLD-GLASS (2026-08-31). The portal is the CLIENT-side shell — a second,
+   separate shell rather than a page inside the staff one — so it takes the
+   same glass chrome. Without it the two halves of the product stop looking
+   like one system.
+
+   Painted on ::before for the same reason as the staff shell: backdrop-filter
+   makes an element a containing block for position:fixed descendants, and a
+   sticky header is exactly where a dropdown or a menu ends up living. */
 .cp-head {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--surface-chrome);
-  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  border-bottom: 1px solid var(--glass-divider);
+}
+.cp-head::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--surface-glass);
+  backdrop-filter: blur(var(--blur-glass)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(var(--glass-saturate));
 }
 .cp-head__bar {
   max-width: 1120px;
@@ -79,30 +96,37 @@
 .cp-tabs {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 8px 24px 12px;
   display: flex;
-  gap: 2px;
+  gap: 6px;
   overflow-x: auto;
   /* The strip scrolls on a phone; hiding the bar keeps it from stealing 12px of a 44px target. The
      tabs remain keyboard- and swipe-reachable. */
   scrollbar-width: none;
 }
 .cp-tabs::-webkit-scrollbar { display: none; }
+/* Pills, matching Tabs.css and .sec-tab on the staff side. */
 .cp-tab {
   position: relative;
   flex: 0 0 auto;
-  padding: 11px 14px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
   font: 500 13px/1 var(--font-body);
   color: var(--ink-muted);
   text-decoration: none;
   white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  transition: color 140ms var(--erp-ease), border-color 140ms var(--erp-ease);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  transition: color 140ms var(--erp-ease), border-color 140ms var(--erp-ease), background 140ms var(--erp-ease);
 }
-.cp-tab:hover { color: var(--ink-strong); }
-.cp-tab[aria-current="page"] {
-  color: var(--ink-strong);
-  border-bottom-color: var(--erp-accent);
+.cp-tab:hover { color: var(--ink-strong); border-color: var(--accent-fg); background: var(--tint-hover); }
+.cp-tab[aria-current="page"], .cp-tab[aria-current="page"]:hover {
+  color: var(--ink-on-accent-fill);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
   font-weight: 600;
 }
 /* The count of things waiting on the client. Deliberately on the nav rather than only on the
@@ -116,7 +140,7 @@
   font: 600 10px/1.6 var(--font-body);
   text-align: center;
   background: var(--status-warning);
-  color: var(--surface-card);
+  color: var(--surface-card-solid);
 }
 
 /* ── Main ──────────────────────────────────────────────────────────────────────────────────────── */
@@ -157,11 +181,11 @@
 .cp-callout {
   border: 1px solid color-mix(in srgb, var(--status-warning) 32%, transparent);
   background: color-mix(in srgb, var(--status-warning) 8%, transparent);
-  border-radius: var(--radius-12);
-  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
 }
 .cp-callout--calm {
-  border-color: var(--hairline);
+  border-color: var(--line);
   background: var(--wash);
 }
 .cp-needs {
@@ -173,10 +197,11 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 11px 12px;
-  border-radius: var(--radius-12);
-  background: var(--surface-card);
-  border: 1px solid var(--hairline);
+  min-height: var(--row-height);
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-card-solid);
+  border: 1px solid var(--line);
 }
 .cp-need__label {
   font: 600 14px/1.35 var(--font-body);
@@ -305,12 +330,14 @@
 .cp-textarea {
   font: 400 14px/1.4 var(--font-body);
   color: var(--ink-body);
-  background: var(--surface-card);
-  border: 1px solid var(--line-control);
-  border-radius: var(--radius-8);
-  padding: 9px 11px;
+  background: var(--surface-page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 13px;
   width: 100%;
+  transition: border-color 0.2s var(--erp-ease);
 }
+.cp-input:hover, .cp-select:hover, .cp-textarea:hover { border-color: var(--line-strong); }
 .cp-textarea { min-height: 88px; resize: vertical; }
 .cp-input:focus-visible,
 .cp-select:focus-visible,

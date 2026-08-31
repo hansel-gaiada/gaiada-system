@@ -34,7 +34,7 @@
 /* Days from the neighbouring month stay visible but recede — losing them entirely breaks the week
    rows, and greying them is how a reader knows the month boundary without counting. */
 .cal-cell--outside { opacity: 0.4; }
-.cal-cell--today { background: var(--wash-soft, var(--surface-card)); }
+.cal-cell--today { background: var(--wash-soft, var(--surface-card-solid)); }
 
 .cal-cell__num {
   align-self: flex-start;
@@ -67,7 +67,7 @@
   gap: 6px;
   padding: 3px 6px;
   border: 0.5px solid var(--erp-hairline);
-  background: var(--surface-card);
+  background: var(--surface-card-solid);
   font: 400 12px var(--font-body);
   color: var(--text-primary);
   text-decoration: none;
@@ -94,7 +94,7 @@
 }
 .cal-week__col { min-height: 220px; display: flex; flex-direction: column; min-width: 0; }
 .cal-week__col + .cal-week__col { border-left: 0.5px solid var(--erp-hairline-soft); }
-.cal-week__col--today { background: var(--wash-soft, var(--surface-card)); }
+.cal-week__col--today { background: var(--wash-soft, var(--surface-card-solid)); }
 .cal-week__head {
   display: flex;
   align-items: baseline;

@@ -5,7 +5,7 @@
 .scope-pill__static { font-size: 12px; }
 .scope-pill__summary {
   display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none;
-  border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card-solid);
   user-select: none;
 }
 .scope-pill__summary::-webkit-details-marker { display: none; }
@@ -37,10 +37,10 @@
    never a silent filter. */
 .scope-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
 .scope-bar__pill { position: relative; display: inline-block; }
-.scope-bar__pill--static { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card); }
+.scope-bar__pill--static { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card-solid); }
 .scope-bar__summary {
   display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none;
-  border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card);
+  border: 0.5px solid var(--erp-hairline); padding: 6px 10px; background: var(--surface-card-solid);
   user-select: none; transition: border-color 0.15s var(--erp-ease), color 0.15s var(--erp-ease);
 }
 .scope-bar__summary::-webkit-details-marker { display: none; }

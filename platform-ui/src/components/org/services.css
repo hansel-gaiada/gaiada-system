@@ -1,7 +1,7 @@
 /* Service-assignment lifecycle rows (ORG-13) — shared by the org page's
    ServicedFunctionsPanel and /admin/services. */
 
-.svc-panel { border: 0.5px solid var(--erp-hairline); background: var(--surface-card); padding: 16px; margin-top: 16px; }
+.svc-panel { border: 0.5px solid var(--erp-hairline); background: var(--surface-card-solid); padding: 16px; margin-top: 16px; }
 .svc-panel__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .svc-panel__eyebrow { font: 700 10px var(--font-body); letter-spacing: 0.01em; color: var(--erp-ink-50); }
 .svc-panel__empty { font: 400 13px var(--font-body); color: var(--erp-ink-50); margin: 0; }

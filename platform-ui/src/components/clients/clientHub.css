@@ -44,7 +44,7 @@
   font: 600 10px/1.6 var(--font-body);
   text-align: center;
   background: var(--status-warning);
-  color: var(--surface-card);
+  color: var(--surface-card-solid);
 }
 
 /* ── Ball columns ──────────────────────────────────────────────────────────────────────────────── */
