@@ -37,6 +37,7 @@ So: use the stand-in to unblock, record it here, and retire it before anyone rel
 |---|---|---|---|---|---|
 | P-01 | `hansel@gaiada.com` | **Accountant** — the person who actually keeps the books | `finance_manager` on D & A Syrowatka, Gaia Digital Agency, Viceroy Bali | 2026-08-25 | Before any real transaction is posted |
 | P-02 | `hansel@gaiada.com` | **Finance manager** — approves, signs off periods | same grant as P-01 | 2026-08-25 | **Before the first period sign-off** |
+| P-03 | 19 × `portal@<slug>.test` (one per client) | **The client's own representative** — a real person at that company | Global `client` role, `company` scope = Gaia Digital Agency; `client_contacts.capability = 'signer'` | 2026-08-31 | **Before the first contract is sent to any of these clients** |
 
 ### Not placeholders — real, and deliberately so
 
@@ -71,6 +72,61 @@ transactions are posted.
 5. **Do not** attempt to re-attribute historical journals or sign-offs. They are append-only and
    correction is by reversal; the history correctly records who actually did it. If entries were
    posted under a stand-in, note that fact in the period's audit file rather than editing anything.
+
+## P-03: the client portal logins
+
+Owner ruling (2026-08-31): *"also make a login sso for those clients now. and document it. later in
+staging we will put their real login details"*. Provisioned the same day by
+`platform-nest/src/admin/provision-client-portal-logins.ts` against the live estate.
+
+**These are a different shape of stand-in from P-01/P-02.** Those over-grant a *real* person's
+account; these are *dedicated* accounts that stand in for a person who has not been named yet. That
+is the safer shape — nothing is attributed to a real human by mistake — but it still has to be
+retired, for the reason below.
+
+### The scheme
+
+| | |
+|---|---|
+| **Address** | `portal@<slug>.test`, slug derived from the client name with diacritics folded (`Apéritif Restaurant` → `aperitif-restaurant`) |
+| **Why `.test`** | Reserved by RFC 2606, so it can **never** route. These accounts cannot receive mail and cannot be confused with a real person's address. Using the client's real domain would mean creating Keycloak accounts against addresses we do not own. |
+| **Password** | A **distinct** random password per client. One shared password across 19 portals would mean one leak exposes every client's data. Non-temporary, matching `seed/client-logins.ts` — a forced password-change screen is an unexplained extra step for someone handed a credential out of band. |
+| **Where the passwords live** | The gitignored `CREDENTIALS.local.md`, owner's machine only. **Never** the repo, a ticket, or chat. |
+| **Recoverable?** | **No.** The script prints each password once and stores nothing. To rotate, re-run the script — it is idempotent (reuses user, contact and role; re-sets only the password). |
+| **Sign-in** | Keycloak SSO at `https://erp.gaiada.online/login` |
+
+Each login is four rows, created in this order so that a failure at the last step still leaves the
+authorization side correct: a `users` row with `kind='client'` (PK-01's discriminator — a portal
+contact is not an employee), a `client_contacts` row binding user to client, the **global `client`
+role** (without it the login reaches an empty portal and looks like a data bug), then the Keycloak
+account and password.
+
+### The one real hazard: these placeholders can sign
+
+`client_contacts.capability = 'signer'` is not cosmetic. A signer can execute a contract from the
+portal — `portal-commerce.controller.ts` writes `contracts.status='signed'`, `signed_at`, and a
+`contract_signatures` row carrying `signer_name`. **That is an irreversible attribution**, and this
+register's own rules say a stand-in must not hold one without the owner explicitly accepting it.
+
+Checked on provisioning day: **zero** live contracts belong to any of these 19 clients, so the
+exposure today is nil. It becomes real the moment a contract is *sent* to one of them.
+
+So, before that happens, do one of:
+
+1. **Replace the placeholder with the client's real representative** (the intended path — see
+   *Retiring a stand-in* above), or
+2. **Downgrade the capability to `viewer`** for any client not yet represented by a real person:
+   `UPDATE client_contacts SET capability='viewer' WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'portal@%.test')`.
+   Viewers keep full read access to the portal; only signing is withheld.
+
+Do **not** simply avoid sending contracts and rely on that — the control has to be in the data, not
+in someone remembering.
+
+### Retiring one
+
+Follow *Retiring a stand-in* above, plus: soft-delete the `client_contacts` row and disable the
+Keycloak account. Leave the `users` row — it may already be referenced by portal activity, and
+`kind='client'` keeps it out of employee-facing reads.
 
 ## Rules for adding a new stand-in
 
