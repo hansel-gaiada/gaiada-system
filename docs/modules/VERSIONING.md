@@ -84,6 +84,39 @@ An infra/CI change that touches no module is exactly this case: bump the letter,
    hyphenated: `Alpha 01.001.0001a` → `alpha-01.001.0001a`.
 5. **`/VERSION` is the single source.** CI reads it; the running app reports it. If they disagree,
    the running app is wrong and the deploy is suspect.
+6. **Never pick the number by hand.** Run `node scripts/next-version.mjs`; it derives the next free
+   version from the **tags**. See "Cutting a release" below for why.
+
+---
+
+## Cutting a release
+
+```sh
+node scripts/next-version.mjs          # -> Alpha 01.071.0301a   (the next FREE version)
+node scripts/next-version.mjs --tag    # -> alpha-01.071.0301a
+```
+
+Write that into `/VERSION`, move the **App version** line in `MODULES.md` to match, add the row to
+the App release log (rule 2), commit, then tag and push.
+
+**Why this is not optional.** Several sessions cut releases against this repo concurrently. On
+2026-08-31 two of them independently chose `Alpha 01.071.0208a` minutes apart. Both wrote the *same
+string* into `/VERSION`, so git auto-merged with **no conflict** — the collision never appeared in a
+diff. But a tag resolves to exactly one commit, so `alpha-01.071.0208a` captured only one of the two
+builds, and the fix merged moments later was **not in it** while `/VERSION` still read `0208a`.
+
+A `version-gate` CI job now fails any pull request that edits `/VERSION` to a version whose tag
+already exists. It runs only when `/VERSION` actually changes.
+
+> **`/VERSION` is not "what is deployed", and not "what `main` contains."** It names the version most
+> recently *cut*. After a release, `main` immediately moves ahead of its own tag. To answer "did
+> commit `C` actually ship in tag `T`?" the only reliable check is:
+>
+> ```sh
+> git merge-base --is-ancestor C T && echo "shipped" || echo "NOT in that build"
+> ```
+>
+> Reading `/VERSION` would have reported the `0208a` fix as shipped. It had not shipped.
 
 ---
 

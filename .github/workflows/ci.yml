@@ -69,6 +69,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # VERSION COLLISION GATE (2026-08-31). Several sessions cut releases against this repo at once. Two
+  # of them picked `Alpha 01.071.0208a` minutes apart; because both wrote the SAME string into
+  # /VERSION, git auto-merged with no conflict and nothing anywhere complained — but the tag resolves
+  # to only one of the two commits, and the fix merged moments later was NOT in that build while
+  # /VERSION still read `0208a`. Reading /VERSION would have told you the fix shipped. It had not.
+  #
+  # This fires ONLY when a PR actually edits /VERSION, so it stays quiet on ordinary commits (after a
+  # release, /VERSION legitimately names an already-tagged version — gating that would be red always).
+  # Needs full history + tags, hence fetch-depth: 0.
+  version-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Does this PR change /VERSION?
+        id: changed
+        run: |
+          git fetch --quiet origin "${{ github.base_ref }}"
+          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- VERSION; then
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "/VERSION untouched — nothing to check."
+          else
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "/VERSION changed to: $(cat VERSION)"
+          fi
+      - name: The version being cut must not already be tagged
+        if: steps.changed.outputs.hit == 'true'
+        run: node scripts/next-version.mjs --check-file
+
   test:
     runs-on: ubuntu-latest
     strategy:
