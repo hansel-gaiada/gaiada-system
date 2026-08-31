@@ -111,7 +111,18 @@ export default defineConfig({
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    // Own output dir: the e2e dev server must never share `.next` with a developer's running server.
-    env: { DEMO_MODE: "1", NEXT_DIST_DIR: process.env.NEXT_DIST_DIR || ".next-e2e" },
+    // Own output dir LOCALLY: the e2e dev server must never share `.next` with a developer's
+    // running server. In CI there is no such server, and the smoke project starts `next start`
+    // against the build the platform-ui job just produced — that build goes to the default `.next`,
+    // so forcing `.next-e2e` there finds no production build at all. An explicit NEXT_DIST_DIR
+    // still wins in both places.
+    env: {
+      DEMO_MODE: "1",
+      ...(process.env.NEXT_DIST_DIR
+        ? { NEXT_DIST_DIR: process.env.NEXT_DIST_DIR }
+        : process.env.CI
+          ? {}
+          : { NEXT_DIST_DIR: ".next-e2e" }),
+    },
   },
 });
