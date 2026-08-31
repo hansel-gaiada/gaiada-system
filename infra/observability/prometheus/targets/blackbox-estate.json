@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "targets": ["https://helios.deitylabs.ai"],
+    "labels": { "host": "helios", "env": "client-production", "plane": "estate" }
+  },
+  {
+    "targets": ["https://delphi.deitylabs.ai"],
+    "labels": { "host": "delphi", "env": "client-staging", "plane": "estate" }
+  },
+  {
+    "targets": ["https://erp.gaiada.online/login"],
+    "labels": { "host": "gda-aicenter", "env": "production", "plane": "estate" }
+  },
+  {
+    "targets": ["https://pilot-fullstack-cms.gaiada.online"],
+    "labels": { "host": "delphi", "env": "client-staging", "plane": "estate" }
+  }
+]

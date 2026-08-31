@@ -1,48 +1,41 @@
-# Prometheus `file_sd` target files — why they start empty
+# Prometheus file_sd targets
 
-Both files in this directory are consumed by `prometheus.remote.yml` via `file_sd_configs` on the
-SumoPod hub. Prometheus reloads a `file_sd` file on its own (`refresh_interval`) — no restart, no
-`--web.enable-lifecycle` reload needed.
+Two planes, deliberately separate because they route to different humans
+(`infra/observability/prometheus/rules/alerts-estate.yml`).
 
-## `blackbox-estate.json` — Plane A, `helios`/`delphi`
+## `blackbox-estate.json` — Plane A, HAND-MAINTAINED
 
-**Status: intentionally `[]`.** This is the target list for MSO-11
-(`docs/plans/2026-08-21-multi-server-observability.md` §12.6) — the blackbox tier for the two
-OBSERVE-ONLY hosts. Populating it requires **owner-named endpoints** (OQ-6, same document §10):
-this estate does not port-scan or crawl to "discover" what to probe — an unnamed service simply
-stays invisible, permanently, by design. Do not add an entry by guessing a URL from the host's
-public IP or from CloudPanel's default vhost.
+Our own estate endpoints. `severity: page` → engineering.
 
-**Format**, once the owner names endpoints:
+Populated 2026-08-31 from the `gaiada-setups` harvest (`_data/raw/<host>-harvest.txt`
+`server_name` directives) — our own recorded inventory, **never a scan of the boxes**.
+helios and delphi are observe-only hosts under the 2026-08-22/23 owner ruling: we probe
+them from outside and install nothing on them.
 
-```json
-[
-  {
-    "targets": ["https://example-client-site.tld/"],
-    "labels": { "host": "helios", "env": "production", "endpoint_name": "example-client-site" }
-  },
-  {
-    "targets": ["https://staging.example-client-site.tld/"],
-    "labels": { "host": "delphi", "env": "staging", "endpoint_name": "example-client-site-staging" }
-  }
-]
-```
+Deliberately ONLY estate endpoints. The 15 client domains helios serves and the 20
+delphi serves are **not** listed here: they belong to Plane B, and putting them in Plane A
+would page an engineer at 3am for a client's marketing site.
 
-`host`/`env` are what let `alerts-estate.yml`'s `EstateProbeDown` ride the *existing*
-production-pages/staging-tickets routing tree in `alertmanager.yml` — get them wrong and an
-outage on `delphi` (staging) pages engineering at 3am, or an outage on `helios` (production)
-silently downgrades to a ticket. Cross-check against `infra_hosts.env` once MSO-09 lands (currently
-PLANNED, not applied) rather than typing it from memory a second time.
+Add an entry only when the thing is ours and its being unreachable is an engineering
+matter. Labels `host` and `env` are required — the alert annotations interpolate both.
 
-## `client-properties.json` — Plane B, client sites (MON-01)
+## `client-properties.json` — Plane B, GENERATED. DO NOT HAND-EDIT.
 
-**Not committed here** — it is *generated*, not hand-written
-(`infra/observability/scripts/gen-client-property-targets.mjs`), and a generated file that also
-lives in git would drift the moment the generator runs. See
-`infra/runbooks/enable-estate-blackbox-and-alert-routing.md` §4 for exactly how it is produced and
-shipped to this path on the hub.
+Written by `infra/observability/scripts/gen-client-property-targets.mjs` (sourced from
+`search_properties WHERE verified_at IS NOT NULL`) and rsynced by
+`infra/scripts/sync-client-property-targets.sh`. `severity: client_page` /
+`client_ticket` → account managers, never engineering.
 
-**Never hand-edit `client-properties.json` on the hub.** The consent gate
-(`search_properties.verified_at IS NOT NULL AND status = 'active'`) lives in the generator's SQL,
-not in this directory — a hand-added entry is a probe against a client's server with no recorded
-consent trail.
+⚠ **MEASURED 2026-08-31: this plane currently yields ZERO targets.** Live has 19
+`search_properties` rows and **0 with `verified_at` set**, so the generator correctly
+produces an empty file. Client-site health is therefore NOT being monitored yet, and the
+gap is *data*, not config — a property has to be verified before we claim to be watching
+it. Two ways to close it, both a decision rather than a config change:
+
+1. Verify the existing 19 properties (the real Search-Console-ownership path), or
+2. Decide to seed the tracked-sites registry from the `gaiada-setups` mirror, which
+   already knows the domains — and accept that "verified" then means "we recorded it",
+   not "we proved ownership".
+
+Until one of those happens, do not describe the two-pane health surface as covering
+client sites. The estate pane is real; the client pane is an empty query.

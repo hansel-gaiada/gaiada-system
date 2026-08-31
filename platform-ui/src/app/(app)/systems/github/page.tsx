@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { can, isElevated } from "@/lib/rbac";
+import { isStaff } from "@/lib/rbac";
 import { listGithubRepos, type ListGithubReposResult } from "@/lib/githubRepos-data";
 import { PageHeader } from "@/components/PageHeader";
 import { BackendPending } from "@/components/BackendPending";
@@ -24,11 +24,20 @@ export const dynamic = "force-dynamic";
 // must stay — it is what a genuinely unauthorized principal (e.g. an isClientOnly client, verified
 // EFFECT_DENY on every action) sees — but it is no longer the expected resting state.
 //
-// ⚠ KNOWN MISMATCH, worth a follow-up ticket: Cerbos grants `github_repo:read` to `member`, but this
-// page's client-side gate is `isElevated(me) || can(me,"company.manage",tenant)` and `member` holds
-// no `company.manage`. So a member Cerbos WOULD serve is refused here before the request fires.
-// That fails toward under-serving (Cerbos stays authoritative, no security hole) but it does not
-// match the policy's intent. Resolve in ONE direction — do not leave the two gates disagreeing.
+// ── GATE RESOLVED 2026-08-31 (owner decision: widen the UI to match Cerbos) ─────────────────────────
+// This page previously gated on `isElevated(me) || can(me,"company.manage",tenant)`. Cerbos grants
+// `github_repo:read` to `member` too, so a member Cerbos WOULD serve was refused here before the
+// request even fired. The two gates disagreed.
+//
+// Now: `isStaff(me)` — "has any role that is not `client`". Deliberately COARSE. The UI's job here is
+// to keep the external-client surface out (an isClientOnly principal is EFFECT_DENY on every action
+// on this kind, verified against a live Cerbos); deciding WHICH staff may read is Cerbos's job, and
+// duplicating that decision in the client is how the two drifted apart in the first place.
+//
+// Consequence, and it is the safe direction: a staff role Cerbos does NOT grant read (say a
+// finance_manager, if the policy never lists it) now passes this gate and gets a 403 from the BFF.
+// `ReadRefusal` renders that honestly as "not authorized" — never as an empty registry — so the
+// failure is legible rather than a silent blank page. Cerbos stays the single authority.
 //
 // ── WHY THIS IS UNDER /systems, NOT /departments/[deptId]/repositories ──────────────────────────────
 // `github_repos` is explicitly a CORE table (GH-05 migration header): it links to `webdev_site_id`
@@ -63,7 +72,7 @@ export default async function GithubRegistryPage({
   const sp = await searchParams;
   const includeArchived = sp.archived === "1";
 
-  const allowed = isElevated(me) || (!!tenant && can(me, "company.manage", tenant));
+  const allowed = !!tenant && isStaff(me);
 
   return (
     <>
@@ -89,7 +98,7 @@ function refusalOrPending(result: Extract<ListGithubReposResult, { ok: false }>)
       <ReadRefusal
         subject="the GitHub repository registry"
         kind="forbidden"
-        detail="This surface is fail-closed until the github_repo Cerbos policy ships (GH-03) — a 403 here today is the documented, correct resting state, not an outage."
+        detail="Your account is not authorized to read the repository registry. The github_repo policy is live, so this is a real authorization decision — not a pending feature and not an outage."
       />
     );
   }
