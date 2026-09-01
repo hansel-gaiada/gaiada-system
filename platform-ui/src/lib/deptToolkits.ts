@@ -140,17 +140,16 @@ const WEB_DEV: DeptToolkit = {
         { key: "requests", label: "Requests", path: "requests", icon: "bell", blurb: "Triage client and internal maintenance requests." },
         { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Every repository the pipeline has provisioned for this department — status, staging, lineage.", fullBleed: true },
         { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
-        // WSK-24 — the WebDesk console: site registry, contract pin status, submissions, and
-        // WS4-gated release actions. Reads only (webdesk-design.md §08); every read here degrades
-        // honestly rather than pretending Zone B is live (WSK-21 ships no live status/release/
-        // submission endpoint yet — see components/webdesk/DegradeBanner.tsx).
-        { key: "sites", label: "Sites", path: "sites", icon: "server", blurb: "Provisioned WebDesk sites, contract pins, submissions, and releases." },
-        // The ESTATE portfolio, distinct from "Sites" above and listed after it on purpose. "Sites"
-        // is the Zone B registry — only what WebDesk itself provisioned, which is legitimately
-        // empty today. This is every site we build or operate, including the ones hosted elsewhere
-        // that we only track. Shipping the page without this entry left it reachable only by typing
-        // the URL, which is the same as not shipping it.
+        // INVENTORY — every site we build or operate, by client and project, including ones hosted
+        // elsewhere that we only track. Listed before Operations because "what do we have" comes
+        // before "is it up".
         { key: "portfolio", label: "Portfolio", path: "sites/portfolio", icon: "server", blurb: "Every site we build or operate, by client and project - including ones we only track." },
+        // OPERATIONS — repurposed from the old "Sites" registry, which duplicated Portfolio's list
+        // and led with a 0-row Zone B registry. Now the incident-response surface: per-site health
+        // (last recorded HTTP status) and quick-investigate links, grouped by server, with the Zone
+        // B pipeline deployment registry (provisioned sites, contract pins, releases) kept beneath.
+        // Path stays "sites" so existing links do not break.
+        { key: "sites", label: "Operations", path: "sites", icon: "pulse", blurb: "Site health and quick-investigate links by server, plus the pipeline deployment registry." },
       ],
     },
     CONNECTIONS_GROUP,
