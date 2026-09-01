@@ -21,16 +21,46 @@
 // a Reconcile button that the backend would answer with a no-op `unchanged`.
 
 export type SiteStatus = "requested" | "pending" | "provisioned" | "live" | "failed";
-export type SiteFramework = "vite" | "nextjs";
+// WSK-08 (2026-09-01) — widened to the FIVE values the backend's framework CHECK now admits
+// (migration 202609011230). `vite`/`nextjs` are kept because existing rows carry them and a label
+// map that cannot render a stored value renders "undefined"; `astro`/`node`/`wp` are §08's canonical
+// selectors, which is what new sites use.
+export type SiteFramework = "vite" | "nextjs" | "astro" | "node" | "wp";
 
-export const FRAMEWORKS: SiteFramework[] = ["vite", "nextjs"];
 export const FRAMEWORK_LABEL: Record<SiteFramework, string> = {
-  vite: "Vite (static)",
-  nextjs: "Next.js",
+  astro: "Static (Astro)",
+  node: "Full-stack (Next.js + Nest)",
+  wp: "WordPress",
+  // Legacy: pre-§08 rows. Still valid in the DB, no longer offered for new sites.
+  vite: "Static (Vite — legacy)",
+  nextjs: "Next.js (legacy)",
 };
-// OQ-P4 default — provisioning.service.ts's own `framework = args.framework ?? "vite"` (P-7 makes
-// nextjs the buggier target on the provision side today).
-export const DEFAULT_FRAMEWORK: SiteFramework = "vite";
+
+/** What the console OFFERS for a new site — §08's kind vocabulary, not the internal framework
+ *  names the old dropdown exposed ("Vite (static)" / "Next.js", which is exactly §08's complaint
+ *  that "four places disagree about what a kind is"). Legacy vite/nextjs stay renderable above but
+ *  are not offered: a new site should not be created against superseded vocabulary. */
+export const FRAMEWORKS: SiteFramework[] = ["astro", "node", "wp"];
+
+/** Offered but NOT yet provisionable, with the reason shown in the UI rather than discovered on
+ *  submit.
+ *
+ *  `wp` is real end-to-end everywhere except the last mile: the DB CHECK admits it, the MCP tool's
+ *  enum admits it, and the scaffolder composes the theme. What refuses it is the external
+ *  "provision" HTTP tool, which is static-export-only and always was — it answers 422 with an
+ *  honest reason and makes zero HTTP calls. §08's fix is the ERP's own repo control (GH-12's
+ *  template-generate path) replacing that tool; until this flow is wired to it, offering WordPress
+ *  as a live choice would be a button that always fails.
+ *
+ *  Shown-and-disabled rather than hidden on purpose: hiding it reads as "WordPress is not supported",
+ *  which is now false and was the actual confusion this whole change came from. */
+export const FRAMEWORK_UNAVAILABLE: Partial<Record<SiteFramework, string>> = {
+  wp: "Needs the ERP repo-control path (§08) — the static-only provision service refuses it",
+};
+
+// OQ-P4 default. Was "vite"; now §08's static selector. provisioning.service.ts still defaults to
+// "vite" server-side when no framework is sent, so this only governs what the form pre-selects.
+export const DEFAULT_FRAMEWORK: SiteFramework = "astro";
 
 export const STATUS_LABEL: Record<SiteStatus, string> = {
   requested: "Requested",

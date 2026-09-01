@@ -57,7 +57,8 @@ describe("CreateRepoForm — standalone (the default): a repository with no PRD 
     const fd = provision.mock.calls[0][0];
     expect(fd.get("runId")).toBeNull();
     expect(fd.get("slug")).toBe("marketing-microsite");
-    expect(fd.get("framework")).toBe("vite");
+    // WSK-08: the default is now §08's static selector "astro", not the legacy "vite".
+    expect(fd.get("framework")).toBe("astro");
   });
 
   it("explains that client and project are optional for a standalone repo", () => {
@@ -83,12 +84,14 @@ describe("CreateRepoForm — for a PRD run", () => {
     fireEvent.change(runSelect, { target: { value: "run-3" } });
     const name = screen.getByRole("textbox", { name: /repository name/i }) as HTMLInputElement;
     expect(name.value).toBe("northwind-checkout-scope");
-    fireEvent.change(screen.getByRole("combobox", { name: /framework/i }), { target: { value: "nextjs" } });
+    // WSK-08: "nextjs" is no longer OFFERED — "node" supersedes it and provision-http translates
+    // node -> nextjs on the wire, so this exercises the same end state through the new vocabulary.
+    fireEvent.change(screen.getByRole("combobox", { name: /framework/i }), { target: { value: "node" } });
     fireEvent.click(screen.getByRole("button", { name: /^create repository$/i }));
     await waitFor(() => expect(provision).toHaveBeenCalledTimes(1));
     const fd = provision.mock.calls[0][0];
     expect(fd.get("runId")).toBe("run-3");
-    expect(fd.get("framework")).toBe("nextjs");
+    expect(fd.get("framework")).toBe("node");
     expect(fd.get("slug")).toBe("northwind-checkout-scope");
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/northwind-checkout-scope.*is being provisioned/i));
   });

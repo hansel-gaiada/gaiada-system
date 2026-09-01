@@ -15,7 +15,7 @@ import { formatDateTime } from "@/lib/format";
 import {
   STATUS_LABEL, FRAMEWORKS, FRAMEWORK_LABEL, DEFAULT_FRAMEWORK,
   canReconcile, canStartNewProvision, failureCopy,
-  type ProvisionedSite, type SiteFramework,
+  type ProvisionedSite, type SiteFramework, FRAMEWORK_UNAVAILABLE,
 } from "@/lib/webdevProvisionedSites";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
 import "./pipeline.css";
@@ -185,8 +185,17 @@ function ProvisionForm({ runId, retry, onProvision }: {
           onChange={(e) => setFramework(e.target.value as SiteFramework)}
           disabled={pending}
         >
-          {FRAMEWORKS.map((f) => <option key={f} value={f}>{FRAMEWORK_LABEL[f]}</option>)}
+          {/* Same rule as the repositories CreateRepoForm: an unavailable kind is DISABLED with its
+              reason, never omitted — omitting WordPress read as "not supported", which is false. */}
+          {FRAMEWORKS.map((f) => (
+            <option key={f} value={f} disabled={!!FRAMEWORK_UNAVAILABLE[f]}>
+              {FRAMEWORK_LABEL[f]}{FRAMEWORK_UNAVAILABLE[f] ? " — not yet available" : ""}
+            </option>
+          ))}
         </select>
+        {FRAMEWORK_UNAVAILABLE[framework] && (
+          <span className="pl-site-form__hint">{FRAMEWORK_UNAVAILABLE[framework]}</span>
+        )}
       </label>
       <label className="pl-site-form__field">
         <span>Slug {retry ? "(required — pick a new name)" : "(optional — derived from the run title if left blank)"}</span>

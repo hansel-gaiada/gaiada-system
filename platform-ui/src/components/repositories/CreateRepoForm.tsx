@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { FRAMEWORKS, FRAMEWORK_LABEL, DEFAULT_FRAMEWORK, isValidSlugInput, type SiteFramework } from "@/lib/webdevProvisionedSites";
+import { FRAMEWORKS, FRAMEWORK_LABEL, FRAMEWORK_UNAVAILABLE, DEFAULT_FRAMEWORK, isValidSlugInput, type SiteFramework } from "@/lib/webdevProvisionedSites";
 import type { SiteActionResult } from "@/lib/webdevProvisionedSitesActions";
 import { suggestSlug, type EligibleRun } from "@/lib/repoInventory";
 import "./repositories.css";
@@ -104,8 +104,18 @@ export function CreateRepoForm({ runs, clients = [], projects = [], actions, prd
         <label className="repo-field">
           Framework
           <select value={framework} onChange={(e) => setFramework(e.target.value as SiteFramework)} disabled={pending}>
-            {FRAMEWORKS.map((f) => <option key={f} value={f}>{FRAMEWORK_LABEL[f]}</option>)}
+            {FRAMEWORKS.map((f) => (
+              // An unavailable kind is rendered DISABLED with its reason, never omitted. Omitting
+              // WordPress read as "not supported", which is what caused the confusion this change
+              // came from — the backend supports it; one last-mile provider does not yet.
+              <option key={f} value={f} disabled={!!FRAMEWORK_UNAVAILABLE[f]}>
+                {FRAMEWORK_LABEL[f]}{FRAMEWORK_UNAVAILABLE[f] ? " — not yet available" : ""}
+              </option>
+            ))}
           </select>
+          {FRAMEWORK_UNAVAILABLE[framework] && (
+            <span className="repo-field__hint">{FRAMEWORK_UNAVAILABLE[framework]}</span>
+          )}
         </label>
         {mode === "standalone" && (
           <>
