@@ -7,7 +7,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { safeConsoleRead } from "@/lib/webdesk";
-import { fetchPortfolio } from "@/lib/webdeskPortfolio";
+import { fetchPortfolio } from "@/lib/webdeskPortfolio.server";
 
 type Params = Promise<{ deptId: string }>;
 

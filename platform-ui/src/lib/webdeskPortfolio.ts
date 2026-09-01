@@ -1,4 +1,3 @@
-import "server-only";
 // The ESTATE PORTFOLIO read model — mirrors `platform-nest/src/modules/webdev/
 // portfolio-reads.service.ts` field-for-field. Backend contract: docs/FRONTEND-BFF-CONTRACT.md §24.
 //
@@ -21,8 +20,10 @@ import "server-only";
 // `crawlConsent`      whether `search_properties.verified_at` is set. MON-01 probes ONLY where this
 //                     is true. Render it — a site nobody is allowed to probe looks identical to one
 //                     that is simply healthy, and the difference is the whole compliance story.
-import { platformFetch } from "./platform";
 
+// PURE, CLIENT-SAFE. Types + display helpers only — no `server-only`, no fetch. The client
+// component `PortfolioPanel` imports from here, so nothing in this file may pull server code in.
+// The network read lives in `webdeskPortfolio.server.ts`.
 export type SiteEnvironment = "production" | "staging" | "preview" | "development";
 
 export interface PortfolioSite {
@@ -131,6 +132,3 @@ export const ADOPTION_COPY: Record<string, string> = {
   mandated: "Platform required",
 };
 
-export async function fetchPortfolio(userId: string, tenant: string): Promise<PortfolioResult> {
-  return platformFetch<PortfolioResult>(`/api/${tenant}/modules/webdev/console/portfolio`, userId);
-}
