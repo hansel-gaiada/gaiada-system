@@ -18,6 +18,22 @@ global:
   # Must default to "true" (real-relay-safe) so a missing env var never silently downgrades
   # security; the sink leg sets SMTP_REQUIRE_TLS=false explicitly in that environment's .env.
   smtp_require_tls: ${SMTP_REQUIRE_TLS}
+  # ⚠ 2026-09-01 — VERIFIED LIVE ON SUMOPOD: SMTP_SMARTHOST is set to `mailpit:1025`, and NO
+  # mailpit container runs in the gaiada-obs project on that box (`docker compose -p gaiada-obs ps`
+  # shows 8 containers, none named mailpit). Every email_configs leg on every receiver below
+  # (default-multi, page-all, account-managers) is therefore a NO-OP today: Alertmanager logs a
+  # DNS/connect failure on each send attempt and moves on — it does not crash, and it does not
+  # block the other transports in the same receiver, but nobody receives that email. Per
+  # infra/runbooks/alerting-wire-a-real-receiver.md's own lesson (a receiver that LOOKS wired but
+  # delivers nothing is worse than an honest gap), do not treat SMTP as a working leg of the ≥2
+  # independent transports design until a real relay (R8, docs/superpowers/specs/2026-08-04-zone-
+  # a-mail-design.md) is wired with real creds in SumoPod's own .env. Today the only CONFIRMED
+  # working transport is the ntfy.sh webhook leg (verified 2026-09-01 with a synthetic client_page
+  # alert observed landing on the account-managers ntfy.sh topic). Telegram is currently ALSO
+  # broken, independent of the SMTP issue: live logs show `telegram: Unauthorized: invalid token
+  # specified (401)` on every send attempt against page-all — TELEGRAM_BOT_TOKEN in SumoPod's .env
+  # is stale/revoked. Do not assume Telegram reaches anyone until that token is rotated and a
+  # send is reverified; ntfy.sh is the one transport genuinely proven end-to-end right now.
 
 route:
   receiver: default-multi
@@ -141,6 +157,18 @@ receivers:
   # "fail loud, not silent" posture as ALERT_WEBHOOK_URL's own comment above; do not let this
   # receiver go live without both wired, per the alerting-wire-a-real-receiver.md lesson (a
   # receiver with no real transport is indistinguishable from no alerting at all).
+  #
+  # AM_ALERT_WEBHOOK_URL: set to a SEPARATE ntfy.sh secret topic from the engineering
+  # ALERT_WEBHOOK_URL above — e.g. https://ntfy.sh/<a-different-hard-to-guess-topic>. Reusing the
+  # SAME topic as ALERT_WEBHOOK_URL would merge the two audiences back into one firehose with
+  # different labels, defeating the entire point of this receiver split (2026-09-01 review). No
+  # new vendor needed: this is the identical mechanism ALERT_WEBHOOK_URL already uses, just a
+  # second, independent subscription that account managers install the ntfy app / open the topic
+  # URL for. The self-hosted `ntfy` container in this compose project (used by page-all's
+  # hardcoded `http://ntfy/gaiada-alerts` leg) is NOT an option here — it publishes no host port
+  # and is unreachable from outside the compose network, so nobody could ever subscribe to it.
+  # AM_ALERT_EMAIL_TO is real but currently lands nowhere until the SMTP no-op above (global
+  # block comment) is resolved with a working relay — do not treat it as a working leg on its own.
   - name: account-managers
     webhook_configs:
       - url: "${AM_ALERT_WEBHOOK_URL}"
