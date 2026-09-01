@@ -36,6 +36,8 @@ export interface PortfolioSite {
   adoption: string;
   repoUrl: string | null;
   repoBranch: string | null;
+  /** Free-text, e.g. a staging site's likely target domain when the host name encodes it. */
+  notes?: string | null;
   contractVersion: string | null;
   origin: string;
   lastSeenAt: string | null;
@@ -80,6 +82,47 @@ export const HOST_KIND_COPY: Record<string, string> = {
   external: "External",
   unknown: "Unknown",
 };
+
+/** A short, on-point name for the SERVER a site sits on, keyed on `host_ref` (which identifies the
+ *  actual box) rather than `host_kind` (which only says "shared hosting" for four different boxes).
+ *  The portfolio groups by this, so it is where "which server is this from" is answered — helios vs
+ *  delphi vs the shared WP box vs a client's own cPanel. Unknown refs fall back to a tidied form of
+ *  the raw value rather than a schema slug. */
+export const SERVER_COPY: Record<string, { label: string; kind: string }> = {
+  helios:                     { label: "Helios", kind: "Our server · production" },
+  delphi:                     { label: "Delphi", kind: "Our server · staging" },
+  "gda-ce01":                 { label: "GDA-CE01", kind: "Our server" },
+  "gda-aicenter":             { label: "GDA-AICenter", kind: "Our server · ERP" },
+  "hstgr-shared-gda-staging": { label: "Shared WP (GDA-Staging)", kind: "Hostinger shared" },
+  "hstgr-vps-srv599617":      { label: "Hostinger VPS", kind: "cPanel/WHM" },
+  hostinger:                  { label: "Hostinger", kind: "Shared" },
+  "hostinger-cdn":            { label: "Hostinger CDN", kind: "Shared / CDN" },
+  "hostyourservices-syd5":    { label: "HostYourServices", kind: "Client cPanel" },
+  godaddy:                    { label: "GoDaddy", kind: "Client-owned" },
+};
+
+/** The server a site belongs to, as a stable grouping key + display pair. Sites with no host_ref
+ *  collapse into one honest "Unrecorded host" bucket rather than scattering. */
+export function serverOf(site: PortfolioSite): { key: string; label: string; kind: string } {
+  const ref = site.hostRef;
+  if (!ref) return { key: "~unknown", label: "Unrecorded host", kind: HOST_KIND_COPY[site.hostKind] ?? site.hostKind };
+  const copy = SERVER_COPY[ref];
+  if (copy) return { key: ref, label: copy.label, kind: copy.kind };
+  // Unknown ref: tidy it (an IP or a raw slug) instead of showing a schema value.
+  return { key: ref, label: ref, kind: HOST_KIND_COPY[site.hostKind] ?? site.hostKind };
+}
+
+/** Every site in the result, flattened, each carrying its project/client label so a server-grouped
+ *  or searched view keeps the "whose is this" answer the project grouping used to give. */
+export interface FlatSite extends PortfolioSite {
+  clientName: string | null;
+  projectName: string | null;
+}
+export function flattenSites(data: PortfolioResult): FlatSite[] {
+  return data.projects.flatMap((p) =>
+    p.environments.map((s) => ({ ...s, clientName: p.clientName, projectName: p.projectName })),
+  );
+}
 
 export const ADOPTION_COPY: Record<string, string> = {
   tracked: "Tracked only",

@@ -26,6 +26,8 @@ export interface PortfolioSite {
   adoption: string;
   repoUrl: string | null;
   repoBranch: string | null;
+  /** Free text; for a machine-named staging host it records the likely target domain. */
+  notes: string | null;
   contractVersion: string | null;
   origin: string;
   lastSeenAt: string | null;
@@ -72,7 +74,7 @@ export interface PortfolioResult {
  */
 const PORTFOLIO_SQL = `
   SELECT s.id, s.domain, s.environment, s.host_kind, s.host_ref, s.access, s.kind, s.adoption,
-         s.repo_url, s.repo_branch, s.contract_version, s.origin, s.last_seen_at, s.last_http_status,
+         s.repo_url, s.repo_branch, s.contract_version, s.origin, s.last_seen_at, s.last_http_status, s.notes,
          s.project_id, s.client_id,
          pr.name  AS project_name,
          cl.name  AS client_name,
@@ -94,6 +96,7 @@ interface Row {
   id: string; domain: string; environment: SiteEnvironment; host_kind: string; host_ref: string | null;
   access: string; kind: string | null; adoption: string; repo_url: string | null; repo_branch: string | null;
   contract_version: string | null; origin: string; last_seen_at: Date | null; last_http_status: number | null;
+  notes: string | null;
   project_id: string | null; client_id: string | null; project_name: string | null; client_name: string | null;
   hosting_provider: string | null; control_panel: string | null; stack: string | null;
   topology_checked_at: Date | null; crawl_consent: boolean;
@@ -112,6 +115,7 @@ function toSite(r: Row): PortfolioSite {
     repoUrl: r.repo_url,
     repoBranch: r.repo_branch,
     contractVersion: r.contract_version,
+    notes: r.notes,
     origin: r.origin,
     lastSeenAt: r.last_seen_at ? r.last_seen_at.toISOString() : null,
     lastHttpStatus: r.last_http_status,
