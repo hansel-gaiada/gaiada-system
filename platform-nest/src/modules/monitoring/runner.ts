@@ -365,7 +365,17 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
     if (!(await isModuleEnabled(row.id, "monitoring"))) continue;
 
     // One tenant per transaction: never spans roots, and one tenant's failure does not abort the rest.
-    await withTenants([row.id], sweepTenant, { modules: ["monitoring"] });
+    //
+    // ── "search" IS LOAD-BEARING HERE, NOT DECORATION ──────────────────────────────────────────
+    // The sweep's DUE_SELECT builds each monitor's SSRF allowlist from `search_properties`, a table
+    // owned by the SEARCH module: its RLS is `tenant_id = ANY(app_current_tenants()) AND
+    // app_module_allowed('search')`. Declaring only `monitoring` leaves `app.scopes` without
+    // `search`, so `app_module_allowed('search')` is false, the allowlist subquery returns ZERO
+    // rows for EVERY monitor, and every probe is refused with "host is not allowlisted" — i.e.
+    // monitoring silently reports the whole estate DOWN while nothing is actually wrong. This is the
+    // same fail-closed module-gate trap the header calls out for `monitoring` itself; the allowlist
+    // read just happens to cross into a second module, so BOTH scopes must be declared.
+    await withTenants([row.id], sweepTenant, { modules: ["monitoring", "search"] });
   }
 
   return out;
