@@ -78,13 +78,22 @@ failure appears at handshake time as an opaque TLS error.
 
 | Recipient | Gets | Never gets |
 |---|---|---|
-| **Zone B (WebDesk)** | `ca-cert.pem` **only**, as `WEBDESK_CONTROL_MTLS_CA_PEM` in `webdesk/.env.control` (0600, gitignored) | the CA key; any client key |
+| **Zone B (WebDesk)** | `ca-cert.pem` **only**, as a FILE at `/etc/webdesk/certs/ca-cert.pem` (0700 dir, `webdesk-svc`-owned on aicenter), pointed to by `WEBDESK_CONTROL_MTLS_CA_FILE` | the CA key; any client key |
 | **platform-nest (Zone A)** | its own `platform-nest-webdesk.crt` + `.key` | the CA key |
 | **git, chat, logs, this repo** | nothing | everything above |
 
+**Fixed 2026-09-01** — this used to say "as `WEBDESK_CONTROL_MTLS_CA_PEM` in `webdesk/.env.control`".
+That transport crash-looped `webdesk-api` in production: the CA is an inherently multi-line PEM,
+and `docker compose`'s `env_file` parser mangles a quoted multi-line value DIFFERENTLY across
+compose versions (one host got an empty string, another a truncated first-line-only value that
+looked "set" but was never usable). A file mount is the CA's natural transport and removes this
+bug class permanently — copy `ca-cert.pem` to the path above instead of pasting it into
+`.env.control`. `WEBDESK_CONTROL_MTLS_CA_PEM` still exists as an inline fallback, shape-validated
+at boot the same as the file, but the file is what production actually uses now.
+
 Zone B currently pins a **placeholder CA whose private key was generated and destroyed at creation**
 — no certificate can ever be issued against it, so the channel is fail-closed by construction.
-Swapping that one PEM for the real `ca-cert.pem` is the entire cutover; nothing else changes.
+Swapping that one file for the real `ca-cert.pem` is the entire cutover; nothing else changes.
 
 After swapping, restart only the api service and confirm it boots:
 

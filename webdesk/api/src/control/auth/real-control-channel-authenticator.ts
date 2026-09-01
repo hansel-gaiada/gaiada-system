@@ -15,6 +15,8 @@
 // token is refused without any TLS material being re-examined at Layer 2. Each layer's refusal
 // reason names ONLY that layer, never leaks into the other.
 import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { readFileSync } from "node:fs";
+import { X509Certificate } from "node:crypto";
 import type { ControlChannelAuthenticator } from "./control-channel-authenticator";
 import type { ControlRequest, ControlContext } from "./control-request";
 import type { ControlPrincipal } from "./control-principal";
@@ -30,6 +32,90 @@ function requireEnv(name: string, devFallback: string): string {
   if (v && v.length > 0) return v;
   if (process.env.NODE_ENV === "production") {
     throw new Error(`[webdesk:api] ${name} is not set — refusing to boot the real control-channel authenticator in production.`);
+  }
+  return devFallback;
+}
+
+const PEM_BEGIN_MARKER = "-----BEGIN CERTIFICATE-----";
+const PEM_END_MARKER = "-----END CERTIFICATE-----";
+
+/**
+ * Fixed the hard way (2026-09-01, 337+ restarts on `gda-aicenter`): the pinned CA is an
+ * inherently multi-line PEM, and `docker compose`'s `env_file` parser handles that
+ * inconsistently ACROSS COMPOSE VERSIONS — the sumopod box (compose 5.1.3) truncated it to just
+ * the 27-char BEGIN line, aicenter (compose 5.3.1) truncated it to an empty string. Neither host
+ * has ever had a usable CA over that transport; sumopod merely passed the old shallow
+ * "is this non-empty" check by accident, which is exactly what hid the bug for weeks. A PEM's
+ * natural transport is a FILE, so that footgun is now structurally impossible: the file is read
+ * and shape-validated (BEGIN/END markers present, parses as a real X.509 cert) at boot, and only
+ * a fully-formed CA is ever handed to `mtls-verifier.ts`.
+ *
+ * `WEBDESK_CONTROL_MTLS_CA_PEM` (the inline env var) is kept ONLY as a fallback for
+ * environments that genuinely cannot mount a file (used directly by
+ * control-auth-layers.spec.ts's fixtures, for instance) — `WEBDESK_CONTROL_MTLS_CA_FILE` wins
+ * whenever both are set. Either source is shape-validated identically: a value that is merely
+ * non-empty but does not contain a complete PEM (the exact class of bug this fixes) is REJECTED
+ * LOUDLY rather than silently accepted, in production or not — a truncated CA must never look
+ * like a working one.
+ */
+function validateCaPemShape(pem: string, source: string): void {
+  const missing: string[] = [];
+  if (!pem.includes(PEM_BEGIN_MARKER)) missing.push("BEGIN CERTIFICATE");
+  if (!pem.includes(PEM_END_MARKER)) missing.push("END CERTIFICATE");
+  if (missing.length > 0) {
+    throw new Error(
+      `[webdesk:api] control-channel CA from ${source} is not a complete PEM certificate ` +
+        `(missing ${missing.join(" and ")} marker${missing.length > 1 ? "s" : ""} — got ${pem.length} ` +
+        `character${pem.length === 1 ? "" : "s"}) — refusing to boot the real control-channel authenticator.`,
+    );
+  }
+  try {
+    // eslint-disable-next-line no-new -- only used for its parse-or-throw side effect here.
+    new X509Certificate(pem);
+  } catch (err) {
+    throw new Error(
+      `[webdesk:api] control-channel CA from ${source} has BEGIN/END markers but does not parse as ` +
+        `an X.509 certificate (${(err as Error).message}) — refusing to boot the real control-channel ` +
+        `authenticator.`,
+    );
+  }
+}
+
+/**
+ * Loads the pinned synccert CA. `WEBDESK_CONTROL_MTLS_CA_FILE` (a path, mounted read-only into
+ * the container — see docker-compose.aicenter.yml / docker-compose.sumopod.yml) wins when set;
+ * `WEBDESK_CONTROL_MTLS_CA_PEM` (inline) is a fallback. Both are shape-validated the same way, so
+ * a truncated value can never pass as a working CA regardless of which source it came from — see
+ * this function's own header comment for the incident that made that validation necessary.
+ */
+export function loadPinnedCaPem(devFallback: string): string {
+  const filePath = process.env.WEBDESK_CONTROL_MTLS_CA_FILE;
+  if (filePath && filePath.length > 0) {
+    let contents: string;
+    try {
+      contents = readFileSync(filePath, "utf8");
+    } catch (err) {
+      throw new Error(
+        `[webdesk:api] WEBDESK_CONTROL_MTLS_CA_FILE is set to '${filePath}' but that file could not be ` +
+          `read (${(err as Error).message}) — refusing to boot the real control-channel authenticator.`,
+      );
+    }
+    validateCaPemShape(contents, `WEBDESK_CONTROL_MTLS_CA_FILE ('${filePath}')`);
+    return contents;
+  }
+
+  const inlinePem = process.env.WEBDESK_CONTROL_MTLS_CA_PEM;
+  if (inlinePem && inlinePem.length > 0) {
+    validateCaPemShape(inlinePem, "WEBDESK_CONTROL_MTLS_CA_PEM (inline env var — prefer WEBDESK_CONTROL_MTLS_CA_FILE)");
+    return inlinePem;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "[webdesk:api] neither WEBDESK_CONTROL_MTLS_CA_FILE nor WEBDESK_CONTROL_MTLS_CA_PEM is set — " +
+        "refusing to boot the real control-channel authenticator in production. Mount the pinned CA " +
+        "and point WEBDESK_CONTROL_MTLS_CA_FILE at it (see webdesk/.env.example).",
+    );
   }
   return devFallback;
 }
@@ -58,8 +144,7 @@ function extractApprovalIdUnverified(header: string | undefined): string | null 
 
 @Injectable()
 export class RealControlChannelAuthenticator implements ControlChannelAuthenticator {
-  private readonly pinnedCaPem = requireEnv(
-    "WEBDESK_CONTROL_MTLS_CA_PEM",
+  private readonly pinnedCaPem = loadPinnedCaPem(
     "-----BEGIN CERTIFICATE-----\nMISSING-DEV-CA-PLACEHOLDER\n-----END CERTIFICATE-----",
   );
   private readonly allowedCommonNames = requireEnv("WEBDESK_CONTROL_MTLS_ALLOWED_CN", "platform-nest-webdesk")

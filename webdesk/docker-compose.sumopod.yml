@@ -142,6 +142,23 @@ services:
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
       # Also absent from the base file's api block, also `requireInProd`:
       API_KEY_PEPPER: ${API_KEY_PEPPER}
+      # Control-channel CA (WSK-22), fixed 2026-09-01 — see the corrected reasoning below and
+      # real-control-channel-authenticator.ts's header comment for the full incident. This box's
+      # OWN measured failure mode was `env_file` truncating the quoted multi-line PEM to just its
+      # 27-char BEGIN line (compose 5.1.3) — non-empty, so it passed the OLD "is this non-empty"
+      # check by accident and was NEVER actually a usable CA here either (this file's superseded
+      # comment below, kept only as the historical record of what was believed at the time, was
+      # wrong about the stack "working": it worked only because the check was too shallow to
+      # notice). A literal path here (not `${VAR}` interpolation) is immune to env_file/interpolation
+      # truncation by construction, same fix as the aicenter overlay, so the two hosts do not
+      # diverge again.
+      WEBDESK_CONTROL_MTLS_CA_FILE: /etc/webdesk/certs/ca-cert.pem
+    # Historical note (superseded 2026-09-01, kept for context — see the env var comment above for
+    # the actual current fix): the paragraph below is what this overlay believed on 2026-08-29.
+    # It was half right (env_file IS a poor transport for a multi-line PEM) and half wrong (it is
+    # NOT true that "the stack worked" — the CA arriving as a 27-character truncation was never a
+    # usable pinned CA, it just passed a check that was too shallow to catch it).
+    #
     # Control-channel trust material (WSK-22) lives in its OWN env file, not in `.env`.
     #
     # WHY THE SPLIT — a footgun found the hard way on 2026-08-29: the CA is a multi-line PEM, and
@@ -155,8 +172,17 @@ services:
     # so no client certificate can ever be issued against it: the control channel is fail-closed
     # BY CONSTRUCTION rather than by configuration, until synccert issues real material. Swapping
     # that one PEM is the entire migration path.
+    #
+    # `.env.control` still holds everything else control-channel (single-line secrets: allowed CN,
+    # OIDC issuer/audience/JWKS URI, WEBDESK_EVENT_SECRET, WEBDESK_APPROVAL_ASSERTION_KEY) — only
+    # the CA itself moved to a file mount.
     env_file:
       - .env.control
+    volumes:
+      # Read-only bind mount of the pinned synccert CA public cert. See
+      # ../infra/runbooks/webdesk-zoneb-box-hardening.md §5 for how it's issued and placed; never
+      # bind-mount the CA *key* — this box, like aicenter, only ever holds the CA's public cert.
+      - /etc/webdesk/certs/ca-cert.pem:/etc/webdesk/certs/ca-cert.pem:ro
     deploy:
       resources:
         limits: { cpus: "1.00", memory: 768M }

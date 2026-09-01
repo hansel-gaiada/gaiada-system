@@ -145,13 +145,28 @@ services:
       WEBDESK_MEDIA_PRESIGN_TTL_SECONDS: ${WEBDESK_MEDIA_PRESIGN_TTL_SECONDS:-900}
       WEBDESK_TENANT_STORAGE_QUOTA_BYTES: ${WEBDESK_TENANT_STORAGE_QUOTA_BYTES:-10737418240}
       API_KEY_PEPPER: ${API_KEY_PEPPER}
-    # Control-channel trust material (WSK-22) — own env file, NOT `.env` (multi-line PEM; see the
-    # sumopod overlay's comment on the same line, unchanged reasoning). On THIS box the file is
-    # `/etc/webdesk/.env.control`, owned by the dedicated `webdesk-svc` unix user, mode 0600 — see
-    # the runbook's filesystem/secrets section. Never root:root, never world-readable, never in
-    # the release image.
+      # Control-channel CA (WSK-22), fixed 2026-09-01 after a 337+-restart crash loop: `env_file`
+      # on a quoted multi-line PEM is what broke, on THIS box specifically to an empty string (see
+      # real-control-channel-authenticator.ts's header comment for the full incident and why the
+      # old sumopod value was never usable either). A file mount is immune to that class of bug by
+      # construction — a literal path here, not `${VAR}` interpolation, so it can never silently
+      # resolve empty the way the old inline var did. Reuses the SAME host path the control
+      # vhost's own Caddy `trusted_ca_cert_file` already expects (see
+      # ../infra/runbooks/webdesk-zoneb-box-hardening.md §5) — one file, one source of truth.
+      WEBDESK_CONTROL_MTLS_CA_FILE: /etc/webdesk/certs/ca-cert.pem
+    # Everything else control-channel (WSK-22) still comes from its own env file, NOT `.env`
+    # (single-line secrets only now — the CA left this file on purpose, see above). On THIS box
+    # the file is `/etc/webdesk/.env.control`, owned by the dedicated `webdesk-svc` unix user,
+    # mode 0600 — see the runbook's filesystem/secrets section. Never root:root, never
+    # world-readable, never in the release image.
     env_file:
       - .env.control
+    volumes:
+      # Read-only bind mount of the pinned synccert CA public cert. Host path is
+      # `/etc/webdesk/certs/ca-cert.pem` (0700 `/etc/webdesk`, owned `webdesk-svc` on this box) —
+      # see webdesk/README.md's WSK-22 operator steps for how it gets there. Never bind-mount the
+      # CA *key* material; Zone B only ever holds the CA's public certificate (design §03).
+      - /etc/webdesk/certs/ca-cert.pem:/etc/webdesk/certs/ca-cert.pem:ro
     security_opt:
       - no-new-privileges:true
     read_only: true
