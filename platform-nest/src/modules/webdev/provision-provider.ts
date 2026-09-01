@@ -49,10 +49,18 @@ export type CreateProjectResult =
   | { outcome: "conflict"; existing: ProvisionProject | null }
   | { outcome: "rejected"; status: number; reason: string };
 
+/** WSK-D28 / §08's canonical framework vocabulary. `astro`/`node` are aliases the ERP now accepts
+ *  and stores (see `webdev_provisioned_sites.framework`'s widened CHECK) for what the `provision`
+ *  driver already builds as `vite`/`nextjs` respectively — the driver is what translates the alias
+ *  to provision's own wire vocabulary (`provision-http.ts`'s `PROVISION_WIRE_FRAMEWORK`), never
+ *  this interface or the service layer, so a future `WebdeskProvider` (D-P2) that receives `wp`
+ *  directly needs no change here. */
+export type CanonicalFramework = "vite" | "nextjs" | "astro" | "node" | "wp";
+
 export interface CreateProjectInput {
   /** The validated slug (`PROVISION_SLUG_RE`) — becomes the repo name AND the public hostname. */
   name: string;
-  framework: "vite" | "nextjs";
+  framework: CanonicalFramework;
   /** Attribution inside provision's own UI. A DISPLAY NAME only — never an ERP id, never a tenant
    *  id, never a run id (design §04: "provision stores no ERP identifiers"; correlation is
    *  Zone-A-side only, via `provider_ref`). */

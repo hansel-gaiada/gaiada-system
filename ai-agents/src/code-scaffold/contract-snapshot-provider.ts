@@ -42,6 +42,14 @@ export interface ContractSnapshotArtifacts {
    *  field is this ticket's own seam for that missing plumbing, same status as the two hub tools
    *  documented in hub-client.ts's header — reported as a third gap. */
   blockLibraryTarball: Buffer;
+  /** WSK-34's generated PHP SDK source (`sdk.php`, plain UTF-8 text — never a tarball, it is vendored
+   *  as a single file per `webdesk/wordpress/scaffold-template/wp-site.ts`'s `vendoredSdkPhp`).
+   *  `null` when `meta.artifacts.sdkPhp` itself is null (a tenant/contract generated before WSK-34,
+   *  or — until webdesk/api's codegen output is actually wired into a live Zone B contract read —
+   *  simply not produced yet). `undefined` only for pre-WSK-D28 fixtures that predate this field;
+   *  `scaffold.ts`'s `wp` branch must treat BOTH as "no PHP SDK available" and refuse loudly rather
+   *  than fabricate one. */
+  sdkPhpSource?: string | null;
 }
 
 export class SnapshotNotFoundError extends Error {
@@ -69,7 +77,7 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
     const rawMeta = await this.callTool("webdev.contracts.get", { tenantId, snapshotId }, this.envelope);
     const meta = JSON.parse(rawMeta) as ContractSnapshotMeta;
 
-    const [openapiB64, sdkTsB64, contractMd, blocksB64] = await Promise.all([
+    const [openapiB64, sdkTsB64, contractMd, blocksB64, sdkPhpB64] = await Promise.all([
       this.callTool("webdev.artifacts.download", { tenantId, fileId: meta.artifacts.openapi }, this.envelope),
       this.callTool("webdev.artifacts.download", { tenantId, fileId: meta.artifacts.sdkTs }, this.envelope),
       this.callTool("webdev.artifacts.downloadText", { tenantId, fileId: meta.artifacts.contractMd }, this.envelope),
@@ -78,6 +86,13 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
         { tenantId, package: meta.artifacts.blockLibrary.package, version: meta.artifacts.blockLibrary.version },
         this.envelope,
       ),
+      // WSK-D28 / §08: fetched only when the pointer actually has a `sdkPhp` key (WSK-34; `null` for
+      // any pointer written before that ticket, per `ArtifactHashManifest`'s own D-10 placeholder
+      // note) — never fabricated, never re-derived. `siteKind: "wp"` is refused loudly by
+      // `scaffold.ts` when this comes back null, rather than composing a theme with no SDK.
+      meta.artifacts.sdkPhp
+        ? this.callTool("webdev.artifacts.download", { tenantId, fileId: meta.artifacts.sdkPhp }, this.envelope)
+        : Promise.resolve(null),
     ]);
 
     return {
@@ -86,6 +101,7 @@ export class HubContractSnapshotProvider implements ContractSnapshotProvider {
       sdkTsTarball: Buffer.from(sdkTsB64, "base64"),
       contractMd,
       blockLibraryTarball: Buffer.from(blocksB64, "base64"),
+      sdkPhpSource: sdkPhpB64 ? Buffer.from(sdkPhpB64, "base64").toString("utf8") : null,
     };
   }
 }

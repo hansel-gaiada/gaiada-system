@@ -83,7 +83,7 @@ import { notify } from "../../core/http";
 import { lockPipelineRun } from "../../core/pipeline-lock";
 import { deriveRunSlug, isValidProvisionSlug } from "./slug";
 import {
-  ProvisionEgressError, type ProvisionProject, type ProvisionProvider,
+  ProvisionEgressError, type CanonicalFramework, type ProvisionProject, type ProvisionProvider,
 } from "./provision-provider";
 
 /** Advisory-lock namespace for OFF-PIPELINE provisioning (no `pipeline_run_id` to key on). 'WP'+1,
@@ -108,7 +108,7 @@ export interface SiteDto {
   provider: string;
   providerRef: string | null;
   slug: string;
-  framework: "vite" | "nextjs";
+  framework: CanonicalFramework;
   repoUrl: string | null;
   stagingUrl: string | null;
   status: SiteStatus;
@@ -131,7 +131,7 @@ interface SiteRow {
   provider: string;
   provider_ref: string | null;
   slug: string;
-  framework: "vite" | "nextjs";
+  framework: CanonicalFramework;
   repo_url: string | null;
   staging_url: string | null;
   status: SiteStatus;
@@ -175,16 +175,35 @@ const SITE_COLUMNS = `id, tenant_id, pipeline_run_id, provider, provider_ref, sl
   repo_url, staging_url, status, failure_reason, requested_by, approval_id, last_reconciled_at,
   created_at, updated_at, client_id, project_id`;
 
-// ── Framework / stack vocabulary (design D-P7) ───────────────────────────────────────────────────
-export const SUPPORTED_FRAMEWORKS = new Set(["vite", "nextjs"]);
-/** Stack tokens this seam can actually deliver. `provision` creates STATIC EXPORTS ONLY — no
- *  per-project database, no runtime, no port (`docs/architecture.md:46-48` in the provision repo).
- *  Its own PRD vocabulary nonetheless has a stack "B = WordPress+MySQL" and a stack "C = full stack"
- *  that its provisioner cannot express.
- *
- *  D-P7: those are REFUSED WITH ROUTING, never downgraded. Shipping a static brochure site against a
- *  WordPress PRD is a client-facing lie, and the refusal is the demand signal for webdesk P6. */
-const STATIC_STACKS = new Set(["a", "static", "vite", "nextjs", "next", "astro"]);
+// ── Framework / stack vocabulary (design D-P7, LIFTED by WSK-D28 / webdesk-design-v2.md §08) ──────
+// §08's ruling: "WordPress and full-stack are refused deliberately at four points... ALL FOUR MUST
+// AGREE IN THE SAME CHANGE or the console and the scaffolder disagree silently." This file is two
+// of the four (the tool's framework enum's runtime twin, and the stack hint). The other two are
+// `webdev_provisioned_sites.framework`'s CHECK (migrations/202609011230_...) and
+// `ai-agents/src/code-scaffold/scaffold.ts`'s `rejected_site_kind` branch.
+//
+// `provision` itself did not get any smarter: it still creates STATIC EXPORTS ONLY — no per-project
+// database, no runtime, no port (`docs/architecture.md:46-48` in the provision repo) — so `wp` is
+// still, HONESTLY, not deliverable through this seam today. What changed is WHERE that is decided:
+// previously the ERP pre-emptively refused the REQUEST (`unsupported_stack`) before it ever reached
+// a provider, conflating "we chose not to build this" (the old D-P7 policy, now retired) with "no
+// implementation exists yet" (a real, current capability gap). Now the request is accepted as a
+// SELECTION, and the ONLY provider that exists (`provision`, via `provision-http.ts`) answers
+// honestly and loudly (`provider_rejected`, from its own capability-boundary check — no HTTP round
+// trip, no silent downgrade to a static site) when asked for `wp`. A future `WebdeskProvider`
+// (design D-P2) is what actually lifts that answer from "no" to "yes".
+export const SUPPORTED_FRAMEWORKS = new Set(["vite", "nextjs", "astro", "node", "wp"]);
+
+/** §08's kind vocabulary (`static`/`wp`/`fullstack`) plus every alias this seam has ever accepted in
+ *  either field (provision's own PRD scheme's `a`/`b`/`c`, and bare framework names some callers put
+ *  in `stack` instead of `framework`), mapped to the canonical `framework` value it now SELECTS.
+ *  Deliberately NOT `Record<string, CanonicalFramework>` typed as exhaustive — this is a lookup
+ *  table over untrusted input, not a closed enum. */
+const STACK_TO_FRAMEWORK: Readonly<Record<string, CanonicalFramework>> = {
+  a: "astro", static: "astro", vite: "vite", astro: "astro",
+  b: "wp", wp: "wp", wordpress: "wp",
+  c: "node", fullstack: "node", "full-stack": "node", node: "node", next: "nextjs", nextjs: "nextjs",
+};
 
 export type PreconditionReason =
   | "run_not_found"
@@ -270,7 +289,10 @@ export interface ProvisionSiteArgs {
   runId: string | null;
   framework?: string;
   slug?: string;
-  /** Optional PRD stack hint. Anything non-static is refused with routing (D-P7). */
+  /** Optional PRD stack hint (§08's kind vocabulary + aliases — `STACK_TO_FRAMEWORK`). SELECTS
+   *  `framework` when `framework` was not given explicitly; a genuinely unrecognized token still
+   *  refuses loudly with `unsupported_stack` (WSK-D28 — see the comment on `SUPPORTED_FRAMEWORKS`
+   *  for why this is no longer a blanket non-static refusal). */
   stack?: string;
   requestedBy: string | null;
   /** Display name written into provision's `devName` for attribution IN PROVISION'S OWN UI. Never an
@@ -482,12 +504,19 @@ const isUniqueViolation = (err: unknown): boolean => (err as { code?: string })?
 export async function provisionSite(args: ProvisionSiteArgs): Promise<ProvisionOutcome> {
   const { tenantId, provider, runId, requestedBy, requestedByName } = args;
 
-  const framework = args.framework ?? "vite"; // OQ-P4 default: `vite` (P-7 makes nextjs the buggier target today)
-  if (!SUPPORTED_FRAMEWORKS.has(framework)) return { outcome: "invalid", reason: "unsupported_framework" };
-  // D-P7: refuse-with-routing, never downgrade.
-  if (args.stack !== undefined && !STATIC_STACKS.has(String(args.stack).trim().toLowerCase())) {
-    return { outcome: "invalid", reason: "unsupported_stack" };
+  // WSK-D28 / §08: `stack` is now the SELECTOR — it picks `framework` when the caller did not set
+  // one explicitly — rather than an independent refusal gate. An explicit `framework` always wins
+  // (unchanged priority from before this ticket). A genuinely UNRECOGNIZED `stack` token is still
+  // refused loudly with `unsupported_stack`: this never silently falls through to the "a"/static
+  // default just because the lookup missed.
+  let framework: string | undefined = args.framework;
+  if (args.stack !== undefined) {
+    const selected = STACK_TO_FRAMEWORK[String(args.stack).trim().toLowerCase()];
+    if (selected === undefined) return { outcome: "invalid", reason: "unsupported_stack" };
+    if (framework === undefined) framework = selected;
   }
+  framework = framework ?? "vite"; // OQ-P4 default: `vite` (P-7 makes nextjs the buggier target today)
+  if (!SUPPORTED_FRAMEWORKS.has(framework)) return { outcome: "invalid", reason: "unsupported_framework" };
 
   let runOwnerId: string | null = null;
   const outcome = await withTenants<ProvisionOutcome>([tenantId], async (c) => {

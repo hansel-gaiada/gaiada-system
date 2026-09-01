@@ -118,7 +118,8 @@ describe("isValidSlugInput / PROVISION_SLUG_RE — mirrors platform-nest's slug.
 describe("describeActionError", () => {
   it("prefers a known token over the status code, for both request-error and row-failure tokens", () => {
     expect(describeActionError(409, "slug_taken")).toContain("already in use");
-    expect(describeActionError(400, "unsupported_stack")).toContain("static site");
+    // WSK-D28 / §08: unsupported_stack now means "genuinely unrecognized token", not "non-static".
+    expect(describeActionError(400, "unsupported_stack")).toContain("wasn't recognized");
     expect(describeActionError(503, "egress_error")).toBe(failureCopy("egress_error").title);
   });
 

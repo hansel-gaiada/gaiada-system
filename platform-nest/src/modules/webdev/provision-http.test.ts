@@ -122,6 +122,26 @@ describe("PRV-02 — provision-http driver (real sockets vs the PRV-00 mock)", (
     expect(r.reason).toContain("framework");
   });
 
+  it("WSK-D28 / §08: translates the canonical aliases (astro/node) to provision's own wire vocabulary " +
+    "(vite/nextjs) rather than forwarding them literally", async () => {
+    const d = driverFor();
+    const astroResult = await d.createProject({ name: "canonical-astro", framework: "astro", devName: "Mo" });
+    expect(astroResult.outcome).toBe("accepted"); // a literal "astro" would 400 against the mock
+    const nodeResult = await d.createProject({ name: "canonical-node", framework: "node", devName: "Mo" });
+    expect(nodeResult.outcome).toBe("accepted"); // a literal "node" would 400 against the mock
+  });
+
+  it("WSK-D28 / §08: `wp` is refused at THIS driver's own capability boundary — honestly, and " +
+    "without ever reaching the far side over the wire (provision cannot build it, full stop)", async () => {
+    const d = driverFor();
+    const r = await d.createProject({ name: "wp-site", framework: "wp", devName: "Mo" });
+    expect(r.outcome).toBe("rejected");
+    if (r.outcome !== "rejected") return;
+    expect(r.status).toBe(422);
+    expect(r.reason).toMatch(/WordPress|webdesk provider/i);
+    expect(mock.hitCount("provision")).toBe(0);
+  });
+
   it("finds by name exactly, and returns null for a free name", async () => {
     const d = driverFor();
     await d.createProject({ name: "findable-site", framework: "nextjs", devName: "Mo" });

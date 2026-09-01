@@ -34,9 +34,24 @@
 // the 409 branch, not a retry.
 import { config } from "../../config";
 import {
-  ProvisionEgressError, ProvisionNotConfiguredError, type CreateProjectInput, type CreateProjectResult,
-  type ProvisionProject, type ProvisionProvider,
+  ProvisionEgressError, ProvisionNotConfiguredError, type CanonicalFramework, type CreateProjectInput,
+  type CreateProjectResult, type ProvisionProject, type ProvisionProvider,
 } from "./provision-provider";
+
+/** WSK-D28 / §08: the ERP's canonical framework -> provision's own wire vocabulary. `vite`/`nextjs`
+ *  map to themselves (no-op, the two values provision has always understood); `astro`/`node` are
+ *  the §08 aliases for the exact same templates. `wp` is handled by an explicit check in
+ *  `createProject` below, never by this map — it is the one canonical value with NO wire
+ *  equivalent, by design, not an oversight. Anything else (a value outside the canonical contract
+ *  entirely, reachable only by bypassing the type system) falls through unmapped and is forwarded
+ *  to provision UNCHANGED, exactly as before this ticket: this driver does not second-guess a token
+ *  it does not recognize as its own vocabulary, and lets the real far side's own validation answer. */
+const PROVISION_WIRE_FRAMEWORK: Partial<Record<CanonicalFramework, "vite" | "nextjs">> = {
+  vite: "vite",
+  astro: "vite",
+  nextjs: "nextjs",
+  node: "nextjs",
+};
 
 type FetchImpl = typeof fetch;
 
@@ -258,10 +273,41 @@ export class ProvisionHttpDriver implements ProvisionProvider {
   }
 
   async createProject(input: CreateProjectInput): Promise<CreateProjectResult> {
+    // WSK-D28 / §08: `input.framework` is the ERP's CANONICAL vocabulary (vite/nextjs/astro/node/
+    // wp — see provision-provider.ts). `provision` itself only ever understood two literal wire
+    // tokens (its own `/api/provision` validates `framework IN ('vite','nextjs')`, unchanged by
+    // this ticket — it is a real, external tool the ERP does not own). `astro`/`node` are pure
+    // aliases for what provision already builds as `vite`/`nextjs` (§08's table: "works today as
+    // vite/astro" / "works today as nextjs/node"), so they translate here, at the driver boundary,
+    // never upstream in the service layer.
+    if (input.framework === "wp") {
+      // provision is a static-export-only tool (no per-project database, no runtime, no port —
+      // docs/architecture.md in the provision repo) and has no wire token for this at all. This is
+      // a REAL capability boundary, not a policy refusal the ERP invented — so it is answered
+      // honestly, at this layer, without ever making the HTTP call (no point spending a
+      // credentialed round trip on a request this driver already knows cannot succeed). §08's "the
+      // stack hint stops being a refusal and becomes the selector" is satisfied one level up (the
+      // service no longer pre-emptively blocks a `wp` request before it reaches a provider) — this
+      // is the honest answer once it DOES reach the only provider that exists today.
+      return {
+        outcome: "rejected",
+        status: 422,
+        reason:
+          "provision cannot deliver a WordPress site (static-export-only tool, no per-project "
+          + "database or runtime) — this seam has no webdesk provider yet (design D-P2); provision "
+          + "the repo/theme via the WebDesk WordPress path instead.",
+      };
+    }
+    // Any OTHER canonical value translates to provision's own wire vocabulary (astro->vite,
+    // node->nextjs, vite/nextjs unchanged); anything outside the canonical contract at all falls
+    // through unmapped and is forwarded verbatim, unchanged from this driver's pre-WSK-D28
+    // behavior — provision's own `/api/provision` validation is the backstop for a token this
+    // driver does not recognize as its own vocabulary.
+    const wireFramework = PROVISION_WIRE_FRAMEWORK[input.framework] ?? input.framework;
     const { status, body } = await this.#authed("POST", "/api/provision", {
       devName: input.devName,
       name: input.name,
-      framework: input.framework,
+      framework: wireFramework,
     });
 
     if (status === 409) {

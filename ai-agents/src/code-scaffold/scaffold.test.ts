@@ -64,18 +64,18 @@ afterEach(async () => {
   for (const d of cleanupDirs.splice(0)) await rm(d, { recursive: true, force: true });
 });
 
-describe("runCodeScaffold — siteKind gating (§06: astro + node only, wp is P6/WSK-35)", () => {
-  it("refuses wp before fetching anything (never touches the network for a job it will reject)", async () => {
+describe("runCodeScaffold — siteKind gating (WSK-D28 / webdesk-design-v2.md §08: astro/node/wp, wp wired)", () => {
+  it("refuses a genuinely unknown siteKind before fetching anything", async () => {
     let called = false;
     const snapshotProvider = { getSnapshotArtifacts: async () => { called = true; return fixtureSnapshot(); } };
-    const result = await runCodeScaffold(baseEnvelope({ siteKind: "wp" }), {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind: "php-legacy" as never }), {
       tenantId: "t1",
       snapshotProvider,
       artifactFetcher: fixtureFetcher(),
       pushTarget: { mode: "dry_run" },
     });
     expect(result.outcome).toBe("rejected_site_kind");
-    expect(result.content).toMatch(/P6|WSK-35/);
+    expect(result.content).toMatch(/unknown siteKind/);
     expect(called).toBe(false);
   });
 
@@ -90,6 +90,49 @@ describe("runCodeScaffold — siteKind gating (§06: astro + node only, wp is P6
       expect(result.outcome).toBe("dry_run");
       if (result.pushedTo) cleanupDirs.push(result.pushedTo);
     }
+  });
+
+  it("wp refuses loudly (never fabricates a theme) when the snapshot has no PHP SDK pinned", async () => {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind: "wp" }), {
+      tenantId: "t1",
+      // fixtureSnapshot()'s default has `artifacts.sdkPhp: null` and no `sdkPhpSource` — the
+      // pre-WSK-34 / not-yet-generated case this branch must catch rather than compose around.
+      snapshotProvider: FakeContractSnapshotProvider.withOne(fixtureSnapshot()),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    expect(result.outcome).toBe("rejected_site_kind");
+    expect(result.content).toMatch(/PHP SDK|WSK-34/);
+  });
+
+  it("wp composes the vendored PHP SDK theme and pushes when the snapshot has one pinned", async () => {
+    const result = await runCodeScaffold(baseEnvelope({ siteKind: "wp" }), {
+      tenantId: "t1",
+      snapshotProvider: FakeContractSnapshotProvider.withOne({
+        ...fixtureSnapshot(),
+        sdkPhpSource: "<?php // fake generated sdk.php\n",
+      }),
+      artifactFetcher: fixtureFetcher(),
+      pushTarget: { mode: "dry_run" },
+    });
+    if (result.pushedTo) cleanupDirs.push(result.pushedTo);
+
+    expect(result.outcome).toBe("dry_run");
+    expect(result.files).toContain("style.css");
+    expect(result.files).toContain("vendor/gaiada-sdk/sdk.php");
+    expect(result.files).toContain("functions.php");
+    expect(result.files).toContain("page.php");
+    expect(result.files).toContain("CONTRACT.lock");
+    // wp is not built from page-composer (a different, PHP-templated content model) — it must
+    // never carry astro/node-only artifacts.
+    expect(result.files).not.toContain("src/lib/webdesk-sdk.ts");
+    expect(result.contractLock).toEqual({
+      snapshotId: "snap-1",
+      contractVersion: "1.4.0",
+      vocabularyVersion: "1.2.0",
+      contentHash: "sha256:abc",
+      blockLibraryVersion: "1.3.2",
+    });
   });
 });
 

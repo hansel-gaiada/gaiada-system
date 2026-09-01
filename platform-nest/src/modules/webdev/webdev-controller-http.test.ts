@@ -195,12 +195,28 @@ describe.skipIf(!TEST_URL)("PRV-05 — webdev.controller HTTP error-contract pin
   });
 
   it("400 invalid (unsupported_stack): the TOKEN arrives verbatim (not \"Bad Request Exception\"), no `site`", async () => {
-    const { r } = await createRunViaHttp("Http Pin Unsupported Stack", { stack: "wordpress" });
+    // WSK-D28 / §08: "wordpress" is now a RECOGNIZED alias (it selects framework `wp`) — this pin
+    // uses a genuinely unrecognized token instead, so it keeps testing the same refusal path.
+    const { r } = await createRunViaHttp("Http Pin Unsupported Stack", { stack: "quantum-blockchain-stack" });
     expect(r.statusCode).toBe(400);
     const body = r.json();
     expect(body.error).toBe("unsupported_stack");
     expect(body.error).not.toMatch(/exception/i);
     expect(body.site).toBeUndefined();
+  });
+
+  it("503 provider_rejected (wp via the `stack` selector): WSK-D28 / §08 — no longer a 400 " +
+    "`unsupported_stack`; the request reaches the (only) real provider, and ITS capability boundary " +
+    "is what refuses it, over real HTTP through the real ProvisionHttpDriver + mock", async () => {
+    const { r } = await createRunViaHttp("Http Pin Wp Stack", { stack: "wordpress" });
+    expect(r.statusCode).toBe(503);
+    const body = r.json();
+    expect(body.error).toBe("provider_rejected");
+    expect(body.error).not.toMatch(/exception/i);
+    expect(body.site).toBeTypeOf("object");
+    expect(body.site.status).toBe("failed");
+    expect(body.site.failureReason).toBe("provider_rejected");
+    expect(body.site.framework).toBe("wp");
   });
 
   it("400 precondition_failed (run_blocked): the TOKEN arrives verbatim, no `site`", async () => {

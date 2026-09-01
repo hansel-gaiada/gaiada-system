@@ -41,6 +41,9 @@ export const webdevModule: ModuleContract = {
     // WSK-19 (additive): the rail's Zone A end — the contract-snapshot mirror table + its IAM.
     "202608271500_webdev_contract_snapshots.sql",
     "202608271510_iam_webdev_contract_snapshot_permissions.sql",
+    // WSK-D28 / §08 (additive): widens the framework CHECK to admit the canonical kind vocabulary
+    // (astro/node/wp) alongside the original vite/nextjs — one quarter of the four-point refusal lift.
+    "202609011230_webdev_provisioned_sites_framework_widen.sql",
   ],
   // IAM-01d migration: all 3 CLEAN (renamed) — the catalog's kind is `webdev_provisioned_site`
   // (singular resource, per N1), so the dotted key is `webdev.provisioned_site.*`.
@@ -95,7 +98,17 @@ export const webdevModule: ModuleContract = {
         properties: {
           tenantId: { type: "string", description: "Company id (route scope)." },
           runId: { type: "string", description: "Pipeline run this site belongs to." },
-          framework: { type: "string", enum: ["vite", "nextjs"], description: "Static site framework. Default vite." },
+          framework: {
+            type: "string",
+            enum: ["vite", "nextjs", "astro", "node", "wp"],
+            description:
+              "Site framework. `vite`/`astro` deliver the `static` kind, `nextjs`/`node` deliver "
+              + "`fullstack` (astro/node are the canonical §08 aliases for the same templates vite/"
+              + "nextjs already build). `wp` is the canonical WordPress kind — accepted here, but the "
+              + "`provision` driver cannot build it yet (static-export-only tool) and rejects it "
+              + "loudly as `provider_rejected`; a future webdesk provider (D-P2) is what actually "
+              + "delivers it. Default vite.",
+          },
           slug: {
             type: "string",
             description:
@@ -106,8 +119,11 @@ export const webdevModule: ModuleContract = {
           stack: {
             type: "string",
             description:
-              "Optional PRD stack hint. Anything beyond a static export (e.g. WordPress, full-stack) "
-              + "is REFUSED with unsupported_stack — never silently downgraded to a static site.",
+              "Optional PRD stack hint, mapped to the §08 kind vocabulary (static/wp/fullstack) and "
+              + "the canonical aliases (a/static/vite/astro, b/wp/wordpress, c/fullstack/node/next/"
+              + "nextjs). SELECTS `framework` when `framework` was not given explicitly (WSK-D28: "
+              + "'stops being a refusal and becomes the selector'). A genuinely UNRECOGNIZED token is "
+              + "still refused loudly with `unsupported_stack` — never silently defaulted to static.",
           },
         },
         required: ["tenantId", "runId"],

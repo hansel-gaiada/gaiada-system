@@ -577,12 +577,42 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
 
   // ══ 7. Refusals that must never reach the far side ════════════════════════════════════════════
 
-  it("refuses a non-static stack with routing rather than downgrading it to a static site", async () => {
-    const runId = await makeRun({ title: "Wordpress Ask Site", prdSigned: true });
-    const r = await provisionSite(base(runId, { stack: "wordpress" }));
+  it("still refuses a genuinely unrecognized stack token, loudly, never defaulting to static (WSK-D28)", async () => {
+    const runId = await makeRun({ title: "Gibberish Stack Site", prdSigned: true });
+    const r = await provisionSite(base(runId, { stack: "quantum-blockchain-stack" }));
     expect(r).toEqual({ outcome: "invalid", reason: "unsupported_stack" });
     expect(mock.hitCount("provision")).toBe(0);
     expect(await storedSitesForRun(runId)).toHaveLength(0);
+  });
+
+  it("WSK-D28 / §08: a wp-shaped stack hint SELECTS framework `wp` instead of being blanket-refused — " +
+    "and provision's own capability boundary (not a pre-emptive ERP guess) is what refuses it, honestly " +
+    "and without ever reaching the far side over the wire", async () => {
+    const runId = await makeRun({ title: "Wordpress Ask Site", prdSigned: true });
+    const r = await provisionSite(base(runId, { stack: "wordpress" }));
+    expect(r.outcome).toBe("provider_rejected");
+    if (r.outcome !== "provider_rejected") return;
+    expect(r.reason).toMatch(/WordPress|webdesk provider/i);
+    // The driver's own capability check short-circuits BEFORE any HTTP call — provision genuinely
+    // cannot build this, so no credentialed round trip is spent proving it.
+    expect(mock.hitCount("provision")).toBe(0);
+    const row = await storedSite(r.site.id);
+    expect(row!.framework).toBe("wp");
+    expect(row!.status).toBe("failed");
+    expect(row!.failure_reason).toBe("provider_rejected");
+  });
+
+  it("WSK-D28 / §08: a fullstack-shaped stack hint SELECTS framework `node` and genuinely provisions " +
+    "(never regresses the already-working case) — the mock's own hard `vite|nextjs` validation is " +
+    "what proves the driver translated `node` to the wire token `nextjs` rather than forwarding the " +
+    "alias literally (a literal `node` would 400 here, same as `wordpress` does above)", async () => {
+    const runId = await makeRun({ title: "Fullstack Ask Site", prdSigned: true });
+    const r = await provisionSite(base(runId, { stack: "fullstack" }));
+    expect(r.outcome).toBe("created");
+    if (r.outcome !== "created") return;
+    expect(mock.hitCount("provision")).toBe(1);
+    const row = await storedSite(r.site.id);
+    expect(row!.framework).toBe("node");
   });
 
   it("refuses an unsupported framework and an unusable slug before egress", async () => {

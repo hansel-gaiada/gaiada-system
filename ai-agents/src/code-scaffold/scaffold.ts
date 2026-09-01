@@ -13,6 +13,7 @@ import { generateSdkClientModule } from "./sdk-client-template";
 import { gitignore, envExample, readme, tsconfig, packageJson } from "./templates/common";
 import { astroConfig as astroConfigAstro } from "./templates/astro-site";
 import { astroConfig as astroConfigNode } from "./templates/node-site";
+import { wpSiteFiles } from "./templates/wp-site";
 import { writeAndPush, vendorFiles, type PushTarget } from "./git-writer";
 
 export interface ScaffoldDeps {
@@ -27,16 +28,12 @@ function rejectedResult(message: string): ScaffoldResult {
 }
 
 export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: ScaffoldDeps): Promise<ScaffoldResult> {
-  // §06: "Per siteKind template: app skeleton... (astro + node; wp is P6 / WSK-35 — do not build
-  // it)". This ticket's own hard scope line, enforced structurally: a wp job is refused, never
-  // half-built.
-  if (envelope.siteKind === "wp") {
-    return rejectedResult(
-      "siteKind \"wp\" is out of scope for code.scaffold v2 (webdev-design.md §06: WP is P6/WSK-35, headless-WordPress via the PHP SDK — not this ticket). Refused before any file was composed.",
-    );
-  }
-  if (envelope.siteKind !== "astro" && envelope.siteKind !== "node") {
-    return rejectedResult(`unknown siteKind "${envelope.siteKind as string}" — expected "astro" or "node" (wp is out of scope).`);
+  // WSK-D28 (webdesk-design-v2.md §08): `wp` is no longer refused outright — this is one of the
+  // four points that ruling required to move together (the mirror table's `framework` CHECK, the
+  // `webdev.provisionSite` tool's enum + stack-hint selector, and this branch). What stays refused,
+  // structurally, is anything NOT in the three-kind vocabulary at all.
+  if (envelope.siteKind !== "astro" && envelope.siteKind !== "node" && envelope.siteKind !== "wp") {
+    return rejectedResult(`unknown siteKind "${envelope.siteKind as string}" — expected "astro", "node" or "wp".`);
   }
 
   let snapshot;
@@ -57,12 +54,60 @@ export async function runCodeScaffold(envelope: ScaffoldJobEnvelope, deps: Scaff
     return { outcome: "artifact_fetch_failed", content: `failed to read prd/prototype artifact: ${(err as Error).message}`, error: (err as Error).message };
   }
 
+  const tenantSlug = snapshot.meta.webdeskTenantSlug;
+  const blockLibraryVersion = envelope.constraints.blockLibraryVersion;
+
+  if (envelope.siteKind === "wp") {
+    // The PHP theme's ONLY real prerequisite is a generated PHP SDK (WSK-34) pinned on THIS
+    // contract snapshot. `sdkPhpSource` is `null`/`undefined` for any snapshot recorded before
+    // WSK-34 shipped, or if webdesk/api's codegen genuinely has not produced one yet — either way
+    // this refuses LOUDLY, before composing a theme with no SDK to vendor, rather than silently
+    // shipping a broken `require_once`. This mirrors the astro/node kinds' own "never invent a
+    // page this ticket has no real data source for" rule (page-composer.ts), applied to the one
+    // artifact the wp kind cannot do without.
+    if (!snapshot.sdkPhpSource) {
+      return rejectedResult(
+        `siteKind "wp" requires a generated PHP SDK (WSK-34) pinned on contract snapshot ` +
+          `${snapshot.meta.id}, and none is recorded (artifacts.sdkPhp is null). Refused before ` +
+          `any file was composed — regenerate the contract snapshot once WSK-34's codegen has run ` +
+          `for this tenant.`,
+      );
+    }
+    const wpFiles: GeneratedFile[] = [
+      ...wpSiteFiles({
+        tenantSlug,
+        sdkPhpSource: snapshot.sdkPhpSource,
+        contractVersion: snapshot.meta.contractVersion,
+        vocabularyVersion: snapshot.meta.vocabularyVersion,
+      }),
+      { path: "docs/PRD.md", content: prdText },
+      { path: "docs/PROTOTYPE.md", content: prototypeText },
+    ];
+    const contractLock = buildContractLock({
+      snapshotId: snapshot.meta.id,
+      contractVersion: snapshot.meta.contractVersion,
+      vocabularyVersion: snapshot.meta.vocabularyVersion,
+      contentHash: snapshot.meta.contentHash,
+      blockLibraryVersion,
+    });
+    wpFiles.push({ path: "CONTRACT.lock", content: contractLockFileContent(contractLock) });
+
+    const pushResult = await writeAndPush(wpFiles, deps.pushTarget);
+    return {
+      outcome: deps.pushTarget.mode === "dry_run" ? "dry_run" : "pushed",
+      content:
+        `Scaffolded a wp site for tenant "${tenantSlug}" pinned to contract snapshot ` +
+        `${snapshot.meta.id} (contract@${snapshot.meta.contractVersion}).`,
+      files: wpFiles.map((f) => f.path),
+      gaps: [],
+      contractLock,
+      pushedTo: pushResult.pushedTo,
+    };
+  }
+
   const index = parseOpenApiCollections(snapshot.openApiDocument);
   const { spec } = parsePrototypeSpec(prototypeText);
   const { files: pageFiles, gaps, referencedCollections } = composePages(spec, index);
-
-  const tenantSlug = snapshot.meta.webdeskTenantSlug;
-  const blockLibraryVersion = envelope.constraints.blockLibraryVersion;
 
   const files: GeneratedFile[] = [
     ...pageFiles,

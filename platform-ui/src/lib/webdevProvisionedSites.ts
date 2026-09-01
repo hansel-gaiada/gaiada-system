@@ -171,8 +171,14 @@ export type RequestErrorToken =
 
 const REQUEST_ERROR_COPY: Record<RequestErrorToken, string> = {
   invalid_slug: "That slug isn't valid — use lowercase letters, digits and hyphens only (1-40 characters).",
-  unsupported_stack: "This PRD implies more than a static site (e.g. WordPress, or a full backend) — this seam only provisions static sites. It needs manual provisioning instead.",
-  unsupported_framework: "That framework isn't supported here — choose Vite or Next.js.",
+  // WSK-D28 / webdesk-design-v2.md §08: `unsupported_stack` no longer means "this PRD implies more
+  // than a static site" — static/WordPress/full-stack are all recognized kinds now. It fires only
+  // for a genuinely UNRECOGNIZED stack token (backend: provisioning.service.ts's `STACK_TO_FRAMEWORK`
+  // lookup miss). A recognized WordPress/full-stack request that the current provider cannot fulfill
+  // surfaces as `provider_rejected` instead (a stored-row failure, not a request-time refusal) — see
+  // `FAILURE_REASON_COPY` below.
+  unsupported_stack: "That stack hint wasn't recognized — check the PRD's stack value and try again, or provision manually.",
+  unsupported_framework: "That framework isn't supported here — choose vite, nextjs, astro, node or wp.",
   run_not_found: "This run couldn't be found — it may have been deleted.",
   run_blocked: "This run is blocked — resolve that before provisioning a site for it.",
   prd_gate_not_decided: "The PRD sign-off gate hasn't been decided yet for this run — provisioning waits for that.",
