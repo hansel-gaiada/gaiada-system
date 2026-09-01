@@ -188,6 +188,19 @@ export const CAPABILITIES = [
   // to be un-collapsed later. Gates: `provisionSiteAction`, `reconcileSiteAction` (both in
   // `webdevProvisionedSitesActions.ts`).
   "webdev.provision",
+  // `github.link` — link/unlink a `github_repos` row to a `webdev_site_id`/`project_id` (GH-08/GH-10).
+  // Verified directly against `resource_github_repo.yaml` (GH-03, shipped 2026-08-31): its `link`/
+  // `unlink` rule is `derivedRoles: ["company_admin", "manager"]`, in-tenant, with NO `approvalId`
+  // condition — unlike `deploy`/`secret_write`/`create_repo`/`delete_repo` on the same kind, which are
+  // D14-gated and therefore unreachable by role tier alone (§25's own binding-rulings section: "no
+  // module wall... tenant_id never moves... GitHub-owned columns are never written here"). `member`
+  // holds `github_repo.read` only — genuinely narrower, not an oversight (§25: "a repo nobody owns" is
+  // a finding for someone who may act on it, not everyone who may look at the registry). Bundled as
+  // ONE capability covering both actions rather than split `github.link`/`github.unlink`: every call
+  // site that offers a Link control on a row offers Unlink on the same row under the identical
+  // condition (`GithubRepoRegistry.tsx`'s per-row controls), so a split would only ever be checked in
+  // lockstep. Gates: `linkGithubRepoAction`, `unlinkGithubRepoAction` (`githubReposActions.ts`).
+  "github.link",
   "knowledge.review",   // review/quarantine knowledge sources
   "hr.view",            // read hr_cases/hr_records/leave/attendance for a company
   "hr.manage",          // file/decide leave on others' behalf, edit cases/records/checklists, manage templates
@@ -355,7 +368,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // resource_webdev_provisioned_site.yaml), same as it always did for `approvals.decide`'s own
     // three policies. Nothing changes for company_admin here — it already had these via the old
     // over-broad `approvals.decide` mapping; this just keeps them held under the correctly-split name.
-    "pipeline.write", "pipeline.manage", "webdev.provision",
+    "pipeline.write", "pipeline.manage", "webdev.provision", "github.link",
     "hr.view", "hr.manage",
     // HR-FULL: company_admin is named in every rule of all three new policies, ratify included.
     // LMS: company_admin is named in every rule of both LMS policies.
@@ -420,7 +433,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // manager never had it and loses nothing.
   manager: [
     "pm.manage", "pm.contribute", "people.directory",
-    "pipeline.write", "pipeline.manage", "webdev.provision",
+    "pipeline.write", "pipeline.manage", "webdev.provision", "github.link",
     // Gap 3 (2026-08 sweep): resource_integration_connection.yaml's "company.manage tier" rule
     // (its own header's name for the rule) explicitly lists `company_admin` AND `manager` for
     // managing company-owned connection rows / other people's seats — `departments/[deptId]/
@@ -643,6 +656,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.client_review.request", "social.client_review.withdraw", "social.inbox.assign",
     "social.inbox.escalate", "social.inbox.read", "social.inbox.reply", "social.ledger.read",
     "social.manage", "social.post.delete", "social.scope.write", "social.view", "webdev.provision",
+    "github.link",
   ],
 };
 

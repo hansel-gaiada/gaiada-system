@@ -275,6 +275,16 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // GH-03 (2026-08-31): `resource_github_repo.yaml`'s `link`/`unlink` rule is
+  // `derivedRoles: ["company_admin", "manager"]`, in-tenant, no `approvalId` condition — unlike
+  // `deploy`/`secret_write`/`create_repo`/`delete_repo` on the same kind, which ARE D14-gated. Bundled
+  // as one capability (both permissions, `all`) because every call site offers Link and Unlink on the
+  // same row under the identical gate — see the capability's own comment on `CAPABILITIES` in rbac.ts.
+  "github.link": {
+    permissions: ["core.github_repo.link", "core.github_repo.unlink"],
+    semantics: "all",
+  },
+
   // ───────────────────────────────────────── knowledge ───────────────────────────────────────────
 
   // "review/quarantine knowledge sources" — rbac.ts carries NO backing-policy citation for this

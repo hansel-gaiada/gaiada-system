@@ -1,8 +1,12 @@
 import "server-only";
-// GH-09 — DEMO_MODE fixtures for GH-08's `GET /api/:t/github/repos` read (§25). Mirrors
-// demoWebdevConsole.ts's convention: its own file, wired into demoFixtures.getDemoResponse via one
-// import + one dispatch call, read-only (link/unlink exist in §25 but GH-09's phase-1 surface is
-// read-mostly per the blueprint's own §5.4 framing — no write routes modelled here).
+// GH-09/GH-10 — DEMO_MODE fixtures for GH-08's `GET /api/:t/github/repos` read AND the
+// link/unlink writes (§25). Mirrors demoWebdevConsole.ts's convention: its own file, wired into
+// demoFixtures.getDemoResponse via one import + one dispatch call.
+//
+// ✅ GH-10 (2026-09-01): link/unlink are now modelled. The REPOS array moved onto the
+// `globalThis`-store pattern (see STORE_KEY below) the moment a write needed to persist across the
+// separate module graphs Next bundles for a "use server" action vs. an RSC read — read-only data
+// never needed that, which is why GH-09 didn't have it.
 //
 // ── DEMO_MODE DELIBERATELY DOES NOT REPRODUCE THE LIVE 403 ─────────────────────────────────────────
 // §25 flags every route as fail-closed today (no `resource_github_repo.yaml` yet — GH-03). That is a
@@ -46,11 +50,19 @@ interface DemoResult {
   json: unknown;
 }
 const ok = (json: unknown, status = 200): DemoResult => ({ status, json });
+const err = (status: number, error: string): DemoResult => ({ status, json: { error } });
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
 const daysAgo = (d: number) => hoursAgo(d * 24);
 
-const REPOS: GithubRepoView[] = [
+// GH-10 — link/unlink now writes here too. `globalThis`, not a plain module-level `const`, for the
+// exact reason `demoWebdevProvisionedSites.ts` documents at its own STORE_KEY: Next bundles the
+// `"use server"` action graph (githubReposActions.ts) separately from the page's RSC read graph
+// (githubRepos-data.ts -> platformFetch -> demoFixtures), and a plain array would give each graph
+// its OWN copy — a link/unlink POST would mutate one while the page's subsequent GET reads the
+// other, so the registry would never show the result of an action that just "succeeded".
+const STORE_KEY = Symbol.for("gaiada.demoGithubRepos.repos");
+const SEED_REPOS: GithubRepoView[] = [
   {
     id: "ghr-01", org: "gaiadabali", name: "northwind-site-redesign-kickoff",
     fullName: "gaiadabali/northwind-site-redesign-kickoff",
@@ -265,17 +277,69 @@ const REPOS: GithubRepoView[] = [
     repoCreatedAt: "2026-08-25T09:00:00Z", pushedAt: hoursAgo(1), lastSyncedAt: hoursAgo(1),
     createdAt: "2026-08-25T09:05:00Z", updatedAt: hoursAgo(1),
   },
+  // ghr-17 — GH-10: added specifically to make the name-match suggestion path DRIVABLE in
+  // DEMO_MODE, not just unit-tested. `northwind-site-redesign-kickoff` is
+  // `demoWebdevProvisionedSites.ts`'s one real seeded slug that `listProvisionedSites()` actually
+  // returns; this repo carries that name plus the ticket's own `-preview` suffix, unlinked, so
+  // `suggestLinkTargets()` proposes it as a FUZZY match the moment the registry renders — the
+  // suffix-stripping path, exercised end to end rather than only in githubRepos.test.ts.
+  {
+    id: "ghr-17", org: "gaiadabali", name: "northwind-site-redesign-kickoff-preview",
+    fullName: "gaiadabali/northwind-site-redesign-kickoff-preview",
+    htmlUrl: "https://github.com/gaiadabali/northwind-site-redesign-kickoff-preview",
+    visibility: "private", archived: false, topics: ["preview"],
+    defaultBranch: "main", headSha: "c6d7e8f9012345678901ab2c3d4e5f6789abcde0",
+    headCommittedAt: hoursAgo(3), headAuthor: "Gede Wirawan <gede@gaiada.com>",
+    openPrCount: 0, latestRunStatus: null, latestRunConclusion: null, latestRunAt: null,
+    latestReleaseTag: null, deployedRef: null,
+    webdevSiteId: null, webdevSiteDomain: null, projectId: null, projectName: null,
+    repoCreatedAt: "2026-08-29T09:00:00Z", pushedAt: hoursAgo(3), lastSyncedAt: hoursAgo(1),
+    createdAt: "2026-08-29T09:05:00Z", updatedAt: hoursAgo(1),
+  },
 ];
+
+// Seeded once per server process, then mutated in place by link()/unlink() below — see the
+// STORE_KEY comment above for why this must be `globalThis`, not a module-local array.
+const REPOS: GithubRepoView[] = ((globalThis as Record<symbol, unknown>)[STORE_KEY] ??= SEED_REPOS) as GithubRepoView[];
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-/** Returns a DemoResult for GH-08's `/github/repos` route, or null if it doesn't match. Mirrors
- *  the real controller's filter/paginate/count behaviour (§25) closely enough that a caller cannot
- *  tell from the response shape alone whether it hit the fixture or the real backend. */
-export function githubReposDemo(method: string, p: string, params: URLSearchParams): DemoResult | null {
-  if (method.toUpperCase() !== "GET") return null;
-  if (!p.match(/^\/api\/[^/]+\/github\/repos$/)) return null;
+/** Returns a DemoResult for GH-08's `/github/repos` read AND GH-10's `/link`/`/unlink` writes, or
+ *  null if the route doesn't match. The read half mirrors the real controller's filter/paginate/
+ *  count behaviour (§25) closely enough that a caller cannot tell from the response shape alone
+ *  whether it hit the fixture or the real backend; the write half mirrors §25's own binding
+ *  rulings (link/unlink touch ONLY the two link columns, at least one target required to link). */
+export function githubReposDemo(method: string, p: string, params: URLSearchParams, body?: string): DemoResult | null {
+  const m = method.toUpperCase();
+
+  const linkM = p.match(/^\/api\/[^/]+\/github\/repos\/([^/]+)\/link$/);
+  if (linkM && m === "POST") {
+    const repo = REPOS.find((r) => r.id === linkM[1]);
+    if (!repo) return err(404, "repo not found");
+    const b = JSON.parse(body || "{}") as { webdevSiteId?: string; projectId?: string };
+    const webdevSiteId = b.webdevSiteId?.trim() || undefined;
+    const projectId = b.projectId?.trim() || undefined;
+    if (!webdevSiteId && !projectId) return err(400, "webdevSiteId or projectId required");
+    if (webdevSiteId) { repo.webdevSiteId = webdevSiteId; repo.webdevSiteDomain = `${webdevSiteId}.gaiada.online`; }
+    if (projectId) { repo.projectId = projectId; repo.projectName = projectId; }
+    repo.updatedAt = new Date().toISOString();
+    return ok({ id: repo.id, webdevSiteId: repo.webdevSiteId, projectId: repo.projectId });
+  }
+
+  const unlinkM = p.match(/^\/api\/[^/]+\/github\/repos\/([^/]+)\/unlink$/);
+  if (unlinkM && m === "POST") {
+    const repo = REPOS.find((r) => r.id === unlinkM[1]);
+    if (!repo) return err(404, "repo not found");
+    const b = JSON.parse(body || "{}") as { target?: "webdev_site" | "project" | "both" };
+    const target = b.target ?? "both";
+    if (target === "webdev_site" || target === "both") { repo.webdevSiteId = null; repo.webdevSiteDomain = null; }
+    if (target === "project" || target === "both") { repo.projectId = null; repo.projectName = null; }
+    repo.updatedAt = new Date().toISOString();
+    return ok({ id: repo.id, webdevSiteId: repo.webdevSiteId, projectId: repo.projectId });
+  }
+
+  if (m !== "GET" || !p.match(/^\/api\/[^/]+\/github\/repos$/)) return null;
 
   const linkedQ = params.get("linked");
   const archivedQ = params.get("archived");

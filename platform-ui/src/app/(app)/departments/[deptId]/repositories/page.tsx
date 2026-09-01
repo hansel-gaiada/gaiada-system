@@ -18,6 +18,8 @@ import { ReadRefusal } from "@/components/systems/ReadRefusal";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { BackendPending } from "@/components/BackendPending";
 import { listGithubRepos, type ListGithubReposResult } from "@/lib/githubRepos-data";
+import type { LinkCandidate } from "@/lib/githubRepos";
+import { linkGithubRepoAction, unlinkGithubRepoAction } from "@/lib/githubReposActions";
 import { GithubRepoRegistry } from "@/components/github/GithubRepoRegistry";
 
 type Params = Promise<{ deptId: string }>;
@@ -109,6 +111,16 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
       }
     : undefined;
 
+  // GH-10 — link-target candidates for the org registry's suggestion engine, tenant-wide (never
+  // scoped to this one department: the registry below lists every repo in the org, so the sites/
+  // projects it can suggest against must be every site/project in the company too, not just this
+  // department's — a repo belonging to another department's site must still be suggestible).
+  // Reuses the two reads this page already made for the pipeline card above rather than issuing a
+  // second round trip for the same tenant-wide rows.
+  const siteCandidates: LinkCandidate[] = sitesResult.ok ? sitesResult.sites.map((s) => ({ id: s.id, name: s.slug })) : [];
+  const projectCandidates: LinkCandidate[] = projects.map((p) => ({ id: p.id, name: p.name }));
+  const mayLinkRepos = can(me, "github.link", tenant);
+
   return (
     <>
       <Card title="Provisioned by the pipeline">
@@ -122,7 +134,15 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
           create={create}
         />
       </Card>
-      <OrgRegistry userId={userId} tenant={tenant} includeArchived={archived === "1"} basePath={basePath} />
+      <OrgRegistry
+        userId={userId}
+        tenant={tenant}
+        includeArchived={archived === "1"}
+        basePath={basePath}
+        mayLink={mayLinkRepos}
+        siteCandidates={siteCandidates}
+        projectCandidates={projectCandidates}
+      />
     </>
   );
 }
@@ -162,11 +182,20 @@ async function OrgRegistry({
   tenant,
   includeArchived,
   basePath,
+  mayLink,
+  siteCandidates,
+  projectCandidates,
 }: {
   userId: string;
   tenant: string;
   includeArchived: boolean;
   basePath: string;
+  /** GH-10: `can(me, "github.link", tenant)` — a mirror only. The 403 a Cerbos denial would still
+   *  produce is the real authority; this decides whether the controls are even OFFERED, so a
+   *  principal who cannot link never sees a button that would just refuse them. */
+  mayLink: boolean;
+  siteCandidates: LinkCandidate[];
+  projectCandidates: LinkCandidate[];
 }) {
   // `archived: undefined` (param omitted) means "both states" per §25 — there is no third value.
   const archivedFilter = includeArchived ? undefined : false;
@@ -195,6 +224,10 @@ async function OrgRegistry({
         archivedTotal={archivedCountResult.ok ? archivedCountResult.data.total : null}
         includeArchived={includeArchived}
         basePath={basePath}
+        mayLink={mayLink}
+        siteCandidates={siteCandidates}
+        projectCandidates={projectCandidates}
+        actions={{ link: linkGithubRepoAction, unlink: unlinkGithubRepoAction }}
       />
     </Card>
   );

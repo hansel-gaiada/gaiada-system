@@ -2034,12 +2034,12 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   const webdevConsole = webdevConsoleDemo(method, p, url.searchParams);
   if (webdevConsole) return webdevConsole;
 
-  // GH-09 — Sites/Repos registry, consuming GH-08's `/github/repos` read (§25). Read-only fixture
-  // (lib/demoGithubRepos.ts); placed here, before the generic `ok([])` GET fallback further down,
-  // for the same reason as the WSK-24 entry above it — a bare `[]` would silently satisfy
-  // `listGithubRepos()`'s `{repos,total,limit,offset}` shape and hide a real backend problem
-  // behind a fake "zero repos, zero total" response.
-  const githubRepos = githubReposDemo(method, p, url.searchParams);
+  // GH-09/GH-10 — Sites/Repos registry, consuming GH-08's `/github/repos` read AND the
+  // link/unlink writes (§25). lib/demoGithubRepos.ts; placed here, before the generic `ok([])` GET
+  // fallback further down, for the same reason as the WSK-24 entry above it — a bare `[]` would
+  // silently satisfy `listGithubRepos()`'s `{repos,total,limit,offset}` shape and hide a real
+  // backend problem behind a fake "zero repos, zero total" response.
+  const githubRepos = githubReposDemo(method, p, url.searchParams, body);
   if (githubRepos) return githubRepos;
 
   // MON — monitoring board (Plane B: client properties + services). Read-only fixtures

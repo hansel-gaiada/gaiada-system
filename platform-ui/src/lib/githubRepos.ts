@@ -238,3 +238,117 @@ export function repoSearchText(r: GithubRepoView): string {
     ...r.topics,
   ].join(" ");
 }
+
+// ── Link-target NAME-MATCH SUGGESTIONS (GH-10) ──────────────────────────────────────────────────────
+// The ticket's own framing: 221 repos, ~30 webdev_sites, 0 linked today. A bare two-dropdown picker
+// for every one of 221 rows is unusable, so a repo's name is matched against candidate site/project
+// names and offered as a ONE-CLICK proposal — never applied automatically (`suggestLinkTargets` is
+// pure and does no I/O; the click that actually links is a separate, human-initiated server action —
+// see `githubReposActions.ts`). This is a client-safe helper (no `server-only`), same as every other
+// export in this file: `GithubRepoRegistry.tsx` calls it at render time over already-fetched pages.
+export type LinkTargetKind = "webdev_site" | "project";
+
+/** The quality distinction the ticket calls out by name: "show clearly when a suggestion is a guess
+ *  versus an exact match... never present a fuzzy hit as certain." `exact` — the two names are
+ *  identical after only COSMETIC normalization (case, hyphen/underscore, whitespace); `fuzzy` — they
+ *  only line up after stripping a known repo-naming suffix off one side, i.e. an inference, not a
+ *  literal match. There is no third tier: this file does not attempt edit-distance/substring scoring
+ *  — that would manufacture confidence this data cannot support (only 221 repos / ~30 sites; a
+ *  crude fuzzy match is a proposal a human reads and confirms, not a ranked search result). */
+export type LinkMatchQuality = "exact" | "fuzzy";
+
+export interface LinkCandidate {
+  id: string;
+  /** The candidate's own display name — a webdev site's `slug`, or a project's `name`. */
+  name: string;
+}
+
+export interface LinkSuggestion {
+  kind: LinkTargetKind;
+  id: string;
+  /** The candidate's name, unmodified — what the confirm button actually shows the human. */
+  name: string;
+  quality: LinkMatchQuality;
+}
+
+/** Suffixes a repo name routinely carries that a site/project name never does — the ticket's own
+ *  examples (`anaya-aesthetics-wp` ↔ site `anaya-aesthetics`). Ordered longest-first so a name
+ *  carrying two of these in sequence (e.g. `-theme-preview`) strips the more specific one first;
+ *  `stripOneKnownSuffix` still only removes ONE per call, and `stripKnownSuffixes` loops it — see
+ *  that function's own comment for why looping is safe here. New suffixes get added to this ONE
+ *  list, never hand-matched at each call site. */
+const KNOWN_REPO_SUFFIXES = ["-theme-preview", "-preview", "-theme", "-site", "-wp"];
+
+/** Lowercase, fold underscores/whitespace to a hyphen, collapse repeats, trim leading/trailing
+ *  hyphens — the cosmetic normalization an `exact` match is allowed to see through. Deliberately
+ *  does NOT strip a naming suffix (`stripKnownSuffixes` is the separate, `fuzzy`-tier step) —
+ *  folding both into one pass would make it impossible to tell which kind of normalization actually
+ *  produced the match, which is the one distinction this whole feature exists to preserve. */
+function normalizeLinkName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/** Strips every KNOWN_REPO_SUFFIXES match off the END of an already-normalized name, repeatedly —
+ *  a repo can plausibly carry more than one (`anaya-aesthetics-wp-preview`). Bounded by
+ *  KNOWN_REPO_SUFFIXES.length passes, so a pathological name cannot loop forever, and a suffix is
+ *  only removed while it would leave at least one character behind (never strips a name down to
+ *  nothing and calls that a match). */
+function stripKnownSuffixes(normalized: string): string {
+  let out = normalized;
+  for (let i = 0; i < KNOWN_REPO_SUFFIXES.length; i++) {
+    const before = out;
+    for (const suffix of KNOWN_REPO_SUFFIXES) {
+      if (out.length > suffix.length && out.endsWith(suffix)) out = out.slice(0, -suffix.length);
+    }
+    if (out === before) break;
+  }
+  return out;
+}
+
+/** The suggestion engine itself. Compares the repo's bare `name` (never `fullName` — the `org/`
+ *  prefix is never part of a site/project's own name) against every candidate, in the order given
+ *  (sites first, then projects — callers pass whichever order they want reflected in a tie). A repo
+ *  can legitimately suggest more than one target (rare, but not impossible with ~30+ candidates), so
+ *  this returns an array, EXACT-quality entries first, for the caller to render as a short list —
+ *  never collapsed to "the one true suggestion" the way a search engine's top hit would be, because
+ *  that is exactly the false confidence the ticket says not to manufacture. `limit` bounds the
+ *  render, not the matching itself. NEVER applies a link — purely a proposal for a human to confirm
+ *  (see file header). */
+export function suggestLinkTargets(
+  repo: Pick<GithubRepoView, "name">,
+  sites: LinkCandidate[],
+  projects: LinkCandidate[],
+  limit = 3,
+): LinkSuggestion[] {
+  const repoNorm = normalizeLinkName(repo.name);
+  const repoStripped = stripKnownSuffixes(repoNorm);
+  const out: LinkSuggestion[] = [];
+
+  const consider = (kind: LinkTargetKind, candidates: LinkCandidate[]) => {
+    for (const c of candidates) {
+      const cNorm = normalizeLinkName(c.name);
+      if (!cNorm) continue;
+      if (cNorm === repoNorm) {
+        out.push({ kind, id: c.id, name: c.name, quality: "exact" });
+        continue;
+      }
+      // Fuzzy: line up only once a known suffix is stripped off EITHER side — a repo named exactly
+      // like the site plus a suffix (`anaya-aesthetics-wp` vs `anaya-aesthetics`), or, less common
+      // but real, a site/project name that itself carries one.
+      if (repoStripped === cNorm || repoStripped === stripKnownSuffixes(cNorm)) {
+        out.push({ kind, id: c.id, name: c.name, quality: "fuzzy" });
+      }
+    }
+  };
+  consider("webdev_site", sites);
+  consider("project", projects);
+
+  // Exact first; stable otherwise (Array.prototype.sort is a stable sort per spec) so ties keep the
+  // sites-then-projects, in-candidate-order sequence `consider()` produced.
+  out.sort((a, b) => (a.quality === b.quality ? 0 : a.quality === "exact" ? -1 : 1));
+  return out.slice(0, limit);
+}

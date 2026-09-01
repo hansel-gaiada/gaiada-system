@@ -33,3 +33,44 @@
   color: var(--erp-ink-40);
   font-style: italic;
 }
+
+/* GH-10 — the "Linked to" cell's own link/unlink controls. `--stack` holds one row per active link
+   (a repo can carry a site AND a project link at once, §25) plus the suggestion/manual-picker
+   block when unlinked; a bare row (linked, read-only, no `mayLink`) stays the plain span above. */
+.ghr-link-cell--stack { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.ghr-link-cell__row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ghr-link-cell__kind { font: 600 10px var(--font-body); letter-spacing: 0.02em; color: var(--erp-ink-40); }
+.ghr-link-cell__name { font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-80); overflow-wrap: anywhere; }
+.ghr-link-cell__btn { padding: 2px 8px; font-size: 11px; min-height: 0; height: auto; }
+.ghr-link-cell__error { font: 400 11px/1.4 var(--font-body); color: var(--status-critical-fg); }
+.ghr-link-cell__ok { font: 400 11px/1.4 var(--font-body); color: var(--status-ok-fg); }
+
+/* A suggestion row: the quality Tag, the candidate's own name, one Confirm button. Never styled to
+   look identical for exact vs fuzzy — the Tag itself (ghr-tag, tone ok vs progress) is what carries
+   that distinction, so a fuzzy row never reads as certain even at a glance. */
+.ghr-link-suggestion { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ghr-link-suggestion__name { font: 400 12px/1.4 var(--font-body); color: var(--erp-ink-80); overflow-wrap: anywhere; }
+.ghr-link-suggestion__kind { color: var(--erp-ink-40); }
+
+/* The manual picker — a native <details> disclosure so it needs no extra JS state and is keyboard-
+   and screen-reader-operable for free. Collapsed by default: with suggestions doing most of the
+   work on this data (30 sites against 221 repos), the picker is the fallback path, not the default
+   one, and a picker open on every one of 221 unlinked rows would be the "half-dead pile" this whole
+   registry already rewrote its layout once to avoid (see this file's own header comment, point 1). */
+.ghr-link-picker { width: 100%; }
+.ghr-link-picker__summary { cursor: pointer; font: 400 12px var(--font-body); color: var(--erp-ink-60); list-style: none; }
+.ghr-link-picker__summary::-webkit-details-marker { display: none; }
+.ghr-link-picker__summary::before { content: "▸ "; }
+.ghr-link-picker[open] > .ghr-link-picker__summary::before { content: "▾ "; }
+.ghr-link-picker__body { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.ghr-link-picker__field { display: flex; flex-direction: column; gap: 2px; font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.ghr-link-picker__field select {
+  border: 0.5px solid var(--line-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  padding: 5px 6px;
+  font: 400 12px var(--font-body);
+}
+.ghr-link-picker__field select:focus-visible { outline: 2px solid var(--erp-accent); outline-offset: 1px; }
+.ghr-link-picker__submit { align-self: flex-start; padding: 4px 10px; font-size: 12px; min-height: 0; height: auto; }

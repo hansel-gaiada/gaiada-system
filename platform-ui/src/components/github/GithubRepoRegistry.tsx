@@ -1,5 +1,5 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { Card, KpiTile } from "@/components/ui";
 import { SearchableTable } from "@/components/systems/SearchableTable";
@@ -7,13 +7,20 @@ import { EmptyNote } from "@/components/systems/EmptyNote";
 import { formatTimestamp } from "@/lib/format";
 import {
   type GithubRepoView, type GithubRepoListResponse, type Tone,
+  type LinkCandidate, type LinkTargetKind,
   syncFreshness, freshnessTone, FRESHNESS_LABEL,
   deployedRefStatus, DEPLOY_HEAD_LABEL,
   runLabel, runTone,
-  formatCommitAuthor, linkDisplayName, repoSearchText,
+  formatCommitAuthor, repoSearchText,
+  suggestLinkTargets,
 } from "@/lib/githubRepos";
+import type { GithubLinkActionResult } from "@/lib/githubReposActions";
 import "@/components/systems/systems.css";
 import "./github.css";
+
+/** The two server actions the link/unlink controls call — same "pass the bound action as a prop"
+ *  convention `RepoInventory.tsx` uses for `provisionSiteAction`/`reconcileSiteAction`. */
+export type GithubLinkActionFn = (formData: FormData) => Promise<GithubLinkActionResult>;
 
 // GH-09 — Sites/Repos view per blueprint §5.4. Pure presentation over TWO already-fetched,
 // server-filtered pages (`linked`/`unlinked`, each `{repos,total,limit,offset}` per §25) — the
@@ -34,6 +41,7 @@ import "./github.css";
 //    visible every time, or its absence gets learned as "this is current" everywhere else.
 export function GithubRepoRegistry({
   linked, unlinked, archivedTotal, includeArchived, basePath,
+  mayLink, siteCandidates, projectCandidates, actions,
 }: {
   linked: GithubRepoListResponse;
   unlinked: GithubRepoListResponse;
@@ -49,6 +57,18 @@ export function GithubRepoRegistry({
    *  page they were reading and back to a route that no longer hosts it. A component that renders
    *  anywhere must not name one route. */
   basePath: string;
+  // ── GH-10: per-row link/unlink ────────────────────────────────────────────────────────────────
+  /** `can(me, "github.link", tenant)` — a MIRROR, not the authority (Cerbos is, server-side).
+   *  Decides only whether the controls render at all: a principal who cannot link must never see a
+   *  button that would just 403, so this is checked once here rather than trusted per-row. */
+  mayLink: boolean;
+  /** Every webdev_site / project in the TENANT (not just one department — see page.tsx's own
+   *  comment on why), for `suggestLinkTargets()` and the manual-picker fallback. An empty array is a
+   *  legitimate state (no sites/projects exist, or the read failed) — it degrades to "no
+   *  suggestions, manual picker has nothing to offer either", never an error on this component's part. */
+  siteCandidates: LinkCandidate[];
+  projectCandidates: LinkCandidate[];
+  actions: { link: GithubLinkActionFn; unlink: GithubLinkActionFn };
 }) {
   // Frozen once per mount rather than re-read on every render — a freshness badge that silently
   // ticks from "Synced" to "Stale" while an operator is mid-read on an open tab is a worse surprise
@@ -61,7 +81,9 @@ export function GithubRepoRegistry({
     { label: "Open PRs", align: "right" as const }, { label: "Last CI run" },
     { label: "Deployed ref" }, { label: "Synced" },
   ];
-  const tcols = "1.8fr 1.1fr 0.8fr 1.3fr 0.7fr 1.2fr 1.1fr 1.2fr";
+  // "Linked to" widened (1.1fr -> 1.7fr) to host the link/unlink controls GH-10 adds — a bare name
+  // fit 1.1fr; a suggestion + confirm button + manual-picker disclosure does not.
+  const tcols = "1.8fr 1.7fr 0.8fr 1.3fr 0.7fr 1.2fr 1.1fr 1.2fr";
 
   // ONE table over both server pages, not two. The linked/unlinked split shipped as two separate
   // tables on the assumption that unlinked would be the exception — on the real org it is 100% of
@@ -79,7 +101,6 @@ export function GithubRepoRegistry({
     const freshness = syncFreshness(r.lastSyncedAt, nowMs);
     const run = runLabel(r.latestRunStatus, r.latestRunConclusion);
     const deploy = deployedRefStatus(r);
-    const link = linkDisplayName(r);
     return [
       <div key="repo" className="ghr-repo-cell">
         <a className="ghr-repo-cell__link" href={r.htmlUrl} target="_blank" rel="noreferrer noopener">
@@ -90,9 +111,15 @@ export function GithubRepoRegistry({
           {r.archived ? " · Archived" : ""}
         </span>
       </div>,
-      link
-        ? <span key="link" className="ghr-link-cell">{link}</span>
-        : <span key="link" className="ghr-link-cell ghr-link-cell--none" title="No webdev site and no project claims this repo">Unlinked</span>,
+      <LinkCell
+        key="link"
+        repo={r}
+        mayLink={mayLink}
+        siteCandidates={siteCandidates}
+        projectCandidates={projectCandidates}
+        actions={actions}
+        basePath={basePath}
+      />,
       <code key="branch" style={{ font: "400 12px var(--font-mono, monospace)", color: "var(--erp-ink-60)" }}>{r.defaultBranch}</code>,
       <div key="commit" className="ghr-commit-cell">
         <span>{r.headSha ? formatCommitAuthor(r.headAuthor) : "No commits yet"}</span>
@@ -243,5 +270,160 @@ function Tag({ label, tone }: { label: string; tone: Tone }) {
       <span className="ghr-tag__dot" style={{ background: `var(--status-${tone})` }} />
       {label}
     </span>
+  );
+}
+
+// ── GH-10: the "Linked to" cell's own controls ──────────────────────────────────────────────────────
+// One component owns both directions (link AND unlink) for a row, same "one result state per row"
+// shape as RepoInventory.tsx's RowActions — a row acts on at most one of its own controls at a time,
+// so a single pending/result pair is enough; it is never shared across rows (each LinkCell instance
+// is its own closure). Two independent link slots (`webdevSiteId`/`projectId`) can both be set on the
+// SAME repo per §25, so a linked row can show up to two rows-within-the-cell, each with its own
+// Unlink button scoped to just that target — unlinking the site must never also drop an unrelated
+// project link (or vice versa), so `target` is always the SPECIFIC one the button names, never the
+// `'both'` default the endpoint itself falls back to when the field is omitted.
+function LinkCell({
+  repo, mayLink, siteCandidates, projectCandidates, actions, basePath,
+}: {
+  repo: GithubRepoView;
+  mayLink: boolean;
+  siteCandidates: LinkCandidate[];
+  projectCandidates: LinkCandidate[];
+  actions: { link: GithubLinkActionFn; unlink: GithubLinkActionFn };
+  basePath: string;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<GithubLinkActionResult | null>(null);
+  const [pickedSite, setPickedSite] = useState("");
+  const [pickedProject, setPickedProject] = useState("");
+
+  const runLink = (webdevSiteId: string | undefined, projectId: string | undefined) => {
+    setResult(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("repoId", repo.id);
+      fd.set("basePath", basePath);
+      if (webdevSiteId) fd.set("webdevSiteId", webdevSiteId);
+      if (projectId) fd.set("projectId", projectId);
+      setResult(await actions.link(fd));
+    });
+  };
+  const runUnlink = (target: LinkTargetKind) => {
+    setResult(null);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("repoId", repo.id);
+      fd.set("basePath", basePath);
+      fd.set("target", target);
+      setResult(await actions.unlink(fd));
+    });
+  };
+
+  const errorNote = result && !result.ok ? <span className="ghr-link-cell__error">{result.error}</span> : null;
+  // §25 confirms the write over `revalidatePath`; this is a same-tick reassurance for the gap
+  // between "the click succeeded" and the server component actually re-rendering with the new row.
+  const okNote = result?.ok ? <span className="ghr-link-cell__ok">Saved — refreshing…</span> : null;
+
+  if (repo.webdevSiteId || repo.projectId) {
+    return (
+      <div className="ghr-link-cell ghr-link-cell--stack">
+        {repo.webdevSiteId && (
+          <span className="ghr-link-cell__row">
+            <span className="ghr-link-cell__kind">Site</span>
+            <span className="ghr-link-cell__name">{repo.webdevSiteDomain ?? "(site — name unavailable)"}</span>
+            {mayLink && (
+              <button type="button" className="btn ghr-link-cell__btn" disabled={pending} onClick={() => runUnlink("webdev_site")}>
+                Unlink
+              </button>
+            )}
+          </span>
+        )}
+        {repo.projectId && (
+          <span className="ghr-link-cell__row">
+            <span className="ghr-link-cell__kind">Project</span>
+            <span className="ghr-link-cell__name">{repo.projectName ?? "(project — name unavailable)"}</span>
+            {mayLink && (
+              <button type="button" className="btn ghr-link-cell__btn" disabled={pending} onClick={() => runUnlink("project")}>
+                Unlink
+              </button>
+            )}
+          </span>
+        )}
+        {errorNote}
+        {okNote}
+      </div>
+    );
+  }
+
+  if (!mayLink) {
+    return (
+      <span className="ghr-link-cell ghr-link-cell--none" title="No webdev site and no project claims this repo">
+        Unlinked
+      </span>
+    );
+  }
+
+  // The suggestion engine's own comment (githubRepos.ts) explains the exact/fuzzy split and why it
+  // never auto-applies — this is the ONE place a suggestion becomes a link, and only on a click.
+  const suggestions = suggestLinkTargets(repo, siteCandidates, projectCandidates);
+
+  return (
+    <div className="ghr-link-cell ghr-link-cell--stack">
+      <span className="ghr-link-cell--none">Unlinked</span>
+      {suggestions.map((s) => (
+        <span key={`${s.kind}-${s.id}`} className="ghr-link-suggestion">
+          <Tag
+            label={s.quality === "exact" ? "Exact match" : "Possible match"}
+            tone={s.quality === "exact" ? "ok" : "progress"}
+          />
+          <span className="ghr-link-suggestion__name">
+            {s.name} <span className="ghr-link-suggestion__kind">({s.kind === "webdev_site" ? "site" : "project"})</span>
+          </span>
+          <button
+            type="button"
+            className="btn ghr-link-cell__btn"
+            disabled={pending}
+            onClick={() => runLink(s.kind === "webdev_site" ? s.id : undefined, s.kind === "project" ? s.id : undefined)}
+          >
+            Confirm
+          </button>
+        </span>
+      ))}
+      {/* Manual fallback — always available, suggestion or not: a real match this heuristic missed
+          (a renamed repo, a name that shares no substring with its site) still needs a path to link. */}
+      <details className="ghr-link-picker">
+        <summary className="ghr-link-picker__summary">Link manually…</summary>
+        <div className="ghr-link-picker__body">
+          <label className="ghr-link-picker__field">
+            <span>Site</span>
+            <select value={pickedSite} onChange={(e) => setPickedSite(e.target.value)} disabled={pending}>
+              <option value="">— none —</option>
+              {siteCandidates.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="ghr-link-picker__field">
+            <span>Project</span>
+            <select value={pickedProject} onChange={(e) => setPickedProject(e.target.value)} disabled={pending}>
+              <option value="">— none —</option>
+              {projectCandidates.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary ghr-link-picker__submit"
+            disabled={pending || (!pickedSite && !pickedProject)}
+            onClick={() => runLink(pickedSite || undefined, pickedProject || undefined)}
+          >
+            {pending ? "Linking…" : "Link"}
+          </button>
+        </div>
+      </details>
+      {errorNote}
+      {okNote}
+    </div>
   );
 }

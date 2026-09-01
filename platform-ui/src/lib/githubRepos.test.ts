@@ -5,6 +5,7 @@ import {
   deployedRefStatus,
   runLabel, runTone,
   formatCommitAuthor, linkDisplayName, repoSearchText,
+  suggestLinkTargets, type LinkCandidate,
   type GithubRepoView,
 } from "./githubRepos";
 
@@ -140,6 +141,56 @@ describe("linkDisplayName — §25's joined display name, never a raw id and nev
 
   it("names a dangling link honestly rather than rendering a raw id or crashing", () => {
     expect(linkDisplayName(repo({ id: "d", webdevSiteId: "site-orphan", webdevSiteDomain: null }))).toBe("(site — name unavailable)");
+  });
+});
+
+describe("suggestLinkTargets — GH-10's name-match proposal, never an auto-apply", () => {
+  const site = (id: string, name: string): LinkCandidate => ({ id, name });
+
+  it("is exact when the repo name matches a site slug with only cosmetic normalization (case/hyphen)", () => {
+    const result = suggestLinkTargets({ name: "Anaya_Aesthetics" }, [site("s1", "anaya-aesthetics")], []);
+    expect(result).toEqual([{ kind: "webdev_site", id: "s1", name: "anaya-aesthetics", quality: "exact" }]);
+  });
+
+  it("is fuzzy — never exact — once a known suffix must be stripped to line up (the ticket's own example)", () => {
+    const result = suggestLinkTargets({ name: "anaya-aesthetics-wp" }, [site("s1", "anaya-aesthetics")], []);
+    expect(result).toEqual([{ kind: "webdev_site", id: "s1", name: "anaya-aesthetics", quality: "fuzzy" }]);
+  });
+
+  it("strips every known suffix (-wp, -site, -theme, -preview), not just one", () => {
+    for (const suffix of ["-wp", "-site", "-theme", "-preview"]) {
+      const result = suggestLinkTargets({ name: `northwind${suffix}` }, [site("s1", "northwind")], []);
+      expect(result, `suffix ${suffix}`).toEqual([{ kind: "webdev_site", id: "s1", name: "northwind", quality: "fuzzy" }]);
+    }
+  });
+
+  it("strips a stacked suffix (theme + preview) in one call", () => {
+    const result = suggestLinkTargets({ name: "northwind-theme-preview" }, [site("s1", "northwind")], []);
+    expect(result).toEqual([{ kind: "webdev_site", id: "s1", name: "northwind", quality: "fuzzy" }]);
+  });
+
+  it("matches a project the same way, and prefers exact over fuzzy when both exist", () => {
+    const result = suggestLinkTargets(
+      { name: "viceroy-crm" },
+      [site("s1", "viceroy-crm-wp")],
+      [{ id: "p1", name: "viceroy-crm" }],
+    );
+    expect(result[0]).toEqual({ kind: "project", id: "p1", name: "viceroy-crm", quality: "exact" });
+    expect(result[1]).toEqual({ kind: "webdev_site", id: "s1", name: "viceroy-crm-wp", quality: "fuzzy" });
+  });
+
+  it("returns an empty array — never a fabricated guess — when nothing lines up", () => {
+    expect(suggestLinkTargets({ name: "totally-unrelated-repo" }, [site("s1", "anaya-aesthetics")], [])).toEqual([]);
+  });
+
+  it("never matches on a blank candidate name", () => {
+    expect(suggestLinkTargets({ name: "" }, [site("s1", "")], [])).toEqual([]);
+  });
+
+  it("caps the result at `limit` (default 3) without changing the ordering", () => {
+    const sites = [site("s1", "acme"), site("s2", "acme"), site("s3", "acme"), site("s4", "acme")];
+    expect(suggestLinkTargets({ name: "acme" }, sites, [])).toHaveLength(3);
+    expect(suggestLinkTargets({ name: "acme" }, sites, [], 2)).toHaveLength(2);
   });
 });
 
