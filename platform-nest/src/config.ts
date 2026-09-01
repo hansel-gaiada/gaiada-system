@@ -559,6 +559,26 @@ const configBase = {
     pollMaxIntervalMs: Number(process.env.PROVISION_POLL_MAX_INTERVAL_MS ?? 30_000),
     pollMaxMs: Number(process.env.PROVISION_POLL_MAX_MS ?? 5 * 60_000),
   },
+  // ERP repo control (webdesk-design-v2.md §08, WSK-D33) — per-KIND GitHub template repo, one
+  // `owner/repo` string per §08's three canonical kinds (`static`/`fullstack`/`wp`). Read ONLY by
+  // `modules/webdev/erp-repo-control-provider.ts`.
+  //
+  // ── NO TEMPLATE NAME IS EVER HARDCODED, ON PURPOSE ──────────────────────────────────────────────
+  // The org's own templates are measured MOSTLY ARCHIVED and the one live template as of this
+  // ticket (`provision-fullstack-cms`) is a fact about the org's CURRENT state, not a contract this
+  // code may assume holds tomorrow — exactly the reasoning GH-12's `repo-creation.ts` already gives
+  // for never assuming a template name in source. A kind with no configured template answers
+  // honestly (`createProject` returns `rejected`/422 naming the missing var) rather than guessing or
+  // silently falling back to a different kind's template.
+  //
+  // ── EMPTY IS THE ONLY DEFAULT, SAME DOCTRINE AS `provision` ABOVE ───────────────────────────────
+  // No fallback owner/repo string. An unconfigured kind must read as "nobody has pointed this
+  // deployment at a template yet", never as "here is a template you didn't ask for".
+  erpRepoTemplates: {
+    static: process.env.ERP_REPO_TEMPLATE_STATIC ?? "",
+    fullstack: process.env.ERP_REPO_TEMPLATE_FULLSTACK ?? "",
+    wp: process.env.ERP_REPO_TEMPLATE_WP ?? "",
+  },
   // WSK-19 — the rail's Zone A end (docs/blueprints/webdesk-design.md §06). The control-channel
   // call `GET /control/v1/tenants/:slug/contract`, per the design's §03 A→B channel.
   //

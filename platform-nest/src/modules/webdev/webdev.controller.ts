@@ -22,11 +22,23 @@
 // against the SERVICE layer, with the HTTP layer covering only what does not depend on the missing
 // policy (auth, module gate, fail-closed env).
 //
-// ── FAIL-CLOSED WITHOUT CREDENTIALS ─────────────────────────────────────────────────────────────
-// `createProvisionHttpDriver()` throws `ProvisionNotConfiguredError` when the env is unset, and that
-// becomes a 503. There is NO default endpoint and no silent no-op: a deployment that never got the
-// credential must not appear to provision anything, and must certainly not aim at a production host
-// nobody configured.
+// ── WSK-D33: `provision` (gda-s01) IS GONE, NOT DEPRECATED — ERP REPO CONTROL IS THE ONLY PROVIDER ──
+// `https://provision.gaiada.online` measures 000 on every request (2026-09-01; the host it lived on
+// was decommissioned) and the live `.env` carries no `PROVISION_*` vars at all. `resolveProvider`
+// below therefore constructs ONLY `ErpRepoControlProvider` (`erp-repo-control-provider.ts`) —
+// GH-12's D14-approved repo-creation path, per webdesk-design-v2.md §08 ("ERP repo control (new,
+// replaces `provision`)"). `provision-http.ts` / `ProvisionHttpDriver` are KEPT (not deleted) but are
+// no longer reachable from this controller, or from anywhere else in production: `main.ts` never
+// calls `setProvisionProviderForTests`, and there is no config branch here that falls back to
+// `createProvisionHttpDriver()`. See `provision-http.ts`'s own header for why the file itself stays.
+//
+// ── FAIL-CLOSED WITHOUT CONFIG ───────────────────────────────────────────────────────────────────
+// `createErpRepoControlProvider()` throws `ErpRepoControlNotConfiguredError` when `GITHUB_ORG` is
+// unset, and that becomes a 503 NAMING THE MISSING VAR — never a network attempt against
+// `provision`'s dead host, and never a silent no-op. A per-KIND template gap (`ERP_REPO_TEMPLATE_*`)
+// is a narrower, per-request failure surfaced by `provisionSite`'s own `provider_rejected` outcome
+// (422 from the driver, mapped to 503 by the switch below, unchanged from how a `wp` request was
+// always refused before this ticket) — it does not block construction of the driver itself.
 import {
   BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
   Param, Post, Query, Req, Res, ServiceUnavailableException, UseGuards,
@@ -36,29 +48,30 @@ import { withGlobal } from "../../db";
 import { authorize, writeActivity } from "../../core/http";
 import { AuthGuard } from "../../auth/guards";
 import { ModuleEnabledGuard } from "../module-enabled.guard";
-import { createProvisionHttpDriver } from "./provision-http";
-import { ProvisionNotConfiguredError, type ProvisionProvider } from "./provision-provider";
+import { ErpRepoControlNotConfiguredError, createErpRepoControlProvider } from "./erp-repo-control-provider";
+import type { ProvisionProvider } from "./provision-provider";
 import {
   getProvisionedSite, listProvisionedSites, provisionSite, pollProvisioningSite,
   reconcileProvisionedSite, type SiteDto,
 } from "./provisioning.service";
 
-/** Test seam: PRV-02's suites drive the real `provision-http` driver against the PRV-00 mock over
- *  real sockets. Nothing in production ever sets this — `main.ts` does not call it. Kept as an
- *  explicit override rather than a config branch so there is no "use the fake" mode reachable from
- *  env, which is the shape that eventually ships disabled-in-prod by accident. */
+/** Test seam: suites drive a fake `ProvisionProvider` (or, for PRV-02's own historical idempotency
+ *  suite, the real `provision-http` driver against the PRV-00 mock over real sockets). Nothing in
+ *  production ever sets this — `main.ts` does not call it. Kept as an explicit override rather than
+ *  a config branch so there is no "use the fake" mode reachable from env, which is the shape that
+ *  eventually ships disabled-in-prod by accident. */
 let providerOverride: ProvisionProvider | null = null;
 export function setProvisionProviderForTests(p: ProvisionProvider | null): void {
   providerOverride = p;
 }
 
-function resolveProvider(): ProvisionProvider {
+function resolveProvider(tenantId: string, actorId: string | null): ProvisionProvider {
   if (providerOverride) return providerOverride;
   try {
-    return createProvisionHttpDriver();
+    return createErpRepoControlProvider(tenantId, actorId);
   } catch (err) {
-    if (err instanceof ProvisionNotConfiguredError) {
-      throw new ServiceUnavailableException("provision seam not configured");
+    if (err instanceof ErpRepoControlNotConfiguredError) {
+      throw new ServiceUnavailableException(err.message);
     }
     throw err;
   }
@@ -117,8 +130,8 @@ export class WebdevController {
     const runId = body?.runId?.trim() || null;
     if (!runId && !body?.slug) throw new BadRequestException("runId (or an explicit slug) is required");
 
-    const provider = resolveProvider();
     const actorId = req.principal.userId;
+    const provider = resolveProvider(tenantId, actorId);
     const outcome = await provisionSite({
       tenantId,
       provider,
@@ -187,7 +200,7 @@ export class WebdevController {
     @Param("id") id: string,
   ): Promise<SiteDto> {
     await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "reconcile");
-    const provider = resolveProvider();
+    const provider = resolveProvider(tenantId, req.principal.userId);
     const outcome = await reconcileProvisionedSite({
       tenantId, siteId: id, provider,
       requestedByName: await displayNameFor(req.principal.userId),

@@ -87,8 +87,17 @@ export class ProvisionNotConfiguredError extends Error {
 }
 
 export interface ProvisionProvider {
-  /** Stable identifier stored in `webdev_provisioned_sites.provider`. */
-  readonly key: "provision" | "webdesk";
+  /** Stable identifier stored in `webdev_provisioned_sites.provider`. `'erp_repo'` (WSK-D33 /
+   *  webdesk-design-v2.md §08) is the ERP's OWN repo-control driver — GH-12's D14-approved
+   *  create/generate path, filed through `fileAutomationApproval` and executed by
+   *  `executeApprovedGithubRepoCreation` — added when `provision` (gda-s01) was decommissioned
+   *  (measured 000 on every request, 2026-09-01). It is the DEFAULT and only provider
+   *  `webdev.controller.ts` constructs today; `'provision'` is kept only for
+   *  `provision-http.ts`'s own historical driver/tests (see that file's header for why it is not
+   *  deleted) and is no longer reachable from any live controller path. See
+   *  `migrations/202609011500_webdev_provisioned_sites_provider_widen.sql` for the schema half of
+   *  this widen. */
+  readonly key: "provision" | "webdesk" | "erp_repo";
   createProject(input: CreateProjectInput): Promise<CreateProjectResult>;
   /** Poll one project by far-side id. `null` = the far side no longer knows about it (404). */
   getProject(id: string): Promise<ProvisionProject | null>;

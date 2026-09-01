@@ -5,6 +5,24 @@
 // Design: docs/blueprints/provision-erp-seam-design.md §03 (Zone B′, the ONE control channel, custody
 // map) + §04 (the provision-side contract, which this driver does not get to reinterpret).
 //
+// ── STATUS (WSK-D33, 2026-09-01): RETAINED, NOT WIRED INTO ANY LIVE CONTROLLER PATH ───────────────
+// The `provision` host (gda-s01) this driver calls is DECOMMISSIONED — `https://provision.gaiada.
+// online` measures 000 on every request, and the live `.env` carries no `PROVISION_*` vars at all.
+// `webdev.controller.ts#resolveProvider` no longer constructs this driver under any config value —
+// see that file's own header. It is kept, unmodified, rather than deleted, for three reasons: (1)
+// this file and its test suite are the only place the `ProvisionProvider` interface's original,
+// fully-synchronous contract (create/conflict/reject, the 409 adopt-only-if-ours shape) is exercised
+// end-to-end against a real driver — `erp-repo-control-provider.ts`'s tests cover the NEW,
+// approval-mediated shape instead, and losing this coverage would lose the historical proof that the
+// interface itself once supported a provider that never needed a human in the loop; (2) the retry/
+// timeout/credential-redaction discipline here (the `#`-private fields, `redact()`, the
+// transport-only retry policy) is real, load-bearing design knowledge for whatever eventually
+// implements a genuine `WebdeskProvider` (design D-P2) over its own HTTP seam; (3) deleting it would
+// also delete `PROVISION_WIRE_FRAMEWORK`'s canonical->wire alias table, which is the only place that
+// mapping is written down. If this ever needs to be reachable again, that is a deliberate wiring
+// change in `webdev.controller.ts`, not a config value someone can flip by accident — there is no
+// `PROVISION_BASE_URL`-shaped escape hatch left in the live controller.
+//
 // ── WHAT THIS DRIVER IS ALLOWED TO TOUCH (design §03, "Command surface") ─────────────────────────
 //   POST /api/users/login                          — mint a session (cached; re-login once on 401)
 //   POST /api/provision                            — the create

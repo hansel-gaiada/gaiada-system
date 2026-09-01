@@ -182,16 +182,23 @@ const SITE_COLUMNS = `id, tenant_id, pipeline_run_id, provider, provider_ref, sl
 // `webdev_provisioned_sites.framework`'s CHECK (migrations/202609011230_...) and
 // `ai-agents/src/code-scaffold/scaffold.ts`'s `rejected_site_kind` branch.
 //
-// `provision` itself did not get any smarter: it still creates STATIC EXPORTS ONLY — no per-project
-// database, no runtime, no port (`docs/architecture.md:46-48` in the provision repo) — so `wp` is
-// still, HONESTLY, not deliverable through this seam today. What changed is WHERE that is decided:
-// previously the ERP pre-emptively refused the REQUEST (`unsupported_stack`) before it ever reached
-// a provider, conflating "we chose not to build this" (the old D-P7 policy, now retired) with "no
-// implementation exists yet" (a real, current capability gap). Now the request is accepted as a
-// SELECTION, and the ONLY provider that exists (`provision`, via `provision-http.ts`) answers
-// honestly and loudly (`provider_rejected`, from its own capability-boundary check — no HTTP round
-// trip, no silent downgrade to a static site) when asked for `wp`. A future `WebdeskProvider`
-// (design D-P2) is what actually lifts that answer from "no" to "yes".
+// UPDATE (WSK-D33, 2026-09-01): `provision` (gda-s01) is DECOMMISSIONED — measured 000 on every
+// request, not merely deprecated — and is no longer the provider `webdev.controller.ts` constructs.
+// The ONLY live provider today is `ErpRepoControlProvider` (`erp-repo-control-provider.ts`), which
+// creates the repo SHELL from a per-kind GitHub template (GH-12's D14-approved path) — it has no
+// static-export-only limitation, so `wp` is now, HONESTLY, deliverable through this seam: §08's
+// "two scaffolders, one job each" split means the repo-control provider only ever owns STRUCTURE
+// (the repo + its template), never CONTENT (a WordPress theme/plugin tree, a database, a runtime —
+// still `ai-agents/src/code-scaffold/`'s job, unchanged by this ticket). What was ORIGINALLY true
+// here (before this update) still explains the SHAPE of the accepted-as-a-selection change below,
+// so it is kept rather than deleted: previously the ERP pre-emptively refused the REQUEST
+// (`unsupported_stack`) before it ever reached a provider, conflating "we chose not to build this"
+// (the old D-P7 policy, retired) with "no implementation exists yet" (a real capability gap at the
+// time). Now the request is accepted as a SELECTION, and the live provider answers honestly and
+// loudly (`provider_rejected`, 422, naming the missing per-kind template config — no HTTP round
+// trip against a provider that cannot deliver it, no silent downgrade to a static site) ONLY when
+// its own config is incomplete for the requested kind — never as a blanket "wp is not supported"
+// the way `provision-http.ts` (kept, unreachable by default — see its own header) still answers.
 export const SUPPORTED_FRAMEWORKS = new Set(["vite", "nextjs", "astro", "node", "wp"]);
 
 /** §08's kind vocabulary (`static`/`wp`/`fullstack`) plus every alias this seam has ever accepted in
