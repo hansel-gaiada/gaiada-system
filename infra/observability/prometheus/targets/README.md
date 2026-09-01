@@ -19,6 +19,22 @@ would page an engineer at 3am for a client's marketing site.
 Add an entry only when the thing is ours and its being unreachable is an engineering
 matter. Labels `host` and `env` are required — the alert annotations interpolate both.
 
+⚠ **A hostname in an nginx config is NOT evidence that it resolves.** The first version of this file
+took `delphi.deitylabs.ai` straight from delphi's `server_name` directives. It has **no DNS record at
+all** — `curl` from two independent vantage points returned `Could not resolve host`, and the probe
+sat DOWN. `helios.deitylabs.ai` from the same source resolves fine, which is what made the mistake
+easy to miss.
+
+So the vhost exists on the box and nobody on the internet can reach it. That is worth knowing in its
+own right, and it is why every target here was verified with an actual request before being listed:
+
+    for h in <hostnames>; do curl -s -o /dev/null -m 12 -w "%{http_code} $h
+" "https://$h"; done
+
+delphi is now represented by two vhosts that genuinely answer (`pilot-fullstack-cms` 200,
+`kalmra` 200) rather than by a hostname that only exists in a config file. A probe target that can
+never succeed is worse than no target: it burns an alert slot and trains people to ignore the plane.
+
 ## `client-properties.json` — Plane B, GENERATED. DO NOT HAND-EDIT.
 
 Written by `infra/observability/scripts/gen-client-property-targets.mjs` (sourced from
