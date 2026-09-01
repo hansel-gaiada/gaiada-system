@@ -57,11 +57,23 @@ export function GithubRepoRegistry({
   const [nowMs] = useState(() => Date.now());
 
   const columns = [
-    { label: "Repository" }, { label: "Branch" }, { label: "Last commit" },
+    { label: "Repository" }, { label: "Linked to" }, { label: "Branch" }, { label: "Last commit" },
     { label: "Open PRs", align: "right" as const }, { label: "Last CI run" },
     { label: "Deployed ref" }, { label: "Synced" },
   ];
-  const tcols = "1.8fr 0.9fr 1.4fr 0.7fr 1.3fr 1.2fr 1.3fr";
+  const tcols = "1.8fr 1.1fr 0.8fr 1.3fr 0.7fr 1.2fr 1.1fr 1.2fr";
+
+  // ONE table over both server pages, not two. The linked/unlinked split shipped as two separate
+  // tables on the assumption that unlinked would be the exception — on the real org it is 100% of
+  // rows (0 linked, 108 unlinked), so the main table rendered "No linked, active repos" while every
+  // repo sat in a bucket below it. That reads as "the crawl did not work", which is exactly the
+  // wrong conclusion, and it is what an operator actually concluded on first look.
+  //
+  // Linkage is now a COLUMN and a KPI, not a partition: it is an attribute of a repo, not a
+  // different kind of thing. The unlinked count stays prominent above because "nobody owns this
+  // repo" is still a finding worth acting on — it just is not a reason to hide the repo.
+  const allRepos = [...linked.repos, ...unlinked.repos].sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const allTotal = linked.total + unlinked.total;
 
   const renderRow = (r: GithubRepoView) => {
     const freshness = syncFreshness(r.lastSyncedAt, nowMs);
@@ -76,9 +88,11 @@ export function GithubRepoRegistry({
         <span className="ghr-repo-cell__meta">
           {r.visibility === "public" ? "Public" : "Private"}
           {r.archived ? " · Archived" : ""}
-          {link ? ` · ${link}` : ""}
         </span>
       </div>,
+      link
+        ? <span key="link" className="ghr-link-cell">{link}</span>
+        : <span key="link" className="ghr-link-cell ghr-link-cell--none" title="No webdev site and no project claims this repo">Unlinked</span>,
       <code key="branch" style={{ font: "400 12px var(--font-mono, monospace)", color: "var(--erp-ink-60)" }}>{r.defaultBranch}</code>,
       <div key="commit" className="ghr-commit-cell">
         <span>{r.headSha ? formatCommitAuthor(r.headAuthor) : "No commits yet"}</span>
@@ -137,18 +151,14 @@ export function GithubRepoRegistry({
         </div>
       </div>
 
-      <Bucket title="Repository registry" data={linked} columns={columns} tcols={tcols} renderRow={renderRow}
-        emptyCopy={includeArchived ? "No linked repos match this view." : "No linked, active repos — try “Show archived”."} />
-
-      <Card title="Unlinked repositories" headerRight={<span className="sys-empty-note">{unlinked.total}</span>}>
-        <p className="ghr-unlinked-note">
-          No webdev site and no project links to these repos — a site nobody registered in the ERP,
-          or a repo nobody owns. Shown as its own bucket so it can&apos;t be scrolled past inside the
-          main registry.
-        </p>
-        <BucketTable data={unlinked} columns={columns} tcols={tcols} renderRow={renderRow}
-          emptyCopy={includeArchived ? "No unlinked repos match this view." : "No unlinked, active repos — try “Show archived”."} />
-      </Card>
+      <Bucket
+        title="Repository registry"
+        data={{ repos: allRepos, total: allTotal, limit: linked.limit, offset: 0 }}
+        columns={columns}
+        tcols={tcols}
+        renderRow={renderRow}
+        emptyCopy={includeArchived ? "No repos match this view." : "No active repos — try “Show archived”."}
+      />
     </div>
   );
 }

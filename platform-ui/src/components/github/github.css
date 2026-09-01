@@ -20,3 +20,16 @@
 .ghr-sync-cell__asof { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
 
 .ghr-unlinked-note { margin: 0 0 12px; font: 400 13px/1.5 var(--font-body); color: var(--erp-ink-50); }
+
+/* "Linked to" cell — the linked/unlinked partition became a column (2026-09-01). An unlinked repo
+   is muted and italic rather than hidden or badged red: it is a finding to act on, not an error,
+   and on a fresh org EVERY row is unlinked, so anything alarming here would be pure noise. */
+.ghr-link-cell {
+  font: 400 12px/1.4 var(--font-body);
+  color: var(--erp-ink-80);
+  overflow-wrap: anywhere;
+}
+.ghr-link-cell--none {
+  color: var(--erp-ink-40);
+  font-style: italic;
+}
