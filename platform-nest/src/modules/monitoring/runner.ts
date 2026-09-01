@@ -241,6 +241,37 @@ export interface SweepResult {
  * enumeration deliberately does not re-implement `isModuleEnabled`'s OR-clause — the third wall
  * already answers that question, in the one place it is allowed to be answered.
  */
+/**
+ * A hard wall-clock deadline around a single probe.
+ *
+ * ── WHY THE DRIVER'S OWN TIMEOUT IS NOT ENOUGH ─────────────────────────────────────────────────
+ * The http driver sets a SOCKET-INACTIVITY timeout (`req.timeout`), which a response that trickles
+ * bytes slowly — or a connect that stalls before a socket exists (a hung DNS lookup in the egress
+ * guard) — never trips. And the whole per-tenant sweep runs inside ONE transaction, so a probe that
+ * hangs does not merely delay one monitor: it wedges the entire sweep, leaves the DB connection
+ * `idle in transaction` indefinitely, and (chained-setTimeout) stops every future tick. Observed in
+ * production the moment probes began actually dialling. So each probe gets an OVERALL ceiling here:
+ * exceed it and the probe is a DOWN observation with a clear reason, and the sweep moves on. `down`
+ * is the honest verdict — a target that cannot answer within the ceiling is not healthy.
+ */
+async function probeWithDeadline(
+  probe: Promise<ProbeResult>,
+  deadlineMs: number,
+): Promise<ProbeResult> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<ProbeResult>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ status: "down", latencyMs: null, detail: `probe exceeded ${deadlineMs}ms hard deadline` }),
+      deadlineMs,
+    );
+  });
+  try {
+    return await Promise.race([probe, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<SweepResult> {
   const out: SweepResult = { considered: 0, probed: 0, skippedNoDriver: 0, incidentsOpened: 0, incidentsClosed: 0 };
 
@@ -289,7 +320,8 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
       let observed: ProbeResult;
       try {
         const driver = getDriver(kind);
-        observed = await driver.probe(driver.validate(row.config), ctx);
+        // timeoutMs + 5s: honouring the socket timeout finishes inside this; only a hang hits it.
+        observed = await probeWithDeadline(driver.probe(driver.validate(row.config), ctx), timeoutMs + 5_000);
       } catch (e) {
         // A driver that throws is a DOWN observation with the reason attached, not a skipped check:
         // "the probe could not complete" is information about the target, and swallowing it would
