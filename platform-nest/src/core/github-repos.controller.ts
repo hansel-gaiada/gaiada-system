@@ -42,12 +42,19 @@
 // 2026-08-31). `linked=false` is its own first-class bucket, matching `idx_github_repos_unlinked`.
 // Neither state is ever mapped to a 4xx/5xx or silently dropped from the list.
 import {
-  BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query, Req, UseGuards,
+  BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post, Query, Req, UseGuards,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
+// GH-12 — the ONLY way a repo creation ever gets asked for. Filing is NOT creating: this endpoint
+// writes a `pending` automation_approvals row and nothing else; the actual GitHub call happens
+// exclusively in `automation-approvals.controller.ts#decide()` -> `executeApprovedGithubRepoCreation`
+// once a company_admin approves it. There is deliberately no other endpoint, here or anywhere else,
+// that calls githubRequest() with a create/generate path — see repo-creation.ts's own header.
+import { fileAutomationApproval } from "./approval-filing";
+import { GITHUB_CREATE_REPO_WORKFLOW, parseCreateRepoArgs } from "./github/repo-creation";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -244,5 +251,38 @@ export class GithubReposController {
 
     await writeActivity(tenantId, req.principal.userId, "unlinked", "github_repo", id, { target });
     return { id: updated.id, webdevSiteId: updated.webdevSiteId, projectId: updated.projectId };
+  }
+
+  // ── GH-12: request repo creation (files a D14 approval; creates NOTHING itself) ─────────────────
+  /** §0.2's reversal, closed the safe way: repo creation is re-enabled, but ONLY as something an
+   *  approval can grant. This handler's entire job is the INSERT — `authorize()` here checks the
+   *  generic `create` action on `automation_approval` (company_admin/manager/member, unchanged
+   *  policy, the same gate every other suspended-write filing already uses), NOT `create_repo` on
+   *  `github_repo` — that stricter, company_admin-only, approvalId-gated check runs later, at
+   *  DECIDE time, against the DECIDER's own authority (`repo-creation.ts`'s own header explains why
+   *  those are two different questions). A member who can file a request here may still have it
+   *  refused by every decider if nobody with `create_repo` reach ever approves it — filing is not a
+   *  promise of outcome, same as every other automation_approval in this table. */
+  @Post(":tenantId/github/repos/creation-requests")
+  @HttpCode(201)
+  async requestCreation(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: { name?: string; private?: boolean; description?: string; templateOwner?: string; templateRepo?: string; reason?: string },
+  ) {
+    const parsed = parseCreateRepoArgs((body ?? {}) as Record<string, unknown>);
+    if (!parsed.ok) throw new BadRequestException(parsed.error);
+    await authorize(req.principal, { kind: "automation_approval", tenantId }, "create");
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    return fileAutomationApproval({
+      tenantId,
+      workflowId: GITHUB_CREATE_REPO_WORKFLOW,
+      toolName: "github.createRepo",
+      toolArgs: { ...parsed.args },
+      impact: "high",
+      reason: body?.reason ?? `create GitHub repo '${parsed.args.name}'`,
+      origin: "github",
+      requestedBy: req.principal.userId,
+    });
   }
 }

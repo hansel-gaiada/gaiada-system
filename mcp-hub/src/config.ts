@@ -75,13 +75,20 @@ export const config = {
   //   central — additionally exposes cross-company/management tools (real rollup.metrics over the
   //             central platform's D12 rollup read path — the only sanctioned cross-company read).
   topology: (process.env.HUB_TOPOLOGY ?? "site") as "site" | "central",
-  // WS11 delivery tools (build item 9). GitHub repo checks + staging deploy trigger. All fail
-  // CLOSED with a clear message when unset (like image.enhance), so the tools register but never
-  // pretend. github: a PAT/app token + API base (default github.com). deploy: a workflow_dispatch-
-  // style webhook the release pipeline (WS10) exposes, plus its auth token.
-  githubApiUrl: process.env.GITHUB_API_URL ?? "https://api.github.com",
-  githubToken: process.env.GITHUB_TOKEN ?? "",
-  githubOrg: process.env.GITHUB_ORG ?? "",
+  // WS11 delivery tools (build item 9). Staging deploy trigger. Fails CLOSED with a clear message
+  // when unset (like image.enhance), so the tool registers but never pretends. deploy: a
+  // workflow_dispatch-style webhook the release pipeline (WS10) exposes, plus its auth token.
+  //
+  // GH-12 CUTOVER (docs/blueprints/github-integration-foundation.md §7 GH-12, §4.1/§2.2) — the hub
+  // held its OWN bare `GITHUB_TOKEN` here and called api.github.com directly. That is exactly the
+  // "no other service mints or holds an installation token" violation §4.1 forbids, and worse for a
+  // token with any write scope on the agent-facing, prompt-injectable surface. REMOVED, not merely
+  // deprecated: `github.repoStatus` (delivery-tools.ts) now forwards (OBO) to platform-nest's own
+  // `GET /api/:tenantId/github/repos` — the same `platformSend`/`oboHeaders` shape every other
+  // platform-front tool already uses — so the hub reads GitHub state through the SAME chokepoint
+  // that mints tokens, never a credential of its own. `github.createRepo` was never enabled here and
+  // stays that way permanently (see that tool's own comment) — the hub must be PROVABLY unable to
+  // write, not merely unconfigured-by-default.
   deployStagingUrl: process.env.DEPLOY_STAGING_URL ?? "",
   deployStagingToken: process.env.DEPLOY_STAGING_TOKEN ?? "",
   // Production deploy (WS11 tail B): a SEPARATE dispatch webhook from staging — production is

@@ -19,6 +19,9 @@ import { fileAutomationApproval } from "./approval-filing";
 // P2-08 part B: an approved IAM request (override, or a dept head's assignment) executes in-band.
 // One import, one call — the IAM-specific knowledge lives in that module, not in this shared route.
 import { IAM_POSITION_ASSIGN_WORKFLOW, executeApprovedIamRequest, isIamRequest } from "../admin/iam-approval-execute";
+// GH-12: an approved github repo-creation request ALSO executes in-band — same reasoning as the IAM
+// case (the D14 registry's hub-redrive shape is unusable here; see repo-creation.ts's own header).
+import { executeApprovedGithubRepoCreation, isGithubRepoCreationRequest } from "./github/repo-creation";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -273,6 +276,13 @@ export class AutomationApprovalsController {
     // against `decide_override` and carry the requester ≠ decider DENY. `workflow_id` tells the
     // execution seam which one it is; this route does not need to know.
     const isOverride = isIamRequest(rowOrigin, existing.rows[0].workflow_id);
+    // GH-12: identified the SAME way `isOverride`/`isLeave` are (origin + workflow_id), and
+    // deliberately NOT routed through `decideAction` below — the generic `decide` action already IS
+    // the right gate for this origin (resource_automation_approval.yaml's `decide` is already
+    // company_admin-only, matching resource_github_repo.yaml's `create_repo` tier; see
+    // repo-creation.ts's header for why no new literal Cerbos action was needed here, unlike
+    // decide_override/decide_leave).
+    const isGithubCreate = isGithubRepoCreationRequest(rowOrigin, existing.rows[0].workflow_id);
     const subKind = isLeave ? "leave" : undefined;
     // Owner split (2026-08-19): the two IAM request kinds authorize against DIFFERENT actions, so a
     // policy can narrow one without narrowing the other, and the audit row records which kind of
@@ -363,11 +373,29 @@ export class AutomationApprovalsController {
       );
     }
 
+    // ── GH-12: an APPROVED github repo-creation request executes IN-BAND, same shape as the IAM
+    // override above (see repo-creation.ts's header for why: the D14 registry's hub-redrive is
+    // unusable here, mcp-hub must never be asked to write). Authority for the ACTUAL GitHub call is
+    // the DECIDER's — `repo-creation.ts` calls `authorize()` against `create_repo` on `github_repo`
+    // with THIS resource's own id, which is the real, narrow, company_admin-only gate. If it throws
+    // (denied, misconfigured GITHUB_ORG, or GitHub itself refused), the row is already `approved` in
+    // the DB (truthful: a human did decide to approve it) but nothing was created — the ledger
+    // (core/github/ledger.ts) still records the ATTEMPT either way, per §4.3.
+    let githubResult: Awaited<ReturnType<typeof executeApprovedGithubRepoCreation>> | null = null;
+    if (res && isGithubCreate && decision === "approved") {
+      githubResult = await executeApprovedGithubRepoCreation(tenantId, id, res.tool_args, req.principal);
+      await writeActivity(tenantId, req.principal.userId, "created", "github_repo", githubResult.correlationId, {
+        viaApproval: id,
+        fullName: githubResult.fullName,
+      });
+    }
+
     if (!res) throw new NotFoundException("approval not found or already decided");
     await writeActivity(tenantId, req.principal.userId, decision, "automation_approval", id);
-    // `override` is present ONLY for an approved IAM override, so every existing consumer of this
-    // response sees a byte-identical shape. It carries the grant id and the expiry because a decider
-    // who cannot see what their approval actually produced has to go and look it up to be sure.
+    // `override`/`github` are present ONLY for their own approved kind, so every existing consumer
+    // of this response sees a byte-identical shape otherwise. They carry what the approval actually
+    // produced because a decider who cannot see that has to go and look it up to be sure.
+    if (githubResult) return { id, status: decision, github: githubResult };
     return iamResult ? { id, status: decision, iam: iamResult } : { id, status: decision };
   }
 

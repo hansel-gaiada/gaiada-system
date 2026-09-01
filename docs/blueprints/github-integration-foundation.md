@@ -116,6 +116,29 @@ tool surface, and agents are prompt-injectable.** If the hub can write, a poison
 repo write. Read-only there also keeps the ledger complete — a hub that can write directly creates a
 path the ERP audit trail never sees. All writes route through `platform-nest`.
 
+> **⚠ CORRECTED 2026-09-01 — this section contradicted §4.1, and §4.1 wins.**
+>
+> "held by `mcp-hub`" is incompatible with §4.1's own rule: *"No other service mints or holds an
+> installation token."* GH-12 hit the contradiction while implementing and resolved it the right way,
+> which is worth recording because the reasoning generalises:
+>
+> **mcp-hub is a separate deployable and cannot import platform-nest's TypeScript.** Giving it a
+> credential would mean a second copy of `jwt.ts`, `token-cache.ts` and `http-client.ts` living in
+> another codebase — a second place to get JWT lifetimes, token caching and rate-limit fairness
+> wrong, and a second place a PEM sits at rest. "Read-only" would have bought less than it cost.
+>
+> **What shipped instead is stronger:** mcp-hub holds **no GitHub credential at all** —
+> `GITHUB_TOKEN` / `GITHUB_API_URL` / `GITHUB_ORG` are gone from its config. `github.repoStatus`
+> forwards on-behalf-of to platform-nest's own registry endpoint (GH-08), and `github.createRepo`
+> refuses permanently, naming the approval path. So §4.1's single chokepoint now holds for **both**
+> roles rather than only the write one, and the read path gains the ledger and Cerbos for free.
+>
+> ⚠ **Consequence to decide: `gaiada-agents` now has NO consumer.** It was created for mcp-hub, and
+> mcp-hub no longer needs it. It is installed, read-only, and idle. Either keep it as a ready-made
+> least-privilege credential for a future service that genuinely needs direct read access, or
+> uninstall it — but do not leave an unexplained App on the org, which is exactly what GH-15's sweep
+> exists to flag. Recorded rather than quietly resolved.
+
 **`gaiadabali-deploy`** — **ALREADY EXISTS, discovered 2026-08-31. Not created by this design.**
 Installed ~2026-08-19, all repositories, **read access to code and metadata only.** Its purpose is
 the client-site deploy bridge, and understanding it matters because it explains why no repo carries

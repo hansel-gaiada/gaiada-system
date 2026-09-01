@@ -485,6 +485,15 @@ const configBase = {
       installationId: process.env.GITHUB_AGENTS_INSTALLATION_ID ?? "",
     },
   },
+  // GH-12 (docs/blueprints/github-integration-foundation.md §7 GH-12) — the org LOGIN this
+  // deployment is allowed to create repos IN (`POST /orgs/{org}/repos` or the template-generate
+  // twin, `core/github/repo-creation.ts`). Needed only for CREATE: every other call in
+  // `core/github/*` already carries `org/name` in its own path/response — `repo-sync.service.ts`'s
+  // own "no org parameter, derived from what GitHub returns" rule is unaffected. NO DEFAULT, EVER —
+  // same reasoning as `githubApps`/`githubRepoSync` above: a guessed org would let an unconfigured
+  // deployment silently attempt to create a repo in the wrong (or a nonexistent) org the moment a
+  // credential happened to be sealed. Empty ⇒ `repo-creation.ts` refuses with a 503, never a guess.
+  githubOrg: process.env.GITHUB_ORG ?? "",
   // GH-06 (docs/blueprints/github-integration-foundation.md §5.3) — the org crawl / reconcile
   // sweep's tenant. NOT resolved by a company-NAME lookup at runtime (this repo's own documented
   // "Seeds — the rename trap": a name is not a stable identifier — see platform-nest/CLAUDE.md) and

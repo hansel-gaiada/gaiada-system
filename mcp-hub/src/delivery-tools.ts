@@ -1,16 +1,56 @@
 // WS11 build item 9 — GitHub + staging-deploy tools for the delivery track.
 //
-// Placement of logic: repo creation is a HUMAN step (the PM creates the repo in company GitHub —
-// WS11 decision), so `github.createRepo` is registered but fail-closed-not-enabled; the workflow
-// gates the Claude Code stage on `github.repoStatus` (a read) instead. `deploy.staging` triggers the
-// WS10 release pipeline via a workflow_dispatch-style webhook. Both fail CLOSED with a clear message
-// when unconfigured (the honest pattern used by image.enhance) rather than pretending to succeed.
+// GH-12 CUTOVER (docs/blueprints/github-integration-foundation.md §7 GH-12) — this file used to hold
+// its own `GITHUB_TOKEN` and call api.github.com directly for `github.repoStatus`. That violated
+// §4.1's single chokepoint ("no other service mints or holds an installation token") and, more to
+// the point, meant the agent-facing hub held a live GitHub credential at all. Both GitHub tools now
+// go through platform-nest, which is the ONLY thing that ever talks to api.github.com:
+//   - `github.repoStatus` forwards (OBO) to platform-nest's `GET /api/:tenantId/github/repos`
+//     (GH-08's registry read, already Cerbos + RLS gated there) — same `platformSend`/`oboHeaders`
+//     shape as `platform-write-tools.ts`. The hub holds no GitHub credential, read-only or otherwise.
+//   - `github.createRepo` STAYS PERMANENTLY REFUSED here. This is not "not configured yet" — it is a
+//     structural decision: repo creation is an external, not-trivially-reversible act that must be
+//     gated by a company_admin's D14 approval AND executed by platform-nest's `erp` (write) App
+//     (`core/github/repo-creation.ts`). mcp-hub is the agent-facing tool surface and agents are
+//     prompt-injectable (§2.2); if this tool ever forwarded instead of refusing, a poisoned prompt
+//     would be one hub call away from creating a repo. The refusal names the real path
+//     (`POST /api/:tenantId/github/repos/creation-requests`, then a company_admin decides it) so a
+//     caller — human or agent — knows where the write actually lives.
 //
-// Egress note: these tools call GitHub / the deploy webhook directly (a hub egress path distinct from
-// the AI Gateway). Keep the tokens least-privilege (a deploy-only PAT; a single-repo dispatch token).
+// `deploy.staging`/`deploy.production` are unchanged by this cutover — they dispatch the WS10
+// release pipeline's own webhook, never GitHub.
 import { config } from "./config";
 import { registerTool } from "./registry";
 import { gatewayComplete } from "./gateway-client";
+import { oboHeaders } from "./obo-headers";
+import type { Principal } from "./principal";
+
+interface PlatformGithubRepo {
+  fullName: string;
+  name: string;
+  defaultBranch: string;
+}
+
+/** `github.repoStatus`'s own thin platform-front call. Deliberately NOT reusing
+ *  `platform-write-tools.ts#platformSend` (a POST/PATCH-only helper) — this is a GET with no body. */
+async function fetchRepoStatus(tenantId: string, repo: string, principal: Principal): Promise<PlatformGithubRepo | null> {
+  const name = repo.includes("/") ? repo.slice(repo.lastIndexOf("/") + 1) : repo;
+  const res = await fetch(
+    `${config.platformUrl}/api/${encodeURIComponent(tenantId)}/github/repos?search=${encodeURIComponent(name)}&limit=10`,
+    { headers: oboHeaders(principal, config.platformToken) },
+  );
+  if (res.status === 401 || res.status === 403) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? "platform denied the request");
+  }
+  if (!res.ok) throw new Error(`platform /github/repos ${res.status}`);
+  const body = (await res.json()) as { repos?: PlatformGithubRepo[] };
+  const repos = body.repos ?? [];
+  // Exact match only: `search` is an ILIKE substring match on the registry side, but "does this repo
+  // exist" (the whole point of this tool — gating the code stage) must not report a false positive
+  // because a DIFFERENT repo's name happens to contain this one as a substring.
+  return repos.find((r) => r.name === name || r.fullName === repo) ?? null;
+}
 
 export function registerDeliveryTools(): void {
   // ---- Claude Design / Claude Code (WS11 build item 7) ----
@@ -65,39 +105,46 @@ export function registerDeliveryTools(): void {
   registerTool({
     name: "github.repoStatus",
     description:
-      "Check whether a GitHub repo exists (gates the Claude Code stage — the PM must create the repo first). Returns { exists, fullName, defaultBranch }.",
-    minAssurance: "low",
+      "Check whether a GitHub repo exists (gates the Claude Code stage). Returns { exists, fullName, defaultBranch }. Reads platform-nest's own repo registry (GH-08) via OBO — the hub holds no GitHub credential of its own.",
+    minAssurance: "low", // the platform resolves the real identity + Cerbos `read` decision
     inputSchema: {
       type: "object",
       properties: {
-        repo: { type: "string", description: "repo name (uses GITHUB_ORG) or full owner/name" },
+        tenantId: { type: "string" },
+        repo: { type: "string", description: "repo name, or full owner/name" },
       },
-      required: ["repo"],
+      required: ["tenantId", "repo"],
     },
-    handler: async (args) => {
-      if (!config.githubToken) throw new Error("github.repoStatus not enabled: set GITHUB_TOKEN (and GITHUB_ORG)");
+    handler: async (args, principal) => {
+      const tenantId = String(args.tenantId ?? "");
       const repo = String(args.repo ?? "");
-      const full = repo.includes("/") ? repo : `${config.githubOrg}/${repo}`;
-      if (!full.includes("/") || full.startsWith("/")) throw new Error("repo must be owner/name or GITHUB_ORG must be set");
-      const res = await fetch(`${config.githubApiUrl}/repos/${full}`, {
-        headers: { Authorization: `Bearer ${config.githubToken}`, Accept: "application/vnd.github+json", "User-Agent": "gaiada-mcp-hub" },
-      });
-      if (res.status === 404) return JSON.stringify({ exists: false, fullName: full });
-      if (!res.ok) throw new Error(`github ${res.status}`);
-      const j = (await res.json()) as { full_name?: string; default_branch?: string };
-      return JSON.stringify({ exists: true, fullName: j.full_name ?? full, defaultBranch: j.default_branch ?? "main" });
+      if (!tenantId) throw new Error("tenantId required");
+      if (!repo.trim()) throw new Error("repo required");
+      const match = await fetchRepoStatus(tenantId, repo, principal);
+      if (!match) return JSON.stringify({ exists: false, fullName: repo.includes("/") ? repo : undefined });
+      return JSON.stringify({ exists: true, fullName: match.fullName, defaultBranch: match.defaultBranch });
     },
   });
 
   registerTool({
     name: "github.createRepo",
-    description: "Create a company GitHub repo — NOT ENABLED (WS11 decision: the PM creates the repo manually; use github.repoStatus to gate).",
+    description:
+      "Create a company GitHub repo — PERMANENTLY NOT ENABLED IN THE HUB. mcp-hub holds only the read-only GitHub App and structurally cannot write. File a D14 approval instead: POST /api/:tenantId/github/repos/creation-requests (a company_admin then approves it, which is what actually creates the repo).",
     minAssurance: "low",
     write: true,
-    impact: "medium", // creating an external, not-trivially-reversible resource
-    inputSchema: { type: "object", properties: { name: { type: "string" }, private: { type: "boolean" } }, required: ["name"] },
+    impact: "medium", // creating an external, not-trivially-reversible resource — see the file header
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, name: { type: "string" }, private: { type: "boolean" } },
+      required: ["tenantId", "name"],
+    },
     handler: async () => {
-      throw new Error("github.createRepo is not enabled: repo creation is a manual PM step (WS11). Use github.repoStatus to gate the code stage.");
+      throw new Error(
+        "github.createRepo is not enabled in mcp-hub: the hub holds only the read-only GitHub App and " +
+          "must never write to GitHub (see docs/blueprints/github-integration-foundation.md §2.2/§4.1). " +
+          "File a D14 approval instead — POST /api/:tenantId/github/repos/creation-requests — a " +
+          "company_admin approving it is what actually creates the repo.",
+      );
     },
   });
 

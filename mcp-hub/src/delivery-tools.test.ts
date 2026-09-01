@@ -10,15 +10,17 @@ function mockFetch(status: number, body: unknown, isJson = true) {
 }
 
 describe("WS11 delivery tools", () => {
-  const saved = { gh: config.githubToken, org: config.githubOrg, dep: config.deployStagingUrl };
+  const saved = { dep: config.deployStagingUrl, platformUrl: config.platformUrl };
   beforeEach(() => {
     resetRegistry();
     registerDeliveryTools();
-    config.githubToken = ""; config.githubOrg = ""; config.deployStagingUrl = "";
+    config.deployStagingUrl = "";
+    config.platformUrl = "http://platform.test";
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    config.githubToken = saved.gh; config.githubOrg = saved.org; config.deployStagingUrl = saved.dep;
+    config.deployStagingUrl = saved.dep;
+    config.platformUrl = saved.platformUrl;
   });
 
   it("registers design/code + github/deploy tools", () => {
@@ -44,17 +46,36 @@ describe("WS11 delivery tools", () => {
     expect(JSON.parse(out)).toEqual({ content: "## Plan\nfile tree..." });
   });
 
-  it("github.repoStatus fails CLOSED when unconfigured, and github.createRepo is not enabled", async () => {
-    await expect(getTool("github.repoStatus")!.handler({ repo: "site" }, principal)).rejects.toThrow(/not enabled/);
-    await expect(getTool("github.createRepo")!.handler({ name: "site" }, principal)).rejects.toThrow(/not enabled/);
+  // GH-12 — github.createRepo is a PERMANENT refusal in the hub, not a "not configured yet" state:
+  // the hub holds only the read-only App and must never write to GitHub. No config value can enable
+  // it, unlike deploy.staging/production below.
+  it("github.createRepo always refuses in the hub and names the D14 approval path", async () => {
+    await expect(getTool("github.createRepo")!.handler({ tenantId: "t1", name: "site" }, principal)).rejects.toThrow(
+      /read-only GitHub App|creation-requests/,
+    );
   });
 
-  it("github.repoStatus reports exists/absent when configured", async () => {
-    config.githubToken = "ght"; config.githubOrg = "gaiada";
-    vi.stubGlobal("fetch", mockFetch(200, { full_name: "gaiada/site", default_branch: "main" }));
-    expect(JSON.parse(await getTool("github.repoStatus")!.handler({ repo: "site" }, principal))).toMatchObject({ exists: true, fullName: "gaiada/site", defaultBranch: "main" });
-    vi.stubGlobal("fetch", mockFetch(404, {}));
-    expect(JSON.parse(await getTool("github.repoStatus")!.handler({ repo: "site" }, principal))).toMatchObject({ exists: false });
+  it("github.repoStatus requires tenantId and repo", async () => {
+    await expect(getTool("github.repoStatus")!.handler({ repo: "site" }, principal)).rejects.toThrow(/tenantId required/);
+    await expect(getTool("github.repoStatus")!.handler({ tenantId: "t1" }, principal)).rejects.toThrow(/repo required/);
+  });
+
+  // GH-12 — github.repoStatus now forwards (OBO) to platform-nest's own repo registry (GH-08)
+  // instead of calling api.github.com directly; the hub holds no GitHub credential at all.
+  it("github.repoStatus reports exists/absent via the platform registry, never GitHub directly", async () => {
+    const fetchMock = mockFetch(200, { repos: [{ name: "site", fullName: "gaiada/site", defaultBranch: "main" }], total: 1 });
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await getTool("github.repoStatus")!.handler({ tenantId: "t1", repo: "site" }, principal);
+    expect(JSON.parse(out)).toMatchObject({ exists: true, fullName: "gaiada/site", defaultBranch: "main" });
+    expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toContain("platform.test/api/t1/github/repos");
+
+    vi.stubGlobal("fetch", mockFetch(200, { repos: [], total: 0 }));
+    expect(JSON.parse(await getTool("github.repoStatus")!.handler({ tenantId: "t1", repo: "site" }, principal))).toMatchObject({ exists: false });
+  });
+
+  it("github.repoStatus does not report a false positive on a substring match", async () => {
+    vi.stubGlobal("fetch", mockFetch(200, { repos: [{ name: "site-old", fullName: "gaiada/site-old", defaultBranch: "main" }], total: 1 }));
+    expect(JSON.parse(await getTool("github.repoStatus")!.handler({ tenantId: "t1", repo: "site" }, principal))).toMatchObject({ exists: false });
   });
 
   it("deploy.staging is LOW impact, fails CLOSED when unconfigured, dispatches when set", async () => {
