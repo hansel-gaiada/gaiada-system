@@ -53,10 +53,27 @@ export type GithubLinkActionFn = (formData: FormData) => Promise<GithubLinkActio
 type RepoPage = Pick<GithubRepoListResponse, "repos" | "total" | "limit" | "offset">;
 
 export function GithubOrgBanner({ org }: { org: GithubOrgMeta }) {
+  // `org.login` can be an EMPTY STRING, and this guard exists because it actually was in production.
+  // `GITHUB_ORG` was forwarded to mcp-hub but not to platform, so `config.githubOrg` read "" and the
+  // API returned `login: ""` while still reporting all 221 repos correctly. Rendered unguarded, this
+  // banner said `GitHub org` followed by an empty <code> box — which reads as a broken page rather
+  // than the config gap it is. The unit tests all passed: their fixtures had a login set.
+  //
+  // So an absent login is named as absent. It is deliberately NOT treated as a failure state — the
+  // registry itself is fine and its rows are correct, and downgrading a working list to a refusal
+  // over a cosmetic gap would be its own confident-wrong-answer.
+  const login = org.login?.trim() ? org.login : null;
   return (
     <div className="ghr-org-banner">
       <span className="ghr-org-banner__title">
-        GitHub org <code>{org.login}</code> — registered to {org.tenantName ?? "an unnamed company"}
+        {login ? (
+          <>
+            GitHub org <code>{login}</code>
+          </>
+        ) : (
+          <>GitHub org (name not configured — set GITHUB_ORG)</>
+        )}{" "}
+        — registered to {org.tenantName ?? "an unnamed company"}
       </span>
       <span className="ghr-org-banner__hint">
         This registry is group-wide: everyone with reach into {org.tenantName ?? "the registered company"}&apos;s

@@ -464,6 +464,16 @@ services:
       GITHUB_REPO_SYNC_ENABLED: ${GITHUB_REPO_SYNC_ENABLED:-false}
       GITHUB_REPO_SYNC_TENANT_ID: ${GITHUB_REPO_SYNC_TENANT_ID:-}
       GITHUB_REPO_SYNC_INTERVAL_MS: ${GITHUB_REPO_SYNC_INTERVAL_MS:-21600000}
+      # The org login itself. Added 2026-09-02 after it was found MISSING here in production: it was
+      # forwarded to `mcp-hub` only, so `config.githubOrg` in platform-nest read "" and GHT-1's
+      # `org.login` response field came back as an empty string. Every OTHER GITHUB_* var above was
+      # already forwarded to this service, which is exactly why the omission was invisible.
+      #
+      # Nothing crashed, because the GH-06 crawl never depended on it — repo-sync.service.ts derives
+      # org logins from what the API actually returns rather than trusting config. So 221 repos synced
+      # correctly while the value platform reports about itself was blank. Only driving the real
+      # endpoint surfaced it; the unit tests used fixtures that had a login set.
+      GITHUB_ORG: ${GITHUB_ORG:-}
       # Automation is the separate `gaiada-automation` n8n stack; set these only if n8n is
       # reachable from this network. AUTOMATION_API_KEY is an n8n Public-API key → the
       # Systems→Automation console then lists real workflows + last-run.

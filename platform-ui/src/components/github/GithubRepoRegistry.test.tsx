@@ -78,3 +78,25 @@ describe("GithubRepoRegistry — app health is wired through, not assumed", () =
     expect(screen.getByText(/configuration gap, not an outage/i)).toBeInTheDocument();
   });
 });
+
+// Regression: production returned `login: ""` (GITHUB_ORG was forwarded to mcp-hub but not to
+// platform). Unguarded, the banner rendered an empty <code> box, which reads as a broken page.
+describe("GithubOrgBanner — an absent org login", () => {
+  it("names the gap instead of rendering an empty code box, and keeps the tenant", () => {
+    render(<GithubOrgBanner org={{ login: "", tenantId: "t1", tenantName: "Gaia Digital Agency" }} />);
+    // The title carries the gap notice AND still names the tenant. `getAllByText` for the tenant:
+    // the hint line names it too, so a single-match query is wrong here rather than the code being.
+    expect(screen.getByText(/name not configured/i)).toBeInTheDocument();
+    expect(screen.getByText(/GITHUB_ORG/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Gaia Digital Agency/).length).toBeGreaterThan(0);
+    // The actual defect: an empty <code> element. There must be no empty code box at all.
+    const codes = document.querySelectorAll("code");
+    expect(Array.from(codes).filter((c) => !c.textContent?.trim())).toHaveLength(0);
+  });
+
+  it("renders the login normally when it is present", () => {
+    render(<GithubOrgBanner org={{ login: "gaiadabali", tenantId: "t1", tenantName: "Gaia Digital Agency" }} />);
+    expect(screen.getByText("gaiadabali")).toBeInTheDocument();
+    expect(screen.queryByText(/name not configured/i)).not.toBeInTheDocument();
+  });
+});
