@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { Button, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { scheduleMaintenance, deleteMaintenance } from "@/lib/monitoringActions";
-import { maintenanceState, describeMaintenanceScope, type MaintenanceWindow } from "@/lib/monitoring";
+import { maintenanceState, describeMaintenanceScope, type MaintenanceWindow } from "@/lib/monitoringShared";
 // Pinned locale + timeZone — see platform-ui/CLAUDE.md's hydration-divergence trap.
 import { formatDateTime } from "@/lib/format";
 

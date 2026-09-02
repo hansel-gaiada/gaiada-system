@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { Button, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { saveRoute, deleteRoute } from "@/lib/monitoringActions";
-import { isCatchAll, type MonitorRoute } from "@/lib/monitoring";
+import { isCatchAll, type MonitorRoute } from "@/lib/monitoringShared";
 
 const labelStyle = {
   font: "600 11px var(--font-body)",

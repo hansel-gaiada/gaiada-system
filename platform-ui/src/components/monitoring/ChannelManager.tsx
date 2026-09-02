@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import { Button, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { saveChannel, setChannelEnabled, deleteChannel, testChannel } from "@/lib/monitoringActions";
-import { channelHealth, ageSeconds, formatAge, CHANNEL_KINDS, type MonitorChannel } from "@/lib/monitoring";
+import { channelHealth, ageSeconds, formatAge, CHANNEL_KINDS, type MonitorChannel } from "@/lib/monitoringShared";
 
 const HEALTH_LABEL: Record<string, string> = {
   ok: "active",
