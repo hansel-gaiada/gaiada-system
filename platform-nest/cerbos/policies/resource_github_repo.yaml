@@ -1,0 +1,165 @@
+# GH-03 (docs/blueprints/github-integration-foundation.md §4.2) — authorization for the `github_repo`
+# resource kind. Filename matches `github-repos.controller.ts`'s (GH-08) own expectation verbatim —
+# see that file's header and `github-repos-http.test.ts`'s: both were built BEFORE this policy shipped
+# and named `resource_github_repo.yaml` as the exact file that would end their fail-closed 403 resting
+# state. This is that file.
+#
+# TWO DIFFERENT CALLERS SHARE THIS ONE RESOURCE KIND, DELIBERATELY:
+#   1. `github-repos.controller.ts` (GH-08) — the ERP's OWN registry bookkeeping: `read` (list/
+#      detail), `link`, `unlink`. These never touch GitHub; they edit `github_repos.webdev_site_id`/
+#      `project_id` only (§5.1: "the ERP is truth for the link"), so they need NO D14 approval —
+#      nothing external or irreversible happens (coordinator ruling, 2026-08-31).
+#   2. §4.1's chokepoint (GH-01/02's `githubRequest()`, wrapped by GH-04's `core/github/ledger.ts`)
+#      — the six actions that actually ask GitHub to do something: `push`, `merge`, `deploy`,
+#      `secret_write`, `create_repo`, `delete_repo`.
+# One resource kind because both callers answer the same question — "may this human act on this
+# repo" — and Cerbos allows exactly one resourcePolicy per (resource, version); splitting the two
+# callers across two files would not compile (a second `resourcePolicy: {resource: github_repo,
+# version: default}` document is a conflict, not an extension).
+#
+# ── READ / LINK / UNLINK — NO MODULE GATE (coordinator ruling, 2026-08-31) ─────────────────────────
+# `github_repos` is a CORE table with no module wall by the migration's own ruling (0735's header:
+# "not owned by one module... tenant isolation only, not module-sliced"), so this policy does not
+# gate these three actions on `resource.attr.module` either — company_admin/manager (link/unlink) and
+# +member (read) reach every repo in their tenant, full stop. `tenant_id` on every row is ALWAYS the
+# operating company that owns the GitHub org (§5.2's ruling) — there is no client tenancy on this
+# table, so this is staff-facing only BY CONSTRUCTION: `client`'s derived role (derived_roles.yaml)
+# is deliberately not a parent of any staff role and matches no rule here, so an `isClientOnly`
+# principal reaches nothing on this kind regardless of company/project scope — the same structural
+# exclusion `resource_pipeline_run.yaml`/`resource_automation_approval.yaml` rely on, not a
+# kind-specific carve-out.
+#
+# ── THE SIX GITHUB-OP ACTIONS, AND WHICH FOUR ARE D14-GATED (coordinator ruling, 2026-08-31) ───────
+#   read          — covers list/detail alike, matching the controller's own single `read` action.
+#   push, merge   — ordinary write traffic, role-tier gated like any other write. §4.4's commit-
+#                   attribution requirement rides ALONGSIDE this gate (this file answers "may they
+#                   ask at all"; core/github/ledger.ts answers "is the commit attributed"; neither
+#                   substitutes for the other).
+#   deploy, secret_write, create_repo, delete_repo — ALL FOUR are D14-gated (approvalId required,
+#                   see the block below), per the coordinator's explicit correction to this ticket's
+#                   original brief: "keep D14 for the external, not-trivially-reversible actions
+#                   (repo create/delete, deploy, secret-write)". `push`/`merge` write to a repo too,
+#                   but neither is external-irreversible the way triggering a live deploy or minting
+#                   a credential is — GitHub's own PR/branch-protection machinery is the review gate
+#                   for ordinary commits; D14 is reserved for actions that gate machinery cannot see.
+#
+# ── "PER REPO" IS THE PROJECT-SCOPE CASCADE, NOT A NEW MECHANISM ───────────────────────────────────
+# Cerbos holds no per-repo ACL data of its own — repo ownership lives in `github_repos.webdev_site_id`/
+# `project_id` (GH-05, already built). Per-repo narrowing for the six GitHub-op actions is expressed
+# the SAME way resource_pipeline_run.yaml/resource_pm_task.yaml already express it: the caller (GH-10,
+# not yet built) populates `resource.attr.projectId` from the repo's linked project, and `manager`'s
+# existing derived-role condition (derived_roles.yaml) already cascades a project-scoped grant onto a
+# resource carrying that project's id. No new derived role, no new cascade logic.
+#
+# ── MODULE SCOPING ON THE SIX GITHUB-OP ACTIONS ONLY ────────────────────────────────────────────────
+# `module_staff`/`module_manager` are included on `push`/`merge` (and, gated behind D14, on
+# `deploy`/`secret_write`) so a department that owns a service assignment for a tenant (ORG-6's
+# reconciler-materialized `<module>_staff`/`<module>_manager` grants) can act on the repos THEIR
+# module serves, without needing a company_admin/manager grant on top. `resource.attr.module` is
+# OPTIONAL and caller-supplied (most repos will carry `module: "webdev"` once GH-10 resolves it from
+# `github_repos.webdev_site_id`; a repo with no module link simply never matches these rules, leaving
+# company_admin/manager as its only reach). Deliberately NOT applied to `read`/`link`/`unlink` — see
+# the no-module-gate note above; those three answer to the table's own no-module-wall ruling, not to
+# this section's per-department reasoning, and `github-repos.controller.ts` never resolves or passes
+# `module` today, so adding module_staff/manager there would be dead code no caller can reach.
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: github_repo
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+
+    # ══════════════ GH-08's registry surface — read / link / unlink. NO D14, NO MODULE GATE ═══════
+    - actions: ["read", "link", "unlink"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # Read is broader than link/unlink — a member may look, only company_admin/manager may edit
+    # the link.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    # `module_staff`/`module_manager` ALSO reach `read` — additive, not a module GATE on the action
+    # itself (that would mean requiring `resource.attr.module` to match before ANYONE could read,
+    # which is exactly what the coordinator's ruling forbids). This is the opposite direction: two
+    # roles that already carry their OWN internal module-match condition (derived_roles.yaml) are
+    # simply added to the eligible set, on top of the unconditional company_admin/manager/member
+    # reach above. Proven necessary live (2026-08-31): without this, a webdev_staff holder who can
+    # `push`/`merge` a module-linked repo could not `read`/list it at all — a strictly worse position
+    # than the write access they already hold, and not something any ruling asked for.
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ══════════════ push / merge — ordinary write traffic, role-tier gated, NO D14 ═════════════════
+    - actions: ["push", "merge"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "module_staff", "module_manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # ═══════════ deploy / secret_write / create_repo / delete_repo — D14-GATED, ALL FOUR ═══════════
+    #
+    # §0.2's reversal ("the ERP gets full GitHub capability... [answered by] routing creation through
+    # D14 approval, not by keeping the tool disabled") and the coordinator's explicit widening of
+    # "anything destructive" to include `deploy`/`secret_write` both cash out here, structurally, not
+    # by convention: there is NO rule anywhere in this file that admits any of these four actions on
+    # role tier alone — even `platform_admin`'s wildcard rule at the top is the ONLY path that does
+    # not require an approval, exactly as it is the only bypass for resource_mcp_tool.yaml's WSK-31
+    # ALWAYS-WS4 tools.
+    #
+    # Mirrors that mechanism byte-for-byte, reapplied to this resource kind instead of `mcp_tool`:
+    # admitted ONLY when the request carries a non-empty, string-typed `approvalId` — see cerbos.ts's
+    # own comment on the `Resource.approvalId` field for why it can never be set from anything but a
+    # verified D14 grant. The role-tier ceiling on this rule is intentionally NOT flattened to one
+    # shared tier for all four actions: `create_repo`/`delete_repo` stay `company_admin`-only (the
+    # narrowest — irreversible org-structure changes), `secret_write` adds `module_manager` (a
+    # department admin managing their own service's credentials), and `deploy` adds `manager` +
+    # `module_staff` (the people who legitimately trigger deploys day to day, now additionally
+    # gated on a real approval rather than trusted on role alone). A member or manager holding a
+    # verified grant for an action their tier does not reach (e.g. a plain member with a create_repo
+    # approvalId, which nothing today can even mint) still could not pass these rules — D14 approval
+    # LOWERS a floor, it does not by itself GRANT authority nobody has.
+    #
+    # ⚠ EVERY RULE BELOW IS DELIBERATELY UNREACHABLE UNTIL GH-10/GH-12 WIRE THE GRANT. That is not a
+    # defect in this ticket — it is the same "an incomplete entry is inert and loud, never silently
+    # executable" doctrine approval-executables.ts's own header states for a name-only registration.
+    # Until a caller exists that can mint a verified approvalId, these four actions are reachable by
+    # `platform_admin` only, which is the correct, safe, fully-tested state for a capability whose
+    # execution arm has not shipped yet.
+    - actions: ["create_repo", "delete_repo"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != ""
+    - actions: ["secret_write"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != ""
+    - actions: ["deploy"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "module_staff", "module_manager"]
+      condition:
+        match:
+          expr: >-
+            variables.inTenant && variables.notLow &&
+            has(request.resource.attr.approvalId) &&
+            type(request.resource.attr.approvalId) == string &&
+            request.resource.attr.approvalId != ""

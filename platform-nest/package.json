@@ -13,6 +13,8 @@
     "seed:automation": "node dist/seed/automation.js",
     "iam:backfill": "node dist/seed/iam-phase2-backfill.js",
     "seed:claude-seats": "node dist/seed/claude-seats.js",
+    "seed:github-apps": "node dist/seed/github-app-credentials.js",
+    "seed:github-sync": "node dist/seed/github-repo-sync.js",
     "seed:search": "node dist/seed/search.js",
     "seed:portal-clients": "node dist/seed/portal-clients.js",
     "provision:roster": "node dist/seed/provision-roster.js",

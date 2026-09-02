@@ -21,12 +21,6 @@ misleads real tickets.
 > **Nothing in this session is committed.** This is a shared checkout with concurrent sessions;
 > the work sits in the working tree. ✅ does **not** mean merged, and no independent `qa` pass has
 > run yet — the M0 gate (WSK-M0) is where that happens.
->
-> **➕ 2026-08-29 — the provisional caveat is now PARTLY discharged.** Zone B is deployed on a real
-> Linux box and the tenancy wall, the ledger, the lockdown and the determinism gate were all
-> re-run there (see the top of the session log for the exact suites and counts). What is still
-> provisional is everything those suites do not cover — and the full `webdesk/api` batch, which
-> does not pass as one run for harness reasons that are themselves WSK-M0 work.
 
 ---
 
@@ -36,12 +30,12 @@ misleads real tickets.
 |---|---|---|---|---|---|
 | A · Close the design | 13 | **10** | 0 | 1 | 2 |
 | B · Milestone 0 — gaiada.com live | 14 | **12** | 0 | 1 | 1 |
-| C · Contract, codegen & the rail | 7 | **7** | 0 | 0 | 0 |
-| D · Control plane · ERP console · envs | 9 | **7** | 0 | 1 | 1 |
-| E · AI execution & approvals | 3 | **3** | 0 | 0 | 0 |
-| F · WordPress headless | 3 | **2** | 0 | 1 | 0 |
+| C · Contract, codegen & the rail | 7 | **6** | 0 | 1 | 0 |
+| D · Control plane · ERP console · envs | 9 | **3** | 1 | 4 | 1 |
+| E · AI execution & approvals | 3 | **1** | 0 | 2 | 0 |
+| F · WordPress headless | 3 | 0 | 0 | 3 | 0 |
 | G · New from reassessment | 2 | **2** | 0 | 0 | 0 |
-| **Total** | **51** | **43** | **0** | **5** | **3** |
+| **Total** | **51** | **34** | **1** | **13** | **3** |
 
 **Ticket count vs design v1.0:** 36 → **35 build tickets** (+WSK-00 spike from the R-1 ruling,
 −1 from merging WSK-26+27 under R-2, −1 from merging the P1/P2 gates into one M0 gate), plus 2
@@ -65,7 +59,7 @@ new from the reassessment (Part G) and 13 design-close tasks (Part A).
 | ✅ | A-13 | **Storage ruled — fully self-hosted** | owner | WSK-D23. MinIO primary, no new cost. R2/NAS kept as a config-only swap + abstraction test. Backups flip to **pull-model**; Workspace at staging, NAS target-state. New §11a preconditions. WSK-07 + WSK-28 rewritten |
 | ⬜ | A-10 | Write §15 · Cost & quotas | claude+owner | Needs real numbers only you have: today's web3forms + hosting spend, target per-client price. Then per-tenant cost · quotas/overage · break-even count — which is what actually answers A-12 |
 | ⬜ | A-11 | Payload governance + trademark check | owner | Ownership changed hands 2025; MIT is irrevocable for shipped versions, but rebranding touches trademark, which MIT does not license. ~1 hour |
-| RULED | A-12 | **Zone B box ruled: `helios`** | owner | **Owner ruling 2026-08-27.** No new procurement. `helios` has **262G free** and **Docker 29.7.2 installed with ZERO containers running** (probed read-only), so Zone B goes there. **This unblocks the whole verification approach** — until now every green in this program was provisional because no Zone B box existed. WARN **The accepted risk, stated so it is auditable:** helios also serves **23 live third-party client sites** from `/home`, so an internet-facing multi-tenant Zone B now shares a host and Docker daemon with paying clients. Isolation is a deliberate trade, not an oversight; I put the separate-box option first and the owner chose helios |
+| ⬜ | A-12 | Procurement call (OQ-W1, now narrower) | owner | Under R-2 only the **backend** box is gated. Decide staging-box timing against Part B's real load |
 
 ---
 
@@ -114,11 +108,11 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 | ✅ | WSK-21 ⚡ | **Control-plane API v1 (Zone B)** — 18 commands / 6 controllers, every one carrying an §07 impact class asserted entry-by-entry; idempotency proven by double-fire (+ a DB unique constraint proven as an **independent cross-process backstop**); long commands job-tracked; audit row per command; authz **seam + dev stub only** (WSK-22 owns the real channel). **Coordinator-verified 36/36**, `tsc` 0 errors, WSK-05 26/26 no regression. **Caddyfile already 404s `/control/*` on the public vhost** — confirmed, so the exposure warning is satisfied today. ⚠️ **Two documented 501s** (`site.archive` needs a `sites.status` column; `contract.read` waits on WSK-15) and **no Cerbos sidecar** — interface + stub only | senior-be | WSK-03 ✅ |
 | ✅⚠ | WSK-22 ⚡ | **Control-channel auth, layers 1-4** — **PROVISIONAL: built + agent-verified on WINDOWS, not re-verified on Linux** (owner rule 2026-08-26). 19-row adversarial matrix all refusing with distinct reasons: no cert · token-without-cert · wrong CA/CN · cert-without-token · wrong audience/issuer/kid · tampered signature · **missing WS4 on a HIGH command** · commandHash mismatch · expired assertion · **replay: same approvalId 201 then 403**. Layer-1 certs **actually issued by `synccert`** (real EC P256 CA via WSL), and the **real public issuer was proven reachable** with zero Zone A credential. ⚠️ **Deterministic matrix used a fixture JWKS** — no `webdesk-control` Keycloak client exists, so no token can genuinely verify against the real issuer. ⚠️ **WS4 dedup is a `SELECT` with no unique constraint** — closes realistic replay, not a concurrent double-fire; needs a migration. Proxy-side mTLS termination unbuilt | senior-integrator | WSK-21 ✅ |
 | ✅ | WSK-23 ⚡ | **ERP egress + BFF console read model** — Linux-verified. 4 read endpoints under the `webdev` module, **no new Cerbos kind** (reused `webdev_provisioned_site:read` / `webdev_contract_snapshot:read`, so no policy edit and no restart). Reuses WSK-19's egress driver **verbatim — zero new egress code**, proven against BOTH directories' `egress-inventory` scanners. **The required degrade test passes:** live → 60s cache → last `contract.published` fact → explicit `unavailable`; killing the upstream keeps the **last-good version** with `stale:true, source:"cache"`, never nulled. 13/13 + 8/8 + 6/6; `platform-nest`+`webdev-contracts` 151/151. Claimed **§24** in FRONTEND-BFF-CONTRACT. ⚠️ **Site registry / releases / submissions are ALWAYS `stale:true`** — see the log; that is honesty, not a defect | senior-be | WSK-19 ✅ |
-| ✅ | WSK-24 | **The Sites tab — the first actual WebDesk UI.** Registry with the **two independent columns kept independent** (backend env · frontend deployment: `delphi` staging / `helios` production / Hostinger for WP), contract card + locale-coverage row, shown-once key mint, WS4-gated release buttons rendering approval state inline, PII-aware submissions. **The load-bearing property is honesty about staleness, and it is what the tests assert.** WSK-23 proved these reads can *never* be live (WSK-21 exposes only `contract`, `jobs`, `jobs/:id` as GETs), so `stale:true` is the always-case — and the suite pins the distinction the estate's frontend-first-drift bug class turns on: a **genuinely-unavailable read renders differently from a confirmed-empty one** (`asOf: null`), the degrade banner sits **above** the table rather than being an empty-state one-off, zero sites renders a teach-state not a bare table, and the rare live case renders distinctly so `stale` is not the only state a viewer can ever see. **26/26 + `tsc --noEmit` 0 errors, run on LINUX** (`node:22-bookworm-slim`) per the server-only test rule — `platform-ui/node_modules` is broken on the Windows checkout (rollup native missing), which is an environment fault, not this ticket's. Shared-file edits verified **pure additions** (`+5 -0`, `+8 -0`) | senior-fe | WSK-23 ✅ |
-| ✅⚠ | WSK-25 | **Promotion engine — content half DEV-VERIFIED, frontend half honestly behind a seam.** **Snapshot-FIRST is proven, not asserted:** a REAL failure is injected after the snapshot commits and before the mutation (a bundle violating `content_items`' own CHECK — `unpublish_at` before `publish_at`, a genuine constraint violation, nothing mocked) and the snapshot survives with the target's content untouched. `promotion_snapshots` proven **genuinely append-only** — the app role can neither UPDATE nor DELETE a restore point. **Rollback with NO prior snapshot REFUSES rather than silently no-opping**, and a rollback restores the exact prior state *including deleting an item the promotion added*. **The cross-INSTANCE test is no longer skipped:** I stood up a SECOND Zone B database and drove export-from-db#1 to promote-into-db#2, which is the real D-4 mechanism. Migration `0008_promotion.sql` applies clean and the RLS gate covers both new tables (**17 to 19**, enabled + forced + >=1 policy). Authorization is explicit and imperative — `content.export` `webdesk:read`; **promote/rollback `webdesk:promote` + ALWAYS a WS4 assertion** — and I verified all three routes call it. Frontend deploy sits behind `FRONTEND_DEPLOY_DRIVER`, bound to a not-yet-available driver, copying WSK-21's own `NotYetAvailableReleaseTransport` precedent. **190/190 on Linux**, `tsc` clean. WARN Authorization is a SECOND mechanism parallel to `COMMAND_REGISTRY` — these three commands are invisible to the registry's exhaustive type check, which is what caught the `schema.aiDraft` omission. WARN No frontend was deployed anywhere | senior-be | WSK-21 done |
+| 🟡 | WSK-24 | **Sites tab** (platform-ui) — **SPEC REFRESHED for WSK-D26** (was written for Cloudflare Pages, now reversed). Registry with **two independent columns: backend env** (staging/production content) **and frontend deployment** (`delphi` staging · `helios` production · Hostinger for WP) — content and frontend promote separately, and one merged chip hides the question people actually ask. Contract card + **locale-coverage row** (WSK-D18). Shown-once key mint. WS4-gated release buttons rendering approval state inline. Submissions (PII-aware). **Degraded state must be visibly honest** when Zone B is unreachable — never a silent empty list. ⚠️ **Do not build against fixtures alone** — the estate's recurring bug class is frontend-first drift (a console reading fields the backend never sends). Needs WSK-23's BFF first | senior-fe | WSK-23 |
+| ⬜ | WSK-25 | **Promotion engine (shrunk by R-2)** — snapshot-first → migrate → content export/import → **Pages deploy hook** → purge. Rollback = content restore + Pages rollback. *Re-rate from `opus·medium` at ticket time* | senior-be | WSK-21 |
 | ⬜ | WSK-26′ | **Pages deploy + domain adapter** (merges old WSK-26+27) — per-branch preview URLs attached to `customer_feedback` gate rows (D-8 unchanged, only the URL source changes); `setDomain` via Pages custom domains. **Deploy token held in Zone A — Zone B never deploys frontends** | senior-integrator | WSK-25 |
-| ✅⚠ | WSK-28 | **Zone B ops baseline — authored, and honest that the box does not exist.** 9 deliverables: hardening runbook, secrets layout (zero secret values), synccert issuance written from `sync-engine-go/cmd/synccert`'s REAL flags, OTel + a **write-only** Zone A OTLP proposal, `wd-backup-sentinel`, WSK-D23 backups (local versioning + object lock, **pull-model** offsite so Zone B holds NO target credential — an `authorized_keys` forced-command, target initiates), stated RTO/RPO, status page, CDN-bypass check. **Two security properties are asserted by a check that FAILS in the wrong direction**, verified independently: `check-otlp-write-only` rejects a config carrying a `zpages` extension, and `check-cdn-bypass` flags a bypassable origin. Compose verified on **exit code** (`config` exit 0, dev and dev+ops), 12 env vars each wired into an `environment:` block. Caddy CDN gate driven live: unset→200, set+no/wrong header→403, set+correct→200. ⚠ **Coordinator addition — the gate was fail-OPEN:** the Caddy matcher is false when the secret is unset, so production with a missing var served `/media/*` unguarded and **no check complained** (`--probe` can't tell it from a dev box). Added `--assert-configured`; selftest 7/7 and all four directions driven. ⚠ Nothing past PLANNED until **A-12**; the Zone A OTLP listener needs `infra/observability/` (not owned); status page adds a new public `/status/*` route | devops | A-12 ⏸ |
-| ✅⚠ | WSK-29 ⚡ | **Deploy-tool wiring — and the "WebDesk is in NO workflow" gap is CLOSED.** `grep -rn webdesk .github/workflows/` was **zero hits**; ci.yml now has **5 real jobs** (`webdesk-root`, `webdesk-blocks`, `webdesk-api` with Postgres+Redis+MinIO, `webdesk-payload`, `webdesk-deploy`) and release.yml builds/cosign-signs/SBOMs **`webdesk-api`**. All 4 workflow files re-parsed clean (14 jobs in ci.yml) and I **built the image myself from release.yml's own resolved context** — because a red matrix leg would skip `deploy` for EVERY component in the estate, not just WebDesk. `webdesk-payload` deliberately **excluded** from release.yml: its `next build` type-check is red today (TS2578 unused `@ts-expect-error`, 4 files) and `fail-fast:false` stops sibling *cancellation*, not job failure. New `webdesk/deploy/` driver seam (real SSH+rsync, injected exec) **24/24** and mcp-hub **356/356** (24 skipped, no live Cerbos), both on Linux. The hub tool is **read-only on purpose** (`webdesk.deploy.probeReachability`) — the mutating `deploy()` has NO network path, because a service with no Cerbos client and no principal model must never be what a caller invokes to change a live host. ⚠ `wd-contract-watch` is **PROTOTYPED, not live**: it calls `webdev.listPendingContractNotices`, which **does not exist anywhere in the repo** | senior-integrator | WSK-21–23 ✅ |
+| ⬜ | WSK-28 | **Zone B ops baseline** — box hardening runbook, secrets layout, synccert issuance, OTel + Zone A write-only OTLP listener, `wd-backup-sentinel`. **Backups per WSK-D23: local versioning + object lock, and a PULL-model nightly copy to a second box (Zone B holds NO credential for the backup target). Google Workspace becomes that target at staging; NAS is target-state.** **+stated RTO/RPO. +status page. +CDN-bypass check on every media path** | devops | A-12 |
+| ⬜ | WSK-29 ⚡ | Deploy-tool wiring (Zone A) — `deploy.staging`/`deploy.production` at the control plane; `wd-contract-watch` live | senior-integrator | WSK-21–23 |
 | ⏸ | WSK-30 ⚡ | **P4 QA gate (the boundary gate)** — full ERP-click walk on the **real box**: provision → deploy → promote → rollback; §03 adversarial matrix; boundary sweep (no Zone A creds/routes in Zone B); backup/restore evidence | qa | all of D + **the box** |
 
 ---
@@ -129,7 +123,7 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 |---|---|---|---|---|
 | ✅ | WSK-31 ⚡ | **MCP tool set + the automation identity** — **closes a LIVE PRODUCTION GAP**: before this, `wd-zoneb-intake`'s OBO envelope resolved to **no `identity_links` row → anonymous → Cerbos denied everything → every real bridge call 403'd**. `seed/automation.ts` now provisions `wf:webdesk-zoneb-intake`, confined by the hub allow-list to exactly `recordZoneBEvent` + `notify`. **42 assertions pin the always-WS4 rule** — HIGH-impact commands suspend for **every** principal class incl. a human admin; the impact-registry entry and the Cerbos `approvalId` arm written together (D14). New `operate`/`promote` actions land with their full six-artifact chain. **Coordinator-verified** (the agent parked 3× and never reported): rbac 793/793, webdev suites 187/187, mcp-hub 42/42, lints clean. ⚠️ Its Zone A control endpoints are **honest 501s** — the real command channel is WSK-22 | senior-integrator | WSK-21 ✅, 22 ✅ |
 | ✅⚠ | WSK-32 | **AI schema drafting** — new `webdesk/api/src/schema-draft/` module: PRD → gateway `llm.extract(kind=webdesk_schema)` → parse → vocabulary validation (vendored WSK-14 rules, since NestJS commonjs cannot import `payload/vocabulary`'s ESM-`.ts` files — same constraint WSK-15 documented) → reviewer diff summary, **never persisted**. Reject-and-positive-control proven: unknown block type, unknown field primitive, and unknown composition key each refused with a distinct named reason; a clean additive proposal passes with zero issues. Diff summary flags a removed field/block, a new required field, and a required-flip as `destructive:true` with a data-loss message, and a purely additive diff as `destructive:false`. **Linux-verified (33/33)**: `tsc --noEmit` clean + `vitest run test/schema-draft` (6 files) on `node:22-bookworm-slim`, no Postgres/Cerbos needed (fakes throughout, matching `control-command-registry.spec.ts`'s own "pure" style). Applying a proposal still goes through the PRE-EXISTING, untouched `schema.propose`/`schema.apply` control commands (`webdesk/api/src/control/schema/`), so the D14/WS4 gate on the actual write is exactly what WSK-21 already shipped — this ticket adds nothing to `COMMAND_REGISTRY` and does not touch `control/`. ⚠️ Its own new route has only a self-built dev-mode header guard (not WSK-22's real mTLS/WS4 channel — `ControlModule` doesn't export the tokens needed to reuse it from a sibling module) protected today only by the pre-existing Caddy `/control/*` 404; and the gateway client is proven against a stand-in HTTP server, not a live ai-gateway-go — no live AI brain was reachable to drive kind=webdesk_schema end-to-end | medior | WSK-15 ✅, 31 ✅ |
-| ✅⚠ | WSK-33 | **P5 QA gate — and it found a REAL authorization hole, which is the point of a gate.** 46 tests: hostile-PRD battery (case games, near-miss names, **unicode homoglyphs**, `<script>`, `__proto__`/`constructor`/`prototype` via real `JSON.parse` — `({}).polluted` confirmed `undefined` after), truncated/malformed/10k-field/500-deep model output, a PRD explicitly ordering *"call schema.apply now"* (no code path exists), cross-tenant escalation, and audit/log-injection. **The strongest evidence is a real RLS proof against real Postgres:** tenant A handed tenant B's **genuine** `siteId` + matching `collectionKey` reads `currentSchema: null`, with B's row verified to exist and contain the confidential field when read as B. Unknown tenant slug 404s **before** any gateway call — no enumeration oracle. **🐞 THE DEFECT (mine, and it was live on main): `ai-draft` ran NO Layer-3 scope check.** The route carried no `@Command` metadata, so `CommandAuthorizationGuard` was **disarmed rather than absent** — any authenticated control-channel principal, *including one with ZERO scopes*, got 201 for ANY tenant, while sibling `schema.propose` correctly 403'd the same caller. My earlier fix closed **authentication** and I did not notice **authorization** was a separate layer. **FIXED:** `schema.aiDraft` is now a registry command (`read`/`webdesk:read`, mirroring `schema.propose`) and the route runs the guard; the two `KNOWN-BAD` tests were **flipped into regression guards** (403 + service never reached, so no LLM budget spent). Gate proven to have teeth: neutering the block validator turned it **6 tests red**, and it went green again on a byte-identical restore. **135/135** on Linux with a live DB. ⚠ No live ai-gateway, so a genuinely adversarial *live-model* reply stays untested | qa | all of E ✅ |
+| ⬜ | WSK-33 | P5 QA gate — agent provisions from a PRD, human-approved, fully audited + **hostile-PRD injection battery** (must die server-side) | qa | all of E |
 
 ---
 
@@ -137,8 +131,8 @@ real. This is the thin vertical slice — everything after generalizes a thing a
 
 | Status | # | Ticket | Tier | Deps |
 |---|---|---|---|---|
-| ✅ | WSK-34 | **PHP SDK — generated, and provably so.** `codegen/generator/sdk-php.mts` derives `sdk.php` from the **same already-built OpenAPI document** the TS SDK comes from, so it cannot drift from the contract; header says `GENERATED — DO NOT HAND-EDIT`. **It joined WSK-15's OWN double-run gate** (`sdk.php` added to `ARTIFACT_FILES`) rather than growing a third determinism harness, and `artifacts.sdkPhp` / `sdkPhpUrl` now fill in. Determinism verified by me on Linux: **byte-identical across two separately spawned processes** for both fixture tenants, matching hashes. The 8 edits under the shared, contract-critical `codegen/` are **purely additive** (verified in a clean worktree: `+4 -1`, `+8 -1`, `+8 -2`, `+8 -0`, `+4 -1`, `+2 -1`, `+227 -0`, `+4 -0`, **zero deletions**), and the two touched existing specs were **strengthened, not relaxed** — `expect(sdkPhpUrl).toBeNull()` became an assertion on the real artifact path and on `X-Amz-Signature`. Codegen suite **46/46** with real Postgres + MinIO; `tsc` clean | senior-be | WSK-15 ✅ |
-| ✅⚠ | WSK-35 | **Headless WP theme pattern — and the render-time asymmetry is respected.** `inc/block-renderer.php` mirrors WSK-16's resolve/report exactly: **skip-and-report, never reject, never silent-drop** (authoring rejects; render-time does not — design §05 hard rule 2, the easiest thing to get backwards). Probe **12/12** on `php:8.3-cli`, driven by me, including a real **NEGATIVE CONTROL**: with the vocabulary forced empty, a normally-known `hero` IS classified unknown — proving the branch is a genuine vocabulary lookup and not a hardcoded `true`. Unknown type and its props appear **zero** times in the output; the report carries the verbatim type and its **original pre-skip index**. Vocabulary vendored (PHP cannot import a `.ts`) with a drift check I proved **can fail**: renaming one vendored type ⇒ `DRIFT`, exit 1; restored ⇒ `OK`, exit 0. `siteKind:"wp"` template implements the branch WSK-20 currently refuses. **🐞 A real bug only Linux could find:** `function_exists('gaiada_render_block_'.$type)` resolved against PHP's **global** namespace, silently matching nothing and throwing on the first known block — `php -l` is blind to it. ⚠ Never activated in a real WP install; Astro↔WP parity is WSK-36's; the determinism gate needs `webdesk/api`'s `node_modules` for `tsx`, so it cannot run from its own directory and **is in no CI job yet** | senior-fe | WSK-16, 34 ✅ |
+| ⬜ | WSK-34 | PHP SDK — **generated from `openapi.v1.json`** (R-3 makes this near-free); joins the determinism gate; `artifacts.sdkPhp` fills in | senior-be | WSK-15 |
+| ⬜ | WSK-35 | Headless WP theme pattern — consumes the PHP SDK; `siteKind:"wp"` scaffold template joins WSK-20 | senior-fe | WSK-16, 34 |
 | ⬜ | WSK-36 | P6 QA gate — WP renders entirely from the central API; Astro↔WP parity; unknown-block behaviour PHP-side | qa | all of F |
 
 ---
@@ -216,8 +210,8 @@ Zone B *backend* only.
 
 | # | Blocker | Why it is hard |
 |---|---|---|
-| 1 | ~~OBSERVE-ONLY~~ **LIFTED FULLY — owner ruling 2026-08-27.** Deploys **and** the monitoring agent tier may write to `delphi` and `helios`. I offered a narrower carve-out (our vhost/docroot only, client `/home` dirs barred) and the owner confirmed the full lift deliberately. | **WSK-26′ is unblocked.** WARN Recorded so it is auditable: this puts **47 live third-party client sites** (24 on delphi, 23 on helios) in write reach of automation. Nothing in this program requires touching a client directory, and no ticket should |
-| 2 | ~~Neither host is reachable~~ **CORRECTED 2026-08-27 — this finding was WRONG.** Both hosts are reachable and I logged in to each read-only: `root@delphi` (72.61.142.88, Ubuntu 24.04.4, up 4wk) and `root@helios` (187.77.116.133, up 5wk), using the keys already in `~/.ssh/config`. HTTP to the bare IPs gives *empty reply / TLS handshake failure*, **not** a timeout — which is what the original probe most likely misread. **There is no SSH allowlist / tunnel / CI-identity problem.** | The REAL blocker is narrower and entirely non-technical: (a) the owner ruling lifting **observe-only for deploys** is still not recorded, and (b) nobody has decided which vhost/docroot our own frontends occupy. Both boxes carry **real third-party customer sites** (24 on delphi, 23 on helios, counted — not enumerated), so there is no path we own by default. ⚠ Also **corrected from WSK-29's own report**: it described them as "cPanel/WHM shared hosting". They are not — `/usr/local/cpanel` is **absent** on both, there is **no control panel at all**, and they are plain Ubuntu + `nginx` vhosts. **And Docker 29.7.2 is installed on both with ZERO containers running** — 43G free on delphi, 262G on helios. That materially widens the options (containers, not just a static docroot) and bears on **A-12**: the Zone B box may not need new procurement. The counter-argument is blast radius, not capacity — co-locating an internet-facing multi-tenant Zone B with 23–24 live customer sites is an owner security call, not a default |
+| 1 | **`delphi`/`helios` are OBSERVE-ONLY** (owner ruling 2026-08-22: collect FROM, never modify ON) | Deploying a frontend *is* modifying them. Needs an explicit ruling lifting observe-only **for deployment**, which is a narrower question than re-authorising the monitoring agent tier |
+| 2 | **Neither host is reachable from the dev machine** — SSH and HTTP both time out (`delphi` 72.61.142.88, `helios` 187.77.116.133) | Access is clearly *intended* (both are in `~/.ssh/config`), so this is an allowlist / tunnel / CI-identity question. WSK-29's deploy tooling needs the same answer |
 
 ### Tenant zero, under the new rule
 
@@ -232,77 +226,6 @@ model, so any migration is a DNS + content-export exercise, never a server-side 
 ---
 
 ## Session log
-
-> **🚀 ZONE B IS DEPLOYED AND RUNNING — `sumopod`, 2026-08-29.** Owner ruled the two-tier estate
-> rule (WSK-D27): client delivery = `helios`/`delphi`/Hostinger · this ERP and everything
-> operational to it = `gda-aicenter` + `sumopod`. WebDesk is an ERP capability, so Zone B lands on
-> the ERP tier. **Build from [`webdesk-design-v2.md`](../blueprints/webdesk-design-v2.md)** — v1.1
-> and the provision seam design are both superseded (banners added naming what remains valid).
->
-> **The stack:** 7 services (`proxy` `payload` `payload-gateway` `api` `postgres` `redis` `minio`)
-> in their own compose project, **exactly one published port, on loopback**, proven against the
-> RESOLVED config rather than the overlay. Payload admin reachable only through an SSH tunnel.
-> Nothing exposed to the internet: no vhost, no TLS, deliberately.
->
-> **NO LONGER PROVISIONAL — re-run on real Linux (the 2026-08-26 rule):**
-> migrations **8/8** applied from scratch + idempotent re-run (`0 applied, 8 already in ledger`) ·
-> role split confirmed NOSUPERUSER/NOBYPASSRLS · migration lint + RLS selftest **6/6** ·
-> RLS integrity **20/20** tenant-scoped tables (enabled + forced + ≥1 policy) ·
-> **WSK-04 cross-path suite ALL PATHS OK** (raw SQL · Payload Local API · pool-subclass pin ·
-> api guarded routes · condition-1 gate; 1 labeled non-blocking gap = admin-SSR first paint,
-> 1 skipped = jobs, no config) · **WSK-02 lockdown 11/11** ·
-> **WSK-15 codegen double-run determinism gate 3/3 including its negative control**.
->
-> **⚠️ The full `webdesk/api` vitest suite does NOT pass as one batch: 251 pass / 77 fail.** Traced,
-> not guessed — the failures are suites needing services this production-shaped overlay omits on
-> purpose (`clamav`, a Zone A bridge endpoint, an SMTP host) plus the **per-ticket env-name
-> fragmentation this tracker already flagged** (`WSK05_`/`WSK11_`/`WSK21_` prefixes for what is one
-> variable). Not a code regression — the security-relevant subset passes via the cross-path suite.
-> **Normalising that env naming and defining the service fixture IS WSK-M0's real content.**
->
-> **FOUR REAL DEFECTS THAT ONLY A REAL DEPLOY COULD FIND — all four fixed in this change:**
-> 1. **The base compose could never boot `api` in production.** Its `api` block forwarded exactly
->    one storage var; the code `requireInProd`s four and reads eight more. Crash-looped on a `.env`
->    that defined every one of them. **The passthrough is now in `docker-compose.yml` itself.**
-> 2. **`payload/Dockerfile` claimed it was "currently RED (4 files / TS2578)" and would fail to
->    build.** Stale — it builds in under two minutes and the image boots. Header corrected.
-> 3. **Payload's tables could not be created in a production-shaped environment at all** — push is
->    hard-disabled at `NODE_ENV=production` (correctly), and nothing else owned that schema. Closed
->    properly: **Payload's own migration mechanism is now wired** (`src/migrations/`, generated not
->    hand-written) plus `npm run init:prod` = `payload migrate` → `reapply-tenant-rls` →
->    `check-rls-integrity`. Payload migrations do NOT re-arm RLS, which is exactly why the chain has
->    three links. The deployed DB is baselined against that migration.
-> 4. **A multi-line PEM in `.env` silently breaks every ad-hoc verification container** —
->    `docker run --env-file` is a flat parser and dies on it, while Compose's own parser is fine. So
->    the stack worked and the tooling didn't. Control-channel trust material now lives in its own
->    `.env.control`.
->
-> **A fifth, found by reading main rather than my own checkout:** the local tree was **71 commits
-> behind**, so the Caddyfile I first deployed was the pre-`8c35909b` one — the version whose own
-> fix commit says it *"never routed /v1, /forms or /media"* because bare `respond` sorts before
-> `reverse_proxy`. **Every security probe still passed against it**, because "denied" and "not
-> routed" are both 404. Re-deployed with the fixed proxy and re-verified with a discriminator:
-> catch-all returns `webdesk`, `/v1/*` returns the RFC 9457 envelope with a requestId, `/forms/*`
-> returns a NestJS error, `/media/*` returns **403** from the CDN-bypass check. The denials mean
-> something now.
->
-> **The control channel runs on a PLACEHOLDER CA whose private key was generated and immediately
-> destroyed** — no client certificate can ever be issued against it, so the channel is fail-closed
-> *by construction* rather than by configuration. WSK-22's synccert material replaces that one PEM
-> and nothing else.
->
-> **Still open, stated plainly:** the docker log-rotation cap is written but inert until a daemon
-> restart · Zone B has no public vhost/TLS · the `overrideAccess` lint (WSK-D25) is still unbuilt ·
-> the hub tool that resolves a `pipeline_stages.artifact_ref` still does not exist (the consumer
-> adapter `ai-agents/src/code-scaffold/artifact-fetcher.ts` was written against a tool name that
-> is *not yet a hub contract* — its own header says so), so PRD-driven scaffolding cannot run live.
->
-> **Estate hygiene done in the same pass, without disturbing any other project:** 87 GB reclaimed
-> on the box (build cache 86.89 GB fully reclaimable, plus two unrotated container logs at 3.8 GB
-> and 3.3 GB), and **`aire` decommissioned** from it after verifying it is live on its own VPS
-> serving publicly — backed up first (`pg_dumpall` + 7 volume tarballs + the compose dir) and the
-> shared `waha` image deliberately kept because another project still uses it.
-
 
 > **Pushed `f14cb3f5` — WSK-20 + WSK-17 + WSK-38, plus a vendor drift I caused.**
 >
@@ -582,233 +505,3 @@ is not needed.
 3. **WSK-05 / WSK-06** follow. WSK-06 is where the `/v1` envelope freezes with the locale axis.
 4. **A-10 / A-11 / A-12** remain yours: cost numbers, the Payload trademark check, the procurement
    call. None block Milestone 0.
-
-> **WSK-24 closed — the first WebDesk UI, and the 🟡 column is now empty.** 35 ✅ · 0 🟡 · 13 ⬜ · 3 ⏸.
->
-> Two things worth keeping from how it was verified:
->
-> 1. **The agent parked without reporting for the tenth time this wave**, so its work was assessed
->    directly rather than nudged again. That assessment is the only reason the next point was found.
-> 2. **The local test run was meaningless and would have read as a pass.** `platform-ui`'s Windows
->    `node_modules` is broken — `vitest` unresolvable, and the direct binary path dies with
->    `MODULE_NOT_FOUND` on rollup's native module. That is *not* a red suite; it is **no suite**, and
->    a session in a hurry reports "couldn't run tests, code looks fine". The owner's server-only test
->    rule exists for exactly this: re-run in `node:22-bookworm-slim` and the suite is **26/26**.
->
-> **What the tests actually pin** is the property the ticket was written around. `stale:true` is not
-> an edge case here — WSK-23 established it is the *permanent* case, because WSK-21 exposes only
-> three GETs (`contract`, `jobs`, `jobs/:id`) and the registry/releases/submissions reads have no
-> live source at all. So the suite pins the distinction that the frontend-first-drift bug class
-> turns on: **an unavailable read must not look like an empty one.** `asOf: null` renders distinctly
-> from a confirmed-empty list, the degrade banner is above the table rather than an empty-state
-> one-off, and the rare live case renders distinctly too — so `stale` never becomes wallpaper the
-> viewer stops reading. A confident empty list is the failure this estate has already shipped once.
->
-> **Still open and NOT hidden by this close:** the console's demand end remains fixture-driven,
-> because no hub tool can read a contract snapshot by id, download artifact bytes, or resolve a
-> `pipeline_stages.artifact_ref`. §08's site registry **cannot** go live until control-plane read
-> commands exist. And `webdesk` still appears in **zero** CI/deploy workflows.
-
-> **WSK-29 pushed — and it overturned a recorded fact, which is worth more than the ticket.**
->
-> **`delphi` and `helios` ARE reachable.** The tracker said "SSH and HTTP both time out" and I repeated
-> that to the owner. It is wrong. I logged in to each myself, read-only: `root@delphi` and `root@helios`,
-> on keys already in `~/.ssh/config`. HTTP to the bare IPs returns *empty reply / TLS handshake failure*,
-> not a timeout — almost certainly what the original probe misread. **There was never an allowlist,
-> tunnel or CI-identity problem to solve.** A blocker that does not exist still costs real time: it sat
-> in this file shaping three tickets (WSK-25, WSK-26′, WSK-29).
->
-> **I also corrected WSK-29's own correction.** It reported both boxes as "live cPanel/WHM shared
-> hosting". They are not: `/usr/local/cpanel` is absent, there is **no control panel at all**, and they
-> are plain Ubuntu 24.04 + `nginx`. **Docker 29.7.2 is installed on both and running ZERO containers**,
-> with 43G free on delphi and 262G on helios. Two agents in a row got the nature of these boxes wrong in
-> opposite directions, which is the argument for checking a host rather than inheriting a description.
->
-> **What this changes:** deployment options widen from "static files into a docroot" to "containers", and
-> **A-12 may not need new procurement at all** — helios has 262G free and an idle Docker daemon. The
-> counter-argument is blast radius, not capacity: co-locating an internet-facing multi-tenant Zone B with
-> 23–24 live third-party customer sites is an owner security call and I am not treating it as a default.
-> Accounts were **counted, not enumerated**; I did not look at any customer's data.
->
-> **The real remaining blocker is non-technical and unchanged in size, only in kind:** the observe-only
-> ruling still has to be lifted *for deploys specifically*, and someone has to decide which vhost/docroot
-> our frontends occupy. No amount of tooling substitutes for either.
->
-> **A near-miss worth recording.** `mcp-hub/src/webdesk-always-ws4.test.ts` — 190 lines of WS4 gating
-> tests — showed up in this shared checkout as `??` untracked, so `git diff origin/main` reported it as a
-> **190-line deletion**. Its content is byte-identical to main, so nothing was lost; a concurrent session
-> had dropped it from the index. But a `git add -A` here would have committed the deletion of a security
-> test with a clean-looking diffstat. This is exactly why generated files and commits go through a clean
-> detached worktree in this program, and why `git add <file>` is never safe in this checkout.
->
-> **Not fixed, and not mine:** `webdesk/payload`'s `next build` is red (TS2578 in 4 files), which is why
-> it stays out of release.yml; `webdev.listPendingContractNotices` does not exist, so `wd-contract-watch`
-> is inert; and the Zone A→B **command** channel is still absent, so WSK-31's control tools still answer
-> `501 webdesk_control_plane_not_wired`.
-
-> **WSK-33 found a live authorization hole on main, and it was mine.**
->
-> The `ai-draft` route ran **no Layer-3 scope check at all**. Earlier in this session I replaced
-> WSK-32's home-made auth stub with the real `ControlAuthGuard` and reported the route secured. That
-> fixed **authentication** — who the caller is. It did nothing about **authorization** — whether that
-> caller holds the scope the command requires. They are different layers and I treated them as one.
->
-> The failure mode is worth remembering because it is invisible in review: `CommandAuthorizationGuard`
-> resolves its command via `Reflector`, so a route **missing `@Command` metadata is DISARMED, not
-> unguarded**. Listing the guard in `@UseGuards` looks correct and enforces nothing. A principal
-> authenticated with **zero scopes** got `201`, while the sibling `schema.propose` on the identical
-> resource shape correctly `403`'d the same caller — which is exactly what made this a real gap rather
-> than "nothing here checks scopes".
->
-> Fixed properly rather than locally: `schema.aiDraft` is a real registry command
-> (`read`/`webdesk:read`, mirroring `schema.propose` because a draft persists no domain row but does
-> read a tenant's schema and spend LLM budget), and the route now runs the guard. The registry spec's
-> exhaustive `Record<CommandName, ...>` caught the omission at **compile time** — that type is doing
-> real work, and it is the reason I could not add a command and forget to classify it.
->
-> **The agent did the single most valuable thing available to it: it did NOT patch `src/`.** It wrote
-> the defect up as two `KNOWN-BAD` tests plus a *positive control* proving the mechanism works on the
-> sibling route. A silent fix would have destroyed the evidence and I would never have known the
-> authentication/authorization confusion happened. I flipped both tests into regression guards.
->
-> **And I checked the gate could fail before trusting it green:** neutering the block validator inside
-> the container turned it **6 tests red**, and it returned to 46/46 on a byte-identical restore. A
-> green security gate that cannot fail is worse than no gate.
-
-> **WSK-34 + WSK-35 pushed. Tenant zero's actual path now has code behind it.**
->
-> Worth stating why this stopped being "Phase 6, later": WSK-D26 keeps `gaiada.com` — **tenant
-> zero** — on WordPress at Hostinger. So the headless-WP path is the one our own site takes, not a
-> future vertical. Hostinger is shared hosting with no shell model, so this had to be a theme +
-> DNS/content exercise, and it is.
->
-> **The bug that justifies the Linux-only rule, again.** `function_exists('gaiada_render_block_'.$type)`
-> with a bare name resolves against PHP's **global** namespace, not the caller's — so it silently
-> matched nothing and threw on the very first *known* block. `php -l` passes it happily. Only running
-> the thing found it. That is now three separate defects this session that a syntax check or a local
-> green would have waved through.
->
-> **What I checked rather than accepted**, because these edits were in the contract-critical
-> `codegen/` directory: the diff is **purely additive with zero deletions** (confirmed in a clean
-> worktree, since this shared checkout had the whole `codegen/` directory dropped from its index and
-> `git diff` therefore reported all 19 files as deletions — the second time today that trap appeared).
-> And the two pre-existing specs it touched were **strengthened**: `expect(sdkPhpUrl).toBeNull()`
-> became an assertion on the real artifact path and on `X-Amz-Signature`. A relaxed assertion
-> disguised as an update is exactly what I was looking for and it is not what happened.
->
-> **The right instinct on determinism:** it added `sdk.php` to **WSK-15's existing** double-run gate
-> instead of writing a third harness. Verified byte-identical across two separately spawned processes.
->
-> **Open:** the PHP determinism gate resolves `tsx` from `webdesk/api`'s `node_modules`, so it cannot
-> run from its own directory and **no CI job runs it** — WSK-29 added five webdesk jobs but not a
-> WordPress one. WSK-36 (Astro↔WP parity) is now unblocked.
-
-> **🔴 I PUT A NON-BOOTING APP ON MAIN, and 135 passing tests told me it was fine.**
->
-> My WSK-33 authorization fix exported the guard **classes** from `ControlModule`. That is not
-> enough. `@UseGuards(SomeGuard)` in a consuming module makes Nest **instantiate** that guard in
-> **that module's** injector, so the guard's own constructor dependencies must be resolvable there.
-> `webdesk/api` could not start at all:
->
-> ```
-> Nest can't resolve dependencies of the ControlAuthGuard (?). Please make sure that the argument
-> Symbol(CONTROL_CHANNEL_AUTHENTICATOR) at index [0] is available in the SchemaDraftModule context.
-> ```
->
-> **Why every check I ran missed it.** `tsc --noEmit` was clean — DI is invisible to it. And all 135
-> tests passed because **every suite touching those controllers builds its own
-> `Test.createTestingModule()` and binds the guards and their collaborators BY HAND.** That is
-> reasonable for testing a handler and **blind to module wiring by construction**: not one test
-> instantiated `SchemaDraftModule` as it actually ships. I verified a handler and reported an
-> application.
->
-> This estate had already written the lesson down — *"a missing module import is invisible to `tsc`"*,
-> *"`tsc` clean is not a working app"* — after `FormsService` injected a provider whose module was
-> only registered in `AppModule`. **It happened again anyway, because no test ever asked the one
-> question: does the application start?**
->
-> **What found it: WSK-25.** Its promotion suite is the first in this project to boot a real module
-> instead of hand-binding providers, so it hit the wall immediately. A ticket about content promotion
-> surfaced a defect in a ticket about authorization — the value came from the *method*, not the scope.
->
-> **Fixed, and made unrepeatable:** `ControlModule` now exports `CONTROL_CHANNEL_AUTHENTICATOR` and
-> `POLICY_DECISION_POINT` (exported, **not re-bound** — the environment-conditional real-vs-stub
-> choice stays the single source of that decision, so a consuming module cannot accidentally bind the
-> dev-mode stub in production). And `test/zz-real-boot.spec.ts` now boots `AppModule` with **no
-> overrides and no hand-bound guards**. Proven both directions on clean main: the boot test **fails**
-> with classes-only exports and **passes** with the tokens exported. 182/182 across boot + p5-gate +
-> schema-draft + control + codegen.
->
-> **The lesson worth keeping is not "export your tokens".** It is that a test suite made entirely of
-> hand-assembled modules can be large, green, and structurally incapable of noticing the app is dead.
-
-> **WSK-25 landed — I took it over after its agent parked four times at ~314k tokens.**
->
-> Its design was right and its harness was broken. Seven tests were red and the cause was **not** the
-> promotion engine:
->
-> 1. **`APP_DATABASE_URL` was unconditionally overwritten** at module load from a suite-specific
->    `WSK25_TEST_DATABASE_URL`. I was exporting `WSK21_*`, so the app pointed at `localhost:55495`,
->    every control call returned **500**, and `t.json().tenant` was undefined — surfacing as
->    `Cannot read properties of undefined (reading 'id')` seven times. The estate's phantom-failure
->    pattern in a new costume: read the suite's own env contract before believing a red suite.
-> 2. **`seedOneItem` inserted a `collections` row unconditionally** while `collections` carries
->    `UNIQUE (site_id, key)` (0002_content.sql:55). The rollback test seeds twice into the same
->    collection, so the second call died on the unique constraint — and it read exactly like *"rollback
->    fails to delete an item the promotion added"*. Made idempotent on the natural key with
->    `DO UPDATE` (not `DO NOTHING`, so `RETURNING` still yields the existing id).
->
-> **A wrong turn of mine worth recording:** I first concluded the missing
-> `await app.getHttpAdapter().getInstance().ready()` was the cause, since Fastify registers routes at
-> `ready()`, not `init()`. It was not — the responses were **500, not 404**, which I should have read
-> more carefully before forming a theory. I kept the `ready()` calls as hygiene (every other suite here
-> awaits it) but they fixed nothing, and the comments say so.
->
-> **The skip I refused to accept.** The cross-INSTANCE test — export from one Zone B database, promote
-> into a *separate* one, the actual D-4 mechanism — was gated behind two env vars and skipping. I stood
-> up a second Zone B Postgres, migrated it, and drove it: **it passes**. That is now real evidence
-> instead of a documented gap, and the suite runs with **no skips at all**.
->
-> **A design tension I am flagging rather than silently accepting:** promotion authorization is a
-> **second, parallel mechanism** to `COMMAND_REGISTRY`. It is explicit and imperative (so immune to the
-> disarmed-guard trap that hid the `schema.aiDraft` hole) and I verified all three routes call it — but
-> `content.export`/`promote`/`rollback` are **invisible to the registry's exhaustive
-> `Record<CommandName, ...>`**, which is precisely the type that caught the last missing
-> classification. Two authorization systems is one more than this estate should have.
-
-> **FOUR OWNER RULINGS — 2026-08-27. Two unblock the program; two are accepted risk.**
->
-> | # | Ruling | Effect |
-> |---|---|---|
-> | 1 | **Zone B goes on `helios`** | **A-12 CLOSED.** No procurement. Every provisional green here can finally become server-verified |
-> | 2 | **Observe-only LIFTED FULLY** on delphi + helios (deploys *and* monitoring writes) | **WSK-26′ unblocked** |
-> | 3 | **Unify authorization onto `COMMAND_REGISTRY` now** | Done in this commit |
-> | 4 | **`gaiada.com` stays WordPress, onboards at P6** | **WSK-36 becomes GATING**, not optional |
->
-> **What I asked before recording 1 and 2, because both carry real risk.** I put the separate-box option
-> first, with the reasoning stated: Zone B is the part strangers can reach, and helios serves 23 paying
-> clients. The owner chose helios. I then re-asked the observe-only scope, offering a narrower carve-out
-> that barred client `/home` directories, and the owner confirmed the full lift deliberately. Both are
-> recorded with the exposure named — **47 live third-party client sites now in write reach of
-> automation** — so the decision is auditable later rather than inferred from a diff. It is the owner's
-> call; the job was to make sure it was made with the number in front of them.
->
-> **Consequence of ruling 4 that is easy to miss:** Milestone 0 is *"gaiada.com live"*, and gaiada.com is
-> now definitively a **headless-WordPress** case on Hostinger shared hosting. That makes **WSK-36
-> (Astro-vs-WP parity + PHP-side unknown-block behaviour) a gate on M0**, not a Phase-6 nicety — and it
-> is the only remaining open ticket that is purely ours to build.
->
-> **Ruling 3, implemented and verified.** `content.export`/`promote`/`rollback` are now first-class
-> `COMMAND_REGISTRY` commands and `promotion-authorization.ts` is **deleted** — one authorization system,
-> one exhaustive `Record<CommandName, ...>`. The classifications reproduce the imperative behaviour
-> exactly: export `read`/`webdesk:read`; promote and rollback `high`/`webdesk:promote`, where **`high` is
-> precisely what makes the PolicyDecisionPoint demand a WS4 assertion**. Nothing was loosened to fit the
-> registry's shape.
->
-> **And I did not trust the green.** The existing promotion suites always send a valid scope *and* a valid
-> WS4, so they would pass with the guard fully disarmed — the exact blindness that hid the `schema.aiDraft`
-> hole. New `test/promotion-authz.spec.ts` is **five refusals plus three positive controls**: promote
-> without WS4 -> 403, rollback without WS4 -> 403, promote with a read-only scope even *with* WS4 -> 403,
-> export with zero scopes -> 403, all three routes asserted to still carry `@Command` metadata (missing
-> metadata **disarms** the guard rather than removing it), and the registry classifications pinned so
-> nobody can downgrade `promote` to `medium` and silently delete the WS4 requirement. **201/201 on Linux.**

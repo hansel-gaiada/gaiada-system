@@ -498,6 +498,7 @@ backend-only (UI reads) and is also present.
   | GET | `/api/admin/hub/detail` | `isElevated` | Proxies **new** mcp-hub `GET /admin/info`: policy engine (**Cerbos vs in-code fallback**), deny-by-default, assurance ranks, the D14 automation write gate, revocation, rate limits (per principal + per service token), mTLS mode/peer allowlist/topology, tool counts by source, **Resources + Prompts** (the two primitives the console never showed), and the per-workflow `AUTOMATION_ALLOWLIST` scope matrix |
   | GET | `/api/admin/hub/audit` | `isElevated` | Proxies **new** mcp-hub `GET /audit`: the §8 tool-call decision trail (principal, tool, allow/deny, reason), newest-first. It was written to JSONL and readable nowhere |
   | GET | `/api/admin/hub/tools` | `isElevated` | **Extended:** each row now carries `source` (`core`/`platform-read`/`platform-write`/`pipeline`/`delivery`/`module`) |
+  | GET | `/api/admin/github/detail?companyId=` | `isElevated` | **✅ NEW (GH-01/GH-02, `docs/blueprints/github-integration-foundation.md` §4.7).** NOT a proxy — GitHub App state lives in platform-nest itself (`core/github/github-app.service.ts`). Returns `{roles:[{role,slug,readOnly,configured,appId,installationId,tokenCached,tokenExpiresAt,rateLimit:{limit,remaining,resetAt},queueDepth,activeUsers}]}` for BOTH the `erp` (write) and `agents` (read-only) installations — the shared per-installation rate-limit bucket + fairness-queue backlog §4.7 asks to be diagnosable. `companyId` is **required**; omitted ⇒ `null` (same "nothing to show yet" shape as an unreachable gateway/hub) — this ticket does not resolve which company tenant holds the sealed GitHub App credential (see that file's own header), so the console cannot default one. No token, PEM, or JWT ever appears in the payload. Never claims live-verified: GH-14 (QA gate) caps this at PROTOTYPED until exercised against the live org |
   | GET | `/api/admin/automation/executions` | `isItOrElevated` | n8n run history, newest-first, with `workflowId` resolved to a name + `durationMs`. Previously fetched and discarded except one "last run" cell |
   | GET | `/api/admin/automation/bridge` | `isItOrElevated` | Event→n8n bridge health (`events/bridge-health.ts`): per watched stream `backlog`/`deadLetter`/`oldestPendingMs`, plus the bridged event allow-list and retry/timeout config. A stalled bridge silently stops every event-triggered workflow; this is the only surface that shows it |
 - **✅ NEW (write levers, 2026-07-27) — the consoles gained the actions that were previously
@@ -1701,7 +1702,13 @@ SURFACED — the client hub's `needsUs` list names them per client, with an age,
 accumulating invisibly. That is visibility, not the write UI: the Commercial tab that actually calls
 `send`/`countersign`/`decide` is slice 2 of the CC-* program and is **not built**.
 
-### 16f. Change Requests (maintenance intake) — `src/core/webdev-change-requests{,-portal}.controller.ts` — **STATUS: DEV-VERIFIED (MI-01..05)**
+### 16f. Change Requests (maintenance intake) — `src/core/webdev-change-requests{,-portal}.controller.ts` — **STATUS: DEV-VERIFIED (MI-01..05)** · bug-detail extension **PROTOTYPED** (2026-08-27)
+
+> **`NEW(unverified):`** marks the bug/QA extension added by `PROGRESS-CLIENT-QA.md` Phase A
+> (migration `202608271000_client_bug_intake_fields.sql`). Those parts are green locally — 48/48 in
+> both change-request suites, `tsc` clean — but have **not** been driven on a real surface and are
+> not on the server, so MI-01..05's DEV-VERIFIED status does **not** extend to them. Drop the marker
+> when Phase D.8 closes.
 
 Portal view for client-submitted change requests + staff triage queue.
 
@@ -1709,9 +1716,9 @@ Portal view for client-submitted change requests + staff triage queue.
 
 | Status | Method | Path | Notes |
 |---|---|---|---|
-| ✅ | GET | `/api/:t/portal/change-requests` | `{id, kind, title, body, status, route, clientId, projectId, projectName, pipelineRunId, pmTaskId, declinedReason, requestedBy, createdAt, updatedAt}[]`. Client's own requests (own clients, own project scope), newest-first, capped at 200. Authz: `portal` read. |
-| ✅ | GET | `/api/:t/portal/change-requests/:id` | Single request. 404 for out-of-scope (not 403 — same existence-oracle avoidance as other portal detail endpoints). Authz: `portal` read. |
-| ✅ | POST | `/api/:t/portal/change-requests` | `{kind, title, body?, projectId?, clientId?}` → `{id, status:'new'}`. `kind` ∈ `content|design|feature|bug`. `title` required, ≤300 chars. Server-derives `client_id`, `project_id`, `requested_by`, `source='portal'`, `status='new'` (all from request context, never body-trusted). Viewer-permitted (capability `request_change`, gated on `portal` resource only — no `canSign` check). Emits `webdev.change_request.created` and notifies the client's project owners (best-effort). |
+| ✅ | GET | `/api/:t/portal/change-requests` | `{id, kind, title, body, status, route, clientId, projectId, projectName, pipelineRunId, pmTaskId, declinedReason, requestedBy, createdAt, updatedAt}[]` **+ NEW(unverified): bug detail: `{severity, reproSteps, environment, seenOnVersion, affectedUrl}`**. Client's own requests (own clients, own project scope), newest-first, capped at 200. Authz: `portal` read. |
+| ✅ | GET | `/api/:t/portal/change-requests/:id` | Single request, same column set as the list (one `SELECT_COLUMNS` constant serves both so they cannot drift) — so it also carries **NEW(unverified): `{severity, reproSteps, environment, seenOnVersion, affectedUrl}`**. `severity` is **read-only here**: the client sees how their bug was ranked at triage but can never set it. 404 for out-of-scope (not 403 — same existence-oracle avoidance as other portal detail endpoints). Authz: `portal` read. |
+| ✅ | POST | `/api/:t/portal/change-requests` | `{kind, title, body?, projectId?, clientId?}` **+ NEW(unverified): `{reproSteps?, environment?, seenOnVersion?, affectedUrl?}`** → `{id, status:'new'}`. NEW(unverified): Caps: repro ≤5000, environment ≤200, seenOnVersion ≤100, affectedUrl ≤2000; all `scrubText`-ed like title/body (a repro step is exactly where a PAN gets pasted). NEW(unverified): **`severity` is NOT part of this contract** — a body naming one is ignored, not rejected, and the row lands `severity:null`. Severity is a triage output; a client ranking their own bug against everyone else's reliably answers "critical". `kind` ∈ `content|design|feature|bug`. `title` required, ≤300 chars. Server-derives `client_id`, `project_id`, `requested_by`, `source='portal'`, `status='new'` (all from request context, never body-trusted). Viewer-permitted (capability `request_change`, gated on `portal` resource only — no `canSign` check). Emits `webdev.change_request.created` and notifies the client's project owners (best-effort). |
 
 #### 16f-ii. Staff — triage queue and conversion
 
@@ -1719,8 +1726,8 @@ Portal view for client-submitted change requests + staff triage queue.
 |---|---|---|---|
 | ✅ | GET | `/api/:t/webdev/change-requests` | `{id, kind, title, status, route, clientId, clientName, projectId, projectName, source, requestedBy, requestedByName, triagedBy, triagedByName, triagedAt, declinedReason, createdAt, updatedAt}[]`. Triage queue + full list. `?status`, `?clientId`, `?projectId`, `?kind` filters. Oldest-first (queue order), capped at 200. Authz: `webdev_change_request` read (manager/module-manager+ — `member` excluded). |
 | ✅ | GET | `/api/:t/webdev/change-requests/:id` | Full row + linked artifact status. Adds `body`, `runStatus`, `runTitle`, `taskTitle`, `taskStatus` (joined at read time, so CR shows live status without a stale copy). Authz: `webdev_change_request` read. |
-| ✅ | POST | `/api/:t/webdev/change-requests` | `{kind, title, body?, clientId?, projectId?}` → `{id, status:'new'}`. Staff-logged maintenance work. `source='internal'` (staff-raised, no client solicitation). `client_id` may be NULL (internal-only work). Server-derives all identity fields. No notification on create (internal work, not client-actionable). Authz: `webdev_change_request` create. |
-| ✅ | POST | `/api/:t/webdev/change-requests/:id/triage` | `{action, route?, reason?, kindOverride?}` → `{id, status, route, pipelineRunId?, pmTaskId?, signers[]?}`. Single triage decision (decline or convert). `action` ∈ `decline|convert`. Decline requires `reason` (≤1000 chars); convert picks a `route` ∈ `control_plane|mini_run|pm_task` (defaults by kind: content→pm_task, design/feature→mini_run, bug→pm_task). `kindOverride` ∈ `content|design|feature|bug` (optional, re-stamps the kind if provided). Serialized on the CR + precondition re-check (lock → re-read → check `status='new'` → spawn/update). **D-2a:** CR table takes CORE tenant wall, no `app_module_allowed()`. **F1:** notification audience follows source (portal requests notify contacts; internal requests don't — even when converted to a mini-run that opens a real `prd_sign` gate the client must sign, the disposition *notification* is withheld for internal-sourced requests; the gate opening itself notifies signers separately). Converts mini_run route spawn gates `prd_sign` directly (no dispatcher step); emits `pipeline.run.created` with honest `sourceMeetingId:null`. Emits `webdev.change_request.updated` + lifecycle event per outcome. Authz: `webdev_change_request` triage. |
+| ✅ | POST | `/api/:t/webdev/change-requests` | `{kind, title, body?, clientId?, projectId?}` **+ NEW(unverified): `{reproSteps?, environment?, seenOnVersion?, affectedUrl?}`** → `{id, status:'new'}`. NEW(unverified): Identical caps and scrubbing to the portal path, deliberately — this is the route a QA engineer, an n8n flow and the D-9 CI receiver all file through, and detail that only survives on the portal path is the "UI as the definition" failure the agentic-native bar names. NEW(unverified): `severity` not accepted here either. Staff-logged maintenance work. `source='internal'` (staff-raised, no client solicitation). `client_id` may be NULL (internal-only work). Server-derives all identity fields. No notification on create (internal work, not client-actionable). Authz: `webdev_change_request` create. |
+| ✅ | POST | `/api/:t/webdev/change-requests/:id/triage` | `{action, route?, reason?, kindOverride?}` **+ NEW(unverified): `{severity?}`** → `{id, status, route, pipelineRunId?, pmTaskId?, signers[]?}`. NEW(unverified): **BREAKING for bug converts:** `severity` ∈ `critical\|high\|medium\|low` is **required** when the effective kind (after `kindOverride`) is `bug` and `action='convert'` — a typed **400**, not the CHECK surfacing as a 500. Declines are exempt (`declined` is pre-triage-terminal in `wcr_bug_has_severity`; ranking something you are discarding is busywork). Resolved under the lock and after `kindOverride` applies, because re-kinding `feature→bug` at triage creates an obligation that did not exist at filing. Non-bug kinds write NULL. Single triage decision (decline or convert). `action` ∈ `decline|convert`. Decline requires `reason` (≤1000 chars); convert picks a `route` ∈ `control_plane|mini_run|pm_task` (defaults by kind: content→pm_task, design/feature→mini_run, bug→pm_task). `kindOverride` ∈ `content|design|feature|bug` (optional, re-stamps the kind if provided). Serialized on the CR + precondition re-check (lock → re-read → check `status='new'` → spawn/update). **D-2a:** CR table takes CORE tenant wall, no `app_module_allowed()`. **F1:** notification audience follows source (portal requests notify contacts; internal requests don't — even when converted to a mini-run that opens a real `prd_sign` gate the client must sign, the disposition *notification* is withheld for internal-sourced requests; the gate opening itself notifies signers separately). Converts mini_run route spawn gates `prd_sign` directly (no dispatcher step); emits `pipeline.run.created` with honest `sourceMeetingId:null`. Emits `webdev.change_request.updated` + lifecycle event per outcome. Authz: `webdev_change_request` triage. |
 
 ### 16g. Site Provisioning (PRV-00..04) — `src/modules/webdev/webdev.controller.ts` — **STATUS: PROTOTYPED**
 
@@ -4163,29 +4170,6 @@ client-scoped surface look correct in DEMO_MODE while showing the whole tenant.
 | GET | `/finance/ledger/verify` | `{ problems, clean }` | `finance_ledger:verify` |
 | GET | `/finance/ar/aging?asOf=` · `/finance/ap/aging?asOf=` | aging rows | `finance_ar\|ap:read` |
 | GET | `/finance/ar/reconcile` · `/finance/ap/reconcile` | `{ position, problems, clean }` | `…:reconcile` |
-| GET | `/finance/ap/vendor-credits?status=` | vendor-credit rows (incl. `unapplied`, `requiresBupotAmendment`) | `finance_ap:read` |
-| POST | `/finance/ap/vendor-credits` | `{ id, creditNo, subtotal, taxTotal, total, amountPayable, requiresBupotAmendment }` — raises AND posts | `finance_ap:credit_note` |
-| POST | `/finance/ap/vendor-credits/:creditId/apply` | `{ applicationId, amount }` — subledger only | `finance_ap:credit_note` |
-| POST | `/finance/ap/vendor-credits/:creditId/bupot-amended` | `{ ok, creditNo, amendmentRef }` — `amendmentRef` REQUIRED | `finance_tax:file` |
-| GET | `/finance/ap/bupot-exceptions` | credits whose bukti potong still needs amending | `finance_tax:read` |
-| POST | `/finance/ap/bills/:billId/write-off` | `{ writeOffId, billNo, amount }` — `confirm` must equal the bill number | `finance_ap:write_off` |
-| | | ⚠ **The AP pair is NOT the AR pair with the signs flipped, and a consumer presenting it that way will mislead the user about their tax position.** A vendor credit reverses **INPUT** VAT (`1170`, an asset the company CLAIMED), not output VAT, and in Indonesia the reversal is validated by a **nota retur the BUYER issues** (PMK 65/2010) — hence `notaReturNo`, which has no AR counterpart. An AP write-off credits **OTHER INCOME (`7300`)**, not an expense: released debt is taxable income, so it *increases* taxable profit — the opposite of the AR write-off. | |
-| | | ⚠ `withholdingRate` on a vendor credit is a **RATE** (`0.02`), matching the bill's own column, while `taxRate` on its lines is a **PERCENT** (`12`). The two differ because the underlying columns differ; guessing either way is wrong by a factor of a hundred. Copy withholding FROM THE BILL rather than re-deriving it — the rate in force when the bill was approved is the rate that must be unwound. | |
-| | | ⚠ A credit that unwinds withholding sets `requiresBupotAmendment` and raises `AP_BUPOT_AMENDMENT_PENDING` on `/finance/ap/reconcile`. Owner ruling 2026-08-27 option (c): the credit is NOT blocked and the filing is NOT auto-amended. Do not render that problem row as a ledger fault — the books tie out; a filing does not. | |
-| | | ⚠ `/finance/ap/reconcile`'s `position` gained a FOURTH field, `unappliedCredits`. The identity is `open bills − payments on account − unapplied vendor credits = the AP control balance`. A consumer still computing `open − onAccount` disagrees with the ledger the moment a credit is issued and not yet applied. | |
-| GET | `/finance/fiscal-years` | `{ id, code, startDate, endDate, status, periodCount, openPeriods }[]` | `finance_period:read` |
-| | | Added 2026-08-27 because closing a year was reachable only by somebody who already held the uuid — nothing returned one, and `/finance/periods` carries the year CODE but not its id. `openPeriods > 0` means the year is NOT closeable; show it on the row and disable the control, rather than letting the user type a confirmation and then be refused. | |
-| GET | `/finance/ar/credit-notes?status=` | credit-note rows (incl. `unapplied`) | `finance_ar:read` |
-| POST | `/finance/ar/credit-notes` | `{ id, creditNoteNo, subtotal, taxTotal, total }` — raises AND posts | `finance_ar:credit_note` |
-| POST | `/finance/ar/credit-notes/:noteId/apply` | `{ applicationId, amount }` — subledger only, posts nothing | `finance_ar:credit_note` |
-| POST | `/finance/ar/invoices/:invoiceId/write-off` | `{ writeOffId, invoiceNo, amount }` — `confirm` must equal the invoice number | `finance_ar:write_off` |
-| | | ⚠ **A credit note and a write-off are NOT two flavours of one adjustment, and a consumer that presents them as one will cause a real tax error.** A CREDIT NOTE means the customer never owed it (return, over-bill, agreed discount): it debits contra-revenue AND **reverses output VAT** (a 2140 debit). A WRITE-OFF means they owed it and will not pay: it debits bad-debt expense (6950) or the allowance (1131) per `finance_company_settings.bad_debt_method`, and posts **NO VAT line at all** — Indonesian PPN gives no relief for a bad debt, so reversing it reclaims tax the company is not entitled to and shows up in a Coretax reconciliation. They also carry different rights (`credit_note` vs the step-up-gated `write_off`), though both bind to the same SoD duty `ar_writeoff_approve`. | |
-| | | ⚠ `/finance/ar/reconcile`'s `position` gained a FOURTH field, `unappliedCredits`. The identity is `open invoices - payments on account - unapplied credit notes = the AR control balance`: an unapplied credit note credits the control account exactly as an unallocated receipt does. A consumer that still computes `open - onAccount` will disagree with the ledger the moment any credit note is issued and not yet applied — which is its normal state. | |
-| GET | `/finance/tax/returns?year=&kind=` | filed/draft return rows | `finance_tax:read` |
-| POST | `/finance/tax/returns` | `{ id, status, computed:{output,input,net} }` — idempotent per period | `finance_tax:prepare` |
-| POST | `/finance/tax/returns/:returnId/file` | `{ id, status, filed:{…} }` — needs `filingReference` + `confirm`; `amend:true` to re-file | `finance_tax:file` |
-| GET | `/finance/tax/returns/drift` | `{ problems, clean }` — filed returns the ledger no longer agrees with | `finance_tax:read` |
-| | | ⚠ Filed figures are a SNAPSHOT taken at filing and are never recomputed. `filed*` is what was told to DJP; the summary endpoints are what the data says today. They diverge the moment a journal lands in a filed period, and `/drift` is the endpoint that measures it — do not "helpfully" refresh `filed*` from the live summary, that destroys the only evidence of the gap. | |
 | GET | `/finance/tax/ppn?from=&to=` | PPN summary | `finance_tax:read` |
 | GET | `/finance/tax/efaktur-exceptions?from=&to=` | exception rows | `finance_tax:read` |
 | GET | `/finance/periods/:periodId/close-readiness` | `{ blockers, ready }` | `finance_bank:reconcile` |
@@ -4235,3 +4219,91 @@ Three contract rules a consumer must not simplify:
 
 `fiscalYearStartMonth` is returned but **not accepted** on write: the database refuses to move it
 once a calendar exists, and offering a field that will be rejected implies it is editable.
+
+---
+
+## 25. GitHub repo registry (GH-08, 2026-08-31) — `src/core/github-repos.controller.ts` — **STATUS: PROTOTYPED (fail-closed — see below)**
+
+**§25 claimed at write time** — `grep -n "^## 2[5-9]\."` immediately before writing this block
+found nothing claimed; §24 (WebDesk console read model) was the prior highest number.
+
+Design: `docs/blueprints/github-integration-foundation.md` §5 (the repo registry), §5.2 (the
+`github_repos` schema, migration `202608310735_github_repos_registry.sql`, GH-05), §5.4 (the
+surface this BFF exists to serve). Read-mostly: list (filterable + paginated), detail, and
+link/unlink to a `webdev_site_id` or `project_id`. No UI consumer yet (GH-09).
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| GET | `/api/:t/github/repos?linked=&archived=&search=&limit=&offset=` | `{ repos: GithubRepoView[], total, limit, offset }` | `github_repo:read` |
+| GET | `/api/:t/github/repos/:id` | `GithubRepoView` | `github_repo:read` |
+| POST | `/api/:t/github/repos/:id/link` — body `{ webdevSiteId?, projectId? }` (at least one required) | `{ id, webdevSiteId, projectId }` | `github_repo:link` |
+| POST | `/api/:t/github/repos/:id/unlink` — body `{ target?: 'webdev_site'\|'project'\|'both' }` (default `both`) | `{ id, webdevSiteId, projectId }` | `github_repo:unlink` |
+
+`GithubRepoView` (camelCase, one shape for list rows and detail — no `lib/*.ts` file exists yet
+for the UI to import from, since GH-09 has not started; treat this table as the canonical shape
+until then):
+
+```
+{
+  id, org, name, fullName, htmlUrl,
+  visibility: 'public'|'private'|'internal', archived: boolean, topics: string[],
+  defaultBranch, headSha, headCommittedAt, headAuthor,
+  openPrCount, latestRunStatus, latestRunConclusion, latestRunAt,
+  latestReleaseTag, deployedRef,
+  webdevSiteId, webdevSiteDomain,        // both null when unlinked to a site
+  projectId, projectName,                // both null when unlinked to a project
+  repoCreatedAt, pushedAt, lastSyncedAt, // lastSyncedAt is what makes a stale row VISIBLY stale
+  createdAt, updatedAt,
+}
+```
+
+### List filters (§5.4's surface)
+
+- `linked=true` — `webdev_site_id IS NOT NULL OR project_id IS NOT NULL`.
+- `linked=false` — **the unlinked bucket**, §5.4's own requirement: "unlinked repos as their own
+  bucket. An unlinked repo is either a site nobody registered or a repo nobody owns — both worth
+  seeing." Never treated as an error state, never dropped from the list.
+- `archived=true|false` — `archived` is a first-class GitHub state (113/221 repos measured
+  archived 2026-08-31, §3), **not** a staleness proxy. `archived=true` filters IN, same status
+  code and shape as any other page.
+- `search=` — case-insensitive substring match on `name` OR `full_name`.
+- `limit`/`offset` — `limit` capped at 200 (default 50). `total` is a real `COUNT(*)` against the
+  same predicate, not just "did this page fill up" — a bucket-size chip ("N unlinked", "N
+  archived") can read it directly.
+
+### ✅ RESOLVED 2026-08-31 — GH-03 shipped; these routes now serve. (Was: 403 for every principal.)
+
+`platform-nest/cerbos/policies/resource_github_repo.yaml` is **live**. It grants `read`/`link`/
+`unlink` to company_admin/manager (+`member` on `read`), and gates `create_repo`/`delete_repo`/
+`deploy`/`secret_write` behind a verified D14 `approvalId` — unreachable by role tier alone. QA
+verified the whole matrix against a real Cerbos instance on 2026-08-31 (18/18), and independently
+probed an `isClientOnly` principal: `EFFECT_DENY` on every action on this kind.
+
+**The earlier text here said every route 403s for every principal including `platform_admin`.**
+That was true when this section was written and is now false — kept visible rather than deleted so
+nobody re-derives the old conclusion from a stale doc.
+
+⚠ **Open mismatch for a follow-up ticket:** Cerbos grants `github_repo:read` to `member`, but
+`platform-ui`'s page gate is `isElevated(me) || can(me,"company.manage",tenant)` and `member` holds
+no `company.manage`. A member Cerbos would serve is refused client-side before the request fires.
+Fails toward under-serving (Cerbos remains authoritative — not a security hole), but the two gates
+disagree and should be reconciled in one direction.
+
+### Binding rulings this endpoint set enforces structurally, not just by convention
+
+- **`tenant_id` never moves.** Neither `link()` nor `unlink()` ever appears in the same `UPDATE`'s
+  `SET` list as `tenant_id` — there is no request shape that could touch it. `tenant_id` is always
+  the operating company that owns the GitHub org (blueprint §5.2's GAP-CLOSED ruling), independent
+  of which site/project a repo is linked to.
+- **GitHub-owned columns are never written here.** `link()`/`unlink()` write ONLY
+  `webdev_site_id` / `project_id` / `updated_at`. Every other column (`org`, `name`, `visibility`,
+  `archived`, `head_sha`, CI/release state, …) is exclusively written by the crawl/webhook/
+  reconcile machinery (GH-06/07), never by this controller.
+- **A bad link target (wrong tenant, or simply not existing) is a 400, not a 500 or a silent
+  accept.** The composite FKs (`(webdev_site_id, tenant_id)` / `(project_id, tenant_id)`,
+  migration 202608310735) run as the table owner outside RLS and are the actual tenancy guarantee
+  — a `23503` violation is mapped to `400 { error: "webdevSiteId/projectId must belong to this
+  tenant" }`, same pattern `webdev-change-requests.controller.ts`'s `createInternal()` uses.
+- **No module wall.** `github_repos` is a CORE table (no `webdev` module gate) — same reasoning as
+  `integration_connections`. These routes are reachable regardless of whether a company has the
+  `webdev` module enabled; RLS tenant isolation is the only wall.

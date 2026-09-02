@@ -186,7 +186,9 @@ function moduleStaffTargets(kind: string, cond: string | undefined): RealRole[] 
   // WSK-19 (2026-08-27): kept byte-aligned with generate-role-bundles.mjs's own addition —
   // webdev_contract_snapshot joins the webdev module tier (unlike webdev_zoneb_event below, its
   // `refresh` action is a real console button, design §08).
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
+  // GH-03 (2026-08-31): github_repo's `read` rule joins the same tier — kept byte-aligned with
+  // generate-role-bundles.mjs's own GH-03 addition (see that file's comment for the full reasoning).
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo") {
     return ["webdev_staff"];
   }
   if (kind === "service_assignment" || kind === "member") {
@@ -211,7 +213,8 @@ function moduleManagerTargets(kind: string, cond: string | undefined): RealRole[
       ? ["reports_manager"]
       : ["hr_manager", "search_manager", "reports_manager"];
   }
-  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot") {
+  // GH-03 (2026-08-31) — see moduleStaffTargets' own GH-03 note above.
+  if (kind === "webdev_change_request" || kind === "webdev_provisioned_site" || kind === "webdev_contract_snapshot" || kind === "github_repo") {
     return ["webdev_manager"];
   }
   if (kind === "service_assignment") return ["hr_manager", "search_manager", "reports_manager", "webdev_manager", "social_manager", "monitoring_manager"];

@@ -80,7 +80,7 @@ describe("POST .../provision + reconcile — the normal ladder", () => {
     const afterFirst = post(reconcile(site.id), {});
     const step1 = afterFirst!.json as { status: string; repoUrl: string | null };
     expect(step1.status).toBe("provisioned");
-    expect(step1.repoUrl).toContain("github.com/Gaia-Digital-Agency/ladder-demo-site");
+    expect(step1.repoUrl).toContain("github.com/gaiadabali/ladder-demo-site");
 
     const step2 = (post(reconcile(site.id), {})!.json) as { status: string; stagingUrl: string | null };
     expect(step2.status).toBe("live");

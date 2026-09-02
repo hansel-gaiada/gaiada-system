@@ -79,7 +79,7 @@ const SITES: DemoSite[] = ((globalThis as Record<symbol, unknown>)[STORE_KEY] ??
     id: "wps-demo-1b", tenantId: "co-agency", pipelineRunId: "run-demo-1",
     provider: "provision", providerRef: "prov-proj-1001",
     slug: "northwind-site-redesign-kickoff", framework: "vite",
-    repoUrl: "https://github.com/Gaia-Digital-Agency/northwind-site-redesign-kickoff",
+    repoUrl: "https://github.com/gaiadabali/northwind-site-redesign-kickoff",
     stagingUrl: "https://northwind-site-redesign-kickoff.gaiada.online",
     status: "live", failureReason: null,
     requestedBy: "demo-hansel", approvalId: null,
@@ -199,7 +199,7 @@ function reconcileStep(site: DemoSite): DemoSite {
       // §04: poll_timeout is "honest, not final" — the next reconcile flips it forward.
       site.status = "live";
       site.failureReason = null;
-      site.repoUrl = `https://github.com/Gaia-Digital-Agency/${site.slug}`;
+      site.repoUrl = `https://github.com/gaiadabali/${site.slug}`;
       site.stagingUrl = `https://${site.slug}.gaiada.online`;
     }
     site.updatedAt = site.lastReconciledAt;
@@ -216,7 +216,7 @@ function reconcileStep(site: DemoSite): DemoSite {
 
   if (site.status === "pending") {
     site.status = "provisioned";
-    site.repoUrl = `https://github.com/Gaia-Digital-Agency/${site.slug}`;
+    site.repoUrl = `https://github.com/gaiadabali/${site.slug}`;
     site.updatedAt = site.lastReconciledAt;
     return site;
   }

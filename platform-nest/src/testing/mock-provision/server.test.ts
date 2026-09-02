@@ -106,7 +106,7 @@ describe("PRV-00 — Mock provision service", () => {
       expect(project.id).toBeDefined();
       expect(project.name).toBe("my-site");
       expect(project.status).toBe("pending");
-      expect(project.repoUrl).toContain("Gaia-Digital-Agency");
+      expect(project.repoUrl).toContain("gaiadabali");
       expect(project.repoUrl).toContain("my-site");
       expect(project.stagingUrl).toBe("https://my-site.gaiada.online");
     });
@@ -300,7 +300,7 @@ describe("PRV-00 — Mock provision service", () => {
       mock.seedProject({
         id: foreignProjectId,
         name: "foreign-site",
-        repoUrl: "https://github.com/Gaia-Digital-Agency/foreign-site",
+        repoUrl: "https://github.com/gaiadabali/foreign-site",
         stagingUrl: "https://foreign-site.gaiada.online",
         status: "live",
         isOurs: false,
@@ -355,7 +355,7 @@ describe("PRV-00 — Mock provision service", () => {
       mock.seedProject({
         id: seedId,
         name: "seeded-site",
-        repoUrl: "https://github.com/Gaia-Digital-Agency/seeded-site",
+        repoUrl: "https://github.com/gaiadabali/seeded-site",
         stagingUrl: "https://seeded-site.gaiada.online",
         status: "live",
         isOurs: true,
@@ -503,7 +503,7 @@ describe("PRV-00 — Mock provision service", () => {
       expect(found.docs.length).toBeGreaterThan(0);
       expect(found.docs[0].name).toBe("complete-flow");
       expect(found.docs[0].status).toBe("live");
-      expect(found.docs[0].repoUrl).toContain("Gaia-Digital-Agency/complete-flow");
+      expect(found.docs[0].repoUrl).toContain("gaiadabali/complete-flow");
       expect(found.docs[0].stagingUrl).toBe("https://complete-flow.gaiada.online");
     });
   });

@@ -95,7 +95,11 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // WSK-31 (2026-08-27): +2 grantable — webdev.provisioned_site.{operate,promote} (the §07 WebDesk
     // control-plane MCP tool set's Zone A authz, on the EXISTING webdev_provisioned_site kind — no
     // new authoring group; both advancedOnly, same reasoning webdev.zoneb_event.record used), 367 -> 369.
-    expect(grantable.length).toBe(372);
+    // GH-03 (2026-08-31): +9 grantable — core.github_repo.{read,link,unlink,push,merge,deploy,
+    // secret_write,create_repo,delete_repo} (1 new Cerbos kind). 5 in a new "GitHub Repos" authoring
+    // group (read/link/unlink/push/merge); the 4 D14-gated ones (deploy/secret_write/create_repo/
+    // delete_repo) are advancedOnly, same reasoning core.position.assign uses. 372 -> 381.
+    expect(grantable.length).toBe(381);
     expect(relationshipKeys.size).toBe(15);
   });
 

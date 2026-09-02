@@ -11,504 +11,84 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
-### platform-nest `0.42.1` / infra - SM-74 hosting topology + MON-01 probe generator (2026-08-30) - PROTOTYPED
-
-~63 managed client properties are monitored by nobody, and the program had this recorded as blocked
-behind the observe-only ruling on `delphi`/`helios`. **It is not.** That ruling forbids *changing
-things on* those hosts; an HTTP GET changes nothing. Re-probed 2026-08-30 — SSH to both is
-filtered, HTTP and HTTPS answer. Observation was never the blocked half; deployment was.
-
-**SM-74** adds the hosting-topology field set to `search_properties` rather than `webdev_sites`,
-split by ownership and not convenience: `search_properties` already owns domain identity, the
-crawl-**consent** gate, the audit history and the crawler, so anything true of the domain *as an
-observable thing on the internet* belongs there. `webdev_sites` owns how we deliver it. One domain,
-one row, one consent gate, one crawler — a second registry would fork consent, which is the one
-thing that must never be ambiguous.
-
-**Every column is nullable on purpose.** Most of these properties have never been surveyed, and
-`NOT NULL DEFAULT 'unknown'` would render as a measurement in every console that reads it. NULL
-means "not surveyed"; `'unknown'` would mean "surveyed and could not tell". Same reason
-`plugin_surface` distinguishes NULL from `[]`, and why `topology_checked_at` exists at all — without
-it a 2025 fingerprint is indistinguishable from this morning's.
-
-**MON-01's generator puts the consent gate in the SQL, not in a comment.** Only verified, active,
-non-deleted properties become probe targets; an unverified property is *absent*, not throttled. It
-also refuses private, loopback and link-local hosts — a property row is client-supplied data, and a
-generator that will happily probe `169.254.169.254` because a row said so is an SSRF with a cron
-attached. Selftest 8/8 including that case; skipped rows are logged rather than silently dropped.
-
-The scrape job is **proposed, not applied**: wiring it decides which host makes standing outbound
-requests to 63 client domains — whose IP appears in their logs, and whose egress posture a
-compromise inherits. Not the ERP box. It also sets 60s rather than the global 15s, because 63
-properties at 15s is ~15k requests an hour from a single IP.
-
-### platform-nest `0.42.0` - webdev_sites, the site portfolio registry (2026-08-30) - PROTOTYPED
-
-v2.0 §04/§07. The design assumed every client site becomes a Zone B tenant; most never will. The
-requirement is two-sided — **future projects must use the unified backend; past and current ones
-must never be touched**, only tracked, with adoption optional and per site.
-
-`webdev_provisioned_sites` (0090) cannot hold these rows and must not be widened to: its
-`framework CHECK IN ('vite','nextjs')` refuses everything else *by design* (D-P7) and its status
-column models a provisioning lifecycle, not the life of a site. It stays the record of how a site
-was **born**, for the subset we provisioned. This is the record of what **exists**.
-
-**Two rules matter more than the columns.** It lives in Zone A and never in Zone B — a tracked site
-must not require a Zone B tenant row, or the internet-facing backend ends up holding an inventory
-of the entire client estate, including the sites on clients' own infrastructure that we cannot
-defend. And it *references* credentials without storing them: `vault_ref` is a pointer and there is
-deliberately no column a password could occupy.
-
-**Hosting and adoption are independent axes, on purpose.** `/v1` is HTTPS with a scoped key, so a
-site on a client's own cPanel can be `linked` (its forms POST to WebDesk) or fully `adopted` (built
-static uploaded by FTP, content read from `/v1`). What a client-owned host costs us is deploy
-automation, not the platform — one combined column would have quietly ruled that out.
-
-`kind` is nullable rather than defaulting to `unknown`: for a legacy site whose stack is
-unsurveyed, `unknown` is a claim and NULL is an admission.
-
-Lints: names · RLS no unguarded backfills · immutability, all clean. CI green, which for this
-change means the migration applied against a real database in the platform-nest shards.
-
-### mcp-hub `0.12.0` / platform-nest `0.41.0` - pipeline.artifacts.get, the rail's missing link (2026-08-30) - PROTOTYPED
-
-`code.scaffold` v2's frozen envelope carries `prdArtifact` and `prototypeArtifact` — both
-`pipeline_stages.artifact_ref` — and **nothing could dereference either**. The consumer adapter
-(`ai-agents/src/code-scaffold/artifact-fetcher.ts`) was written against the tool name
-`pipeline.artifacts.get`, and its own header records that no hub contract answered it. That is the
-reason PRD-driven scaffolding could not run live: the scaffolder was handed references into a
-system with no read side.
-
-**The ref must be stage-referenced, and that is the security property.** Resolving a
-caller-supplied id straight to file bytes would make this a generic file reader wearing a pipeline
-name — any automation principal holding `pipeline_run:read` could then read any file in the tenant.
-The platform side first requires the ref to be referenced by a real stage in that tenant and only
-then resolves it. The stage lookup is the authorization boundary, not a convenience.
-
-Reuses `pipeline_run:read` rather than minting a Cerbos kind: a new kind costs six coupled
-artifacts (catalog, groups, seeding migration, both bundle resolvers, the regenerated bundle), and
-this read genuinely is "read a pipeline run's own output", which the existing kind already means.
-
-Returns `{resolvable:false, reason}` instead of failing when a ref is a URL, a repo or an external
-link rather than stored text — a scaffolder must tell "cannot fetch this" apart from "this was
-empty". Non-UUID refs are rejected before the query, so a legitimate non-file ref cannot surface as
-a Postgres `invalid input syntax for type uuid`.
-
-Added to `wf:delivery`'s allowlist, which is the identity the scaffolder runs under.
-
-Verified: platform-nest `tsc` clean · mcp-hub `tsc` clean · mcp-hub 380/380 · CI all green.
-
-### webdesk `0.2.0` - Zone B is deployed and running, and main is green again (2026-08-30) - DEV-VERIFIED
-
-Zone B runs on a real Linux host: 7 services in their own compose project, **exactly one published
-port and it is on loopback**, proven against the RESOLVED compose config rather than the overlay.
-Payload's admin is reachable only through an SSH tunnel. Nothing is exposed to the internet — no
-vhost, no TLS — deliberately.
-
-**No longer provisional, because it was re-run on Linux:** migrations 8/8 from scratch plus an
-idempotent re-run · role split confirmed NOSUPERUSER/NOBYPASSRLS · RLS integrity 20/20 tenant-scoped
-tables · **WSK-04 cross-path suite ALL PATHS OK** · **WSK-02 lockdown 11/11** · **WSK-15 codegen
-double-run determinism 3/3 including its negative control**.
-
-**Four defects that only a real boot could find**, all fixed here: the base compose could never boot
-`api` in production (its block forwarded one storage var; the code requires four and reads eight
-more) · `payload/Dockerfile` claimed it was RED and unbuildable, which had stopped being true ·
-Payload's tables could not be created in a production-shaped environment at all, now closed with
-Payload's own migration mechanism plus `init:prod` = migrate → reapply-tenant-rls → check-rls-
-integrity, three links because Payload migrations do not re-arm RLS · a multi-line PEM in `.env`
-silently broke every ad-hoc verification container while the stack itself worked, since
-`docker run --env-file` is a flat parser and Compose's is not.
-
-**The estate internal CA existed nowhere** — gateway and hub both had TLS off and no `gaiada_*`
-volume held cert material — while three designs were written against it. It exists now
-(`CN=gaiada-internal-ca`, ECDSA P-256, key never off-host), and the A→B control channel is proven to
-discriminate three ways: no cert → 401 at Layer 1 · right CN signed by a foreign CA → 401 at Layer 1
-· the issued cert → 401 *"Layer 2: no Bearer token"*, i.e. it passed mTLS. A channel answering all
-three identically would have proven nothing, which is exactly what the placeholder did.
-
-**CI is green for the first time in more than a dozen commits.** `webdesk-api` had never once passed:
-MinIO was declared as a `services:` container, which cannot take the `server /data` argument it
-needs, so the job died before a test ran. Beyond that, the suites read 58 environment variables
-against nine supplied, with **seven different names for "the test database URL"**, each carrying its
-own hardcoded `localhost:555xx` fallback — so a missing name produced `AggregateError` and
-`expected 500 to be 201` with no host or port named anywhere. 56 → 8 → 2 → 0.
-
-Also: the `overrideAccess` lint WSK-D25 asked for and nobody built (Payload runs its access function
-only when `overrideAccess` is falsy, and the Local API defaults it true — so an un-opted-in call
-runs on RLS alone) · Cloudflare Tunnel as the exposure path, gated behind its own profile so
-exposure is never a side effect of a restart · `aire` decommissioned from the box after verifying it
-serves publicly from its own VPS, backed up first · 87 GB reclaimed.
-
-**Design v2.0 supersedes v1.1 and the provision seam design.** Zone B moved to the ERP-operational
-tier under a two-tier estate rule, Payload was recorded as editorial-only at last, the portfolio
-adoption ladder was added so live client sites are tracked and never touched, and §03's containment
-claim was rewritten rather than repeated — v1.1 said a Zone B compromise cannot reach Zone A, and on
-a co-tenanted box that is no longer true.
-
-### platform-ui `0.60.0` - the AP credit-note and write-off surface (2026-08-27) - PROTOTYPED
-
-The payables half of `finance 0.16.0`: `IssueVendorCreditForm`, `VendorCreditsTable` with a per-row
-apply, `BupotExceptionsCard` with a per-row amend action, and `WriteOffBillForm` behind
-`ConfirmAction` on the bill number. Plus the fourth `unappliedCredits` KPI tile.
-
-The three domain points are stated as COPY on the forms, not left implicit, because a user who
-assumes AP mirrors AR will misread their tax position: a vendor credit reverses **input** VAT and
-needs a buyer-issued nota retur; the withholding it unwinds can invalidate an issued bukti potong,
-which is flagged rather than blocking; and an AP write-off credits **other income**, increasing
-taxable profit — the opposite of the AR write-off.
-
-`bupot-exceptions` is a first-class card rather than a footnote. Owner ruling (c) makes the credit
-post regardless, so the only thing standing between a reversed withholding and a wrong filing is
-somebody seeing the chase list.
-
-⚠ **The FE work caught a backend bug during it**, which is why the review order matters:
-`apReconcile` did not SELECT `unapplied_credits` even though `finance_ap_position()` returns it — the
-SQL computed the number and the handler discarded it, invisible to `tsc` because a query is a string.
-Reported rather than typed around (that agent was barred from `platform-nest`), and the KPI was made
-to degrade to `—` so it would fail visibly against a backend that had not caught up. Fixed in
-`finance 0.16.0`, and now pinned by a test asserting all four fields are on the WIRE.
-
-### finance `0.16.0` - AP vendor credits and write-offs (2026-08-27) - PROTOTYPED
-
-The payables mirror of F4b, and deliberately NOT a sign flip. Three differences each carry money:
-
-| | AR (F4b) | AP (F5b) |
-|---|---|---|
-| credit reverses | output VAT — `2140`, a liability we owed | **input VAT — `1170`, an asset we CLAIMED** |
-| validated by | our own faktur | a **nota retur the BUYER issues** (PMK 65/2010) |
-| withholding | no analogue | **unwound**, which can invalidate an issued bukti potong |
-| write-off posts | DR bad-debt expense `6950` → reduces profit | **CR other income `7300` → INCREASES taxable profit** |
-
-That last row is the one a mirror-image implementation gets wrong. Released debt (*pembebasan utang*)
-is taxable income under UU PPh; booking it as a negative expense understates taxable profit — the
-same class of error as reclaiming VAT on a bad debt, in the opposite direction.
-
-The withholding arithmetic is not optional either. `finance_ap_approve_bill` credits AP with
-`amount_payable` (= total − withholding) and the PPh liability separately, because the company never
-owed the vendor the withheld part. A credit must unwind BOTH legs or the journal does not balance:
-
-```
-DR AP control            credit.amount_payable
-DR withholding account   credit.withholding_amount
-    CR expense           credit.subtotal
-    CR 1170 PPN Masukan  credit.tax_total
-```
-
-**Owner ruling (c), 2026-08-27 — the ledger is corrected here; the FILING is not.** If a bukti potong
-was already issued, the credit makes it overstate what was withheld, and fixing that is an amended
-e-Bupot — a statement to DJP. Auto-amending would have this system silently restate a filing;
-blocking would make a routine purchase return impossible until a tax officer acted. So the credit
-posts, `requires_bupot_amendment` is set, `finance_ap_bupot_amendment_exceptions()` is the chase
-list, and `AP_BUPOT_AMENDMENT_PENDING` surfaces on the reconciliation — the one screen somebody reads
-every close. `POST .../vendor-credits/:id/bupot-amended` records the resolution, and demands a
-reference: marking it resolved with none cannot be told apart from nobody having filed it.
-
-- `202608272000` — `finance_ap_vendor_credits` (+ lines, + a SEPARATE applications table, or
-  `finance_ap_reconcile`'s `amount_paid = sum(allocations)` check breaks on every credited bill),
-  `finance_ap_writeoffs`, three posting functions, `amount_credited`/`amount_written_off` on the
-  bill (measured against `amount_payable`, never `total`), and the tie-outs re-defined — an unapplied
-  vendor credit DEBITS the AP control account exactly as an unallocated payment does, so
-  `control = open bills − payments on account − unapplied vendor credits`.
-- `202608272010` — `finance.ap.credit_note` + `finance.ap.write_off`, and a NEW duty
-  `ap_credit_writeoff_approve` with two blocking pairs: *enter a bill then credit it away*, and
-  *divert the payment then write off the debt*. AR needed no new duty because `ar_writeoff_approve`
-  was seeded already naming credit notes; the AP side was never anticipated. Not held by
-  `finance_staff` — the clerk who enters bills must not be able to cancel them.
-
-DEV-VERIFIED by replay against the LIVE schema in a rolled-back transaction on a real bill carrying
-both PPN Masukan and PPh 23: the credit produced `CR 1170` with no `2140` and `DR AP` equal to
-`amount_payable` not the gross; the write-off produced `CR 7300` (revenue) with no VAT leg; the
-bukti potong flag fired; aging netted 38,150,000 − 3,815,000 − 1,000,000 = 33,335,000. 8 new tests
-cover both VAT assertions, the income assertion, both tier denials, the confirmation gate, the flag
-lifecycle and the tie-out. finance.test.ts 81/81.
-
-⚠ Also restored `finance.ar.credit_note`, which commit `f6a29bbf` deleted from BOTH
-`permission-catalog.json` and `permission-groups.json` while `202608270910` still inserts it into the
-database — artifact and DB disagreeing, 13 suites red on `main`. Recovered verbatim from the commit
-that introduced it. This is the third time in one day a concurrent wave has broken `main` through
-these six hand-maintained IAM artifacts; the pattern is structural, not bad luck.
-
-### platform-ui `0.59.1` - every table with more than 4 columns was wrapping (2026-08-27) - DEV-VERIFIED
-
-`.lux-table__head/__row` fall back to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — FOUR tracks — and
-`HairlineTable` set that variable only when a caller passed `tcols`. Any table with more columns put
-N grid items into 4 tracks, so every row wrapped onto extra lines and the columns rendered out of
-visual order.
-
-On the **live** receivables aging the header read `61–90 / Current 90+ / 1–30 Total / 31–60`, with
-each customer's figures split across two rows. That is the schedule that has to tie to the control
-account, and it was unreadable in production.
-
-A scan found **62** such tables — finance, HR, IT, learning, monitoring, PM, search, meetings. Not a
-finance bug, an app-wide one, so the fix is in the primitive rather than at 62 call sites (which
-would still leave the 63rd broken the day someone adds it): the template is now DERIVED from
-`columns.length` when the caller gives none. Callers passing `tcols` are unaffected, 4-column tables
-render identically, and 2–3 column tables stop emitting phantom empty tracks.
-
-⚠ **Nothing in the pipeline could see this.** The markup is correct and every cell is present in DOM
-order, so `tsc`, vitest, `next build` and the axe sweep all pass — wrapping is neither a type error
-nor a contrast failure. It reached production and was found by opening the page. That is the case for
-a browser pass before calling a surface delivered.
-
-DEV-VERIFIED against a local DEMO_MODE render: the aging head reports 7 grid tracks for 7 header
-cells on ONE visual row, labels in order. Before: 4 tracks, two rows, scrambled.
-
-### finance `0.15.1` / platform-nest — IAM: zoneb_event.record must be ui_grantable (2026-08-27) - PROTOTYPED
-
-`202608271400` inserted `webdev.zoneb_event.record` with `ui_grantable = false` AND bundled it onto
-`manager` and `company_admin`. Both cannot stand: `position_roles_guard()` clause (b) refuses to
-attach a role carrying a non-ui_grantable permission to a position, so `seedPositions()` threw and
-took NINE files red on `main` — four seed suites, the positions controller, the IAM guard, two
-catalog pins and the permission-chain sweep. One flag; eight files that never mention it.
-Reproduced on a clean `origin/main` checkout before the fix, so it was not a merge artifact.
-
-`true` is the correct side. `ui_grantable = false` is a narrow carve-out with a pinned composition —
-"exactly 22 rows (15 relationship + 7 `portal.*`)", documented as "everything else true". `record` is
-grantable-class and not `portal.*`, and its sibling `.read` is true. The alternative (dropping it
-from the bundles) was rejected: the policy grants it to those roles deliberately, as the
-`wd-zoneb-intake` intake endpoint pinned `impact: "low"`. Fixed in a NEW migration (`202608271600`)
-rather than by editing an already-deployed one, and it ASSERTS — failing loudly if the key is absent,
-if the update matches no row, or if any non-relationship non-portal key is still false.
-
-Also regenerated `CAPABILITY-INVENTORY.md`, stale from WSK-12's new mcpTool (+1 low-impact write).
-
-⚠ Two of the nine were NOT that defect: the zoneb HTTP suite and the permission-chain sweep failed
-against a Cerbos container started *before* the merge added the policy file. Cerbos does not reliably
-hot-reload; restarting fixed both with no code change. Recorded so nobody re-chases it.
-
-### platform-ui `0.59.0` - finance write surfaces: credit notes, write-offs, and five wire-ups (2026-08-27) - PROTOTYPED
-
-Six finance surfaces whose backends existed and which nothing could reach: consolidation runs +
-eliminations, period reopen, instrument creation + accrual posting, AR customer and AP vendor
-creation, and the fiscal-year close. Plus the new AR credit-note and write-off forms for
-`finance 0.15.0`.
-
-**Credit notes and write-offs are two forms on purpose, not one adjustment form with a reason
-dropdown.** A credit note says the customer never owed it and reverses output VAT; a write-off says
-they owed it and will not pay, and reverses nothing, because the PPN was properly due and has been
-remitted. Choosing wrong is not a wrong button — it produces a wrong VAT return — so both forms state
-the consequence rather than leaving it to be inferred from the name. Line accounts are filtered from
-the real chart (contra-revenue 4300/4200), never hardcoded, because an accountant may renumber it.
-
-- Period reopen requires the period NAME as confirmation and a reason; a HARD_LOCK period is refused
-  with the server's own wording rather than a generic failure.
-- Accrual posting is keyed on the schedule `seq` — the 1-based instalment, picked from a live
-  dropdown — not on a fiscal period. An instrument whose payment months do not align with the fiscal
-  calendar has no unambiguous "accrual for August".
-- Fiscal-year close is disabled while the year still has open periods, showing the count. Learning
-  that from a refusal AFTER typing a confirmation is a worse surface than seeing it on the row.
-
-⚠ **Fixed a defect that made DEMO_MODE lie.** `demoFinance.ts`'s header comments described a "second
-group" of plain writes that had NO dispatch code at all — every one of those endpoints would have
-404'd in demo mode. The build gate and e2e both run in DEMO_MODE, so this was a surface claiming
-capabilities nothing served, invisible to `tsc` and to vitest. Same bug class as the earlier
-"financeDemo never received the request body". Dispatch added for all of them; the FISCAL_YEARS
-fixture now derives its period counts from the existing PERIODS array rather than hand-maintained
-numbers that would drift from the table rendered beside them.
-
-Every stale "not built yet" claim for these surfaces was removed from the receivables, payables,
-close and cutover pages. Gates verified independently of the agent that wrote the code: typecheck
-clean, 177 files / 3445 tests, `DEMO_MODE=1 next build` exit 0.
-
-### finance `0.15.0` - AR credit notes and write-offs, and the tax return lifecycle (2026-08-27) - PROTOTYPED
-
-Two ways a receivable legitimately shrinks with no cash arriving. They were deferred from F4 on
-purpose — `finance_ar_invoices` still carries the comment "(Credit balances are deferred with credit
-memos.)" — and everything except the accounting already existed: the Cerbos `write_off` action, the
-`finance.ar.write_off` catalog key, and the seeded SoD duty `ar_writeoff_approve`, whose name has
-read "AR credit note / write-off approval" since 202608241013.
-
-**The distinction the whole design turns on, because it is money:**
-
-| | ledger posting | output VAT |
-|---|---|---|
-| Credit note (nota retur) | DR contra-revenue (4300/4200) + DR 2140 PPN Keluaran, CR AR control | **reversed** |
-| Write-off (piutang tak tertagih) | DR 6950 or 1131, CR AR control | **NOT reversed** |
-
-Indonesian PPN gives no relief for a bad debt. Treating a write-off like a credit note reclaims VAT
-the company is not entitled to, understates tax payable, and surfaces in a Coretax reconciliation as
-a difference DJP will ask about. So they are separate documents, separate tables, separate postings
-and separate rights — not two `reason` values on one adjustment table, which is how this normally
-gets built and is precisely how the VAT ends up wrong.
-
-- `202608270900` — `finance_ar_credit_notes` (+ lines, + a SEPARATE `finance_ar_credit_applications`
-  table, because putting credit applications into `finance_ar_allocations` would break
-  `finance_ar_reconcile`'s `amount_paid = sum(allocations)` check on every invoice that ever receives
-  a credit); `finance_ar_writeoffs`; `finance_ar_issue_credit_note` / `finance_ar_apply_credit` /
-  `finance_ar_write_off`; `amount_credited` + `amount_written_off` on the invoice; a
-  `bad_debt_method` company setting (`direct` | `allowance`, default `direct`); and account
-  **6950 Beban Kerugian Piutang**, added to the CoA template AND backfilled into every existing
-  chart — the template shipped the allowance (1131) but never a bad-debt expense.
-- `finance_ar_aging` / `finance_ar_reconcile` / `finance_ar_position` are **re-defined in the new
-  migration, not edited in place** — 202608241019 is applied on every estate, and editing it would
-  reach fresh databases only. The reconciliation identity grows a third term: an unapplied credit
-  note credits the AR control account exactly as an unallocated receipt does, so
-  `control = open invoices - payments on account - unapplied credit notes`. Omitting that term would
-  report a permanent mismatch for as long as any credit note sits unapplied, which is its normal
-  state. `position()` gains a fourth number and is therefore DROPped first (OUT params changed).
-- `202608270910` — one grantable key, `finance.ar.credit_note`, on the existing `finance_ar` kind.
-  A separate ACTION from `write_off` but the SAME duty: the control is unchanged, only the capability
-  splits, because `write_off` demands `assurance == "high"` and a sales return is routine traffic.
-  A step-up in front of every return gets `write_off` granted permanently, which destroys the control
-  for the case that needs it. Frequency is the argument, not risk. Not held by `finance_staff`.
-- `202608271230` — the tax return lifecycle: `finance_tax_prepare_return` / `file_return` /
-  `amend_return` / `return_figures` / `return_period`, plus **`finance_tax_return_drift`**. F7 already
-  had the data (`finance_tax_returns`, the PPN/PPh summaries, Coretax reconciliation) and lacked only
-  the lifecycle. Filed figures are SNAPSHOTTED at filing and never recomputed — the gap between "what
-  we filed on the 20th" and "what the data says now" is exactly what an auditor asks about, and
-  `finance_tax_return_drift` is what measures it: one row per filed return the ledger no longer
-  agrees with, meaning a journal was posted into a period already declared to DJP. Same problem-list
-  shape as `finance_ar_reconcile`. Filing requires a `filingReference` (the ASP/PJAP NTPN) — a return
-  marked filed with no receipt cannot be told apart from one nobody sent. Still does not transmit
-  (ruling D-F2). Endpoints: `GET/POST /finance/tax/returns`, `POST .../:id/file`,
-  `GET /finance/tax/returns/drift`.
-
-  ⚠ **This migration was written by a CONCURRENT session** that was handed this session's
-  continuation summary at a context boundary and built the same work before noticing. Its AR half
-  was discarded (it sorted after 202608270900 and re-defined the same three tie-out functions, so it
-  would have silently overwritten them); its tax half was better than the controller-side TypeScript
-  this session had written — the lifecycle belongs in SQL where automation and agents reach it, and
-  the drift check did not exist here at all — so it was adopted unchanged and the endpoints rewired
-  onto it.
-
-**Verification is not uniform across this entry, and the halves differ.** The AR half is
-DEV-VERIFIED: replayed against the LIVE schema in a rolled-back transaction, posting a real credit
-note and a real write-off against real data — the credit note produced a 2140 debit, the write-off
-produced none, and `finance_ar_reconcile` returned zero problems at every step. 7 new tests cover
-both VAT assertions, both tier denials, the confirmation gate and the tie-out; `finance.test.ts` is
-66/66 and the finance+rbac suites are 857/857 together. The TAX half is PROTOTYPED only: endpoints
-typecheck and have no tests and no UI yet.
-
-Also fixed: `accounts?q=` was pinned to assert every "Piutang" match sits in 11xx/12xx, which encoded
-a chart-layout assumption rather than a filter property; 6950 is a correct counter-example. It now
-asserts the filter's real contract — every row matches the query — and that it still narrows.
-
-### webdesk `0.1.0` - Zone B exists: a contained content engine with its own RLS ledger (2026-08-26) - DEV-VERIFIED
+### platform-nest `0.41.0` — 2026-08-27 — bug-grade fields on the maintenance-intake spine (PROGRESS-CLIENT-QA Phase A) — PROTOTYPED
+
+Client-project bug tracking is being built ERP-native rather than on Linear (owner decision,
+2026-08-26). This is Phase A: the D-7 change-request spine already carried `kind='bug'` and portal
+write access, so it is extended, not replaced.
 
 **Added**
-- `webdesk/` — the Zone B project: a Payload 3 content engine plus a NestJS read API, its own
-  Postgres, its own migration ledger (`migrations/0001-0005`) and its own owner/migrator/app role
-  split. All three roles are NOSUPERUSER NOBYPASSRLS, so no role in Zone B can read across tenants
-  even by mistake.
-- Payload runs as TWO listeners on purpose: an internal one carrying `/admin` and the raw
-  collection REST, bound to localhost, and a public gateway that is the only process the public
-  vhost may reach. The split is structural — a misrouted vhost cannot expose the admin panel.
-- `api/` — API keys stored as `sha256(key + pepper)` with the pepper out of the DB, scope guards,
-  per-tenant read quotas, tenant-scoped pools and an audit trail.
-- `spike-rls/` — the WSK-00 layer-1 findings the design rests on, kept in-tree because the design's
-  fail-closed claims are only as good as the probes that proved them.
-
-**★ Containment, and why it is enforced by absence**
-- Zone B carries ZERO Zone A credentials or hostnames — not the ERP host, not a Keycloak realm, not
-  a Zone A connection string. The control-channel values in `.env.example` are local placeholders
-  for work that lands at WSK-21/22. This is a hard rule, not a convention, and it is checkable by
-  grep precisely because there is nothing to find.
-- Payload's dev schema push DISABLES row security and drops policies while leaving
-  `relforcerowsecurity=true` — fail-OPEN and invisible. Both opt-in flags are left unset, and the
-  second one is named so that setting it is a deliberate act.
-
-**Known gaps**
-- Read quota enforcement is in-memory/single-process: it under-enforces the moment the api service
-  runs more than one replica. Redis-backed impl is a drop-in.
-- Not in any server compose profile. Nothing about this ships to the live estate in this release.
-
----
-
-### platform-ui `0.58.0` - The Office: one building, the art actually used, and two tiers of movement (2026-08-26) - DEV-VERIFIED
+- Migration `202608271000_client_bug_intake_fields.sql` — `severity`, `repro_steps`, `environment`,
+  `seen_on_version`, `affected_url` on `webdev_change_requests`; `source` CHECK admits `'ci'` (the
+  D-9 QA harness files as neither portal nor internal); partial index `ix_wcr_open_bugs`.
+  Column names are deliberately dept-agnostic so the later SMM/SEO/Creative generalization is a
+  table rename, not a reshape.
+- Both intake paths — `POST /:t/portal/change-requests` and `POST /:t/webdev/change-requests` —
+  accept the four reporter-supplied fields with identical caps (5000/200/100/2000), every one
+  `scrubText`-ed. Parity is deliberate: the internal path is what a QA engineer, an n8n flow and the
+  D-9 CI receiver all file through.
+- Portal list + detail return the bug detail. `severity` is readable there but settable on neither
+  intake path.
 
 **Changed**
-- ★ **The floor reads as one building.** `drawOuterShell` was a 3px `strokeRect` and nothing else,
-  so the PAGE background showed between rooms and the plate read as detached islands. It now fills
-  the plate with a tiled building floor and outer wall; `ROOM_GAP_TILES` 2 -> 0 and
-  `OUTER_MARGIN_TILES` 2 -> 1 so rooms abut into shared partitions instead of leaving strips of
-  empty interior.
-- ★ **The art pack is actually used.** ~70 of the 75 assets in `public/office-env/` were never
-  loaded - only the 5 floor textures. Walls, desks, chairs, monitors and per-room dressing now draw
-  from it. Wall texture alpha 0.55 -> 1 (at 0.55 the tile averaged back into the flat bar it was
-  meant to replace). The desk sprite is a 32x32 source that was being squashed into ~30x9px, which
-  is why it read as a plank; it now draws on its own aspect with the monitor standing on it.
-- **Seated avatars face their desk** (LPC row 0, away) instead of the viewer. The desk is drawn
-  above the seat, so a row-2 avatar had its back to its own monitor.
-- **Geometry**: `DESK_ROW_TILES` splits the vertical row pitch from the horizontal
-  `DESK_SPACING_TILES` - at a shared 3.0 pitch a row's name labels painted across the desks of the
-  row below. `DESK_TOP_TILES` 3.6 -> 4.7 to clear the nameplate now the desk art is taller.
-- **The side rail is tabbed** (Cast / Detail / Activity / Legend); stacked, the detail panel fell
-  below the fold so selecting an avatar looked inert. **Fullscreen** is a CSS state, not the
-  Fullscreen API, so the app shell stays mounted and Escape returns you where you were.
+- `POST /:t/webdev/change-requests/:id/triage` accepts `severity` ∈ `critical|high|medium|low`, and
+  **requires** it when the effective kind (after `kindOverride`) is `bug` and `action='convert'` —
+  a typed 400, not the CHECK surfacing as a 500. Declines are exempt. Callers converting bugs must
+  send the new field.
+
+**Decisions**
+- **Severity is a triage output, not an intake field.** The first draft required it at INSERT and
+  broke 10 of 46 change-request tests; 46/46 were green with the migration pulled aside, so the
+  regression was unambiguously the constraint. It was also wrong on the merits — the portal is this
+  table's primary writer, and asking a client to rank their own bug against everyone else's reliably
+  yields "critical". Reshaped to mirror `wcr_route_matches_status`: pre-triage statuses may carry
+  NULL, post-triage bugs may not.
+- **`wcr_bug_has_severity` is `NOT VALID` on purpose.** Migrations run as `platform_owner`
+  (NOBYPASSRLS) against a FORCE-RLS table, so a backfill here matches zero rows and reports success.
+  A silently-empty backfill followed by a validated CHECK is worse than an honest unvalidated one.
+  Validating it from the application path (tenant GUC set) is tracked as A.2c.
+- The table keeps 0088's **plain core tenant wall** (D-2a). No module wall was added — that would
+  make every portal read return zero rows, silently.
+
+**Verification**
+- Fresh `postgres:17` container, all 195 migrations applied from scratch in order.
+- `webdev-change-requests.controller.test.ts` + `-portal.controller.test.ts`: **48/48 pass** (46
+  pre-existing + 2 new: the typed refusal on a severity-less bug convert, and a portal round-trip
+  asserting a client-supplied `severity` is ignored and lands NULL).
+- `npx tsc --noEmit` exit 0; `lint:migration-{names,rls,immutable}` all green — the RLS lint
+  independently reports "no unguarded FORCE-RLS backfills".
+- **NOT DEV-VERIFIED.** Local Windows run, no real surface driven, not on the server. Per
+  `tests-run-on-server-not-local` the server run is the one that counts.
+
+
+### platform-ui `0.58.0` - The Office: a command-centre layout, and status that refuses to guess (2026-08-26) - DEV-VERIFIED
+
+**Changed**
+- **The side rail is tabbed** — `Cast · Detail · Activity · Legend`. It previously stacked legend,
+  roster and detail in one column, which on a real floor pushed the detail panel below the fold, so
+  selecting an avatar looked like it did nothing. Presentation only: every panel shows something the
+  page already had, and no tab implies a capability that is not built.
+- **Fullscreen** is a CSS state (`.office--fullscreen`), deliberately NOT the browser Fullscreen
+  API: the app shell stays mounted underneath, so leaving returns the user exactly where they were
+  with the sidebar intact, and the API's document takeover would fight the shell's focus handling.
+  Escape exits; the page behind is locked from scrolling while it is open.
 
 **Added**
-- `OfficeCastStrip` - a bottom strip, one card per person/agent/automation. ⚠ A human card never
-  carries a working/idle badge: people have no activity feed comparable to an agent run, so a badge
-  would be a presence claim the data cannot support. Absence of status is never rendered as "idle".
-- ★ **Movement now has two tiers** (owner decision 2026-08-26). Room-to-room stays DERIVED from
-  recorded handovers. Movement WITHIN a room is ambient and means nothing about the person. What
-  makes that honest is that drift is **unconditional** - `ambientDriftOffset(avatarId, nowMs)` has
-  no parameter through which `activeRunId`/`busyUntil`/`automationSignal` could enter, and a test
-  pins its arity so a future change threading one in fails loudly rather than quietly turning
-  decoration into surveillance. Speech lines come from a fixed curated bank, never generative
-  (plan §6). `prefers-reduced-motion` kills it outright. The toolbar hint states both tiers, because
-  the old text promised ALL movement was derived.
-- Dev-only: `office-fixture.ts`, `office-snapshot.ts` and `/office-lab` (404s in production) - a
-  harness for the renderer with no backend, able to render a snapshot captured from the live server.
-  `next.config.ts` honours `NEXT_DIST_DIR`; several dev servers share this working copy and all
-  wrote the same `.next`, serving 500s whenever one recompiled.
+- `components/office/OfficeCastStrip.tsx` + `cast-strip.css` — a bottom strip with one card per
+  person, agent and automation, click-to-select, sharing the roster's listbox a11y pattern.
+- An **Activity** panel listing floor-wide recorded movement, with an empty state that says WHY it
+  is empty (movement is derived from two actors on one record, never location tracking) rather than
+  rendering a blank panel.
 
 **Notes**
-- ⚠ Open, belongs to platform-nest: the live org structure returns DUPLICATE person ids (four people
-  in GM share `p-019fb652`). `steadyPositions` no longer depends on their uniqueness - an id-keyed
-  lookup was stacking four people on one desk and teleporting others cross-department - but the data
-  is still wrong.
-- Verified: `tsc --noEmit` clean; `vitest run` 177 files / 3427 tests; `DEMO_MODE=1 npm run build`
-  green; driven in a browser against a live-server snapshot in both themes, with drift observed
-  across three differing frame checksums.
-
----
-
-### platform-ui - finance UI: zero axe violations across all 11 routes (2026-08-26) - DEV-VERIFIED
-
-**Method**
-- Rendered every finance route in a real browser (Playwright + axe-core, WCAG 2.0/2.1 A+AA) rather
-  than reasoning about the CSS. This is the first time these pages have been looked at in a browser
-  at all - the standing gap in every previous report.
-
-**Fixed - CRITICAL**
-- `JournalEntryForm`'s grid controls had NO accessible names (`select-name` x4, `label` x2). A
-  `<th scope="col">` names a COLUMN; it does not name a control inside a cell. A screen-reader user
-  tabbing the grid heard "combo box" twice and "edit text" twice per row with nothing distinguishing
-  account from side - on the one surface here where a mistake writes an immutable journal. Names now
-  include the LINE NUMBER, because four identically-named controls are barely better than four
-  unnamed ones.
-
-**Fixed - SERIOUS (contrast, every route)**
-- `.fin-page__asof`, `.fin-muted` and `.fin-verdict__note` stacked `opacity` on top of a ramp colour.
-  The ink ramp's own header says it is "the ONLY source of text color" and each tier is chosen to
-  clear AA on its worst-case surface; multiplying the alpha again threw that away. Moved to
-  `--ink-muted` (5.14:1). That covered most of the explanatory prose on the surface - 25 failing
-  nodes on the overview alone.
-- `HairlineTable` column labels used inline `opacity: 0.5` - the last violation left, and shared by
-  EVERY table in the app. Now `--ink-subtle` (4.54:1), which the ramp documents for exactly this
-  ("small caps labels"). Deliberately NOT `--ink-faint` (2.62:1, "decorative only"): these labels are
-  the only thing saying which column holds the amount.
-
-**Fixed - the overview had no title**
-- `/finance`'s `<h1>` was the fiscal period plus its badge, rendering as "Aug 2026 Open". The
-  department's landing page never said what it was, it was the only tab whose heading changed as the
-  calendar moved, and screen readers/bookmarks got "Aug 2026 Open" as the page name. The heading is
-  now "Overview"; the period moved to the context line where every sibling tab puts its scope.
-
-**Checked and found NOT broken**
-- Tab strip renders all 11 with the active one correctly marked (the `sec-tab--active` fix holds).
-- Sidebar nav is identical across routes - an earlier "nav differs between routes" reading was an
-  artifact of truncating the probe output at 220 chars, not a defect.
-- No page errors, no console errors, no horizontal overflow on any route.
-
-**⚠ An audit that lies is worse than none**
-- A mid-run version reported ONE contrast violation per route, all of them the word "or" on the
-  sign-in form: the login had silently failed and every route redirected to `/login`. That reads as
-  "finance is nearly clean" - the most misleading possible result. The audit script now refuses to
-  run unless it is actually authenticated.
-
-**Verified**: 3416 UI tests, typecheck clean, design-token guard green, DEMO_MODE build green.
+- ⚠ **A human card never carries a working/idle badge, by design.** People have no activity feed
+  comparable to an agent run, so a badge would be a presence claim the data cannot support (office
+  plan §4.2/§3 — the same rule that stops the canvas animating a human). Agents and automations do
+  carry real status, resolved through the SAME `emoteKindFor` gate the canvas and roster use, so the
+  three can never disagree. Absence of status is never rendered as "idle": it claims nothing.
+- Verified: `tsc --noEmit` clean; tokens guard 22/22; `vitest run` 177 files / 3414 tests;
+  `DEMO_MODE=1 npm run build` green with `/office` and `/office-lab` both in the route list; and the
+  page driven in a browser against a live-server snapshot — 4 tabs, 33 cast cards, Escape exits.
 
 ---
 
@@ -7121,7 +6701,7 @@ tenant's 8 seeded rows still need purging (per-tenant SQL in the design doc §12
   transcript can carry user-triggered tool output). `probeStatus("agents")` now hits `/health` real-time; `connectionConfig("agents")` no longer says "CLI/library".
 - **Not deployed yet:** nest endpoints verified against running agent-runner (pipeline+gateway working end-to-end per design spec §3.2).
 
-### [0.5.0] — 2026-07-23 · PROTOTYPED
+### platform-nest [0.5.0] — 2026-07-23 · PROTOTYPED
 - Baseline. Core schema (FORCE RLS), ModuleContract + custom fields, Cerbos RBAC, OBO/identity links,
   rollups, agency vertical, event backbone (outbox→Redis Streams). ~92 dev tests.
 - **Unreleased / next:** identity writes, org-structure endpoints.
@@ -7787,7 +7367,7 @@ Verified: 939 unit tests pass, `tsc` clean, `next build` green. Not driven in a 
   detail panel: step list as text chips (model/tool kind + detail only, never HTML/markdown, never raw JSON). Poll every 4s while goal queued|running, stop otherwise.
 - **NOT deployed yet:** UI-through path PROTOTYPED; backend for `/systems/bot` and `/agents` surfaces now answering (but not yet deployed container).
 
-### [0.5.0] — 2026-07-23 · PROTOTYPED
+### platform-ui [0.5.0] — 2026-07-23 · PROTOTYPED
 - Baseline. ERP UI Plans 1–5 + People 360 + org builder + dept consoles + PM/AI-tracker + IT console;
   OIDC PKCE; `DEMO_MODE`; Playwright e2e.
 - **Unreleased / next:** deploy once backend admin API is live.
@@ -9444,7 +9024,7 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
 - **Not done, deliberately:** no release tag cut, no `deploy.yml` trigger, no fix to the
   `test:mail-corpus` script or any file under `platform-nest/**`/`platform-ui/**`.
 
-## mail (continued)
+## mail (continued 2)
 ### [0.0.12] — 2026-08-05 · IN PROGRESS · MAIL-22 (senior-db) — FORCE-RLS invariant restored on the mail tables
 
 - **The gap:** `src/db/rls.test.ts`'s estate-wide "every tenant-scoped table has FORCE RLS" invariant
@@ -9520,7 +9100,7 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   `adminPool()`, so it is expected to keep passing, but was not run as part of this ticket's
   scoped `src/mail src/db` command).
 
-## mail (continued)
+## mail (continued 3)
 ### [0.0.13] — 2026-08-05 · IN PROGRESS · MAIL-23 (senior-be) — drift guard for the Cerbos decider mirror
 
 - **The gap:** `src/core/approval-deciders.ts` mirrors two Cerbos policies IN APPLICATION CODE,
@@ -9606,7 +9186,7 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   separately; see its evidence doc. Module version recorded for tracking; no schema changes this entry.
 
 ## webdesk
-### [0.0.0] — 2026-07-23 · PLANNED
+### webdesk [0.0.0] — 2026-07-23 · PLANNED
 - Blueprint approved; no code. Phased plan P1–P6 (see BLUEPRINTS.md).
 - **2026-08-04 — blueprint amended to v1.1 (still no code, version unchanged):** C-03 unpinned from
   Hostinger SMTP → rented relay (Brevo free tier → ZeptoMail/SES at volume); three sending
@@ -9699,7 +9279,7 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   (pillar → engagement tool-scope → ordered budget stop-loss → provider capability).
 - **Next:** the ⚡ QA + architect gate over the P0 tail, then P1 (SM-07 crawl workers ∥ SM-09 keywords).
 
-### [0.0.0] — 2026-07-23 · PLANNED
+### search-marketing [0.0.0] — 2026-07-23 · PLANNED
 - Foundation research + v1.1 architect design ratified; no code. See
   `blueprints/seo-sem-foundation.md` + `blueprints/seo-sem-design.md`.
 - Owner decisions locked: dept name SEO (3-craft-group Web-Dev console), dual-mode SEM execution,
@@ -9843,7 +9423,7 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   - 59 new tests (22 unit + 5 gateway-host-isolation + 10 golden-case incl. the leak test); social
     module suite **87/87 passing**. `FRONTEND-BFF-CONTRACT.md` §19 extended.
 
-### [0.0.0] — 2026-07-23 · PLANNED
+### social-media [0.0.0] — 2026-07-23 · PLANNED
 - Foundation research + v1.0 architect design; no code. See `blueprints/smm-foundation.md` +
   `blueprints/smm-design.md` (+ print `GAIADA-Social-Media-Engineering-Blueprint.pdf`).
 - Decisions locked: scope v1 = organic publish + engagement + copy + assets (paid/listening/influencer
@@ -9873,7 +9453,7 @@ Built by a 4-agent parallel run against a frozen contract (`docs/superpowers/pla
   the Render Gateway → P2 gen/edit → P3 DAM → P4 video. 27 tickets CR-00–CR-26 (design §12); Opus-flagged
   CR-01/06/13; QA gates CR-01/06/12/13/20.
 
-## mail (continued)
+## mail (continued 4)
 ### [0.0.20] — 2026-08-06 · IN PROGRESS · MAIL-31 (senior-be) — the replay verifier now measures what it claims
 
 The audit table originally scoped here was **dropped**: the owner decided to stand up Tier-2 Loki, which
@@ -10238,7 +9818,7 @@ zero matches. Test databases created under scoped prefixes and dropped, counts r
   §15 R1/R2/R5 regardless of how clean the sink evidence is.
 
 ## render-gateway-go
-### [0.0.0] — 2026-07-23 · PLANNED
+### render-gateway-go [0.0.0] — 2026-07-23 · PLANNED
 - Design only — the centerpiece of `blueprints/creative-design.md` §05; no code. Separate Go service
   (mirror of `ai-gateway-go`): typed render job-queue, `RenderBackend` abstraction (serverless GPU /
   self-host ComfyUI / commercial API) routed per capability+license+cost+health, ComfyUI-workflow-as-JSON,

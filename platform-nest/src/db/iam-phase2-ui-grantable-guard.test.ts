@@ -93,9 +93,19 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
       expect(mismatches, mismatches.join("\n")).toEqual([]);
     });
 
-    it("exactly 22 rows are ui_grantable=false (15 relationship + 7 portal.*)", async () => {
+    // The 22 baseline (15 relationship + 7 portal.*) grew by THREE since this test was written, none
+    // of them relationship-class and none portal.*: `webdev.zoneb_event.record` (WSK-12, 2026-08-27
+    // — "the only legitimate caller is the wd-zoneb-intake automation identity; granting this to a
+    // human would let them inject facts that look like they came from Zone B") and
+    // `webdev.provisioned_site.operate`/`.promote` (WSK-31, 2026-08-27 — the §07 WebDesk
+    // control-plane MCP tool set's Zone A authz, routed to an honest 501 stub pending WSK-23's Zone B
+    // egress client). All three are `class:"grantable"` but deliberately `uiGrantable:false` for a
+    // reason narrower than "relationship" or "portal" — a real human role (company_admin/manager/
+    // module_manager) DOES hold them via the role arm, they are simply not individually assignable
+    // through the role-editor UI yet. 22 -> 25.
+    it("exactly 25 rows are ui_grantable=false (15 relationship + 7 portal.* + 3 role-tier-only writes)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(22);
+      expect(Number(rows[0].n)).toBe(25);
     });
   });
 

@@ -163,7 +163,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     expect(row!.framework).toBe("vite"); // OQ-P4 default
     expect(row!.status).toBe("pending");
     expect(row!.provider_ref).toBeTruthy();       // the correlation key — NULL here disarms the 409 rule
-    expect(row!.repo_url).toBe("https://github.com/Gaia-Digital-Agency/acme-corp-website");
+    expect(row!.repo_url).toBe("https://github.com/gaiadabali/acme-corp-website");
     expect(row!.staging_url).toBe("https://acme-corp-website.gaiada.online");
     expect(row!.failure_reason).toBeNull();
     expect(row!.requested_by).toBe(manager);
@@ -410,7 +410,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     const runId = await makeRun({ title: "Foreign Conflict Site", prdSigned: true });
     mock.seedProject({
       id: "proj-someone-elses", name: "foreign-conflict-site",
-      repoUrl: "https://github.com/Gaia-Digital-Agency/foreign-conflict-site",
+      repoUrl: "https://github.com/gaiadabali/foreign-conflict-site",
       stagingUrl: "https://foreign-conflict-site.gaiada.online", status: "live", isOurs: false,
     });
 
@@ -443,7 +443,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     const runId = await makeRun({ title: "Lying Far Side Site", prdSigned: true });
     mock.seedProject({
       id: "proj-claims-to-be-ours", name: "lying-far-side-site",
-      repoUrl: "https://github.com/Gaia-Digital-Agency/lying-far-side-site",
+      repoUrl: "https://github.com/gaiadabali/lying-far-side-site",
       stagingUrl: "https://lying-far-side-site.gaiada.online", status: "live", isOurs: true,
     });
     const r = await provisionSite(base(runId));
@@ -460,7 +460,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     const runId = await makeRun({ title: "Cross Tenant Site", prdSigned: true });
     mock.seedProject({
       id: "proj-other-tenants", name: "cross-tenant-site",
-      repoUrl: "https://github.com/Gaia-Digital-Agency/cross-tenant-site",
+      repoUrl: "https://github.com/gaiadabali/cross-tenant-site",
       stagingUrl: "https://cross-tenant-site.gaiada.online", status: "live", isOurs: true,
     });
     // The OTHER tenant legitimately owns that provider_ref.
@@ -483,7 +483,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     const runId = await makeRun({ title: "Adopt Ours Site", prdSigned: true });
     mock.seedProject({
       id: "proj-definitely-ours", name: "adopt-ours-site",
-      repoUrl: "https://github.com/Gaia-Digital-Agency/adopt-ours-site",
+      repoUrl: "https://github.com/gaiadabali/adopt-ours-site",
       stagingUrl: "https://adopt-ours-site.gaiada.online", status: "provisioned", isOurs: true,
     });
     const oldId = newId();
@@ -501,7 +501,7 @@ describe.skipIf(!TEST_URL)("PRV-02 — provisioning idempotency + adoption core"
     const row = await storedSite(r.site.id);
     expect(row!.provider_ref).toBe("proj-definitely-ours");
     expect(row!.status).toBe("provisioned");           // taken from the far side, not assumed
-    expect(row!.repo_url).toBe("https://github.com/Gaia-Digital-Agency/adopt-ours-site");
+    expect(row!.repo_url).toBe("https://github.com/gaiadabali/adopt-ours-site");
     expect(row!.staging_url).toBe("https://adopt-ours-site.gaiada.online");
     expect(row!.failure_reason).toBeNull();
     expect(row!.last_reconciled_at).not.toBeNull();

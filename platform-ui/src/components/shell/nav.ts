@@ -209,6 +209,10 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" },
       { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
       { label: "Automation", href: "/systems/automation", icon: "automation" },
+      // GH-09 — the org-wide repo registry (blueprint §5.4). Ungated here like every other Systems
+      // row (nav is not the authority — see this group's own comment above); the page itself gates
+      // its content on `company.manage`/`isElevated` and renders ReadRefusal for anyone else.
+      { label: "Sites & Repos", href: "/systems/github", icon: "box" },
       // MON-09i. Plane A (this box) belongs in Systems, which is where OUR infrastructure
       // consoles live -- as opposed to Business > Monitoring, which is the CLIENT's sites.
       // Until now Plane A had no ERP surface at all: server metrics were collected for weeks

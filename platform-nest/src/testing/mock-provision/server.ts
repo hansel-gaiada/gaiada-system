@@ -115,7 +115,7 @@ function projectIdFor(name: string): string {
 
 /** Derive repo URL from project name (matches provision's GitHub org). */
 function repoUrlFor(name: string): string {
-  return `https://github.com/Gaia-Digital-Agency/${name}`;
+  return `https://github.com/gaiadabali/${name}`;
 }
 
 /** Derive staging URL from project name. */

@@ -1,0 +1,36 @@
+{
+  "name": "gaiada-erp",
+  "description": "The Gaiada ERP's hands on GitHub. All repo writes originate from platform-nest and are recorded in the ERP activities ledger. See docs/blueprints/github-integration-foundation.md.",
+  "url": "https://erp.gaiada.online",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://erp.gaiada.online/api/webhooks/github",
+    "active": true
+  },
+  "redirect_url": "http://localhost:8765/callback",
+  "default_events": [
+    "push",
+    "pull_request",
+    "workflow_run",
+    "check_suite",
+    "repository",
+    "release",
+    "deployment_status"
+  ],
+  "default_permissions": {
+    "administration": "write",
+    "contents": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "issues": "write",
+    "actions": "write",
+    "workflows": "write",
+    "statuses": "read",
+    "checks": "read",
+    "deployments": "write",
+    "environments": "write",
+    "repository_hooks": "write",
+    "secrets": "write",
+    "members": "read"
+  }
+}
