@@ -102,6 +102,7 @@ export default async function MonitoringBoardPage() {
         <span style={{ display: "flex", gap: 12, fontSize: 13 }}>
           <Link href="/monitoring/new">+ New monitor</Link>
           <Link href="/monitoring/channels">Alert channels</Link>
+          <Link href="/monitoring/maintenance">Maintenance windows</Link>
         </span>
       </div>
       <p style={{ opacity: 0.7, marginBottom: 20, fontSize: 14 }}>

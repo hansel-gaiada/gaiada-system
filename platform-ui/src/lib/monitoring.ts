@@ -23,7 +23,17 @@ import "server-only";
 //   GET   /api/:t/monitoring/summary                         -> MonitoringSummary
 //   GET   /api/:t/monitoring/kinds                           -> MonitorKindSpec[]
 //   GET   /api/:t/monitoring/maintenance                     -> MaintenanceWindow[]
-//   POST  /api/:t/monitoring/maintenance     body {..}       -> { id }     (monitoring.write)
+//   POST  /api/:t/monitoring/maintenance     body {..}       -> { id }     (monitoring.maintenance.create)
+//   DELETE /api/:t/monitoring/maintenance/:id                -> {}         (monitoring.maintenance.delete)   [MON-20]
+//   GET   /api/:t/monitoring/channels                        -> MonitorChannel[]
+//   POST  /api/:t/monitoring/channels        body {..}       -> { id }     (monitoring.channel.manage)  [MON-20]
+//   PATCH /api/:t/monitoring/channels/:id    body {..}       -> { id }     (monitoring.channel.manage)  [MON-20]
+//   DELETE /api/:t/monitoring/channels/:id                   -> {}         (monitoring.channel.manage)  [MON-20]
+//   POST  /api/:t/monitoring/channels/:id/test                -> { ok }    (monitoring.channel.manage)
+//   GET   /api/:t/monitoring/routes                           -> MonitorRoute[]
+//   POST  /api/:t/monitoring/routes          body {..}       -> { id }     (monitoring.channel.manage)  [MON-20 — no separate "route" permission is documented; a route is the channel's own delivery config, so it rides the same grant, see rbac.ts's capability comment]
+//   PATCH /api/:t/monitoring/routes/:id      body {..}       -> { id }     (monitoring.channel.manage)  [MON-20]
+//   DELETE /api/:t/monitoring/routes/:id                     -> {}         (monitoring.channel.manage)  [MON-20]
 // Readable by any member of :t holding `monitoring.read`; writes are Cerbos-gated.
 // RLS + Cerbos are the real boundary — the UI gate is a mirror, never the source.
 import { platformFetch, PlatformError } from "./platform";
@@ -234,16 +244,44 @@ export async function getMonitor(u: string, t: string, id: string): Promise<Moni
   );
 }
 
+export type ResultsWindow = "24h" | "7d" | "30d";
+export const RESULTS_WINDOWS: ResultsWindow[] = ["24h", "7d", "30d"];
+
+/**
+ * MON-20 — deliberately NOT `skipUnavailable`. The plain "collapse 404/403/405 into []" helper is
+ * correct for a board-wide list (an empty board and an absent backend are both "nothing to show
+ * here yet"), but it is the WRONG shape for a single monitor's history: a genuinely quiet window
+ * ("0 incidents in the last 24h") and "this endpoint doesn't exist yet" render identically as an
+ * empty array, and this is exactly the surface `[id]/page.tsx:70` used to get wrong — a caller that
+ * cannot tell "clean" from "couldn't ask" and picks "clean" is the false-green failure this whole
+ * module exists to replace. `available` carries that distinction explicitly so the page can render
+ * "not available yet" instead of a confident empty history strip.
+ */
+export interface WindowedResults {
+  /** False only for 404/403/405 — the endpoint itself isn't there (or not visible to this caller).
+   *  Never conflate with "true and results is []", which means the window was queried and is clean. */
+  available: boolean;
+  results: MonitorResult[];
+}
+
 export async function listResults(
   u: string,
   t: string,
   id: string,
-  window: "24h" | "7d" | "30d" = "24h",
-): Promise<MonitorResult[]> {
-  return skipUnavailable(
-    platformFetch<MonitorResult[]>(`/api/${t}/monitoring/monitors/${id}/results?window=${window}`, u),
-    [] as MonitorResult[],
-  );
+  window: ResultsWindow = "24h",
+): Promise<WindowedResults> {
+  try {
+    const results = await platformFetch<MonitorResult[]>(
+      `/api/${t}/monitoring/monitors/${id}/results?window=${window}`,
+      u,
+    );
+    return { available: true, results };
+  } catch (e) {
+    if (e instanceof PlatformError && (e.status === 404 || e.status === 403 || e.status === 405)) {
+      return { available: false, results: [] };
+    }
+    throw e;
+  }
 }
 
 export async function listIncidents(u: string, t: string, limit = 25): Promise<Incident[]> {
@@ -366,4 +404,27 @@ export function expiryLevel(days: number | null): "none" | "warn" | "critical" {
 export function formatUptime(u: number | null | undefined): string {
   if (u === null || u === undefined) return "—";
   return `${(u * 100).toFixed(u >= 0.9995 ? 3 : 2)}%`;
+}
+
+/**
+ * A window's lifecycle, purely from its own start/end — there is no separate "status" field to
+ * drift from the timestamps. `active` is the state K7 exists for (alerting is suppressed RIGHT NOW);
+ * `upcoming` and `ended` are both informational, but kept distinct so an ended window doesn't read
+ * as "still protecting you" on a stale list.
+ */
+export function maintenanceState(w: MaintenanceWindow, now: number = Date.now()): "upcoming" | "active" | "ended" {
+  const starts = Date.parse(w.startsAt);
+  const ends = Date.parse(w.endsAt);
+  if (now < starts) return "upcoming";
+  if (now > ends) return "ended";
+  return "active";
+}
+
+/** `scope` is either the literal `"all"` or `"monitor:<id>"` (monitoring-program.md's K7 shape).
+ *  `names` resolves the id to a label for display; falls back to the raw scope when it cannot. */
+export function describeMaintenanceScope(scope: string, names: Map<string, string>): string {
+  if (scope === "all" || !scope) return "All monitors";
+  const m = scope.match(/^monitor:(.+)$/);
+  if (!m) return scope;
+  return names.get(m[1]) ?? `Monitor ${m[1]}`;
 }

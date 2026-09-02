@@ -102,6 +102,18 @@ export type Role =
   // models; their remaining 19 and 38 backend permissions have no UI surface yet. That is honest, not
   // a gap in this change — a capability is added when a UI reads it, never speculatively.
   | "finance_staff" | "finance_manager"
+  // MON-20 (2026-09-02) — the monitoring module's own module_staff/module_manager pair
+  // (`resource.attr.module === "monitoring"`, monitoring-program.md §14's naming constraint:
+  // `derived_roles.yaml` string-composes `monitoring_staff`/`monitoring_manager`, so those are the
+  // ONLY names Cerbos will ever look for). Same defect class this file's own header warns about —
+  // added alongside the channel/route/maintenance management UI rather than left absent, because an
+  // absent `Role` member is not "no grant", it's "every capability check silently resolves false for
+  // a real holder". `monitoring.controller.ts` does not exist for channels/routes yet (this module is
+  // frontend-first, per the FRONTEND-BFF-CONTRACT), so — unlike finance_staff/manager above — there
+  // is no live bundle to verify these two against; the split below is taken directly from
+  // monitoring-program.md §13.2's PROBED Cerbos decisions (`monitoring_staff` DENY on
+  // `maintenance:create`/`channel:manage`; `monitoring_manager` ALLOW), not guessed.
+  | "monitoring_staff" | "monitoring_manager"
   // `owner` — the holding-wide BUSINESS authority, granted per owned company (see the IAM-15 note on
   // `group_executive` above, which `owner` replaced). It carries 330 permissions in the bundles,
   // deriving 61 capabilities here. **This was the most consequential omission of the three:** an
@@ -323,6 +335,18 @@ export const CAPABILITIES = [
   "appraisal.read",           // read appraisal packs beyond one's own (Cerbos `read`)
   "appraisal.score",          // write/submit scores (Cerbos `write`/`submit`) — the ASSIGNED manager only; server narrows to manager_user_id
   "appraisal.cycle.admin",    // cycle CRUD + generate + finalize (Cerbos `cycle_admin`/`finalize`) — hr_manager ONLY (TR-25 finding ②)
+
+  // ── monitoring (MON-20, 2026-09-02) — closes the "nobody can create a channel or a route" gap.
+  // Key spelling matches monitoring-program.md §14's permission table exactly (`monitoring.channel.
+  // manage`, `monitoring.maintenance.create`/`.delete`) — dotted `<domain>.<resource>.<action>`, not
+  // an invented shorthand. Deliberately NOT adding `monitoring.monitor.*` / `monitoring.incident.*` /
+  // `monitoring.status_page.*` here even though the same table documents them: no page in this
+  // change reads those, and this file's own discipline ("a capability is added when a UI reads it,
+  // never speculatively" — see the finance_staff/manager comment above) applies just as much to a
+  // module's first capabilities as to its later ones.
+  "monitoring.channel.manage",      // create/edit/enable/disable/delete a channel, send a test notification, and create/edit/delete the routes that point at one — `sensitive: true` server-side (channels carry secret references and a test send is a real outward notification). No separate `monitoring.route.*` key exists in the backend's permission table; a route is the channel's own delivery config, so it rides the same grant.
+  "monitoring.maintenance.create",  // schedule a maintenance window — suppresses alerting AND SLA math while it runs, `sensitive: true` server-side. This is the "hide an outage" direction (§14).
+  "monitoring.maintenance.delete",  // cancel a window early — ends suppression, not conceal it, so the backend does NOT mark it sensitive. Kept as its own capability rather than folded into `.create` for the identical reason those two are separate Cerbos actions: granting cancel should not require granting the power to start a window that pages nobody.
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -395,6 +419,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     ...REPORT_READS, ...EXEC_ONLY_REPORTS, "reports.ops.poll", "checkin.read", "checkin.excuse", "appraisal.read",
     // GM-09: the tenant's own administrator holds the finance read tier in the bundles.
     "finance.statement.view", "finance.ar.view",
+    // MON-20: every monitoring resource policy names `company_admin` alongside `monitoring_manager`
+    // (monitoring-program.md §13.2's probe table) — the tenant admin holds the manager tier here too.
+    "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -459,6 +486,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // ledger.yaml's own header: the override sits one tier up, with company_admin).
     "social.ledger.read",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
+    // MON-20 — the second-gap fix recorded in monitoring-program.md §13.1 found `manager` holding
+    // ZERO monitoring bundle rows despite every monitoring policy naming it explicitly (19 rows were
+    // added there: "manager: all 14"). This mirrors that live finding, not a guess.
+    "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
@@ -642,6 +673,21 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // write-off, waive) is real in Cerbos but has no capability in this file yet, because no UI reads
   // it — see the union comment.
   finance_manager: ["finance.statement.view", "finance.ar.view"],
+  // MON-20 — `monitoring_staff` holds NONE of the three write capabilities, per the §13.2 probe:
+  // ALLOW on `monitor:read`/`create`/`incident:acknowledge`, DENY on `channel:manage` and
+  // `maintenance:create`. `maintenance:delete` was not itself probed, but it is the SAME
+  // `monitor_maintenance` kind the probe denied `staff` on for `create` (module_staff is not named
+  // in that policy's elevated-action rule at all), so granting delete here without evidence would be
+  // exactly the "guess, not evidence" this file's own discipline forbids — left out until a real
+  // bundle or a probe says otherwise. Staff can still run the desk (acknowledge incidents, read
+  // everything); they cannot touch delivery config or suppress alerting.
+  monitoring_staff: [],
+  // `monitoring_manager` — Cerbos module_manager for `resource.attr.module === "monitoring"`. The
+  // §13.2 probe ALLOWed `monitor:delete`/`maintenance:create`/`status_page:publish` for this role
+  // directly; `channel:manage` is inferred from the SAME module_manager pattern every other module in
+  // this file uses (hr/search/social: manager tier gets what staff tier is denied), not probed
+  // independently — flagged here rather than asserted as verified, since MON-20 has no live bundle.
+  monitoring_manager: ["monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete"],
   owner: [
     "admin.access", "appraisal.read", "approvals.decide", "approvals.retry", "checkin.excuse",
     "checkin.read", "company.manage", "finance.ar.view", "finance.statement.view", "hr.manage",
@@ -649,7 +695,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "hr.policy.view", "hr.recruitment.approve", "hr.recruitment.manage", "hr.recruitment.view", "hr.view",
     "it.manage", "knowledge.review", "lms.assign", "lms.authoring", "lms.catalogue.view", "lms.grade",
     "lms.progress.view", "lms.publish", "lms.waive", "org.edit", "people.directory", "pipeline.manage",
-    "pipeline.write", "pm.contribute", "pm.manage", "reports.company.view", "reports.department.view",
+    "pipeline.write", "pm.contribute", "pm.manage",
+    // MON-20: the holding-wide business authority holds the monitoring manager tier too.
+    "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
+    "reports.company.view", "reports.department.view",
     "reports.facts.admin", "reports.ops.poll", "reports.period.seal", "reports.person.view",
     "reports.project.view", "search.campaign.launch", "search.ledger.admin", "search.manage",
     "search.report.approve", "search.scope.write", "search.view", "social.client_review.read",

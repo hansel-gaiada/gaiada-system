@@ -1,13 +1,16 @@
 import "server-only";
-// MON — DEMO_MODE fixtures for the monitoring board (`/monitoring`, `/monitoring/[id]`).
+// MON — DEMO_MODE fixtures for the monitoring board (`/monitoring`, `/monitoring/[id]`), the alert
+// channel/route manager (`/monitoring/channels`) and maintenance windows (`/monitoring/maintenance`).
 // Mirrors demoWebdevProvisionedSites.ts's convention. Wired from demoFixtures.getDemoResponse,
 // BEFORE the generic route matching.
 //
-// ── READ-ONLY, SO NO globalThis STORE IS NEEDED ────────────────────────────────────────────────
-// Every route here is a GET. The globalThis dance the other sub-stores do exists to keep a
-// `"use server"` action graph and the page's RSC read graph pointing at ONE mutable array; with no
-// writes there is nothing to keep in sync, so a module-level const is correct and simpler. Add the
-// globalThis wrapper the moment an acknowledge/pause write lands (MON-20).
+// ── MON-20 — CHANNELS/ROUTES/MAINTENANCE ARE NOW WRITABLE, SO THEY LIVE IN globalThis ───────────
+// Monitors/incidents/results/kinds stay read-only module consts (nothing here writes them yet), but
+// channels, routes and maintenance windows are mutated by monitoringActions.ts's `"use server"`
+// action graph, which Next bundles SEPARATELY from the page's RSC read graph. A plain module-level
+// array would give each graph its own instance — a create/edit/delete POST would mutate one copy
+// while the page's next GET reads the other, so the page would never show the result of a write that
+// just "succeeded". `demoWebdevProvisionedSites.ts`'s `STORE_KEY` is the worked example this follows.
 //
 // ── THE FIXTURES ARE DELIBERATELY UNFLATTERING ─────────────────────────────────────────────────
 // This module replaces Gaia Nexus, whose dashboard derived Lighthouse scores from a hash of the
@@ -33,14 +36,23 @@ import type {
   MonitorChannel,
   MonitorRoute,
   MonitorStatus,
+  MaintenanceWindow,
 } from "./monitoring";
+
+type MaintenanceWindowRow = MaintenanceWindow;
 
 export interface DemoResult {
   status: number;
   json: unknown;
 }
-const ok = (json: unknown): DemoResult => ({ status: 200, json });
-const err = (status: number, message: string): DemoResult => ({ status, json: { message } });
+const ok = (json: unknown, status = 200): DemoResult => ({ status, json });
+// MON-20 fix — every other demo store (demoCheckins.ts, demoSocial.ts, demoGithubRepos.ts, …) keys
+// the error body `{ error }`, because `platformFetch`'s DEMO_MODE branch reads `body?.error` when
+// building the thrown `PlatformError` (lib/platform.ts). This file alone used `{ message }`, so
+// every `err(...)` here was silently discarded in favour of the generic "platform <status>" fallback
+// — harmless while nothing surfaced the message to a user, but MON-20's new write actions DO (a
+// bad edit or a channel with no destination should show its real reason, not a bare status code).
+const err = (status: number, error: string): DemoResult => ({ status, json: { error } });
 
 const SEC = 1000;
 const DAY = 86400 * SEC;
@@ -269,96 +281,235 @@ function kinds(): MonitorKindSpec[] {
  *   - `ch-webhook-n8n` is FAILING (4 consecutive failures) — the agentic path is dead,
  *   - `ch-email-ops` is enabled but has NO route pointing at it — configured, never used,
  *   - `rt-catchall` matches everything — the route that floods a channel and gets it muted.
- * A demo where all three are green would make the page look like decoration.
+ * A demo where all three are green would make the page look like decoration — the writable store
+ * below only ADDS to this seed (create/edit/delete), it never resets it, so those three states stay
+ * reachable across a session even after someone starts clicking around.
  */
-function channels(): MonitorChannel[] {
-  return [
-    {
-      id: "ch-telegram-ops",
-      kind: "telegram",
-      name: "Ops Telegram",
-      enabled: true,
-      destination: "@gaiada-alerts",
-      lastDeliveryAt: iso(-18 * 60 * SEC),
-      lastDeliveryOk: true,
-      failureCount: 0,
-    },
-    {
-      id: "ch-webhook-n8n",
-      kind: "webhook",
-      name: "n8n incident flow",
-      enabled: true,
-      // Redacted: the real config holds a secret REFERENCE, never the token itself.
-      destination: "https://erp.gaiada.online/n8n/webhook/incident-…",
-      lastDeliveryAt: iso(-9 * 60 * SEC),
-      lastDeliveryOk: false,
-      failureCount: 4,
-    },
-    {
-      id: "ch-email-ops",
-      kind: "email",
-      name: "Ops mailbox",
-      enabled: true,
-      destination: "ops@gaiada.com",
-      lastDeliveryAt: null,
-      lastDeliveryOk: null,
-      failureCount: 0,
-    },
-    {
-      id: "ch-mcp-hermes",
-      kind: "mcp",
-      name: "Hermes (agent triage)",
-      enabled: true,
-      destination: "mcp-hub → monitoring.incident.*",
-      lastDeliveryAt: iso(-9 * 60 * SEC),
-      lastDeliveryOk: true,
-      failureCount: 0,
-    },
-  ];
-}
+const CHANNEL_STORE_KEY = Symbol.for("gaiada.demoMonitoring.channels");
+const CHANNELS: MonitorChannel[] = ((globalThis as Record<symbol, unknown>)[CHANNEL_STORE_KEY] ??= [
+  {
+    id: "ch-telegram-ops",
+    kind: "telegram",
+    name: "Ops Telegram",
+    enabled: true,
+    destination: "@gaiada-alerts",
+    lastDeliveryAt: iso(-18 * 60 * SEC),
+    lastDeliveryOk: true,
+    failureCount: 0,
+  },
+  {
+    id: "ch-webhook-n8n",
+    kind: "webhook",
+    name: "n8n incident flow",
+    enabled: true,
+    // Redacted: the real config holds a secret REFERENCE, never the token itself.
+    destination: "https://erp.gaiada.online/n8n/webhook/incident-…",
+    lastDeliveryAt: iso(-9 * 60 * SEC),
+    lastDeliveryOk: false,
+    failureCount: 4,
+  },
+  {
+    id: "ch-email-ops",
+    kind: "email",
+    name: "Ops mailbox",
+    enabled: true,
+    destination: "ops@gaiada.com",
+    lastDeliveryAt: null,
+    lastDeliveryOk: null,
+    failureCount: 0,
+  },
+  {
+    id: "ch-mcp-hermes",
+    kind: "mcp",
+    name: "Hermes (agent triage)",
+    enabled: true,
+    destination: "mcp-hub → monitoring.incident.*",
+    lastDeliveryAt: iso(-9 * 60 * SEC),
+    lastDeliveryOk: true,
+    failureCount: 0,
+  },
+]) as MonitorChannel[];
 
-function routes(): MonitorRoute[] {
-  return [
-    {
-      id: "rt-page",
-      channelId: "ch-telegram-ops",
-      channelName: "Ops Telegram",
-      matchSeverity: "page",
-      enabled: true,
-    },
-    {
-      id: "rt-agent",
-      channelId: "ch-mcp-hermes",
-      channelName: "Hermes (agent triage)",
-      matchSeverity: "ticket",
-      enabled: true,
-    },
-    {
-      id: "rt-catchall",
-      channelId: "ch-webhook-n8n",
-      channelName: "n8n incident flow",
-      enabled: true,
-    },
-  ];
+const ROUTE_STORE_KEY = Symbol.for("gaiada.demoMonitoring.routes");
+const ROUTES: MonitorRoute[] = ((globalThis as Record<symbol, unknown>)[ROUTE_STORE_KEY] ??= [
+  {
+    id: "rt-page",
+    channelId: "ch-telegram-ops",
+    channelName: "Ops Telegram",
+    matchSeverity: "page",
+    enabled: true,
+  },
+  {
+    id: "rt-agent",
+    channelId: "ch-mcp-hermes",
+    channelName: "Hermes (agent triage)",
+    matchSeverity: "ticket",
+    enabled: true,
+  },
+  {
+    id: "rt-catchall",
+    channelId: "ch-webhook-n8n",
+    channelName: "n8n incident flow",
+    enabled: true,
+  },
+]) as MonitorRoute[];
+
+const MAINTENANCE_STORE_KEY = Symbol.for("gaiada.demoMonitoring.maintenance");
+const MAINTENANCE: MaintenanceWindowRow[] = ((globalThis as Record<symbol, unknown>)[MAINTENANCE_STORE_KEY] ??= [
+  {
+    id: "mw-1",
+    scope: "monitor:mon-blossom-tls",
+    startsAt: iso(-1 * 3600 * SEC),
+    endsAt: iso(3 * 3600 * SEC),
+    reason: "WordPress + PHP 8.3 upgrade",
+    createdBy: "Hansel",
+  },
+]) as MaintenanceWindowRow[];
+
+let seq = 100;
+const nid = (prefix: string) => `${prefix}-demo-${++seq}`;
+
+function channelName(id: string): string | null {
+  return CHANNELS.find((c) => c.id === id)?.name ?? null;
 }
 
 export function monitoringDemo(
   method: string,
   p: string,
   params: URLSearchParams,
+  body: string | undefined,
 ): DemoResult | null {
   const m = method.toUpperCase();
 
-  if (p.match(/^\/api\/[^/]+\/monitoring\/channels$/) && m === "GET") return ok(channels());
-  if (p.match(/^\/api\/[^/]+\/monitoring\/routes$/) && m === "GET") return ok(routes());
-  if (p.match(/^\/api\/[^/]+\/monitoring\/channels\/[^/]+\/test$/) && m === "POST") {
+  // ── channels ──────────────────────────────────────────────────────────────────────────────────
+  if (p.match(/^\/api\/[^/]+\/monitoring\/channels$/) && m === "GET") return ok(CHANNELS);
+  if (p.match(/^\/api\/[^/]+\/monitoring\/channels$/) && m === "POST") {
+    const b = JSON.parse(body || "{}") as { kind?: string; name?: string; destination?: string; enabled?: boolean };
+    if (!b.name?.trim()) return err(400, "name is required");
+    if (!b.kind?.trim()) return err(400, "kind is required");
+    if (!b.destination?.trim()) return err(400, "destination is required");
+    const row: MonitorChannel = {
+      id: nid("ch"),
+      kind: b.kind.trim(),
+      name: b.name.trim(),
+      enabled: b.enabled !== false,
+      destination: b.destination.trim(),
+      lastDeliveryAt: null,
+      lastDeliveryOk: null,
+      failureCount: 0,
+    };
+    CHANNELS.push(row);
+    return ok({ id: row.id }, 201);
+  }
+  const channelM = p.match(/^\/api\/[^/]+\/monitoring\/channels\/([^/]+)$/);
+  if (channelM && m === "PATCH") {
+    const row = CHANNELS.find((c) => c.id === channelM[1]);
+    if (!row) return err(404, "channel not found");
+    const b = JSON.parse(body || "{}") as Partial<{ kind: string; name: string; destination: string; enabled: boolean }>;
+    if (b.kind !== undefined) row.kind = b.kind;
+    if (b.name !== undefined) row.name = b.name;
+    if (b.destination !== undefined) row.destination = b.destination;
+    if (b.enabled !== undefined) row.enabled = b.enabled;
+    return ok({ id: row.id });
+  }
+  if (channelM && m === "DELETE") {
+    const i = CHANNELS.findIndex((c) => c.id === channelM[1]);
+    if (i === -1) return err(404, "channel not found");
+    CHANNELS.splice(i, 1);
+    // A channel's routes are now dangling — drop them too, mirroring an ON DELETE CASCADE. Leaving
+    // them behind would make a route reference a channel that no longer exists, which is a worse
+    // demo state than the real "unrouted channel" warning this page already models.
+    for (let ri = ROUTES.length - 1; ri >= 0; ri--) {
+      if (ROUTES[ri].channelId === channelM[1]) ROUTES.splice(ri, 1);
+    }
+    return ok({});
+  }
+  const testM = p.match(/^\/api\/[^/]+\/monitoring\/channels\/([^/]+)\/test$/);
+  if (testM && m === "POST") {
+    const row = CHANNELS.find((c) => c.id === testM[1]);
+    if (!row) return err(404, "channel not found");
+    if (!row.destination) return err(422, "This channel has no destination configured yet.");
+    // Mirrors the real outcome: a send updates the channel's own delivery health, so the page's
+    // "failing"/"degraded" badges move in response to the test rather than staying frozen.
+    row.lastDeliveryAt = iso(0);
+    row.lastDeliveryOk = true;
+    row.failureCount = 0;
     return ok({ ok: true });
   }
+
+  // ── routes ────────────────────────────────────────────────────────────────────────────────────
+  if (p.match(/^\/api\/[^/]+\/monitoring\/routes$/) && m === "GET") {
+    return ok(ROUTES.map((r) => ({ ...r, channelName: channelName(r.channelId) ?? r.channelName })));
+  }
+  if (p.match(/^\/api\/[^/]+\/monitoring\/routes$/) && m === "POST") {
+    const b = JSON.parse(body || "{}") as {
+      channelId?: string; matchClientId?: string | null; matchSeverity?: string | null; matchKind?: string | null; enabled?: boolean;
+    };
+    if (!b.channelId?.trim()) return err(400, "channelId is required");
+    if (!CHANNELS.some((c) => c.id === b.channelId)) return err(400, "channel not found");
+    const row: MonitorRoute = {
+      id: nid("rt"),
+      channelId: b.channelId.trim(),
+      channelName: channelName(b.channelId.trim()),
+      matchClientId: b.matchClientId || null,
+      matchSeverity: (b.matchSeverity as MonitorRoute["matchSeverity"]) || null,
+      matchKind: b.matchKind || null,
+      enabled: b.enabled !== false,
+    };
+    ROUTES.push(row);
+    return ok({ id: row.id }, 201);
+  }
+  const routeM = p.match(/^\/api\/[^/]+\/monitoring\/routes\/([^/]+)$/);
+  if (routeM && m === "PATCH") {
+    const row = ROUTES.find((r) => r.id === routeM[1]);
+    if (!row) return err(404, "route not found");
+    const b = JSON.parse(body || "{}") as Partial<{
+      channelId: string; matchClientId: string | null; matchSeverity: string | null; matchKind: string | null; enabled: boolean;
+    }>;
+    if (b.channelId !== undefined) {
+      if (!CHANNELS.some((c) => c.id === b.channelId)) return err(400, "channel not found");
+      row.channelId = b.channelId;
+      row.channelName = channelName(b.channelId);
+    }
+    if (b.matchClientId !== undefined) row.matchClientId = b.matchClientId;
+    if (b.matchSeverity !== undefined) row.matchSeverity = b.matchSeverity as MonitorRoute["matchSeverity"];
+    if (b.matchKind !== undefined) row.matchKind = b.matchKind;
+    if (b.enabled !== undefined) row.enabled = b.enabled;
+    return ok({ id: row.id });
+  }
+  if (routeM && m === "DELETE") {
+    const i = ROUTES.findIndex((r) => r.id === routeM[1]);
+    if (i === -1) return err(404, "route not found");
+    ROUTES.splice(i, 1);
+    return ok({});
+  }
+
+  // ── maintenance ───────────────────────────────────────────────────────────────────────────────
+  if (p.match(/^\/api\/[^/]+\/monitoring\/maintenance$/) && m === "GET") return ok(MAINTENANCE);
+  if (p.match(/^\/api\/[^/]+\/monitoring\/maintenance$/) && m === "POST") {
+    const b = JSON.parse(body || "{}") as { scope?: string; startsAt?: string; endsAt?: string; reason?: string | null };
+    if (!b.startsAt || !b.endsAt) return err(400, "startsAt and endsAt are required");
+    const row: MaintenanceWindowRow = {
+      id: nid("mw"),
+      scope: b.scope?.trim() || "all",
+      startsAt: b.startsAt,
+      endsAt: b.endsAt,
+      reason: b.reason ?? null,
+      createdBy: "Hansel",
+    };
+    MAINTENANCE.push(row);
+    return ok({ id: row.id }, 201);
+  }
+  const maintenanceM = p.match(/^\/api\/[^/]+\/monitoring\/maintenance\/([^/]+)$/);
+  if (maintenanceM && m === "DELETE") {
+    const i = MAINTENANCE.findIndex((w) => w.id === maintenanceM[1]);
+    if (i === -1) return err(404, "maintenance window not found");
+    MAINTENANCE.splice(i, 1);
+    return ok({});
+  }
+
   if (p.match(/^\/api\/[^/]+\/monitoring\/monitors$/) && m === "POST") {
     return ok({ id: "mon-demo-created" });
-  }
-  if (p.match(/^\/api\/[^/]+\/monitoring\/maintenance$/) && m === "POST") {
-    return ok({ id: "mw-demo-created" });
   }
   if (p.match(/^\/api\/[^/]+\/monitoring\/incidents\/[^/]+\/ack$/) && m === "POST") {
     return ok({ id: "inc-acked" });
@@ -366,18 +517,6 @@ export function monitoringDemo(
 
   if (p.match(/^\/api\/[^/]+\/monitoring\/summary$/) && m === "GET") return ok(summary());
   if (p.match(/^\/api\/[^/]+\/monitoring\/kinds$/) && m === "GET") return ok(kinds());
-  if (p.match(/^\/api\/[^/]+\/monitoring\/maintenance$/) && m === "GET") {
-    return ok([
-      {
-        id: "mw-1",
-        scope: "monitor:mon-blossom-tls",
-        startsAt: iso(-1 * 3600 * SEC),
-        endsAt: iso(3 * 3600 * SEC),
-        reason: "WordPress + PHP 8.3 upgrade",
-        createdBy: "Hansel",
-      },
-    ]);
-  }
 
   if (p.match(/^\/api\/[^/]+\/monitoring\/incidents$/) && m === "GET") {
     const limit = Number(params.get("limit") ?? "25");
@@ -389,7 +528,14 @@ export function monitoringDemo(
 
   const resultsM = p.match(/^\/api\/[^/]+\/monitoring\/monitors\/([^/]+)\/results$/);
   if (resultsM && m === "GET") {
-    return ok(HISTORIES[resultsM[1]] ?? []);
+    const all = HISTORIES[resultsM[1]] ?? [];
+    // MON-20 — actually honour `window`, so the 24h/7d/30d switcher on `[id]/page.tsx` has something
+    // to switch BETWEEN in DEMO_MODE. Without this every window would render the identical dataset
+    // and the control would look wired but do nothing under demo verification.
+    const win = params.get("window");
+    const windowMs = win === "30d" ? 30 * DAY : win === "7d" ? 7 * DAY : DAY;
+    const cutoff = Date.now() - windowMs;
+    return ok(all.filter((r) => Date.parse(r.checkedAt) >= cutoff));
   }
 
   const detailM = p.match(/^\/api\/[^/]+\/monitoring\/monitors\/([^/]+)$/);

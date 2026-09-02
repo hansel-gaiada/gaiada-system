@@ -11,6 +11,78 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.63.0` - monitoring: a human can finally create a channel or a route (2026-09-02) - PROTOTYPED
+
+The backend has fanned incidents out `monitor_routes -> monitor_channels -> enqueueMail` since the
+runner shipped (`platform-nest/src/modules/monitoring/runner.ts:293-345`), but nothing let a human
+create either half of that path — `/monitoring/channels` only ever listed them, and its own empty
+state ("Monitoring will still record incidents, but nobody will be told") was literally true in
+production. This ticket closes the loop, frontend-first (the backend write endpoints for channels/
+routes/maintenance are all `⏳ PENDING` per `docs/FRONTEND-BFF-CONTRACT.md`'s Monitoring section).
+
+**Added**
+- Channel create/edit/enable-disable/delete + "send test notification" with the result surfaced
+  inline (`role="status"`, not `role="log"` — this is a one-shot result, not a running feed) —
+  `components/monitoring/ChannelManager.tsx`, wired into `/monitoring/channels`.
+- Route create/edit/delete, so a channel is actually reachable — an enabled channel with no route
+  delivers nothing, which is exactly the `unrouted` warning that page already computed but could not
+  previously be fixed from — `components/monitoring/RouteManager.tsx`.
+- A new `/monitoring/maintenance` page: schedule + cancel a maintenance window, so a planned outage
+  doesn't page anyone (and doesn't corrupt SLA math either — `.create` is `sensitive: true`
+  server-side for exactly that reason) — `components/monitoring/MaintenanceManager.tsx`.
+- A windowed (24h/7d/30d) results/history panel on `/monitoring/[id]`, replacing its reliance on the
+  monitor's embedded 24h-only history. Three states, not two: the panel distinguishes "queried and
+  clean" from "the dedicated endpoint isn't available for this window yet" — never collapsing the
+  latter into a confident empty history strip, which is the exact regression this file's own
+  `[id]/page.tsx:70` comment used to record (a 404 there once crashed the whole page).
+- Three new capabilities in `lib/rbac.ts` — `monitoring.channel.manage`,
+  `monitoring.maintenance.create`, `monitoring.maintenance.delete` — plus the `monitoring_staff`/
+  `monitoring_manager` `Role` members (Cerbos will only ever look for those exact derived-role names
+  per monitoring-program.md §14). **The monitoring module had zero capabilities in this file before
+  this change**, so every write affordance on every monitoring page — including the pre-existing
+  "+ New monitor" link and the maintenance form `scheduleMaintenance` already exposed — was
+  previously ungated in the UI. `company_admin`/`manager`/`owner` hold all three (`manager`'s grant
+  is a live-verified finding per §13.1: "manager: all 14 [monitoring actions]", not a guess);
+  `monitoring_staff` holds none (§13.2's probed DENY on `channel:manage`/`maintenance:create`);
+  `monitoring_manager` holds all three (probed ALLOW on `maintenance:create`, `channel:manage`
+  pattern-matched from the same staff/manager split every other module here uses — flagged as
+  inferred, not probed, in the code comment, since MON-20 has no live Cerbos bundle yet).
+
+**Changed**
+- `lib/monitoringActions.ts`'s `ctx()` now also resolves `me` (via `getMe`), so every new action can
+  gate on `can(c.me, …, c.tenantId)` — same shape as `webdevProvisionedSitesActions.ts`. `scheduleMaintenance`
+  and `testChannel` (both pre-existing) gained the same gate; neither had one before.
+- `lib/monitoring.ts`'s `listResults` changed from `Promise<MonitorResult[]>` (collapsing 404/403/405
+  into `[]`, via the shared `skipUnavailable`) to `Promise<{available, results}>`. Nothing else in the
+  tree called it, so this is not a breaking change to any existing caller — it is a correction before
+  the first real one landed. The board-wide list readers (`listMonitors`, `listChannels`, etc.) keep
+  `skipUnavailable`'s collapse-to-`[]` behaviour on purpose; only a single monitor's windowed history
+  needed the finer distinction.
+- `lib/demoMonitoring.ts`: channels/routes/maintenance moved from read-only module-level consts to a
+  `globalThis`-backed store (same pattern as `demoWebdevProvisionedSites.ts`), because Next bundles
+  the `"use server"` action graph separately from the page's RSC read graph — a plain array would let
+  a create/edit/delete mutate one copy while the next page load read the other. Also fixed: this
+  file's `err()` helper keyed the error body `{ message }`; every other demo store in the tree keys it
+  `{ error }`, which is what `platformFetch`'s DEMO_MODE branch actually reads — so every `err(...)`
+  call in this module was silently discarded in favour of a generic `"platform <status>"` before this.
+  Harmless while nothing surfaced the message; MON-20's new write actions do.
+- `docs/FRONTEND-BFF-CONTRACT.md` §20 gains the new endpoint rows (channel/route POST/PATCH/DELETE,
+  maintenance DELETE), all `⏳ PENDING` — for whoever builds the backend to match.
+
+**Verification — PROTOTYPED, not DEV-VERIFIED.** Driven in a browser under `DEMO_MODE=1` only; no
+live platform-nest backend exists for the new endpoints yet (confirmed: `monitoring.controller.ts`
+has no channel/route routes at all as of this change). `tsc --noEmit` + the full `vitest run` for
+`platform-ui` were run in a container on the shared Linux test host, not locally — see the ticket's
+own verification report for the exact file/test/pass/fail/skip counts.
+
+**Known gaps / follow-ups**
+- The backend endpoints this UI is built against are all `⏳ PENDING` — see the contract doc.
+- `monitoring_staff`/`monitoring_manager`'s exact split is pattern-matched for the parts §13.2 never
+  probed (`channel.manage` for the manager tier, `maintenance.delete` for staff); flagged in the code
+  comments rather than asserted as verified.
+- No status-page surface, no `monitoring.monitor.*`/`monitoring.incident.*` capabilities — out of this
+  ticket's scope; not read by any page this change touches.
+
 ### platform-nest `0.48.0` - authorize before validate on the three write paths (2026-08-31) - PROTOTYPED
 
 `createProject`, webdev change-request `triage` and the client-facing portal `create` all ran

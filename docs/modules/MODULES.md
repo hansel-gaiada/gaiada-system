@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.48.0` | IN PROGRESS | WS1 | 2026-08-31 |
-| platform-ui | `0.62.0` | IN PROGRESS | WS5 | 2026-08-31 |
+| platform-ui | `0.63.0` | IN PROGRESS | WS5 | 2026-09-02 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -156,7 +156,46 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.62.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.63.0` · IN PROGRESS
+
+**0.63.0 (2026-09-02, MON-20, monitoring: channel/route/maintenance management UI — frontend-first,
+PROTOTYPED against DEMO_MODE only):** closes the gap the ticket was opened for — alert delivery has
+always worked in the backend (`runner.ts` fans an incident out `monitor_routes -> monitor_channels
+-> enqueueMail`) but there was no way for a human to create a channel or a route, so
+`/monitoring/channels` rendered a technically-true, practically-useless "no channels configured"
+empty state. New: create/edit/enable-disable/delete a channel + send-test-notification
+(`ChannelManager.tsx`), create/edit/delete a route (`RouteManager.tsx`), a maintenance-window
+scheduler + cancel at a new `/monitoring/maintenance` page (`MaintenanceManager.tsx`), and a
+windowed (24h/7d/30d) results panel on `/monitoring/[id]` that replaces the page's own embedded-
+24h-only history. `lib/monitoringActions.ts` gains `saveChannel`/`setChannelEnabled`/`deleteChannel`/
+`saveRoute`/`deleteRoute`/`deleteMaintenance`, all gated with `can()` (defence-in-depth; Cerbos is
+the real boundary). `lib/rbac.ts` gains `monitoring_staff`/`monitoring_manager` (module_staff/
+module_manager derived roles Cerbos will look for by name) and three capabilities —
+`monitoring.channel.manage`, `monitoring.maintenance.create`, `monitoring.maintenance.delete` — the
+module had NONE before this, so every existing monitoring page rendered its write affordances
+ungated; company_admin/manager/owner get all three, `monitoring_staff` gets none (per
+monitoring-program.md §13.2's PROBED Cerbos decisions), `monitoring_manager` gets all three
+(pattern-matched from the staff/manager split every other module here uses, not itself probed —
+flagged as such in the code comment).
+
+`lib/monitoring.ts`'s `listResults` changed shape from `Promise<MonitorResult[]>` to
+`Promise<{available, results}>` (nothing else called it) so a genuinely-empty window is
+distinguishable from "the endpoint isn't built yet" — the exact ambiguity `[id]/page.tsx:70`'s own
+comment flagged as a past regression (a 404 there used to crash the page). `demoMonitoring.ts`'s
+channels/routes/maintenance fixtures moved from module-level consts to a `globalThis`-backed store
+(same pattern as `demoWebdevProvisionedSites.ts`) so a create/edit/delete actually persists across
+the action-graph/RSC-graph split; also fixed a latent bug where this file's `err()` keyed the error
+body `{message}` instead of the `{error}` key `platformFetch`'s DEMO_MODE branch actually reads —
+every demo error in this module was silently discarded in favour of a generic `"platform <status>"`
+before this.
+
+**Caps at PROTOTYPED, not DEV-VERIFIED:** every write endpoint (`POST/PATCH/DELETE
+/monitoring/{channels,routes,maintenance}*`) is `⏳ PENDING` on the backend — this ticket is
+frontend-first per `docs/FRONTEND-BFF-CONTRACT.md`, verified only against `DEMO_MODE` fixtures and a
+server-side `tsc --noEmit` + `vitest run` gate, never against a live platform-nest. `monitoring_staff`/
+`monitoring_manager`'s exact capability split has no live Cerbos bundle to check against yet (the
+module has never been seeded) — see the code comments in `rbac.ts` for exactly which half of each is
+probed evidence versus pattern-matched inference.
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the
