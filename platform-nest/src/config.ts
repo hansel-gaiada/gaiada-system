@@ -504,11 +504,22 @@ const configBase = {
   // that owns the gaiadabali GitHub org. NO DEFAULT, EVER — same reasoning as githubApps above: a
   // default tenant id would let an unconfigured deployment silently sync real repos into the wrong
   // company's registry the moment a credential happened to be sealed.
+  //
+  // GHT-1 (docs/blueprints/github-tenant-scope-ruling.md §3/§9) — this env var now has a SECOND
+  // consumer, aliased below as `githubOrgTenantId`: the GitHub BFF's effective-org-tenant resolver
+  // (`core/github-org-tenant.ts`), which reads it as "the org-owner anchor" rather than "the crawl
+  // job's target". Same value, two honest names for two call sites — NOT a second source of truth,
+  // and the env var itself is deliberately NOT renamed (the server env is live and set to the agency
+  // id today; a rename is the estate's own documented stale-env rollback footgun).
   githubRepoSync: {
     tenantId: process.env.GITHUB_REPO_SYNC_TENANT_ID ?? "",
     enabled: process.env.GITHUB_REPO_SYNC_ENABLED === "true",
     intervalMs: Number(process.env.GITHUB_REPO_SYNC_INTERVAL_MS ?? 21_600_000), // 6h
   },
+  // GHT-1 alias — see the comment on `githubRepoSync` immediately above. Same env var
+  // (`GITHUB_REPO_SYNC_TENANT_ID`), NO DEFAULT EVER (identical reasoning), read by
+  // `core/github-org-tenant.ts::resolveGithubOrgTenant` on every `:tenantId/github/*` BFF route.
+  githubOrgTenantId: process.env.GITHUB_REPO_SYNC_TENANT_ID ?? "",
   // GH-07 (docs/blueprints/github-integration-foundation.md §4.5) — `POST /api/webhooks/github`.
   // This endpoint is internet-facing and deliberately carries NO AuthGuard (GitHub is not a session
   // holder) — the HMAC secret IS the authentication, same shape as `mail.webhookToken` and

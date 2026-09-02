@@ -27,6 +27,18 @@
 // report for GH-03 rather than worked around here (this ticket's scope boundary explicitly forbids
 // inventing new Cerbos policy).
 //
+// ── GHT-1: EVERY ROUTE AUTHORIZES AND SCOPES AGAINST THE RESOLVED ORG TENANT ────────────────────
+// (docs/blueprints/github-tenant-scope-ruling.md §3/§9) `github_repos` is stamped to the SINGLE
+// operating company that owns the `gaiadabali` GitHub org, always — but the caller may be standing
+// anywhere in that company's root tree. Each route below now runs `resolveGithubOrgTenant(:tenantId)`
+// FIRST, then `authorize()`s against the RESOLVED org tenant (never the URL tenant, never both),
+// and only then opens `withTenants([org])`. A resolution failure (unset config, or the URL tenant
+// sits in a different root) throws `ServiceUnavailableException` BEFORE any query runs against
+// `github_repos` — never a silently-empty 200. A same-root caller who resolves the org fine but
+// lacks Cerbos reach into it gets `authorize()`'s ordinary 403 — a DELIBERATE behaviour change from
+// the old `authorize(..., tenantId)` shape, which some such callers passed (their own tenant had
+// zero rows) and is now refused instead (see the ruling's §3 "Behavior change to pin").
+//
 // ── GITHUB IS TRUTH FOR REPO FACTS, THE ERP IS TRUTH FOR THE LINK (§5.1) ────────────────────────
 // link()/unlink() below write ONLY `webdev_site_id` / `project_id` / `updated_at`. Every other
 // column (org, name, visibility, archived, head_sha, CI state, …) is GitHub-owned and this
@@ -48,6 +60,7 @@ import type { FastifyRequest } from "fastify";
 import { withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
+import { resolveGithubOrgTenant, throwGithubOrgUnavailable, githubOrgMeta } from "./github-org-tenant";
 // GH-12 — the ONLY way a repo creation ever gets asked for. Filing is NOT creating: this endpoint
 // writes a `pending` automation_approvals row and nothing else; the actual GitHub call happens
 // exclusively in `automation-approvals.controller.ts#decide()` -> `executeApprovedGithubRepoCreation`
@@ -116,7 +129,11 @@ export class GithubReposController {
     const limit = Math.max(1, Math.min(Number(limitQ ?? DEFAULT_LIMIT) || DEFAULT_LIMIT, MAX_LIMIT));
     const offset = Math.max(0, Number(offsetQ ?? 0) || 0);
 
-    await authorize(req.principal, { kind: "github_repo", tenantId }, "read");
+    // GHT-1: resolve -> authorize (against the ORG tenant) -> scope. See file header.
+    const resolution = await resolveGithubOrgTenant(tenantId);
+    if (!resolution.ok) throwGithubOrgUnavailable(resolution.reason);
+    const org = resolution.tenantId;
+    await authorize(req.principal, { kind: "github_repo", tenantId: org }, "read");
 
     const clauses = ["gr.deleted_at IS NULL"];
     const args: unknown[] = [];
@@ -130,37 +147,49 @@ export class GithubReposController {
     }
     const where = clauses.join(" AND ");
 
-    return withTenants([tenantId], async (c) => {
-      const [rows, count] = await Promise.all([
-        c.query(
-          `SELECT ${REPO_VIEW_COLUMNS} ${REPO_VIEW_JOINS}
-            WHERE ${where}
-            ORDER BY gr.full_name ASC
-            LIMIT $${args.push(limit)} OFFSET $${args.push(offset)}`,
-          args,
-        ),
-        // Separate COUNT, same predicate minus the just-appended limit/offset params — the UI's
-        // pagination (and any bucket-size chip: "N unlinked", "N archived") needs a real total, not
-        // just "did this page fill up".
-        c.query<{ n: string }>(`SELECT count(*)::text AS n FROM github_repos gr WHERE ${where}`, args.slice(0, args.length - 2)),
-      ]);
-      return { repos: rows.rows, total: Number(count.rows[0]?.n ?? 0), limit, offset };
-    });
+    const [{ repos, total }, org_meta] = await Promise.all([
+      withTenants([org], async (c) => {
+        const [rows, count] = await Promise.all([
+          c.query(
+            `SELECT ${REPO_VIEW_COLUMNS} ${REPO_VIEW_JOINS}
+              WHERE ${where}
+              ORDER BY gr.full_name ASC
+              LIMIT $${args.push(limit)} OFFSET $${args.push(offset)}`,
+            args,
+          ),
+          // Separate COUNT, same predicate minus the just-appended limit/offset params — the UI's
+          // pagination (and any bucket-size chip: "N unlinked", "N archived") needs a real total, not
+          // just "did this page fill up".
+          c.query<{ n: string }>(`SELECT count(*)::text AS n FROM github_repos gr WHERE ${where}`, args.slice(0, args.length - 2)),
+        ]);
+        return { repos: rows.rows, total: Number(count.rows[0]?.n ?? 0) };
+      }),
+      githubOrgMeta(org),
+    ]);
+    return { repos, total, limit, offset, org: org_meta };
   }
 
   // ── Detail ────────────────────────────────────────────────────────────────────────────────────
   @Get(":tenantId/github/repos/:id")
   async get(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
-    await authorize(req.principal, { kind: "github_repo", tenantId, id }, "read");
-    return withTenants([tenantId], async (c) => {
-      const r = await c.query(
-        `SELECT ${REPO_VIEW_COLUMNS} ${REPO_VIEW_JOINS}
-          WHERE gr.id::text = $1 AND gr.deleted_at IS NULL`,
-        [id],
-      );
-      if (!r.rows[0]) throw new NotFoundException("repo not found");
-      return r.rows[0];
-    });
+    // GHT-1: resolve -> authorize (against the ORG tenant) -> scope. See file header.
+    const resolution = await resolveGithubOrgTenant(tenantId);
+    if (!resolution.ok) throwGithubOrgUnavailable(resolution.reason);
+    const org = resolution.tenantId;
+    await authorize(req.principal, { kind: "github_repo", tenantId: org, id }, "read");
+    const [row, org_meta] = await Promise.all([
+      withTenants([org], async (c) => {
+        const r = await c.query(
+          `SELECT ${REPO_VIEW_COLUMNS} ${REPO_VIEW_JOINS}
+            WHERE gr.id::text = $1 AND gr.deleted_at IS NULL`,
+          [id],
+        );
+        if (!r.rows[0]) throw new NotFoundException("repo not found");
+        return r.rows[0];
+      }),
+      githubOrgMeta(org),
+    ]);
+    return { ...row, org: org_meta };
   }
 
   // ── Link ──────────────────────────────────────────────────────────────────────────────────────
@@ -181,7 +210,14 @@ export class GithubReposController {
     if (!webdevSiteId && !projectId) {
       throw new BadRequestException("webdevSiteId or projectId required");
     }
-    await authorize(req.principal, { kind: "github_repo", tenantId, id }, "link");
+    // GHT-1: resolve -> authorize (against the ORG tenant) -> scope. See file header. Composite FKs
+    // (webdev_site_id, tenant_id) / (project_id, tenant_id) still bind the linked row to the ORG
+    // tenant's own projects/sites — scoping the UPDATE to `withTenants([org])` is what makes that
+    // true from every same-root vantage, not just the URL tenant.
+    const resolution = await resolveGithubOrgTenant(tenantId);
+    if (!resolution.ok) throwGithubOrgUnavailable(resolution.reason);
+    const org = resolution.tenantId;
+    await authorize(req.principal, { kind: "github_repo", tenantId: org, id }, "link");
 
     const sets: string[] = [];
     const args: unknown[] = [];
@@ -191,7 +227,7 @@ export class GithubReposController {
 
     let updated: RepoRow | undefined;
     try {
-      updated = await withTenants([tenantId], async (c) => {
+      updated = await withTenants([org], async (c) => {
         const r = await c.query<RepoRow>(
           `UPDATE github_repos SET ${sets.join(", ")}
             WHERE id::text = $${args.push(id)} AND deleted_at IS NULL
@@ -210,7 +246,7 @@ export class GithubReposController {
     }
     if (!updated) throw new NotFoundException("repo not found");
 
-    await writeActivity(tenantId, req.principal.userId, "linked", "github_repo", id, {
+    await writeActivity(org, req.principal.userId, "linked", "github_repo", id, {
       webdevSiteId: webdevSiteId ?? null, projectId: projectId ?? null,
     });
     return { id: updated.id, webdevSiteId: updated.webdevSiteId, projectId: updated.projectId };
@@ -231,14 +267,18 @@ export class GithubReposController {
     if (!UNLINK_TARGETS.has(target)) {
       throw new BadRequestException("target must be webdev_site|project|both");
     }
-    await authorize(req.principal, { kind: "github_repo", tenantId, id }, "unlink");
+    // GHT-1: resolve -> authorize (against the ORG tenant) -> scope. See file header.
+    const resolution = await resolveGithubOrgTenant(tenantId);
+    if (!resolution.ok) throwGithubOrgUnavailable(resolution.reason);
+    const org = resolution.tenantId;
+    await authorize(req.principal, { kind: "github_repo", tenantId: org, id }, "unlink");
 
     const sets: string[] = [];
     if (target === "webdev_site" || target === "both") sets.push("webdev_site_id = NULL");
     if (target === "project" || target === "both") sets.push("project_id = NULL");
     sets.push("updated_at = now()");
 
-    const updated = await withTenants([tenantId], async (c) => {
+    const updated = await withTenants([org], async (c) => {
       const r = await c.query<RepoRow>(
         `UPDATE github_repos SET ${sets.join(", ")}
           WHERE id::text = $1 AND deleted_at IS NULL
@@ -249,7 +289,7 @@ export class GithubReposController {
     });
     if (!updated) throw new NotFoundException("repo not found");
 
-    await writeActivity(tenantId, req.principal.userId, "unlinked", "github_repo", id, { target });
+    await writeActivity(org, req.principal.userId, "unlinked", "github_repo", id, { target });
     return { id: updated.id, webdevSiteId: updated.webdevSiteId, projectId: updated.projectId };
   }
 
@@ -272,10 +312,17 @@ export class GithubReposController {
   ) {
     const parsed = parseCreateRepoArgs((body ?? {}) as Record<string, unknown>);
     if (!parsed.ok) throw new BadRequestException(parsed.error);
-    await authorize(req.principal, { kind: "automation_approval", tenantId }, "create");
+    // GHT-1: resolve -> authorize (against the ORG tenant) -> file. Filing into ORG (rather than the
+    // URL tenant) fixes a latent misfiling: a request from a holding-root vantage used to file its
+    // automation_approval into the HOLDING tenant, where no agency company_admin inbox would ever
+    // surface it and where the D14 decider set was wrong (ruling §3).
+    const resolution = await resolveGithubOrgTenant(tenantId);
+    if (!resolution.ok) throwGithubOrgUnavailable(resolution.reason);
+    const org = resolution.tenantId;
+    await authorize(req.principal, { kind: "automation_approval", tenantId: org }, "create");
     if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
     return fileAutomationApproval({
-      tenantId,
+      tenantId: org,
       workflowId: GITHUB_CREATE_REPO_WORKFLOW,
       toolName: "github.createRepo",
       toolArgs: { ...parsed.args },
