@@ -61,6 +61,8 @@ import { withTenants } from "../db";
 import { authorize, writeActivity } from "./http";
 import { AuthGuard } from "../auth/guards";
 import { resolveGithubOrgTenant, throwGithubOrgUnavailable, githubOrgMeta } from "./github-org-tenant";
+// GHT-2 (docs/blueprints/github-tenant-scope-ruling.md §9) — the org's App-health read.
+import { getGithubOrgStatus } from "./github-org-status";
 // GH-12 — the ONLY way a repo creation ever gets asked for. Filing is NOT creating: this endpoint
 // writes a `pending` automation_approvals row and nothing else; the actual GitHub call happens
 // exclusively in `automation-approvals.controller.ts#decide()` -> `executeApprovedGithubRepoCreation`
@@ -105,6 +107,25 @@ interface RepoRow {
 @Controller("api")
 @UseGuards(AuthGuard)
 export class GithubReposController {
+  // ── GHT-2: org-status ────────────────────────────────────────────────────────────────────────
+  /** `GET /api/:t/github/org-status` (docs/blueprints/github-tenant-scope-ruling.md §9). Read-only
+   *  App-health surface: no POST/PATCH/DELETE variant exists and none should be added — this route
+   *  never writes `integration_connections`. Same resolve -> authorize -> read order as every other
+   *  route in this file; `authorize()` asks Cerbos about `github_repo` `read` at the RESOLVED org
+   *  tenant, so the same principal sees the same answer from any same-root vantage, and a
+   *  same-root principal without org-tenant reach is refused 403 rather than served a fake
+   *  "unconfigured" state (that state is reserved for §9's genuine no-org cases below). No new
+   *  Cerbos kind or action: `github_repo`'s existing `read` rule already admits company_admin/
+   *  manager/member/module_staff/module_manager — see resource_github_repo.yaml. */
+  @Get(":tenantId/github/org-status")
+  async orgStatus(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    const resolution = await resolveGithubOrgTenant(tenantId);
+    if (!resolution.ok) throwGithubOrgUnavailable(resolution.reason);
+    const org = resolution.tenantId;
+    await authorize(req.principal, { kind: "github_repo", tenantId: org }, "read");
+    return getGithubOrgStatus(org);
+  }
+
   // ── List ──────────────────────────────────────────────────────────────────────────────────────
   /** The §5.4 surface's list read: filterable on link state, archived state, and a name/full_name
    *  search, paginated. `linked=false` serves the "unlinked repos as their own bucket" requirement
