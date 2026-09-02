@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.48.0` | IN PROGRESS | WS1 | 2026-08-31 |
-| platform-ui | `0.62.0` | IN PROGRESS | WS5 | 2026-08-31 |
+| platform-nest | `0.49.0` | IN PROGRESS | WS1 | 2026-08-31 |
+| platform-ui | `0.63.0` | IN PROGRESS | WS5 | 2026-08-31 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -63,7 +63,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.48.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.49.0` · IN PROGRESS
 **0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
 maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
 now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,
@@ -156,7 +156,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.62.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.63.0` · IN PROGRESS
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the

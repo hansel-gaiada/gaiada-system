@@ -130,6 +130,23 @@ export const CAPABILITY_MAP = {
     semantics: "any",
   },
 
+  // IAM-GAP-01/02 — the invoice maker/checker seam (`POST /api/:t/invoices/:id/approve`).
+  // `resource_invoice.yaml`'s own comment states explicitly that NO `perm_invoice_approve` mirror
+  // rule exists (IAM-04c doctrine: a flat permission mirror cannot express the creator!=approver
+  // condition without over-granting a company_admin/manager who IS the creator). The catalog key
+  // below is therefore used ONLY by this map/`rbac.ts` mirror — it is never wired into a Cerbos
+  // ALLOW rule via the permission-catalog arm. Real Cerbos reach is the two named-role ALLOW rules
+  // (`derivedRoles: ["company_admin", "manager"]`, creator!=approver, evaluated per-invoice) plus
+  // the platform_admin wildcard (itself subject to the structural DENY that closes self-approval for
+  // every tier). Because no permission-arm rule exists, `owner`'s bundle entry for this key
+  // (`role-permission-bundles.json`) is a pure catalog-seed artifact with NO corresponding Cerbos
+  // grant — see `rbac-capability-parity.test.ts`'s KNOWN_NON_DRIFT register for the resulting
+  // `owner x invoice.approve` pair, registered there rather than silently matched here.
+  "invoice.approve": {
+    permissions: ["invoice.approve"],
+    semantics: "all",
+  },
+
   // Design doc §2.1's own worked example of "the capability already IS one permission under a
   // stable name": "org.edit -> core.org_structure.update". No split tiers, no ambiguity.
   "org.edit": {

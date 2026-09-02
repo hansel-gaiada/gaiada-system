@@ -106,9 +106,34 @@ const cookieName = (t: string) => `gaiada_org_${t}`;
 // from a tampered cookie or a future loose backend).
 export function sanitizeStructure(input: unknown, fallbackName = "Company"): OrgStructure {
   let count = 0;
+  // ── id de-duplication (2026-09-02) — ported from platform-nest's org-structure.service.ts, the
+  // implementation this file's own header calls out as a mirror. Two fixes, both load-bearing here
+  // too: this sanitizer runs on every LOCAL (cookie-fallback) render even when no backend exists, so
+  // a collision here is a client-only bug the server-side fix cannot catch.
+  //   1. The fallback id used to be computed inline in the `return` below, which runs AFTER the
+  //      recursive children loop — so `count` had already been advanced by the WHOLE subtree by the
+  //      time a parent read it, and a parent could end up sharing `n-<N>` with its own last-visited
+  //      descendant (or, along a single-child chain, with every node in between). Fixed by capturing
+  //      the fallback immediately after `count` advances for THIS node, before recursing.
+  //   2. A general safety net for duplicate EXPLICIT ids (e.g. a stale cookie written before this
+  //      fix, or any future producer of a client-side org edit that copies a node's id along with
+  //      the rest of its shape): first occurrence keeps the id, every later duplicate is renamed to
+  //      `<id>-dupN` — never reparented, never renamed if unique.
+  const seenIds = new Set<string>();
+  let dupCounter = 0;
+  function uniqueId(candidate: string): string {
+    let id = candidate;
+    while (seenIds.has(id)) {
+      dupCounter += 1;
+      id = `${candidate}-dup${dupCounter}`;
+    }
+    seenIds.add(id);
+    return id;
+  }
   function node(raw: unknown, depth: number): OrgNode {
     const r = (raw ?? {}) as Record<string, unknown>;
     count += 1;
+    const fallbackId = `n-${count}`;
     // Migrate the legacy "team" kind to its rename "division"; unknown kinds
     // fall back to "role".
     const rawKind = r.kind === "team" ? "division" : r.kind;
@@ -122,7 +147,7 @@ export function sanitizeStructure(input: unknown, fallbackName = "Company"): Org
       }
     }
     return {
-      id: typeof r.id === "string" && r.id ? r.id : `n-${count}`,
+      id: uniqueId(typeof r.id === "string" && r.id ? r.id : fallbackId),
       name: typeof r.name === "string" && r.name.trim() ? r.name.trim().slice(0, 80) : "Untitled",
       kind,
       assigneeId: typeof r.assigneeId === "string" ? r.assigneeId : null,

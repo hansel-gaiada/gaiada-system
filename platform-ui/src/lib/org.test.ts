@@ -61,4 +61,49 @@ describe("sanitizeStructure", () => {
     const clean = sanitizeStructure({ root: { name: "D & A", kind: "company", children: [{ name: "Dev", kind: "department", children: [{ name: "FE", kind: "division", children: [] }] }] } });
     expect(clean.root.children[0].children[0].kind).toBe("division");
   });
+
+  // 2026-09-02 — ported from platform-nest's org-structure.service.test.ts, the byte-identical bug
+  // this file's own header calls a "mirror" of. A parent node with no explicit `id` used to read its
+  // fallback `n-<count>` from the RETURN statement, which executes AFTER recursing through the whole
+  // subtree — so a parent and its last-visited descendant (also missing an id) shared one id string.
+  // This sanitizer also runs client-side on the cookie-fallback structure, so a collision here is a
+  // real bug even when no backend PUT is ever made.
+  it("gives every node a UNIQUE fallback id, even along a single-child chain where no node supplies one", () => {
+    const clean = sanitizeStructure({
+      root: {
+        name: "Acme",
+        children: [{
+          name: "Engineering", kind: "department", children: [{
+            name: "Backend", kind: "role", children: [
+              { name: "Alice", kind: "person", assigneeId: "u-alice" },
+            ],
+          }],
+        }],
+      },
+    });
+    const dept = clean.root.children[0];
+    const role = dept.children[0];
+    const person = role.children[0];
+    const ids = [clean.root.id, dept.id, role.id, person.id];
+    expect(new Set(ids).size, `duplicate fallback ids: ${ids.join(", ")}`).toBe(4);
+  });
+
+  it("de-duplicates explicit ids reused across sibling nodes, without moving anyone or touching assigneeId", () => {
+    const clean = sanitizeStructure({
+      root: {
+        id: "root", name: "Gaia Digital Agency", kind: "company",
+        children: [{
+          id: "d-gm", name: "GM", kind: "department",
+          children: [
+            { id: "p-019fb652", name: "Ayu", kind: "person", assigneeId: "u-ayu", children: [] },
+            { id: "p-019fb652", name: "Budi", kind: "person", assigneeId: "u-budi", children: [] },
+          ],
+        }],
+      },
+    });
+    const people = clean.root.children[0].children;
+    expect(people.map((p) => p.id)).toEqual(["p-019fb652", "p-019fb652-dup1"]);
+    expect(people.map((p) => p.name)).toEqual(["Ayu", "Budi"]);
+    expect(people.map((p) => p.assigneeId)).toEqual(["u-ayu", "u-budi"]);
+  });
 });

@@ -635,8 +635,13 @@ const DELIVERABLES: Record<string, unknown>[] = [
   { id: "dl-2", project_id: "p-web-1", client_id: "cl-1", name: "Checkout rebuild", status: "todo", due_date: "2026-07-28" },
   { id: "dl-3", project_id: "p-seo-1", client_id: "cl-2", name: "Q3 SEO audit report", status: "todo", due_date: "2026-08-01" },
 ];
+// IAM-GAP-01/02: `createdBy` is a DIFFERENT id from DEMO_USER_ID on purpose — the seed row already
+// cleared the maker/checker seam (status 'sent' implies it was approved), and demo mode's identity
+// is `platform_admin` (isElevated), which the resource_invoice.yaml wildcard lets approve anyone
+// ELSE's invoice but never its own. Making the seed self-created would make the Approve control
+// permanently invisible in demo mode with no invoice left to demonstrate it on.
 const INVOICES: Record<string, unknown>[] = [
-  { id: "inv-1", clientId: "cl-1", clientName: "Northwind Traders", periodStart: "2026-06-01", periodEnd: "2026-06-30", status: "sent", currency: "USD", total: 6300, lines: [{ description: "Billable time 2026-06", hours: 42, rate: 150, amount: 6300 }], createdAt: "2026-07-01T09:00:00Z" },
+  { id: "inv-1", clientId: "cl-1", clientName: "Northwind Traders", periodStart: "2026-06-01", periodEnd: "2026-06-30", status: "sent", currency: "USD", total: 6300, lines: [{ description: "Billable time 2026-06", hours: 42, rate: 150, amount: 6300 }], createdAt: "2026-07-01T09:00:00Z", createdBy: "u-other-demo", approvedBy: "u-other-demo-2", approvedAt: "2026-07-02T09:00:00Z", updatedBy: DEMO_USER_ID },
 ];
 const FILES: Record<string, unknown>[] = [
   { id: "f-1", entity_type: "project", entity_id: "p-web-1", filename: "Redesign SOW.pdf", content_type: "application/pdf", byte_size: 184320, scrubbed: true, uploader_id: "u-pm", created_at: "2026-06-20T09:00:00Z", url: null },
@@ -2462,11 +2467,43 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   }
 
   // Invoices — POST computes billable hours in the period.
+  // IAM-GAP-01/02: mirrors the real controller's maker/checker seam (invoice.controller.ts) so demo
+  // mode can actually demonstrate the Approve control and its refusals, not just the happy path.
+  const invApprove = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)\/approve$/);
+  if (invApprove && m === "POST") {
+    const inv = INVOICES.find((x) => x.id === invApprove[1]) as { status: string; createdBy: string | null } | undefined;
+    if (!inv) return { status: 404, json: { error: "invoice not found" } };
+    // IAM-GAP-02: the self-approval DENY — structural, fires for every tier including DEMO_USER_ID's
+    // platform_admin. A legacy row with no recorded creator (createdBy null/undefined) never
+    // matches this, same fail-closed shape as the real Cerbos condition.
+    if (inv.createdBy === DEMO_USER_ID) {
+      return { status: 403, json: { error: "not authorized: you raised this invoice" } };
+    }
+    if (inv.status !== "draft") {
+      return { status: 400, json: { error: `invoice is '${inv.status}', not awaiting approval (only 'draft' invoices can be approved)` } };
+    }
+    Object.assign(inv, { status: "approved", approvedBy: DEMO_USER_ID, approvedAt: "2026-07-16T10:00:00Z", updatedBy: DEMO_USER_ID });
+    return ok({ ok: true, status: "approved" });
+  }
   const invOne = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)$/);
   if (invOne) {
-    const inv = INVOICES.find((x) => x.id === invOne[1]);
+    const inv = INVOICES.find((x) => x.id === invOne[1]) as { status: string; updatedBy: string | null } | undefined;
     if (!inv) return { status: 404, json: { error: "invoice not found" } };
-    if (m === "PATCH") { const b = JSON.parse(body || "{}"); if (b.status) inv.status = b.status; return ok({ ok: true }); }
+    if (m === "PATCH") {
+      const b = JSON.parse(body || "{}");
+      const status = String(b.status ?? "");
+      if (!["draft", "sent", "paid", "void"].includes(status)) {
+        return { status: 400, json: { error: "valid status required (draft|sent|paid|void)" } };
+      }
+      // IAM-GAP-01: 'sent'/'paid' require the invoice to already be 'approved' — mirrors
+      // invoice.controller.ts's REQUIRES_APPROVED_STATUS gate.
+      if ((status === "sent" || status === "paid") && inv.status !== "approved") {
+        return { status: 400, json: { error: `invoice must be approved before it can be marked '${status}' (currently '${inv.status}')` } };
+      }
+      inv.status = status;
+      inv.updatedBy = DEMO_USER_ID;
+      return ok({ ok: true });
+    }
     return ok(inv);
   }
   const invMatch = p.match(/^\/api\/[^/]+\/invoices$/);
@@ -2480,7 +2517,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       const hours = Math.round((minutes / 60) * 10) / 10;
       const amount = Math.round(hours * rate * 100) / 100;
       const clientName = (CLIENTS.find((c) => c.id === b.clientId)?.name as string) ?? "Client";
-      const inv = { id: demoId("inv"), clientId: (b.clientId as string) ?? null, clientName, periodStart: start || null, periodEnd: end || null, status: "draft", currency: String(b.currency ?? "USD"), total: amount, lines: [{ description: `Billable time${start ? ` ${start} – ${end}` : ""}`, hours, rate, amount }], createdAt: "2026-07-16T09:00:00Z" };
+      // IAM-GAP-02: created_by = updated_by = the caller at creation, same as the real INSERT.
+      // DEMO_USER_ID (platform_admin) is always the creator of anything made through this form, so a
+      // freshly-created demo invoice is exactly the self-approval case the ticket calls out.
+      const inv = {
+        id: demoId("inv"), clientId: (b.clientId as string) ?? null, clientName, periodStart: start || null, periodEnd: end || null,
+        status: "draft", currency: String(b.currency ?? "USD"), total: amount,
+        lines: [{ description: `Billable time${start ? ` ${start} – ${end}` : ""}`, hours, rate, amount }],
+        createdAt: "2026-07-16T09:00:00Z", createdBy: DEMO_USER_ID, approvedBy: null, approvedAt: null, updatedBy: DEMO_USER_ID,
+      };
       INVOICES.push(inv);
       return { status: 201, json: { id: inv.id } };
     }

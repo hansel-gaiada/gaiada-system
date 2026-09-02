@@ -11,6 +11,79 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.63.0` - the invoice maker/checker gets a UI (2026-09-02) - PROTOTYPED
+
+IAM-GAP-01 shipped `POST /api/:t/invoices/:invoiceId/approve` on 2026-08-13 with no way to reach it
+from the app — nothing in the UI could move an invoice `draft → approved`, so nothing could
+legitimately reach `sent`/`paid` either (`PATCH .../invoices/:id` has required `'approved'` first
+since that same ticket). `/invoices/[invoiceId]` now has:
+
+- An **Approve** action, gated on a new `invoice.approve` capability (`lib/rbac.ts`) mirrored to
+  exactly the two roles `resource_invoice.yaml`'s `approve` rule names (`company_admin`/`manager`)
+  — deliberately its own capability rather than the wider `company.manage`, which `owner` also
+  holds but which Cerbos never grants approve reach to (no `perm_invoice_approve` mirror rule
+  exists at all; verified against `role-permission-bundles.json`, and the resulting `owner ×
+  invoice.approve` mismatch is registered in `rbac-capability-parity.test.ts`'s `KNOWN_NON_DRIFT`
+  as a bundler-seed artifact, not a real Cerbos grant).
+- The self-approval case handled HONESTLY rather than as a dead-end 403: the page hides the Approve
+  button outright and explains why ("You raised this invoice — a different approver must sign off")
+  when the viewer is the invoice's own `createdBy`, and again (different message) when the creator
+  is unknown on a legacy pre-migration row and the viewer isn't `platform_admin`. The 403 itself is
+  still caught (a second tab, a role change mid-session) and rendered as the same clear message via
+  `useActionState` — never a crash, never a generic "Forbidden".
+- `createdBy` / `approvedBy` / `approvedAt` (plus the pre-existing `updatedBy`) render in a new
+  "Approval trail" card, name-resolved against `/members` (not the admin-only `/users` list, so a
+  plain manager doesn't lose the whole page) with a raw-id fallback.
+- State-machine legibility: Mark sent only appears once `approved`; Mark paid only once `sent`; a
+  static note explains why a draft has neither.
+- `mark sent`/`mark paid` (`invoiceActions.ts`) were previously fire-and-forget, silently swallowing
+  every refusal — converted to the same `useActionState` pattern so a stale-precondition 400 is
+  visible instead of the button just doing nothing.
+
+Files: `platform-ui/src/lib/rbac.ts`, `rbac-capability-map.ts`, `rbac-capability-parity.test.ts`,
+`lib/invoice.ts`, `lib/invoiceActions.ts`, `lib/demoFixtures.ts` (DEMO_MODE mirrors the maker/checker
+gate so the flow is browsable without a live backend),
+`app/(app)/invoices/[invoiceId]/{page.tsx,InvoiceActions.tsx}`.
+
+Contract-doc: `docs/FRONTEND-BFF-CONTRACT.md`'s invoice-approve row corrected from "no UI" to UI
+built.
+
+### platform-nest `0.49.0` - two org-structure node-id collisions, one fixed at the write path (2026-09-02) - PROTOTYPED
+
+Live symptom (reported 2026-08-26): in the `GM` org tree, four different people carried the same
+node id (`p-019fb652`) — 2 distinct ids across 5 people. Two independent defects, found by reading:
+
+1. **`sanitizeStructure()` (`org-structure.service.ts`, mirrored in `platform-ui/src/lib/org.ts`)**
+   — a synthetic fallback id (`n-<N>`) was computed inline in the `return` statement, which runs
+   AFTER the function recurses through the node's entire subtree. `count` is a single counter every
+   descendant call also advances, so a parent with no explicit id could be handed the SAME `n-<N>`
+   as its own last-visited descendant (worse along a single-child chain: every node in the chain
+   collapsed to one id). Fixed by capturing the fallback immediately after `count` advances for that
+   node, before recursing. Pinned with a failing-then-passing unit test in the new
+   `org-structure.service.test.ts` (mirrored in `org.test.ts`) that reproduces the collision on a
+   dept → role → person chain with no explicit ids.
+2. **The live `p-` collision itself** — a SEPARATE defect, diagnosed rather than assumed:
+   `upsertPersonNode` (the sanctioned JML write path) mints `p-${person.userId}` from the FULL
+   uuidv7 id, which cannot practically collide. `seed/org-structure-refresh.ts`'s one-off tree
+   builder instead minted `"p-" + p.id.slice(0, 8)` — and `newId()` is `uuidv7()` (`db/index.ts`),
+   TIME-ORDERED, so any batch of accounts this seed's roster-creation step makes close together in
+   time shares a long common hex prefix. An 8-character truncation of a time-ordered id collides by
+   construction, not by chance, for exactly the kind of batch-created roster this script exists to
+   seed. Fixed at the source: the full id, matching `upsertPersonNode`'s own convention.
+3. **General write-path hardening** — `sanitizeStructure` now also de-duplicates any duplicate
+   EXPLICIT id (whatever produced it) via a first-occurrence-wins pass: a later duplicate is renamed
+   `<id>-dupN`, never reparented, with `assigneeId`/`assigneeName`/`kind`/`name`/position untouched.
+   Verified safe against placement/authorization: `deriveBlobPlacements` (`core/dept-resolution.ts`)
+   keys membership purely off `assigneeId`, never off a node's own `id`.
+
+**Not done, and deliberately so:** the already-stored live blob is NOT touched by this change —
+`sanitizeStructure`'s dedup only runs on the NEXT write through `applyOrgStructure` (a PUT, or a
+re-run of the now-fixed refresh script). Repairing the live `GM` tree today is a data decision for
+the owner, not something this session takes on itself.
+
+Files: `platform-nest/src/admin/org-structure.service.ts` (+ new `.test.ts`),
+`platform-nest/src/seed/org-structure-refresh.ts`, `platform-ui/src/lib/org.ts` (+ `.test.ts`).
+
 ### platform-nest `0.48.0` - authorize before validate on the three write paths (2026-08-31) - PROTOTYPED
 
 `createProject`, webdev change-request `triage` and the client-facing portal `create` all ran

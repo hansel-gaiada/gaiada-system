@@ -245,6 +245,25 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
     reason: "Same self-service-only integration_connection reach as team_lead/member above, same policy, same conflation.",
     decisionRef: "resource_integration_connection.yaml lines 44-49; IAM-02a drift register §3 conflation class",
   },
+  // ── IAM-GAP-01/02: `owner` never has real reach on invoice approval, but the bundler's flat
+  // catalog seed says otherwise. `resource_invoice.yaml` names only `company_admin`/`manager`
+  // (creator!=approver, per-invoice) and the platform_admin wildcard (itself DENY-gated on
+  // self-approval) — `owner` appears in NEITHER rule, and the policy's own comment records that no
+  // `perm_invoice_approve` permission-arm rule exists at all, so holding the catalog key
+  // `invoice.approve` grants NOTHING at the Cerbos layer for any role. `role-permission-bundles.json`
+  // still lists it for `owner` because the bundler derives reach from the flat `role_permission` seed
+  // table, which has no way to represent "this key exists in the catalog but is deliberately never
+  // wired to a policy rule." Widening `ROLE_CAPS.owner` to match would show an owner an Approve
+  // button Cerbos will always refuse — the exact over-claim direction the guard exists to prevent,
+  // arriving through the under-claim door, same shape as the `hr.payroll.view` entry above.
+  {
+    role: "owner",
+    capability: "invoice.approve",
+    direction: "under-claim",
+    reason:
+      "owner's bundle carries invoice.approve only because the catalog seed grants it broadly; resource_invoice.yaml names only company_admin/manager (per-invoice creator!=approver) and the platform_admin wildcard, and its own comment confirms NO perm_invoice_approve mirror rule exists to wire this key to any Cerbos grant for any role, owner included.",
+    decisionRef: "resource_invoice.yaml (approve ALLOW rule + its 'NO perm_invoice_approve mirror' comment); IAM-04c doctrine",
+  },
   // ── a call-site double-gate makes a mirror gap inert, already ruled "no live gap" by IAM-02a.
   {
     role: "hr_manager",
