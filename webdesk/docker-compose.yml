@@ -159,12 +159,35 @@ services:
       # non-empty check, which is exactly what hid the bug for weeks). WEBDESK_CONTROL_MTLS_CA_PEM
       # (inline) is kept only as a fallback the app itself now shape-validates strictly — see
       # real-control-channel-authenticator.ts's loadPinnedCaPem.
+      #
+      # THE REST OF THE CONTROL-CHANNEL VARS ARE DELIBERATELY *NOT* LISTED HERE.
+      # They come from `env_file: .env.control` (see the aicenter/sumopod overlays), and listing
+      # them in `environment:` is what BROKE them — this is the exact INVERSE of the `.env`
+      # passthrough rule, so it is worth being precise about which rule applies where:
+      #
+      #   * `.env` (compose's INTERPOLATION source) — a var there does nothing for the container
+      #     unless it is named in an `environment:` block. Hence every other line in this block.
+      #   * `env_file:` — a var there reaches the container ON ITS OWN. Naming it in
+      #     `environment:` as `${VAR:-}` OVERRIDES it with an empty string, because
+      #     `environment:` outranks `env_file:` and the `:-` default fires whenever the
+      #     interpolation source (`.env`) lacks the var — which it always did, by design,
+      #     since these live in `.env.control`.
+      #
+      # Measured live on gda-aicenter 2026-09-02, which is how this was found: the container
+      # received `WEBDESK_CONTROL_OIDC_ISSUER=` (empty) while `/etc/webdesk/.env.control` plainly
+      # held `https://erp.gaiada.online/idp/realms/gaiada`. ALLOWED_CN and OIDC_AUDIENCE *looked*
+      # fine only by coincidence — their `:-` defaults here happen to equal the real values, so
+      # they masked the bug rather than escaping it.
+      #
+      # Net effect before this change: `.env.control` — a dedicated 0600 file owned by
+      # `webdesk-svc` — was inert. Every secret in it was silently replaced by an empty default.
+      # That is why fixing the CA loader moved the crash loop on to the NEXT required var instead
+      # of ending it.
+      #
+      # WEBDESK_CONTROL_MTLS_CA_FILE stays below on purpose: the overlays set it as a LITERAL path
+      # in their own `environment:` block (never `${VAR}`, which could resolve empty), and an
+      # overlay's `environment:` beats this one. It is the only control var this file may name.
       WEBDESK_CONTROL_MTLS_CA_FILE: ${WEBDESK_CONTROL_MTLS_CA_FILE:-}
-      WEBDESK_CONTROL_MTLS_CA_PEM: ${WEBDESK_CONTROL_MTLS_CA_PEM:-}
-      WEBDESK_CONTROL_MTLS_ALLOWED_CN: ${WEBDESK_CONTROL_MTLS_ALLOWED_CN:-platform-nest-webdesk}
-      WEBDESK_CONTROL_OIDC_ISSUER: ${WEBDESK_CONTROL_OIDC_ISSUER:-}
-      WEBDESK_CONTROL_OIDC_AUDIENCE: ${WEBDESK_CONTROL_OIDC_AUDIENCE:-webdesk-control-plane}
-      WEBDESK_CONTROL_OIDC_JWKS_URI: ${WEBDESK_CONTROL_OIDC_JWKS_URI:-}
       CLAMAV_HOST: ${CLAMAV_HOST}
       CLAMAV_PORT: ${CLAMAV_PORT}
       TENANT_GUC_NAME: ${TENANT_GUC_NAME}
