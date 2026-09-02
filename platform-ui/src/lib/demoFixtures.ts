@@ -2473,16 +2473,19 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (invApprove && m === "POST") {
     const inv = INVOICES.find((x) => x.id === invApprove[1]) as { status: string; createdBy: string | null } | undefined;
     if (!inv) return { status: 404, json: { error: "invoice not found" } };
-    // IAM-GAP-02: the self-approval DENY — structural, fires for every tier including DEMO_USER_ID's
-    // platform_admin. A legacy row with no recorded creator (createdBy null/undefined) never
-    // matches this, same fail-closed shape as the real Cerbos condition.
-    if (inv.createdBy === DEMO_USER_ID) {
+    // IAM-GAP-02: the self-approval DENY — structural, fires for every tier. Compares against the
+    // ACTUAL caller (`userId`, the demo identity making THIS request), not a fixed constant — a
+    // hardcoded comparison here would deny every identity approving an invoice hansel raised
+    // regardless of who is actually asking, which is not what the real Cerbos condition does. A
+    // legacy row with no recorded creator (createdBy null/undefined) never matches this, same
+    // fail-closed shape as the real condition.
+    if (inv.createdBy === userId) {
       return { status: 403, json: { error: "not authorized: you raised this invoice" } };
     }
     if (inv.status !== "draft") {
       return { status: 400, json: { error: `invoice is '${inv.status}', not awaiting approval (only 'draft' invoices can be approved)` } };
     }
-    Object.assign(inv, { status: "approved", approvedBy: DEMO_USER_ID, approvedAt: "2026-07-16T10:00:00Z", updatedBy: DEMO_USER_ID });
+    Object.assign(inv, { status: "approved", approvedBy: userId, approvedAt: "2026-07-16T10:00:00Z", updatedBy: userId });
     return ok({ ok: true, status: "approved" });
   }
   const invOne = p.match(/^\/api\/[^/]+\/invoices\/([^/]+)$/);
@@ -2501,7 +2504,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
         return { status: 400, json: { error: `invoice must be approved before it can be marked '${status}' (currently '${inv.status}')` } };
       }
       inv.status = status;
-      inv.updatedBy = DEMO_USER_ID;
+      inv.updatedBy = userId;
       return ok({ ok: true });
     }
     return ok(inv);
@@ -2517,14 +2520,14 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       const hours = Math.round((minutes / 60) * 10) / 10;
       const amount = Math.round(hours * rate * 100) / 100;
       const clientName = (CLIENTS.find((c) => c.id === b.clientId)?.name as string) ?? "Client";
-      // IAM-GAP-02: created_by = updated_by = the caller at creation, same as the real INSERT.
-      // DEMO_USER_ID (platform_admin) is always the creator of anything made through this form, so a
-      // freshly-created demo invoice is exactly the self-approval case the ticket calls out.
+      // IAM-GAP-02: created_by = updated_by = the ACTUAL caller at creation, same as the real
+      // INSERT — not a fixed constant, so whichever demo identity generates the invoice (not just
+      // DEMO_USER_ID) is correctly the one the self-approval DENY above compares against.
       const inv = {
         id: demoId("inv"), clientId: (b.clientId as string) ?? null, clientName, periodStart: start || null, periodEnd: end || null,
         status: "draft", currency: String(b.currency ?? "USD"), total: amount,
         lines: [{ description: `Billable time${start ? ` ${start} – ${end}` : ""}`, hours, rate, amount }],
-        createdAt: "2026-07-16T09:00:00Z", createdBy: DEMO_USER_ID, approvedBy: null, approvedAt: null, updatedBy: DEMO_USER_ID,
+        createdAt: "2026-07-16T09:00:00Z", createdBy: userId, approvedBy: null, approvedAt: null, updatedBy: userId,
       };
       INVOICES.push(inv);
       return { status: 201, json: { id: inv.id } };
