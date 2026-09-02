@@ -136,10 +136,23 @@ describe("RepoInventory — the department's code, one row per repo", () => {
     expect(screen.getByText(/don.t have access to view/i)).toBeInTheDocument();
   });
 
-  it("the GitHub line is honest about what the connection can and cannot do yet", () => {
+  // Rewritten 2026-09-02. This test previously pinned "GitHub: not connected" and "commit and PR
+  // activity appears once the GitHub App is connected" — copy that became FALSE when the App was
+  // installed on `gaiadabali` (221 repos crawled, commit/PR state present). A test pinning stale
+  // copy does not protect the user; it protects the mistake, so the assertions moved with it.
+  //
+  // The negative assertion is the load-bearing one: no personal link is the ORDINARY state, because
+  // web@gaiada.com is deliberately the single shared ERP->GitHub identity. The line must not imply a
+  // fault or tell anyone to wait for an install that already happened.
+  it("the GitHub line describes the personal link only, and does not imply a fault", () => {
     const { rerender } = render(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={null} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
-    expect(screen.getByText(/github: not connected/i)).toBeInTheDocument();
-    expect(screen.getByText(/commit and pr activity appears once the github app is connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/github: no personal link/i)).toBeInTheDocument();
+    expect(screen.getByText(/normal — the erp pushes and deploys as a shared org identity/i)).toBeInTheDocument();
+    expect(screen.getByText(/org registry below/i)).toBeInTheDocument();
+    // The retired claim must not come back: the App IS installed, so telling anyone to wait for it
+    // is the specific regression this line guards.
+    expect(screen.queryByText(/once the github app is connected/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/github: not connected/i)).not.toBeInTheDocument();
     rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={{ status: "pending", account: "hansel-gh" }} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);
     expect(screen.getByText(/github: hansel-gh · identity only/i)).toBeInTheDocument();
     rerender(<RepoInventory state={{ kind: "ok", rows: [row({ id: "s1" })] }} github={{ status: "linked", account: "hansel-gh" }} mayReconcile={false} actions={actions()} pipelineHref="/pipeline" />);

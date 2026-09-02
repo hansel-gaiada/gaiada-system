@@ -18,9 +18,17 @@ import "./repositories.css";
 // when the system last confirmed all that, and the one action that helps. Rows arrive problems-first
 // from lib/repoInventory.ts.
 //
-// What this tab does NOT show yet: commits, PRs, per-repo activity, repos created outside the
-// pipeline. All of that needs the GitHub App installed on the org (WD-21/WD-22 — an owner action), so
-// the GitHub line says exactly that instead of leaving empty columns.
+// Scope: this component shows ONLY what the delivery pipeline provisioned. It deliberately still
+// does not show commits, PRs, per-repo activity, or repos created outside the pipeline.
+//
+// The reason changed on 2026-09-02 and the distinction matters. That used to be blocked — it needed
+// the GitHub App on the org (WD-21/WD-22, an owner action). That is DONE: the App is installed on
+// `gaiadabali` and 221 repos, with commit/PR/run state, are on `github_repos`. So the data exists;
+// it simply belongs to a different dataset with a different tenant scope, and merging the two into
+// one table is what made the page confusing enough to be rebuilt. Both now render as two clearly
+// labelled sections on `departments/[deptId]/repositories` — this one, and the org registry.
+//
+// Anyone tempted to add a commits column here should add it to the registry section instead.
 export interface RepoInventoryActions {
   /** `reconcileSiteAction` — re-poll the provisioning service for one site. */
   reconcile: (formData: FormData) => Promise<SiteActionResult>;
@@ -158,16 +166,36 @@ export function RepoInventory({
   );
 }
 
+// This line describes YOUR personal GitHub link, and nothing else. Two corrections landed here on
+// 2026-09-02 because the old copy misdescribed both halves.
+//
+// 1. The hint used to read "Commit and PR activity appears once the GitHub App is connected to the
+//    org." The App was installed on `gaiadabali` on 2026-08-31; 221 repos are crawled and commit,
+//    PR and run state are on `github_repos` right now. The sentence had become simply false, and it
+//    told an operator to wait for something that had already happened.
+// 2. "not connected" overstated the absence. `web@gaiada.com` is deliberately the single shared
+//    ERP->GitHub identity (to hold seat billing down; per-user attribution lives in the ERP, not in
+//    GitHub), so having NO personal link is the ordinary steady state for nearly all staff — not a
+//    fault, and not something to nag about.
+//
+// What this component must NOT do is claim anything about the ORG App's health. It is handed a
+// personal `GithubConnectionView` and has no data about the installation, so asserting "the org App
+// is connected" here would be a guess rendered as fact. Where org-wide state genuinely lives is the
+// registry section further down the same page, so the hint points there instead of describing it.
 function GithubLine({ github }: { github: GithubConnectionView | null }) {
   const label = !github
-    ? "GitHub: not connected"
+    ? "GitHub: no personal link"
     : github.status === "linked"
       ? `GitHub: ${github.account ?? "connected"} · linked`
       : `GitHub: ${github.account ?? "—"} · identity only`;
   return (
     <div className="repo-github">
       <span className="repo-github__label">{label}</span>
-      <span className="repo-github__hint">Commit and PR activity appears once the GitHub App is connected to the org.</span>
+      <span className="repo-github__hint">
+        {github
+          ? "Org-wide commit, PR and workflow state is in the GitHub org registry below."
+          : "Normal — the ERP pushes and deploys as a shared org identity, so most staff have no personal link. Org-wide commit, PR and workflow state is in the GitHub org registry below."}
+      </span>
     </div>
   );
 }

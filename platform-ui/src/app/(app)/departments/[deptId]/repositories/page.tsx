@@ -29,9 +29,12 @@ type Search = Promise<{ preview?: string | string[]; archived?: string }>;
 // provisioned for this department's projects (`webdev_provisioned_sites`, read tenant-wide, then
 // attributed through run → project → department, the same rule PRD Studio uses). Each row: name →
 // GitHub, client · project, status, staging URL, the PRD run it came from, last check; failures say
-// why and offer the one action that helps. What it cannot show yet — commits, PRs, repos created
-// outside the pipeline — needs the GitHub App on the org (WD-21/22, owner action), and the page says
-// so rather than pretending.
+// why and offer the one action that helps.
+//
+// The old note here said commits, PRs and non-pipeline repos "need the GitHub App on the org
+// (WD-21/22, owner action)". Stale as of 2026-08-31 — the App is installed and 221 repos carry that
+// state. They are not missing, they live in the SECOND section below (the org registry), which is a
+// different dataset on a different tenant scope. Two labelled sections, not one merged table.
 export default async function DepartmentRepositoriesPage({ params, searchParams }: { params: Params; searchParams: Search }) {
   const userId = await getSessionUserId();
   if (!userId) redirect("/login");
