@@ -200,12 +200,47 @@ function renderSocialPostFailed(payload: SocialPostFailedPayload): RenderedMail 
   return { subject, html, text };
 }
 
-const TEMPLATES: Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
+export interface MonitoringAlertPayload {
+  /** "opened" (a monitor just went DOWN/degraded) or "closed" (it recovered). */
+  event: "opened" | "closed";
+  siteName: string;
+  target: string;
+  status: string;
+  reason?: string | null;
+  href: string;
+  [key: string]: unknown;
+}
+
+function renderMonitoringAlert(payload: MonitoringAlertPayload): RenderedMail {
+  const opened = payload.event !== "closed";
+  const site = asStr(payload.siteName, "a monitored site");
+  const target = asStr(payload.target);
+  const status = asStr(payload.status, opened ? "down" : "up");
+  const reason = typeof payload.reason === "string" && payload.reason ? asStr(payload.reason) : null;
+  const href = asStr(payload.href);
+  const subject = stripHeaderInjection(opened ? `[DOWN] ${site} is ${status.toUpperCase()}` : `[OK] ${site} has recovered`);
+  const text = opened
+    ? `${site} (${target}) is reporting ${status}.\n` +
+      `${reason ? `Reason: ${reason}\n` : ""}\nOpen the monitor: ${href}`
+    : `${site} (${target}) is back up.\n\nOpen the monitor: ${href}`;
+  const html = opened
+    ? `<p><strong>${escapeHtml(site)}</strong> (${escapeHtml(target)}) is reporting ` +
+      `<strong>${escapeHtml(status)}</strong>.</p>` +
+      `${reason ? `<p>Reason: ${escapeHtml(reason)}</p>` : ""}` +
+      `<p><a href="${escapeHtml(safeHref(href))}">Open the monitor</a></p>`
+    : `<p><strong>${escapeHtml(site)}</strong> (${escapeHtml(target)}) is back up.</p>` +
+      `<p><a href="${escapeHtml(safeHref(href))}">Open the monitor</a></p>`;
+  return { subject, html, text };
+}
+
+const TEMPLATES
+: Record<string, (payload: Record<string, unknown>) => RenderedMail> = {
   "approval.warning": (p) => renderApprovalWarning(p as ApprovalMailPayload),
   "approval.actionable": (p) => renderApprovalActionable(p as ApprovalMailPayload),
   "auth.shell": (p) => renderAuthShell(p as AuthShellPayload),
   "auth.magic_link": (p) => renderAuthMagicLink(p as AuthMagicLinkPayload),
   "social.post_failed": (p) => renderSocialPostFailed(p as SocialPostFailedPayload),
+  "monitoring.alert": (p) => renderMonitoringAlert(p as MonitoringAlertPayload),
 };
 
 export function knownTemplateKeys(): string[] {

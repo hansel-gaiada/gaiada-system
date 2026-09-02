@@ -19,6 +19,8 @@ import { withGlobal, withTenants } from "../../db";
 import { isModuleEnabled } from "../registry";
 import { getDriver, hasDriver, parseKind, type MonitorStatus, type ProbeCtx, type ProbeResult } from "./drivers/registry";
 import type { HeartbeatProbeCtx } from "./drivers/heartbeat";
+import { enqueueMail } from "../../mail/queue";
+import { config } from "../../config";
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // PURE DECISIONS
@@ -142,6 +144,7 @@ interface DueRow {
   client_id: string;
   property_id: string | null;
   kind: string;
+  name: string;
   config: Record<string, unknown>;
   target: string | null;
   interval_sec: number;
@@ -191,7 +194,7 @@ export async function ensureResultPartitions(c: PoolClient, now = new Date()): P
  * attacker-supplied input against itself, which is not a guard at all.
  */
 const DUE_SELECT = `
-  SELECT m.id, m.tenant_id, m.client_id, m.property_id, m.kind, m.config, m.target,
+  SELECT m.id, m.tenant_id, m.client_id, m.property_id, m.kind, m.config, m.target, m.name,
          m.interval_sec, m.status, m.last_checked_at, m.severity,
          hb.last_seen_at AS hb_last_seen_at, hb.grace_sec AS hb_grace_sec,
          (SELECT i.id FROM monitor_incidents i
@@ -272,14 +275,87 @@ async function probeWithDeadline(
   }
 }
 
+/** One incident state-change worth telling someone about. Collected during the sweep and acted on
+ *  AFTER the tenant transaction commits — never notify for an incident a rollback erased, and never
+ *  hold the sweep's transaction open across mail I/O. */
+interface IncidentEvent {
+  monitorId: string;
+  clientId: string;
+  monitorKind: string;
+  severity: string;
+  siteName: string;
+  target: string;
+  event: "opened" | "closed";
+  status: string;
+  reason: string | null;
+}
+
+/** Fan an incident out to the tenant's configured notification channels (monitor_routes ->
+ *  monitor_channels). Reads channels in the tenant's own scope, then enqueues mail OUTSIDE that read
+ *  so a slow mail path cannot pin a DB transaction. Email is the only channel kind wired today; other
+ *  kinds are skipped (not errored) so adding a driver later is additive. */
+async function notifyIncidents(tenantId: string, events: IncidentEvent[]): Promise<void> {
+  if (!events.length) return;
+  interface Outbound { toEmail: string; event: IncidentEvent }
+  const outbound: Outbound[] = [];
+
+  await withTenants(
+    [tenantId],
+    async (c) => {
+      for (const ev of events) {
+        // A route matches when each of its filters is either unset (catch-all) or equals this event.
+        const chans = await c.query<{ kind: string; destination: string }>(
+          `SELECT DISTINCT ch.kind, ch.destination
+             FROM monitor_channels ch
+             JOIN monitor_routes r ON r.channel_id = ch.id AND r.enabled = true
+            WHERE ch.enabled = true AND ch.deleted_at IS NULL
+              AND (r.match_client_id IS NULL OR r.match_client_id = $1)
+              AND (r.match_severity  IS NULL OR r.match_severity  = $2)
+              AND (r.match_kind      IS NULL OR r.match_kind      = $3)`,
+          [ev.clientId, ev.severity, ev.monitorKind],
+        );
+        for (const ch of chans.rows) {
+          if (ch.kind !== "email" || !ch.destination) continue;
+          outbound.push({ toEmail: ch.destination, event: ev });
+        }
+      }
+    },
+    { modules: ["monitoring"] },
+  );
+
+  for (const o of outbound) {
+    try {
+      await enqueueMail({
+        stream: "notify",
+        templateKey: "monitoring.alert",
+        toEmail: o.toEmail,
+        tenantId,
+        entityType: "monitor",
+        entityId: o.event.monitorId,
+        payload: {
+          event: o.event.event,
+          siteName: o.event.siteName,
+          target: o.event.target,
+          status: o.event.status,
+          reason: o.event.reason,
+          href: `${config.mail.linkBaseUrl}/monitoring/${o.event.monitorId}`,
+        },
+      });
+    } catch {
+      /* A single bad recipient must not stop the rest — enqueueMail throws on an implausible address. */
+    }
+  }
+}
+
 export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<SweepResult> {
+
   const out: SweepResult = { considered: 0, probed: 0, skippedNoDriver: 0, incidentsOpened: 0, incidentsClosed: 0 };
 
   // Partition roll-forward is DDL on a shared table and is NOT tenant-scoped, so it stays global and
   // runs once per sweep rather than once per tenant.
   await withGlobal((c) => ensureResultPartitions(c, now));
 
-  const sweepTenant = async (c: PoolClient) => {
+  const sweepTenant = (events: IncidentEvent[]) => async (c: PoolClient) => {
     const due = await c.query<DueRow>(DUE_SELECT);
     const windows = await c.query<{ starts_at: Date; ends_at: Date; monitor_id: string | null }>(
       `SELECT starts_at, ends_at, monitor_id FROM monitor_maintenance WHERE ends_at > now() AND starts_at <= now()`,
@@ -361,7 +437,14 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
            ON CONFLICT DO NOTHING RETURNING id`,
           [row.tenant_id, row.client_id, row.id, now, observed.detail, row.severity],
         );
-        if (ins.rows.length) out.incidentsOpened += 1;
+        if (ins.rows.length) {
+          out.incidentsOpened += 1;
+          events.push({
+            monitorId: row.id, clientId: row.client_id, monitorKind: row.kind, severity: row.severity,
+            siteName: row.name, target: row.target ?? row.name, event: "opened",
+            status: observed.status, reason: observed.detail,
+          });
+        }
       }
       if (t.closeIncident) {
         const upd = await c.query(
@@ -370,6 +453,13 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
           [row.id, now],
         );
         out.incidentsClosed += upd.rows.length;
+        if (upd.rows.length) {
+          events.push({
+            monitorId: row.id, clientId: row.client_id, monitorKind: row.kind, severity: row.severity,
+            siteName: row.name, target: row.target ?? row.name, event: "closed",
+            status: "up", reason: null,
+          });
+        }
       }
     }
   };
@@ -407,7 +497,10 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
     // monitoring silently reports the whole estate DOWN while nothing is actually wrong. This is the
     // same fail-closed module-gate trap the header calls out for `monitoring` itself; the allowlist
     // read just happens to cross into a second module, so BOTH scopes must be declared.
-    await withTenants([row.id], sweepTenant, { modules: ["monitoring", "search"] });
+    const events: IncidentEvent[] = [];
+    await withTenants([row.id], sweepTenant(events), { modules: ["monitoring", "search"] });
+    // Notify AFTER the sweep transaction has committed — only for incidents that actually persisted.
+    if (events.length) await notifyIncidents(row.id, events);
   }
 
   return out;
