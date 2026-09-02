@@ -103,11 +103,106 @@ waha_sessions() {
   echo "backup ok: $OUT"
 }
 
+# ── Stacks that live in their OWN compose project (webdesk, gaiada-social) ───────────────────────
+# `dump()` above cannot reach these. It resolves a service through `docker compose $COMPOSE_FILES`,
+# which is the `gaiada` project (vps.yml + hostdata.yml); webdesk and gaiada-social are SEPARATE
+# projects with their own directories, networks and databases — deliberately so, for Zone B
+# isolation. So they are addressed by CONTAINER NAME instead.
+#
+# Why this exists at all: both stacks were consolidated onto gda-aicenter from sumopod (WebDesk on
+# 2026-08-31, Postiz on 2026-09-01) and NEITHER was added here. Measured 2026-09-02: the nightly run
+# produced dumps for gaiada_platform/knowledge/keycloak/n8n/bot and waha sessions, and nothing for
+# `webdesk` (250 migrated tenants) or `postiz`. The only surviving copies were the original stacks
+# still running on sumopod — which means the "soak period" was silently doing the job a backup should
+# do, and sumopod could not have been decommissioned without destroying the sole copy.
+#
+# The role note matters and is not incidental: webdesk's cluster uses the owner/app split, and
+# `pg_dump -U webdesk_owner` FAILS with "permission denied" because the owner cannot read its own
+# tables under that model. Dump as the container's own superuser.
+dump_container() { # <container> <pg-user> <db>
+  OUT="$BACKUP_DIR/$3-$STAMP.sql.gz"
+  if ! docker ps --format '{{.Names}}' | grep -qx "$1"; then
+    # An absent stack is a clean skip, matching the profile-off precedent above — this script gates
+    # migrations and must not fail a box that simply does not host that stack.
+    echo "backup SKIPPED: container $1 not running (stack not on this host?)" >&2
+    return 0
+  fi
+  if ! docker exec -i "$1" pg_dump -U "$2" "$3" | gzip > "$OUT"; then
+    echo "backup FAILED: pg_dump $3 from $1 as $2" >&2
+    return 1
+  fi
+  # A gzip of an empty/failed dump is ~20 bytes and would rotate in looking like a real backup.
+  SZ="$(wc -c < "$OUT")"
+  if [ "$SZ" -lt 1000 ]; then
+    echo "backup FAILED: $OUT is only ${SZ}B — refusing to keep a dump that cannot be a database" >&2
+    rm -f "$OUT"
+    return 1
+  fi
+  chmod 600 "$OUT"
+  echo "backup ok: $OUT (${SZ}B)"
+}
+
+# ── Cluster ROLES — without these, none of the dumps above is actually restorable ────────────────
+# Found 2026-09-02 by restore-testing a webdesk dump into a clean container: the DATA restored
+# perfectly (30 tables, 250 tenants, matching live exactly) but four statements failed with
+# `role "webdesk_app" does not exist` / `role "webdesk_migrator" does not exist`. Every GRANT and
+# every OWNER assignment silently did not apply.
+#
+# That is a worse outcome than a failed restore, and it applies to the ERP's own databases too, not
+# just the consolidated stacks: `pg_dump` NEVER emits roles (they are cluster-level, not per-database)
+# and nothing here dumped globals. The host cluster alone carries 8 of them — platform_owner,
+# platform_app, knowledge_owner, knowledge_app, sync_app, keycloak, n8n, gaiada_exporter.
+#
+# Why that is severe HERE specifically rather than a tidiness point: this estate runs FORCE RLS with
+# an owner/app role split, and its policies are written against those role names. Restore the data
+# without them and you get a database the application cannot read at all — every policy references a
+# role that does not exist — while the restore itself looks like it worked.
+#
+# NOTE: globals include role password HASHES, so these files are secret-bearing. 0600, same as the
+# rest, and never anywhere world-readable.
+dump_globals() { # <label> [container] [pg-user]
+  OUT="$BACKUP_DIR/globals-$1-$STAMP.sql.gz"
+  if [ -z "${2:-}" ]; then
+    sudo -n -u postgres pg_dumpall --globals-only | gzip > "$OUT"
+  else
+    docker ps --format '{{.Names}}' | grep -qx "$2" || { echo "backup SKIPPED: globals $1 (container $2 absent)" >&2; return 0; }
+    docker exec -i "$2" pg_dumpall -U "$3" --globals-only | gzip > "$OUT"
+  fi
+  SZ="$(wc -c < "$OUT")"
+  if [ "$SZ" -lt 200 ]; then
+    echo "backup FAILED: $OUT is only ${SZ}B — a cluster always has roles" >&2
+    rm -f "$OUT"; return 1
+  fi
+  chmod 600 "$OUT"
+  echo "backup ok: $OUT (${SZ}B)"
+}
+
 mkdir -p "$BACKUP_DIR"
 for DB in gaiada_platform gaiada_knowledge gaiada_keycloak gaiada_n8n; do dump postgres "$DB"; done
 dump pg-bot gaiada_bot
 waha_sessions
 
-# Rotate all dumps on the same schedule.
+# Roles for every cluster this box hosts. Restore order in a real recovery is globals FIRST, then
+# the per-database dumps — the reverse leaves the GRANTs unapplied, which is the bug found above.
+dump_globals host
+dump_globals webdesk webdesk-postgres-1 postgres
+dump_globals social gaiada-social-social-postgres-1 postiz
+dump_globals temporal gaiada-social-social-temporal-postgres-1 temporal
+
+# WebDesk (WSK) — `postgres`, not `webdesk_owner`; see the role note above.
+dump_container webdesk-postgres-1 postgres webdesk
+# gaiada-social (Postiz) + its Temporal pair. Temporal's two databases are useless apart: the
+# visibility store is rebuilt from, and must match, the main one.
+dump_container gaiada-social-social-postgres-1 postiz postiz
+dump_container gaiada-social-social-temporal-postgres-1 temporal temporal
+dump_container gaiada-social-social-temporal-postgres-1 temporal temporal_visibility
+
+# Rotate all dumps on the same schedule. The second glob is NOT redundant: these dumps are named
+# after their own databases (`webdesk-`, `postiz-`, `temporal-`), so `gaiada*` never matches them and
+# they would otherwise accumulate forever.
 find "$BACKUP_DIR" -name 'gaiada*-*.sql.gz' -mtime "+$KEEP_DAYS" -delete
 find "$BACKUP_DIR" -name 'waha-sessions-*.tar.gz' -mtime "+$KEEP_DAYS" -delete
+for P in webdesk postiz temporal temporal_visibility; do
+  find "$BACKUP_DIR" -name "$P-*.sql.gz" -mtime "+$KEEP_DAYS" -delete
+done
+find "$BACKUP_DIR" -name 'globals-*.sql.gz' -mtime "+$KEEP_DAYS" -delete

@@ -33,7 +33,24 @@ sh "$ROOT/infra/scripts/backup.sh"
 # Fail loudly if a run produced fewer than the 5 expected DB dumps — a silent partial backup is
 # the failure mode this whole wrapper exists to prevent.
 STAMP_GLOB="$(date -u '+%Y%m%d')"
-COUNT="$(find "${BACKUP_DIR:-$HOME/gaiada-backups}" -name "gaiada_*-$STAMP_GLOB-*.sql.gz" | wc -l)"
+BDIR="${BACKUP_DIR:-$HOME/gaiada-backups}"
+COUNT="$(find "$BDIR" -name "gaiada_*-$STAMP_GLOB-*.sql.gz" | wc -l)"
 if [ "$COUNT" -lt 5 ]; then
   echo "backup WARNING: only $COUNT DB dumps for $STAMP_GLOB (expected >=5)" >&2
 fi
+
+# The guard above counts `gaiada_*` ONLY, and that is exactly how the consolidated stacks went
+# unnoticed: webdesk and postiz dumps are named after their own databases, so zero of them would
+# still satisfy it and the run would report success. Each consolidated stack is therefore checked
+# by name, and only when its container is actually on this host — a box that does not host a stack
+# must not warn about it forever.
+for PAIR in 'webdesk-postgres-1 webdesk' \
+            'gaiada-social-social-postgres-1 postiz' \
+            'gaiada-social-social-temporal-postgres-1 temporal' \
+            'gaiada-social-social-temporal-postgres-1 temporal_visibility'; do
+  set -- $PAIR
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1" || continue
+  if [ "$(find "$BDIR" -name "$2-$STAMP_GLOB-*.sql.gz" | wc -l)" -eq 0 ]; then
+    echo "backup WARNING: $1 is running but no '$2' dump exists for $STAMP_GLOB" >&2
+  fi
+done
