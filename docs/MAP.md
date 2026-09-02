@@ -430,6 +430,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/monitoring`
 - `/monitoring/[id]`
 - `/monitoring/channels`
+- `/monitoring/maintenance`
 - `/monitoring/new`
 - `/notifications`
 - `/office`
