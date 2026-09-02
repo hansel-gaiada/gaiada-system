@@ -1,0 +1,48 @@
+# webdesk/docker-compose.aicenter-release.yml — run the SIGNED release artifact, not a box build.
+#
+# Compose as the THIRD file, after the base and the aicenter overlay:
+#
+#   docker compose --env-file /etc/webdesk/.env \
+#     -f docker-compose.yml -f docker-compose.aicenter.yml -f docker-compose.aicenter-release.yml \
+#     up -d --no-build api
+#
+# WHY THIS FILE EXISTS, and why it is separate rather than an edit to the aicenter overlay.
+#
+# `docker-compose.aicenter.yml` sets `image: !reset null` + `build:` for `api`, so `up` builds the
+# image on the box. That is genuinely useful for iterating on Zone B, and this file does not take it
+# away — the build path stays exactly as it was for anyone who composes only the first two files.
+#
+# What it was NOT good for is production. Until 2026-09-01 the api container on gda-aicenter ran a
+# hand-built local image tagged `webdesk-api`, produced outside the release pipeline: unsigned, no
+# provenance, and impossible to trace to a commit. Meanwhile `release.yml` has been building,
+# cosign-signing and SLSA-attesting `gaiada-webdesk-api` all along (see its matrix — `webdesk-api`
+# is listed). The signed artifact existed and simply went unused, because `deploy.yml` has no step
+# for the `webdesk` compose project. It is a SEPARATE compose project on purpose (own directory,
+# own database, Zone B isolation), and it must stay that way — see the warning below.
+#
+# DO NOT "FIX" THIS BY ADDING `webdesk-api` TO deploy.yml's COMPONENTS LIST.
+# That job runs `up -d --no-build --remove-orphans` against the **gaiada** project. Adding webdesk
+# to that list would bring it up inside the wrong compose project, and with `--remove-orphans` in
+# the loop a mistake there DELETES containers rather than merely failing. WebDesk sitting outside
+# that list is currently what protects it from that flag. The right fix is a deploy step of its own
+# for this project; that work is not this file.
+#
+# VERIFY BEFORE YOU PULL. The point of a signed artifact is lost if nothing checks the signature:
+#
+#   cosign verify ghcr.io/<owner>/gaiada-webdesk-api:<tag> \
+#     --certificate-identity-regexp 'https://github.com/<owner>/.+/.github/workflows/release.yml@.+' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#
+# That is the same assertion deploy.yml makes for every other component, restated here because this
+# project does not go through that job yet and so nothing else makes it.
+#
+# `WEBDESK_API_IMAGE` is REQUIRED, with no default. A default would be a version pinned in git that
+# silently goes stale and then quietly deploys the wrong build months later — the `:?` form fails
+# the compose invocation loudly instead. Set it in `/etc/webdesk/.env` to the tag you verified.
+services:
+  api:
+    # `!reset` on build is what makes `image` authoritative; without it compose would still be
+    # willing to build, and `--no-build` would be the only thing standing between production and a
+    # box-built image. Belt and braces, because the failure is silent.
+    build: !reset null
+    image: ${WEBDESK_API_IMAGE:?set WEBDESK_API_IMAGE to a cosign-verified ghcr.io/<owner>/gaiada-webdesk-api:<tag>}
