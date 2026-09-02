@@ -68,6 +68,7 @@ describe("mail/templates", () => {
       "approval.warning",
       "auth.magic_link",
       "auth.shell",
+      "monitoring.alert",
       "social.post_failed",
     ]);
   });

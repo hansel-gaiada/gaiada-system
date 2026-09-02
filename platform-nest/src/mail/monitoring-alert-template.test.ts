@@ -11,7 +11,7 @@ describe("monitoring.alert template", () => {
       target: "https://akoyaspabali.com",
       status: "down",
       reason: "HTTP 503",
-      href: "https://erp.gaiada.online/monitoring/abc",
+      href: "https://erp.example.test/monitoring/abc",
     });
     expect(m.subject).toContain("Akoya Spa");
     expect(m.subject.toLowerCase()).toContain("down");
@@ -29,7 +29,7 @@ describe("monitoring.alert template", () => {
       target: "https://akoyaspabali.com",
       status: "up",
       reason: null,
-      href: "https://erp.gaiada.online/monitoring/abc",
+      href: "https://erp.example.test/monitoring/abc",
     });
     expect(m.subject.toLowerCase()).toMatch(/recover|ok/);
     expect(m.text.toLowerCase()).toContain("back up");
@@ -42,7 +42,7 @@ describe("monitoring.alert template", () => {
       siteName: "<script>x</script>",
       target: "https://x.test",
       status: "down",
-      href: "https://erp.gaiada.online/monitoring/abc",
+      href: "https://erp.example.test/monitoring/abc",
     });
     expect(m.html).not.toContain("<script>x</script>");
     expect(m.html).toContain("&lt;script&gt;");
