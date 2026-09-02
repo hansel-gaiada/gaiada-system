@@ -50,9 +50,46 @@ export interface OrgStructure {
  *  node-count and depth (defends against cycles/abuse). Root is forced to kind "company". */
 export function sanitizeStructure(input: unknown, fallbackName = "Company"): OrgStructure {
   let count = 0;
+  // ── id de-duplication (2026-09-02, live symptom: 4 GM people sharing one `p-` node id) ──────────
+  // This runs on EVERY write through this function (the PUT handler and every JML flow), so it is
+  // the one place that can catch a duplicate id regardless of where it came from — an explicit id
+  // reused by a client payload, a bug in a future seed/import script (the proximate cause of the
+  // live symptom was `org-structure-refresh.ts` truncating a full uuidv7 person id down to 8 hex
+  // characters, which collides by construction for any batch of accounts created close together in
+  // time — fixed separately, at the source, in that file). `seenIds` is scoped to ONE
+  // `sanitizeStructure` call, i.e. one whole tree, and `dupCounter` is independent of the id
+  // `count` above specifically so a disambiguated id (`<original>-dupN`) can never coincide with a
+  // node's own natural fallback (`n-<count>`) — the two counters name disjoint id spaces.
+  //
+  // Deliberately NEVER reparents anyone: only the `id` STRING of the LATER duplicate occurrence
+  // changes (first-seen wins, keeping the more "natural" id stable across a resave); `assigneeId`,
+  // `assigneeName`, `kind`, `name` and the node's position in the tree are all untouched. Renaming
+  // an id has no bearing on placement/authorization either way — `deriveBlobPlacements`
+  // (core/dept-resolution.ts) keys membership purely off `assigneeId`, never off a node's own `id`.
+  const seenIds = new Set<string>();
+  let dupCounter = 0;
+  function uniqueId(candidate: string): string {
+    let id = candidate;
+    while (seenIds.has(id)) {
+      dupCounter += 1;
+      id = `${candidate}-dup${dupCounter}`;
+    }
+    seenIds.add(id);
+    return id;
+  }
   function node(raw: unknown, depth: number): OrgNode {
     const r = (raw ?? {}) as Record<string, unknown>;
     count += 1;
+    // ⚠ FIXED (2026-09-02, live symptom: 4 people sharing one `p-` node id in the `GM` tree):
+    // the fallback id MUST be captured HERE, immediately after `count` advances for THIS node and
+    // before recursing into its children — `count` is a single shared counter that every descendant
+    // call also advances. The id used to be computed inline in the `return` below, which executes
+    // AFTER the recursive `children.push(node(...))` loop below has walked the entire subtree — so a
+    // parent's fallback id read `count` as it stood once its LAST-visited descendant had also
+    // incremented it, handing the parent and that descendant (and, along a single-child chain, every
+    // node in between) the IDENTICAL `n-<N>` string. Allocating it now, pre-order, means each node's
+    // id is fixed at the moment `count` reflects that node and no other.
+    const fallbackId = `n-${count}`;
     const rawKind = r.kind === "team" ? "division" : (r.kind as string);
     const kind = ORG_KINDS.has(rawKind) ? rawKind : "role";
     const rawChildren = Array.isArray(r.children) ? r.children : [];
@@ -64,7 +101,7 @@ export function sanitizeStructure(input: unknown, fallbackName = "Company"): Org
       }
     }
     return {
-      id: typeof r.id === "string" && r.id ? r.id : `n-${count}`,
+      id: uniqueId(typeof r.id === "string" && r.id ? r.id : fallbackId),
       name: typeof r.name === "string" && r.name.trim() ? r.name.trim().slice(0, 80) : "Untitled",
       kind,
       assigneeId: typeof r.assigneeId === "string" ? r.assigneeId : null,

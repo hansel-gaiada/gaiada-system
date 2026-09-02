@@ -140,9 +140,20 @@ export async function refreshOrgStructure(opts: { force: boolean }): Promise<Org
     arr.push({ id: u.id, name: s.name });
     placements.set(s.target, arr);
   }
+  // ⚠ FIXED (2026-09-02) — live symptom: 4 different GM people (Ayu, Budi, Eka, Gaiada Exec) all
+  // carrying the SAME `p-` node id, 2 distinct ids across 5 people. Root cause: this used to be
+  // `"p-" + p.id.slice(0, 8)`. `p.id` is a `newId()` (`uuidv7()`, db/index.ts) — TIME-ORDERED, not
+  // random: its leading bits encode a millisecond timestamp, so every account this script's
+  // roster-seeding batch creates in the same tight window shares a long common hex PREFIX. Keeping
+  // only the first 8 hex characters throws away exactly the part of the id that would have
+  // disambiguated them and keeps exactly the part that collides by construction — this was never a
+  // low-probability accident, it was near-guaranteed for any batch-created roster. Fixed to the FULL
+  // id, matching `upsertPersonNode`'s own established convention (`org-structure.service.ts`:
+  // `id: \`p-${person.userId}\``) — the two person-node mints in this codebase now agree, and a full
+  // uuidv7 has no realistic collision risk.
   const people = (nodeId: string): Node[] =>
     (placements.get(nodeId) ?? []).map((p) => ({
-      id: "p-" + p.id.slice(0, 8),
+      id: "p-" + p.id,
       name: p.name,
       kind: "person",
       assigneeId: p.id,

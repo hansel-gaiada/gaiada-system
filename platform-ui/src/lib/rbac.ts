@@ -137,6 +137,24 @@ export type Role =
 export const CAPABILITIES = [
   "admin.access",       // /admin/* (users, identity, modules, compliance, audit)
   "company.manage",     // company settings / module enablement
+  // `invoice.approve` — IAM-GAP-01/02's maker/checker seam (`POST /api/:t/invoices/:id/approve`).
+  // Verified directly against `resource_invoice.yaml`'s `approve` ALLOW rule: `derivedRoles:
+  // ["company_admin", "manager"]`, condition `inTenant && notLow`. The creator!=approver half of
+  // the rule (plus the structural `EFFECT_DENY` that closes the self-approval hole for every tier,
+  // platform_admin/group_executive included) is an ATTRIBUTE-INSTANCE check the server evaluates
+  // per invoice — this capability only answers "should the Approve control render at all", never
+  // "may THIS user approve THIS invoice". A 403 for self-approval, or for a legacy invoice with an
+  // unknown `createdBy` (the policy fails closed on those for company_admin/manager — only the
+  // platform_admin wildcard can still reach them), is real and expected even when this is `true`;
+  // the invoice page narrows further using the invoice's own `createdBy`, which this file cannot see.
+  //
+  // Deliberately its OWN capability, NOT folded into `company.manage`: `owner` holds
+  // `company.manage` below but is named NOWHERE in `resource_invoice.yaml`, and that file's own
+  // comment records that no `perm_invoice_approve` mirror exists either (IAM-04c doctrine — a flat
+  // permission mirror cannot express the creator!=approver condition without over-granting a
+  // company_admin/manager who IS the creator). Reusing `company.manage` for the Approve button would
+  // show an owner a control Cerbos will always refuse.
+  "invoice.approve",
   "org.edit",           // edit the org structure
   "people.directory",   // browse the people directory
   "rollups.view",       // cross-company rollups (global)
@@ -388,7 +406,7 @@ const HR_BASELINE_READS: Capability[] = ["hr.policy.view", "hr.recruitment.view"
 export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   company_admin: [
-    "admin.access", "company.manage", "org.edit", "people.directory", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
+    "admin.access", "company.manage", "invoice.approve", "org.edit", "people.directory", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
     // IAM-02a-FIX-2 — company_admin appears in every one of the five backing policies for these three
     // (resource_pipeline_run/stage/gate.yaml, resource_scope_signoff.yaml,
     // resource_webdev_provisioned_site.yaml), same as it always did for `approvals.decide`'s own
@@ -479,6 +497,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // refusal, never a silent one) — flagged here as the judgement call it is, not asserted as
     // risk-free in every one of `company.manage`'s several consuming surfaces.
     "company.manage",
+    // IAM-GAP-01 — manager is one of the two derivedRoles resource_invoice.yaml's `approve` rule
+    // names (the "department-manager tier, owner default" the policy's own comment cites).
+    "invoice.approve",
     // manager's bundle matches company_admin's on every social.* permission this file cites — same
     // Cerbos rule (`company_admin, manager` on both social_engagement and social_post), verified.
     "social.view", "social.manage", "social.scope.write", "social.post.delete",

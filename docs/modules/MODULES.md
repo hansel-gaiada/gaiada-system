@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.48.0` | IN PROGRESS | WS1 | 2026-08-31 |
-| platform-ui | `0.63.0` | IN PROGRESS | WS5 | 2026-09-02 |
+| platform-nest | `0.49.0` | IN PROGRESS | WS1 | 2026-09-02 |
+| platform-ui | `0.64.0` | IN PROGRESS | WS5 | 2026-09-02 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -63,7 +63,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.48.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.49.0` · IN PROGRESS
 **0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
 maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
 now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,
@@ -156,7 +156,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.63.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.64.0` · IN PROGRESS
+
+**0.64.0 (2026-09-02, IAM-GAP-01, the invoice maker/checker gets a UI — PROTOTYPED.)** The `POST /invoices/:id/approve` endpoint had shipped with no UI, so `approved` was unreachable from the app and no invoice could legitimately reach `sent`/`paid`. Adds the Approve action, the createdBy/approvedBy/approvedAt trail, and honest copy for the self-approval DENY. Full detail in CHANGELOG.md. Renumbered from 0.63.0 at merge — MON-20 had already claimed that version the same day.
 
 **0.63.0 (2026-09-02, MON-20, monitoring: channel/route/maintenance management UI — frontend-first,
 PROTOTYPED):** closes the gap the ticket was opened for — alert delivery has always worked in the
