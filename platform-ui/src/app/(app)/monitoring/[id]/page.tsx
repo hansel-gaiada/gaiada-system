@@ -5,7 +5,6 @@ import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import {
   getMonitor,
-  listResults,
   ageSeconds,
   formatAge,
   formatUptime,
@@ -67,10 +66,10 @@ export default async function MonitorDetailPage({ params }: { params: Promise<{ 
     return <EmptyNote>Select a company from the top bar.</EmptyNote>;
   }
 
-  const [monitor, results] = await Promise.all([
-    getMonitor(userId, tenant, id),
-    listResults(userId, tenant, id, "24h"),
-  ]);
+  // The monitor detail already embeds its last-24h results (MonitorDetail.results); there is no
+  // separate /results endpoint in the backend, and calling one 404'd and crashed this whole page.
+  // Use the embedded history.
+  const monitor = await getMonitor(userId, tenant, id);
 
   if (!monitor) {
     return (
@@ -91,7 +90,7 @@ export default async function MonitorDetailPage({ params }: { params: Promise<{ 
   const stale = isStale(monitor, now);
   const certDays = daysUntil(monitor.certExpiresAt, now);
   const domainDays = daysUntil(monitor.domainExpiresAt, now);
-  const history = results.length > 0 ? results : monitor.results ?? [];
+  const history = monitor.results ?? [];
 
   return (
     <>
