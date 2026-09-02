@@ -254,6 +254,46 @@ const KNOWN_NON_DRIFT: RegisterEntry[] = [
       "hr_manager genuinely holds core.automation_approval.decide (module-scoped to hr), so this file's biconditional flags it. But the one real call site, hrActions.ts's decideHrLeave, gates on `can(...,'approvals.decide',...) || can(...,'hr.manage',...)`, and hr_manager holds hr.manage — so the mirror gap is provably inert, not a live under-claim.",
     decisionRef: "IAM-02a drift register §3 (\"hr_manager + approvals.decide\" false positive, already ruled out)",
   },
+  // ── MON-20 (2026-09-02) — the permission catalog says `owner` holds all three; the ENFORCING
+  // Cerbos policy says it holds none. `cerbos/policies/resource_monitor_channel.yaml` and
+  // `resource_monitor_maintenance.yaml` each carry a "PERMISSION ARM DEFERRED, DELIBERATELY"
+  // comment stating outright that the fine-grained `monitoring.*` permission catalog is NOT yet
+  // wired to any Cerbos decision for this module ("a principal holding ONLY a fine-grained
+  // monitoring.* permission grant and no role is DENIED here until that arm lands. Fail-closed, and
+  // visible rather than silent"). Both files' actual `rules:` name only `platform_admin` (wildcard),
+  // `company_admin`, `manager` and `module_manager` — `owner`/`group_executive` appears in NEITHER
+  // rule, and `cerbos/policies/derived_roles.yaml` has no `owner`/`group_executive` derived-role
+  // entry at all, so a principal whose only grant is `role: "owner"` is denied by Cerbos on every
+  // monitor_* kind today, regardless of what `role-permission-bundles.json` (the catalog-side
+  // artifact this test reads) records administratively. Widening `ROLE_CAPS.owner` to satisfy this
+  // file's biconditional would be exactly the dangerous direction the register exists to catch in
+  // the OTHER direction from usual: it would make the UI mirror the catalog's fiction rather than
+  // the server's actual behaviour, showing `owner` a control that 403s with no visible reason. Flagged
+  // for the architect — this looks like `owner` has NO Cerbos-side reach into the `monitoring` module
+  // at all yet (not even read), which may itself be an unintended gap, but that is a Cerbos-policy
+  // fix, not an `ROLE_CAPS` one.
+  {
+    role: "owner",
+    capability: "monitoring.channel.manage",
+    direction: "under-claim",
+    reason:
+      "owner's bundle carries monitoring.channel.manage via the permission catalog only; resource_monitor_channel.yaml's `manage` rule names company_admin/manager/module_manager (+platform_admin wildcard), never owner/group_executive, and that policy's own comment says the permission-catalog arm is not wired to any decision yet.",
+    decisionRef: "cerbos/policies/resource_monitor_channel.yaml (rules + \"PERMISSION ARM DEFERRED\" comment); cerbos/policies/derived_roles.yaml (no owner/group_executive entry)",
+  },
+  {
+    role: "owner",
+    capability: "monitoring.maintenance.create",
+    direction: "under-claim",
+    reason: "Same cause as monitoring.channel.manage above: resource_monitor_maintenance.yaml's `create` rule names company_admin/manager/module_manager only.",
+    decisionRef: "cerbos/policies/resource_monitor_maintenance.yaml (rules + \"PERMISSION ARM DEFERRED\" comment); cerbos/policies/derived_roles.yaml (no owner/group_executive entry)",
+  },
+  {
+    role: "owner",
+    capability: "monitoring.maintenance.delete",
+    direction: "under-claim",
+    reason: "Same cause as monitoring.channel.manage above: resource_monitor_maintenance.yaml's `delete` rule names company_admin/manager/module_manager only.",
+    decisionRef: "cerbos/policies/resource_monitor_maintenance.yaml (rules + \"PERMISSION ARM DEFERRED\" comment); cerbos/policies/derived_roles.yaml (no owner/group_executive entry)",
+  },
 ];
 
 const knownNonDriftKey = (role: string, capability: Capability) => `${role} ${capability}`;

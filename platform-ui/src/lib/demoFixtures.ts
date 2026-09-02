@@ -2182,7 +2182,7 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     } };
   }
 
-  const monitoring = monitoringDemo(method, p, url.searchParams);
+  const monitoring = monitoringDemo(method, p, url.searchParams, body);
   if (monitoring) return monitoring;
 
   // Client portal DASHBOARD (CP-2..CP-5) — overview/projects/timeline/deliverables/invoices/contracts/

@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.48.0` | IN PROGRESS | WS1 | 2026-08-31 |
-| platform-ui | `0.62.0` | IN PROGRESS | WS5 | 2026-08-31 |
+| platform-ui | `0.63.0` | IN PROGRESS | WS5 | 2026-09-02 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -156,7 +156,72 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.62.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.63.0` · IN PROGRESS
+
+**0.63.0 (2026-09-02, MON-20, monitoring: channel/route/maintenance management UI — frontend-first,
+PROTOTYPED):** closes the gap the ticket was opened for — alert delivery has always worked in the
+backend (`runner.ts` fans an incident out `monitor_routes -> monitor_channels -> enqueueMail`) but
+there was no way for a human to create a channel or a route, so `/monitoring/channels` rendered a
+technically-true, practically-useless "no channels configured" empty state. New: create/edit/
+enable-disable/delete a channel + send-test-notification (`ChannelManager.tsx`), create/edit/delete
+a route (`RouteManager.tsx`), a maintenance-window scheduler + cancel at a new
+`/monitoring/maintenance` page (`MaintenanceManager.tsx`), and a windowed (24h/7d/30d) results panel
+on `/monitoring/[id]` that replaces the page's own embedded-24h-only history.
+
+Built frontend-first, but the companion backend ticket landed real channel/route/maintenance-write
+endpoints in the same window, so the UI honours the confirmed real contract rather than a guess:
+POSTs return 201; only `email` channels have a delivery driver (the other four kinds can be
+created/routed, but "Send test" renders disabled with "No driver yet" rather than a button that
+always 400s, and the destination field is client-validated as a plausible email before submit);
+routes authorize under the existing `monitor_channel` Cerbos kind (confirmed, not assumed) so they
+ride `monitoring.channel.manage`, with no dedicated route permission; `channelHealth()` reads
+"unused" for every channel because `last_delivery_at`/`last_delivery_ok`/`failure_count` are
+schema-only columns nothing writes yet, and the UI says so plainly rather than implying a badge
+means verified delivery.
+
+`lib/monitoringActions.ts` gains `saveChannel`/`setChannelEnabled`/`deleteChannel`/`saveRoute`/
+`deleteRoute`/`deleteMaintenance`, all gated with `can()` (defence-in-depth; Cerbos is the real
+boundary). `lib/rbac.ts` gains `monitoring_staff`/`monitoring_manager` (module_staff/module_manager
+derived roles Cerbos will look for by name) and three capabilities — `monitoring.channel.manage`,
+`monitoring.maintenance.create`, `monitoring.maintenance.delete` — the module had NONE before this,
+so every existing monitoring page rendered its write affordances ungated. Every grant is cited
+against the ENFORCING Cerbos policy (`resource_monitor_channel.yaml` / `resource_monitor_
+maintenance.yaml`'s actual `rules:`, not the permission catalog): `company_admin`/`manager`/
+`monitoring_manager` hold all three, `monitoring_staff` and **`owner` hold none**.
+`monitoring_staff` also gains `people.directory` (DR-7 precedent, a genuine mirror omission the
+parity test caught, fixed the same way hr_staff/search_staff/reports_staff already were — not a
+MON-20 design choice).
+
+**A genuine finding for the architect, not silently resolved:** `platform-nest/src/rbac/
+role-permission-bundles.json` (seeded by migrations `0117_iam_monitoring_permissions.sql` +
+`202608191417_iam_monitoring_permissions_completion.sql`) lists `owner` holding all three write
+capabilities. The actual Cerbos policy does not — both resource files carry a "PERMISSION ARM
+DEFERRED, DELIBERATELY" comment stating the fine-grained permission catalog is not wired to any
+decision yet, their `rules:` name only `platform_admin`/`company_admin`/`manager`/`module_manager`,
+and `derived_roles.yaml` has no `owner`/`group_executive` entry at all — so an `owner`-only grant is
+denied by Cerbos on every `monitor_*` kind today, not even read. `rbac.ts` mirrors the ENFORCING
+policy (excludes `owner`); three `KNOWN_NON_DRIFT` entries were added to
+`rbac-capability-parity.test.ts` citing exactly this, rather than widening `ROLE_CAPS.owner` to
+mirror a fiction the server will 403. May be intentional on a brand-new module, may be an oversight —
+a Cerbos-policy question, not a UI-mirror one.
+
+`lib/monitoring.ts`'s `listResults` changed shape from `Promise<MonitorResult[]>` to
+`Promise<{available, results}>` (nothing else called it) so a genuinely-empty window is
+distinguishable from "the endpoint isn't built yet" — the exact ambiguity `[id]/page.tsx:70`'s own
+comment flagged as a past regression (a 404 there used to crash the page). That file's own BFF-
+contract doc-comment block was also rewritten (it still said the backend module didn't exist and
+omitted channels/routes entirely). `demoMonitoring.ts`'s channels/routes/maintenance fixtures moved
+from module-level consts to a `globalThis`-backed store (same pattern as
+`demoWebdevProvisionedSites.ts`) so a create/edit/delete actually persists across the action-graph/
+RSC-graph split; also fixed a latent bug where this file's `err()` keyed the error body `{message}`
+instead of the `{error}` key `platformFetch`'s DEMO_MODE branch actually reads — every demo error in
+this module was silently discarded in favour of a generic `"platform <status>"` before this.
+
+**Caps at PROTOTYPED, not DEV-VERIFIED:** verified with `tsc --noEmit` + `vitest run` on the shared
+Linux test host and driven in a browser under `DEMO_MODE=1`. Not driven against a genuinely live
+platform-nest running the companion ticket's real endpoints — the code is written to the confirmed
+real contract, which is narrower than having watched it work live end-to-end. That combination is
+the natural next verification step.
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the

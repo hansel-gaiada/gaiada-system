@@ -3436,8 +3436,35 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
     tenant-wide window, `"monitor:<uuid>"` for a monitor-scoped one — matching
     `platform-ui/src/lib/monitoringActions.ts`'s `scheduleMaintenance` form field exactly, so no
     second representation needs to stay in sync.
+16. **MON-20 — `GET /monitors/:id/results?window` must 404 (or 403/405) when it genuinely does not
+    exist, and return `200 []` (never a synthesized row) for a real monitor with zero checks in that
+    window.** The UI (`lib/monitoring.ts`'s `listResults`) treats those as different states —
+    `{available:false}` vs `{available:true, results:[]}` — and renders different copy for each. A
+    500 or a network fault must still propagate (do not catch those into either shape).
+17. **MON-20 — channel/route write bodies.** `POST`/`PATCH /channels[/:id]` accept
+    `{kind, name, destination, enabled}` (all but `enabled` required on create; any subset on PATCH).
+    `POST`/`PATCH /routes[/:id]` accept `{channelId, matchClientId?, matchSeverity?, matchKind?,
+    enabled}` (`channelId` required on create, must reference an existing channel — 400 if not).
+    `DELETE /channels/:id` should cascade-delete or reject-if-referenced routes pointing at it; the
+    UI's DEMO_MODE fixture cascades (see `lib/demoMonitoring.ts`'s comment on that choice) but this is
+    a UI-side guess, not a locked decision — pick whichever the real schema's FK constraint implies
+    and update `lib/monitoringActions.ts`'s `deleteChannel` doc comment to match.
+18. **MON-20 — `DELETE /maintenance/:id` cancels a window; it is not sensitive server-side** (ending
+    suppression early is the opposite of concealing an outage — see monitoring-program.md §14's own
+    reasoning for why `.create` and `.delete` are catalogued as two permissions, not one).
+19. **Deleting a channel does NOT delete its routes, and the DEMO_MODE fixture disagrees
+    with production on this.** `monitor_routes.channel_id` carries `ON DELETE CASCADE`
+    (`0116_module_monitoring.sql`:198), but `DELETE /channels/:id` is a SOFT delete, so the FK
+    cascade never fires and the route row survives its channel. Delivery is still safe — the
+    runner's fan-out filters `ch.enabled = true AND ch.deleted_at IS NULL` (`runner.ts`:311), so
+    nothing is ever sent to a deleted channel. The visible consequence is cosmetic and honest:
+    `RouteManager` renders `r.channelName ?? r.channelId`, so an orphaned route shows a raw uuid
+    instead of a name. `lib/demoMonitoring.ts` CASCADES instead, so demo and production diverge
+    here — resolved at merge (2026-09-02) from the schema and the runner, replacing what both
+    tickets had each documented as a guess. If the divergence is closed, make the FIXTURE match
+    production (stop cascading), not the other way round.
 
-### UI consumers (built 2026-08-13)
+### UI consumers (built 2026-08-13; MON-20 additions 2026-09-02)
 
 - `/monitoring` — operations board: KPI tiles, worst-first monitor table, open incidents, explicit
   stale-monitor callout, explicit backend-absent state.
@@ -3448,13 +3475,22 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
   disabled rather than hidden.
 - `/monitoring/channels` — notification channels + routes, surfacing three quiet failure modes:
   a channel failing its last 3 deliveries, an enabled channel with no route pointing at it, and a
-  catch-all route that matches every event.
+  catch-all route that matches every event. MON-20: full create/edit/enable-disable/delete on
+  channels (`ChannelManager.tsx`) and create/edit/delete on routes (`RouteManager.tsx`), gated on
+  `monitoring.channel.manage`; a viewer without it sees the same tables read-only.
+- `/monitoring/maintenance` (MON-20, new) — list + schedule + cancel maintenance windows, gated on
+  `monitoring.maintenance.create`/`.delete` (`MaintenanceManager.tsx`).
 - Writes: `lib/monitoringActions.ts` (`createMonitor`, `acknowledgeIncident`, `scheduleMaintenance`,
-  `testChannel`).
+  `deleteMaintenance`, `testChannel`, `saveChannel`, `setChannelEnabled`, `deleteChannel`,
+  `saveRoute`, `deleteRoute` — MON-20 added the last six).
 - Nav: **Business → Monitoring** (`components/shell/nav.ts`, indexed in `docs/sidebar-nav-map.md`).
+  `/monitoring/maintenance` is reached from in-page links (board page + channels page), not a new
+  top-level nav entry.
 - DEMO_MODE fixtures: `lib/demoMonitoring.ts` — seeded with a down/degraded/stale/maintenance/
   unknown/never-checked spread plus expiring cert and domain, so every branch is drivable with no
-  backend. Wired into `demoFixtures.getDemoResponse`.
+  backend. Wired into `demoFixtures.getDemoResponse`. MON-20: channels/routes/maintenance are now a
+  writable `globalThis`-backed store (create/edit/delete persist for the session), and
+  `/results?window=` actually filters by window so the 24h/7d/30d switcher has something to show.
 
 ---
 
