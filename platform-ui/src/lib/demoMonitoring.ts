@@ -366,8 +366,14 @@ const MAINTENANCE: MaintenanceWindowRow[] = ((globalThis as Record<symbol, unkno
   },
 ]) as MaintenanceWindowRow[];
 
-let seq = 100;
-const nid = (prefix: string) => `${prefix}-demo-${++seq}`;
+// The id counter needs the SAME globalThis pinning as the three stores above, for the same reason: a
+// plain module-level `let` gives the action graph and the RSC read graph one counter each, so two
+// creates in one session can mint the SAME id — which surfaced as React's "two children with the
+// same key" error (ch-demo-101/102) during a dark-theme pass. Boxed in an object because a bare
+// number cannot be incremented through the `??=` expression by reference.
+const SEQ_STORE_KEY = Symbol.for("gaiada.demoMonitoring.seq");
+const SEQ = ((globalThis as Record<symbol, unknown>)[SEQ_STORE_KEY] ??= { n: 100 }) as { n: number };
+const nid = (prefix: string) => `${prefix}-demo-${++SEQ.n}`;
 
 function channelName(id: string): string | null {
   return CHANNELS.find((c) => c.id === id)?.name ?? null;
