@@ -7,6 +7,16 @@
 // `canManage` is COSMETIC — it hides the affordances for a user who would get a 403 anyway, so a
 // dead button never renders. The server (Cerbos `monitoring.channel.manage`) is the real gate; every
 // action in `monitoringActions.ts` re-checks it, so hiding the button here is a courtesy, not a lock.
+//
+// ── TWO BACKEND REALITIES THIS UI MUST NOT PAPER OVER (per T1's landed implementation) ───────────
+// 1. Only `email` has a delivery driver today. The other four kinds (telegram/ntfy/webhook/wa/mcp)
+//    can be created and routed, but a test send — and real delivery — 400s for all of them. Offering
+//    a working-looking "Send test" button on those would be exactly the false-green failure this
+//    whole module exists to replace, so it renders disabled with an honest reason instead.
+// 2. `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` are schema-only columns nothing writes yet, so
+//    `channelHealth()` reads "unused" for every channel regardless of whether it has ever actually
+//    delivered anything successfully. The Health column says so plainly rather than implying a
+//    green/"active" badge means verified delivery.
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, HairlineTable, StatusBadge } from "@/components/ui";
@@ -20,6 +30,17 @@ const HEALTH_LABEL: Record<string, string> = {
   failing: "critical",
   unused: "draft",
 };
+
+/** The only channel kind with a real delivery driver today. Everything else can be configured and
+ *  routed (so the UI does not hide them), but a test send — and real delivery — will 400. */
+const KINDS_WITH_DRIVER = new Set(["email"]);
+
+/** The backend 400s on a missing/implausible `destination` for `email` at create time; catching it
+ *  client-side turns that into an inline field message instead of a round-trip toast. Deliberately
+ *  loose (this is a client-side pre-check, not the validator) — the server's rule is authoritative. */
+function looksLikeEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+}
 
 const labelStyle = {
   font: "600 11px var(--font-body)",
@@ -59,6 +80,10 @@ export function ChannelManager({ tenantId, channels, canManage }: {
   function save() {
     if (!draft) return;
     setError(null);
+    if (draft.kind === "email" && !looksLikeEmail(draft.destination)) {
+      setError("Enter a real email address — the backend rejects anything else for this kind.");
+      return;
+    }
     const fd = new FormData();
     fd.set("tenantId", tenantId);
     if (draft.id) fd.set("channelId", draft.id);
@@ -127,37 +152,54 @@ export function ChannelManager({ tenantId, channels, canManage }: {
           about them.
         </EmptyNote>
       ) : (
-        <HairlineTable
-          columns={[
-            { label: "Channel" },
-            { label: "Kind" },
-            { label: "Destination" },
-            { label: "Health" },
-            { label: "Last delivery" },
-            ...(canManage ? [{ label: "Actions" }] : []),
-          ]}
-          rows={channels.map((c) => [
-            c.name,
-            c.kind,
-            c.destination ?? "—",
-            <StatusBadge key={`h-${c.id}`} label={HEALTH_LABEL[channelHealth(c)] ?? "draft"} />,
-            c.lastDeliveryAt
-              ? `${formatAge(ageSeconds(c.lastDeliveryAt, now))}${c.lastDeliveryOk === false ? " (failed)" : ""}`
-              : "never",
-            ...(canManage
-              ? [
-                  <div key={`a-${c.id}`} style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <Button size="sm" variant="ghost" onClick={() => edit(c)} disabled={pending}>Edit</Button>
-                    <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={pending}>
-                      {c.enabled ? "Disable" : "Enable"}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => sendTest(c)} disabled={pending}>Send test</Button>
-                    <Button size="sm" variant="ghost" onClick={() => remove(c)} disabled={pending}>Delete</Button>
-                  </div>,
-                ]
-              : []),
-          ])}
-        />
+        <>
+          <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 10 }}>
+            Health is not yet backed by real delivery tracking — the backend does not record a
+            channel&apos;s last send outcome, so every channel shows &quot;draft&quot; here
+            regardless of whether it has actually delivered anything. Only <strong>email</strong> has
+            a delivery driver; the others can be configured and routed but cannot send yet.
+          </p>
+          <HairlineTable
+            columns={[
+              { label: "Channel" },
+              { label: "Kind" },
+              { label: "Destination" },
+              { label: "Health" },
+              { label: "Last delivery" },
+              ...(canManage ? [{ label: "Actions" }] : []),
+            ]}
+            rows={channels.map((c) => {
+              const hasDriver = KINDS_WITH_DRIVER.has(c.kind);
+              return [
+                c.name,
+                c.kind,
+                c.destination ?? "—",
+                <StatusBadge key={`h-${c.id}`} label={HEALTH_LABEL[channelHealth(c)] ?? "draft"} />,
+                c.lastDeliveryAt
+                  ? `${formatAge(ageSeconds(c.lastDeliveryAt, now))}${c.lastDeliveryOk === false ? " (failed)" : ""}`
+                  : "never",
+                ...(canManage
+                  ? [
+                      <div key={`a-${c.id}`} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <Button size="sm" variant="ghost" onClick={() => edit(c)} disabled={pending}>Edit</Button>
+                        <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={pending}>
+                          {c.enabled ? "Disable" : "Enable"}
+                        </Button>
+                        {hasDriver ? (
+                          <Button size="sm" variant="ghost" onClick={() => sendTest(c)} disabled={pending}>Send test</Button>
+                        ) : (
+                          <span title="No delivery driver exists for this kind yet" style={{ fontSize: 12, opacity: 0.55 }}>
+                            No driver yet
+                          </span>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => remove(c)} disabled={pending}>Delete</Button>
+                      </div>,
+                    ]
+                  : []),
+              ];
+            })}
+          />
+        </>
       )}
 
       {/* role="status" (polite, not "log") — a one-shot result for the single test just fired, never
@@ -204,8 +246,9 @@ export function ChannelManager({ tenantId, channels, canManage }: {
                   style={{ width: "100%", padding: "8px 10px" }}
                 />
                 <p style={{ fontSize: 12, marginTop: 6, opacity: 0.7 }}>
-                  A webhook URL with an embedded token is a credential — the backend redacts it in
-                  every read after this save, so paste it here once.
+                  {draft.kind === "email"
+                    ? "Must be a real email address — the backend rejects anything else for this kind."
+                    : "No delivery driver exists for this kind yet, so it can be saved and routed but a test send will fail. A webhook URL with an embedded token is a credential — the backend redacts it in every read after this save, so paste it here once."}
                 </p>
               </div>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>

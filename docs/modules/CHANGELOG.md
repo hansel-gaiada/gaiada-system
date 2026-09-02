@@ -17,16 +17,27 @@ The backend has fanned incidents out `monitor_routes -> monitor_channels -> enqu
 runner shipped (`platform-nest/src/modules/monitoring/runner.ts:293-345`), but nothing let a human
 create either half of that path — `/monitoring/channels` only ever listed them, and its own empty
 state ("Monitoring will still record incidents, but nobody will be told") was literally true in
-production. This ticket closes the loop, frontend-first (the backend write endpoints for channels/
-routes/maintenance are all `⏳ PENDING` per `docs/FRONTEND-BFF-CONTRACT.md`'s Monitoring section).
+production. Built frontend-first; the companion backend ticket landed real channel/route/
+maintenance-write endpoints in the same window, so this UI is written against the confirmed real
+contract (see the deviations noted below), not a guess — see Verification for exactly what was
+driven live versus DEMO_MODE only.
 
 **Added**
 - Channel create/edit/enable-disable/delete + "send test notification" with the result surfaced
   inline (`role="status"`, not `role="log"` — this is a one-shot result, not a running feed) —
-  `components/monitoring/ChannelManager.tsx`, wired into `/monitoring/channels`.
+  `components/monitoring/ChannelManager.tsx`, wired into `/monitoring/channels`. Honest about two
+  backend realities instead of papering over them: only `email` has a delivery driver today (the
+  other four kinds can be created and routed, but "Send test" renders disabled with "No driver yet"
+  rather than a button that always 400s), and `channelHealth()` reads "unused" for every channel
+  because `last_delivery_at`/`last_delivery_ok`/`failure_count` are schema-only columns nothing
+  writes yet — the card says so plainly instead of implying a badge means verified delivery. The
+  create/edit form also validates an `email` destination looks like an email address client-side
+  (the backend 400s on a missing/implausible one at create) — a field message, not a round-trip toast.
 - Route create/edit/delete, so a channel is actually reachable — an enabled channel with no route
   delivers nothing, which is exactly the `unrouted` warning that page already computed but could not
-  previously be fixed from — `components/monitoring/RouteManager.tsx`.
+  previously be fixed from — `components/monitoring/RouteManager.tsx`. Gated on
+  `monitoring.channel.manage`, CONFIRMED (not assumed) correct: routes authorize under the existing
+  `monitor_channel` Cerbos kind, no dedicated route permission exists.
 - A new `/monitoring/maintenance` page: schedule + cancel a maintenance window, so a planned outage
   doesn't page anyone (and doesn't corrupt SLA math either — `.create` is `sensitive: true`
   server-side for exactly that reason) — `components/monitoring/MaintenanceManager.tsx`.
@@ -37,16 +48,37 @@ routes/maintenance are all `⏳ PENDING` per `docs/FRONTEND-BFF-CONTRACT.md`'s M
   `[id]/page.tsx:70` comment used to record (a 404 there once crashed the whole page).
 - Three new capabilities in `lib/rbac.ts` — `monitoring.channel.manage`,
   `monitoring.maintenance.create`, `monitoring.maintenance.delete` — plus the `monitoring_staff`/
-  `monitoring_manager` `Role` members (Cerbos will only ever look for those exact derived-role names
-  per monitoring-program.md §14). **The monitoring module had zero capabilities in this file before
-  this change**, so every write affordance on every monitoring page — including the pre-existing
-  "+ New monitor" link and the maintenance form `scheduleMaintenance` already exposed — was
-  previously ungated in the UI. `company_admin`/`manager`/`owner` hold all three (`manager`'s grant
-  is a live-verified finding per §13.1: "manager: all 14 [monitoring actions]", not a guess);
-  `monitoring_staff` holds none (§13.2's probed DENY on `channel:manage`/`maintenance:create`);
-  `monitoring_manager` holds all three (probed ALLOW on `maintenance:create`, `channel:manage`
-  pattern-matched from the same staff/manager split every other module here uses — flagged as
-  inferred, not probed, in the code comment, since MON-20 has no live Cerbos bundle yet).
+  `monitoring_manager` `Role` members (Cerbos will only ever look for those exact derived-role names).
+  **The monitoring module had zero capabilities in this file before this change**, so every write
+  affordance on every monitoring page — including the pre-existing "+ New monitor" link and the
+  maintenance form `scheduleMaintenance` already exposed — was previously ungated in the UI.
+  `monitoring_staff` also gains `people.directory` (DR-7 precedent — its generated bundle carries
+  `core.member.read` via `resource_member.yaml`'s unconditional `module_staff` baseline, same as
+  hr_staff/search_staff/reports_staff already hold; a genuine mirror omission the capability-parity
+  test caught, not a MON-20 design choice, fixed the identical way those three were).
+- Every grant is cited against the ENFORCING Cerbos policy
+  (`cerbos/policies/resource_monitor_channel.yaml` / `resource_monitor_maintenance.yaml`'s actual
+  `rules:`), not the permission catalog — see the finding below for why that distinction mattered
+  here specifically. `company_admin`/`manager`/`monitoring_manager` hold all three;
+  `monitoring_staff` and **`owner` hold none of them.**
+
+**A genuine finding, flagged for the architect rather than silently resolved either way.** The
+permission catalog (`platform-nest/src/rbac/role-permission-bundles.json`, seeded by migrations
+`0117_iam_monitoring_permissions.sql` + `202608191417_iam_monitoring_permissions_completion.sql`)
+lists `owner` holding all three of these capabilities. The actual Cerbos policy does not: both
+`resource_monitor_channel.yaml` and `resource_monitor_maintenance.yaml` carry a "PERMISSION ARM
+DEFERRED, DELIBERATELY" comment stating outright that "a principal holding ONLY a fine-grained
+monitoring.* permission grant and no role is DENIED here until that arm lands" — their `rules:` name
+only `platform_admin` (wildcard), `company_admin`, `manager` and `module_manager`, never
+`owner`/`group_executive`, and `cerbos/policies/derived_roles.yaml` has no `owner`/`group_executive`
+derived-role entry at all. A principal whose only grant is `role: "owner"` is therefore denied by
+Cerbos on every `monitor_*` kind today — not even read — regardless of what the catalog bundle
+records administratively. `rbac.ts` mirrors the ENFORCING policy (excludes `owner`); three
+`KNOWN_NON_DRIFT` entries were added to `rbac-capability-parity.test.ts` documenting exactly this,
+each citing the same two policy files, rather than either (a) silently widening `ROLE_CAPS.owner` to
+match the catalog and mirror a fiction the server will 403, or (b) leaving the parity test red with
+no explanation. This may be an intentional gap on a brand-new module or an oversight; either way it
+is a Cerbos-policy question, not something this UI-mirror ticket can or should resolve.
 
 **Changed**
 - `lib/monitoringActions.ts`'s `ctx()` now also resolves `me` (via `getMe`), so every new action can
@@ -66,20 +98,24 @@ routes/maintenance are all `⏳ PENDING` per `docs/FRONTEND-BFF-CONTRACT.md`'s M
   `{ error }`, which is what `platformFetch`'s DEMO_MODE branch actually reads — so every `err(...)`
   call in this module was silently discarded in favour of a generic `"platform <status>"` before this.
   Harmless while nothing surfaced the message; MON-20's new write actions do.
-- `docs/FRONTEND-BFF-CONTRACT.md` §20 gains the new endpoint rows (channel/route POST/PATCH/DELETE,
-  maintenance DELETE), all `⏳ PENDING` — for whoever builds the backend to match.
+- `lib/monitoring.ts`'s own BFF-contract doc-comment block was rewritten — it still said "the backend
+  `monitoring` module does not exist yet" and omitted channels/routes entirely, both stale the moment
+  the companion backend ticket landed. (`docs/FRONTEND-BFF-CONTRACT.md` §20 itself is maintained by
+  that ticket, not here — avoiding a duplicate edit surface for the same table.)
 
-**Verification — PROTOTYPED, not DEV-VERIFIED.** Driven in a browser under `DEMO_MODE=1` only; no
-live platform-nest backend exists for the new endpoints yet (confirmed: `monitoring.controller.ts`
-has no channel/route routes at all as of this change). `tsc --noEmit` + the full `vitest run` for
-`platform-ui` were run in a container on the shared Linux test host, not locally — see the ticket's
-own verification report for the exact file/test/pass/fail/skip counts.
+**Verification.** `tsc --noEmit` + the full `vitest run` for `platform-ui` were run in a container on
+the shared Linux test host, not locally. Driven in a browser under `DEMO_MODE=1`; no live
+platform-nest was stood up here for a manual click-through against the companion ticket's real
+endpoints, so that specific combination (this UI against a genuinely live backend) was not itself
+driven end-to-end — the code is written to the confirmed real contract, which is a narrower claim
+than having watched it work live. See the ticket's own verification report for the exact
+file/test/pass/fail/skip counts and what was actually seen in the browser.
 
 **Known gaps / follow-ups**
-- The backend endpoints this UI is built against are all `⏳ PENDING` — see the contract doc.
-- `monitoring_staff`/`monitoring_manager`'s exact split is pattern-matched for the parts §13.2 never
-  probed (`channel.manage` for the manager tier, `maintenance.delete` for staff); flagged in the code
-  comments rather than asserted as verified.
+- The `owner` monitoring-access discrepancy above — a Cerbos-policy question for the architect, not
+  fixable from this file.
+- This UI was never driven against a genuinely live platform-nest with the companion ticket's
+  endpoints running — only DEMO_MODE. A live end-to-end pass is the natural next verification step.
 - No status-page surface, no `monitoring.monitor.*`/`monitoring.incident.*` capabilities — out of this
   ticket's scope; not read by any page this change touches.
 

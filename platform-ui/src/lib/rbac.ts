@@ -108,11 +108,13 @@ export type Role =
   // ONLY names Cerbos will ever look for). Same defect class this file's own header warns about —
   // added alongside the channel/route/maintenance management UI rather than left absent, because an
   // absent `Role` member is not "no grant", it's "every capability check silently resolves false for
-  // a real holder". `monitoring.controller.ts` does not exist for channels/routes yet (this module is
-  // frontend-first, per the FRONTEND-BFF-CONTRACT), so — unlike finance_staff/manager above — there
-  // is no live bundle to verify these two against; the split below is taken directly from
-  // monitoring-program.md §13.2's PROBED Cerbos decisions (`monitoring_staff` DENY on
-  // `maintenance:create`/`channel:manage`; `monitoring_manager` ALLOW), not guessed.
+  // a real holder". `monitoring.controller.ts` has no channel/route ENDPOINTS yet (this module is
+  // frontend-first, per the FRONTEND-BFF-CONTRACT), but the Cerbos POLICY is already live —
+  // `cerbos/policies/resource_monitor_channel.yaml` / `resource_monitor_maintenance.yaml` name
+  // `module_staff`/`module_manager` in their own `rules:`, string-composed at request time from
+  // these two role names — so the split in `ROLE_CAPS` below is read directly off that enforcing
+  // policy, not the (separately seeded, and per those same files' own comment NOT YET WIRED to any
+  // decision) permission catalog.
   | "monitoring_staff" | "monitoring_manager"
   // `owner` — the holding-wide BUSINESS authority, granted per owned company (see the IAM-15 note on
   // `group_executive` above, which `owner` replaced). It carries 330 permissions in the bundles,
@@ -419,8 +421,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     ...REPORT_READS, ...EXEC_ONLY_REPORTS, "reports.ops.poll", "checkin.read", "checkin.excuse", "appraisal.read",
     // GM-09: the tenant's own administrator holds the finance read tier in the bundles.
     "finance.statement.view", "finance.ar.view",
-    // MON-20: every monitoring resource policy names `company_admin` alongside `monitoring_manager`
-    // (monitoring-program.md §13.2's probe table) — the tenant admin holds the manager tier here too.
+    // MON-20: `company_admin` is named directly in `cerbos/policies/resource_monitor_channel.yaml`'s
+    // `["read","manage"]` rule and `resource_monitor_maintenance.yaml`'s `["read","create","delete"]`
+    // rule (both `inTenant && notLow`) — the actual enforcement, not just the permission catalog
+    // (see `owner`'s comment below for why that distinction matters here specifically).
     "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
@@ -486,9 +490,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // ledger.yaml's own header: the override sits one tier up, with company_admin).
     "social.ledger.read",
     ...REPORT_READS, "checkin.read", "checkin.excuse", "appraisal.read", "appraisal.score",
-    // MON-20 — the second-gap fix recorded in monitoring-program.md §13.1 found `manager` holding
-    // ZERO monitoring bundle rows despite every monitoring policy naming it explicitly (19 rows were
-    // added there: "manager: all 14"). This mirrors that live finding, not a guess.
+    // MON-20 — `manager` sits on the SAME rule as `company_admin` in both
+    // `resource_monitor_channel.yaml` and `resource_monitor_maintenance.yaml`
+    // (`derivedRoles: ["company_admin", "manager"]`, `inTenant && notLow`) — direct citation from
+    // the enforcing policy, not the permission catalog.
     "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
@@ -673,20 +678,26 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // write-off, waive) is real in Cerbos but has no capability in this file yet, because no UI reads
   // it — see the union comment.
   finance_manager: ["finance.statement.view", "finance.ar.view"],
-  // MON-20 — `monitoring_staff` holds NONE of the three write capabilities, per the §13.2 probe:
-  // ALLOW on `monitor:read`/`create`/`incident:acknowledge`, DENY on `channel:manage` and
-  // `maintenance:create`. `maintenance:delete` was not itself probed, but it is the SAME
-  // `monitor_maintenance` kind the probe denied `staff` on for `create` (module_staff is not named
-  // in that policy's elevated-action rule at all), so granting delete here without evidence would be
-  // exactly the "guess, not evidence" this file's own discipline forbids — left out until a real
-  // bundle or a probe says otherwise. Staff can still run the desk (acknowledge incidents, read
-  // everything); they cannot touch delivery config or suppress alerting.
-  monitoring_staff: [],
-  // `monitoring_manager` — Cerbos module_manager for `resource.attr.module === "monitoring"`. The
-  // §13.2 probe ALLOWed `monitor:delete`/`maintenance:create`/`status_page:publish` for this role
-  // directly; `channel:manage` is inferred from the SAME module_manager pattern every other module in
-  // this file uses (hr/search/social: manager tier gets what staff tier is denied), not probed
-  // independently — flagged here rather than asserted as verified, since MON-20 has no live bundle.
+  // MON-20 — `monitoring_staff` holds NONE of the three write capabilities. Directly verified
+  // against the ENFORCING policy: `resource_monitor_channel.yaml` and
+  // `resource_monitor_maintenance.yaml` both grant `module_staff` (the derived role a
+  // `monitoring_staff` grant activates) only `["read"]`, on its own separate rule from
+  // `module_manager`'s `["read","manage"]` / `["read","create","delete"]`. Also matches the
+  // permission-catalog seed (`0117_iam_monitoring_permissions.sql`'s own comment: "what staff
+  // deliberately does NOT get: channel.manage, maintenance.create, monitor.delete and
+  // status_page.publish — the four that either reach outside the ERP, hide an outage, or destroy
+  // history") and the generated `role-permission-bundles.json` (10 permissions, none of the three).
+  // Staff can still run the desk (acknowledge incidents, read everything); they cannot touch
+  // delivery config or suppress alerting.
+  // DR-7 precedent (see hr_staff's comment above for the full citation) — `people.directory` ADDED:
+  // `monitoring_staff`'s generated bundle carries `core.member.read` (`resource_member.yaml`'s
+  // `module_staff` baseline tenant-directory rule, unconditional, same as hr_staff/search_staff/
+  // reports_staff). `monitoring_manager` does NOT carry it (that rule names `module_staff` only),
+  // matching the identical staff-only split those three other module pairs already draw.
+  monitoring_staff: ["people.directory"],
+  // `monitoring_manager` — the derived role `module_manager` activates on a `monitoring_manager`
+  // grant. Directly named in both policies' `["read","manage"]` / `["read","create","delete"]`
+  // `module_manager` rule (`inTenant && notLow`) — the enforcing policy, not just the catalog.
   monitoring_manager: ["monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete"],
   owner: [
     "admin.access", "appraisal.read", "approvals.decide", "approvals.retry", "checkin.excuse",
@@ -696,8 +707,22 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "it.manage", "knowledge.review", "lms.assign", "lms.authoring", "lms.catalogue.view", "lms.grade",
     "lms.progress.view", "lms.publish", "lms.waive", "org.edit", "people.directory", "pipeline.manage",
     "pipeline.write", "pm.contribute", "pm.manage",
-    // MON-20: the holding-wide business authority holds the monitoring manager tier too.
-    "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
+    // MON-20: deliberately NOT granted, despite `platform-nest/src/rbac/role-permission-
+    // bundles.json` (the generated artifact `rbac-capability-parity.test.ts` diffs against) listing
+    // `owner` holding all three. That bundle is administrative catalog data the resource policies
+    // THEMSELVES say is not yet connected to any decision:
+    // `cerbos/policies/resource_monitor_channel.yaml` / `resource_monitor_maintenance.yaml`'s own
+    // "PERMISSION ARM DEFERRED, DELIBERATELY" comment states outright that "a principal holding
+    // ONLY a fine-grained monitoring.* permission grant and no role is DENIED here until that arm
+    // lands. Fail-closed, and visible rather than silent." The actual `rules:` in BOTH files name
+    // only `platform_admin` (wildcard), `company_admin`, `manager` and `module_manager` — never
+    // `owner` or `group_executive` — and `derived_roles.yaml` has no `owner`/`group_executive` entry
+    // at all, so a principal whose only grant is `role: "owner"` matches NONE of those derived
+    // roles and is denied by Cerbos regardless of what the catalog bundle says. Mirroring the
+    // bundle here would be the exact "safe-looking button that 403s" failure this file exists to
+    // avoid — worse, a SILENT one, since `owner` would see the affordance and get denied with no
+    // visible reason. Flagged for the architect: `owner` appears to have NO Cerbos-side access to
+    // ANY monitor_* kind today (not even read), which may be a genuine gap rather than intended.
     "reports.company.view", "reports.department.view",
     "reports.facts.admin", "reports.ops.poll", "reports.period.seal", "reports.person.view",
     "reports.project.view", "search.campaign.launch", "search.ledger.admin", "search.manage",

@@ -271,8 +271,9 @@ export async function deleteChannel(formData: FormData): Promise<MonitoringActio
 export async function saveRoute(formData: FormData): Promise<MonitoringActionResult> {
   const c = await ctx(formData);
   if ("ok" in c) return c;
-  // No separate "route" permission exists in the backend's catalog (monitoring-program.md §14) — a
-  // route is the channel's own delivery config, so it rides `monitoring.channel.manage`. See rbac.ts.
+  // No separate "route" permission exists in the backend's catalog — routes authorize under the
+  // `monitor_channel` Cerbos kind (confirmed by the backend implementation), so this rides
+  // `monitoring.channel.manage`. See rbac.ts.
   if (!can(c.me, "monitoring.channel.manage", c.tenantId)) {
     return { ok: false, error: "You don't have permission to manage alert routing." };
   }

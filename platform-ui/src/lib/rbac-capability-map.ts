@@ -756,4 +756,39 @@ export const CAPABILITY_MAP = {
     permissions: ["reports.appraisal.cycle_admin", "reports.appraisal.finalize"],
     semantics: "all",
   },
+
+  // ── monitoring (MON-20, 2026-09-02) ─────────────────────────────────────────────────────────────
+  // Unlike almost every entry above, these three are NOT a rename onto a differently-spelled catalog
+  // key — the module's permission keys ARE already dotted `<domain>.<resource>.<action>` catalog
+  // form, seeded verbatim by `platform-nest/migrations/0117_iam_monitoring_permissions.sql`, so the
+  // capability name and the catalog permission are the identical string. Each is a singleton set,
+  // direct 1:1 citation, same as `org.edit`'s worked example above.
+  //
+  // ⚠ THE PERMISSION CATALOG IS NOT THE ENFORCING MECHANISM FOR THIS MODULE YET. `platform-nest/
+  // src/rbac/role-permission-bundles.json` (the generated artifact `rbac-capability-parity.test.ts`
+  // diffs against) lists `company_admin`/`platform_admin`/`manager`/`owner`/`monitoring_manager`
+  // holding all three of these permissions — but `cerbos/policies/resource_monitor_channel.yaml` and
+  // `resource_monitor_maintenance.yaml` say outright, in their own "PERMISSION ARM DEFERRED,
+  // DELIBERATELY" comment, that "a principal holding ONLY a fine-grained monitoring.* permission
+  // grant and no role is DENIED here until that arm lands." Those two files' actual `rules:` name
+  // only `platform_admin` (wildcard), `company_admin`, `manager` and `module_manager` —
+  // `owner`/`group_executive` appears in NEITHER rule, and `derived_roles.yaml` has no
+  // `owner`/`group_executive` derived-role entry at all. So `rbac.ts`'s `ROLE_CAPS` for this trio is
+  // cited against the ENFORCING Cerbos policy, not this bundle — `owner` is (deliberately, see its
+  // own `ROLE_CAPS` comment) excluded despite the bundle saying otherwise, because the bundle would
+  // be mirroring administrative data Cerbos does not currently act on. This is a live discrepancy
+  // between the permission catalog and the resource policy for the `monitoring` module specifically,
+  // flagged for the architect rather than silently resolved either direction.
+  "monitoring.channel.manage": {
+    permissions: ["monitoring.channel.manage"],
+    semantics: "all",
+  },
+  "monitoring.maintenance.create": {
+    permissions: ["monitoring.maintenance.create"],
+    semantics: "all",
+  },
+  "monitoring.maintenance.delete": {
+    permissions: ["monitoring.maintenance.delete"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

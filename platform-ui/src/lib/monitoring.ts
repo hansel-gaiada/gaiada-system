@@ -1,8 +1,11 @@
 import "server-only";
 // Monitoring (Plane B) data layer — property/service monitoring for the tenant's clients.
-// Frontend-first: the backend `monitoring` module does not exist yet, so every reader DEGRADES
-// gracefully (null/[] on 404/403) and the pages render an explicit empty state rather than
-// crashing — same pattern as lib/it.ts and lib/admin.ts.
+// The backend `monitoring` module exists (monitors/incidents/summary/kinds/maintenance shipped
+// first; channels/routes/maintenance-write landed with MON-20, 2026-09-02). Every reader still
+// DEGRADES gracefully (null/[] on 404/403) rather than crashing — same pattern as lib/it.ts and
+// lib/admin.ts — because a module can be disabled per-company (`enabled_modules`), so "the backend
+// doesn't exist" and "this company hasn't enabled it" look identical from here and both must render
+// an explicit empty state, never a synthesised healthy one.
 //
 // ⚠ THE ONE RULE THIS FILE EXISTS TO ENFORCE: an absent backend must never render as "healthy".
 // Gaia Nexus's monitoring dashboard was a hash function that always looked green, and that is the
@@ -12,30 +15,42 @@ import "server-only";
 // PLANE SEPARATION (docs/blueprints/monitoring-program.md §0): this is Plane B — the tenant's
 // websites and services. Plane A (our own containers) lives in Grafana and is NOT surfaced here.
 //
-// BFF CONTRACT (implement in platform-nest to match — docs/FRONTEND-BFF-CONTRACT.md §Monitoring):
-//   GET   /api/:t/monitoring/monitors?clientId&kind&status   -> Monitor[]
-//   POST  /api/:t/monitoring/monitors        body {..}       -> { id }     (monitoring.write)
-//   GET   /api/:t/monitoring/monitors/:id                    -> MonitorDetail | 404
-//   PATCH /api/:t/monitoring/monitors/:id    body {..}       -> { id }     (monitoring.write)
-//   GET   /api/:t/monitoring/monitors/:id/results?window     -> MonitorResult[]
-//   GET   /api/:t/monitoring/incidents?status&limit          -> Incident[]
-//   POST  /api/:t/monitoring/incidents/:id/ack               -> { id }     (monitoring.ack)
-//   GET   /api/:t/monitoring/summary                         -> MonitoringSummary
-//   GET   /api/:t/monitoring/kinds                           -> MonitorKindSpec[]
-//   GET   /api/:t/monitoring/maintenance                     -> MaintenanceWindow[]
-//   POST  /api/:t/monitoring/maintenance     body {..}       -> { id }     (monitoring.maintenance.create)
-//   DELETE /api/:t/monitoring/maintenance/:id                -> {}         (monitoring.maintenance.delete)   [MON-20]
-//   GET   /api/:t/monitoring/channels                        -> MonitorChannel[]
-//   POST  /api/:t/monitoring/channels        body {..}       -> { id }     (monitoring.channel.manage)  [MON-20]
-//   PATCH /api/:t/monitoring/channels/:id    body {..}       -> { id }     (monitoring.channel.manage)  [MON-20]
-//   DELETE /api/:t/monitoring/channels/:id                   -> {}         (monitoring.channel.manage)  [MON-20]
-//   POST  /api/:t/monitoring/channels/:id/test                -> { ok }    (monitoring.channel.manage)
-//   GET   /api/:t/monitoring/routes                           -> MonitorRoute[]
-//   POST  /api/:t/monitoring/routes          body {..}       -> { id }     (monitoring.channel.manage)  [MON-20 — no separate "route" permission is documented; a route is the channel's own delivery config, so it rides the same grant, see rbac.ts's capability comment]
-//   PATCH /api/:t/monitoring/routes/:id      body {..}       -> { id }     (monitoring.channel.manage)  [MON-20]
-//   DELETE /api/:t/monitoring/routes/:id                     -> {}         (monitoring.channel.manage)  [MON-20]
-// Readable by any member of :t holding `monitoring.read`; writes are Cerbos-gated.
+// BFF CONTRACT — canonical detail lives in docs/FRONTEND-BFF-CONTRACT.md §20; this is the quick
+// reference, and per that doc's own rule it must never drift from it again (a contract comment that
+// lies is worse than no comment — it reads as documentation while actively misleading):
+//   GET   /api/:t/monitoring/monitors?clientId&kind&status    -> Monitor[]                                  (monitoring.monitor.read)
+//   POST  /api/:t/monitoring/monitors        body {..}        -> { id }                                     (monitoring.monitor.create) — ⏳ PENDING
+//   GET   /api/:t/monitoring/monitors/:id                     -> MonitorDetail | 404                        (monitoring.monitor.read)
+//   PATCH /api/:t/monitoring/monitors/:id    body {..}        -> { id }                                     (monitoring.monitor.update) — ⏳ PENDING
+//   GET   /api/:t/monitoring/monitors/:id/results?window      -> MonitorResult[]                            (monitoring.monitor.read)
+//   GET   /api/:t/monitoring/incidents?status&limit           -> Incident[]                                 (monitoring.incident.read)
+//   POST  /api/:t/monitoring/incidents/:id/ack                -> { id }                                     (monitoring.incident.acknowledge) — ⏳ PENDING
+//   GET   /api/:t/monitoring/summary                          -> MonitoringSummary                          (monitoring.monitor.read)
+//   GET   /api/:t/monitoring/kinds                            -> MonitorKindSpec[]                          (monitoring.monitor.read)
+//   GET   /api/:t/monitoring/maintenance                      -> MaintenanceWindow[]                        (monitoring.maintenance.read)
+//   POST  /api/:t/monitoring/maintenance     body {..}        -> { id }                                     (monitoring.maintenance.create)  [MON-20]
+//   DELETE /api/:t/monitoring/maintenance/:id                 -> { id }                                     (monitoring.maintenance.delete)  [MON-20]
+//   GET   /api/:t/monitoring/channels                         -> MonitorChannel[]                           (monitoring.channel.read)        [MON-20]
+//   POST  /api/:t/monitoring/channels        body {..}        -> { id }, HTTP 201                           (monitoring.channel.manage)      [MON-20]
+//   PATCH /api/:t/monitoring/channels/:id    body {..}        -> MonitorChannel                             (monitoring.channel.manage)      [MON-20]
+//   DELETE /api/:t/monitoring/channels/:id                    -> { id, deletedAt } — SOFT delete             (monitoring.channel.manage)      [MON-20]
+//   POST  /api/:t/monitoring/channels/:id/test                -> { ok } | 400 — a REAL send (same enqueueMail path runner.ts uses); 400 for
+//                                                                 any non-`email` kind (no delivery driver exists yet) — the UI must not
+//                                                                 imply those kinds will deliver.                                            (monitoring.channel.manage)      [MON-20]
+//   GET   /api/:t/monitoring/routes                           -> MonitorRoute[]                             (monitoring.channel.read)        [MON-20]
+//   POST  /api/:t/monitoring/routes          body {..}        -> { id }, HTTP 201                           (monitoring.channel.manage)      [MON-20 — routes authorize under the `monitor_channel` Cerbos kind, confirmed by the backend; there is no separate "route" permission, by design, not by omission]
+//   PATCH /api/:t/monitoring/routes/:id      body {..}        -> MonitorRoute                                (monitoring.channel.manage)      [MON-20]
+//   DELETE /api/:t/monitoring/routes/:id                      -> { id } — HARD delete                        (monitoring.channel.manage)      [MON-20]
 // RLS + Cerbos are the real boundary — the UI gate is a mirror, never the source.
+//
+// ⚠ MON-20 known backend gaps, NOT fixable from here — see each write action's own comment:
+//   - `MonitorChannel.destination` for `email` is validated server-side at create time (400 on
+//     missing/implausible); every other kind accepts anything, because no delivery driver exists
+//     for telegram/ntfy/webhook/wa/mcp yet, so there is nothing to validate a destination against.
+//   - `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` are schema-only columns nothing writes yet —
+//     `channelHealth()` will read "unused" for every channel even right after a successful test
+//     send. Do not paper over this: if a surface shows health, it must say plainly that delivery
+//     status isn't tracked, not imply a green channel is a verified one.
 import { platformFetch, PlatformError } from "./platform";
 
 /** A monitor's health at last check. `unknown` is a first-class state, not a synonym for `up`. */
