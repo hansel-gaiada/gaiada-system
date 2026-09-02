@@ -3360,12 +3360,12 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 | Method | Path | Scope / gate | Returns | Status |
 |---|---|---|---|---|
 | GET | `/api/:t/monitoring/monitors?clientId&kind&status` | `monitoring.read` | `Monitor[]` | ✅ BUILT |
-| POST | `/api/:t/monitoring/monitors` | `monitoring.write` | `{ id }` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/monitors` | `monitoring.monitor.create` (Cerbos `monitor`/`create`) | `{ id }` | ✅ BUILT (pre-existing — this row was STALE, corrected 2026-09-02: the handler predates this round; verified in `monitoring.controller.ts`) |
 | GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ✅ BUILT |
-| PATCH | `/api/:t/monitoring/monitors/:id` | `monitoring.write` | `{ id }` | ⏳ PENDING |
+| PATCH | `/api/:t/monitoring/monitors/:id` | `monitoring.monitor.update` (Cerbos `monitor`/`update`) | `{ id }` | ✅ BUILT (pre-existing — this row was STALE, corrected 2026-09-02: the handler predates this round; verified in `monitoring.controller.ts`) |
 | GET | `/api/:t/monitoring/monitors/:id/results?window=24h\|7d\|30d` | `monitoring.monitor.read` | `MonitorResult[]` | ✅ BUILT (2026-09-02) |
 | GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ✅ BUILT |
-| POST | `/api/:t/monitoring/incidents/:id/ack` | `monitoring.ack` | `{ id }` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/incidents/:id/ack` | `monitoring.incident.acknowledge` (Cerbos `monitor_incident`/`acknowledge`) | `{ id }` | ✅ BUILT (pre-existing — this row was STALE, corrected 2026-09-02: the handler predates this round; verified in `monitoring.controller.ts`) |
 | GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ✅ BUILT |
 | GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ✅ BUILT (from the driver registry) |
 | GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ✅ BUILT |
