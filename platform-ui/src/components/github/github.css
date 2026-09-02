@@ -2,6 +2,30 @@
    prefix rule ("a genuinely new surface gets a new prefix, never a bare class name"). No colour
    literals: every tone below rides `--status-*`/`--erp-*` tokens, per the tokens.test.ts guard. */
 
+/* GHT-3 — the org-meta banner (ruling §3/§9): names WHICH GitHub org's registry this is and which
+   company operates it, so a holding-root viewer never mistakes an org-wide list for their own
+   company's private one. Plain, not a status color — this is a statement of fact, not a health
+   signal (that is `.ghr-apphealth` below). */
+.ghr-org-banner { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 0.5px solid var(--erp-hairline); background: var(--tint-hover); }
+.ghr-org-banner__title { font: 600 13px var(--font-body); color: var(--text-primary); }
+.ghr-org-banner__title code { font: 600 12px var(--font-mono, monospace); }
+.ghr-org-banner__hint { font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-50); }
+
+/* GHT-2/GHT-3 — the org App's own health chip, split out of the old combined "GitHub connection"
+   badge (ruling §5). Never colored to imply "everything's fine" on a failure — `--note` (the
+   refused/no_org/unavailable branch) intentionally carries no status dot at all, just plain text,
+   because none of those three states is itself a health VERDICT about the App. */
+.ghr-apphealth { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 0.5px solid var(--erp-hairline); }
+.ghr-apphealth--note { flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+.ghr-apphealth__label { font: 600 11px var(--font-body); letter-spacing: 0.02em; color: var(--erp-ink-50); }
+.ghr-apphealth__note { font: 400 12px/1.5 var(--font-body); color: var(--erp-ink-60); }
+.ghr-apphealth__apps { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.ghr-apphealth__app { display: inline-flex; align-items: center; gap: 6px; }
+.ghr-apphealth__account { font: 400 11px var(--font-body); color: var(--erp-ink-50); }
+.ghr-apphealth__sync { display: flex; flex-direction: column; gap: 3px; }
+.ghr-apphealth__asof { font: 400 11px/1.5 var(--font-body); color: var(--erp-ink-50); }
+.ghr-apphealth__webhookerror { font: 400 11px/1.5 var(--font-body); color: var(--status-critical-fg); }
+
 .ghr-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .ghr-toggle-row { display: flex; flex-wrap: wrap; gap: 6px; }
 

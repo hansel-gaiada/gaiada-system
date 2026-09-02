@@ -65,14 +65,28 @@ export interface GithubRepoView {
   updatedAt: string;
 }
 
+/** GHT-1's response meta (docs/blueprints/github-tenant-scope-ruling.md §3): names the org tenant
+ *  the rows actually belong to, which is almost never the browsing company once GHT-1 ships (a
+ *  holding-root request's `:tenantId` in the URL and this `tenantId` are different companies on
+ *  purpose). Every surface that renders "whose data is this" or aims a `can()` mirror check MUST
+ *  use `org.tenantId`, never the URL/active tenant — see `GithubRepoRegistry.tsx`'s org banner and
+ *  `page.tsx`'s `mayLink` computation. */
+export interface GithubOrgMeta {
+  login: string;
+  tenantId: string;
+  tenantName: string | null;
+}
+
 /** `GET /api/:t/github/repos` response envelope (§25) — never a bare array. `total` is a real
  *  `COUNT(*)` against the same filter predicate, independent of how many rows this page carries,
- *  so a bucket-size chip can read it directly even when the page is truncated by `limit`. */
+ *  so a bucket-size chip can read it directly even when the page is truncated by `limit`.
+ *  `org` (GHT-1) is present on every successful response — see `GithubOrgMeta`'s own comment. */
 export interface GithubRepoListResponse {
   repos: GithubRepoView[];
   total: number;
   limit: number;
   offset: number;
+  org: GithubOrgMeta;
 }
 
 /** Query params the list endpoint accepts (§25's "List filters"). Booleans are sent as the literal

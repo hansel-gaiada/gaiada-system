@@ -43,7 +43,8 @@ import "server-only";
 //     looking exceptions, proving deployedRefStatus()'s matches_head/differs branches still render
 //     correctly for the day GH-07 starts populating this field — regression coverage for a state
 //     DEMO_MODE cannot otherwise produce, not a claim that today's data looks like this.
-import type { GithubRepoView } from "./githubRepos";
+import type { GithubOrgMeta, GithubRepoView } from "./githubRepos";
+import type { GithubOrgStatus } from "./githubOrgStatus";
 
 interface DemoResult {
   status: number;
@@ -51,6 +52,13 @@ interface DemoResult {
 }
 const ok = (json: unknown, status = 200): DemoResult => ({ status, json });
 const err = (status: number, error: string): DemoResult => ({ status, json: { error } });
+
+// GHT-1/GHT-2's response meta (docs/blueprints/github-tenant-scope-ruling.md §3) — every real list/
+// detail/org-status response carries this now, so the fixture must too, or a page rendering
+// `org.login` against the fixture would crash in a way the live backend never would. Mirrors the
+// live values exactly: `co-agency` / "Gaia Digital Agency" IS the org tenant on the real estate
+// (ruling §1's live table), same as `demoFixtures.ts`'s own COMPANIES seed.
+const DEMO_ORG: GithubOrgMeta = { login: "gaiadabali", tenantId: "co-agency", tenantName: "Gaia Digital Agency" };
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
 const daysAgo = (d: number) => hoursAgo(d * 24);
@@ -339,6 +347,29 @@ export function githubReposDemo(method: string, p: string, params: URLSearchPara
     return ok({ id: repo.id, webdevSiteId: repo.webdevSiteId, projectId: repo.projectId });
   }
 
+  // GHT-2 — `GET /api/:t/github/org-status`, the org App's own health read. Always the "everything
+  // is fine" branch in DEMO_MODE, same reasoning as this file's own header note on the 403 path: a
+  // Cerbos denial for THIS endpoint is a real backend/policy state DEMO_MODE has no mechanism to
+  // reproduce (it bypasses Cerbos entirely), so the refused/no_org/unavailable branches of
+  // `GithubOrgHealth.tsx` are exercised by `githubOrgStatus-data.test.ts` against a mocked
+  // PlatformError, not by DEMO_MODE — same split GH-09's own read/403 note already documents.
+  if (m === "GET" && p.match(/^\/api\/[^/]+\/github\/org-status$/)) {
+    const status: GithubOrgStatus = {
+      org: DEMO_ORG,
+      apps: [
+        { role: "erp", slug: "gaiada-erp", readOnly: false, configured: true, externalAccount: "gaiadabali", status: "linked", hasToken: true, tokenExpiresAt: new Date(Date.now() + 3600_000).toISOString() },
+        { role: "agents", slug: "gaiada-agents", readOnly: true, configured: true, externalAccount: "gaiadabali", status: "linked", hasToken: true, tokenExpiresAt: new Date(Date.now() + 3600_000).toISOString() },
+      ],
+      sync: {
+        asOf: new Date().toISOString(),
+        lastRepoSyncAt: hoursAgo(1),
+        lastWebhookReceivedAt: hoursAgo(2),
+        lastWebhookErrorClass: null,
+      },
+    };
+    return ok(status);
+  }
+
   if (m !== "GET" || !p.match(/^\/api\/[^/]+\/github\/repos$/)) return null;
 
   const linkedQ = params.get("linked");
@@ -357,5 +388,5 @@ export function githubReposDemo(method: string, p: string, params: URLSearchPara
   const offset = Math.max(0, Number(params.get("offset") ?? 0) || 0);
   const page = [...filtered].sort((a, b) => a.fullName.localeCompare(b.fullName)).slice(offset, offset + limit);
 
-  return ok({ repos: page, total, limit, offset });
+  return ok({ repos: page, total, limit, offset, org: DEMO_ORG });
 }

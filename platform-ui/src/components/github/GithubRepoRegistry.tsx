@@ -6,7 +6,7 @@ import { SearchableTable } from "@/components/systems/SearchableTable";
 import { EmptyNote } from "@/components/systems/EmptyNote";
 import { formatTimestamp } from "@/lib/format";
 import {
-  type GithubRepoView, type GithubRepoListResponse, type Tone,
+  type GithubRepoView, type GithubRepoListResponse, type GithubOrgMeta, type Tone,
   type LinkCandidate, type LinkTargetKind,
   syncFreshness, freshnessTone, FRESHNESS_LABEL,
   deployedRefStatus, DEPLOY_HEAD_LABEL,
@@ -15,6 +15,8 @@ import {
   suggestLinkTargets,
 } from "@/lib/githubRepos";
 import type { GithubLinkActionResult } from "@/lib/githubReposActions";
+import type { GetGithubOrgStatusResult } from "@/lib/githubOrgStatus-data";
+import { GithubOrgHealth } from "./GithubOrgHealth";
 import "@/components/systems/systems.css";
 import "./github.css";
 
@@ -39,9 +41,34 @@ export type GithubLinkActionFn = (formData: FormData) => Promise<GithubLinkActio
 // 3. Sync freshness is a badge on EVERY row, not a banner shown "when something is wrong" — matching
 //    components/webdesk/DegradeBanner.tsx's own reasoning: a state that is normal-and-common must be
 //    visible every time, or its absence gets learned as "this is current" everywhere else.
+// GHT-3 (ruling §3/§9) — names WHICH GitHub org this is and which company operates it, so a viewer
+// standing anywhere in the same root tree (the holding root included) understands this is a
+// GROUP-WIDE registry, not this browsing company's own private list, before reading a single row.
+// `org.tenantId` (never the browsing/active tenant) is also what the `can()` mirror check for
+// link/unlink is aimed at (page.tsx). Exported (not inlined in `GithubRepoRegistry` below) so
+// `page.tsx`'s own "genuinely zero rows, org-wide" branch can show the SAME banner rather than a
+// bare "no repositories" that would look like a browsing-company-scoped empty list.
+/** A renderable page of repo rows, without the `org` meta a real server response carries — see
+ *  `Bucket`'s own comment on why the merged linked+unlinked view below needs this narrower shape. */
+type RepoPage = Pick<GithubRepoListResponse, "repos" | "total" | "limit" | "offset">;
+
+export function GithubOrgBanner({ org }: { org: GithubOrgMeta }) {
+  return (
+    <div className="ghr-org-banner">
+      <span className="ghr-org-banner__title">
+        GitHub org <code>{org.login}</code> — registered to {org.tenantName ?? "an unnamed company"}
+      </span>
+      <span className="ghr-org-banner__hint">
+        This registry is group-wide: everyone with reach into {org.tenantName ?? "the registered company"}&apos;s
+        GitHub org sees the same rows from any company in this root, including this one.
+      </span>
+    </div>
+  );
+}
+
 export function GithubRepoRegistry({
   linked, unlinked, archivedTotal, includeArchived, basePath,
-  mayLink, siteCandidates, projectCandidates, actions,
+  mayLink, siteCandidates, projectCandidates, actions, appHealth,
 }: {
   linked: GithubRepoListResponse;
   unlinked: GithubRepoListResponse;
@@ -69,6 +96,10 @@ export function GithubRepoRegistry({
   siteCandidates: LinkCandidate[];
   projectCandidates: LinkCandidate[];
   actions: { link: GithubLinkActionFn; unlink: GithubLinkActionFn };
+  /** GHT-2's App-health read — an INDEPENDENT fetch from `linked`/`unlinked` above (its own resolve
+   *  -> authorize -> read), so it carries its own ok/refused/no_org/unavailable result rather than
+   *  assuming it must have succeeded just because the registry rows did. */
+  appHealth: GetGithubOrgStatusResult;
 }) {
   // Frozen once per mount rather than re-read on every render — a freshness badge that silently
   // ticks from "Synced" to "Stale" while an operator is mid-read on an open tab is a worse surprise
@@ -96,6 +127,9 @@ export function GithubRepoRegistry({
   // repo" is still a finding worth acting on — it just is not a reason to hide the repo.
   const allRepos = [...linked.repos, ...unlinked.repos].sort((a, b) => a.fullName.localeCompare(b.fullName));
   const allTotal = linked.total + unlinked.total;
+  // GHT-1's response meta (ruling §3) — both pages are fetched against the same resolved org
+  // tenant, so `linked.org` and `unlinked.org` are always the same value; either would do.
+  const org: GithubOrgMeta = linked.org;
 
   const renderRow = (r: GithubRepoView) => {
     const freshness = syncFreshness(r.lastSyncedAt, nowMs);
@@ -137,6 +171,8 @@ export function GithubRepoRegistry({
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
+      <GithubOrgBanner org={org} />
+      <GithubOrgHealth result={appHealth} />
       <div className="sys-status-card__counters">
         <KpiTile label="Linked repos" value={String(linked.total)} />
         <KpiTile
@@ -201,7 +237,12 @@ function Bucket({
   title, data, columns, tcols, renderRow, emptyCopy,
 }: {
   title: string;
-  data: GithubRepoListResponse;
+  /** A page of rows to render — `Pick`, not the full `GithubRepoListResponse`: the merged-bucket
+   *  caller below synthesizes `{repos: allRepos, total: allTotal, ...}` from BOTH server pages, and
+   *  that merged view has no single `org` of its own to report (linked/unlinked share one, but a
+   *  bucket over both is not "a page" in the API's sense) — narrowing the prop type here means this
+   *  component never has to fabricate one just to satisfy a field it never reads. */
+  data: RepoPage;
   columns: { label: string; align?: "right" }[];
   tcols: string;
   renderRow: (r: GithubRepoView) => ReactNode[];
@@ -217,7 +258,12 @@ function Bucket({
 function BucketTable({
   data, columns, tcols, renderRow, emptyCopy,
 }: {
-  data: GithubRepoListResponse;
+  /** A page of rows to render — `Pick`, not the full `GithubRepoListResponse`: the merged-bucket
+   *  caller below synthesizes `{repos: allRepos, total: allTotal, ...}` from BOTH server pages, and
+   *  that merged view has no single `org` of its own to report (linked/unlinked share one, but a
+   *  bucket over both is not "a page" in the API's sense) — narrowing the prop type here means this
+   *  component never has to fabricate one just to satisfy a field it never reads. */
+  data: RepoPage;
   columns: { label: string; align?: "right" }[];
   tcols: string;
   renderRow: (r: GithubRepoView) => ReactNode[];

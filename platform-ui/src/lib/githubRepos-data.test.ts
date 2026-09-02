@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { listGithubRepos } from "./githubRepos-data";
+import { listGithubRepos, classifyGithubOrgUnavailable } from "./githubRepos-data";
+import { PlatformError } from "./platform";
 
 beforeEach(() => {
   process.env.PLATFORM_URL = "http://p.test";
@@ -43,6 +44,50 @@ describe("listGithubRepos", () => {
     await listGithubRepos("u1", "t1", {});
     expect(capturedUrl).not.toContain("linked=");
     expect(capturedUrl).not.toContain("archived=");
+  });
+
+  // GHT-3 — the third failure state. GHT-1's resolver throws a 503 with one of two known message
+  // strings when there is no reachable org tenant (unset config, or a different root); this reader
+  // must tell that apart from a real 503 outage rather than lumping both into "unavailable" — an
+  // operator retrying a config gap forever is exactly the confident-wrong-answer this ticket exists
+  // to stop.
+  it("returns ok:false, reason:no_org on the 503 GHT-1 throws for an unconfigured org tenant", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "github org tenant misconfigured: GITHUB_REPO_SYNC_TENANT_ID is unset" }),
+      { status: 503 },
+    )));
+    expect(await listGithubRepos("u1", "t1")).toEqual({ ok: false, reason: "no_org" });
+  });
+
+  it("returns ok:false, reason:no_org on the 503 GHT-1 throws for a different-root tenant", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "no GitHub org registered for this company's root" }),
+      { status: 503 },
+    )));
+    expect(await listGithubRepos("u1", "t1")).toEqual({ ok: false, reason: "no_org" });
+  });
+
+  it("a 403 never renders as no_org or an empty registry — the three states stay distinct", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "forbidden" }), { status: 403 })));
+    const result = await listGithubRepos("u1", "t1");
+    expect(result).not.toEqual({ ok: true, data: { repos: [], total: 0, limit: 50, offset: 0 } });
+    expect(result).toEqual({ ok: false, reason: "refused" });
+  });
+
+  it("a 503 with an UNRECOGNIZED message is 'unavailable', not guessed to be no_org", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "database connection pool exhausted" }), { status: 503 })));
+    expect(await listGithubRepos("u1", "t1")).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  describe("classifyGithubOrgUnavailable", () => {
+    it("is false for any status other than 503, regardless of message", () => {
+      expect(classifyGithubOrgUnavailable(new PlatformError(403, "github org tenant misconfigured"))).toBe(false);
+      expect(classifyGithubOrgUnavailable(new PlatformError(500, "no GitHub org registered for this company's root"))).toBe(false);
+    });
+
+    it("is case-insensitive over the known message fragments", () => {
+      expect(classifyGithubOrgUnavailable(new PlatformError(503, "GITHUB ORG TENANT MISCONFIGURED: oops"))).toBe(true);
+    });
   });
 
   it("serializes linked/archived as the literal strings the controller requires", async () => {

@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
-import { getMe } from "@/lib/platform";
+import { getMe, type Me } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getDepartment } from "@/lib/departments";
@@ -20,7 +20,9 @@ import { BackendPending } from "@/components/BackendPending";
 import { listGithubRepos, type ListGithubReposResult } from "@/lib/githubRepos-data";
 import type { LinkCandidate } from "@/lib/githubRepos";
 import { linkGithubRepoAction, unlinkGithubRepoAction } from "@/lib/githubReposActions";
-import { GithubRepoRegistry } from "@/components/github/GithubRepoRegistry";
+import { getGithubOrgStatus } from "@/lib/githubOrgStatus-data";
+import { GithubRepoRegistry, GithubOrgBanner } from "@/components/github/GithubRepoRegistry";
+import { GithubOrgHealth } from "@/components/github/GithubOrgHealth";
 
 type Params = Promise<{ deptId: string }>;
 type Search = Promise<{ preview?: string | string[]; archived?: string }>;
@@ -122,7 +124,6 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
   // second round trip for the same tenant-wide rows.
   const siteCandidates: LinkCandidate[] = sitesResult.ok ? sitesResult.sites.map((s) => ({ id: s.id, name: s.slug })) : [];
   const projectCandidates: LinkCandidate[] = projects.map((p) => ({ id: p.id, name: p.name }));
-  const mayLinkRepos = can(me, "github.link", tenant);
 
   return (
     <>
@@ -140,9 +141,9 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
       <OrgRegistry
         userId={userId}
         tenant={tenant}
+        me={me}
         includeArchived={archived === "1"}
         basePath={basePath}
-        mayLink={mayLinkRepos}
         siteCandidates={siteCandidates}
         projectCandidates={projectCandidates}
       />
@@ -162,6 +163,14 @@ export default async function DepartmentRepositoriesPage({ params, searchParams 
 // org, the superset, including repos no pipeline created. This file's original comment said that
 // second view "needs the GitHub App on the org (WD-21/22, owner action)". That is now done, and this
 // is it.
+// GHT-3 (ruling §3/§9) — the three ways this read fails, each rendered as ITSELF. `refused` and
+// `unavailable` reuse the exact components/wording the pipeline-runs refusal above already
+// established for this page (AGN-3) — no parallel pattern invented here. `no_org` is the ticket's
+// open question made concrete: GHT-1/GHT-2 currently signal it with the SAME 503 status
+// `unavailable` also covers (see `classifyGithubOrgUnavailable`, lib/githubRepos-data.ts, for
+// exactly where that message-content sniff lives and why), so this function is where the one-line
+// change lands the day the architect gives reads a distinct signal — everything downstream of
+// `ListGithubReposResult.reason` here stays the same.
 function refusalOrPending(result: Extract<ListGithubReposResult, { ok: false }>) {
   if (result.reason === "refused") {
     return (
@@ -169,6 +178,14 @@ function refusalOrPending(result: Extract<ListGithubReposResult, { ok: false }>)
         subject="the org-wide GitHub registry"
         kind="forbidden"
         detail="Your account is not authorized to read the repository registry. The github_repo policy is live, so this is a real authorization decision, not a pending feature and not an outage."
+      />
+    );
+  }
+  if (result.reason === "no_org") {
+    return (
+      <BackendPending
+        what="No GitHub org is registered for this company's group yet. This is a configuration gap — the org tenant is unset, or this company sits in a different root than the one it's registered to — not an outage, and it will not resolve by retrying. Ask an admin to verify the GitHub org tenant setting."
+        contract="GET /api/:t/github/repos (docs/blueprints/github-tenant-scope-ruling.md §3, §9)"
       />
     );
   }
@@ -183,38 +200,50 @@ function refusalOrPending(result: Extract<ListGithubReposResult, { ok: false }>)
 async function OrgRegistry({
   userId,
   tenant,
+  me,
   includeArchived,
   basePath,
-  mayLink,
   siteCandidates,
   projectCandidates,
 }: {
   userId: string;
   tenant: string;
+  me: Me;
   includeArchived: boolean;
   basePath: string;
-  /** GH-10: `can(me, "github.link", tenant)` — a mirror only. The 403 a Cerbos denial would still
-   *  produce is the real authority; this decides whether the controls are even OFFERED, so a
-   *  principal who cannot link never sees a button that would just refuse them. */
-  mayLink: boolean;
   siteCandidates: LinkCandidate[];
   projectCandidates: LinkCandidate[];
 }) {
   // `archived: undefined` (param omitted) means "both states" per §25 — there is no third value.
   const archivedFilter = includeArchived ? undefined : false;
-  const [linkedResult, unlinkedResult, archivedCountResult] = await Promise.all([
+  const [linkedResult, unlinkedResult, archivedCountResult, orgStatusResult] = await Promise.all([
     listGithubRepos(userId, tenant, { linked: true, archived: archivedFilter, limit: 200 }),
     listGithubRepos(userId, tenant, { linked: false, archived: archivedFilter, limit: 200 }),
     listGithubRepos(userId, tenant, { archived: true, limit: 1 }),
+    // GHT-2 — the org App's own health, fetched alongside the registry rather than gating on them:
+    // an independent read with its own resolve -> authorize -> read order, so it must carry its own
+    // ok/refused/no_org/unavailable result rather than being assumed to succeed just because the
+    // registry rows did (see GithubOrgHealth.tsx).
+    getGithubOrgStatus(userId, tenant),
   ]);
 
   if (!linkedResult.ok) return <Card title="Everything in the GitHub org">{refusalOrPending(linkedResult)}</Card>;
   if (!unlinkedResult.ok) return <Card title="Everything in the GitHub org">{refusalOrPending(unlinkedResult)}</Card>;
 
+  // GHT-3: `can()` is aimed at the RESOLVED ORG TENANT (linkedResult.data.org.tenantId), never the
+  // browsing/active `tenant` — otherwise a holding-root viewer with real agency reach would see no
+  // link/unlink controls (their grant is scoped to the agency company, not the holding one), and a
+  // same-root viewer whose grant happens to cover the browsing tenant but NOT the org tenant would
+  // wrongly be offered a button the server will 403 on the very next click. Both are exactly the
+  // "UI offers what the API refuses, or hides what it would allow" failure the ticket calls out.
+  const mayLink = can(me, "github.link", linkedResult.data.org.tenantId);
+
   if (linkedResult.data.total === 0 && unlinkedResult.data.total === 0) {
     return (
       <Card title="Everything in the GitHub org">
-        <EmptyNote>No repositories on file yet. The initial org crawl (GH-06) seeds this table.</EmptyNote>
+        <GithubOrgBanner org={linkedResult.data.org} />
+        <GithubOrgHealth result={orgStatusResult} />
+        <EmptyNote>No repositories on file yet for this org. The initial org crawl (GH-06) seeds this table.</EmptyNote>
       </Card>
     );
   }
@@ -230,6 +259,7 @@ async function OrgRegistry({
         mayLink={mayLink}
         siteCandidates={siteCandidates}
         projectCandidates={projectCandidates}
+        appHealth={orgStatusResult}
         actions={{ link: linkGithubRepoAction, unlink: unlinkGithubRepoAction }}
       />
     </Card>
