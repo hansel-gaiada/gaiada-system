@@ -11,6 +11,59 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### monitoring `0.3.0` - channel/route/maintenance management surface (2026-09-02) - PROTOTYPED
+
+The schema, RLS, Cerbos policies and permission keys for `monitor_channels`/`monitor_routes` all
+already existed, and so did the incident notifier (`runner.ts:293-345`, `monitor_routes ->
+monitor_channels -> enqueueMail("monitoring.alert")`) — but nothing in `monitoring.controller.ts`
+let a tenant create those rows. In practice the alert path had nothing to fan out to: the only way
+to wire a notification channel was hand-SQL against a live database.
+
+**Endpoints added**, all on `MonitoringController` (`/api/:t/monitoring/*`):
+- `GET /monitors/:id/results?window=24h|7d|30d` -> `MonitorResult[]` — a windowed slice, separate
+  from `MonitorDetail`'s embedded fixed-24h/500-row sample, backing the uptime strip and
+  recent-checks views platform-ui already renders against a fixed sample.
+- `GET/POST /channels`, `PATCH/DELETE /channels/:id`, `POST /channels/:id/test` -> `MonitorChannel[]`
+  / `{id}` / `MonitorChannel` / `{id, deletedAt}` / `{ok}`. Gated by the existing
+  `monitoring.channel.read`/`monitoring.channel.manage` keys; `manage` covers create/edit/delete/test
+  uniformly (the Cerbos policy's own comment: "manage also covers the test-send"), since neither the
+  catalog nor the Cerbos policy declares a separate delete action. `test` sends a REAL notification
+  through the exact `enqueueMail("monitoring.alert")` path the runner uses — not a synthetic health
+  check — and refuses (400) for any channel `kind` other than `email`, the only kind with a wired
+  delivery driver today (`runner.ts`'s `notifyIncidents` silently skips the rest). An `email` channel
+  requires a plausible `destination` at write time, closing the "exists, enabled, silently never
+  delivers" gap `channelHealth()` exists to surface.
+- `GET/POST /routes`, `PATCH/DELETE /routes/:id` -> `MonitorRoute[]` / `{id}` / `MonitorRoute` /
+  `{id}`. Authorized under the **existing** `monitor_channel` Cerbos kind — there is deliberately no
+  `monitor_route` kind. A route is a channel's own routing rule with no independent ownership
+  semantics, and minting a sixth Cerbos kind for it would be six more artifacts (policy + derived-role
+  wiring + four pinned count tests) for no behavioural gain. `monitor_routes` has no `deleted_at`
+  column, so its delete is a real `DELETE`, unlike the soft-deleting `monitors`/`monitor_channels`.
+- `POST /maintenance` -> `{id}`, `DELETE /maintenance/:id` -> `{id}`. `scope` round-trips the exact
+  `"all"` / `"monitor:<uuid>"` string `GET /maintenance` already rendered, so
+  `platform-ui/src/lib/monitoringActions.ts`'s `scheduleMaintenance` form needs no second
+  representation. Delete is a real `DELETE` (no `deleted_at` on this table either) gated by the
+  already-declared `monitoring.maintenance.delete` key.
+
+**No schema, Cerbos policy, or permission-catalog change.** Every endpoint reuses keys and policies
+that predate this ticket (`monitoring.channel.read/manage`, `monitoring.maintenance.create/delete`);
+catalog/permission row counts are unchanged, so the pinned `capability-inventory.test.ts` and
+`iam-215-boundary-pin.test.ts` suites needed no update.
+
+**Files:** `platform-nest/src/modules/monitoring/monitoring.controller.ts` (new endpoints + row
+mappers), `platform-nest/src/modules/monitoring/write-validation.ts` (new pure validators:
+`parseChannelKind`, `parseOptionalMatchSeverity`, `parseOptionalMatchKind`, `parseMaintenanceScope`,
+`parseMaintenanceWindow`, `parseResultWindow`), plus their test files
+(`monitoring.controller.test.ts`, `write-validation.test.ts`) and
+`docs/FRONTEND-BFF-CONTRACT.md` §20 (rows flipped PENDING → BUILT, new rows added for the
+create/edit/delete endpoints the original PENDING list did not enumerate).
+
+**Verified:** clean-checkout Linux gate (sumopod, isolated docker network, live Postgres RLS + live
+Cerbos + Redis, `tsc --noEmit` + full `npm test`) against a same-recipe clean-main baseline
+(`f94eb71d`, `1.0.0-alpha.328`: 497 files / 7004 tests passed, 2 files / 6 tests skipped, 1 todo).
+This change: **497 files / 7053 tests passed, 2 files / 6 tests skipped, 1 todo — 0 failed files,
+0 failed tests**; the +49 tests are exactly the new coverage added here.
+
 ### platform-nest `0.48.0` - authorize before validate on the three write paths (2026-08-31) - PROTOTYPED
 
 `createProject`, webdev change-request `triage` and the client-facing portal `create` all ran

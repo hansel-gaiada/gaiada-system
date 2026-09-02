@@ -118,6 +118,103 @@ export function assertHostAllowlisted(host: string | null, allowlist: readonly s
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Channel / route / maintenance write surface — the management endpoints that fill in the middle
+// between "a monitor exists" and "runner.ts:293-345 has somewhere to fan an incident out to".
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+export type MonitorChannelKind = "email" | "telegram" | "ntfy" | "webhook" | "wa" | "mcp";
+
+export const MONITOR_CHANNEL_KINDS: readonly MonitorChannelKind[] = [
+  "email", "telegram", "ntfy", "webhook", "wa", "mcp",
+];
+
+/** `kind` is required and must be one of the declared channel kinds — an unrecognised value is a
+ *  typo, not a new kind, and a row nothing will ever deliver through must fail loudly at write
+ *  time rather than sit on the console looking like coverage (monitoring.ts's own `channelHealth`
+ *  concern, restated at the write boundary). Only `email` is actually wired to a delivery driver
+ *  today (runner.ts's notifyIncidents skips the rest); the others are legal to create ahead of
+ *  their driver landing — "absent, not silently inert" applies to drivers, not to channel rows. */
+export function parseChannelKind(input: unknown): MonitorChannelKind {
+  if (typeof input === "string" && (MONITOR_CHANNEL_KINDS as readonly string[]).includes(input)) {
+    return input as MonitorChannelKind;
+  }
+  throw new MonitorValidationError(`kind must be one of ${MONITOR_CHANNEL_KINDS.join("|")}`);
+}
+
+/**
+ * A route's match fields are a FILTER, not a value with a default. `parseSeverity` defaults an
+ * absent severity to `"ticket"` because that is right for a monitor's OWN severity — but an absent
+ * `matchSeverity` on a route means "match every severity" (a catch-all), and silently narrowing that
+ * to `"ticket"` would make a route quietly stop matching `page`/`info` events nobody asked to exclude.
+ * Returns `null` for "unset", never a default.
+ */
+export function parseOptionalMatchSeverity(input: unknown): MonitorSeverity | null {
+  if (input === undefined || input === null || input === "") return null;
+  if (typeof input === "string" && (MONITOR_SEVERITIES as readonly string[]).includes(input)) {
+    return input as MonitorSeverity;
+  }
+  throw new MonitorValidationError(`matchSeverity must be one of ${MONITOR_SEVERITIES.join("|")}`);
+}
+
+/** `matchKind` filters against `monitors.kind`, which is free text (registry.ts's driver-kind CHECK
+ *  lives at monitor-create time, not here) — so this only trims, it does not re-validate against the
+ *  driver registry. A route may legitimately target a kind whose driver was since removed. */
+export function parseOptionalMatchKind(input: unknown): string | null {
+  if (input === undefined || input === null) return null;
+  const s = String(input).trim();
+  return s === "" ? null : s;
+}
+
+export interface MaintenanceScope {
+  /** `null` = tenant-wide window (matches every monitor). */
+  monitorId: string | null;
+}
+
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * The GET /maintenance read path renders `scope` as `"all"` or `"monitor:<uuid>"` (see the
+ * controller's `mapMaintenance`); the write path accepts the same string back so the UI's
+ * scheduleMaintenance form (platform-ui/src/lib/monitoringActions.ts) round-trips without a
+ * second representation to keep in sync.
+ */
+export function parseMaintenanceScope(input: unknown): MaintenanceScope {
+  const raw = input === undefined || input === null ? "all" : String(input).trim();
+  if (raw === "" || raw === "all") return { monitorId: null };
+  const m = raw.match(/^monitor:(.+)$/);
+  if (!m || !UUID_RE.test(m[1])) {
+    throw new MonitorValidationError(`scope must be "all" or "monitor:<uuid>", got '${raw}'`);
+  }
+  return { monitorId: m[1] };
+}
+
+/** Both ends are required and the window must run forward — an open-ended or inverted window is how
+ *  alerting gets muted permanently (K7, the exact failure this table exists to prevent). The DB CHECK
+ *  (`monitor_maintenance_range`) enforces this too, but re-stating it here turns a constraint
+ *  violation into a clean 400 instead of a raw pg error. */
+export function parseMaintenanceWindow(startsAtInput: unknown, endsAtInput: unknown): { startsAt: Date; endsAt: Date } {
+  const startsAt = new Date(String(startsAtInput ?? ""));
+  const endsAt = new Date(String(endsAtInput ?? ""));
+  if (Number.isNaN(startsAt.getTime())) throw new MonitorValidationError("startsAt is not a valid date");
+  if (Number.isNaN(endsAt.getTime())) throw new MonitorValidationError("endsAt is not a valid date");
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    throw new MonitorValidationError("endsAt must be after startsAt");
+  }
+  return { startsAt, endsAt };
+}
+
+/** Results windows the board offers — a fixed, safe set of interval literals rather than splicing a
+ *  caller-supplied string into SQL. An unrecognised window is a 400, not a silent fallback to 24h. */
+export const RESULT_WINDOWS: Record<string, string> = { "24h": "24 hours", "7d": "7 days", "30d": "30 days" };
+
+export function parseResultWindow(input: unknown): string {
+  const key = input === undefined ? "24h" : String(input);
+  const interval = RESULT_WINDOWS[key];
+  if (!interval) throw new MonitorValidationError(`window must be one of ${Object.keys(RESULT_WINDOWS).join("|")}`);
+  return interval;
+}
+
 /** Raw (unvalidated) driver config built from the write body. The DRIVER's own `validate()` is still
  *  the authority — this only assembles the shape each kind expects; it never trusts the result. */
 export function buildRawDriverConfig(

@@ -39,11 +39,20 @@ import {
   assertHostAllowlisted,
   buildRawDriverConfig,
   extractTargetHost,
+  parseChannelKind,
   parseIntervalSec,
+  parseMaintenanceScope,
+  parseMaintenanceWindow,
+  parseOptionalMatchKind,
+  parseOptionalMatchSeverity,
+  parseResultWindow,
   parseSeverity,
   parseTags,
+  type MonitorChannelKind,
   MonitorValidationError,
 } from "./write-validation";
+import { enqueueMail } from "../../mail/queue";
+import { isPlausibleEmail } from "../../mail/sanitize";
 
 const MOD = { modules: ["monitoring"] as string[] };
 // MON-19 — the SSRF allowlist (constraint 2) is resolved from `search_properties`, a table owned by
@@ -149,6 +158,58 @@ function mapMonitor(r: MonitorRow) {
   };
 }
 
+interface MonitorChannelRow {
+  id: string;
+  kind: string;
+  name: string;
+  destination: string | null;
+  enabled: boolean;
+  last_delivery_at: Date | null;
+  last_delivery_ok: boolean | null;
+  failure_count: number;
+}
+
+/** Mirrors `MonitorChannel` in platform-ui/src/lib/monitoring.ts. `destination` is returned exactly
+ *  as stored — the DISPLAY-SAFE convention (contract note 7) is enforced at write time (callers must
+ *  never put a secret in this column), not by truncating on the way out here. */
+function mapChannel(r: MonitorChannelRow) {
+  return {
+    id: r.id,
+    kind: r.kind,
+    name: r.name,
+    enabled: r.enabled,
+    destination: r.destination,
+    lastDeliveryAt: iso(r.last_delivery_at),
+    lastDeliveryOk: r.last_delivery_ok,
+    failureCount: r.failure_count,
+  };
+}
+
+interface MonitorRouteRow {
+  id: string;
+  channel_id: string;
+  channel_name: string | null;
+  match_client_id: string | null;
+  match_client_name: string | null;
+  match_severity: string | null;
+  match_kind: string | null;
+  enabled: boolean;
+}
+
+/** Mirrors `MonitorRoute` in platform-ui/src/lib/monitoring.ts. */
+function mapRoute(r: MonitorRouteRow) {
+  return {
+    id: r.id,
+    channelId: r.channel_id,
+    channelName: r.channel_name,
+    matchClientId: r.match_client_id,
+    matchClientName: r.match_client_name,
+    matchSeverity: r.match_severity,
+    matchKind: r.match_kind,
+    enabled: r.enabled,
+  };
+}
+
 @Controller("api")
 @UseGuards(AuthGuard, ModuleEnabledGuard("monitoring"))
 export class MonitoringController {
@@ -222,6 +283,49 @@ export class MonitoringController {
           // Redacted: config can hold secret REFERENCES, and `monitoring.read` is a broad grant.
           config: null,
         };
+      },
+      MOD,
+    );
+  }
+
+  /**
+   * Results by an explicit window — separate from `MonitorDetail`'s embedded (fixed 24h, 500-row)
+   * `results`, so the uptime strip / recent-checks views can ask for exactly the window they render
+   * instead of re-slicing a fixed sample. `window` is one of a fixed literal set (write-validation.ts's
+   * `RESULT_WINDOWS`) so it is never spliced into SQL as a caller-supplied string.
+   */
+  @Get(":tenantId/monitoring/monitors/:id/results")
+  async monitorResults(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Query("window") window?: string,
+  ) {
+    await authorize(req.principal, { kind: "monitor", id, tenantId, module: "monitoring" }, "read");
+    let interval: string;
+    try {
+      interval = parseResultWindow(window);
+    } catch (e) {
+      if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+      throw e;
+    }
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const m = await c.query(`SELECT 1 FROM monitors WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!m.rows[0]) throw new NotFoundException("monitor not found");
+        const results = await c.query(
+          `SELECT checked_at, status, latency_ms, detail FROM monitor_results
+             WHERE monitor_id = $1 AND checked_at > now() - $2::interval
+           ORDER BY checked_at DESC LIMIT 2000`,
+          [id, interval],
+        );
+        return results.rows.map((r: Record<string, unknown>) => ({
+          checkedAt: iso(r.checked_at as Date),
+          status: r.status,
+          latencyMs: r.latency_ms,
+          detail: r.detail,
+        }));
       },
       MOD,
     );
@@ -330,6 +434,83 @@ export class MonitoringController {
       reason: r.reason,
       createdBy: r.created_by,
     }));
+  }
+
+  /**
+   * Schedules a window that suppresses BOTH alerting and SLA math for its duration (K7) — the one
+   * write in this module that can make monitoring lie, which is why `monitoring.maintenance.create`
+   * sits a tier above `monitoring.monitor.update` in the Cerbos policy (manager-tier only). `scope`
+   * round-trips the exact string `GET /maintenance` renders (`"all"` or `"monitor:<uuid>"`), matching
+   * `platform-ui/src/lib/monitoringActions.ts`'s `scheduleMaintenance` form field.
+   */
+  @Post(":tenantId/monitoring/maintenance")
+  async createMaintenance(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor_maintenance", tenantId, module: "monitoring" }, "create");
+
+    let scope: { monitorId: string | null };
+    let window: { startsAt: Date; endsAt: Date };
+    try {
+      scope = parseMaintenanceScope(body?.scope);
+      window = parseMaintenanceWindow(body?.startsAt, body?.endsAt);
+    } catch (e) {
+      if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+      throw e;
+    }
+    const reason = typeof body?.reason === "string" && body.reason.trim() ? body.reason.trim() : null;
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        // A tenant-wide window (`scope: "all"`) has no single client to hang off, and that is
+        // correct — it suppresses every client's monitors at once. A monitor-scoped window inherits
+        // that monitor's client, both because the column expects one and because it is genuinely
+        // true: this window is scoped to that client's property.
+        let clientId: string | null = null;
+        if (scope.monitorId) {
+          const m = await c.query<{ client_id: string }>(
+            `SELECT client_id FROM monitors WHERE id = $1 AND deleted_at IS NULL`,
+            [scope.monitorId],
+          );
+          if (!m.rows[0]) throw new BadRequestException("scope names a monitor that does not exist in this tenant");
+          clientId = m.rows[0].client_id;
+        }
+        const ins = await c.query<{ id: string }>(
+          `INSERT INTO monitor_maintenance (tenant_id, client_id, monitor_id, starts_at, ends_at, reason, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [
+            tenantId, clientId, scope.monitorId,
+            window.startsAt.toISOString(), window.endsAt.toISOString(),
+            reason, req.principal.userId ?? null,
+          ],
+        );
+        return { id: ins.rows[0].id };
+      },
+      MOD,
+    );
+  }
+
+  /**
+   * Ends suppression early — it cannot hide an outage that already happened, only stop hiding
+   * future ones (`monitoring.maintenance.delete`'s own catalog description). No soft-delete column
+   * exists on this table (unlike monitors/channels): a maintenance window is a schedule, not a
+   * record anything else references, so a real DELETE is the honest operation.
+   */
+  @Delete(":tenantId/monitoring/maintenance/:id")
+  async deleteMaintenance(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "monitor_maintenance", id, tenantId, module: "monitoring" }, "delete");
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const r = await c.query<{ id: string }>(`DELETE FROM monitor_maintenance WHERE id = $1 RETURNING id`, [id]);
+        if (!r.rows[0]) throw new NotFoundException("maintenance window not found");
+        return { id: r.rows[0].id };
+      },
+      MOD,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -653,6 +834,394 @@ export class MonitoringController {
           acknowledgedAt: iso(existing.rows[0].acknowledged_at),
           acknowledgedBy: existing.rows[0].acknowledged_by,
         };
+      },
+      MOD,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // Channel + route management — the missing middle. Before these, `monitor_channels` /
+  // `monitor_routes` rows could only be created by hand-SQL, so runner.ts:293-345's incident
+  // fan-out (`monitor_routes -> monitor_channels -> enqueueMail("monitoring.alert")`) had nothing
+  // to fan out to in practice.
+  //
+  // Authorized under `monitor_channel` for BOTH channels and routes, on purpose: there is no
+  // dedicated `monitor_route` Cerbos kind, and there is not meant to be one — a route is a
+  // channel's own routing rule, not an independently-owned resource, and minting a sixth Cerbos
+  // kind for it would be six more artifacts (policy + derived-role wiring + pinned count tests)
+  // for a resource with no ownership semantics of its own. `monitoring.channel.manage` covers
+  // create/edit/delete/test uniformly — the Cerbos policy comment states this explicitly ("manage
+  // also covers the test-send"), and the permission catalog has no separate channel/route delete
+  // key, so delete reuses `manage` rather than inventing one.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+  @Get(":tenantId/monitoring/channels")
+  async listChannels(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "monitor_channel", tenantId, module: "monitoring" }, "read");
+    const rows = await withTenants(
+      [tenantId],
+      (c) =>
+        c.query<MonitorChannelRow>(
+          `SELECT id, kind, name, destination, enabled, last_delivery_at, last_delivery_ok, failure_count
+             FROM monitor_channels WHERE deleted_at IS NULL ORDER BY name`,
+        ),
+      MOD,
+    );
+    return rows.rows.map(mapChannel);
+  }
+
+  @Post(":tenantId/monitoring/channels")
+  async createChannel(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor_channel", tenantId, module: "monitoring" }, "manage");
+
+    const name = String(body?.name ?? "").trim();
+    if (!name) throw new BadRequestException("name is required");
+
+    let kind: MonitorChannelKind;
+    try {
+      kind = parseChannelKind(body?.kind);
+    } catch (e) {
+      if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+      throw e;
+    }
+
+    const destination = typeof body?.destination === "string" && body.destination.trim() ? body.destination.trim() : null;
+    // An email channel with no address (or an implausible one) would sit on the console looking
+    // like coverage and then silently never deliver — runner.ts's notifyIncidents skips any row
+    // with `!ch.destination`. Only `email` is checked because it is the only kind with meaning for
+    // "is this a valid address"; the others store an opaque display string.
+    if (kind === "email") {
+      if (!destination) throw new BadRequestException("destination (an email address) is required for an email channel");
+      if (!isPlausibleEmail(destination)) throw new BadRequestException("destination is not a plausible email address");
+    }
+    const cfg = body?.config && typeof body.config === "object" && !Array.isArray(body.config) ? body.config : {};
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const ins = await c.query<{ id: string }>(
+          `INSERT INTO monitor_channels (tenant_id, kind, name, config, destination, origin_site)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [tenantId, kind, name, JSON.stringify(cfg), destination, config.originSite],
+        );
+        const id = ins.rows[0].id;
+        // "After any write, assert what you wrote" (constraint 1) — same idiom as createMonitor.
+        const check = await c.query(`SELECT id FROM monitor_channels WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (!check.rows[0]) {
+          throw new Error(`monitor_channel ${id} was inserted but is not readable under its own write scope`);
+        }
+        return { id };
+      },
+      MOD,
+    );
+  }
+
+  @Patch(":tenantId/monitoring/channels/:id")
+  async updateChannel(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor_channel", id, tenantId, module: "monitoring" }, "manage");
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const existing = await c.query<{ kind: string }>(
+          `SELECT kind FROM monitor_channels WHERE id = $1 AND deleted_at IS NULL`,
+          [id],
+        );
+        if (!existing.rows[0]) throw new NotFoundException("channel not found");
+        let kind = existing.rows[0].kind;
+
+        const sets: string[] = ["updated_at = now()"];
+        const params: unknown[] = [id];
+
+        if (body?.kind !== undefined) {
+          try {
+            kind = parseChannelKind(body.kind);
+          } catch (e) {
+            if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+            throw e;
+          }
+          params.push(kind);
+          sets.push(`kind = $${params.length}`);
+        }
+        if (body?.name !== undefined) {
+          const name = String(body.name).trim();
+          if (!name) throw new BadRequestException("name cannot be blank");
+          params.push(name);
+          sets.push(`name = $${params.length}`);
+        }
+        if (body?.destination !== undefined) {
+          const destination =
+            typeof body.destination === "string" && body.destination.trim() ? body.destination.trim() : null;
+          if (kind === "email" && destination && !isPlausibleEmail(destination)) {
+            throw new BadRequestException("destination is not a plausible email address");
+          }
+          params.push(destination);
+          sets.push(`destination = $${params.length}`);
+        }
+        if (body?.config !== undefined) {
+          const cfg = body.config && typeof body.config === "object" && !Array.isArray(body.config) ? body.config : {};
+          params.push(JSON.stringify(cfg));
+          sets.push(`config = $${params.length}`);
+        }
+        if (body?.enabled !== undefined) {
+          params.push(Boolean(body.enabled));
+          sets.push(`enabled = $${params.length}`);
+        }
+
+        const upd = await c.query<{ id: string }>(
+          `UPDATE monitor_channels SET ${sets.join(", ")} WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+          params,
+        );
+        // Cross-tenant is proven here exactly as updateMonitor proves it: company B's request runs
+        // inside withTenants([tenantB]), so RLS makes company A's row invisible and this UPDATE
+        // matches zero rows — a 404, never a 200 that quietly touched nothing.
+        if (!upd.rows[0]) throw new NotFoundException("channel not found");
+
+        const row = await c.query<MonitorChannelRow>(
+          `SELECT id, kind, name, destination, enabled, last_delivery_at, last_delivery_ok, failure_count
+             FROM monitor_channels WHERE id = $1`,
+          [id],
+        );
+        return mapChannel(row.rows[0]);
+      },
+      MOD,
+    );
+  }
+
+  /**
+   * SOFT DELETE, matching monitors/status_pages: `monitor_routes` rows keep referencing this
+   * channel_id (no cascade on a soft delete), but `notifyIncidents`'s own join already filters
+   * `ch.deleted_at IS NULL`, so a deleted channel simply stops receiving events without a second
+   * code path to keep in sync.
+   */
+  @Delete(":tenantId/monitoring/channels/:id")
+  async deleteChannel(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "monitor_channel", id, tenantId, module: "monitoring" }, "manage");
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const r = await c.query<{ id: string; deleted_at: Date }>(
+          `UPDATE monitor_channels SET deleted_at = now(), enabled = false, updated_at = now()
+             WHERE id = $1 AND deleted_at IS NULL
+           RETURNING id, deleted_at`,
+          [id],
+        );
+        if (!r.rows[0]) throw new NotFoundException("channel not found");
+        return { id: r.rows[0].id, deletedAt: iso(r.rows[0].deleted_at) };
+      },
+      MOD,
+    );
+  }
+
+  /**
+   * Sends a REAL notification through the exact path a real incident would use —
+   * `enqueueMail("monitoring.alert")`, the same template runner.ts's `notifyIncidents` uses — rather
+   * than a health check that proves nothing about whether the destination actually receives mail.
+   * Only `email` has a wired delivery driver today (`parseChannelKind`'s doc comment; runner.ts's own
+   * comment: "Email is the only channel kind wired today"), so any other kind refuses loudly instead
+   * of reporting a fake `{ok:true}` for a send that never happened.
+   *
+   * `channel.destination` is NEVER logged — it is a webhook URL / address, and
+   * `monitoring.channel.manage` is a broad grant.
+   */
+  @Post(":tenantId/monitoring/channels/:id/test")
+  async testChannel(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "monitor_channel", id, tenantId, module: "monitoring" }, "manage");
+
+    const channel = await withTenants(
+      [tenantId],
+      async (c) => {
+        const row = await c.query<{ id: string; kind: string; name: string; destination: string | null }>(
+          `SELECT id, kind, name, destination FROM monitor_channels WHERE id = $1 AND deleted_at IS NULL`,
+          [id],
+        );
+        if (!row.rows[0]) throw new NotFoundException("channel not found");
+        return row.rows[0];
+      },
+      MOD,
+    );
+
+    if (channel.kind !== "email") {
+      throw new BadRequestException(
+        `no notification driver is registered for channel kind '${channel.kind}' on this deployment — it cannot deliver a test`,
+      );
+    }
+    if (!channel.destination) {
+      throw new BadRequestException("channel has no destination configured");
+    }
+
+    await enqueueMail({
+      stream: "notify",
+      templateKey: "monitoring.alert",
+      toEmail: channel.destination,
+      tenantId,
+      entityType: "monitor_channel",
+      entityId: channel.id,
+      payload: {
+        event: "opened",
+        siteName: `Test notification — ${channel.name}`,
+        target: "monitoring channel test",
+        status: "test",
+        reason:
+          "This is a test notification triggered from the monitoring channel console. No real incident is open.",
+        href: `${config.mail.linkBaseUrl}/monitoring/channels`,
+      },
+    });
+
+    return { ok: true };
+  }
+
+  @Get(":tenantId/monitoring/routes")
+  async listRoutes(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string) {
+    await authorize(req.principal, { kind: "monitor_channel", tenantId, module: "monitoring" }, "read");
+    const rows = await withTenants(
+      [tenantId],
+      (c) =>
+        c.query<MonitorRouteRow>(
+          `SELECT r.id, r.channel_id, ch.name AS channel_name, r.match_client_id,
+                  cl.name AS match_client_name, r.match_severity, r.match_kind, r.enabled
+             FROM monitor_routes r
+             JOIN monitor_channels ch ON ch.id = r.channel_id
+             LEFT JOIN clients cl ON cl.id = r.match_client_id
+            WHERE ch.deleted_at IS NULL
+            ORDER BY ch.name, r.created_at`,
+        ),
+      MOD,
+    );
+    return rows.rows.map(mapRoute);
+  }
+
+  @Post(":tenantId/monitoring/routes")
+  async createRoute(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor_channel", tenantId, module: "monitoring" }, "manage");
+
+    const channelId = String(body?.channelId ?? "").trim();
+    if (!channelId) throw new BadRequestException("channelId is required");
+
+    let matchSeverity: string | null;
+    let matchKind: string | null;
+    try {
+      matchSeverity = parseOptionalMatchSeverity(body?.matchSeverity);
+      matchKind = parseOptionalMatchKind(body?.matchKind);
+    } catch (e) {
+      if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+      throw e;
+    }
+    const matchClientId =
+      typeof body?.matchClientId === "string" && body.matchClientId.trim() ? body.matchClientId.trim() : null;
+    const enabled = body?.enabled === undefined ? true : Boolean(body.enabled);
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const ch = await c.query(`SELECT 1 FROM monitor_channels WHERE id = $1 AND deleted_at IS NULL`, [channelId]);
+        if (!ch.rows[0]) throw new BadRequestException("channelId not found in this tenant");
+        if (matchClientId) {
+          const cl = await c.query(`SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL`, [matchClientId]);
+          if (!cl.rows[0]) throw new BadRequestException("matchClientId not found in this tenant");
+        }
+        const ins = await c.query<{ id: string }>(
+          `INSERT INTO monitor_routes (tenant_id, channel_id, match_client_id, match_severity, match_kind, enabled)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [tenantId, channelId, matchClientId, matchSeverity, matchKind, enabled],
+        );
+        return { id: ins.rows[0].id };
+      },
+      MOD,
+    );
+  }
+
+  @Patch(":tenantId/monitoring/routes/:id")
+  async updateRoute(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    await authorize(req.principal, { kind: "monitor_channel", id, tenantId, module: "monitoring" }, "manage");
+
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const sets: string[] = [];
+        const params: unknown[] = [id];
+
+        if (body?.matchClientId !== undefined) {
+          const matchClientId =
+            typeof body.matchClientId === "string" && body.matchClientId.trim() ? body.matchClientId.trim() : null;
+          if (matchClientId) {
+            const cl = await c.query(`SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL`, [matchClientId]);
+            if (!cl.rows[0]) throw new BadRequestException("matchClientId not found in this tenant");
+          }
+          params.push(matchClientId);
+          sets.push(`match_client_id = $${params.length}`);
+        }
+        if (body?.matchSeverity !== undefined) {
+          let matchSeverity: string | null;
+          try {
+            matchSeverity = parseOptionalMatchSeverity(body.matchSeverity);
+          } catch (e) {
+            if (e instanceof MonitorValidationError) throw new BadRequestException(e.message);
+            throw e;
+          }
+          params.push(matchSeverity);
+          sets.push(`match_severity = $${params.length}`);
+        }
+        if (body?.matchKind !== undefined) {
+          params.push(parseOptionalMatchKind(body.matchKind));
+          sets.push(`match_kind = $${params.length}`);
+        }
+        if (body?.enabled !== undefined) {
+          params.push(Boolean(body.enabled));
+          sets.push(`enabled = $${params.length}`);
+        }
+        if (sets.length === 0) throw new BadRequestException("nothing to update");
+
+        const upd = await c.query<{ id: string }>(
+          `UPDATE monitor_routes SET ${sets.join(", ")} WHERE id = $1 RETURNING id`,
+          params,
+        );
+        if (!upd.rows[0]) throw new NotFoundException("route not found");
+
+        const row = await c.query<MonitorRouteRow>(
+          `SELECT r.id, r.channel_id, ch.name AS channel_name, r.match_client_id,
+                  cl.name AS match_client_name, r.match_severity, r.match_kind, r.enabled
+             FROM monitor_routes r
+             JOIN monitor_channels ch ON ch.id = r.channel_id
+             LEFT JOIN clients cl ON cl.id = r.match_client_id
+            WHERE r.id = $1`,
+          [id],
+        );
+        return mapRoute(row.rows[0]);
+      },
+      MOD,
+    );
+  }
+
+  /** Hard delete: `monitor_routes` has no `deleted_at` column — it is a routing rule, not a record
+   *  anything else references or that history depends on (unlike monitors/channels/incidents). */
+  @Delete(":tenantId/monitoring/routes/:id")
+  async deleteRoute(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
+    await authorize(req.principal, { kind: "monitor_channel", id, tenantId, module: "monitoring" }, "manage");
+    return withTenants(
+      [tenantId],
+      async (c) => {
+        const r = await c.query<{ id: string }>(`DELETE FROM monitor_routes WHERE id = $1 RETURNING id`, [id]);
+        if (!r.rows[0]) throw new NotFoundException("route not found");
+        return { id: r.rows[0].id };
       },
       MOD,
     );

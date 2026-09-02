@@ -479,4 +479,387 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
       expect(res.statusCode).toBe(404);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  // Channel / route / maintenance management — the missing middle that lets a tenant fill
+  // monitor_channels/monitor_routes without hand-SQL, so runner.ts:293-345 has somewhere to fan an
+  // incident out to.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════
+  describe("results by window", () => {
+    it("returns results within the requested window, defaulting to 24h", async () => {
+      const res = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/monitors/${monitorA}/results`, headers: asUser(staff),
+      });
+      expect(res.statusCode).toBe(200);
+      const rows = res.json() as { checkedAt: string; status: string }[];
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows[0].status).toBe("down");
+    });
+
+    it("accepts 7d and 30d explicitly", async () => {
+      for (const window of ["7d", "30d"]) {
+        const res = await app.inject({
+          method: "GET", url: `/api/${coA}/monitoring/monitors/${monitorA}/results?window=${window}`,
+          headers: asUser(staff),
+        });
+        expect(res.statusCode).toBe(200);
+      }
+    });
+
+    it("an unrecognised window is a 400, not a silent fallback", async () => {
+      const res = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/monitors/${monitorA}/results?window=1y`,
+        headers: asUser(staff),
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("an unknown monitor id is 404", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/${coA}/monitoring/monitors/00000000-0000-0000-0000-000000000000/results`,
+        headers: asUser(staff),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("company C cannot read company A's monitor results — RLS, not just Cerbos", async () => {
+      const res = await app.inject({
+        method: "GET", url: `/api/${coC}/monitoring/monitors/${monitorA}/results`, headers: asUser(managerC),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe("channels — the delivery targets runner.ts fans incidents out to", () => {
+    let channelId: string;
+
+    it("monitoring_staff cannot create a channel — manage is manager-tier", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(staff),
+        payload: { kind: "email", name: "ops pager", destination: "ops@viceroybali.com" },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("rejects an unknown channel kind with 400", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "carrier-pigeon", name: "bad kind" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("an email channel requires a plausible destination", async () => {
+      const noDest = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "email", name: "no destination" },
+      });
+      expect(noDest.statusCode).toBe(400);
+
+      const badDest = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "email", name: "bad destination", destination: "not-an-email" },
+      });
+      expect(badDest.statusCode).toBe(400);
+    });
+
+    it("a manager creates an email channel, and staff can read it back", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "email", name: "ops pager", destination: "ops@viceroybali.com" },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      channelId = res.json().id;
+      expect(channelId).toBeTruthy();
+
+      const list = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/channels`, headers: asUser(staff),
+      });
+      expect(list.statusCode).toBe(200);
+      const rows = list.json() as { id: string; kind: string; destination: string | null; enabled: boolean }[];
+      const row = rows.find((r) => r.id === channelId);
+      expect(row?.kind).toBe("email");
+      expect(row?.destination).toBe("ops@viceroybali.com");
+      expect(row?.enabled).toBe(true);
+    });
+
+    it("a non-email channel can be created even with no wired driver — 'absent, not silently inert'", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "webhook", name: "n8n hook", destination: "https://n8n.example/webhook/abc…" },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+    });
+
+    it("staff cannot update a channel", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/channels/${channelId}`, headers: asUser(staff),
+        payload: { name: "renamed" },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("a manager can update name/destination/enabled", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/channels/${channelId}`, headers: asUser(manager),
+        payload: { name: "ops pager (renamed)", enabled: false },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { name: string; enabled: boolean };
+      expect(body.name).toBe("ops pager (renamed)");
+      expect(body.enabled).toBe(false);
+
+      // Put it back enabled for the routes/test-send suites below.
+      const reEnable = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/channels/${channelId}`, headers: asUser(manager),
+        payload: { enabled: true },
+      });
+      expect(reEnable.statusCode).toBe(200);
+    });
+
+    it("company C cannot update company A's channel — RLS", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coC}/monitoring/channels/${channelId}`, headers: asUser(managerC),
+        payload: { name: "hijacked" },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    describe("test-send — a REAL notification through enqueueMail(\"monitoring.alert\")", () => {
+      const savedMailEnabled = config.mail.enabled;
+      beforeAll(() => { config.mail.enabled = true; });
+      afterAll(() => { config.mail.enabled = savedMailEnabled; });
+
+      it("sends through the exact template path runner.ts's notifyIncidents uses", async () => {
+        const before = await adminPool().query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM mail_log WHERE template_key = 'monitoring.alert' AND tenant_id = $1`,
+          [coA],
+        );
+        const res = await app.inject({
+          method: "POST", url: `/api/${coA}/monitoring/channels/${channelId}/test`, headers: asUser(manager),
+        });
+        // NestJS's default success code for @Post is 201, not 200 — same convention every other
+        // POST assertion in this file already follows (createMonitor et al. use toBeLessThan(300)).
+        expect(res.statusCode).toBeLessThan(300);
+        expect(res.json()).toEqual({ ok: true });
+
+        const after = await adminPool().query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM mail_log WHERE template_key = 'monitoring.alert' AND tenant_id = $1`,
+          [coA],
+        );
+        expect(Number(after.rows[0].n)).toBe(Number(before.rows[0].n) + 1);
+
+        // Never a leak of the destination into anything the test can observe beyond the row that
+        // legitimately carries it (mail_log.to_email) — the HTTP response carries only {ok:true}.
+        const row = await adminPool().query<{ to_email: string }>(
+          `SELECT to_email FROM mail_log WHERE template_key = 'monitoring.alert' AND tenant_id = $1
+            ORDER BY id DESC LIMIT 1`,
+          [coA],
+        );
+        expect(row.rows[0].to_email).toBe("ops@viceroybali.com");
+      });
+
+      it("staff cannot trigger a test-send — manage is manager-tier", async () => {
+        const res = await app.inject({
+          method: "POST", url: `/api/${coA}/monitoring/channels/${channelId}/test`, headers: asUser(staff),
+        });
+        expect(res.statusCode).toBe(403);
+      });
+
+      it("refuses to test a channel kind with no wired driver, rather than reporting a fake ok", async () => {
+        const webhook = await adminPool().query<{ id: string }>(
+          `SELECT id FROM monitor_channels WHERE tenant_id = $1 AND kind = 'webhook' LIMIT 1`, [coA],
+        );
+        const res = await app.inject({
+          method: "POST", url: `/api/${coA}/monitoring/channels/${webhook.rows[0].id}/test`, headers: asUser(manager),
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toMatch(/no notification driver/i);
+      });
+    });
+
+    it("a manager can delete (soft) a channel, and it disappears from the active list", async () => {
+      const disposable = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "email", name: "disposable channel", destination: "throwaway@viceroybali.com" },
+      });
+      const disposableId = disposable.json().id;
+
+      const del = await app.inject({
+        method: "DELETE", url: `/api/${coA}/monitoring/channels/${disposableId}`, headers: asUser(manager),
+      });
+      expect(del.statusCode).toBe(200);
+      expect(del.json().deletedAt).toBeTruthy();
+
+      const list = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/channels`, headers: asUser(staff),
+      });
+      expect((list.json() as { id: string }[]).map((r) => r.id)).not.toContain(disposableId);
+    });
+  });
+
+  describe("routes — a channel's own routing table", () => {
+    let channelId: string;
+    let routeId: string;
+
+    beforeAll(async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/channels`, headers: asUser(manager),
+        payload: { kind: "email", name: "routes-suite channel", destination: "routes-suite@viceroybali.com" },
+      });
+      channelId = res.json().id;
+    });
+
+    it("an unknown channelId is a 400, not a silently accepted orphan route", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/routes`, headers: asUser(manager),
+        payload: { channelId: "00000000-0000-0000-0000-000000000000" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("rejects an invalid matchSeverity with 400", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/routes`, headers: asUser(manager),
+        payload: { channelId, matchSeverity: "urgent" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("a manager creates a severity-filtered route, and staff can read it", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/routes`, headers: asUser(manager),
+        payload: { channelId, matchSeverity: "page" },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      routeId = res.json().id;
+
+      const list = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/routes`, headers: asUser(staff),
+      });
+      expect(list.statusCode).toBe(200);
+      const rows = list.json() as { id: string; channelId: string; matchSeverity: string | null }[];
+      const row = rows.find((r) => r.id === routeId);
+      expect(row?.channelId).toBe(channelId);
+      expect(row?.matchSeverity).toBe("page");
+    });
+
+    it("staff cannot create a route", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/routes`, headers: asUser(staff),
+        payload: { channelId },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("a manager updates the match filter", async () => {
+      const res = await app.inject({
+        method: "PATCH", url: `/api/${coA}/monitoring/routes/${routeId}`, headers: asUser(manager),
+        payload: { matchSeverity: "ticket", matchKind: "http" },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { matchSeverity: string | null; matchKind: string | null };
+      expect(body.matchSeverity).toBe("ticket");
+      expect(body.matchKind).toBe("http");
+    });
+
+    it("company C cannot delete company A's route — RLS", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coC}/monitoring/routes/${routeId}`, headers: asUser(managerC),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("a manager deletes the route, and it is gone (hard delete — no deleted_at column)", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coA}/monitoring/routes/${routeId}`, headers: asUser(manager),
+      });
+      expect(res.statusCode).toBe(200);
+
+      const row = await adminPool().query(`SELECT id FROM monitor_routes WHERE id = $1`, [routeId]);
+      expect(row.rows[0]).toBeUndefined();
+    });
+  });
+
+  describe("maintenance — the one write that can make monitoring lie (K7)", () => {
+    it("monitoring_staff cannot schedule a window — create is manager-tier", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(staff),
+        payload: { scope: "all", startsAt: "2026-09-10T00:00:00Z", endsAt: "2026-09-10T02:00:00Z" },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("rejects an inverted window with 400, not a constraint-violation 500", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(manager),
+        payload: { scope: "all", startsAt: "2026-09-10T02:00:00Z", endsAt: "2026-09-10T00:00:00Z" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("rejects a malformed scope string with 400", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(manager),
+        payload: { scope: "everything", startsAt: "2026-09-10T00:00:00Z", endsAt: "2026-09-10T02:00:00Z" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("rejects a scope naming a monitor outside this tenant", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(manager),
+        payload: { scope: `monitor:${monitorB}`, startsAt: "2026-09-10T00:00:00Z", endsAt: "2026-09-10T02:00:00Z" },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    let windowId: string;
+
+    it("a manager schedules a monitor-scoped window, and it round-trips through GET", async () => {
+      const res = await app.inject({
+        method: "POST", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(manager),
+        payload: {
+          scope: `monitor:${monitorA}`, startsAt: "2026-09-10T00:00:00Z", endsAt: "2026-09-10T02:00:00Z",
+          reason: "planned upgrade",
+        },
+      });
+      expect(res.statusCode).toBeLessThan(300);
+      windowId = res.json().id;
+      expect(windowId).toBeTruthy();
+
+      const list = await app.inject({
+        method: "GET", url: `/api/${coA}/monitoring/maintenance`, headers: asUser(staff),
+      });
+      const rows = list.json() as { id: string; scope: string; reason: string | null }[];
+      const row = rows.find((r) => r.id === windowId);
+      expect(row?.scope).toBe(`monitor:${monitorA}`);
+      expect(row?.reason).toBe("planned upgrade");
+    });
+
+    it("staff cannot cancel a window — delete is manager-tier", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coA}/monitoring/maintenance/${windowId}`, headers: asUser(staff),
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("company C cannot cancel company A's window — RLS", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coC}/monitoring/maintenance/${windowId}`, headers: asUser(managerC),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("a manager cancels the window early, and it is gone", async () => {
+      const res = await app.inject({
+        method: "DELETE", url: `/api/${coA}/monitoring/maintenance/${windowId}`, headers: asUser(manager),
+      });
+      expect(res.statusCode).toBe(200);
+
+      const row = await adminPool().query(`SELECT id FROM monitor_maintenance WHERE id = $1`, [windowId]);
+      expect(row.rows[0]).toBeUndefined();
+    });
+  });
 });

@@ -3343,7 +3343,7 @@ tables and read zero until the later write paths land.
 
 ---
 
-## 20. Monitoring module — Plane B property/service monitoring (MON-* program, 2026-08-13) — `platform-ui/src/lib/monitoring.ts` — **STATUS: UI PROTOTYPED, BACKEND NOT STARTED (every row PENDING)**
+## 20. Monitoring module — Plane B property/service monitoring (MON-* program, 2026-08-13) — `platform-ui/src/lib/monitoring.ts` — **STATUS: BACKEND MOSTLY BUILT (2026-09-02: channel/route management, results-by-window and maintenance write/delete landed — the alert-delivery management surface described below; `POST/PATCH /monitors` and `POST /incidents/:id/ack` are separately-implemented pre-existing rows whose PENDING marker predates this pass)**
 
 Design: `docs/blueprints/monitoring-program.md`. Shapes are **canonical in `platform-ui/src/lib/monitoring.ts`** —
 implement the backend to match those exported types, not a re-derivation from this table.
@@ -3363,17 +3363,24 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 | POST | `/api/:t/monitoring/monitors` | `monitoring.write` | `{ id }` | ⏳ PENDING |
 | GET | `/api/:t/monitoring/monitors/:id` | `monitoring.read` | `MonitorDetail` \| 404 | ✅ BUILT |
 | PATCH | `/api/:t/monitoring/monitors/:id` | `monitoring.write` | `{ id }` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/monitors/:id/results?window=24h\|7d\|30d` | `monitoring.read` | `MonitorResult[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/monitors/:id/results?window=24h\|7d\|30d` | `monitoring.monitor.read` | `MonitorResult[]` | ✅ BUILT (2026-09-02) |
 | GET | `/api/:t/monitoring/incidents?status&limit` | `monitoring.read` | `Incident[]` | ✅ BUILT |
 | POST | `/api/:t/monitoring/incidents/:id/ack` | `monitoring.ack` | `{ id }` | ⏳ PENDING |
 | GET | `/api/:t/monitoring/summary` | `monitoring.read` | `MonitoringSummary` | ✅ BUILT |
 | GET | `/api/:t/monitoring/kinds` | `monitoring.read` | `MonitorKindSpec[]` | ✅ BUILT (from the driver registry) |
 | GET | `/api/:t/monitoring/maintenance` | `monitoring.read` | `MaintenanceWindow[]` | ✅ BUILT |
-| POST | `/api/:t/monitoring/maintenance` | `monitoring.write` | `{ id }` | ⏳ PENDING |
+| POST | `/api/:t/monitoring/maintenance` | `monitoring.maintenance.create` | `{ id }` | ✅ BUILT (2026-09-02) |
+| DELETE | `/api/:t/monitoring/maintenance/:id` | `monitoring.maintenance.delete` | `{ id }` | ✅ BUILT (2026-09-02) — hard delete, ends suppression early; no `deleted_at` column on this table |
 | POST | `/api/monitoring/heartbeat/:token` | **unauthenticated by design** (token IS the credential) | `{ok:true}`, always | ✅ BUILT — NOTE the path has NO `:t`: there is no principal, so no tenant to scope by; the token identifies the row |
-| GET | `/api/:t/monitoring/channels` | `monitoring.read` | `MonitorChannel[]` | ⏳ PENDING |
-| POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.write` | `{ ok }` | ⏳ PENDING |
-| GET | `/api/:t/monitoring/routes` | `monitoring.read` | `MonitorRoute[]` | ⏳ PENDING |
+| GET | `/api/:t/monitoring/channels` | `monitoring.channel.read` | `MonitorChannel[]` | ✅ BUILT (2026-09-02) |
+| POST | `/api/:t/monitoring/channels` | `monitoring.channel.manage` | `{ id }` | ✅ BUILT (2026-09-02) — not in the original PENDING list, added to close the create gap |
+| PATCH | `/api/:t/monitoring/channels/:id` | `monitoring.channel.manage` | `MonitorChannel` | ✅ BUILT (2026-09-02) — not in the original PENDING list, added to close the edit gap |
+| DELETE | `/api/:t/monitoring/channels/:id` | `monitoring.channel.manage` | `{ id, deletedAt }` | ✅ BUILT (2026-09-02) — soft delete; not in the original PENDING list |
+| POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.channel.manage` | `{ ok }` | ✅ BUILT (2026-09-02) — sends a real `monitoring.alert` notification through `enqueueMail`; refuses (400) for any channel kind other than `email`, which is the only kind with a wired delivery driver today |
+| GET | `/api/:t/monitoring/routes` | `monitoring.channel.read` | `MonitorRoute[]` | ✅ BUILT (2026-09-02) |
+| POST | `/api/:t/monitoring/routes` | `monitoring.channel.manage` | `{ id }` | ✅ BUILT (2026-09-02) — not in the original PENDING list, added to close the create gap |
+| PATCH | `/api/:t/monitoring/routes/:id` | `monitoring.channel.manage` | `MonitorRoute` | ✅ BUILT (2026-09-02) — not in the original PENDING list |
+| DELETE | `/api/:t/monitoring/routes/:id` | `monitoring.channel.manage` | `{ id }` | ✅ BUILT (2026-09-02) — hard delete; `monitor_routes` has no `deleted_at` column; not in the original PENDING list |
 
 ### Contract notes the backend must honour
 
@@ -3404,6 +3411,31 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 9. **Public status pages (`/status/:slug`) are NOT in this section.** They are an unauthenticated
    surface with their own strict field allowlist (monitoring-program.md §3.5) and must not reuse
    these shapes — `target`, `config` and assertion strings are all forbidden there.
+10. **Routes are authorized under `monitor_channel`, not a dedicated `monitor_route` Cerbos kind —
+    there is no such kind, by design.** A route is a channel's own routing rule, not an
+    independently-owned resource, and Cerbos denies unlisted kind/action pairs silently, so minting
+    a sixth kind for it would be six more artifacts (policy + derived-role wiring + pinned count
+    tests) for a resource with no ownership semantics of its own. `monitoring.channel.read` /
+    `monitoring.channel.manage` gate BOTH channel and route endpoints.
+11. **`monitoring.channel.manage` covers create, edit, delete AND test-send uniformly.** The
+    permission catalog has no separate `channel.delete` or `route.*` key; delete reuses `manage`
+    rather than inventing one, matching the Cerbos policy's own comment ("manage also covers the
+    test-send").
+12. **`POST /channels/:id/test` refuses (400) for any channel `kind` other than `email`.** Only
+    `email` has a wired delivery driver (`runner.ts`'s `notifyIncidents` skips every other kind
+    without erroring) — a test-send must not report a fake `{ok:true}` for a channel nothing can
+    actually deliver through yet. Creating a non-email channel is still legal ahead of its driver
+    landing ("absent, not silently inert" applies to drivers, not to channel rows).
+13. **An email channel requires a plausible `destination` at write time.** `runner.ts`'s fan-out
+    silently skips any channel with `!ch.destination`, so a channel that could never deliver would
+    otherwise sit on the console looking like coverage — the exact failure `channelHealth` exists to
+    surface. Non-email kinds accept any (or no) `destination`; it is an opaque display string.
+14. **`monitor_routes` has no `deleted_at` column and neither does `monitor_maintenance`.** Their
+    deletes are real `DELETE`s, unlike `monitors`/`monitor_channels`/`status_pages`, which soft-delete.
+15. **`POST /maintenance`'s `scope` round-trips `GET /maintenance`'s own rendering** — `"all"` for a
+    tenant-wide window, `"monitor:<uuid>"` for a monitor-scoped one — matching
+    `platform-ui/src/lib/monitoringActions.ts`'s `scheduleMaintenance` form field exactly, so no
+    second representation needs to stay in sync.
 
 ### UI consumers (built 2026-08-13)
 

@@ -3729,11 +3729,29 @@ agents against one test Postgres produced a `57P01` failure that was contention,
 
 ---
 
-## monitoring — Uptime · Incidents · Status Pages · `0.2.0` · IN PROGRESS
+## monitoring — Uptime · Incidents · Status Pages · `0.3.0` · IN PROGRESS
 
 **What exists (dev):** the `monitoring` module vertical — monitors, incidents, maintenance windows
 and status pages, with **18 uptime monitors live** on the estate. `0.2.0` was a correctness wave over
-the IAM layer rather than a feature wave.
+the IAM layer; `0.3.0` is the alert-delivery management surface.
+
+**Added in `0.3.0` (2026-09-02):** the endpoints that let a tenant manage alert delivery end to end,
+closing the gap where `monitor_channels`/`monitor_routes` rows could only be created by hand-SQL and
+the incident notifier (`runner.ts:293-345`, `monitor_routes -> monitor_channels ->
+enqueueMail("monitoring.alert")`) had nothing to fan out to in practice:
+- `GET/POST/PATCH/DELETE /api/:t/monitoring/channels(/:id)` and `POST .../channels/:id/test` (a REAL
+  send through the exact `enqueueMail("monitoring.alert")` path `runner.ts` uses — refuses 400 for
+  any channel kind other than `email`, the only one with a wired delivery driver today).
+- `GET/POST/PATCH/DELETE /api/:t/monitoring/routes(/:id)` — routes are authorized under the existing
+  `monitor_channel` Cerbos kind (`monitoring.channel.read`/`.manage`) rather than a new kind: a route
+  is a channel's own routing rule with no ownership semantics of its own, and minting a sixth Cerbos
+  kind would be six more artifacts plus four pinned count tests for no behavioural gain.
+- `POST/DELETE /api/:t/monitoring/maintenance(/:id)` — `scope` round-trips the exact `"all"` /
+  `"monitor:<uuid>"` string `GET /maintenance` already rendered.
+- `GET /api/:t/monitoring/monitors/:id/results?window=24h|7d|30d` — a windowed slice separate from
+  `MonitorDetail`'s embedded fixed-24h sample.
+- No new Cerbos kind, no catalog changes: reuses `monitoring.channel.read/manage` and
+  `monitoring.maintenance.create/delete`, all already declared. Catalog/permission counts unchanged.
 
 **Fixed in `0.2.0` (2026-08-19):**
 - **Five Cerbos actions had a policy rule and no catalog row** (`monitor_incident::read`,
@@ -3762,6 +3780,13 @@ and the **www allowlist**.
 
 **Verified:** 796/796 across `src/rbac` + `src/modules/monitoring` against live Postgres RLS and live
 Cerbos, with **zero skips** — the DB-backed half of this drift is invisible to CI, which has no test DB.
+
+**Verified (`0.3.0`, 2026-09-02):** full `platform-nest` suite on a clean-checkout Linux gate
+(sumopod, isolated docker network, live Postgres RLS + live Cerbos + Redis, `tsc --noEmit` +
+`npm test`) against a same-recipe clean-main baseline (`f94eb71d`, 1.0.0-alpha.328):
+baseline 497 files / 7004 tests passed, 2 files / 6 tests skipped, 1 todo; this change
+**497 files / 7053 tests passed, 2 files / 6 tests skipped, 1 todo — 0 failed files, 0 failed
+tests**, the +49 tests being exactly the new channel/route/maintenance/results coverage added here.
 
 ---
 
