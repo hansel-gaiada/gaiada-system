@@ -4206,6 +4206,39 @@ reconstructed from this table alone. Format defined in [`VERSIONING.md`](./VERSI
 | `Alpha 01.071.0301a` | 2026-08-31 | *(no module version moved)* |
 | `1.0.0-alpha.302` | — | **cut but NEVER TAGGED** — superseded by `1.0.0-alpha.303`, which contains everything it would have |
 | `1.0.0-alpha.303` | 2026-08-31 | *(no module version moved — **the first SemVer release actually tagged and deployed**)* |
+| `1.0.0-alpha.304` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.305` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.306` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.307` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.308` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.309` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.310` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.311` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.312` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.313` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.314` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.315` | 2026-08-31 | *(no module version moved)* |
+| `1.0.0-alpha.316` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.317` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.318` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.319` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.320` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.322` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.323` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.324` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.325` | 2026-09-01 | *(no module version moved)* |
+| `1.0.0-alpha.326` | 2026-09-02 | *(no module version moved)* |
+| `1.0.0-alpha.327` | 2026-09-02 | *(no module version moved)* |
+| `1.0.0-alpha.328` | 2026-09-02 | *(no module version moved)* |
+
+> **Backfilled 2026-09-02 from the git tags** (`v1.0.0-alpha.304` … `v1.0.0-alpha.328`), which are
+> the authoritative record of what shipped. **No module version moved across this whole window** —
+> the registry table already stood at its current values when `alpha.303` was cut, so these 24 cuts
+> carried fixes and infrastructure work that never moved a module number. **`1.0.0-alpha.321` has no
+> tag** — cut but never tagged, the same pattern as `Alpha 01.071.0300a` and `1.0.0-alpha.302`.
+> Live at time of backfill: **`v1.0.0-alpha.328`**, confirmed against the running containers on
+> `gda-aicenter` (`webdesk-api` trails at `v1.0.0-alpha.325`).
+
 
 ### `Alpha 01.067.0144a` - 2026-08-23 - the work that was finished but never left the laptop
 

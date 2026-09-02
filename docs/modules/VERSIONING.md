@@ -5,7 +5,7 @@ Two levels, deliberately different, because they answer different questions:
 | Level | Format | Answers |
 |---|---|---|
 | **Module** | `0.7.0` (semver) | "what changed in *this* component?" |
-| **App** | `Alpha 01.001.0001a` | "what is *deployed*, and which module set is it?" |
+| **App** | `1.0.0-alpha.328` (SemVer 2.0.0) | "what is *deployed*, and which module set is it?" |
 
 Module versions already live in [`MODULES.md`](./MODULES.md); per-module history is in
 [`CHANGELOG.md`](./CHANGELOG.md). This document defines the **app** version that sits on top,

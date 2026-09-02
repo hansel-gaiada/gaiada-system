@@ -23,7 +23,7 @@ version and add a `CHANGELOG.md` entry on every notable module change.
 
 ## App version
 
-**`1.0.0-alpha.302`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
+**`1.0.0-alpha.328`** â€” see [`VERSIONING.md`](./VERSIONING.md) for the format, and
 
 [`/VERSION`](../../VERSION) for the machine-readable source. The app version composes the module
 versions below; the running build reports it at `GET /health`.
@@ -48,7 +48,7 @@ versions below; the running build reports it at `GET /health`.
 | capture-helper | `0.2.0` | IN PROGRESS | WS11 | 2026-07 |
 | webdev | `0.13.0` | IN PROGRESS | Web Dev | 2026-08-09 |
 | webdesk | `0.2.0` | DEV-VERIFIED | Web Dev | 2026-08-30 |
-| search-marketing | `0.5.1` | DEV-VERIFIED | SEO | 2026-08-04 |
+| search-marketing | `0.5.2` | DEV-VERIFIED | SEO | 2026-08-04 |
 | social-media | `0.5.31` | IN PROGRESS | Social Media | 2026-08-23 |
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
@@ -63,7 +63,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest â€” Platform Core Â· `0.33.0` Â· IN PROGRESS
+## platform-nest â€” Platform Core Â· `0.48.0` Â· IN PROGRESS
 **0.22.0 (2026-08-13, IAM authorization hardening — permission arm, scope filter, invoice
 maker/checker):** Closed the mis-scoped-grant class at the resolution source — `assemblePrincipal()`
 now drops permissions from any grant at a scope the role's own Cerbos condition can never satisfy,
@@ -156,7 +156,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) â†’ hardening to production.
 
-## platform-ui â€” ERP Suite Â· `0.58.0` Â· IN PROGRESS
+## platform-ui â€” ERP Suite Â· `0.62.0` Â· IN PROGRESS
 
 **0.25.1 (2026-08-10, IAM Phase 1 mirror corrections):** `lib/rbac.ts` and the new
 `lib/rbac-capability-map.ts` corrected against re-derived Cerbos ground truth rather than the
@@ -212,7 +212,7 @@ run detail page showing step-chip transcript (text-only, never HTML or raw JSON)
 **Known gaps:** not deployed to production.
 **Future plans:** dept-console integrations program â†’ prod hardening.
 
-## ai-gateway-go â€” AI Gateway Â· `0.13.0` Â· PROTOTYPED
+## ai-gateway-go â€” AI Gateway Â· `0.13.2` Â· PROTOTYPED
 
 **What exists (dev):** Go gateway (the `ai-gateway` service on `:3002`), HTTP-parity with the retired Node
 gateway; provider chain + failover + circuit breaker, DLP, daily cost cap, egress audit + allowlist,
@@ -229,7 +229,7 @@ for tenant-attributed load).
 deploy. Deferred: OpenBao-issued creds, media DLP classification, native per-provider streaming, cert rotation.
 **Future plans:** verify container build â†’ OpenBao creds â†’ media DLP â†’ prod.
 
-## mcp-hub â€” Access Layer Â· `0.10.1` Â· PROTOTYPED
+## mcp-hub â€” Access Layer Â· `0.12.1` Â· PROTOTYPED
 
 **What exists (dev):** MCP server (official SDK, Streamable HTTP, stateless) fronting platform-nest; OBO
 principal minting, Cerbos-authoritative policy, full Tools/Resources/Prompts surface, module-aggregated
@@ -245,14 +245,14 @@ Property-based convergence + partition/chaos passing on a local 2-Postgres harne
 **Known gaps:** runs **idle** (`sync-central`) â€” never exercised against a real second site; not in production.
 **Future plans:** activate when a second site exists â†’ prod hardening.
 
-## automation (n8n) â€” Orchestration Â· `0.4.0` Â· DEV-VERIFIED
+## automation (n8n) â€” Orchestration Â· `0.4.1` Â· DEV-VERIFIED
 
 **What exists (dev):** n8n + MCP-calling templates, scoped n8n accounts, impact gate, platformâ†’n8n event
 bridge, approvals-suspension surface. **3 flows verified end-to-end** on the live dev stack (2026-07-15).
 **Known gaps:** Temporal (durable workflows) deferred until a durable flow exists; not in production.
 **Future plans:** more flows â†’ Temporal for durable orchestration â†’ prod.
 
-## observability â€” Telemetry Â· `0.6.0` Â· DEV-VERIFIED
+## observability â€” Telemetry Â· `0.6.2` Â· DEV-VERIFIED
 
 **What exists (dev):** OTel across all services (fail-soft), opt-in Grafana/Prometheus/Tempo/Loki stack,
 multi-burn-rate SLOs, alerting (â‰¥2 transports + dead-man's-switch), synthetics, restore drill. **Verified
@@ -260,7 +260,7 @@ end-to-end on a live Docker stack** (2026-07-15).
 **Known gaps:** filelogâ†’Loki env-limited on Docker Desktop (works on Linux VPS); not deployed to prod.
 **Future plans:** deploy the stack to a real host â†’ tune SLOs against prod traffic.
 
-## infra â€” Platform Engineering & Delivery Â· `0.7.1` Â· PROTOTYPED
+## infra â€” Platform Engineering & Delivery Â· `0.8.7` Â· PROTOTYPED
 
 **What exists (dev):** full VPS Docker Compose stack, per-component Dockerfiles, local CI (`test-all.sh`),
 GH Actions (inert until the repo is standalone), crypto-shred-safe backups, supply-chain pipeline
@@ -290,7 +290,7 @@ the host-run UI depends on).
 **Known gaps:** not deployed; K8s/GitOps + SPIFFE/SPIRE are target-state (hiring-gated).
 **Future plans:** first production deploy â†’ GitOps â†’ K8s/SPIFFE at target-state.
 
-## wa-chat-bot â€” Messaging Surface Â· `0.9.1` Â· PROTOTYPED
+## wa-chat-bot â€” Messaging Surface Â· `0.9.2` Â· PROTOTYPED
 
 **What exists (dev):** WA (WAHA) + Telegram work-summary/assistant bot; scrub â†’ crypto-shred store â†’
 skills/Q&A, digests, media enrichment via gateway. Telegram live in dev; P5a production-grade features.
@@ -329,7 +329,7 @@ array `/chats`, NOWEB `subject` and WEBJS `name`) on the next message and on eve
 before real ingestion; not in production.
 **Future plans:** WAHA primary once number scanned â†’ hardening backlog â†’ prod after gates.
 
-## ai-agents â€” Agent Brigade Â· `0.4.0` Â· PROTOTYPED
+## ai-agents â€” Agent Brigade Â· `0.8.1` Â· PROTOTYPED
 
 **What exists (dev):** specialist framework (status-reporter, approvals-chaser) + supervisor orchestrator
 (blackboard, cycle guard, per-goal budget, fan-out cap, approval suspension) + pgvector RAG; D14 safety in code.
@@ -500,7 +500,7 @@ Phase 1; Phase 3 (external wiring â€” GitHub App, Drive OAuth, Claude Admin
 decisions OQ-2/OQ-3; Phase 4 (webdesk + the one-rail contract-snapshot scaffolder) activates once
 webdesk's own P3 codegen lands.
 
-## webdesk â€” Website Platform Â· `0.1.0` Â· PROTOTYPED
+## webdesk â€” Website Platform Â· `0.2.0` Â· DEV-VERIFIED
 
 **What exists:** blueprint only (approved 2026-07-23) â€” see [`../BLUEPRINTS.md`](../BLUEPRINTS.md). No code.
 **Future plans:** phased build P1 Foundation â†’ P2 Forms+Mail â†’ P3 Contract/codegen â†’ P4 ERP control+envs â†’
@@ -3697,6 +3697,131 @@ approval via the portal** (new SMM-31/32, plain-tenant-wall table per 0088's les
 analytics + reports (attach-only assets) â†’ P4 agents + assistant. Decision-gated: SMM-28 Mixpost fallback,
 SMM-29 ClipsAI video, SMM-34 generative images (gated on the Creative render gateway).
 
+## lab-runner — Lab Execution Sidecar · `0.2.1` · DEV-VERIFIED
+
+**What exists (dev):** the standalone `lab-runner/` component — a gVisor-isolated execution sidecar
+that runs and **grades** LMS lab activities, with companion-target support (`buildTargetArgs`) so a
+Cyber lab can attack a second, deliberately vulnerable container (`lab-runner/targets/webapp-cmdi`).
+L5 put labs on a real host; L6 added the DevOps lab graded on real `nginx -t` output and the Cyber
+lab against the target; L7 shipped the six-department curriculum it grades for.
+
+**Traps closed on the way (all real, all found before push):**
+- **gVisor does not proxy Docker's embedded DNS on `--internal` networks**, so an attacker could
+  never resolve its target by alias — resolved via `--add-host` with the target's real IP.
+- `buildLabRequest` dropped `target`, which would have shipped a Cyber lab that was dead on arrival.
+- The Cyber flag was hardcoded in the seed **and** the test. Now read from `LMS_CYBER_FLAG`, refused
+  if unset, and asserted **by shape rather than value** — the first version of that assertion printed
+  the flag on failure, which is the same leak by a slower route.
+- `spec-redaction.ts` strips the **whole** `gradingSpec`, not just `answer`: a Cyber lab's pass
+  condition is "did you get the flag", so the flag lives in a `stdoutMatches` pattern.
+
+**Design invariants:** the target is as hardened as the attacker and **never publishes a port**. No
+DevOps/Cyber lab may exist before the runner can grade it — a required activity nothing can pass
+makes its whole path permanently uncompletable.
+
+**Known gaps:** not deployed to production. Under the RE-ZONED estate model (2026-08-31) this moves
+to `gda-aicenter`.
+
+**Future plans:** production hardening alongside [`lms`](#lms--learning--certification--070--dev-verified).
+
+**Verified:** driven 95/95 across 9 suites; runner 31/31. Suites were re-run **serially** — four
+agents against one test Postgres produced a `57P01` failure that was contention, not a defect.
+
+---
+
+## monitoring — Uptime · Incidents · Status Pages · `0.2.0` · IN PROGRESS
+
+**What exists (dev):** the `monitoring` module vertical — monitors, incidents, maintenance windows
+and status pages, with **18 uptime monitors live** on the estate. `0.2.0` was a correctness wave over
+the IAM layer rather than a feature wave.
+
+**Fixed in `0.2.0` (2026-08-19):**
+- **Five Cerbos actions had a policy rule and no catalog row** (`monitor_incident::read`,
+  `monitor_maintenance::{read,delete}`, `status_page::{read,update}`). Two are authorized by code
+  **already in production**, so the running platform was deciding against pairs the catalog did not
+  describe. Module contract went 9 → 14 declared permissions.
+- **`manager` and `group_executive` held zero monitoring bundle rows** while every monitoring policy
+  names them — Cerbos allowed a plain manager all 14 actions with the DB mirror recording none.
+  19 rows added (manager 14, `group_executive` 5 reads).
+- **The `permissions` table had drifted 9 rows ahead of the catalog** (293/284, sensitive 105/102),
+  breaking the row-count invariant `0093` establishes. Restored to 298/298 and 106/106.
+- **Heartbeat ingest could never have worked** (`0119`): unauthenticated by design, it has no tenant
+  context, so FORCE RLS filtered every row and the endpoint returned **200 having matched nothing**.
+  Now a `SECURITY DEFINER` function with a pinned `search_path`, matching on the token hash's index.
+
+**Known traps:** the RLS **search-scope** GUC (unset ⇒ zero rows, no error), the **probe deadline**,
+and the **www allowlist**.
+
+**Known gaps:** no dedicated blueprint section here — the programme doc is
+[`../blueprints/monitoring-program.md`](../blueprints/monitoring-program.md) with a tracker at
+[`../plans/monitoring-tracker.md`](../plans/monitoring-tracker.md). Not production-hardened.
+
+**Future plans:** close the gated rulings in
+[`../plans/2026-08-20-monitoring-gated-rulings.md`](../plans/2026-08-20-monitoring-gated-rulings.md)
+→ multi-server observability → production.
+
+**Verified:** 796/796 across `src/rbac` + `src/modules/monitoring` against live Postgres RLS and live
+Cerbos, with **zero skips** — the DB-backed half of this drift is invisible to CI, which has no test DB.
+
+---
+
+## finance — Finance & Accounting · `0.16.0` · PROTOTYPED
+
+**What exists (dev):** the Finance & Accounting vertical, built F0 → F9 plus the AR/AP credit-note
+and write-off waves. Ledger core, statements, AR, AP, bank reconciliation and the close, tax and
+statutory (Indonesian: PPN, PPh, bukti potong / e-Bupot), fixed assets with **book and tax**
+depreciation, posting rules, consolidation, and a `/finance` console over the lot.
+
+**The maker/checker seam:** invoices carry an `approve` action, creator/approver attribution, an
+`invoice_revisions` history covering all four write paths, and the repository's **first
+`EFFECT_DENY` rule** — so nobody, superadmin included, approves their own invoice (IAM-GAP-01/02).
+A new `ap_credit_writeoff_approve` duty carries two blocking pairs (*enter a bill then credit it
+away*; *divert the payment then write off the debt*) and is deliberately **not** held by
+`finance_staff`: the clerk who enters bills must not be able to cancel them.
+
+**Why AP is not a sign-flipped AR** — three differences each carry money:
+
+| | AR (F4b) | AP (F5b) |
+|---|---|---|
+| credit reverses | output VAT — `2140`, a liability we owed | **input VAT — `1170`, an asset we CLAIMED** |
+| validated by | our own faktur | a **nota retur the BUYER issues** (PMK 65/2010) |
+| withholding | no analogue | **unwound**, which can invalidate an issued bukti potong |
+| write-off posts | DR bad-debt expense `6950` → reduces profit | **CR other income `7300` → INCREASES taxable profit** |
+
+Released debt (*pembebasan utang*) is taxable income under UU PPh; booking it as a negative expense
+understates taxable profit — the same class of error as reclaiming VAT on a bad debt, in reverse.
+
+**Owner ruling (c), 2026-08-27 — the ledger is corrected here; the FILING is not.** If a bukti potong
+was already issued, the credit makes it overstate what was withheld, and fixing that is an amended
+e-Bupot — a statement to DJP. Auto-amending would silently restate a filing; blocking would make a
+routine purchase return impossible until a tax officer acted. So the credit posts,
+`requires_bupot_amendment` is set, `finance_ap_bupot_amendment_exceptions()` is the chase list, and
+`AP_BUPOT_AMENDMENT_PENDING` surfaces on the reconciliation — the one screen somebody reads every
+close. Marking it resolved **demands a reference**: a resolution with none cannot be told apart from
+nobody having filed it.
+
+**Known gaps:** no dedicated blueprint section here — see
+[`../blueprints/finance-accounting-foundation.md`](../blueprints/finance-accounting-foundation.md)
+and the progress docs (`../plans/2026-08-24-finance-PROGRESS.md`,
+`../plans/2026-08-25-finance-phase2-PROGRESS.md`). **`project-hug` is the reference implementation
+and its licence is unresolved** — that is the open gate on the programme. Not production-hardened.
+
+**Future plans:** close the licence question → statutory ratification → production validation.
+
+**Verified:** DEV-VERIFIED by replay against the **live schema** in a rolled-back transaction on a
+real bill carrying both PPN Masukan and PPh 23 — the credit produced `CR 1170` with no `2140` and
+`DR AP` equal to `amount_payable` not the gross; the write-off produced `CR 7300` with no VAT leg;
+the bukti potong flag fired; aging netted 38,150,000 − 3,815,000 − 1,000,000 = 33,335,000.
+`finance.test.ts` 81/81.
+
+> ⚠ **Structural fragility, recorded 2026-08-27:** a concurrent wave deleted `finance.ar.credit_note`
+> from **both** `permission-catalog.json` and `permission-groups.json` while migration `202608270910`
+> still inserts it into the database — artifact and DB disagreeing, 13 suites red on `main`. That was
+> the **third time in one day** a concurrent wave broke `main` through these six hand-maintained IAM
+> artifacts. The pattern is structural, not bad luck.
+
+---
+
 ## creative â€” Creative Studio Â· `0.1.0` Â· PROTOTYPED
 
 **What exists (dev):** the **Image Studio** â€” client-side auto-correct + hand-LUT colour-grading engine
@@ -3741,7 +3866,7 @@ rows; the gateway is Zone A egress-only.
 **Future plans:** built under the `creative` P1â€“P4 tickets (CR-* â€” design Â§12); container-build verification
 on a Docker host before deploy (same caveat as ai-gateway-go).
 
-## reports â€” Work Tracker Â· Reports Â· Appraisal Â· `0.3.0` Â· PROTOTYPED
+## reports â€” Work Tracker Â· Reports Â· Appraisal Â· `0.3.2` Â· PROTOTYPED
 
 **Design:** [`../blueprints/tracker-reporting-foundation.md`](../blueprints/tracker-reporting-foundation.md).
 
