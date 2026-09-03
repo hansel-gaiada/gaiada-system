@@ -38,8 +38,27 @@ import type {
   MonitorStatus,
   MaintenanceWindow,
 } from "./monitoring";
+// Value import from the CLIENT-SAFE half on purpose — this file is server-only, so importing a
+// runtime value from monitoringShared (which carries no "server-only" marker) is fine in this
+// direction; only the reverse (a client component importing a value from monitoring.ts) 500s the
+// build. Reusing the same list the real write-validation.ts's MONITOR_CHANNEL_KINDS declares (and
+// ChannelManager.tsx's <select> renders) means an unknown kind 400s here exactly like production,
+// instead of the fixture silently accepting a typo a real POST would reject.
+import { CHANNEL_KINDS, type ChannelKind } from "./monitoringShared";
 
 type MaintenanceWindowRow = MaintenanceWindow;
+// MON-fixture-parity — a channel's soft-delete marker. NOT part of the public `MonitorChannel`
+// shape (the real `mapChannel()` in monitoring.controller.ts never returns `deleted_at`), so every
+// response path below goes through `toPublicChannel()` to strip it before the row reaches `ok(...)`.
+type ChannelRow = MonitorChannel & { deletedAt: string | null };
+
+/** Same regex as platform-nest's `mail/sanitize.ts::isPlausibleEmail` — kept in sync by hand since
+ *  the two are separate projects with no shared package layer (root CLAUDE.md's "no monorepo"). */
+const PLAUSIBLE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Mirrors write-validation.ts's `MONITOR_SEVERITIES` — the set `matchSeverity` (routes) and
+ *  `severity` (monitors) are validated against. */
+const SEVERITIES = ["page", "ticket", "info"];
 
 export interface DemoResult {
   status: number;
@@ -286,7 +305,7 @@ function kinds(): MonitorKindSpec[] {
  * reachable across a session even after someone starts clicking around.
  */
 const CHANNEL_STORE_KEY = Symbol.for("gaiada.demoMonitoring.channels");
-const CHANNELS: MonitorChannel[] = ((globalThis as Record<symbol, unknown>)[CHANNEL_STORE_KEY] ??= [
+const CHANNELS: ChannelRow[] = ((globalThis as Record<symbol, unknown>)[CHANNEL_STORE_KEY] ??= [
   {
     id: "ch-telegram-ops",
     kind: "telegram",
@@ -296,6 +315,7 @@ const CHANNELS: MonitorChannel[] = ((globalThis as Record<symbol, unknown>)[CHAN
     lastDeliveryAt: iso(-18 * 60 * SEC),
     lastDeliveryOk: true,
     failureCount: 0,
+    deletedAt: null,
   },
   {
     id: "ch-webhook-n8n",
@@ -307,6 +327,7 @@ const CHANNELS: MonitorChannel[] = ((globalThis as Record<symbol, unknown>)[CHAN
     lastDeliveryAt: iso(-9 * 60 * SEC),
     lastDeliveryOk: false,
     failureCount: 4,
+    deletedAt: null,
   },
   {
     id: "ch-email-ops",
@@ -317,6 +338,7 @@ const CHANNELS: MonitorChannel[] = ((globalThis as Record<symbol, unknown>)[CHAN
     lastDeliveryAt: null,
     lastDeliveryOk: null,
     failureCount: 0,
+    deletedAt: null,
   },
   {
     id: "ch-mcp-hermes",
@@ -327,8 +349,16 @@ const CHANNELS: MonitorChannel[] = ((globalThis as Record<symbol, unknown>)[CHAN
     lastDeliveryAt: iso(-9 * 60 * SEC),
     lastDeliveryOk: true,
     failureCount: 0,
+    deletedAt: null,
   },
-]) as MonitorChannel[];
+]) as ChannelRow[];
+
+/** Strips the internal soft-delete marker before a row reaches `ok(...)` — the real
+ *  `mapChannel()` (monitoring.controller.ts) never returns `deleted_at` on the wire. */
+function toPublicChannel(c: ChannelRow): MonitorChannel {
+  const { deletedAt: _deletedAt, ...pub } = c;
+  return pub;
+}
 
 const ROUTE_STORE_KEY = Symbol.for("gaiada.demoMonitoring.routes");
 const ROUTES: MonitorRoute[] = ((globalThis as Record<symbol, unknown>)[ROUTE_STORE_KEY] ??= [
@@ -375,8 +405,12 @@ const SEQ_STORE_KEY = Symbol.for("gaiada.demoMonitoring.seq");
 const SEQ = ((globalThis as Record<symbol, unknown>)[SEQ_STORE_KEY] ??= { n: 100 }) as { n: number };
 const nid = (prefix: string) => `${prefix}-demo-${++SEQ.n}`;
 
+/** Only resolves for a LIVE channel — mirrors the real `listRoutes`/`createRoute`'s
+ *  `WHERE ch.deleted_at IS NULL` join condition. A route pointing at a soft-deleted channel must
+ *  resolve to `null` here, exactly like the real INNER JOIN drops the row instead of surfacing it
+ *  with a raw uuid (see the DELETE-channel/GET-routes handlers below for why). */
 function channelName(id: string): string | null {
-  return CHANNELS.find((c) => c.id === id)?.name ?? null;
+  return CHANNELS.find((c) => c.id === id && !c.deletedAt)?.name ?? null;
 }
 
 export function monitoringDemo(
@@ -388,77 +422,143 @@ export function monitoringDemo(
   const m = method.toUpperCase();
 
   // ── channels ──────────────────────────────────────────────────────────────────────────────────
-  if (p.match(/^\/api\/[^/]+\/monitoring\/channels$/) && m === "GET") return ok(CHANNELS);
+  // FRONTEND-BFF-CONTRACT.md §20 note 19 — production soft-deletes a channel (`deleted_at`) and
+  // NEVER cascades to its routes (the FK's ON DELETE CASCADE never fires because this is an
+  // UPDATE, not a DELETE). Every handler below therefore treats a channel as "gone" once
+  // `deletedAt` is set — filtered from GET, 404 from PATCH/DELETE/test — exactly like the real
+  // controller's `WHERE deleted_at IS NULL`, WITHOUT ever removing the row or touching ROUTES.
+  if (p.match(/^\/api\/[^/]+\/monitoring\/channels$/) && m === "GET") {
+    return ok(
+      CHANNELS.filter((c) => !c.deletedAt)
+        .map(toPublicChannel)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }
   if (p.match(/^\/api\/[^/]+\/monitoring\/channels$/) && m === "POST") {
     const b = JSON.parse(body || "{}") as { kind?: string; name?: string; destination?: string; enabled?: boolean };
-    if (!b.name?.trim()) return err(400, "name is required");
-    if (!b.kind?.trim()) return err(400, "kind is required");
-    if (!b.destination?.trim()) return err(400, "destination is required");
-    const row: MonitorChannel = {
+    const name = b.name?.trim();
+    if (!name) return err(400, "name is required");
+    if (typeof b.kind !== "string" || !CHANNEL_KINDS.includes(b.kind as ChannelKind)) {
+      return err(400, `kind must be one of ${CHANNEL_KINDS.join("|")}`);
+    }
+    const kind = b.kind;
+    // Mirrors createChannel's own rule (contract note 13): `destination` is required and validated
+    // as a plausible email ONLY for kind "email" — every other kind accepts anything, or nothing,
+    // because no delivery driver exists to validate a destination against yet.
+    const destination = typeof b.destination === "string" && b.destination.trim() ? b.destination.trim() : null;
+    if (kind === "email") {
+      if (!destination) return err(400, "destination (an email address) is required for an email channel");
+      if (!PLAUSIBLE_EMAIL_RE.test(destination)) return err(400, "destination is not a plausible email address");
+    }
+    const row: ChannelRow = {
       id: nid("ch"),
-      kind: b.kind.trim(),
-      name: b.name.trim(),
+      kind,
+      name,
       enabled: b.enabled !== false,
-      destination: b.destination.trim(),
+      destination,
       lastDeliveryAt: null,
       lastDeliveryOk: null,
       failureCount: 0,
+      deletedAt: null,
     };
     CHANNELS.push(row);
     return ok({ id: row.id }, 201);
   }
   const channelM = p.match(/^\/api\/[^/]+\/monitoring\/channels\/([^/]+)$/);
   if (channelM && m === "PATCH") {
-    const row = CHANNELS.find((c) => c.id === channelM[1]);
+    const row = CHANNELS.find((c) => c.id === channelM[1] && !c.deletedAt);
     if (!row) return err(404, "channel not found");
     const b = JSON.parse(body || "{}") as Partial<{ kind: string; name: string; destination: string; enabled: boolean }>;
-    if (b.kind !== undefined) row.kind = b.kind;
-    if (b.name !== undefined) row.name = b.name;
-    if (b.destination !== undefined) row.destination = b.destination;
+    let kind = row.kind;
+    if (b.kind !== undefined) {
+      if (!CHANNEL_KINDS.includes(b.kind as ChannelKind)) {
+        return err(400, `kind must be one of ${CHANNEL_KINDS.join("|")}`);
+      }
+      kind = b.kind;
+      row.kind = b.kind;
+    }
+    if (b.name !== undefined) {
+      const name = b.name.trim();
+      if (!name) return err(400, "name cannot be blank");
+      row.name = name;
+    }
+    if (b.destination !== undefined) {
+      const destination = typeof b.destination === "string" && b.destination.trim() ? b.destination.trim() : null;
+      if (kind === "email" && destination && !PLAUSIBLE_EMAIL_RE.test(destination)) {
+        return err(400, "destination is not a plausible email address");
+      }
+      row.destination = destination;
+    }
     if (b.enabled !== undefined) row.enabled = b.enabled;
-    return ok({ id: row.id });
+    // Production returns the full updated row here, not `{ id }` — matching it so a caller that
+    // reads the PATCH response (unlike today's `saveChannel`, which discards it) sees the real shape.
+    return ok(toPublicChannel(row));
   }
   if (channelM && m === "DELETE") {
-    const i = CHANNELS.findIndex((c) => c.id === channelM[1]);
-    if (i === -1) return err(404, "channel not found");
-    CHANNELS.splice(i, 1);
-    // A channel's routes are now dangling — drop them too, mirroring an ON DELETE CASCADE. Leaving
-    // them behind would make a route reference a channel that no longer exists, which is a worse
-    // demo state than the real "unrouted channel" warning this page already models.
-    for (let ri = ROUTES.length - 1; ri >= 0; ri--) {
-      if (ROUTES[ri].channelId === channelM[1]) ROUTES.splice(ri, 1);
-    }
-    return ok({});
+    const row = CHANNELS.find((c) => c.id === channelM[1] && !c.deletedAt);
+    if (!row) return err(404, "channel not found");
+    // SOFT delete, matching `deleteChannel` in monitoring.controller.ts exactly: `deleted_at` is
+    // set (and `enabled` cleared) but the row — and every route still pointing at it — survives.
+    // Do NOT touch ROUTES here; `channelName()`/GET routes below make an orphaned route invisible
+    // without ever deleting it, the same way the real `JOIN monitor_channels ... WHERE
+    // ch.deleted_at IS NULL` does.
+    row.deletedAt = iso(0);
+    row.enabled = false;
+    return ok({ id: row.id, deletedAt: row.deletedAt });
   }
   const testM = p.match(/^\/api\/[^/]+\/monitoring\/channels\/([^/]+)\/test$/);
   if (testM && m === "POST") {
-    const row = CHANNELS.find((c) => c.id === testM[1]);
+    const row = CHANNELS.find((c) => c.id === testM[1] && !c.deletedAt);
     if (!row) return err(404, "channel not found");
-    if (!row.destination) return err(422, "This channel has no destination configured yet.");
+    // Contract note 12 — only `email` has a wired delivery driver; every other kind refuses loudly
+    // rather than reporting a fake {ok:true} for a send that can never actually go out.
+    if (row.kind !== "email") {
+      return err(
+        400,
+        `no notification driver is registered for channel kind '${row.kind}' on this deployment — it cannot deliver a test`,
+      );
+    }
+    if (!row.destination) return err(400, "channel has no destination configured");
     // Mirrors the real outcome: a send updates the channel's own delivery health, so the page's
     // "failing"/"degraded" badges move in response to the test rather than staying frozen.
     row.lastDeliveryAt = iso(0);
     row.lastDeliveryOk = true;
     row.failureCount = 0;
-    return ok({ ok: true });
+    return ok({ ok: true }, 201);
   }
 
   // ── routes ────────────────────────────────────────────────────────────────────────────────────
   if (p.match(/^\/api\/[^/]+\/monitoring\/routes$/) && m === "GET") {
-    return ok(ROUTES.map((r) => ({ ...r, channelName: channelName(r.channelId) ?? r.channelName })));
+    // Mirrors `listRoutes`'s `JOIN monitor_channels ch ... WHERE ch.deleted_at IS NULL`: an INNER
+    // join, so a route whose channel has since been soft-deleted is dropped from the list entirely
+    // — it does NOT survive with a raw-uuid fallback. (`RouteManager.tsx`'s `r.channelName ??
+    // r.channelId` fallback is therefore dead code against this endpoint as currently written; see
+    // the CHANGELOG entry and the report to the orchestrator for the doc/code mismatch this
+    // uncovered — `docs/FRONTEND-BFF-CONTRACT.md` §20 note 19 describes the OTHER behaviour.)
+    return ok(
+      ROUTES.filter((r) => CHANNELS.some((c) => c.id === r.channelId && !c.deletedAt)).map((r) => ({
+        ...r,
+        channelName: channelName(r.channelId),
+      })),
+    );
   }
   if (p.match(/^\/api\/[^/]+\/monitoring\/routes$/) && m === "POST") {
     const b = JSON.parse(body || "{}") as {
       channelId?: string; matchClientId?: string | null; matchSeverity?: string | null; matchKind?: string | null; enabled?: boolean;
     };
     if (!b.channelId?.trim()) return err(400, "channelId is required");
-    if (!CHANNELS.some((c) => c.id === b.channelId)) return err(400, "channel not found");
+    if (!CHANNELS.some((c) => c.id === b.channelId && !c.deletedAt)) return err(400, "channelId not found in this tenant");
+    let matchSeverity: MonitorRoute["matchSeverity"] = null;
+    if (b.matchSeverity !== undefined && b.matchSeverity !== null && b.matchSeverity !== "") {
+      if (!SEVERITIES.includes(b.matchSeverity)) return err(400, `matchSeverity must be one of ${SEVERITIES.join("|")}`);
+      matchSeverity = b.matchSeverity as MonitorRoute["matchSeverity"];
+    }
     const row: MonitorRoute = {
       id: nid("rt"),
       channelId: b.channelId.trim(),
       channelName: channelName(b.channelId.trim()),
       matchClientId: b.matchClientId || null,
-      matchSeverity: (b.matchSeverity as MonitorRoute["matchSeverity"]) || null,
+      matchSeverity,
       matchKind: b.matchKind || null,
       enabled: b.enabled !== false,
     };
@@ -469,25 +569,42 @@ export function monitoringDemo(
   if (routeM && m === "PATCH") {
     const row = ROUTES.find((r) => r.id === routeM[1]);
     if (!row) return err(404, "route not found");
+    // `channelId` is intentionally NOT accepted here — `updateRoute` in monitoring.controller.ts
+    // only ever touches matchClientId/matchSeverity/matchKind/enabled; re-pointing a route at a
+    // different channel is not a supported edit in production, so the fixture must not silently
+    // allow it either.
     const b = JSON.parse(body || "{}") as Partial<{
-      channelId: string; matchClientId: string | null; matchSeverity: string | null; matchKind: string | null; enabled: boolean;
+      matchClientId: string | null; matchSeverity: string | null; matchKind: string | null; enabled: boolean;
     }>;
-    if (b.channelId !== undefined) {
-      if (!CHANNELS.some((c) => c.id === b.channelId)) return err(400, "channel not found");
-      row.channelId = b.channelId;
-      row.channelName = channelName(b.channelId);
+    let touched = false;
+    if (b.matchClientId !== undefined) {
+      row.matchClientId = b.matchClientId || null;
+      touched = true;
     }
-    if (b.matchClientId !== undefined) row.matchClientId = b.matchClientId;
-    if (b.matchSeverity !== undefined) row.matchSeverity = b.matchSeverity as MonitorRoute["matchSeverity"];
-    if (b.matchKind !== undefined) row.matchKind = b.matchKind;
-    if (b.enabled !== undefined) row.enabled = b.enabled;
-    return ok({ id: row.id });
+    if (b.matchSeverity !== undefined) {
+      if (b.matchSeverity !== null && b.matchSeverity !== "" && !SEVERITIES.includes(b.matchSeverity)) {
+        return err(400, `matchSeverity must be one of ${SEVERITIES.join("|")}`);
+      }
+      row.matchSeverity = (b.matchSeverity || null) as MonitorRoute["matchSeverity"];
+      touched = true;
+    }
+    if (b.matchKind !== undefined) {
+      row.matchKind = b.matchKind || null;
+      touched = true;
+    }
+    if (b.enabled !== undefined) {
+      row.enabled = b.enabled;
+      touched = true;
+    }
+    if (!touched) return err(400, "nothing to update");
+    row.channelName = channelName(row.channelId);
+    return ok(row);
   }
   if (routeM && m === "DELETE") {
     const i = ROUTES.findIndex((r) => r.id === routeM[1]);
     if (i === -1) return err(404, "route not found");
-    ROUTES.splice(i, 1);
-    return ok({});
+    const [removed] = ROUTES.splice(i, 1);
+    return ok({ id: removed.id });
   }
 
   // ── maintenance ───────────────────────────────────────────────────────────────────────────────
@@ -495,9 +612,34 @@ export function monitoringDemo(
   if (p.match(/^\/api\/[^/]+\/monitoring\/maintenance$/) && m === "POST") {
     const b = JSON.parse(body || "{}") as { scope?: string; startsAt?: string; endsAt?: string; reason?: string | null };
     if (!b.startsAt || !b.endsAt) return err(400, "startsAt and endsAt are required");
+    const startsAt = new Date(String(b.startsAt));
+    const endsAt = new Date(String(b.endsAt));
+    if (Number.isNaN(startsAt.getTime())) return err(400, "startsAt is not a valid date");
+    if (Number.isNaN(endsAt.getTime())) return err(400, "endsAt is not a valid date");
+    // K7 — an open-ended or inverted window is how alerting gets muted permanently. Mirrors
+    // write-validation.ts's parseMaintenanceWindow exactly.
+    if (endsAt.getTime() <= startsAt.getTime()) return err(400, "endsAt must be after startsAt");
+
+    const scopeRaw = b.scope?.trim() || "all";
+    let scope = "all";
+    if (scopeRaw !== "all") {
+      // NOTE — deliberately NOT the real parseMaintenanceScope's strict `monitor:<uuid>` regex:
+      // every id in this demo store (monitors, channels, routes) is a readable slug, not a uuid, by
+      // design (see the file header's globalThis note for why they're stable strings at all), so a
+      // uuid-shaped check would 400 every legitimate monitor-scoped window MaintenanceManager.tsx
+      // can actually construct. Structural validation (must reference a real demo monitor) is kept;
+      // the id-*format* check is the one piece of write-validation.ts not mirrored, on purpose.
+      const scopeM = scopeRaw.match(/^monitor:(.+)$/);
+      if (!scopeM) return err(400, `scope must be "all" or "monitor:<id>", got '${scopeRaw}'`);
+      if (!monitors().some((mo) => mo.id === scopeM[1])) {
+        return err(400, "scope names a monitor that does not exist in this tenant");
+      }
+      scope = scopeRaw;
+    }
+
     const row: MaintenanceWindowRow = {
       id: nid("mw"),
-      scope: b.scope?.trim() || "all",
+      scope,
       startsAt: b.startsAt,
       endsAt: b.endsAt,
       reason: b.reason ?? null,
@@ -510,15 +652,45 @@ export function monitoringDemo(
   if (maintenanceM && m === "DELETE") {
     const i = MAINTENANCE.findIndex((w) => w.id === maintenanceM[1]);
     if (i === -1) return err(404, "maintenance window not found");
-    MAINTENANCE.splice(i, 1);
-    return ok({});
+    const [removed] = MAINTENANCE.splice(i, 1);
+    return ok({ id: removed.id });
   }
 
   if (p.match(/^\/api\/[^/]+\/monitoring\/monitors$/) && m === "POST") {
-    return ok({ id: "mon-demo-created" });
+    const b = JSON.parse(body || "{}") as { name?: string; kind?: string; clientId?: string };
+    const name = b.name?.trim();
+    if (!name) return err(400, "name is required");
+    const kindSpec = kinds().find((k) => k.kind === b.kind);
+    if (!b.kind || !kindSpec) return err(400, `unknown monitor kind '${String(b.kind)}'`);
+    if (!kindSpec.available) {
+      return err(400, `no monitor driver is registered for kind '${b.kind}' on this deployment — it cannot run`);
+    }
+    if (!b.clientId?.trim()) return err(400, "clientId is required");
+    // NOT reproduced here: the real createMonitor also enforces the SSRF host-allowlist (the
+    // target's host must be a VERIFIED `search_properties` row for this client) before inserting.
+    // That check spans the `search` module's own fixtures, which this file does not have access
+    // to — a deliberately left gap, reported to the orchestrator rather than half-wired.
+    return ok({ id: "mon-demo-created" }, 201);
   }
-  if (p.match(/^\/api\/[^/]+\/monitoring\/incidents\/[^/]+\/ack$/) && m === "POST") {
-    return ok({ id: "inc-acked" });
+  const ackM = p.match(/^\/api\/[^/]+\/monitoring\/incidents\/([^/]+)\/ack$/);
+  if (ackM && m === "POST") {
+    const inc = incidents().find((i) => i.id === ackM[1]);
+    if (!inc) return err(404, "incident not found");
+    // NOTE — no writable store backs `incidents()` (it is a pure, regenerated read fixture, unlike
+    // channels/routes/maintenance), and this action has no caller anywhere in the UI today
+    // (`grep acknowledgeIncident` finds only its own definition in monitoringActions.ts), so the
+    // real endpoint's "first acknowledger wins, permanently" persistence is not reproduced — a
+    // second call in the same session returns a fresh timestamp rather than the first one. Fixed
+    // here: the 404-on-unknown-id, the response shape (`acknowledgedAt`/`acknowledgedBy`, not a
+    // bare `{id}`), and the status code (201, like every other POST in this module).
+    return ok(
+      {
+        id: inc.id,
+        acknowledgedAt: inc.acknowledgedAt ?? iso(0),
+        acknowledgedBy: inc.acknowledgedAt ? inc.acknowledgedBy : "Hansel",
+      },
+      201,
+    );
   }
 
   if (p.match(/^\/api\/[^/]+\/monitoring\/summary$/) && m === "GET") return ok(summary());
