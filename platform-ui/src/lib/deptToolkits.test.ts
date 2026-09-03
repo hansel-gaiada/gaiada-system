@@ -16,11 +16,28 @@ describe("toolkitFor", () => {
     expect(tk.slug).toBe("web-dev");
     expect(tk.groups.map((g) => g.key)).toEqual(["home", "work", "build", "connections"]);
     // Flattened tabs preserve the full route set (paths unchanged from the flat model).
-    // Portfolio (inventory) now precedes Operations (the repurposed "sites" registry, key unchanged).
     expect(deptTabs(tk).map((t) => t.key)).toEqual([
-      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "sites", "connections",
+      "home", "projects", "board", "ball", "timeline", "charts", "activity", "prd", "requests", "repositories", "deliverables", "portfolio", "connections",
     ]);
     expect(tk.launchers.some((l) => l.key === "claude-code")).toBe(true);
+  });
+
+  // 2026-09-03, owner decision. The Build group carried BOTH a "Portfolio" tab and an "Operations"
+  // tab (`key: "sites"`). They read the SAME endpoint, flattened it with the same helper, grouped by
+  // server with a verbatim copy of the same function and drew the same chips; Operations' one
+  // distinct column was health, sourced from `webdev_sites.last_http_status`/`last_seen_at` — two
+  // columns nothing in this program has ever written. It said "Not checked" on every row forever.
+  //
+  // This case is the guard against it coming back as a tab. The PATH still resolves (it
+  // `permanentRedirect`s to the portfolio) so no deep link breaks — it is simply not advertised in
+  // the strip, because one dataset does not get two entries.
+  it("no longer advertises a second site tab — Operations was merged into Portfolio", () => {
+    const tabs = deptTabs(toolkitFor("Web Dev"));
+    expect(tabs.some((t) => t.key === "sites")).toBe(false);
+    expect(tabs.some((t) => t.label === "Operations")).toBe(false);
+    // Exactly ONE tab points at the site surface, and it is the portfolio.
+    const siteTabs = tabs.filter((t) => t.path.startsWith("sites"));
+    expect(siteTabs.map((t) => t.path)).toEqual(["sites/portfolio"]);
   });
   it("returns the bespoke Creatives toolkit with a two-tab Studio group and the Work spine", () => {
     const tk = toolkitFor("Creatives");

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { StatusBadge, Button } from "@/components/ui";
+import { mappingLabel } from "./ConnectionsPanel";
 import type { ConnectionRow } from "@/lib/connections";
 import type { SeatRow } from "@/lib/claudeSeats";
 
@@ -45,8 +46,12 @@ export function TeamConnectionsGrid({
           {rows.map((r) => (
             <tr key={r.person.id}>
               <td className="dept-conn-grid__person">{r.person.name}</td>
-              <td><StatusBadge label={r.github?.status ?? "unconfigured"} /></td>
-              <td><StatusBadge label={r.drive?.status ?? "unconfigured"} /></td>
+              {/* `mappingLabel`, not the raw `status` column — the same fix as the self-service
+                  panel beside it (2026-09-03). Printing `status` here reported every teammate who
+                  HAD saved a mapping as "unconfigured", because no user-owned row can ever leave
+                  that state on the Phase-1 HTTP surface. Three cells, one lie, thirty rows. */}
+              <td>{r.github ? <StatusBadge label={mappingLabel(r.github)} /> : <StatusBadge label="not set" />}</td>
+              <td>{r.drive ? <StatusBadge label={mappingLabel(r.drive)} /> : <StatusBadge label="not set" />}</td>
               <td>
                 <SeatCell userId={r.person.id} seat={r.seat} onMapSeat={onMapSeat} />
               </td>
@@ -74,7 +79,7 @@ function SeatCell({
   if (mapped) {
     return (
       <div className="dept-conn-grid__cell">
-        <StatusBadge label="linked" />
+        <StatusBadge label="mapped" />
         <span className="dept-conn-row__account">{seat?.codeSeatEmail}</span>
       </div>
     );
@@ -83,7 +88,7 @@ function SeatCell({
   if (!editing) {
     return (
       <div className="dept-conn-grid__cell">
-        <StatusBadge label="unconfigured" />
+        <StatusBadge label="not set" />
         <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>Map seat</Button>
       </div>
     );

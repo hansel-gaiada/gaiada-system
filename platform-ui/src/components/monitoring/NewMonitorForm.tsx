@@ -57,17 +57,31 @@ export function NewMonitorForm({
   tenantId,
   kinds,
   clients,
+  prefill,
 }: {
   tenantId: string;
   kinds: MonitorKindSpec[];
   clients: { id: string; name: string }[];
+  /** Optional seed from a deep link (2026-09-03) — the Web Dev portfolio's "Add" action, which
+   *  knows the domain and, via that domain's SEO property, usually the client too. Only the INITIAL
+   *  state is seeded: every field stays fully editable, because a prefill is a convenience and must
+   *  never become an assertion the operator cannot correct. */
+  prefill?: { domain?: string; clientId?: string };
 }) {
   const router = useRouter();
   const available = kinds.filter((k) => k.available);
   const [kind, setKind] = useState(available[0]?.kind ?? "http");
-  const [name, setName] = useState("");
-  const [target, setTarget] = useState("");
-  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  // Name and target both seed from the domain: for an `http` monitor the target IS the URL, and a
+  // monitor named after its domain is the convention the existing rows already follow.
+  const [name, setName] = useState(prefill?.domain ?? "");
+  const [target, setTarget] = useState(prefill?.domain ? `https://${prefill.domain}` : "");
+  // A prefilled client is honoured only if it is actually in the list this caller may pick from —
+  // never trusted from the URL. A stale or hand-edited id would otherwise be posted verbatim and
+  // 400 (or worse, attach the monitor to the wrong client) on submit.
+  const seededClient = prefill?.clientId && clients.some((c) => c.id === prefill.clientId)
+    ? prefill.clientId
+    : undefined;
+  const [clientId, setClientId] = useState(seededClient ?? clients[0]?.id ?? "");
   const [intervalSec, setIntervalSec] = useState("60");
   const [severity, setSeverity] = useState("ticket");
   const [expectText, setExpectText] = useState("");
