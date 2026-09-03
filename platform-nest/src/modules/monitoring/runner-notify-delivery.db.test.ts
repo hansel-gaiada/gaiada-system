@@ -46,9 +46,20 @@ describe.skipIf(!TEST_URL)("CH · notifyIncidents writes monitor_channels health
     // catch-all-except-severity route matches exactly ONE channel — otherwise a single catch-all
     // route would fan BOTH events out to BOTH channels and the success/failure assertions below
     // would contaminate each other.
+    // ⚠ `monitor_heartbeats.grace_sec` is SELECTED by runner.ts's DUE_SELECT (as `hb_grace_sec`) but
+    // never actually passed to the driver — `ctx.heartbeat` only carries `{lastSeenAt, now}`
+    // (runner.ts around the `heartbeat:` ctx literal), and the grace period `evaluateHeartbeat`
+    // receives comes from `driver.validate(row.config)`, i.e. `monitors.config.graceSec` (defaulting
+    // to 300s when unset). That column looks load-bearing and is not — a real, PRE-EXISTING latent
+    // defect unrelated to this ticket's delivery-tracking columns, out of scope to fix here. The
+    // first version of this fixture set `monitor_heartbeats.grace_sec = 600` believing it controlled
+    // the grace period, which left the ACTUAL grace at the 300s default — exactly equal to the
+    // "recovery" test's 5-minute clock jump, so a few milliseconds of real test overhead pushed
+    // `silentMs` just past `graceMs` and the monitor read `down` instead of `up`. Fixed by setting
+    // the column the runner actually reads.
     const mk = await pool.query<{ id: string }>(
-      `INSERT INTO monitors (tenant_id, client_id, name, kind, status, severity, interval_sec, last_checked_at)
-       VALUES ($1,$2,'ok-path','heartbeat','unknown','ticket',60,NULL) RETURNING id`,
+      `INSERT INTO monitors (tenant_id, client_id, name, kind, status, severity, interval_sec, config, last_checked_at)
+       VALUES ($1,$2,'ok-path','heartbeat','unknown','ticket',60,'{"graceSec":600}'::jsonb,NULL) RETURNING id`,
       [tenantId, clientId],
     );
     okMonitorId = mk.rows[0].id;
