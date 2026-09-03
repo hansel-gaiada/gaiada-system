@@ -11,6 +11,55 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### monitoring `0.3.1` - channel health is TRUE, not decorative (2026-09-03, CH) - PROTOTYPED
+
+`monitor_channels.last_delivery_at`/`last_delivery_ok`/`failure_count` existed since `0116` and
+`0.3.0`'s test-send/incident-fan-out both already SELECTed them, but nothing ever wrote them —
+`channelHealth()` (`platform-ui/src/lib/monitoringShared.ts`) read every channel as "unused" forever,
+even seconds after a real send.
+
+**Backend:**
+- `runner.ts`'s `notifyIncidents()` (real incident fan-out) and `monitoring.controller.ts`'s
+  `testChannel()` (`POST /channels/:id/test`) now write all three columns after every delivery
+  attempt. Success: `last_delivery_at = now()`, `last_delivery_ok = true`, `failure_count` reset to 0.
+  Failure (a thrown `enqueueMail()` call, or a `status: 'suppressed'` result — the recipient matches
+  `mail_suppressions`, so the row is written but the sender worker deliberately never reaches it):
+  `last_delivery_ok = false`, `failure_count` incremented. An attempt made while the whole mail
+  subsystem is globally disabled (`config.mail.enabled=false`) is not recorded at all — a
+  platform-wide fact, not something wrong with the individual channel.
+- `notifyIncidents()`'s write happens in a NEW `withTenants` transaction opened only after every
+  `enqueueMail()` call in the fan-out has settled — preserves both pre-existing invariants (the
+  sweep's own transaction is never reopened; no transaction is held open across the mail I/O).
+- **Honesty boundary, pinned in `migrations/202609030200_monitor_channel_delivery_columns_comment.sql`'s
+  `COMMENT ON COLUMN`:** `last_delivery_ok = true` means only "handed to the mail queue"
+  (`enqueueMail()` inserted a `mail_log` row and returned `status: 'queued'`) — NOT that the provider
+  accepted the send or the recipient received it. `enqueueMail()` only inserts a row; the actual
+  SMTP/API handoff happens later in an async sender worker (`mail/sender.ts`), and the provider's own
+  delivered/bounced verdict later still, via an inbound webhook (`mail/webhook.controller.ts`)
+  updating that SAME `mail_log` row to `delivered`/`bounced`. That stronger signal is NOT wired here:
+  it is keyed to one `mail_log` row via `entity_type`/`entity_id`, and the incident fan-out path
+  records the monitor on that row, not which channel the send went out through (one incident can fan
+  out to several channels) — attributing a delivered/bounced webhook event back to one specific
+  channel needs a new column on `mail_log`, a table this module does not own. Flagged as a follow-up
+  requiring senior-db/architect sign-off, not improvised in this ticket.
+- No DDL: the columns pre-existed from `0116`. The migration is comment-only (documents semantics),
+  so it is deliberately NOT added to `monitoringModule.migrations` in `src/modules/monitoring/index.ts`
+  (same precedent as the `0086` DML-only backfill — that array documents new-table migrations for the
+  module registration test, not every follow-up). No Cerbos policy edit, no permission-catalog change.
+
+**Frontend:** `ChannelManager.tsx`'s on-page caveat and header comment, plus `lib/monitoring.ts`'s BFF
+contract comment, updated to match reality — health now reflects real attempts, but "active" still
+only means "queued for delivery", never "delivered"; the previous "delivery status isn't tracked at
+all" wording would now be actively wrong.
+
+**Docs:** `docs/FRONTEND-BFF-CONTRACT.md` §20 note 8 and the `/channels/:id/test` row updated;
+`docs/modules/MODULES.md` monitoring section bumped to `0.3.1`.
+
+**Files:** `platform-nest/src/modules/monitoring/runner.ts`, `monitoring.controller.ts`,
+`platform-nest/migrations/202609030200_monitor_channel_delivery_columns_comment.sql`,
+`platform-ui/src/components/monitoring/ChannelManager.tsx`, `platform-ui/src/lib/monitoring.ts`,
+`docs/FRONTEND-BFF-CONTRACT.md`, `docs/modules/MODULES.md`.
+
 ### monitoring `0.3.0` - channel/route/maintenance management surface (2026-09-02) - PROTOTYPED
 
 The schema, RLS, Cerbos policies and permission keys for `monitor_channels`/`monitor_routes` all

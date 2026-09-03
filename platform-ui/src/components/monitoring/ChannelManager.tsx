@@ -13,10 +13,12 @@
 //    can be created and routed, but a test send — and real delivery — 400s for all of them. Offering
 //    a working-looking "Send test" button on those would be exactly the false-green failure this
 //    whole module exists to replace, so it renders disabled with an honest reason instead.
-// 2. `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` are schema-only columns nothing writes yet, so
-//    `channelHealth()` reads "unused" for every channel regardless of whether it has ever actually
-//    delivered anything successfully. The Health column says so plainly rather than implying a
-//    green/"active" badge means verified delivery.
+// 2. CH — `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` are now written on every delivery
+//    attempt (runner.ts's incident fan-out AND this component's own test-send), so `channelHealth()`
+//    reflects real attempts. But "ok" only ever means "handed to the mail queue" — enqueueMail()
+//    inserts a `mail_log` row and returns; it does not wait for the provider to accept the send or
+//    the recipient to receive it. The Health column and the note below say so plainly rather than
+//    implying a green/"active" badge means confirmed delivery.
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, HairlineTable, StatusBadge } from "@/components/ui";
@@ -154,10 +156,11 @@ export function ChannelManager({ tenantId, channels, canManage }: {
       ) : (
         <>
           <p style={{ fontSize: 12, opacity: 0.7, marginBottom: 10 }}>
-            Health is not yet backed by real delivery tracking — the backend does not record a
-            channel&apos;s last send outcome, so every channel shows &quot;draft&quot; here
-            regardless of whether it has actually delivered anything. Only <strong>email</strong> has
-            a delivery driver; the others can be configured and routed but cannot send yet.
+            Health reflects real delivery attempts (both real incident alerts and test sends), but
+            &quot;active&quot; means only that the send was handed to the mail queue — it is not
+            confirmation the provider accepted it or the recipient received it. Only{" "}
+            <strong>email</strong> has a delivery driver; the others can be configured and routed but
+            cannot send yet, and always show &quot;draft&quot;.
           </p>
           <HairlineTable
             columns={[

@@ -658,6 +658,66 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
           [coA],
         );
         expect(row.rows[0].to_email).toBe("ops@viceroybali.com");
+
+        // CH — the whole point of this ticket: a successful test-send must ACTUALLY write the health
+        // columns runner.ts's own fan-out reads, not leave them null forever.
+        const chan = await adminPool().query<{
+          last_delivery_at: Date | null; last_delivery_ok: boolean | null; failure_count: number;
+        }>(
+          `SELECT last_delivery_at, last_delivery_ok, failure_count FROM monitor_channels WHERE id = $1`,
+          [channelId],
+        );
+        expect(chan.rows[0].last_delivery_at).not.toBeNull();
+        expect(chan.rows[0].last_delivery_ok).toBe(true);
+        expect(chan.rows[0].failure_count).toBe(0);
+      });
+
+      it("a recipient under an active suppression still returns {ok:true} but is recorded as a FAILURE, not a fake success", async () => {
+        // mail_suppressions is a GLOBAL table (no tenant_id) — see suppressions.ts — so a superuser
+        // insert against it needs no tenant context.
+        await adminPool().query(
+          `INSERT INTO mail_suppressions (id, email, stream, reason) VALUES (gen_random_uuid(), 'ops@viceroybali.com', 'notify', 'manual')
+             ON CONFLICT (email, stream) DO NOTHING`,
+        );
+        try {
+          const res = await app.inject({
+            method: "POST", url: `/api/${coA}/monitoring/channels/${channelId}/test`, headers: asUser(manager),
+          });
+          // The HTTP contract does not change — enqueueMail() did not throw, it queued a
+          // status='suppressed' row — but the channel's own health columns must say the truth.
+          expect(res.statusCode).toBeLessThan(300);
+          expect(res.json()).toEqual({ ok: true });
+
+          const chan = await adminPool().query<{ last_delivery_ok: boolean | null; failure_count: number }>(
+            `SELECT last_delivery_ok, failure_count FROM monitor_channels WHERE id = $1`,
+            [channelId],
+          );
+          expect(chan.rows[0].last_delivery_ok).toBe(false);
+          expect(chan.rows[0].failure_count).toBe(1);
+
+          const log = await adminPool().query<{ status: string }>(
+            `SELECT status FROM mail_log WHERE template_key = 'monitoring.alert' AND tenant_id = $1
+              ORDER BY id DESC LIMIT 1`,
+            [coA],
+          );
+          expect(log.rows[0].status).toBe("suppressed");
+        } finally {
+          await adminPool().query(`DELETE FROM mail_suppressions WHERE email = 'ops@viceroybali.com' AND stream = 'notify'`);
+        }
+      });
+
+      it("a later successful send resets failure_count back to 0", async () => {
+        const res = await app.inject({
+          method: "POST", url: `/api/${coA}/monitoring/channels/${channelId}/test`, headers: asUser(manager),
+        });
+        expect(res.statusCode).toBeLessThan(300);
+
+        const chan = await adminPool().query<{ last_delivery_ok: boolean | null; failure_count: number }>(
+          `SELECT last_delivery_ok, failure_count FROM monitor_channels WHERE id = $1`,
+          [channelId],
+        );
+        expect(chan.rows[0].last_delivery_ok).toBe(true);
+        expect(chan.rows[0].failure_count).toBe(0);
       });
 
       it("staff cannot trigger a test-send — manage is manager-tier", async () => {

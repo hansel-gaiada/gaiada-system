@@ -3376,7 +3376,7 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 | POST | `/api/:t/monitoring/channels` | `monitoring.channel.manage` | `{ id }` | ✅ BUILT (2026-09-02) — not in the original PENDING list, added to close the create gap |
 | PATCH | `/api/:t/monitoring/channels/:id` | `monitoring.channel.manage` | `MonitorChannel` | ✅ BUILT (2026-09-02) — not in the original PENDING list, added to close the edit gap |
 | DELETE | `/api/:t/monitoring/channels/:id` | `monitoring.channel.manage` | `{ id, deletedAt }` | ✅ BUILT (2026-09-02) — soft delete; not in the original PENDING list |
-| POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.channel.manage` | `{ ok }` | ✅ BUILT (2026-09-02) — sends a real `monitoring.alert` notification through `enqueueMail`; refuses (400) for any channel kind other than `email`, which is the only kind with a wired delivery driver today |
+| POST | `/api/:t/monitoring/channels/:id/test` | `monitoring.channel.manage` | `{ ok }` | ✅ BUILT (2026-09-02); delivery tracking (`lastDeliveryAt`/`lastDeliveryOk`/`failureCount`) DEV-VERIFIED (2026-09-03, CH) — sends a real `monitoring.alert` notification through `enqueueMail`, refuses (400) for any channel kind other than `email`, and now writes the channel's health columns on every attempt (see note 8) |
 | GET | `/api/:t/monitoring/routes` | `monitoring.channel.read` | `MonitorRoute[]` | ✅ BUILT (2026-09-02) |
 | POST | `/api/:t/monitoring/routes` | `monitoring.channel.manage` | `{ id }` | ✅ BUILT (2026-09-02) — not in the original PENDING list, added to close the create gap |
 | PATCH | `/api/:t/monitoring/routes/:id` | `monitoring.channel.manage` | `MonitorRoute` | ✅ BUILT (2026-09-02) — not in the original PENDING list |
@@ -3408,6 +3408,25 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
    must maintain `failureCount` as *consecutive* failures reset to 0 on success. A channel that is
    enabled and failing is worse than no channel — it looks like coverage — so this counter is what
    the UI escalates on, not a boolean.
+   **DEV-VERIFIED 2026-09-03 (CH):** both writers of these columns — `runner.ts`'s `notifyIncidents`
+   (real incident fan-out) and `POST /channels/:id/test` (test-send) — now write
+   `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` on every attempt, immediately after
+   `migrations/202609030200_monitor_channel_delivery_columns_comment.sql` pinned the semantics in
+   `COMMENT ON COLUMN`. **`lastDeliveryOk: true` means only "`enqueueMail()` handed this to the mail
+   queue as `status: 'queued'`" — an ENQUEUE acknowledgement, never proof the provider accepted the
+   send or the recipient received it.** `enqueueMail()` inserts one `mail_log` row and returns
+   immediately; the actual SMTP/API handoff happens later in an async sender worker, and the
+   provider's own delivered/bounced verdict later still, via an inbound webhook that updates that
+   SAME `mail_log` row — but is not attributed back to which `monitor_channel` sent it (a single
+   incident can fan out to several channels, and `mail_log` only records the monitor/channel it was
+   enqueued for, not a link a later webhook event can resolve back to one specific channel). Wiring
+   that stronger signal needs a schema change on `mail_log`, a table this module does not own — an
+   explicit follow-up, not implemented here. A recipient matching `mail_suppressions` (prior hard
+   bounce/complaint) comes back `status: 'suppressed'` and is recorded as a FAILURE (increments
+   `failureCount`), because the sender worker deliberately never reaches such a row — a channel that
+   will silently never deliver is exactly the false-confidence case this column exists to catch. An
+   attempt is not recorded at all (columns untouched) when the whole mail subsystem is switched off
+   (`config.mail.enabled=false`) — a platform-wide fact, not one about the individual channel.
 9. **Public status pages (`/status/:slug`) are NOT in this section.** They are an unauthenticated
    surface with their own strict field allowlist (monitoring-program.md §3.5) and must not reuse
    these shapes — `target`, `config` and assertion strings are all forbidden there.

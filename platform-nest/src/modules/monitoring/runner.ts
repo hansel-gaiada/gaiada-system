@@ -290,13 +290,22 @@ interface IncidentEvent {
   reason: string | null;
 }
 
-/** Fan an incident out to the tenant's configured notification channels (monitor_routes ->
- *  monitor_channels). Reads channels in the tenant's own scope, then enqueues mail OUTSIDE that read
- *  so a slow mail path cannot pin a DB transaction. Email is the only channel kind wired today; other
- *  kinds are skipped (not errored) so adding a driver later is additive. */
+/**
+ * Fan an incident out to the tenant's configured notification channels (monitor_routes ->
+ * monitor_channels). Reads channels in the tenant's own scope, then enqueues mail OUTSIDE that read
+ * so a slow mail path cannot pin a DB transaction. Email is the only channel kind wired today; other
+ * kinds are skipped (not errored) so adding a driver later is additive.
+ *
+ * ── HEALTH COLUMNS: WRITTEN AFTER MAIL I/O, IN A NEW TRANSACTION ────────────────────────────────
+ * `monitor_channels.last_delivery_at`/`last_delivery_ok`/`failure_count` (see the migration's
+ * COMMENT ON COLUMN for exactly what "ok" can honestly claim — enqueue succeeded, not provider
+ * delivery) are written in a SEPARATE `withTenants` call, opened only after every `enqueueMail` in
+ * this fan-out has settled. That keeps both existing invariants: the write never reopens the sweep's
+ * (already-committed) transaction, and no transaction is held across the mail I/O itself.
+ */
 async function notifyIncidents(tenantId: string, events: IncidentEvent[]): Promise<void> {
   if (!events.length) return;
-  interface Outbound { toEmail: string; event: IncidentEvent }
+  interface Outbound { channelId: string; toEmail: string; event: IncidentEvent }
   const outbound: Outbound[] = [];
 
   await withTenants(
@@ -304,8 +313,8 @@ async function notifyIncidents(tenantId: string, events: IncidentEvent[]): Promi
     async (c) => {
       for (const ev of events) {
         // A route matches when each of its filters is either unset (catch-all) or equals this event.
-        const chans = await c.query<{ kind: string; destination: string }>(
-          `SELECT DISTINCT ch.kind, ch.destination
+        const chans = await c.query<{ id: string; kind: string; destination: string }>(
+          `SELECT DISTINCT ch.id, ch.kind, ch.destination
              FROM monitor_channels ch
              JOIN monitor_routes r ON r.channel_id = ch.id AND r.enabled = true
             WHERE ch.enabled = true AND ch.deleted_at IS NULL
@@ -316,16 +325,20 @@ async function notifyIncidents(tenantId: string, events: IncidentEvent[]): Promi
         );
         for (const ch of chans.rows) {
           if (ch.kind !== "email" || !ch.destination) continue;
-          outbound.push({ toEmail: ch.destination, event: ev });
+          outbound.push({ channelId: ch.id, toEmail: ch.destination, event: ev });
         }
       }
     },
     { modules: ["monitoring"] },
   );
 
+  // outcome is `null` when the whole mail subsystem is switched off (config.mail.enabled=false) —
+  // a platform-wide switch, not a fact about this channel, so that attempt is not recorded at all
+  // (never marked "ok", never counted as a failure) rather than misrepresent either way.
+  const outcomes: { channelId: string; ok: boolean }[] = [];
   for (const o of outbound) {
     try {
-      await enqueueMail({
+      const result = await enqueueMail({
         stream: "notify",
         templateKey: "monitoring.alert",
         toEmail: o.toEmail,
@@ -341,10 +354,34 @@ async function notifyIncidents(tenantId: string, events: IncidentEvent[]): Promi
           href: `${config.mail.linkBaseUrl}/monitoring/${o.event.monitorId}`,
         },
       });
+      // `status: 'suppressed'` means mail_suppressions matched this recipient — the row is written
+      // but queue.ts's own comment says the sender worker is deliberately never reached for it, so
+      // this channel will never actually deliver despite looking "queued". That is precisely the
+      // false-confidence case this column exists to surface, so it counts as a failure here.
+      if (!result.skipped) outcomes.push({ channelId: o.channelId, ok: result.status === "queued" });
     } catch {
-      /* A single bad recipient must not stop the rest — enqueueMail throws on an implausible address. */
+      // A single bad recipient must not stop the rest — enqueueMail throws on an implausible address.
+      outcomes.push({ channelId: o.channelId, ok: false });
     }
   }
+
+  if (!outcomes.length) return;
+  await withTenants(
+    [tenantId],
+    async (c) => {
+      for (const oc of outcomes) {
+        await c.query(
+          `UPDATE monitor_channels
+              SET last_delivery_at = now(), last_delivery_ok = $2,
+                  failure_count = CASE WHEN $2 THEN 0 ELSE failure_count + 1 END,
+                  updated_at = now()
+            WHERE id = $1`,
+          [oc.channelId, oc.ok],
+        );
+      }
+    },
+    { modules: ["monitoring"] },
+  );
 }
 
 export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<SweepResult> {

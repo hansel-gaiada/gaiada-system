@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202609011500_webdev_provisioned_sites_provider_widen.sql`
+- Head: `202609030200_monitor_channel_delivery_columns_comment.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 220 (121 legacy `NNNN_`, 99 timestamped)
+- Applied files on disk: 221 (121 legacy `NNNN_`, 100 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)

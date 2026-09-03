@@ -1032,6 +1032,11 @@ export class MonitoringController {
    *
    * `channel.destination` is NEVER logged — it is a webhook URL / address, and
    * `monitoring.channel.manage` is a broad grant.
+   *
+   * CH — also writes `last_delivery_at`/`last_delivery_ok`/`failure_count`, the same three columns
+   * runner.ts's `notifyIncidents` writes for a real incident fan-out, and with the identical
+   * semantics (see that function's comment and the migration's `COMMENT ON COLUMN`): "ok" means the
+   * enqueue succeeded, never that the provider accepted or delivered it.
    */
   @Post(":tenantId/monitoring/channels/:id/test")
   async testChannel(@Req() req: FastifyRequest, @Param("tenantId") tenantId: string, @Param("id") id: string) {
@@ -1059,24 +1064,55 @@ export class MonitoringController {
       throw new BadRequestException("channel has no destination configured");
     }
 
-    await enqueueMail({
-      stream: "notify",
-      templateKey: "monitoring.alert",
-      toEmail: channel.destination,
-      tenantId,
-      entityType: "monitor_channel",
-      entityId: channel.id,
-      payload: {
-        event: "opened",
-        siteName: `Test notification — ${channel.name}`,
-        target: "monitoring channel test",
-        status: "test",
-        reason:
-          "This is a test notification triggered from the monitoring channel console. No real incident is open.",
-        href: `${config.mail.linkBaseUrl}/monitoring/channels`,
-      },
-    });
+    // Same health columns runner.ts's notifyIncidents() writes, same semantics (the migration's
+    // COMMENT ON COLUMN is authoritative): `ok` means only "enqueueMail handed this to mail_log as
+    // status=queued" — never provider-confirmed delivery. `outcome === null` means the whole mail
+    // subsystem is switched off (config.mail.enabled=false), a platform-wide fact rather than one
+    // about this channel, so the columns are left untouched rather than marked either way.
+    let outcome: boolean | null = null;
+    let caught: unknown;
+    try {
+      const result = await enqueueMail({
+        stream: "notify",
+        templateKey: "monitoring.alert",
+        toEmail: channel.destination,
+        tenantId,
+        entityType: "monitor_channel",
+        entityId: channel.id,
+        payload: {
+          event: "opened",
+          siteName: `Test notification — ${channel.name}`,
+          target: "monitoring channel test",
+          status: "test",
+          reason:
+            "This is a test notification triggered from the monitoring channel console. No real incident is open.",
+          href: `${config.mail.linkBaseUrl}/monitoring/channels`,
+        },
+      });
+      // See runner.ts's notifyIncidents() comment: status='suppressed' is written but never sent.
+      outcome = result.skipped ? null : result.status === "queued";
+    } catch (e) {
+      outcome = false;
+      caught = e;
+    }
 
+    if (outcome !== null) {
+      await withTenants(
+        [tenantId],
+        (c) =>
+          c.query(
+            `UPDATE monitor_channels
+                SET last_delivery_at = now(), last_delivery_ok = $2,
+                    failure_count = CASE WHEN $2 THEN 0 ELSE failure_count + 1 END,
+                    updated_at = now()
+              WHERE id = $1`,
+            [channel.id, outcome],
+          ),
+        MOD,
+      );
+    }
+
+    if (caught) throw caught;
     return { ok: true };
   }
 

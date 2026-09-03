@@ -53,7 +53,7 @@ versions below; the running build reports it at `GET /health`.
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
-| monitoring | `0.3.0` | IN PROGRESS | Monitoring | 2026-09-02 |
+| monitoring | `0.3.1` | IN PROGRESS | Monitoring | 2026-09-03 |
 | finance | `0.16.0` | PROTOTYPED | Finance & Accounting | 2026-08-27 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -3796,11 +3796,39 @@ agents against one test Postgres produced a `57P01` failure that was contention,
 
 ---
 
-## monitoring — Uptime · Incidents · Status Pages · `0.3.0` · IN PROGRESS
+## monitoring — Uptime · Incidents · Status Pages · `0.3.1` · IN PROGRESS
 
 **What exists (dev):** the `monitoring` module vertical — monitors, incidents, maintenance windows
 and status pages, with **18 uptime monitors live** on the estate. `0.2.0` was a correctness wave over
-the IAM layer; `0.3.0` is the alert-delivery management surface.
+the IAM layer; `0.3.0` is the alert-delivery management surface; `0.3.1` (CH) makes channel health
+TRUE rather than decorative.
+
+**Added in `0.3.1` (2026-09-03, CH):** `monitor_channels.last_delivery_at`/`last_delivery_ok`/
+`failure_count` — present in the schema since `0116` but written by NOTHING, so `channelHealth()`
+(`platform-ui/src/lib/monitoringShared.ts`) read every channel as "unused" forever, even seconds
+after a real send. Both delivery paths now write them on every attempt:
+- `runner.ts`'s `notifyIncidents()` (real incident fan-out) and `POST .../channels/:id/test`
+  (test-send) each update the touched channel(s) after `enqueueMail()` settles — success resets
+  `failure_count` to 0 and sets `last_delivery_ok = true`; a thrown `enqueueMail()` call OR a
+  `status: 'suppressed'` result (the recipient matches `mail_suppressions` — the row is written but
+  the sender worker deliberately never reaches it) increments `failure_count` and sets
+  `last_delivery_ok = false`.
+- **Semantics, pinned in `migrations/202609030200_monitor_channel_delivery_columns_comment.sql`'s
+  `COMMENT ON COLUMN`:** `last_delivery_ok = true` means only "successfully handed to the mail queue"
+  — `enqueueMail()` inserts a `mail_log` row and returns immediately; it does not wait for the async
+  sender worker's SMTP/API handoff or the provider's later delivered/bounced webhook. That stronger
+  signal exists in this codebase (`mail/webhook.controller.ts` updates `mail_log.status` to
+  `delivered`/`bounced`) but is not wired here: it is keyed to a single `mail_log` row via
+  `entity_type`/`entity_id`, which for the incident fan-out records the monitor, not the channel a
+  given send went out on (one incident can fan out to several channels) — attributing it per-channel
+  needs a new column on `mail_log`, a table this module does not own, so it is a follow-up requiring
+  senior-db/architect sign-off, not improvised here.
+- An attempt against a channel is **not recorded at all** when the whole mail subsystem is globally
+  disabled (`config.mail.enabled=false`) — a platform-wide fact, not something wrong with the
+  channel, so the columns are left untouched rather than marked either "ok" or "failing".
+- UI: `ChannelManager.tsx`'s caveat text and `lib/monitoring.ts`'s BFF-contract comment updated to
+  match — health is real now, but "active" still only means "queued", never "delivered".
+- No schema change (columns pre-existed from `0116`); no Cerbos/permission-catalog change.
 
 **Added in `0.3.0` (2026-09-02):** the endpoints that let a tenant manage alert delivery end to end,
 closing the gap where `monitor_channels`/`monitor_routes` rows could only be created by hand-SQL and

@@ -63,10 +63,17 @@ import "server-only";
 //   - `MonitorChannel.destination` for `email` is validated server-side at create time (400 on
 //     missing/implausible); every other kind accepts anything, because no delivery driver exists
 //     for telegram/ntfy/webhook/wa/mcp yet, so there is nothing to validate a destination against.
-//   - `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` are schema-only columns nothing writes yet —
-//     `channelHealth()` will read "unused" for every channel even right after a successful test
-//     send. Do not paper over this: if a surface shows health, it must say plainly that delivery
-//     status isn't tracked, not imply a green channel is a verified one.
+//   - CH — `lastDeliveryAt`/`lastDeliveryOk`/`failureCount` ARE now written, by both mail paths
+//     (`runner.ts`'s `notifyIncidents` and the `/channels/:id/test` test-send), on every delivery
+//     ATTEMPT. But "ok" can only honestly claim "handed to the mail queue" (`enqueueMail()` returned
+//     `status: 'queued'`) — it enqueues a `mail_log` row and returns; the actual SMTP/API handoff
+//     happens later in an async worker, and the provider's own delivered/bounced verdict later
+//     still, via a webhook that updates that SAME `mail_log` row but is NOT attributed back to a
+//     channel (a single incident can fan out to several channels; the row only remembers the
+//     monitor/channel it was enqueued for, not a stronger per-channel delivery-webhook link — closing
+//     that gap needs a schema change on a table this module does not own). Do not read `ok: true` as
+//     "the recipient got the mail" — it is "the send attempt did not fail before enqueue", and the UI
+//     caveat says so.
 import { platformFetch, PlatformError } from "./platform";
 import type {
   Monitor,
