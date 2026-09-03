@@ -101,6 +101,25 @@ describe.skipIf(!TEST_URL)("MAIL-24 Finding 1 — timing re-measurement (known v
     // UNCHANGED — that assertion is QA's and is not weakened here. This is a strictly TIGHTER,
     // additional bound proving the gap actually closed post-fix (pre-fix measured ratio was
     // 3.25x; this fails loudly if a future change regresses back toward that).
-    expect(ratio).toBeLessThan(1.8);
+    //
+    // ── 2026-09-03: the bound is now ABSOLUTE, because the ratio alone measured the machine, not
+    // the code. Both medians sit at 4-6ms here, and `Date.now()` quantises to whole milliseconds
+    // with a floor of 1 in the denominator, so a single millisecond of scheduler jitter reads as a
+    // "1.25x timing gap" and 11ms vs 6ms — nothing but load — reads as 1.83x and FAILS. Measured
+    // on the shared Linux runner: run alone, this test reports ratios of 1.00-1.25 on both clean
+    // main and a feature branch (3 runs each, medians 4-5.5ms, indistinguishable); run inside the
+    // full 500-file suite it reported 1.83 and 2.59 and failed, on BOTH trees. It was flagging
+    // concurrency, and it had already cost one false "regression" investigation.
+    //
+    // What a timing oracle actually requires is a measurable ABSOLUTE difference an attacker can
+    // separate from network noise — a 1ms delta is not an oracle whatever its ratio. So: assert the
+    // absolute gap, and keep the ratio check only where a ratio is meaningful (medians large enough
+    // that quantisation is not the dominant term). This is not a weakening: at the pre-fix 3.25x
+    // with the medians that produced it, `absDelta` was far past 5ms and this still fails loudly.
+    const absDelta = Math.abs(kMed - uMed);
+    expect(absDelta).toBeLessThan(5);
+    if (Math.min(kMed, uMed) >= 20) {
+      expect(ratio).toBeLessThan(1.8);
+    }
   }, 60_000);
 });
