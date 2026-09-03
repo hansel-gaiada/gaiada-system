@@ -360,6 +360,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/departments/[deptId]/sites`
 - `/departments/[deptId]/sites/[slug]`
 - `/departments/[deptId]/sites/portfolio`
+- `/departments/[deptId]/sites/portfolio/[siteId]`
 - `/departments/[deptId]/studio`
 - `/departments/[deptId]/timeline`
 - `/departments/[deptId]/tools`
