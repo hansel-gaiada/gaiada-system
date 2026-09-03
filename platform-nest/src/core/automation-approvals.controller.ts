@@ -18,7 +18,11 @@ import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
 // The probe-consent discriminator, imported from the module that owns the flow rather than
 // re-declared here — core/approval-executables.ts sets the same precedent for module-owned rules.
-import { PROBE_CONSENT_WORKFLOW } from "../modules/search/probe-consent";
+// Probe consent (2026-09-04): an approved request executes IN-BAND here, exactly like the IAM and
+// github-repo cases below. NOT on the `automation_approval.decided` event — `search-sem-apply.test.ts`
+// asserts the search module registers no such handler, because its other approval path spends a
+// client's ad budget. See probe-consent.ts for the full reasoning.
+import { PROBE_CONSENT_WORKFLOW, executeApprovedProbeConsent } from "../modules/search/probe-consent";
 // P2-08 part B: an approved IAM request (override, or a dept head's assignment) executes in-band.
 // One import, one call — the IAM-specific knowledge lives in that module, not in this shared route.
 import { IAM_POSITION_ASSIGN_WORKFLOW, executeApprovedIamRequest, isIamRequest } from "../admin/iam-approval-execute";
@@ -356,17 +360,11 @@ export class AutomationApprovalsController {
       : undefined;
     const executionStatus: "pending" | "not_applicable" = executable ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
-      // `requested_by` joins the RETURNING (2026-09-03) so the decided event can carry it. A module
-      // eventHandler that needs to tell the REQUESTER what happened had no way to find them: HR's
-      // handlers get the subject from their own domain row, and the search module's probe-consent
-      // handler has no such row (its domain row is the property, which does not know who asked).
-      // Additive — no existing consumer reads it, and the column was already SELECTed above for the
-      // override path, so this is the same value, not a new fact.
-      const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string; requested_by: string | null }>(
+      const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
         `UPDATE automation_approvals
            SET status = $2, decided_by = $3, decided_at = now(), updated_at = now(), execution_status = $4
          WHERE id = $1 AND status = 'pending' AND deleted_at IS NULL
-         RETURNING origin, tool_args, workflow_id, tool_name, requested_by`,
+         RETURNING origin, tool_args, workflow_id, tool_name`,
         [id, decision, req.principal.userId, executionStatus],
       );
       if (upd.rowCount === 0) return null;
@@ -379,7 +377,6 @@ export class AutomationApprovalsController {
         workflowId: upd.rows[0].workflow_id,
         toolName: upd.rows[0].tool_name,
         decidedBy: req.principal.userId,
-        requestedBy: upd.rows[0].requested_by,
       });
       return upd.rows[0];
     });
@@ -423,6 +420,26 @@ export class AutomationApprovalsController {
     // (denied, misconfigured GITHUB_ORG, or GitHub itself refused), the row is already `approved` in
     // the DB (truthful: a human did decide to approve it) but nothing was created — the ledger
     // (core/github/ledger.ts) still records the ATTEMPT either way, per §4.3.
+    // ── Probe consent: an approved request records `verified_at` IN-BAND ─────────────────────────
+    // Same shape and same reason as the IAM case above and the github case below. The approver's
+    // authority for THIS grant (`resource_search_property · update` on the named property) was
+    // checked before the decide UPDATE, so reaching here means the decision was theirs to make.
+    //
+    // `requested_by` comes off the row read before authorizing — the notification goes to whoever
+    // ASKED, since they are the one waiting and the one who asserted the basis.
+    //
+    // A `null` return is not an error: the property was already consented (a duplicate approval, or
+    // consent arrived by another route) or has since been deleted. The row is still truthfully
+    // `approved` either way — a human did decide — and the grant is idempotent by design.
+    if (res && rowOrigin === "search" && res.workflow_id === PROBE_CONSENT_WORKFLOW && decision === "approved") {
+      const grant = await executeApprovedProbeConsent(tenantId, res.tool_args, existing.rows[0].requested_by);
+      if (grant?.granted) {
+        await writeActivity(tenantId, req.principal.userId, "granted", "search_property", grant.propertyId, {
+          viaApproval: id, domain: grant.domain,
+        });
+      }
+    }
+
     let githubResult: Awaited<ReturnType<typeof executeApprovedGithubRepoCreation>> | null = null;
     if (res && isGithubCreate && decision === "approved") {
       githubResult = await executeApprovedGithubRepoCreation(tenantId, id, res.tool_args, req.principal);

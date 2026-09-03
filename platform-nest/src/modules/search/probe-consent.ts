@@ -13,19 +13,18 @@
 // `{verifiedAt}` already existed and was deliberately never given a button, because a one-click
 // grant makes whoever is on the portfolio page the author of a compliance claim.
 //
-// ── WHY THE DECIDED EVENT AND NOT THE D14 EXECUTABLE REGISTRY ──────────────────────────────────
+// ── WHY IN-BAND AND NOT THE D14 EXECUTABLE REGISTRY ───────────────────────────────────────────
 // `automation-approvals.controller.ts`'s decide path computes an executor ONLY for
 // `origin IN ('automation','agent')` — its own comment states that any future origin outside that
 // pair "can never become auto-executable even if its tool_name were mistakenly registered". This
 // flow is `origin='search'`, so the registry is structurally unavailable to it, and that is the
 // right answer: the registry re-drives MCP TOOL CALLS through the hub, and registering a
 // consent-granting tool would create an agent-callable privilege surface for a compliance flag.
-// Instead this applies the decision in-process on the `automation_approval.decided` event — the
-// same slot `origin='hr'` uses for leave and loans (modules/hr/leave-decision.ts), which the
-// registry's own doctrine names as the safe pattern for a module's own domain mutation.
+// Instead the grant runs IN-BAND from the decide route (see `executeApprovedProbeConsent` below for
+// why not the `automation_approval.decided` event either — a money guard forbids this module from
+// registering one at all).
 import { withTenants } from "../../db";
 import { notify } from "../../core/http";
-import type { OutboxEvent } from "../../events/types";
 
 /** The workflow discriminator. `origin` alone is not enough: the search module may file other kinds
  *  of approval later, and each must be told apart on the write side (the same reason HR checks a
@@ -66,67 +65,83 @@ export function validateConsentBasis(raw: unknown): BasisVerdict {
   return { ok: true, basis };
 }
 
-interface DecidedPayload {
-  decision?: "approved" | "rejected";
-  origin?: string;
-  workflowId?: string;
-  decidedBy?: string | null;
-  toolArgs?: { propertyId?: string; domain?: string; basis?: string } & Record<string, unknown>;
+/**
+ * Applies an APPROVED probe-consent request onto the `search_properties` row it was filed for.
+ *
+ * ── WHY IN-BAND AND NOT AN `automation_approval.decided` HANDLER ────────────────────────────────
+ * That was the first design, and a guard test rejected it — correctly.
+ * `search-sem-apply.test.ts` asserts the search module registers **no**
+ * `automation_approval.decided` handler at all, because the module's OTHER approval path is
+ * `sem-apply`: deciding one of those would spend a client's advertising money with no human present
+ * at the moment of execution. The assertion is structural (no handler exists) rather than
+ * behavioural (the handler ignores ad workflows) on purpose — "there is no handler" cannot regress
+ * into "there is a handler that grew a second branch", which is exactly what adding this one would
+ * have started. A money guard shaped that deliberately is not mine to reshape.
+ *
+ * So this executes IN-BAND from the decide route instead, which is the precedent P2-08 part B set
+ * for approved IAM requests and GH-12 followed for repo creation: `executeApprovedIamRequest` /
+ * `executeApprovedGithubRepoCreation` are called the same way, for the same reason (the D14
+ * registry's hub-redrive shape is unusable, and a module eventHandler is unavailable). It also
+ * makes the HTTP response reflect committed reality rather than an eventual one.
+ *
+ * The approver's authority is checked by the caller BEFORE this runs
+ * (`resource_search_property · update`, automation-approvals.controller.ts) — the requester's
+ * authority never backs the grant.
+ */
+export interface ProbeConsentGrant {
+  propertyId: string;
+  domain: string;
+  /** False when the row was already verified — a redelivered or duplicate approval. */
+  granted: boolean;
 }
 
-/**
- * Applies a decided probe-consent request onto the `search_properties` row it was filed for.
- *
- * Every event that is not an APPROVED search-origin probe-consent decision is a no-op — including a
- * rejection, which by design changes nothing about the property. A rejected request leaves the
- * domain unconsented, which is the state it was already in; the record of the refusal lives on the
- * approval row, where the reason is.
- */
-export async function applyProbeConsentDecision(event: OutboxEvent): Promise<void> {
-  const payload = event.payload as DecidedPayload;
-  if (payload.origin !== "search") return;
-  if (payload.workflowId !== PROBE_CONSENT_WORKFLOW) return;
-  if (payload.decision !== "approved") return;
+export async function executeApprovedProbeConsent(
+  tenantId: string,
+  toolArgs: unknown,
+  requestedBy: string | null,
+): Promise<ProbeConsentGrant | null> {
+  const args = toolArgs as { propertyId?: unknown } | null;
+  const propertyId = typeof args?.propertyId === "string" ? args.propertyId : "";
+  if (!propertyId) return null;
 
-  const propertyId = payload.toolArgs?.propertyId;
-  if (typeof propertyId !== "string" || !propertyId) return;
-
-  const tenantId = event.tenantId;
   const granted = await withTenants(
     [tenantId],
     async (c) => {
-      // IDEMPOTENT, and the guard is `verified_at IS NULL` rather than a status column: a
-      // redelivered event, or a second request approved for a domain that has since been consented
-      // by another route, must not move `verified_at` forward. The FIRST grant is the one that
-      // happened, and its timestamp is the evidence — overwriting it would quietly rewrite when we
-      // became entitled to probe.
-      const upd = await c.query<{ domain: string; client_id: string }>(
+      // IDEMPOTENT, and the guard is `verified_at IS NULL` rather than a status column: a duplicate
+      // approval, or a domain consented by another route in between, must not move `verified_at`
+      // forward. The FIRST grant is the one that happened and its timestamp is the evidence of when
+      // we became entitled to probe — overwriting it would quietly rewrite that.
+      const upd = await c.query<{ domain: string }>(
         `UPDATE search_properties
             SET verified_at = now(), updated_at = now()
-          WHERE id = $1 AND deleted_at IS NULL AND verified_at IS NULL
-        RETURNING domain, client_id`,
-        [propertyId],
+          WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL AND verified_at IS NULL
+        RETURNING domain`,
+        [propertyId, tenantId],
       );
-      return upd.rows[0] ?? null;
+      if (upd.rows[0]) return { domain: upd.rows[0].domain, granted: true };
+      // Distinguish "already consented" from "no such property": the first is a benign duplicate,
+      // the second means the request named something that has since been deleted.
+      const cur = await c.query<{ domain: string }>(
+        `SELECT domain FROM search_properties WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+        [propertyId, tenantId],
+      );
+      return cur.rows[0] ? { domain: cur.rows[0].domain, granted: false } : null;
     },
     { modules: ["search"] },
   );
-  if (!granted) return;
+  if (!granted) return null;
 
-  // The REQUESTER is told, not the approver: they are the one waiting, and they are the one who
-  // asserted the basis. `requestedBy` rides on the payload the decide endpoint emits.
-  const requestedBy = typeof event.payload?.requestedBy === "string" ? event.payload.requestedBy : null;
-  if (requestedBy) {
+  // The REQUESTER is told, not the approver: they are the one waiting, and they asserted the basis.
+  if (granted.granted && requestedBy) {
     await notify(tenantId, requestedBy, null, "search.probe_consent.granted", {
       title: `Probe consent granted for ${granted.domain}`,
       severity: "info",
       entityType: "search_property",
       entityId: propertyId,
-      // Deep-links to the SEO property, which is where consent lives. Web Dev's portfolio reads it
-      // from there; it does not own it.
-      href: `/departments/seo/gsc-ga4`,
+      href: "/monitoring",
       domain: granted.domain,
       decision: "approved",
     });
   }
+  return { propertyId, domain: granted.domain, granted: granted.granted };
 }

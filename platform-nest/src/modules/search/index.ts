@@ -12,7 +12,6 @@
 // later tickets land, exactly like every other module's rollups did before their write paths shipped.
 import { config } from "../../config";
 import { registerSearchGoogleSurfaces } from "./google/property-binding";
-import { applyProbeConsentDecision } from "./probe-consent";
 import type { ModuleContract, RollupProvider } from "../contract";
 import {
   handleAiVisibilityChanged,
@@ -560,11 +559,6 @@ export const searchModule: ModuleContract = {
   // see notifications.ts's file header for the full type -> href table and the one type
   // (search.backlinks.lost_spike) deliberately left unwired (no Backlinks tab exists yet).
   eventHandlers: {
-    // Probe consent (2026-09-03). Same slot HR uses for leave/loans, and for the same reason: the
-    // D14 executable registry is origin-scoped to automation|agent, so a `search`-origin approval
-    // can never auto-execute and MUST apply its own domain mutation here. Every non-search-origin
-    // decided event is a cheap no-op inside the handler.
-    "automation_approval.decided": applyProbeConsentDecision,
     "search.provider.budget_threshold": handleBudgetThreshold,
     // SM-50 (addendum §A11.2 #11): a vendor charge that delivered no data must reach a human, not only
     // the budget sums. Producer: providers/dispatch.ts's compensating write.
