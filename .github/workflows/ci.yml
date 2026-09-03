@@ -837,6 +837,10 @@ jobs:
       - run: npm run build
         env:
           DEMO_MODE: "1"
+          # This job deliberately builds/serves a PRODUCTION artifact against the demo fixtures
+          # (there is no backend in CI). platform-ui refuses to start with DEMO_MODE in a
+          # production runtime unless that is acknowledged BY NAME — see src/lib/demoMode.ts.
+          DEMO_MODE_ACK_NON_PRODUCTION: "1"
       # Left running UNCONDITIONALLY, and still with `--with-deps`, even on a cache hit. The cache
       # above covers the ~120MB browser download in ~/.cache/ms-playwright; it cannot cover the
       # host apt libraries `--with-deps` installs, which live outside any cacheable path and would
@@ -849,6 +853,10 @@ jobs:
         run: npx playwright test --project=smoke --grep @smoke
         env:
           DEMO_MODE: "1"
+          # This job deliberately builds/serves a PRODUCTION artifact against the demo fixtures
+          # (there is no backend in CI). platform-ui refuses to start with DEMO_MODE in a
+          # production runtime unless that is acknowledged BY NAME — see src/lib/demoMode.ts.
+          DEMO_MODE_ACK_NON_PRODUCTION: "1"
           # src/lib/session.ts throws when this is unset, so the Playwright webServer never
           # booted and every test failed as a waitForURL timeout. CI-only dummy value.
           SESSION_SECRET: ci-smoke-secret-not-a-real-key
