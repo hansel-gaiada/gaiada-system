@@ -59,6 +59,72 @@ all" wording would now be actively wrong.
 `platform-nest/migrations/202609030200_monitor_channel_delivery_columns_comment.sql`,
 `platform-ui/src/components/monitoring/ChannelManager.tsx`, `platform-ui/src/lib/monitoring.ts`,
 `docs/FRONTEND-BFF-CONTRACT.md`, `docs/modules/MODULES.md`.
+### platform-nest `0.50.0` - GM-blob live data repair + monitoring delivery/maintenance seed (2026-09-03) - DEV-VERIFIED
+
+Two owner-authorised dev-stage data actions on the LIVE `gda-aicenter` database ("we need to delete
+or fix GM Blob"; "this is still in dev stage, where we don't mind some make up data or seeds").
+Neither touches schema; both went through sanctioned write paths, not hand-written SQL.
+
+1. **GM-blob repair.** `0.49.0`'s write-path fixes (above) do not retroactively repair data already
+   corrupted by the OLD `org-structure-refresh.ts` truncation bug — they only stop it recurring on
+   the next write. Read via the storage `org-structure.service.ts` itself queries
+   (`company_org_structure.structure`, one JSONB blob per tenant, `PRIMARY KEY (tenant_id)`, from
+   0011): the collision was WORSE than the reported symptom — one id (`p-019fb652`) was shared by
+   **7** people tree-wide (Clement Hansel, Citra (Design), Dewi (Copy), Ayu (Owner), Budi (PM), Eka
+   (Client Lead), Gaiada Exec), not only the 4 in the `GM`/`d-gm` department the live report named.
+   Backed up first (full `company_org_structure` + `org_unit_memberships` + `org_unit_closure`
+   counts, all 6 companies, before any write). The live container (`ghcr.io/…:v1.0.0-alpha.328`) was
+   still running the PRE-fix compiled `dist/seed/org-structure-refresh.js` — origin/main's fix had
+   not been deployed yet — so the one-line id-minting fix (`"p-" + p.id.slice(0, 8)` →
+   `"p-" + p.id`) was hand-applied to the container's compiled `dist/seed/org-structure-refresh.js`
+   (not the shipped image; a normal deploy of this fix overwrites it identically) and the SANCTIONED
+   `refreshOrgStructure()` was re-run through `applyOrgStructure()` — the same path that also sweeps
+   `org_unit_memberships` (TR-04) and rebuilds `org_unit_closure` (IAM-09) inside the same
+   transaction, which hand-written SQL would have skipped. Verified against the live rows
+   afterward: 26/26 person node ids now unique (was 1 id shared 7 ways); all 26 people compared
+   before/after by `assigneeId` — identical name + identical unit for every one, zero moved;
+   `org_unit_memberships` unchanged at 26 open + 11 closed (placements were already correct — only
+   the node-id STRING was colliding, so the sweep correctly produced zero ops); `org_unit_closure`
+   for the tenant went 118 → 133 rows, which is the EXPECTED direction and size (the collision had
+   been silently under-counting the closure table by collapsing 7 people onto 1 descendant id).
+2. **Monitoring delivery/maintenance seed (new).** Real live counts showed monitors well-populated
+   (18 monitors, 32 incidents, 7615 probe results) but delivery/suppression config nearly empty
+   (`monitor_channels`=1, `monitor_routes`=1, `monitor_maintenance`=0 — one hand-made channel/route
+   from console testing, no seeder existed for any of the three). Added
+   `platform-nest/src/seed/monitoring-delivery.ts` (`npm run seed:monitoring-delivery`), following
+   the existing `withGlobal`/`withTenants({modules:["monitoring"]})` seed convention (finance-config.ts
+   et al.) rather than inventing a new one: discovers candidate tenants from the GLOBAL `companies`
+   table (never from a monitoring table under `withGlobal`, which would silently read zero rows
+   under FORCE RLS), then for each tenant that already has ≥1 monitor, adds two more channels
+   (`monitor_channels` is `UNIQUE(tenant_id, name)`, used as the natural key — never touches the
+   existing hand-made channel), a catch-all route to each new channel, and two demonstration
+   `monitor_maintenance` windows (one closed, one upcoming) tied to real monitor rows.
+   `monitor_routes`/`monitor_maintenance` have no natural unique key, so the script checks for an
+   equivalent row before inserting. Run twice against live: first run created 2 channels / 2 routes /
+   2 maintenance windows for Gaia Digital Agency (its only tenant with monitors); second run created
+   0 of everything — idempotent, confirmed live. **Incidental finding, not fixed here:** one of the
+   two new channels is `kind:'slack_webhook'`; `monitoring.controller.ts`'s `POST
+   /channels/:id/test` 400s for any kind other than `email` today (only email has a wired delivery
+   driver per the `0.63.0` platform-ui entry below) — the row renders in the console but its Test
+   button will not succeed. Left as-is deliberately: it demonstrates the exact gap rather than
+   hiding it behind an all-email seed.
+
+**Not done, flagged for an owner decision rather than fabricated:** `org_units` (service-layer table,
+0026) is still 0 rows live. It is populated only by an active cross-company shared-service
+assignment (`service_assignments`, also 0 rows) via `service-reconciler.ts` — no seeder exists for
+either, and none of the 3 live companies currently has one. This reads as a genuinely unused feature
+area, not a missing-seed bug; inventing a shared-service scenario blind felt riskier than reporting
+it. Also left alone: `hr_statutory_parameters` (ratification deliberately deferred per a prior owner
+ruling — see `hr-full-deployed` memory) and `search_engagements`/`search_audits`/`search_keywords`/
+`search_kpi_targets`/`search_content_briefs` (all 0 rows; the existing, idempotent `seed:search`
+targets a client literally named "Bali Beach Resort", which exists under Gaia Digital Agency but was
+soft-deleted 2026-08-31 — running the seed as-is is a safe no-op, not a fix, since its target no
+longer resolves; re-pointing it or reviving the client is an owner call, not assumed here).
+
+Files: `platform-nest/src/seed/monitoring-delivery.ts` (new), `platform-nest/package.json`
+(`seed:monitoring-delivery` script entry). The GM-blob repair itself touched only the LIVE database
+(`company_org_structure`, `org_unit_memberships`, `org_unit_closure` rows) and the live container's
+compiled seed script, not source — no repo diff for that half.
 
 ### monitoring `0.3.0` - channel/route/maintenance management surface (2026-09-02) - PROTOTYPED
 
