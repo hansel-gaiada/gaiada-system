@@ -36,6 +36,19 @@ function isProductionRuntime(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+/** CI legitimately runs a PRODUCTION-mode build and server against the demo fixtures: the
+ *  `npm run build` gate exists precisely to catch `server-only` imports reaching client components,
+ *  and the Playwright smoke drives that same artifact through `next start` — both with no backend,
+ *  hence DEMO_MODE=1. `next build` always sets NODE_ENV=production, so a naive "demo + production =
+ *  refuse" rule breaks CI. It did exactly that on 2026-09-03.
+ *
+ *  The escape hatch is therefore a SECOND, explicitly-named variable. This is not a weakening: the
+ *  live deployment sets NEITHER, so a stray DEMO_MODE=1 there still refuses to start. Defeating the
+ *  guard now requires deliberately asserting, by name, that the environment is not production. */
+export function demoModeAcknowledgedNonProduction(): boolean {
+  return process.env.DEMO_MODE_ACK_NON_PRODUCTION === "1";
+}
+
 // Leads with the login bypass, deliberately. Whoever reads this at 2am is deciding whether to force
 // the deployment back up, and "invented data" sounds survivable while "anyone can log in" does not.
 // The severity ordering here is the message's whole job.
@@ -50,7 +63,7 @@ export const DEMO_MODE_IN_PRODUCTION_MESSAGE =
  *  (`next.config.ts`) so a misconfigured deployment dies at start, and again from `isDemoMode()` so
  *  a runtime that somehow got past boot still cannot serve a single fixture. */
 export function assertDemoModeAllowed(): void {
-  if (demoModeRequested() && isProductionRuntime()) {
+  if (demoModeRequested() && isProductionRuntime() && !demoModeAcknowledgedNonProduction()) {
     throw new Error(DEMO_MODE_IN_PRODUCTION_MESSAGE);
   }
 }

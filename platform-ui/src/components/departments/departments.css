@@ -657,6 +657,16 @@ a.dept-proj__name:hover { opacity: 0.6; }
   color: var(--dept-risk);
   font: 400 12px var(--font-body);
 }
+/* What the rows below it ARE — an account mapping, not a sign-in. Deliberately NOT styled like
+   `.dept-conn-banner` above: that one is a WARNING (an unreachable service, in the risk colour),
+   and this is a standing explanation that is always true. Giving a permanent fact the same
+   treatment as a transient fault is how people learn to skip both. */
+.dept-conn-note {
+  margin: 0 0 14px;
+  font: 400 12px var(--font-body);
+  color: var(--ink-muted);
+  max-width: 62ch;
+}
 .dept-conn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .dept-conn-row { padding: 14px 0; border-bottom: 0.5px solid var(--erp-hairline-soft); display: flex; flex-direction: column; gap: 8px; }
 .dept-conn-row:last-child { border-bottom: none; }

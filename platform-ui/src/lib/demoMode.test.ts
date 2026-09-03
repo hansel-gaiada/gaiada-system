@@ -7,7 +7,9 @@ import { demoModeRequested, isDemoMode, assertDemoModeAllowed } from "./demoMode
 const prevDemo = process.env.DEMO_MODE;
 const prevNode = process.env.NODE_ENV;
 
-function setEnv(demo: string | undefined, node: string | undefined) {
+function setEnv(demo: string | undefined, node: string | undefined, ack?: string | undefined) {
+  if (ack === undefined) delete process.env.DEMO_MODE_ACK_NON_PRODUCTION;
+  else process.env.DEMO_MODE_ACK_NON_PRODUCTION = ack;
   if (demo === undefined) delete process.env.DEMO_MODE;
   else process.env.DEMO_MODE = demo;
   // NODE_ENV is readonly in the Next type surface; assign through a cast, same as the existing
@@ -62,5 +64,22 @@ describe("demoMode", () => {
     // own misconfiguration rather than hide the cause behind the guard.
     setEnv("1", "production");
     expect(demoModeRequested()).toBe(true);
+  });
+
+  it("permits demo fixtures in a production RUNTIME only when acknowledged by name — this is what CI does", () => {
+    // CI builds and smoke-tests a production artifact against the fixtures; `next build` always sets
+    // NODE_ENV=production, so without this the guard breaks CI (it did, on 2026-09-03).
+    setEnv("1", "production", "1");
+    expect(() => assertDemoModeAllowed()).not.toThrow();
+    expect(isDemoMode()).toBe(true);
+  });
+
+  it("STILL refuses when the acknowledgement is absent or not exactly \"1\" — the live case", () => {
+    // The property that matters: the real deployment sets NEITHER variable, so a stray DEMO_MODE=1
+    // there is still fatal. The escape hatch must not be reachable by accident.
+    for (const ack of [undefined, "0", "true", "yes", ""]) {
+      setEnv("1", "production", ack);
+      expect(() => assertDemoModeAllowed()).toThrow(/Refusing to start/);
+    }
   });
 });

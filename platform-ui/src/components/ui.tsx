@@ -86,6 +86,14 @@ const STATUS_FAMILY: Record<string, StatusFamily> = {
   // already covered above by draft/pending/at-risk-family aliases where they
   // overlap; only the two not already present are added here).
   linked: "ok", unconfigured: "idle",
+  // 2026-09-03 — the two states the department Connections tab actually renders, now that it stops
+  // printing the vault's raw `status` column at people (see ConnectionsPanel's `mappingLabel`).
+  // "not set" is idle: nothing has been recorded, which is inactive, not in-flight — the default
+  // "progress" family would put a bronze in-flight tone on a row where nobody has done anything.
+  // "mapped" deliberately STAYS in the default progress family rather than joining `linked` in
+  // "ok": an account mapping with no credential behind it is a half-finished thing, and a green
+  // badge would say the integration works. It does not — that is the whole point of the label.
+  "not set": "idle",
   // PRV-04 — webdev_provisioned_sites lifecycle (requested/pending/provisioned already fall through
   // to the default "progress" family). "live" is the terminal success state, same family as
   // active/shipped; "failed" is already covered by the D14-08 entry above.
@@ -170,11 +178,30 @@ export function KpiTile({ label, value, delta, deltaUp, foot, hint }: {
   );
 }
 
-export function HairlineTable({ columns, rows, tcols }: {
-  columns: { label: string; align?: "right" }[];
+export function HairlineTable({ columns, rows, tcols, sort, onSort }: {
+  /** `sortKey` opts a column into the sort affordance below; columns without one stay static. */
+  columns: { label: string; align?: "right"; sortKey?: string }[];
   rows: ReactNode[][];
   tcols?: string;
+  /** The column currently sorted, and which way. Omit for an unsorted table. */
+  sort?: { key: string; dir: "asc" | "desc" };
+  /** Called with a column's `sortKey`. The CALLER owns the sort state and the actual ordering of
+   *  `rows` — this primitive never reorders anything, it only renders the control. */
+  onSort?: (key: string) => void;
 }) {
+  // ── Sorting is OPT-IN and additive (2026-09-03) ───────────────────────────────────────────────
+  // Nothing in this app had a sortable table — `aria-sort` appeared zero times in `src/` — so the
+  // portfolio's rebuild had the usual choice between inventing a private pattern next door and
+  // teaching the primitive. It teaches the primitive: every one of the ~60 existing call sites
+  // passes neither `sort` nor `onSort` and renders byte-identically.
+  //
+  // No `aria-sort`, deliberately. `.lux-table` is a grid of plain `div`/`span`s with NO table or
+  // grid roles at all, and `aria-sort` is only meaningful on a `columnheader` inside a
+  // row/rowgroup/table hierarchy. Bolting the attribute onto a bare div would be invalid ARIA that
+  // reads as compliance, and adding the full role hierarchy would change screen-reader behaviour on
+  // every table in the app from one department's ticket. So the state is carried where it is always
+  // announced: in the button's own accessible name.
+
   // DERIVE the grid template from the column count when the caller does not give one.
   //
   // `.lux-table__head/__row` fall back to `var(--lux-tcols, 2fr 1fr 1fr 1fr)` — FOUR tracks. Any
@@ -210,9 +237,33 @@ export function HairlineTable({ columns, rows, tcols }: {
           // These labels are not decoration. They are the only thing saying which column holds the
           // amount and which the account, so `--ink-faint` (2.62:1, "decorative only") would be the
           // wrong tier even though it looks closer to the old rendering.
-          <Eyebrow key={c.label} style={{ fontSize: 10, color: "var(--ink-subtle)", ...(c.align === "right" ? { justifySelf: "end" } : {}) }}>
-            {c.label}
-          </Eyebrow>
+          c.sortKey && onSort ? (
+            <button
+              key={c.label}
+              type="button"
+              className="lux-table__sort"
+              style={c.align === "right" ? { justifySelf: "end" } : undefined}
+              onClick={() => onSort(c.sortKey as string)}
+              aria-label={
+                sort?.key === c.sortKey
+                  ? `${c.label}, sorted ${sort.dir === "asc" ? "ascending" : "descending"} — activate to reverse`
+                  : `Sort by ${c.label}`
+              }
+            >
+              <Eyebrow style={{ fontSize: 10, color: sort?.key === c.sortKey ? "var(--text-primary)" : "var(--ink-subtle)" }}>
+                {c.label}
+              </Eyebrow>
+              {/* aria-hidden: the direction is already in the button's accessible name above, and a
+                  screen reader reading "black up-pointing triangle" after it is noise. */}
+              <span aria-hidden="true" className="lux-table__sort-mark">
+                {sort?.key === c.sortKey ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+              </span>
+            </button>
+          ) : (
+            <Eyebrow key={c.label} style={{ fontSize: 10, color: "var(--ink-subtle)", ...(c.align === "right" ? { justifySelf: "end" } : {}) }}>
+              {c.label}
+            </Eyebrow>
+          )
         ))}
       </div>
       {rows.map((cells, i) => (

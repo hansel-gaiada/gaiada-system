@@ -7,7 +7,11 @@ import type { NextConfig } from "next";
 // 200s. Duplicated at the call sites via lib/demoMode.ts on purpose: this stops the process, that
 // stops the fiction if anything ever gets past this. Inlined because next.config.ts is loaded
 // outside the app's module graph and its TS path aliases.
-if (process.env.DEMO_MODE === "1" && process.env.NODE_ENV === "production") {
+if (
+  process.env.DEMO_MODE === "1" &&
+  process.env.NODE_ENV === "production" &&
+  process.env.DEMO_MODE_ACK_NON_PRODUCTION !== "1"
+) {
   throw new Error(
     "DEMO_MODE=1 is set while NODE_ENV=production. Refusing to start: demo mode bypasses login and " +
       "answers every API read from in-memory fixtures, so this deployment would serve invented data " +

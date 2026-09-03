@@ -1,0 +1,197 @@
+/* Web Dev site surfaces (the estate portfolio and its per-site page).
+ *
+ * Prefix `wd-`. The webdesk components had no stylesheet of their own until now — they borrowed
+ * `dashboard.css`'s `.filter-chip*` and `systems.css`'s `.sys-searchable__*` and inlined the rest as
+ * `style={{ color: "var(--erp-ink-50)" }}` object literals. Inline styles outrank every selector, so
+ * none of it could be reached from a media query; that is the same trap `Eyebrow`'s own comment in
+ * ui.tsx records. Everything the portfolio needs now lives here.
+ *
+ * No colour literals — every value is a token, which `styles/tokens.test.ts` enforces on every
+ * stylesheet in `components/`. */
+
+/* ── Headline figures ─────────────────────────────────────────────────────────────────────────── */
+/* auto-fit rather than a fixed 5 columns: the tiles reflow to 3+2 and then to one per row instead of
+   squeezing five 60px columns onto a phone. Same shape /monitoring uses for its own KPI row. */
+/* 128px, not 150px: at 150 the five tiles wrapped 4 + 1 in the console's content column and the
+   orphan read as a different, lesser row of information. Measured on screen, not guessed. */
+.wd-pf__kpis {
+  display: grid;
+  gap: var(--space-12);
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  margin-bottom: var(--space-20);
+}
+
+/* ── One toolbar line ─────────────────────────────────────────────────────────────────────────── */
+/* The old panel spent two full rows on filter chips plus a search row, which pushed the first data
+   row below the fold on a laptop. Search grows, the three facets hold a fixed comfortable width, and
+   the count sits at the end; below ~720px they stack in the same order rather than reflowing into a
+   grid nobody can scan. */
+.wd-pf__toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-12);
+  margin-bottom: var(--space-12);
+}
+.wd-pf__search { display: flex; flex-direction: column; gap: 6px; flex: 1 1 240px; min-width: 180px; }
+.wd-pf__facet { display: flex; flex-direction: column; gap: 6px; flex: 0 1 170px; min-width: 140px; }
+
+/* The facet labels and the per-site page's `dt`s both wear `.type-eyebrow` (globals.css) — the
+   app's 0.30em small-caps signature — so there are no font declarations here to drift from it.
+   Only the size and the ink tier are narrowed, and the tier is `--ink-subtle`, the one the ramp
+   documents for small-caps labels at AA. */
+.wd-pf__label, .wd-site__fact dt { font-size: 10px; color: var(--ink-subtle); }
+
+/* Pushed to the far end of the toolbar. It is a readout, not a control, so it should not sit in
+   the tab order of the facets or read as a fifth field wedged between them. */
+.wd-pf__count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0 0 6px auto;
+  white-space: nowrap;
+  font: 400 12px var(--font-body);
+  color: var(--ink-muted);
+}
+.wd-pf__clear {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: 400 12px var(--font-body);
+  color: var(--accent-fg);
+  text-decoration: underline;
+  transition: opacity 0.18s var(--erp-ease);
+}
+.wd-pf__clear:hover { opacity: 0.7; }
+
+/* ── The table ────────────────────────────────────────────────────────────────────────────────── */
+/* `--lux-table-min` is ui.css's documented per-call-site override: the measured width below which
+   this table's own cells start breaking mid-phrase. 1040px, not the 640px default — seven columns,
+   two of which carry a domain and a client name and one a row of monitoring chips. Below it the
+   wrapper takes the scroll. */
+.wd-pf__scroll { --lux-table-min: 1040px; }
+
+/* Uniform row height was the whole point of the rebuild, so every cell that can hold a long value
+   truncates rather than wrapping. The full text is always in the cell's `title`. */
+.wd-pf__truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Absence, in the one tier the ink ramp reserves for it. NOT `opacity`, which would compound with
+   the ramp and fail contrast — the lesson `HairlineTable`'s header comment records. */
+.wd-pf__none { color: var(--ink-subtle); }
+.wd-pf__dim { color: var(--ink-subtle); }
+
+/* ── The column gap this table needs ─────────────────────────────────────────────────────────────
+   `.lux-table__head` / `.lux-table__row` are grids with NO `column-gap`; every existing caller gets
+   away with it because their cells are short enough not to reach the track edge. This one's cells
+   do, and three pairs of columns ran into each other on screen with no space between them:
+     "staging.northwind.example ↗Delphi"                          (the live-site arrow, then Server)
+     "Shared WP (GDA-Staging)Staging"                              (Server, then Environment)
+     "Northwind Traders · Northwind — corporate siteNot recorded"  (Client/project, then consent)
+   Read as one run-on string, which is exactly the "clumped" complaint this rebuild was for.
+   Scoped to this table rather than added to `.lux-table` itself: a `column-gap` on the primitive
+   would re-flow all ~60 of its call sites for one department's ticket. */
+.wd-pf__scroll .lux-table__head > *,
+.wd-pf__scroll .lux-table__row > * { padding-right: var(--space-12); min-width: 0; }
+.wd-pf__scroll .lux-table__head > *:last-child,
+.wd-pf__scroll .lux-table__row > *:last-child { padding-right: 0; }
+
+/* Probe consent is a two-word value ("Not recorded") in a narrow track, and it wrapped to two
+   lines — which broke the uniform row height the rebuild exists to deliver. */
+.wd-pf__consent { white-space: nowrap; }
+
+/* `min-width: 0` above is what makes the truncation on `.wd-pf__truncate` / `.wd-pf__domain-link`
+   actually happen. An `fr` track is `minmax(auto, 1fr)`, and `auto` floors at MIN-CONTENT — for a
+   long unbreakable domain like `goldenmonkeybali-com-303701.hostingersite.com` that floor is the
+   whole string, so that row's first track pushed the others until the last column clipped. The
+   cells are HairlineTable's own spans, so the override has to reach them from here. */
+
+/* `flex`, NOT `inline-flex`. An inline-level box inside the grid cell sizes to max-content and
+   simply overflowed: `goldenmonkeybali-com-303701.hostingersite.com` printed straight across the
+   Server column and overlapped its text. A block-level flex container fills the track, so the
+   link (a flex item with `min-width: 0`) can finally shrink and show its ellipsis. */
+.wd-pf__domain { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+.wd-pf__domain-link {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The "open the live site" arrow. Quiet until hovered or focused, because it repeats on every row
+   and a column of bright arrows reads as the most important thing on the page. */
+.wd-pf__out {
+  flex: 0 0 auto;
+  font-size: 11px;
+  text-decoration: none;
+  color: var(--ink-subtle);
+  transition: color 0.18s var(--erp-ease);
+}
+.wd-pf__out:hover, .wd-pf__out:focus-visible { color: var(--accent-fg); }
+
+/* The monitoring cell. A row of small chips: the monitor status, plus whatever qualifies it
+   (suspended, no consent) or the one action that fixes it (Add). `nowrap` because a wrapped chip
+   row breaks the uniform row height the rebuild exists to deliver — the cell scrolls with the
+   table instead. */
+.wd-pf__watch { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.wd-pf__watch-add { font: 400 12px var(--font-body); }
+
+.wd-pf__link { font: 400 13px var(--font-body); }
+
+/* ── Per-site page ────────────────────────────────────────────────────────────────────────────── */
+/* A definition grid, not a table: one site's facts are label/value pairs, and half of them are
+   legitimately absent. `auto-fit` so it is two or three columns on a desktop and one on a phone. */
+.wd-site__facts {
+  display: grid;
+  gap: var(--space-12) var(--space-20);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  margin: 0;
+}
+.wd-site__fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wd-site__fact dd {
+  margin: 0;
+  font: 400 14px var(--font-body);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+/* An absent fact says which KIND of absent it is (not surveyed / not attached / none recorded), so
+   the value slot holds a sentence in the subtle tier rather than a bare dash. */
+.wd-site__fact dd.wd-site__absent { color: var(--ink-subtle); font-size: 13px; }
+
+/* The badge line under the site name. A flex row with a real gap, because the JSX separators
+   between adjacent badges collapse to a single space and the three chips read as one run-on
+   phrase ("Staging On the platform No probe consent on record"). */
+.wd-site__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0 0 var(--space-16);
+}
+
+.wd-site__envs { display: flex; flex-wrap: wrap; gap: var(--space-8); }
+.wd-site__env {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font: 400 13px var(--font-body);
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: color 0.18s var(--erp-ease), border-color 0.18s var(--erp-ease);
+}
+.wd-site__env:hover { color: var(--text-primary); border-color: var(--accent-fg); }
+.wd-site__env--current {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  /* --ink-on-accent-fill, never --text-on-accent: the latter is invisible on the fill in light
+     theme. The trap the token pair exists to close, per platform-ui/CLAUDE.md. */
+  color: var(--ink-on-accent-fill);
+}

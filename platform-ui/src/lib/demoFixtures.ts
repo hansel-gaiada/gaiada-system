@@ -3037,6 +3037,23 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     }
     return ok(row);
   }
+  // ── Web Dev estate portfolio (§24) ───────────────────────────────────────────────────────────
+  // GET /api/:t/modules/webdev/console/portfolio
+  //
+  // This endpoint had NO fixture, and the generic fallback at the bottom of this file answers an
+  // unknown GET with `ok([])` — a 200 carrying an ARRAY. `PortfolioResult` is an object, so
+  // `data.projects.flatMap(...)` threw and the Portfolio tab 500'd in demo mode: the build gate and
+  // e2e both run `DEMO_MODE=1`, and neither could see it because no smoke test opens the tab.
+  //
+  // The rows below are shaped to exercise the honest-absence cases the panel is built around, not
+  // to look tidy: a project with three environments, a machine-generated staging host whose only
+  // human-readable handle is the `likely target` note, sites on four different hosts (one of them
+  // with NO recorded host_ref at all), an SSH repo remote that must render as text rather than a
+  // dead link, unsurveyed stacks, and rows attached to no client or project. `withoutConsent` is
+  // computed from the rows so the KPI can never disagree with the table beneath it.
+  const portfolioMatch = p.match(/^\/api\/([^/]+)\/modules\/webdev\/console\/portfolio$/);
+  if (portfolioMatch && m === "GET") return ok(demoPortfolio());
+
   const connListMatch = p.match(/^\/api\/([^/]+)\/integrations\/connections$/);
   if (connListMatch) {
     const t = connListMatch[1];
@@ -3191,6 +3208,17 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
           id: "sm-prop-1", clientId: "cl-2", domain: "cedargroup.example.com",
           siteUrl: "https://cedargroup.example.com", targets: {}, umamiSiteId: null,
           verifiedAt: "2026-07-01T00:00:00Z", status: "verified", createdAt: "2026-06-01T00:00:00Z",
+        },
+        // A VERIFIED property for a domain that is also in the Web Dev portfolio (2026-09-03).
+        // This is what makes the site->monitor bridge's create path drivable: `/monitoring/new`
+        // requires a client, portfolio rows mostly have `clientId: null`, and the property row for a
+        // consented domain is where the client is actually knowable (`search_properties.client_id`).
+        // Without this row the "Add" link can still be followed, but arrives with no client
+        // prefilled — which is the OTHER branch, and it is exercised by the rest of the portfolio.
+        {
+          id: "sm-prop-2", clientId: "cl-1", domain: "northwind.example",
+          siteUrl: "https://northwind.example", targets: {}, umamiSiteId: null,
+          verifiedAt: "2026-08-02T00:00:00Z", status: "verified", createdAt: "2026-07-15T00:00:00Z",
         },
       ]);
     }
@@ -4287,6 +4315,146 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   if (m === "GET") return ok([]);
   if (m === "POST") return { status: 201, json: { id: `demo-${Date.now()}`, ok: true } };
   return ok({ ok: true });
+}
+
+// ── Demo estate portfolio (§24) ────────────────────────────────────────────────────────────────
+// Stateless: nothing writes sites in demo mode, so this is a pure function rather than a store.
+// NOTE the two fields the backend returns and this deliberately DOES NOT: `lastSeenAt` and
+// `lastHttpStatus`. Nothing in the program writes them (see lib/webdeskPortfolio.ts's header), and
+// a fixture that invented values for them would resurrect the dead health column by making it look
+// like it works locally — which is precisely how a frontend-first surface ships a confident wrong
+// answer.
+function demoPortfolio() {
+  const site = (over: Record<string, unknown>) => ({
+    id: String(over.id),
+    domain: String(over.domain),
+    environment: over.environment ?? "production",
+    hostKind: over.hostKind ?? "our-box",
+    hostRef: over.hostRef ?? null,
+    access: over.access ?? "none",
+    kind: over.kind ?? null,
+    adoption: over.adoption ?? "tracked",
+    repoUrl: over.repoUrl ?? null,
+    repoBranch: over.repoBranch ?? null,
+    notes: over.notes ?? null,
+    contractVersion: over.contractVersion ?? null,
+    origin: over.origin ?? "probe",
+    hostingProvider: over.hostingProvider ?? null,
+    controlPanel: over.controlPanel ?? null,
+    stack: over.stack ?? null,
+    topologyCheckedAt: over.topologyCheckedAt ?? null,
+    crawlConsent: over.crawlConsent ?? false,
+  });
+
+  const northwindProd = site({
+    id: "site-nw-prod", domain: "northwind.example", environment: "production",
+    hostRef: "helios", hostKind: "our-box", kind: "next", adoption: "adopted",
+    repoUrl: "https://github.com/gaiada/northwind-web", repoBranch: "main",
+    contractVersion: "2.1.0", origin: "provisioned", hostingProvider: "Gaiada", controlPanel: "none",
+    stack: "next", topologyCheckedAt: "2026-08-30T02:15:00.000Z", crawlConsent: true,
+  });
+  const northwindStaging = site({
+    id: "site-nw-stg", domain: "staging.northwind.example", environment: "staging",
+    hostRef: "delphi", hostKind: "our-box", kind: "next", adoption: "adopted",
+    repoUrl: "https://github.com/gaiada/northwind-web", repoBranch: "develop",
+    contractVersion: "2.2.0-rc.1", origin: "provisioned", crawlConsent: false,
+  });
+  const northwindPreview = site({
+    id: "site-nw-prev", domain: "northwind-example-418822.hostingersite.com", environment: "preview",
+    hostRef: "hstgr-shared-gda-staging", hostKind: "shared-hosting", adoption: "linked",
+    notes: "likely target: northwind.example; machine-named preview slot", crawlConsent: false,
+  });
+
+  const goldenMonkey = site({
+    id: "site-gm-prod", domain: "goldenmonkeybali.com", environment: "production",
+    hostRef: "hstgr-shared-gda-staging", hostKind: "shared-hosting", kind: "wp",
+    adoption: "linked", origin: "probe", hostingProvider: "Hostinger", controlPanel: "hPanel",
+    stack: "wordpress", topologyCheckedAt: "2026-08-29T09:40:00.000Z", crawlConsent: true,
+  });
+  const goldenMonkeyStaging = site({
+    id: "site-gm-stg", domain: "goldenmonkeybali-com-303701.hostingersite.com", environment: "staging",
+    hostRef: "hstgr-shared-gda-staging", hostKind: "shared-hosting", kind: "wp", adoption: "linked",
+    notes: "likely target: goldenmonkeybali.com", crawlConsent: false,
+  });
+
+  const viceroyDms = site({
+    id: "site-dms-prod", domain: "dmsviceroy.com", environment: "production",
+    hostRef: "hostyourservices-syd5", hostKind: "client-cpanel", adoption: "tracked",
+    // A real, non-navigable remote: another agency builds this one on GitLab over SSH.
+    repoUrl: "git@gitlab.com:partner-agency/dmsviceroy.git", repoBranch: "master",
+    origin: "nexus-import", controlPanel: "cPanel", crawlConsent: false,
+  });
+
+  // No host_ref at all — collapses into the one honest "Unrecorded host" bucket, and attached to
+  // nothing, which is true of most of the real surveyed rows.
+  const orphan = site({
+    id: "site-orphan", domain: "essentialbali.com", environment: "production",
+    hostRef: null, hostKind: "unknown", adoption: "tracked", origin: "nexus-import",
+    crawlConsent: false,
+  });
+
+  // Matches the demo monitor `mon-viceroy-http` (status "down", open incident) BY DOMAIN — the
+  // bridge's happy path, and the one that proves the column reports a real failure rather than a
+  // column nothing writes. Consented, so it is a legitimate probe target.
+  const viceroy = site({
+    id: "site-viceroy", domain: "viceroybali.com", environment: "production",
+    hostRef: "hostinger", hostKind: "shared-hosting", kind: "wp", adoption: "linked",
+    origin: "probe", hostingProvider: "Hostinger", stack: "wordpress", crawlConsent: true,
+  });
+
+  // Matches `mon-blossom-tls`, whose target is `blossomsteakhouse.com:443` — so this row also
+  // exercises PORT STRIPPING in the join. Consent is deliberately FALSE: it renders the compliance
+  // ANOMALY (a domain being probed with no consent on record), which is the one state the ordering
+  // in `siteMonitoring()` exists to surface instead of filing under "not probed".
+  const blossom = site({
+    id: "site-blossom", domain: "blossomsteakhouse.com", environment: "production",
+    hostRef: "hostyourservices-syd5", hostKind: "client-cpanel", kind: "wp", adoption: "tracked",
+    origin: "nexus-import", controlPanel: "cPanel", crawlConsent: false,
+  });
+
+  const projects = [
+    {
+      // `cl-1` — the REAL demo client id (CLIENTS, top of this file), not an invented one. It has to
+      // be real for the site->monitor bridge to be drivable end to end: the "Add" link carries this
+      // id to /monitoring/new, and the form only honours a client it can actually pick from.
+      projectId: "prj-northwind", projectName: "Northwind — corporate site",
+      clientId: "cl-1", clientName: "Northwind Traders",
+      production: northwindProd,
+      environments: [northwindProd, northwindStaging, northwindPreview],
+    },
+    {
+      // `cl-goldenmonkey` is deliberately NOT in the demo CLIENTS list. That is the other branch of
+      // the create path and it needs to stay drivable: the "Add" link carries an id the caller
+      // cannot pick, and `NewMonitorForm` must ignore it rather than post it verbatim (which would
+      // 400, or worse, attach the monitor to the wrong client). Wrong on purpose, not by accident.
+      projectId: "prj-goldenmonkey", projectName: "Golden Monkey — WP refresh",
+      clientId: "cl-goldenmonkey", clientName: "Golden Monkey Bali",
+      production: goldenMonkey,
+      environments: [goldenMonkey, goldenMonkeyStaging],
+    },
+    // projectId/clientId null is a REAL answer, not a gap to be filled in: a tracked site we do not
+    // build. The panel renders these as "Unassigned" rather than guessing an owner.
+    {
+      projectId: null, projectName: null, clientId: null, clientName: null,
+      production: null,
+      environments: [viceroyDms, orphan, viceroy, blossom],
+    },
+  ];
+
+  const all = projects.flatMap((pr) => pr.environments);
+  const tally = (pick: (s: (typeof all)[number]) => string) =>
+    all.reduce<Record<string, number>>((acc, s) => { const k = pick(s); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {});
+
+  return {
+    projects,
+    counts: {
+      sites: all.length,
+      projects: projects.filter((pr) => pr.projectId !== null).length,
+      byAdoption: tally((s) => String(s.adoption)),
+      byEnvironment: tally((s) => String(s.environment)),
+      withoutConsent: all.filter((s) => !s.crawlConsent).length,
+    },
+  };
 }
 
 export const DEMO_USER = { id: DEMO_USER_ID };
