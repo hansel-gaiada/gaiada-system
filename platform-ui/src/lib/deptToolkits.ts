@@ -140,16 +140,32 @@ const WEB_DEV: DeptToolkit = {
         { key: "requests", label: "Requests", path: "requests", icon: "bell", blurb: "Triage client and internal maintenance requests." },
         { key: "repositories", label: "Repositories", path: "repositories", icon: "gateway", blurb: "Every repository the pipeline has provisioned for this department — status, staging, lineage.", fullBleed: true },
         { key: "deliverables", label: "Deliverables", path: "deliverables", icon: "box", blurb: "Files and docs this department's work has produced." },
-        // INVENTORY — every site we build or operate, by client and project, including ones hosted
-        // elsewhere that we only track. Listed before Operations because "what do we have" comes
-        // before "is it up".
-        { key: "portfolio", label: "Portfolio", path: "sites/portfolio", icon: "server", blurb: "Every site we build or operate, by client and project - including ones we only track." },
-        // OPERATIONS — repurposed from the old "Sites" registry, which duplicated Portfolio's list
-        // and led with a 0-row Zone B registry. Now the incident-response surface: per-site health
-        // (last recorded HTTP status) and quick-investigate links, grouped by server, with the Zone
-        // B pipeline deployment registry (provisioned sites, contract pins, releases) kept beneath.
-        // Path stays "sites" so existing links do not break.
-        { key: "sites", label: "Operations", path: "sites", icon: "pulse", blurb: "Site health and quick-investigate links by server, plus the pipeline deployment registry." },
+        // SITES — the estate inventory: every site we build or operate, including ones hosted
+        // elsewhere that we only track, plus the Zone B pipeline deployment registry beneath it.
+        //
+        // ── THIS USED TO BE TWO TABS (retired 2026-09-03, owner decision) ─────────────────────
+        // "Portfolio" (this one) sat next to "Operations" (`path: "sites"`). Both called the SAME
+        // endpoint, flattened it with the same helper, grouped by server with a verbatim COPY of
+        // the same function and drew the same chips; Operations' one distinct column was a health
+        // readout fed by `webdev_sites.last_http_status`/`last_seen_at`, which nothing in this
+        // program has ever written — so it said "Not checked" on every row, forever, beneath a
+        // headline claiming "0 showing a problem".
+        //
+        // Health is now owned by exactly one surface, Business > Monitoring, which genuinely
+        // probes. `sites` still resolves — it `permanentRedirect`s here — so every existing deep
+        // link keeps working; it is simply no longer a TAB, because a department does not need two
+        // entries in its strip for one dataset.
+        //
+        // The LABEL stays "Portfolio", not "Sites": it is the design-v2 §07 term, it is what the
+        // owner calls this surface, and renaming the survivor of a merge is how people conclude
+        // the thing they knew was removed rather than kept.
+        //
+        // `fullBleed` — measured, not assumed. With the `MyWorkRail` present the content column is
+        // ~700px, and a six-column table carrying a domain AND a client·project pair needs ~900px
+        // before its cells start breaking mid-phrase. The result on screen was the last column
+        // (Probe consent) pushed off into a horizontal scroll and the KPI row wrapping 4 + 1
+        // orphan. Same precedent as `repositories` above, and for the same structural reason.
+        { key: "portfolio", label: "Portfolio", path: "sites/portfolio", icon: "server", blurb: "Every site we build or operate, by client and project - including the ones we only track. Live health lives in Monitoring.", fullBleed: true },
       ],
     },
     CONNECTIONS_GROUP,

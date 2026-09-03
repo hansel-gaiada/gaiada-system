@@ -125,6 +125,180 @@ Files: `platform-nest/src/seed/monitoring-delivery.ts` (new), `platform-nest/pac
 (`seed:monitoring-delivery` script entry). The GM-blob repair itself touched only the LIVE database
 (`company_org_structure`, `org_unit_memberships`, `org_unit_closure` rows) and the live container's
 compiled seed script, not source — no repo diff for that half.
+### platform-ui `0.66.0` - the portfolio can finally say whether a site is watched (2026-09-03) - PROTOTYPED
+
+Plan item 6, the honest replacement for the health column deleted in `0.65.0`. That column was fed
+by `webdev_sites.last_http_status` / `last_seen_at`, which nothing in this program writes, so it
+said "Not checked" on every row forever. This one reports what the **monitoring module** says, and
+when it cannot reach that module it says so instead of reporting the estate as uncovered.
+
+**The join is in the BFF, not the database, and that is the design.** `webdev_sites` and `monitors`
+have no link in either direction. Adding one is the obvious fix and the wrong one: the two modules
+are separately enabled, each with its own RLS module gate, and `app_module_allowed()` returns
+**NULL** — not false — for a module that is off, so the `AND` silently yields zero rows and Postgres
+raises nothing. A cross-module foreign key would therefore make the whole portfolio read as empty
+for any company without monitoring, which is a failure that has already happened once on this exact
+endpoint. So `lib/siteMonitoring.ts` joins the two reads on what they ALREADY share — the domain,
+via `search_properties`, which the portfolio read left-joins on `(tenant_id, domain)` and the
+monitoring sweep builds its probe allowlist from. No migration, no new endpoint, no new Cerbos kind.
+
+- **Five states, each rendering as itself.** `unavailable` (monitoring off here, or refused — shown
+  as *Unknown*, never as "no monitor"), `watched` (the monitor's own status, linked to it),
+  `no-consent` (*Not probed* — a rule, not a gap), `none` (consented and genuinely unwatched, the
+  only state with an action attached), plus the anomaly below.
+- **"Watched with no consent on record" is surfaced, not swallowed.** The order of the checks in
+  `siteMonitoring()` is load-bearing: it asks "is it watched" BEFORE "is it consented", so a domain
+  being probed with no consent shows up as an anomaly with its own chip and its own facet. Asking
+  consent first would file the one state nobody wants to be in under "not probed" and hide it. The
+  demo fixture now carries such a row on purpose so the branch stays drivable.
+- **`listMonitors` is deliberately NOT reused.** It wraps its fetch in `skipUnavailable`, which
+  collapses 404/403/405 into `[]` — right for the monitoring board (an empty board and an absent
+  backend are both "nothing to show") and a false claim here, where it would print "No monitor" on
+  every row whether nothing is watched or nobody could ask. `siteMonitoring-data.ts` carries
+  availability explicitly, the same split MON-20 made for `listResults` after the monitor detail
+  page got it wrong.
+- **The domain match is normalised, not string-compared.** `hostOf()` strips scheme, credentials,
+  port, path and a leading `www.`, because a monitor's `target` is a DISPLAY string
+  (`blossomsteakhouse.com:443`, `https://aperitif.com/reservations`) and treating those as
+  different hosts would report a monitored site as unmonitored. A monitor's `propertyId` wins over
+  its target when it resolves — an identity beats a parse. A heartbeat monitor has neither and joins
+  to nothing rather than being attached to an arbitrary site. Subdomains stay distinct: a staging
+  monitor must never read as production coverage.
+- **The create path is unblocked, via consent.** `/monitoring/new` requires a client and nearly
+  every surveyed portfolio row has `clientId` null, which is what made "set up a check for this
+  site" a dead end. But a consented domain has a `search_properties` row by definition — consent
+  *is* `verified_at` on that row — and that row carries a `client_id`. So for exactly the sites a
+  monitor is permitted on, the client is knowable rather than guessed. The row's **Add** link and
+  the site page's "Create a monitor" link carry `?domain=&clientId=`; `NewMonitorForm` seeds name,
+  target and client from them, and **ignores a client id that is not in the list the caller may
+  pick from** rather than posting it verbatim — which would 400, or worse, attach the monitor to the
+  wrong client. That guard fired on the first browser run against a fixture id, which is how the
+  demo data's own inconsistency was found and fixed.
+- **A coverage KPI that refuses to show a figure it cannot stand behind.** "Monitored 2/4" counts
+  only sites monitoring is permitted to probe; when the feed is unavailable the tile reads "—", not
+  "0", because "0 unmonitored" and "we could not ask" look identical as a number and mean opposite
+  things. `problems` counts "not up" (down, degraded, unknown) rather than only `down` — neither
+  degraded nor unknown is evidence of health — and excludes `maintenance`, which is suppressed on
+  purpose.
+- **A "Monitoring" facet, not a seventh sortable column.** Its value comes from a second module that
+  may be unavailable, and a sort axis whose rows can all read "unknown" is a control that does
+  nothing. The facet's options are built from the states actually present, so it never offers a
+  filter that returns nothing.
+- **The site page's health card is now the same five answers with room to explain them**, including
+  what to do about each, and it states plainly that this page runs no check of its own.
+
+Verified: `tsc --noEmit` clean; full suite 203 files / 3963 tests green (27 new cases for the
+bridge); `next build` (`DEMO_MODE=1`) green. Driven in a browser against `DEMO_MODE` (Playwright,
+`dept-1`/`co-agency`): all five states render on the real table — *Not probed*, *No monitor · Add*,
+*Down* (a real monitor with an open incident), and *Maintenance · No consent* (the anomaly, which
+also proves port stripping, since that monitor's target is `blossomsteakhouse.com:443`); the facet
+counts match the column; **Add** produced
+`/monitoring/new?domain=northwind.example&clientId=cl-1` and the form arrived with name, target and
+client all seeded; and the three site pages each rendered their own state. Two layout defects were
+found by looking at the page and fixed (the monitoring chips clipping the card edge, and the column
+widths that caused it).
+
+**Item 7 of the plan — a consent-granting path in Web Dev — was deliberately NOT built.** It is one
+`PATCH /modules/search/properties/:id` away technically (`verifiedAt` is already an accepted field,
+gated by `resource_search_property:update`), and that is exactly why it should not be added on an
+engineer's judgement: `verified_at` is the record that we have permission to probe a client's site,
+so a button that sets it is a compliance assertion, not a convenience. It needs an owner decision
+about who may assert it and what they are attesting to. Until then the portfolio states the rule and
+points at where consent lives, which is honest and costs nothing to reverse.
+
+### platform-ui `0.65.0` - Web Dev had two site tabs reading one endpoint; now it has one (2026-09-03) - PROTOTYPED
+
+Owner report: the Web Dev console's Portfolio and Operations tabs "look the same to me", the
+portfolio's data is "messy, clumped and hard to read through", and both duplicate Business >
+Monitoring. All three were correct, and the third was the most serious.
+
+**Operations was Portfolio with two columns swapped.** Same endpoint
+(`GET /modules/webdev/console/portfolio`), same `flattenSites`, same filter chips, and a
+byte-identical *copy* of `groupByServer` in each component. Its one distinct contribution was a
+health column fed by `webdev_sites.last_http_status` / `last_seen_at` — **two columns nothing in
+this program has ever written.** A repo-wide search finds exactly two references: the migration
+that adds them and the backend read that returns them. So every row read "Not checked" forever
+under a headline claiming "0 showing a problem" about an estate nobody was checking: absence of
+data rendered as calm, the precise failure the monitoring program exists to prevent.
+
+Ruling applied (owner decision): **Portfolio = inventory · Business > Monitoring = health · Zone B
+registry = deployment.** One health surface for the company, never a per-department copy of it.
+
+- **Operations deleted.** `OperationsConsole.tsx` is gone and the tab is out of `deptToolkits`.
+  `sites` `permanentRedirect`s (308, not a temporary 307) to `sites/portfolio`, so every deep link
+  from the pipeline, the requests queue, bookmarks and tickets still resolves. `sites/[slug]` — the
+  Zone B per-site detail page — is untouched; a static segment wins over its dynamic sibling.
+- **The duplicated helpers have one home.** `groupByServer`, `environmentLabel`, the search-text
+  builder and the server-ordering rule moved into `lib/webdeskPortfolio.ts` with the first tests
+  they have ever had (25 cases). Neither copy had one, which is how they were free to drift into
+  looking like two features.
+- **`lastSeenAt` / `lastHttpStatus` removed from the read model.** The backend still returns them;
+  `PortfolioSite` no longer models them, so no UI can render them by accident. Contract §24 carries
+  the warning and says where health actually lives.
+- **Portfolio rebuilt.** It rendered one table per server, each in its own Card, under a run-on
+  summary sentence and two full rows of filter chips — the first data row sat below the fold, and
+  three of six cells stacked a second muted line, so no two rows were the same height. Now: five
+  `KpiTile` figures (sites · on our servers · WordPress · no probe consent · unassigned), ONE table
+  with the server as a sortable column, one toolbar line (search + three facet selects), and every
+  cell single-line with the full value in its `title`. The tab is `fullBleed` — measured: six
+  columns carrying a domain and a client·project pair need ~900px and the railed column gives ~700.
+- **Sortable columns are now a `HairlineTable` primitive**, opt-in via `columns[].sortKey` +
+  `sort`/`onSort`. `aria-sort` appeared zero times in `src/` before this, so the alternative was a
+  private pattern next door. No `aria-sort` here on purpose: `.lux-table` is a grid of bare divs
+  with no table roles, so the attribute would be invalid ARIA reading as compliance — the state is
+  carried in each header button's accessible name instead. All ~60 existing call sites pass neither
+  prop and render byte-identically.
+- **A per-site page** (`sites/portfolio/[siteId]`) holds what the row could not: hosting provider,
+  control panel, adoption tier, provenance in words, topology survey date, notes, sibling
+  environments, and an honest "this site has no health signal anywhere" note when consent is
+  absent. Each missing fact says WHICH kind of missing it is, because a dash cannot distinguish
+  "we never looked" from "there is none" and those have different next actions.
+- **A demo fixture for `console/portfolio`**, which had none: the generic fallback answers an
+  unknown GET with `ok([])` — a 200 carrying an *array* — so `data.projects.flatMap(...)` threw and
+  the tab 500'd under `DEMO_MODE`. The build gate and e2e both run in demo mode and neither could
+  see it, because no smoke test opens the tab.
+
+**Connections, same tab strip, same class of problem.** Asked whether its features actually work,
+they largely do not, and the UI said otherwise:
+
+- **A saved mapping labelled itself `unconfigured`.** The badge printed `row.status` verbatim.
+  Every row the Phase-1 HTTP surface can create is inserted `status='unconfigured'`, and the only
+  path that sets `'linked'` (`setConnectionTokens`) is deliberately not exposed over HTTP and has no
+  caller for a user-owned row. So the moment you typed your GitHub username and pressed *Connect*,
+  the row came back saying "unconfigured" beside your own username — the write succeeded and the
+  badge called it a failure. Fixed in `ConnectionsPanel` **and** in the three cells of
+  `TeamConnectionsGrid` that had the identical bug.
+- **The words now match what happens.** *Connect* → *Save* (it writes an account name; it does not
+  authenticate, request a scope, or obtain a token), *Revoke* → *Remove* (there is no credential to
+  revoke), and a standing note says these are account mappings, not sign-ins. `google_drive` cannot
+  ever link today: it is in the Google provider union but **no surface is registered** in
+  `core/google-oauth/registry.ts`, so there is no callback and no scopes.
+- **The org GitHub App is now visible here, read-only.** The credential that actually exists is the
+  sealed App private key under `owner_kind='github_app'`, and it was only reachable from the
+  Repositories tab under 200+ repo rows — so a reader on the Connections tab saw one GitHub row,
+  saw it hold nothing, and concluded GitHub was not connected while the App was installed and
+  working.
+- **Team grid round trips halved** (2 per member → 1) by dropping the redundant `provider` filter.
+  Still one call per member: the endpoint's `owner` selector accepts only `me | company | user:<id>`
+  and 400s anything else, so real batching needs a backend selector plus a Cerbos decision about
+  which action authorizes reading a whole tenant's user-owned rows. Documented at the call site,
+  not silently left as a mystery.
+
+**Deliberately NOT done** (the plan's later items, unstarted): the monitor↔site bridge that would
+give Portfolio a real status column, and the consent-grant path in Web Dev. Both need backend/DB
+work — there is no link between `monitors` and `webdev_sites` in either direction, and
+`/monitoring/new` requires a client while every surveyed portfolio row has `clientId` null.
+
+Verified: `tsc --noEmit` clean; full suite 202 files / 3936 tests green; `next build`
+(`DEMO_MODE=1`) green with all four routes emitted. Driven in a browser against `DEMO_MODE`
+(Playwright, `dept-1`/`co-agency`): the old `sites` URL lands on the portfolio, the tab strip
+advertises one site tab, sorting reorders and reverses, facets narrow with a truthful count, search
+finds a machine-named staging host by the domain it is *going* to be, a row opens its site page
+with sibling environments, a bogus site id renders the 404 page, and a Google Drive mapping saved
+from the browser came back "Mapped" and survived a reload. Five layout defects were found by
+looking at the rendered page and fixed — the KPI row wrapping 4+1, three pairs of columns running
+into each other with no gap, a long domain overflowing across the Server column, "Not recorded"
+wrapping to two lines, and the site page's badge row collapsing into one run-on phrase.
 
 ### monitoring `0.3.0` - channel/route/maintenance management surface (2026-09-02) - PROTOTYPED
 

@@ -3572,7 +3572,52 @@ existed. Its own module key is the EXISTING `webdev` (WSK-12/19/PRV-02 already o
 | GET | `/api/:t/modules/webdev/console/sites/:slug/releases` | `{ releases: ReleaseFact[], meta: DegradeMeta }` | `webdev_provisioned_site:read` |
 | GET | `/api/:t/modules/webdev/console/sites/:slug/submissions[?formId=]` | `{ submissions: SubmissionFact[], meta: DegradeMeta }` — slim projection only (`submissionId, formId, hasAttachments, receivedAt`); Zone A never receives submission content over the bridge, so this is PII-aware by construction, not by filtering | `webdev_provisioned_site:read` |
 | GET | `/api/:t/modules/webdev/console/contract-pins[?slug=]` | `{ pins: ContractPinStatus[] }` — WSK-19's pinned snapshot × the live-or-degraded "latest published" read | `webdev_contract_snapshot:read` (existing kind/action, WSK-19) |
-| GET | `/api/:t/modules/webdev/console/portfolio` | `{ projects: PortfolioProject[], counts }` — the ESTATE portfolio, grouped by project with each environment (`production`/`staging`/`preview`/`development`) as its own row. **Reads Zone A tables only — no `DegradeMeta`, because there is no egress and nothing to be stale about.** Left-joins `search_properties` for hosting topology and the `crawlConsent` gate rather than duplicating either. Distinct from `console/sites` above, which answers "which Zone B tenants exist"; this answers "what does the estate consist of", including the sites we do not host and must not touch | `webdev_provisioned_site:read` (existing kind/action) | **UI: `platform-ui/src/app/(app)/departments/[deptId]/sites/portfolio/page.tsx` via `lib/webdeskPortfolio.ts`** |
+| GET | `/api/:t/modules/webdev/console/portfolio` | `{ projects: PortfolioProject[], counts }` — the ESTATE portfolio, grouped by project with each environment (`production`/`staging`/`preview`/`development`) as its own row. **Reads Zone A tables only — no `DegradeMeta`, because there is no egress and nothing to be stale about.** Left-joins `search_properties` for hosting topology and the `crawlConsent` gate rather than duplicating either. Distinct from `console/sites` above, which answers "which Zone B tenants exist"; this answers "what does the estate consist of", including the sites we do not host and must not touch | `webdev_provisioned_site:read` (existing kind/action) | **UI: `platform-ui/src/app/(app)/departments/[deptId]/sites/portfolio/page.tsx` (+ `[siteId]/page.tsx`, which resolves one row out of this same list read — there is no single-site GET) via `lib/webdeskPortfolio.ts`. As of 2026-09-03 this is Web Dev's ONLY site surface; `sites` `permanentRedirect`s here. See the `lastSeenAt`/`lastHttpStatus` warning below.** |
+
+### ⚠ `lastSeenAt` / `lastHttpStatus` are returned and MUST NOT be rendered (2026-09-03)
+
+`console/portfolio`'s row shape includes `lastSeenAt` and `lastHttpStatus`, selected straight from
+`webdev_sites`. **Nothing in this program has ever written either column.** A repo-wide search
+returns exactly two references: migration `202608301055_webdev_sites_environments_and_repo.sql`,
+which adds them, and `portfolio-reads.service.ts`, which returns them. Their migration comment
+promises MON-01 will fill them; MON-01 landed on `monitors`, not here.
+
+They were rendered once, as the headline "Health (last recorded)" column of a second Web Dev tab
+("Operations", `path: sites`). Every row read "Not checked" permanently and the tab's summary line
+claimed "0 showing a problem" about an estate nobody was checking — absence of data presented as
+calm, which is the exact failure the monitoring program exists to prevent. That tab is deleted
+(owner decision) and `platform-ui/src/lib/webdeskPortfolio.ts` deliberately **omits both fields
+from its `PortfolioSite` type**, so no UI can reach them by accident.
+
+Site health has ONE owner: the monitoring module (`/monitoring` — live sweeps, uptime, incidents,
+cert expiry, alert channels). A status column on the portfolio must be sourced from `monitors`,
+never from these two columns and never from a null read.
+
+**That column now exists, and it is joined in the BFF, not in the database.** `webdev_sites` and
+`monitors` still have no link in either direction, and adding one would be the wrong fix: the two
+modules are separately enabled, each with its own RLS module gate, and `app_module_allowed()`
+returns **NULL** (not false) for a module that is off — so a cross-module join would silently yield
+zero rows and read as an empty portfolio, which has already happened once on this endpoint. Instead
+`platform-ui/src/lib/siteMonitoring.ts` joins the two reads on the thing they ALREADY share, the
+domain, via `search_properties`: this endpoint left-joins that table on `(tenant_id, domain)` and
+the monitoring sweep builds its probe allowlist from the same rows. No new endpoint, no new Cerbos
+kind, no migration.
+
+Two consequences worth recording here, because they are contract-shaped:
+
+- **`GET /api/:t/monitoring/monitors` is read WITHOUT collapsing 404/403 into `[]`** for this
+  purpose. `platform-ui/src/lib/monitoring.ts`'s own `listMonitors` does collapse them, which is
+  correct for the monitoring board and wrong for the portfolio: it would print "No monitor" on
+  every row whether nothing is watched or nobody was allowed to ask. `siteMonitoring-data.ts`
+  carries availability explicitly — the same split MON-20 made for `listResults`.
+- **`search_properties.client_id` is what makes a monitor creatable from the portfolio.**
+  `POST /api/:t/monitoring/monitors` requires a client, and nearly every surveyed `webdev_sites`
+  row has `client_id` NULL (attributing them would have been invention). But a CONSENTED domain has
+  a `search_properties` row by definition — consent *is* `verified_at` on that row — and that row
+  carries a client. So for exactly the sites a monitor is permitted on, the client is knowable
+  rather than guessed. `/monitoring/new` accepts `?domain=&clientId=` to seed the form; the client
+  id is validated against the pickable list client-side and ignored if it is not there, never
+  posted verbatim.
 
 **No new Cerbos resource kind.** The ticket's own warning ("a new kind costs six coupled
 artifacts") was heeded by checking first: design §08's button matrix already gates registry/env-

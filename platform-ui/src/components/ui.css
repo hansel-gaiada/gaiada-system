@@ -113,6 +113,34 @@
 .lux-table__row { min-height: var(--row-height); border-bottom: 1px solid var(--line); transition: background 0.2s var(--erp-ease); }
 .lux-table__row:hover { background: var(--tint-hover); }
 .lux-table__cell--right { justify-self: end; text-align: right; }
+
+/* Sortable column header (HairlineTable's opt-in `sortKey`/`onSort`). A BUTTON, not a styled span:
+   the header is the control, so it must be reachable by keyboard and expose its state in its own
+   accessible name — see the comment in ui.tsx for why there is no `aria-sort` here. Transparent and
+   padding-free so an opted-in column sits on exactly the same baseline as a static one; only the
+   ink tier and the direction mark change when it becomes the active sort. */
+.lux-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: inherit;
+  transition: opacity 0.18s var(--erp-ease);
+}
+.lux-table__sort:hover { opacity: 0.7; }
+/* The mark holds its box whether or not it is the active column, so turning a sort on and off does
+   not nudge the header label sideways. */
+.lux-table__sort-mark {
+  flex: 0 0 auto;
+  width: 8px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--accent-fg);
+}
 /* Figures in a shared column need identical advance widths or the digits
    jitter row to row. --font-data is Inter with tnum always on. */
 .lux-table__cell--num { justify-self: end; text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
