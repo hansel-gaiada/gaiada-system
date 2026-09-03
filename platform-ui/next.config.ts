@@ -1,4 +1,20 @@
 import type { NextConfig } from "next";
+
+// BOOT GUARD — refuse to start a production runtime with the demo harness enabled. next.config.ts
+// is evaluated by `next build` and `next start` before any request is served, so a deployment
+// carrying a stray DEMO_MODE=1 dies here rather than bypassing LOGIN (app/login/actions.ts accepts
+// any email in demo mode) and answering real users from in-memory fixtures, all behind healthy
+// 200s. Duplicated at the call sites via lib/demoMode.ts on purpose: this stops the process, that
+// stops the fiction if anything ever gets past this. Inlined because next.config.ts is loaded
+// outside the app's module graph and its TS path aliases.
+if (process.env.DEMO_MODE === "1" && process.env.NODE_ENV === "production") {
+  throw new Error(
+    "DEMO_MODE=1 is set while NODE_ENV=production. Refusing to start: demo mode bypasses login and " +
+      "answers every API read from in-memory fixtures, so this deployment would serve invented data " +
+      "to real users while appearing completely healthy. Unset DEMO_MODE — it is a local " +
+      "verification harness and is never valid in production. See src/lib/demoMode.ts.",
+  );
+}
 const nextConfig: NextConfig = {
   output: "standalone",
   // Build directory, overridable per process. It stays `.next` unless NEXT_DIST_DIR is set, so

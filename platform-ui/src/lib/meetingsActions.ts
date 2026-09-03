@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, platformUpload, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
+import { isDemoMode } from "./demoMode";
 
 export type MeetingResult = { ok: boolean; error?: string; id?: string; runId?: string | null; reason?: string };
 
@@ -133,7 +134,7 @@ export async function uploadAudioAction(_prev: AudioUploadResult | null, formDat
   if (!id) return { ok: false, error: "recording id required." };
   if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose an audio file first." };
   try {
-    if (process.env.DEMO_MODE === "1") {
+    if (isDemoMode()) {
       const { demoUploadAudio } = await import("./demoMeetings");
       const r = demoUploadAudio(id, file.name, file.size);
       if (r.status >= 300) {
@@ -167,7 +168,7 @@ export async function retryAudioAction(_prev: AudioUploadResult | null, formData
   const id = String(formData.get("id") ?? "");
   if (!id) return { ok: false, error: "recording id required." };
   try {
-    if (process.env.DEMO_MODE === "1") {
+    if (isDemoMode()) {
       const { demoRetryAudio } = await import("./demoMeetings");
       const r = demoRetryAudio(id);
       if (r.status >= 300) {
@@ -216,7 +217,7 @@ export async function registerAndUploadAudioAction(_prev: MeetingResult | null, 
   }
 
   try {
-    if (process.env.DEMO_MODE === "1") {
+    if (isDemoMode()) {
       const { demoUploadAudio } = await import("./demoMeetings");
       demoUploadAudio(id, file.name, file.size);
     } else {

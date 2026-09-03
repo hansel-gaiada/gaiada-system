@@ -13,6 +13,7 @@ import "server-only";
 //      `lib/demoAssistant.ts`, in the exact wire format the live backend uses, so the whole flow is
 //      drivable with zero backend running.
 import { demoAssistantStreamBody } from "./demoAssistant";
+import { isDemoMode } from "./demoMode";
 
 export type AssistantStreamUpstream =
   | { kind: "stream"; body: ReadableStream<Uint8Array> }
@@ -26,7 +27,7 @@ export async function assistantStreamUpstream(
   userId: string,
   signal?: AbortSignal,
 ): Promise<AssistantStreamUpstream> {
-  if (process.env.DEMO_MODE === "1") {
+  if (isDemoMode()) {
     const body = demoAssistantStreamBody(tenant, threadId, messageId);
     return body ? { kind: "stream", body } : { kind: "not_found" };
   }

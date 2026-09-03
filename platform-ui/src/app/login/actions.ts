@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { sealSession, SESSION_COOKIE } from "@/lib/session";
 import { demoIdentityFor } from "@/lib/demoIdentity";
 import { sanitizeReturnTo } from "@/lib/returnTo";
+import { isDemoMode } from "@/lib/demoMode";
 
 export async function login(_prev: { error: string } | null, formData: FormData): Promise<{ error: string }> {
   const email = String(formData.get("email") ?? "").trim();
@@ -20,7 +21,7 @@ export async function login(_prev: { error: string } | null, formData: FormData)
   // • any other email → manager tier (Command Center Home)
   // Inert unless DEMO_MODE=1 is set locally. Checked BEFORE the "ic" substring test since neither
   // "seo-staff" nor "seo-staff@gaiada.com" contains "ic", but order still matters for clarity.
-  if (process.env.DEMO_MODE === "1") {
+  if (isDemoMode()) {
     // Tier resolution lives in `lib/demoIdentity.ts` because this module is `"use server"` and may
     // export only async functions — a pure helper cannot live here, and the ordering it encodes is
     // load-bearing enough to need tests (see demoIdentity.test.ts).

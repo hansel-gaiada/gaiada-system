@@ -1,6 +1,7 @@
 import "server-only";
 import { platformFetch } from "./platform";
 import type { AboutInfo } from "./about";
+import { demoModeRequested } from "./demoMode";
 
 // Server-only reader half of lib/about.ts (see that file for why the split exists).
 
@@ -30,7 +31,9 @@ function nextVersion(): string {
 export function uiFlags(): { label: string; on: boolean }[] {
   const on = (v: string | undefined) => v === "1" || v === "true";
   return [
-    { label: "Demo mode", on: on(process.env.DEMO_MODE) },
+    // Raw request, deliberately: this panel must show the flag AS CONFIGURED, even in a runtime
+    // where serving fixtures is forbidden — otherwise a misconfigured deployment hides its own cause.
+    { label: "Demo mode", on: demoModeRequested() },
     { label: "Shared-service assignments", on: on(process.env.SERVICE_ASSIGNMENTS_ENABLED) },
     { label: "Print stub", on: on(process.env.PRINT_STUB) },
     { label: "Telemetry (OTel)", on: on(process.env.OTEL_ENABLED) },
