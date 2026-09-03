@@ -27,7 +27,7 @@ npm run typecheck              # tsc --noEmit
 npm test                       # vitest run (jsdom) — 98 test/spec files
 npx vitest run src/lib/pm.test.ts            # one file
 npx vitest run src/lib/pm.test.ts -t "name"  # one case
-DEMO_MODE=1 npm run build      # THE gate — see below
+DEMO_MODE=1 DEMO_MODE_ACK_NON_PRODUCTION=1 npm run build   # THE gate — see below
 npm run e2e                    # playwright; self-contained (starts next dev + DEMO_MODE=1)
 npx playwright test --project=smoke --grep @smoke   # the CI build-gate smoke check
 ```
@@ -37,7 +37,19 @@ npx playwright test --project=smoke --grep @smoke   # the CI build-gate smoke ch
 `next dev` is up corrupts that server (`Cannot find module './1331.js'` from
 `webpack-runtime.js`, fixed only by restarting it with a clean `.next`). `next.config.ts` reads
 `NEXT_DIST_DIR`, and `playwright.config.ts` sets it to `.next-e2e` for its own server — so run the
-gate as `NEXT_DIST_DIR=.next-gate DEMO_MODE=1 npm run build` whenever a dev server may be running.
+gate as `NEXT_DIST_DIR=.next-gate DEMO_MODE=1 DEMO_MODE_ACK_NON_PRODUCTION=1 npm run build` whenever
+a dev server may be running.
+
+**`DEMO_MODE_ACK_NON_PRODUCTION=1` is required alongside `DEMO_MODE=1` for anything that sets
+`NODE_ENV=production`** — which `next build` and `next start` both do. Without it the DEMO_MODE boot
+guard (`next.config.ts`, mirrored in `lib/demoMode.ts`) refuses to load the config and the gate dies
+at `Failed to load next.config.ts`. Not a papercut: that is what broke ci.yml's `platform-ui` job
+from alpha.330 to alpha.332, taking down the build gate **and** the smoke check — and the build gate
+is the only thing in the pipeline that catches a `server-only` import reaching a client component.
+The variable is an explicit assertion that the environment is not production; it is set in ci.yml's
+`platform-ui` job and nowhere else in the repo (no compose file, no `.env`, nothing in `infra/`), so
+serving fixtures from a real deployment takes two deliberate variables. `npm run dev` needs neither
+— it is `NODE_ENV=development`.
 
 **`next build` is the real gate.** `tsc` + vitest have both passed while the build broke and
 routes 500'd (a `server-only` import reaching a client component). CI runs `npm run build`

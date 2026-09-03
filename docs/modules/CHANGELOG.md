@@ -11,6 +11,58 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.66.1` - the DEMO_MODE guard stops disabling the build gate (2026-09-03) - PROTOTYPED
+
+**The substance of this fix is `ccd87506` / alpha.332, by another session** — recorded here because
+it shipped without a changelog entry or a `MODULES.md` bump, and this file is where the program's
+module history is supposed to live. What follows is their change plus three gaps closed on top.
+
+ci.yml's `platform-ui` job had failed at `Failed to load next.config.ts` on every commit from
+alpha.330 to alpha.332, which means **the build gate and the smoke check did not run for two
+releases**. `next build` is the only thing in the pipeline that catches a `server-only` import
+reaching a client component — `tsc` and vitest are both blind to it, per this component's own guide
+and a real incident. So a guard written to prevent a production accident had switched off the check
+that covers the accident it cannot see itself.
+
+Cause: `assertDemoModeAllowed()` keyed on `NODE_ENV === "production"` alone, and `next build` sets
+exactly that — as does `next start`, which the Playwright `smoke` project uses to serve the built
+app with `DEMO_MODE=1` because CI has no backend. Both of the repo's own verification paths looked
+identical to a real deployment.
+
+Their fix: `DEMO_MODE_ACK_NON_PRODUCTION=1`, a second explicitly-named variable asserting the
+environment is not production. The default is unchanged — DEMO_MODE in a production runtime still
+refuses — so serving fixtures from a real deployment now takes **two** deliberate variables, and the
+acknowledgement fails closed on anything but the exact string `"1"`.
+
+Added here:
+
+- **`platform-ui/CLAUDE.md` documented the broken command.** It still read
+  `DEMO_MODE=1 npm run build   # THE gate`, so anyone following the component guide reproduced the
+  original failure. Now carries the variable in both places it appears, with the reason.
+- **A test pinning the boot guard against the library.** `next.config.ts` repeats the condition
+  inline — it loads outside the app's module graph and its path aliases, so it cannot import
+  `demoMode.ts`. Nothing stopped the two drifting, and drift is silent in both directions and bad
+  both ways: the library allowing what the boot guard kills breaks the build gate again exactly as
+  it just did; the boot guard allowing what the library forbids gives a deployment a chance to boot
+  with fixtures. The test asserts both copies key on the same three variables with the same
+  comparisons.
+- **A test recording what does NOT work, so nobody re-derives it.** Exempting
+  `NEXT_PHASE === "phase-production-build"` is the obvious and apparently-safer fix — a build serves
+  nobody, so fixtures during one cannot reach a user, and it needs no override at all. It fails:
+  **`NEXT_PHASE` is `undefined` when `next.config.ts` is evaluated**, because Next passes the phase
+  only to a function-shaped config and this project exports an object. Measured with a probe after
+  the build kept dying with the exemption in place. This route was taken, and abandoned, during this
+  session — the test is what stops the next person spending the same afternoon.
+- One more behavioural case: the acknowledgement **alone** never turns demo mode on. It only removes
+  a refusal, so a production process carrying just that variable is an ordinary production process.
+  Without it, the CI-only variable would be one step from serving fixtures rather than two.
+
+Verified: 11 cases green in this file; `DEMO_MODE=1 DEMO_MODE_ACK_NON_PRODUCTION=1 npm run build`
+compiles (the gate runs again) and `DEMO_MODE=1 npm run build` alone still **refuses** — both
+directions, since a guard tested only on its happy path would pass with no guard at all. The live
+box was inspected over SSH during this work: `gaiada-platform-ui-1` carries `NODE_ENV=production`
+and neither DEMO_MODE variable, which is the property the whole design rests on.
+
 ### monitoring `0.3.1` - channel health is TRUE, not decorative (2026-09-03, CH) - PROTOTYPED
 
 `monitor_channels.last_delivery_at`/`last_delivery_ok`/`failure_count` existed since `0116` and
