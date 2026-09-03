@@ -1,4 +1,5 @@
 import "server-only";
+import { isDemoMode } from "./demoMode";
 // The ONLY backend this UI talks to. Server-side only — tokens never reach the browser.
 export class PlatformError extends Error {
   // `field` is additive (bot admin proxy 400s as {error, field} per doc §2.3/2.4) —
@@ -14,7 +15,12 @@ export class PlatformError extends Error {
 export async function platformFetch<T>(path: string, userId: string, init: RequestInit = {}): Promise<T> {
   // TEMP DEMO MODE — see lib/demoFixtures.ts. Lets the UI be browsed with no
   // backend running. Inert unless DEMO_MODE=1 is set locally (gitignored .env).
-  if (process.env.DEMO_MODE === "1") {
+  //
+  // `isDemoMode()` rather than reading the env directly: it THROWS if the flag is ever set in a
+  // production runtime, so a misconfigured deployment fails loudly here instead of quietly serving
+  // fixtures — invented invoices, clients and monitors — to real users behind healthy-looking 200s.
+  // See lib/demoMode.ts. This is the only branch in the app that reaches the fixture modules.
+  if (isDemoMode()) {
     const { getDemoResponse } = await import("./demoFixtures");
     const body = typeof init.body === "string" ? init.body : undefined;
     const { status, json } = getDemoResponse(init.method ?? "GET", path, userId, body);

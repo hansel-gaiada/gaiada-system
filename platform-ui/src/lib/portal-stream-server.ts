@@ -1,4 +1,5 @@
 import "server-only";
+import { isDemoMode } from "./demoMode";
 // CP-5 — the ONE raw `fetch` to the platform that is not `platformFetch`, and the reason it exists.
 //
 // `platformFetch` parses the response as JSON (`await res.json()`). An SSE response never completes, so
@@ -26,7 +27,7 @@ export async function portalStreamUpstream(
   // DEMO_MODE has no backend at all. Returning null makes the route answer its poll-mode hello frame,
   // so the whole portal is browsable — and the POLLING fallback is what gets exercised in demo mode and
   // in the e2e suite, which is the path most likely to break unnoticed.
-  if (process.env.DEMO_MODE === "1") return null;
+  if (isDemoMode()) return null;
 
   const base = process.env.PLATFORM_URL ?? "http://localhost:3004";
   let authHeaders: Record<string, string>;

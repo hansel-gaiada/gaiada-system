@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe, platformAuthHeaders } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getRecording } from "@/lib/meetings";
+import { isDemoMode } from "@/lib/demoMode";
 
 // Streaming upload proxy for a recording's media (PRD Studio "Upload a file").
 //
@@ -32,7 +33,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "Expected a multipart/form-data upload with a `file` field." }, { status: 400, headers: noStore });
   }
 
-  if (process.env.DEMO_MODE === "1") {
+  if (isDemoMode()) {
     // No platform to stream to: read the form once (demo files are tiny) and update the demo store
     // the same way uploadAudioAction does, so the card's transcribing→transcribed poll is drivable.
     const form = await req.formData();

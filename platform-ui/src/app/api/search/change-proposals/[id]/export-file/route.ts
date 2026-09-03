@@ -3,6 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getActiveTenant } from "@/lib/tenant";
 import { getMe } from "@/lib/platform";
 import { getChangeProposal, getCampaign } from "@/lib/searchMarketing";
+import { isDemoMode } from "@/lib/demoMode";
 
 // SM-19 — the download half of SM-30's manual-mode export (`ApplyProposalTwins.tsx`). The export
 // SERVER ACTION only ever returns metadata (`{fileId,filename,...}` — `search.controller.ts`'s
@@ -51,7 +52,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     return NextResponse.json({ error: "this proposal has not been exported yet — use \"Export CSV\" first" }, { status: 404 });
   }
 
-  if (process.env.DEMO_MODE === "1") {
+  if (isDemoMode()) {
     const campaign = await getCampaign(userId, tenant, proposal.campaignId);
     const csv = demoCsv(proposal.id, campaign?.name ?? "(unknown campaign)", proposal.kind);
     return new Response(csv, {
