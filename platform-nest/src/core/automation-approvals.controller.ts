@@ -16,6 +16,9 @@ import { getExecutable } from "./approval-executables";
 import { EXECUTING_STALE_MS, executeApprovedAutomationWrite, isExecutionWedged, toolArgsOf } from "./approval-execute";
 import { computeArgsSha256 } from "./hub-client";
 import { fileAutomationApproval } from "./approval-filing";
+// The probe-consent discriminator, imported from the module that owns the flow rather than
+// re-declared here — core/approval-executables.ts sets the same precedent for module-owned rules.
+import { PROBE_CONSENT_WORKFLOW } from "../modules/search/probe-consent";
 // P2-08 part B: an approved IAM request (override, or a dept head's assignment) executes in-band.
 // One import, one call — the IAM-specific knowledge lives in that module, not in this shared route.
 import { IAM_POSITION_ASSIGN_WORKFLOW, executeApprovedIamRequest, isIamRequest } from "../admin/iam-approval-execute";
@@ -262,8 +265,11 @@ export class AutomationApprovalsController {
     // requester ≠ decider (design §6.5). Fetching it here keeps the one-route/no-fork shape this
     // handler already uses for hr:leave: only the Cerbos action and one attribute differ.
     const existing = await withTenants([tenantId], (c) =>
-      c.query<{ origin: string; tool_name: string; workflow_id: string; requested_by: string | null }>(
-        `SELECT origin, tool_name, workflow_id, requested_by FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
+      // `tool_args` joins this pre-authorize SELECT (2026-09-03) because the probe-consent branch
+      // below has to know WHICH property is being consented before it can authorize against it —
+      // authorizing against an empty id would hand the decision to whatever a policy does with "".
+      c.query<{ origin: string; tool_name: string; workflow_id: string; requested_by: string | null; tool_args: unknown }>(
+        `SELECT origin, tool_name, workflow_id, requested_by, tool_args FROM automation_approvals WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       ),
     );
@@ -306,6 +312,35 @@ export class AutomationApprovalsController {
       },
       decideAction,
     );
+
+    // ── Probe consent: the approver must hold the authority the GRANT needs (2026-09-03) ─────────
+    // Ruling §1 (docs/plans/2026-09-03-probe-consent-rulings.md): Web Dev REQUESTS, a holder of
+    // `search.manage`/`company.manage` GRANTS. The generic `decide` above does not express that —
+    // it is the "may you decide approvals here" gate, and plenty of people hold it who have no
+    // business asserting that we may probe a client's website.
+    //
+    // Rather than mint a bespoke `decide_probe_consent` action (a policy edit, a catalog entry, and
+    // a Cerbos restart to prove), this authorizes against the write the approval will actually
+    // perform: `resource_search_property · update`, the exact gate `PATCH properties/:id` already
+    // uses to set `verified_at`. That is a stronger guarantee than a parallel action, because it
+    // cannot drift from the thing being approved — if you could not set this column yourself, you
+    // cannot approve someone else's request to set it.
+    //
+    // Fails CLOSED in both directions: an approval whose `tool_args.propertyId` is missing or not a
+    // string is refused outright rather than authorized against an empty id (which some policies
+    // treat as a wildcard). Applies to REJECTION too — refusing a consent request is also a
+    // decision about a client's property, and the alternative would let anyone with generic decide
+    // reach clear the queue.
+    if (rowOrigin === "search" && existing.rows[0].workflow_id === PROBE_CONSENT_WORKFLOW) {
+      const args = existing.rows[0].tool_args as { propertyId?: unknown } | null;
+      const propertyId = typeof args?.propertyId === "string" ? args.propertyId : "";
+      if (!propertyId) throw new BadRequestException("this consent request names no property");
+      await authorize(
+        req.principal,
+        { kind: "resource_search_property", id: propertyId, tenantId, module: "search" },
+        "update",
+      );
+    }
     // D14-02: the executor is REGISTRY-scoped, not origin-scoped (approval-executables.ts's own
     // doctrine + migration 0078's header). execution_status is computed here and flipped in the
     // SAME UPDATE that flips `status` below — never a second statement — so a crash between the two
@@ -321,11 +356,17 @@ export class AutomationApprovalsController {
       : undefined;
     const executionStatus: "pending" | "not_applicable" = executable ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
-      const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
+      // `requested_by` joins the RETURNING (2026-09-03) so the decided event can carry it. A module
+      // eventHandler that needs to tell the REQUESTER what happened had no way to find them: HR's
+      // handlers get the subject from their own domain row, and the search module's probe-consent
+      // handler has no such row (its domain row is the property, which does not know who asked).
+      // Additive — no existing consumer reads it, and the column was already SELECTed above for the
+      // override path, so this is the same value, not a new fact.
+      const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string; requested_by: string | null }>(
         `UPDATE automation_approvals
            SET status = $2, decided_by = $3, decided_at = now(), updated_at = now(), execution_status = $4
          WHERE id = $1 AND status = 'pending' AND deleted_at IS NULL
-         RETURNING origin, tool_args, workflow_id, tool_name`,
+         RETURNING origin, tool_args, workflow_id, tool_name, requested_by`,
         [id, decision, req.principal.userId, executionStatus],
       );
       if (upd.rowCount === 0) return null;
@@ -338,6 +379,7 @@ export class AutomationApprovalsController {
         workflowId: upd.rows[0].workflow_id,
         toolName: upd.rows[0].tool_name,
         decidedBy: req.principal.userId,
+        requestedBy: upd.rows[0].requested_by,
       });
       return upd.rows[0];
     });

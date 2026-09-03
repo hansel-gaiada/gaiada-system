@@ -3619,6 +3619,42 @@ Two consequences worth recording here, because they are contract-shaped:
   id is validated against the pickable list client-side and ignored if it is not there, never
   posted verbatim.
 
+### Probe consent — Web Dev asks, the search module's authority grants (2026-09-04)
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| POST | `/api/:t/modules/webdev/console/probe-consent-requests` | `{ ok, approvalId, domain, attestation }` — files an `automation_approvals` row with `origin='search'`, `workflow_id='search:probe_consent'`. 400 on a missing/short/oversized reference note; 404 unknown property; **409** already-consented; **409** an open request for the same property | `webdev_provisioned_site:read` (the SAME action the portfolio read uses — see below) | **UI: `platform-ui/src/lib/probeConsentActions.ts`, rendered by `components/webdesk/ProbeConsentRequest.tsx`** |
+
+Owner rulings: `docs/plans/2026-09-03-probe-consent-rulings.md`. `search_properties.verified_at` is
+what the monitoring sweep builds its SSRF allowlist from, so setting it is the record that we may
+reach out and touch a client's website. `PATCH /modules/search/properties/:id` could always set it;
+this exists so that nobody sets it for themselves.
+
+Four things about this are contract-shaped and easy to get wrong:
+
+- **The requester is gated on a WEBDEV action, not a search one.** Web Dev reads consent and hosting
+  topology *through* §24's portfolio, which authorizes `webdev_provisioned_site:read`; requiring
+  `resource_search_property:read` here would lock out exactly the people the flow is for. Filing
+  grants nothing and mutates no domain state.
+- **The APPROVER is gated on `resource_search_property:update`** — the exact gate that endpoint uses
+  — checked by the decide path for `origin='search'` rows *in addition to* the generic `decide`, and
+  applied to rejection as well. No new Cerbos action was minted: an authority that cannot drift from
+  the write being approved beats a parallel one that can.
+- **`origin='search'` can never auto-execute.** The decide path computes an executor only for
+  `automation|agent`, so the grant is applied on the `automation_approval.decided` event by
+  `modules/search/probe-consent.ts` — the same slot `origin='hr'` uses. Registering a
+  consent-granting MCP tool in the D14 executable registry would create an agent-callable privilege
+  surface for a compliance flag and must not be done.
+- **A new origin must be added in FOUR places or the request is unfindable.** `ALL_ORIGINS` in
+  `core/approvals.controller.ts`, `ORIGINS` in `core/approvals-decide.controller.ts`,
+  `ORIGIN_BASE_WEIGHT`/`ApprovalOrigin` in `core/approvals-urgency.ts`, and the UI's mirror in
+  `lib/approvalsShared.ts` + `ApprovalDecideOrigin`. `origin` is a plain text column, so nothing
+  type-checks this: the first filed request was decidable by id and invisible in the inbox.
+
+§24 additionally gains **`propertyId`** on each portfolio row (`sp.id`). NULL is not the same answer
+as `crawlConsent: false` — no property row means there is nothing that could carry consent, so it
+cannot be requested either, and the UI states that instead of offering a button.
+
 **No new Cerbos resource kind.** The ticket's own warning ("a new kind costs six coupled
 artifacts") was heeded by checking first: design §08's button matrix already gates registry/env-
 status/submissions under ONE action, and both existing kinds this file authorizes against

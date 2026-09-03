@@ -112,27 +112,66 @@
    whole string, so that row's first track pushed the others until the last column clipped. The
    cells are HairlineTable's own spans, so the override has to reach them from here. */
 
+/* ── The whole row opens the record; the domain opens the site (2026-09-04) ────────────────
+   Implemented as a stretched `::after` on a REAL anchor rather than an onClick on the row — see
+   `domainCell` in PortfolioPanel.tsx for why a clickable div was rejected. Three rules make it
+   work, and all three are load-bearing:
+
+     1. the row is the positioning context, so the overlay can cover exactly it;
+     2. the overlay is the record link's own pseudo-element, so the row IS that link to the mouse;
+     3. everything else interactive in the row is lifted ABOVE the overlay, or it stops working.
+
+   Rule 3 is the one that breaks silently: without it the monitor-status link and the "Add" action
+   in the Monitoring column sit UNDER the overlay and quietly navigate to the record instead of
+   where they say they go. */
+.wd-pf__scroll .lux-table__row { position: relative; }
+.wd-pf__scroll .lux-table__row:hover { cursor: pointer; }
+
 /* `flex`, NOT `inline-flex`. An inline-level box inside the grid cell sizes to max-content and
    simply overflowed: `goldenmonkeybali-com-303701.hostingersite.com` printed straight across the
    Server column and overlapped its text. A block-level flex container fills the track, so the
    link (a flex item with `min-width: 0`) can finally shrink and show its ellipsis. */
 .wd-pf__domain { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+
+/* Above the overlay (rule 3), and it truncates: the domain is the longest value in the table. */
 .wd-pf__domain-link {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* The "open the live site" arrow. Quiet until hovered or focused, because it repeats on every row
-   and a column of bright arrows reads as the most important thing on the page. */
-.wd-pf__out {
+/* The external-link mark rides INSIDE the anchor now, so it is part of that same click target
+   rather than a second control beside it. Quiet: it repeats on every row. */
+.wd-pf__ext { margin-left: 4px; font-size: 10px; color: var(--ink-subtle); }
+.wd-pf__domain-link:hover .wd-pf__ext,
+.wd-pf__domain-link:focus-visible .wd-pf__ext { color: var(--accent-fg); }
+
+/* The record link: visually a chevron at the end of the domain cell, functionally the whole row. */
+.wd-pf__rowlink {
   flex: 0 0 auto;
-  font-size: 11px;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
   text-decoration: none;
   color: var(--ink-subtle);
   transition: color 0.18s var(--erp-ease);
 }
-.wd-pf__out:hover, .wd-pf__out:focus-visible { color: var(--accent-fg); }
+.wd-pf__rowlink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.wd-pf__scroll .lux-table__row:hover .wd-pf__rowlink { color: var(--accent-fg); }
+/* The focus ring sits on the CHEVRON, not on the stretched overlay: a ring drawn around `inset: 0`
+   would outline the entire row and read as "everything here is focused". */
+.wd-pf__rowlink:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: 2px;
+  border-radius: var(--radius-2);
+}
+.wd-pf__rowlink:focus-visible::after { content: none; }
 
 /* The monitoring cell. A row of small chips: the monitor status, plus whatever qualifies it
    (suspended, no consent) or the one action that fixes it (Add). `nowrap` because a wrapped chip
@@ -140,6 +179,10 @@
    table instead. */
 .wd-pf__watch { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .wd-pf__watch-add { font: 400 12px var(--font-body); }
+/* Rule 3 of the row overlay above. These links live INSIDE the row, so unless they are lifted the
+   record link's stretched pseudo-element covers them and they silently open the record instead of
+   the monitor or the new-monitor form. */
+.wd-pf__watch a { position: relative; z-index: 1; }
 
 .wd-pf__link { font: 400 13px var(--font-body); }
 
@@ -195,3 +238,23 @@
      theme. The trap the token pair exists to close, per platform-ui/CLAUDE.md. */
   color: var(--ink-on-accent-fill);
 }
+
+/* ── Probe consent request (2026-09-03) ─────────────────────────────────────────────────────────
+   Rulings: docs/plans/2026-09-03-probe-consent-rulings.md. The layout carries one intent: this is
+   an assertion, not a toggle. So the attestation gets its own weight above the field rather than
+   being tucked into a hint, and the field is wide enough to hold a real reference. */
+.wd-consent { display: flex; flex-direction: column; gap: var(--space-8); max-width: 62ch; }
+/* The sentence being agreed to. Bordered on the leading edge so it reads as a quotation of terms
+   rather than as body copy — the one element here that must not be skimmed. */
+.wd-consent__attest {
+  margin: 0;
+  padding: var(--space-8) var(--space-12);
+  border-left: 2px solid var(--accent-fg);
+  font: 500 14px var(--font-body);
+  color: var(--text-primary);
+}
+.wd-consent__field { display: flex; flex-direction: column; gap: 6px; }
+.wd-consent__hint { margin: 0; font: 400 12px var(--font-body); color: var(--ink-muted); }
+.wd-consent__actions { display: flex; gap: var(--space-8); }
+.wd-consent__error { margin: 0; font: 400 12px var(--font-body); color: var(--status-critical-fg); }
+.wd-consent__done { margin: 0; font: 400 13px var(--font-body); color: var(--ink-muted); }

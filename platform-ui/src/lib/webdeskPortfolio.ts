@@ -54,6 +54,12 @@ export interface PortfolioSite {
   notes?: string | null;
   contractVersion: string | null;
   origin: string;
+  /** The SEO property row for this domain, when one exists. NULL is NOT the same answer as
+   *  `crawlConsent: false`: no property row means there is nothing that COULD carry consent, so
+   *  consent cannot be requested for it either — a different problem with a different fix. The
+   *  consent request flow needs this distinction, and it is what lets the monitor join match by
+   *  identity instead of by parsing a display target. */
+  propertyId: string | null;
   /** NOTE: the backend also returns `lastSeenAt` / `lastHttpStatus`. They are deliberately not
    *  modelled here — see the header. Nothing writes them, so any UI reading them renders a
    *  permanent "unknown" dressed as health. */

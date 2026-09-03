@@ -44,7 +44,11 @@ export interface UnifiedApprovalItem {
 type ApprovalStatus = "pending" | "decided";
 type Sort = "urgency" | "age";
 
-const ALL_ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent"];
+// `search` (probe consent, 2026-09-03) rides the automation_approvals leg below alongside
+// automation/agent/hr — it is an `automation_approvals` row with `origin='search'`, exactly as
+// WSD-4 made hr-origin rows. It MUST be listed here: the leg filters `origin = ANY($1)`, so an
+// unlisted origin produces a request that is filed, decidable by id, and invisible in the inbox.
+const ALL_ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search"];
 
 function parseOrigins(raw: string | undefined): ApprovalOrigin[] {
   if (!raw) return ALL_ORIGINS;
@@ -191,6 +195,9 @@ async function automationLeg(
   const decidableHr = readableHr && (await canDo(principal, tenantId, "automation_approval", "decide", "hr"));
   const decidableOther = readableOther && (await canDo(principal, tenantId, "automation_approval", "decide"));
 
+  // `search` groups with automation/agent, not with hr: hr's leg carries a MODULE gate
+  // (`automation_approval:read` scoped to the hr module) and probe-consent rows have no equivalent
+  // — they are read under the same generic action every automation row is.
   const readableOrigins = subOrigins.filter((o) => (o === "hr" ? readableHr : readableOther));
   if (!readableOrigins.length) return { items: [], readable: false };
 
@@ -221,6 +228,12 @@ async function automationLeg(
       createdAt: iso(r.created_at),
       ageMs,
       urgencyScore: ORIGIN_BASE_WEIGHT[origin] + (IMPACT_BONUS[r.impact] ?? 0) + ageBonus(ageMs),
+      // `decidable` is an inbox HINT, and for a probe-consent row it is deliberately optimistic:
+      // the real gate is the `resource_search_property · update` check the decide endpoint makes
+      // against THIS row's property (automation-approvals.controller.ts), which cannot be computed
+      // here without a per-row Cerbos call. Someone who lacks it sees the row and is refused on
+      // decide — the safe direction. The reverse (hiding rows they could decide) would strand
+      // requests, which is the failure this whole fix is about.
       decidable: origin === "hr" ? decidableHr : decidableOther,
       status: r.status,
     };

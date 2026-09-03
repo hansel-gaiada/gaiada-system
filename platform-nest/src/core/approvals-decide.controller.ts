@@ -28,7 +28,12 @@ import { PipelineController } from "./pipeline.controller";
 import { AutomationApprovalsController } from "./automation-approvals.controller";
 import type { ApprovalOrigin } from "./approvals-urgency";
 
-const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent"];
+// `search` (probe consent, 2026-09-03) rides the automation_approvals branch below: it is an
+// `automation_approvals` row like automation/agent/hr, so the same controller decides it, and that
+// controller applies the probe-consent authority gate. Listing it here is not cosmetic — the guard
+// above 400s any origin absent from this array, so without it the inbox can SHOW the request and
+// then refuse every attempt to decide it.
+const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search"];
 
 // None of the three origin controllers take constructor dependencies (their helpers — withTenants,
 // authorize, writeActivity, notify, emitEvent, config — are module-level imports, not injected), so
@@ -71,12 +76,15 @@ export class ApprovalsDecideController {
       }
       case "automation":
       case "agent":
-      case "hr": {
+      case "hr":
+      case "search": {
         // automation-approvals.controller.ts's own decide() re-derives the row's REAL origin from
-        // the DB before authorizing (WSD-4) — so whichever of these three the caller believes the
+        // the DB before authorizing (WSD-4) — so whichever of these four the caller believes the
         // item is, the underlying handler still authorizes against the row's true origin. The
         // façade's job is only to route "this id lives in automation_approvals" to the right
-        // controller, not to pre-judge which of the three sub-origins it is.
+        // controller, not to pre-judge which of the sub-origins it is. That property is what makes
+        // adding `search` here safe: a caller cannot claim `automation` to dodge the probe-consent
+        // property gate, because the gate is chosen from the stored row, not from this body.
         await automationApprovalsController.decide(req, tenantId, id, { decision: decision as "approved" | "rejected" });
         break;
       }

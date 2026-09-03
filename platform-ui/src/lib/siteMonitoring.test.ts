@@ -12,6 +12,7 @@ function site(over: Partial<FlatSite>): FlatSite {
     id: over.id ?? "s1", domain: over.domain ?? "example.com", environment: "production",
     hostKind: "our-box", hostRef: null, access: "none", kind: null, adoption: "tracked",
     repoUrl: null, repoBranch: null, contractVersion: null, origin: "probe",
+    propertyId: over.propertyId ?? null,
     hostingProvider: null, controlPanel: null, stack: null, topologyCheckedAt: null,
     crawlConsent: over.crawlConsent ?? false, notes: null,
   };

@@ -56,11 +56,15 @@ export async function decideQueueItem(
 // `decideQueueItem` above (which dispatches per-origin to each native decide
 // route directly, predating WSUX-2), this calls the WSUX-2 façade
 // (`POST /api/:t/approvals/:id/decide`) straight up: one path, all five
-// origins (agency|pipeline|hr|automation|agent), the façade's own dispatcher
+// origins (agency|pipeline|hr|automation|agent|search), the façade's own dispatcher
 // does the per-origin authorize()/Cerbos call. No new authorization model —
 // same rule as `decideQueueItem`'s own comment, just via the endpoint instead
 // of a client-side origin switch.
-export type ApprovalDecideOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent";
+// `search` (probe consent) added 2026-09-03. The façade routes it to the same
+// automation_approvals controller as automation/agent/hr, which re-derives the row's real origin
+// from the DB before authorizing — so a caller cannot claim a softer origin to dodge the
+// probe-consent property gate.
+export type ApprovalDecideOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search";
 
 export async function decideApprovalItem(
   tenantId: string,

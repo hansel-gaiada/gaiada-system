@@ -11,6 +11,122 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.51.0` - probe consent becomes a request, not a column somebody flips (2026-09-04) - PROTOTYPED
+
+Plan item 7, on the owner rulings recorded in `docs/plans/2026-09-03-probe-consent-rulings.md`.
+`search_properties.verified_at` is what the monitoring sweep builds its SSRF allowlist from, so it
+is the record that we may reach out and touch a client's website — and 63 of the 81 sites on the
+live estate do not have it. `PATCH properties/:id` could already set it and was deliberately never
+given a button, because a one-click grant makes whoever is on the portfolio page the author of a
+compliance claim.
+
+**The shape, and why it is not the D14 executable registry.** `automation-approvals.controller.ts`
+computes an executor only for `origin IN ('automation','agent')` — its own comment states that any
+other origin "can never become auto-executable even if its tool_name were mistakenly registered".
+This flow is `origin='search'`, so the registry is structurally unavailable to it, and that is the
+right answer: the registry re-drives MCP TOOL CALLS through the hub, and registering a
+consent-granting tool would create an agent-callable privilege surface for a compliance flag.
+Instead the grant is applied in-process on the `automation_approval.decided` event — the same slot
+`origin='hr'` uses for leave and loans, which the registry's own doctrine names as the safe pattern
+for a module's own domain mutation.
+
+- **`POST /modules/webdev/console/probe-consent-requests`** files the request. The requester is
+  gated on `webdev_provisioned_site · read` — the SAME action that let them see the portfolio row —
+  not on a search action. The obvious gate (`resource_search_property · read`) would lock out
+  exactly the people the flow is for, because Web Dev reads consent and hosting topology *through*
+  the portfolio. Filing grants nothing and mutates no domain state, so the bounded risk is queue
+  noise from someone who can already see the site.
+- **The reference note is mandatory, server-side** (ruling §2): 3–500 characters after trimming, so
+  whitespace cannot satisfy it. The attestation TEXT is stored on the row alongside it (ruling §3),
+  not merely rendered — if that wording ever changes, consent already granted must not be silently
+  re-labelled as having been given under the new sentence.
+- **Two refusals before filing:** already-consented (409) and an open request for the same property
+  (409). Without the first, approval would be a silent no-op against the handler's
+  `verified_at IS NULL` guard — the wrong place to discover it. Without the second, the queue fills
+  with duplicates for one domain and an approver cannot tell which to act on.
+- **The approver must hold the authority the GRANT needs.** The decide path now authorizes
+  `resource_search_property · update` — the exact gate `PATCH properties/:id` uses — for
+  `origin='search'` probe-consent rows, in addition to the generic `decide`. Chosen over minting a
+  bespoke `decide_probe_consent` action (a policy edit, a catalog entry and a Cerbos restart to
+  prove) because it cannot drift from the thing being approved: if you could not set the column
+  yourself, you cannot approve someone else's request to set it. It applies to REJECTION too, and
+  fails closed on a row whose `tool_args.propertyId` is missing rather than authorizing against `""`.
+- **The grant is idempotent on `verified_at IS NULL`**, not on a status column. A redelivered event,
+  or a second request approved after the domain was consented by another route, must not move the
+  timestamp: the FIRST grant is the one that happened and its timestamp is the evidence of when we
+  became entitled to probe.
+- **`requestedBy` now rides the `automation_approval.decided` event.** A module handler that wants to
+  tell the REQUESTER what happened had no way to find them — HR's handlers read the subject off
+  their own domain row, and this flow's domain row is the property, which does not know who asked.
+  Additive; the column was already SELECTed for the override path.
+- **`propertyId` joins the §24 portfolio read** (`sp.id`). NULL is load-bearing and is NOT the same
+  answer as `crawlConsent: false`: no property row means there is nothing that COULD carry consent,
+  so consent cannot be requested either — a different problem with a different fix.
+
+**A defect found by driving it, not by a type error.** The unified inbox
+(`GET /api/approvals`) filters `origin = ANY($1)` from an `ALL_ORIGINS` array of five, and the
+decide façade 400s any origin absent from its own copy. `origin` is a plain text column, so nothing
+complained: the first request filed cleanly, was decidable by id, and was **invisible in the
+approvals queue** — a request nobody could find. `search` is now listed in both, plus
+`ORIGIN_BASE_WEIGHT` (weighted 70, with HR's people-decisions: important, not urgent — nothing is
+failing while it waits, and it still carries an `impact` so the impact bonus lifts it over a routine
+row of the same age).
+
+Verified: `tsc --noEmit` clean. The DB-backed suites need the three test containers and five env
+vars this component's guide documents, which only the Linux gate has — CI runs them.
+
+### platform-ui `0.67.0` - the row opens the record, the domain opens the site, and consent can be asked for (2026-09-04) - PROTOTYPED
+
+Two owner requests plus the UI half of plan item 7.
+
+**Clicking a row opens that site's record; the domain opens the actual site.** The reverse of how it
+shipped. The two requirements cannot both be plain nesting — an anchor may not contain another
+anchor — and the obvious escape, an `onClick` on the row div, is the wrong one: not reachable by
+keyboard, announces as nothing, cannot be opened in a new tab or copied as a link. So the record
+link is a real `<Link>` whose `::after` is stretched over the row, and every other interactive thing
+in the row is lifted above that overlay with `z-index`. Both links are tabbable with honest hrefs;
+the mouse gets the whole row. Rule three is the one that breaks silently — without it the monitor
+status and the "Add" action sit UNDER the overlay and quietly navigate to the record instead of
+where they say they go; both were driven with real mouse clicks to prove they don't. The one real
+cost is that row text can no longer be drag-selected.
+
+**Probe consent, four states and none of them collapsible.** `granted` (nothing to ask),
+`pending` ("awaiting a decision", with the stated basis and a link to the request), `requestable`
+(the form), and `no-property` — the one that matters: a domain with no SEO property row has nothing
+that could carry `verified_at`, so offering "request consent" would file a request nobody can
+action. Most of the 63 unconsented live sites are in exactly that state, and it renders as its own
+honest explanation rather than as a disabled button.
+
+- The form states the attestation **in full, above the field** — not in a tooltip — because that
+  sentence is the compliance artefact. The note is required before the button does anything, and
+  the copy says what happens next, since pressing it grants nothing.
+- The read carries its own availability: if the approvals surface cannot be read, no request is
+  offered, because a "Request consent" button shown to someone whose open request we simply could
+  not see invites a duplicate the server then refuses with a confusing conflict.
+- One approvals read per page, joined in memory against the rows — the same shaping decision the
+  monitor bridge makes, rather than a round trip per site.
+- `search` mirrored into `ApprovalOrigin`, `ORIGINS`, `ORIGIN_LABEL` (as **"Probe consent"** — from
+  the inbox's point of view the reader is being asked to decide about probing a client domain; the
+  module that owns the column is an implementation detail) and `ApprovalDecideOrigin`. Without the
+  first three the rows arrive from the API and land under a blank filter; without the last the
+  inbox can show the request and refuse every attempt to decide it.
+- Demo fixtures: an UNVERIFIED third property, so the `requestable` state exists at all; a
+  `propertyId` on the portfolio rows; and the filed request pushed into BOTH the per-tenant and the
+  unified inbox arrays — the unified one is a separate fixture, and without it the demo showed a
+  request that had been filed and was nowhere to be found, which is precisely the defect the origin
+  allowlists had. A fixture that cannot reproduce the bug cannot prove the fix.
+
+Verified: `tsc --noEmit` clean; 205 files / 3991 tests green (17 new for consent state, basis
+validation and the attestation wording). Driven in a browser against `DEMO_MODE`: all four consent
+states render; an empty note is refused with guidance naming what to cite; filing produces a
+confirmation, then the pending branch after reload with the basis and a link; the request appears in
+the approvals inbox under a "Probe consent" chip with the domain; row-click opens the record; the
+domain opens the site in a new tab leaving the list in place; and both monitoring-column links still
+go where they say.
+
+**Not built, and still not to be assumed** (ruling §4): revocation behaviour, bulk grant across 63
+domains, and creating the missing SEO property rows from Web Dev.
+
 ### platform-ui `0.66.1` - the DEMO_MODE guard stops disabling the build gate (2026-09-03) - PROTOTYPED
 
 **The substance of this fix is `ccd87506` / alpha.332, by another session** — recorded here because

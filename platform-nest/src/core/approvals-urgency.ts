@@ -9,7 +9,11 @@
 // carry a due date — unlike tasks, "urgency" here is origin tier (how blocking the ask
 // structurally is) + impact (automation/agent only) + how long it has been waiting. Higher score
 // = more urgent = sorted first.
-export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent";
+// `search` added 2026-09-03 for probe-consent requests (modules/search/probe-consent.ts). Without
+// it those rows are invisible in the unified inbox: `approvals.controller.ts` filters
+// `origin = ANY($1)` from `ALL_ORIGINS`, so an unlisted origin files a request nobody can find.
+// Caught by driving the flow, not by a type error — the origin is a plain string column.
+export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search";
 
 /** Base tier per origin. Pipeline gates (client/delivery-blocking sign-off) and agency
  *  creative-review sit above automation/agent write-suspensions, which sit above hr leave asks
@@ -19,6 +23,11 @@ export const ORIGIN_BASE_WEIGHT: Record<ApprovalOrigin, number> = {
   agency: 90,
   automation: 80,
   agent: 80,
+  // A probe-consent request blocks monitoring coverage for a client domain and nothing is failing
+  // while it waits, so it does not outrank a suspended write or a stalled deploy. It sits with HR's
+  // people-decisions: important, not urgent. It DOES carry an `impact` (filed 'high'), so the
+  // IMPACT_BONUS still lifts it above a routine row of the same age.
+  search: 70,
   hr: 70,
 };
 

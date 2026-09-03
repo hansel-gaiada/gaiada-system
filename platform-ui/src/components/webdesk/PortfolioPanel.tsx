@@ -148,26 +148,58 @@ function whoseCell(site: FlatSite) {
   return <span className="wd-pf__none" title="Not attached to a client or project yet">Unassigned</span>;
 }
 
-/** The domain cell: the site's own page (internal), plus a separate small link that opens the live
- *  site. Two targets in one cell need two controls — a single link cannot mean both, and "the name
- *  opens the record, the arrow opens the thing" is the convention the rest of the app already uses. */
+/** The domain cell, and the whole row's click target.
+ *
+ *  ── WHAT THE ROW DOES NOW (2026-09-04, owner request) ─────────────────────────────────────────
+ *  Clicking anywhere on the row opens that site's RECORD (the per-site page). The domain itself is
+ *  a link to the ACTUAL SITE. This is the reverse of how it shipped: the domain used to open the
+ *  record and a small arrow beside it opened the site.
+ *
+ *  ── WHY THIS IS TWO REAL ANCHORS AND AN OVERLAY, NOT AN onClick ON THE ROW ────────────────────
+ *  The two requirements are in direct tension in HTML: "the whole row links to the record" and
+ *  "a link inside the row goes somewhere else" cannot both be plain nesting, because an anchor may
+ *  not contain another anchor. The obvious escape is a click handler on the row div, and it is the
+ *  wrong one — a div with onClick is not reachable by keyboard, announces as nothing to a screen
+ *  reader, and cannot be opened in a new tab or copied as a link. This surface already carries the
+ *  program's rule that a control must BE the thing it claims to be (see `HairlineTable`'s sortable
+ *  header, which is a real `<button>` for the same reason).
+ *
+ *  So: the record link is a REAL `<Link>` whose `::after` is stretched over the whole row (the row
+ *  is `position: relative`), and every other interactive thing in the row — the domain, the monitor
+ *  status, the "Add" action — is lifted above that overlay with `z-index`. Both links are tabbable,
+ *  both have honest hrefs, middle-click and "copy link" work on each, and the mouse gets the whole
+ *  row. The one real cost is that text in the row can no longer be selected by dragging across it;
+ *  the full value of every truncated cell is in its `title`, and the record page has all of it.
+ */
 function domainCell(site: FlatSite, basePath: string) {
   const hint = targetHint(site);
   return (
     <span className="wd-pf__domain">
-      <Link href={`${basePath}/${site.id}`} className="wd-pf__domain-link" title={hint ? `${site.domain} → ${hint}` : site.domain}>
-        {site.domain}
-      </Link>
+      {/* The domain goes to the SITE. `noreferrer noopener` because this is an outbound link to a
+          third party we do not control — including client-owned hosting. */}
       <a
         href={`https://${site.domain}`}
         target="_blank"
         rel="noreferrer noopener"
-        className="wd-pf__out"
-        aria-label={`Open ${site.domain} in a new tab`}
-        title="Open the live site"
+        className="wd-pf__domain-link"
+        title={hint ? `Open ${site.domain} — machine-named host, likely ${hint}` : `Open ${site.domain} in a new tab`}
       >
-        ↗
+        {site.domain}
+        {/* aria-hidden: the anchor's own text plus its title already say where this goes, and
+            "north east arrow" read aloud on all 81 rows is noise. */}
+        <span aria-hidden="true" className="wd-pf__ext">↗</span>
       </a>
+
+      {/* The row's click target. Icon-only, so the accessible name has to be explicit — and it
+          names the DOMAIN, because "Open record" repeated 81 times distinguishes nothing. */}
+      <Link
+        href={`${basePath}/${site.id}`}
+        className="wd-pf__rowlink"
+        aria-label={`Open the portfolio record for ${site.domain}`}
+        title="Open this site's record"
+      >
+        <span aria-hidden="true">›</span>
+      </Link>
     </span>
   );
 }

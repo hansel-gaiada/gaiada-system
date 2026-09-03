@@ -32,6 +32,12 @@ export interface PortfolioSite {
   origin: string;
   lastSeenAt: string | null;
   lastHttpStatus: number | null;
+  /** The SEO property row for this domain, when one exists. NULL is load-bearing and is NOT the
+   *  same answer as `crawlConsent: false`: no property row means there is nothing that COULD carry
+   *  consent, so consent cannot be requested for it either — a different problem with a different
+   *  fix. The consent request flow needs this to tell those two apart, and the site<->monitor
+   *  bridge uses it to match a monitor by IDENTITY instead of by parsing its display target. */
+  propertyId: string | null;
   /** From the SEO module's property record, when the domain is registered there. */
   hostingProvider: string | null;
   controlPanel: string | null;
@@ -78,6 +84,7 @@ const PORTFOLIO_SQL = `
          s.project_id, s.client_id,
          pr.name  AS project_name,
          cl.name  AS client_name,
+         sp.id AS property_id,
          sp.hosting_provider, sp.control_panel, sp.stack, sp.topology_checked_at,
          (sp.verified_at IS NOT NULL) AS crawl_consent
     FROM webdev_sites s
@@ -98,6 +105,7 @@ interface Row {
   contract_version: string | null; origin: string; last_seen_at: Date | null; last_http_status: number | null;
   notes: string | null;
   project_id: string | null; client_id: string | null; project_name: string | null; client_name: string | null;
+  property_id: string | null;
   hosting_provider: string | null; control_panel: string | null; stack: string | null;
   topology_checked_at: Date | null; crawl_consent: boolean;
 }
@@ -119,6 +127,7 @@ function toSite(r: Row): PortfolioSite {
     origin: r.origin,
     lastSeenAt: r.last_seen_at ? r.last_seen_at.toISOString() : null,
     lastHttpStatus: r.last_http_status,
+    propertyId: r.property_id,
     hostingProvider: r.hosting_provider,
     controlPanel: r.control_panel,
     stack: r.stack,

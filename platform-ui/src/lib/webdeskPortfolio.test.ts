@@ -10,7 +10,7 @@ function site(over: Partial<PortfolioSite>): PortfolioSite {
     id: over.id ?? "x", domain: over.domain ?? "example.com", environment: over.environment ?? "production",
     hostKind: over.hostKind ?? "our-box", hostRef: over.hostRef ?? null, access: "none", kind: over.kind ?? null,
     adoption: "tracked", repoUrl: over.repoUrl ?? null, repoBranch: null, contractVersion: null,
-    origin: "probe", hostingProvider: null, controlPanel: null,
+    origin: "probe", propertyId: over.propertyId ?? null, hostingProvider: null, controlPanel: null,
     stack: over.stack ?? null, topologyCheckedAt: null, crawlConsent: false, notes: over.notes ?? null,
   };
 }

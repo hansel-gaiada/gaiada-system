@@ -17,6 +17,10 @@ import {
 import { fetchMonitoringFeed } from "@/lib/siteMonitoring-data";
 import { indexMonitorsByDomain, siteMonitoring, createMonitorHref, type SiteMonitoring } from "@/lib/siteMonitoring";
 import { formatUptime, formatAge, ageSeconds } from "@/lib/monitoring";
+import { fetchPendingConsentRequests, type ConsentRequestsResult } from "@/lib/probeConsent-data";
+import { consentState, type ConsentState } from "@/lib/probeConsent";
+import { requestProbeConsentAction } from "@/lib/probeConsentActions";
+import { ProbeConsentRequest } from "@/components/webdesk/ProbeConsentRequest";
 import { formatDateTime } from "@/lib/format";
 import "@/components/webdesk/webdesk.css";
 
@@ -72,6 +76,15 @@ export default async function PortfolioSitePage({ params }: { params: Params }) 
     feed,
     feed.available ? indexMonitorsByDomain(feed.monitors, feed.properties) : new Map(),
   );
+
+  // Open consent requests. Read only when this site could actually have one — a consented domain
+  // has nothing pending, and a domain with no SEO property row cannot have a request filed for it
+  // at all, so asking would be a round trip for an answer we already have.
+  const consentReads: ConsentRequestsResult = !site.crawlConsent && site.propertyId
+    ? await fetchPendingConsentRequests(userId, tenant)
+    : { available: true, pending: [] };
+  const consent = consentState(site, consentReads.available ? consentReads.pending : []);
+  const consentUnavailable = !consentReads.available;
 
   const listHref = `/departments/${deptId}/sites/portfolio`;
   const server = serverOf(site);
@@ -198,6 +211,17 @@ export default async function PortfolioSitePage({ params }: { params: Params }) 
         style={{ marginTop: 16 }}
       >
         <MonitoringSection state={monitorState} site={site} />
+
+        {/* Consent, and what can be done about it. Kept in the SAME card as health because they are
+            one story: consent is the rule that decides whether health can exist for this domain at
+            all. Split across two cards, a reader sees "no health signal" and "no consent" as two
+            unrelated gaps. */}
+        <ConsentSection
+          state={consent}
+          unavailable={consentUnavailable}
+          domain={site.domain}
+          deptId={deptId}
+        />
       </Card>
     </>
   );
@@ -276,6 +300,71 @@ function MonitoringSection({ state, site }: { state: SiteMonitoring; site: FlatS
           : " — the domain is filled in; a monitor also needs a client, and this site has none on record yet."}
       </p>
     </>
+  );
+}
+
+/** The four consent answers. Rulings: docs/plans/2026-09-03-probe-consent-rulings.md.
+ *
+ *  `no-property` is the one that must not be collapsed into "no consent": a domain with no SEO
+ *  property row has nothing that COULD carry consent, so offering "request consent" would file a
+ *  request nobody can action. It needs a property first, which is a different act with a different
+ *  authority, and deliberately out of scope (ruling §4). */
+function ConsentSection({
+  state, unavailable, domain, deptId,
+}: {
+  state: ConsentState;
+  unavailable: boolean;
+  domain: string;
+  deptId: string;
+}) {
+  if (state.kind === "granted") return null;   // MonitoringSection above already says what consent bought
+
+  if (unavailable) {
+    return (
+      <p className="wd-pf__none" style={{ margin: "12px 0 0" }}>
+        Whether a consent request is already open could not be checked, so no request is offered
+        here — filing a second one would only be refused. The approvals queue is the place to look.
+      </p>
+    );
+  }
+
+  if (state.kind === "no-property") {
+    return (
+      <p style={{ margin: "12px 0 0" }}>
+        Consent cannot be requested for this domain yet: it has <strong>no SEO property record</strong>,
+        and consent lives on that record (<code>search_properties.verified_at</code>) — there is
+        nothing for it to be set on. Creating the property is a separate step and needs the client it
+        belongs to.
+      </p>
+    );
+  }
+
+  if (state.kind === "pending") {
+    return (
+      <div style={{ marginTop: 12 }}>
+        <p style={{ margin: "0 0 6px" }}>
+          A consent request for this domain is <strong>awaiting a decision</strong>. Nothing probes
+          it until someone with the authority to record consent approves.
+        </p>
+        {state.request.basis ? (
+          <p className="wd-consent__hint">Stated basis: {state.request.basis}</p>
+        ) : null}
+        <p className="wd-consent__hint">
+          <Link href={`/approvals/${state.request.approvalId}`}>Open the request</Link>
+        </p>
+      </div>
+    );
+  }
+
+  // requestable
+  return (
+    <div style={{ marginTop: 12 }}>
+      <ProbeConsentRequest
+        domain={domain}
+        propertyId={state.propertyId}
+        onRequest={requestProbeConsentAction.bind(null, deptId)}
+      />
+    </div>
   );
 }
 

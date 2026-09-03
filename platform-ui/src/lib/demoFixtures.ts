@@ -266,7 +266,8 @@ function unifiedUrgency(origin: string, ageMs: number, impact?: string): number 
   return (UNIFIED_BASE_WEIGHT[origin] ?? 0) + (impact ? (UNIFIED_IMPACT_BONUS[impact] ?? 0) : 0) + unifiedAgeBonus(ageMs);
 }
 interface UnifiedDemoRow {
-  id: string; origin: "agency" | "pipeline" | "hr" | "automation" | "agent"; tenantId: string;
+  // `search` = probe consent (2026-09-03). Mirrors lib/approvalsShared.ts's ApprovalOrigin.
+  id: string; origin: "agency" | "pipeline" | "hr" | "automation" | "agent" | "search"; tenantId: string;
   subject: string; subjectHref?: string; previewUrl?: string; createdAt: string; status: string; impact?: string;
 }
 const UNIFIED_APPROVALS: UnifiedDemoRow[] = [
@@ -2998,6 +2999,57 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
     });
   }
 
+  // ---- Probe consent requests (2026-09-03) ----
+  // Mirrors platform-nest's `POST console/probe-consent-requests`, including its two 409s, so the
+  // form's refusal paths are drivable without a backend. The filed row is pushed into
+  // AUTOMATION_APPROVALS so the site page's "awaiting a decision" state appears on the next load —
+  // a fixture that accepted the request and then showed no trace of it would make the pending
+  // branch untestable, which is the branch most likely to be wrong.
+  const consentReqMatch = p.match(/^\/api\/([^/]+)\/modules\/webdev\/console\/probe-consent-requests$/);
+  if (consentReqMatch && m === "POST") {
+    const b = JSON.parse(body || "{}") as { propertyId?: string; basis?: string };
+    const propertyId = typeof b.propertyId === "string" ? b.propertyId : "";
+    const basis = (typeof b.basis === "string" ? b.basis : "").trim();
+    if (!propertyId) return { status: 400, json: { error: "propertyId is required" } };
+    if (basis.length < 3) {
+      return { status: 400, json: { error: "a reference note is required — cite the contract clause, email date or ticket that covers this domain" } };
+    }
+    // sm-prop-1 is verified in the properties fixture above -> the "already consented" refusal.
+    if (propertyId === "sm-prop-1") {
+      return { status: 409, json: { error: "this domain already has probe consent on record" } };
+    }
+    const dup = AUTOMATION_APPROVALS.find(
+      (r) => r.status === "pending" && r.workflow_id === "search:probe_consent"
+        && (r.tool_args as { propertyId?: string })?.propertyId === propertyId,
+    );
+    if (dup) {
+      return { status: 409, json: { error: "a consent request for this domain is already awaiting a decision" } };
+    }
+    const id = demoId("aa");
+    const attestation = "I confirm monitoring this domain is covered by our service agreement with this client.";
+    AUTOMATION_APPROVALS.push({
+      id, workflow_id: "search:probe_consent", tool_name: "search.recordProbeConsent",
+      tool_args: { propertyId, domain: { "sm-prop-2": "northwind.example", "sm-prop-3": "dmsviceroy.com" }[propertyId] ?? propertyId, basis, attestation },
+      impact: "high", reason: `Probe consent — ${basis}`, status: "pending", origin: "search",
+      agent_name: null, requested_by: DEMO_USER_ID, decided_by: null, decided_at: null,
+      created_at: new Date().toISOString(),
+    } as (typeof AUTOMATION_APPROVALS)[number]);
+    // ALSO push it into the unified inbox fixture. The real `GET /api/approvals` reads
+    // `automation_approvals` filtered by `ALL_ORIGINS` (which now includes `search`), so the
+    // approver genuinely sees it in production — but this fixture is a SEPARATE array, so without
+    // this the demo shows a request that has been filed and is nowhere to be found, which is
+    // exactly the defect that adding `search` to those allowlists fixed. A fixture that cannot
+    // reproduce the bug cannot prove the fix.
+    const domain = { "sm-prop-2": "northwind.example", "sm-prop-3": "dmsviceroy.com" }[propertyId] ?? propertyId;
+    UNIFIED_APPROVALS.push({
+      id, origin: "search", tenantId: "co-agency",
+      subject: `Probe consent for ${domain} — ${basis}`,
+      subjectHref: undefined,
+      createdAt: new Date().toISOString(), status: "pending", impact: "high",
+    });
+    return { status: 201, json: { ok: true, approvalId: id, domain, attestation } };
+  }
+
   const autoApprovalsMatch = p.match(/^\/api\/([^/]+)\/automation-approvals$/);
   if (autoApprovalsMatch) {
     if (m === "POST") {
@@ -3219,6 +3271,15 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
           id: "sm-prop-2", clientId: "cl-1", domain: "northwind.example",
           siteUrl: "https://northwind.example", targets: {}, umamiSiteId: null,
           verifiedAt: "2026-08-02T00:00:00Z", status: "verified", createdAt: "2026-07-15T00:00:00Z",
+        },
+        // UNVERIFIED on purpose (2026-09-03): `verifiedAt: null` with a real property row is the
+        // "consent can be REQUESTED" state, and without a row in it the whole request branch of the
+        // consent flow is undrivable — the other two properties are verified, and every remaining
+        // portfolio row has no property at all (which is the different "nothing to consent" answer).
+        {
+          id: "sm-prop-3", clientId: "cl-2", domain: "dmsviceroy.com",
+          siteUrl: "https://dmsviceroy.com", targets: {}, umamiSiteId: null,
+          verifiedAt: null, status: "active", createdAt: "2026-08-28T00:00:00Z",
         },
       ]);
     }
@@ -4339,6 +4400,9 @@ function demoPortfolio() {
     notes: over.notes ?? null,
     contractVersion: over.contractVersion ?? null,
     origin: over.origin ?? "probe",
+    // Mirrors the backend's LEFT JOIN: null when the domain has no SEO property row at all, which is
+    // a different answer from "has one, unverified" and drives whether consent can even be asked for.
+    propertyId: over.propertyId ?? null,
     hostingProvider: over.hostingProvider ?? null,
     controlPanel: over.controlPanel ?? null,
     stack: over.stack ?? null,
@@ -4349,6 +4413,7 @@ function demoPortfolio() {
   const northwindProd = site({
     id: "site-nw-prod", domain: "northwind.example", environment: "production",
     hostRef: "helios", hostKind: "our-box", kind: "next", adoption: "adopted",
+    propertyId: "sm-prop-2",
     repoUrl: "https://github.com/gaiada/northwind-web", repoBranch: "main",
     contractVersion: "2.1.0", origin: "provisioned", hostingProvider: "Gaiada", controlPanel: "none",
     stack: "next", topologyCheckedAt: "2026-08-30T02:15:00.000Z", crawlConsent: true,
@@ -4379,6 +4444,8 @@ function demoPortfolio() {
 
   const viceroyDms = site({
     id: "site-dms-prod", domain: "dmsviceroy.com", environment: "production",
+    // Has a property row (sm-prop-3) but no consent -> the REQUESTABLE state.
+    propertyId: "sm-prop-3",
     hostRef: "hostyourservices-syd5", hostKind: "client-cpanel", adoption: "tracked",
     // A real, non-navigable remote: another agency builds this one on GitLab over SSH.
     repoUrl: "git@gitlab.com:partner-agency/dmsviceroy.git", repoBranch: "master",

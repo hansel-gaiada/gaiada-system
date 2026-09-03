@@ -4,17 +4,24 @@
 // `listApprovals` fetcher into the browser bundle. `lib/approvals.ts`
 // re-exports all of this for server-component callers (the page) so there's
 // still one import path from the server side.
-export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent";
+// `search` added 2026-09-03 for probe-consent requests. This union MIRRORS the backend's
+// `core/approvals-urgency.ts`; an origin missing here has no facet chip and no label, so the rows
+// arrive from the API and land under a blank filter — which is how a request becomes unfindable.
+export type ApprovalOrigin = "agency" | "pipeline" | "hr" | "automation" | "agent" | "search";
 export type ApprovalStatus = "pending" | "decided";
 export type ApprovalSort = "urgency" | "age";
 
-export const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent"];
+export const ORIGINS: ApprovalOrigin[] = ["agency", "pipeline", "hr", "automation", "agent", "search"];
 export const ORIGIN_LABEL: Record<ApprovalOrigin, string> = {
   agency: "Agency",
   pipeline: "Pipeline",
   hr: "HR",
   automation: "Automation",
   agent: "Agent",
+  // Not "Search": from the inbox's point of view what arrives under this origin is a request to
+  // record that we may probe a client's domain, and the chip has to say what the reader is being
+  // asked to decide. The module that owns the column is an implementation detail here.
+  search: "Probe consent",
 };
 
 // Matches the backend's UnifiedApprovalItem (approvals.controller.ts) exactly —
