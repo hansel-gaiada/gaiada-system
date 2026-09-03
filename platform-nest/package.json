@@ -35,6 +35,7 @@
     "seed:social-content-brief-automation": "node dist/seed/social-content-brief-automation.js",
     "seed:owner-grant": "node dist/seed/owner-grant.js",
     "seed:org-structure-refresh": "node dist/seed/org-structure-refresh.js",
+    "seed:monitoring-delivery": "node dist/seed/monitoring-delivery.js",
     "seed:retire-placeholder-hr": "node dist/seed/retire-placeholder-hr.js",
     "seed:reassign-retired": "node dist/seed/reassign-retired.js",
     "seed:purge-retired-history": "node dist/seed/purge-retired-history.js",
