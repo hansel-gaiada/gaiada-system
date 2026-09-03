@@ -11,6 +11,53 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### monitoring `0.3.2` - one source of truth for a heartbeat monitor's grace period (2026-09-03, GS) - PROTOTYPED
+
+`monitor_heartbeats.grace_sec` (0116) was written ONCE at monitor creation and never updated — the
+PATCH path (`updateMonitor`) only ever touched `monitors.config`. `runner.ts`'s `DUE_SELECT` aliased
+the column in as `hb_grace_sec` but nothing read that alias: the grace period `evaluateHeartbeat`
+actually used always came from `driver.validate(row.config)`, i.e. `monitors.config.graceSec`
+(defaulting to 300s). A column on the heartbeat table, named exactly like the thing it appeared to
+gate, silently diverged from the enforced value the moment a monitor was edited — already cost a real
+debugging cycle (a fixture set the column to 600 believing it controlled the grace, the runtime kept
+enforcing 300, and the test failed looking like an unrelated bug; see
+`runner-notify-delivery.db.test.ts`'s fixture comment for the full account).
+
+**Chose to DROP the column rather than teach the runner to read it.** `monitors.config.graceSec` was
+already authoritative in practice — validated by the driver, kept current by both write paths — and a
+repo-wide grep (platform-nest, platform-ui, mcp-hub, docs, every `*.sql`) found exactly one other
+reference: `monitoring_heartbeat_touch` (0119) selected and returned it, but its sole caller (the
+unauthenticated heartbeat-ingest endpoint) runs `SELECT * FROM monitoring_heartbeat_touch($1)` and
+discards the whole result. Nothing anywhere made a decision from this column.
+
+**Backend:**
+- `migrations/202609031200_monitor_heartbeats_drop_grace_sec.sql` — redefines
+  `monitoring_heartbeat_touch` without `grace_sec` in its `RETURNS TABLE` (a function's output columns
+  can't change under `CREATE OR REPLACE`, so it is dropped and recreated), then
+  `ALTER TABLE monitor_heartbeats DROP COLUMN grace_sec`. Surgical: the column's
+  `CHECK (grace_sec >= 30)` was single-column, not shared, so dropping it carries none of the
+  DROP+ADD-on-a-shared-CHECK risk this repo has been burned by before. **Not yet applied to any live
+  database — owner runs it.**
+- `monitoring.controller.ts`'s `createMonitor` no longer writes `grace_sec` on the
+  `monitor_heartbeats` INSERT (4 columns now, not 5).
+- `runner.ts`'s `DUE_SELECT` no longer selects `hb.grace_sec`; the `DueRow` type drops `hb_grace_sec`.
+  `monitor_heartbeats` now contributes only `last_seen_at` to a heartbeat evaluation.
+- Test fixtures that used to poke `monitor_heartbeats.grace_sec` directly
+  (`monitoring.controller.test.ts`, `runner-sweep.db.test.ts`, `runner-notify-delivery.db.test.ts`)
+  now set the grace period through `monitors.config.graceSec` instead, matching what the runner has
+  always actually read.
+- **New:** `heartbeat-gracesec-single-source.db.test.ts` pins the invariant this ticket exists to
+  guarantee — that the stored and enforced grace period cannot differ. A schema assertion proves
+  `monitor_heartbeats` has no `grace_sec` column at all (so the trap cannot be reintroduced by a
+  careless future migration); a behavioural test creates a heartbeat monitor via the real HTTP surface
+  with a 60s grace, drives it overdue, confirms `down`, then PATCHes the grace to 1000s covering the
+  SAME staleness and re-sweeps — this recovers to `up` only because the runner reads the current
+  config, not a value frozen at creation. Run against a version of the code that still read a frozen
+  `monitor_heartbeats.grace_sec`, this test would fail exactly the way the original defect did.
+
+**Cap: PROTOTYPED.** The migration is written, not deployed — see the gate run for the local suite
+result; a `senior-db`/owner-approved run against the live DB (18 real monitors) is a separate step.
+
 ### monitoring `0.3.1` - channel health is TRUE, not decorative (2026-09-03, CH) - PROTOTYPED
 
 `monitor_channels.last_delivery_at`/`last_delivery_ok`/`failure_count` existed since `0116` and

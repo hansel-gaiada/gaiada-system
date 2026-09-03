@@ -46,17 +46,19 @@ describe.skipIf(!TEST_URL)("CH · notifyIncidents writes monitor_channels health
     // catch-all-except-severity route matches exactly ONE channel — otherwise a single catch-all
     // route would fan BOTH events out to BOTH channels and the success/failure assertions below
     // would contaminate each other.
-    // ⚠ `monitor_heartbeats.grace_sec` is SELECTED by runner.ts's DUE_SELECT (as `hb_grace_sec`) but
-    // never actually passed to the driver — `ctx.heartbeat` only carries `{lastSeenAt, now}`
-    // (runner.ts around the `heartbeat:` ctx literal), and the grace period `evaluateHeartbeat`
-    // receives comes from `driver.validate(row.config)`, i.e. `monitors.config.graceSec` (defaulting
-    // to 300s when unset). That column looks load-bearing and is not — a real, PRE-EXISTING latent
-    // defect unrelated to this ticket's delivery-tracking columns, out of scope to fix here. The
-    // first version of this fixture set `monitor_heartbeats.grace_sec = 600` believing it controlled
-    // the grace period, which left the ACTUAL grace at the 300s default — exactly equal to the
-    // "recovery" test's 5-minute clock jump, so a few milliseconds of real test overhead pushed
-    // `silentMs` just past `graceMs` and the monitor read `down` instead of `up`. Fixed by setting
-    // the column the runner actually reads.
+    // ⚠ `monitor_heartbeats.grace_sec` used to exist here (0116) and LOOKED load-bearing — same
+    // table, same name as the thing it appears to gate — but `ctx.heartbeat` only ever carried
+    // `{lastSeenAt, now}` (runner.ts's `heartbeat:` ctx literal); the grace period
+    // `evaluateHeartbeat` actually received came from `driver.validate(row.config)`, i.e.
+    // `monitors.config.graceSec` (defaulting to 300s when unset). The column was written once at
+    // creation and never updated, so it silently diverged from whatever `config.graceSec` held after
+    // any edit. The FIRST version of this fixture set `monitor_heartbeats.grace_sec = 600` believing
+    // it controlled the grace period, which left the ACTUAL grace at the 300s default — exactly
+    // equal to the "recovery" test's 5-minute clock jump below, so a few milliseconds of real test
+    // overhead pushed `silentMs` just past `graceMs` and the monitor read `down` instead of `up`.
+    // Migration 202609031200 removed the column outright rather than leaving a second, driftable
+    // representation around — see it for the full writeup — so grace now lives ONLY in
+    // `monitors.config.graceSec`, set below via the monitor's own `config` column.
     const mk = await pool.query<{ id: string }>(
       `INSERT INTO monitors (tenant_id, client_id, name, kind, status, severity, interval_sec, config, last_checked_at)
        VALUES ($1,$2,'ok-path','heartbeat','unknown','ticket',60,'{"graceSec":600}'::jsonb,NULL) RETURNING id`,
@@ -69,8 +71,8 @@ describe.skipIf(!TEST_URL)("CH · notifyIncidents writes monitor_channels health
     // ahead of a freshly-touched `last_seen_at` and land back INSIDE grace — a small grace would
     // still read `down` at that offset and the recovery assertion would prove nothing.
     await pool.query(
-      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, grace_sec, last_seen_at)
-       VALUES ($1,$2,$3,'ok-path-hash',600, now() - interval '1 hour')`,
+      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, last_seen_at)
+       VALUES ($1,$2,$3,'ok-path-hash', now() - interval '1 hour')`,
       [tenantId, clientId, okMonitorId],
     );
 
@@ -81,8 +83,8 @@ describe.skipIf(!TEST_URL)("CH · notifyIncidents writes monitor_channels health
     );
     failMonitorId = fk.rows[0].id;
     await pool.query(
-      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, grace_sec, last_seen_at)
-       VALUES ($1,$2,$3,'fail-path-hash',60, now() - interval '1 hour')`,
+      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, last_seen_at)
+       VALUES ($1,$2,$3,'fail-path-hash', now() - interval '1 hour')`,
       [tenantId, clientId, failMonitorId],
     );
 

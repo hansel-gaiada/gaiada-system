@@ -49,7 +49,7 @@ unfalsifiable after.
 | invoice | `invoices` | 3 |
 | it | `it` | 4 |
 | knowledge | `knowledge` | 2 |
-| monitoring | `monitoring` | 2 |
+| monitoring | `monitoring` | 3 |
 | pm | `pm` | 9 |
 | reports | `checkins` · `reports` | 15 |
 | search | `search` | 16 |

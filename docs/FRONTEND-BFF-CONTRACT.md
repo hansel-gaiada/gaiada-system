@@ -3482,6 +3482,17 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
     here — resolved at merge (2026-09-02) from the schema and the runner, replacing what both
     tickets had each documented as a guess. If the divergence is closed, make the FIXTURE match
     production (stop cascading), not the other way round.
+20. **A heartbeat monitor's grace period has exactly ONE source of truth: `MonitorDetail.config`
+    (`graceSec`, part of the driver-validated config `POST`/`PATCH` already accept and persist to
+    `monitors.config`).** `monitor_heartbeats.grace_sec` existed from `0116` through 2026-09-03 and
+    LOOKED authoritative — same table as the heartbeat's `lastSeenAt`, same name as the value it
+    appeared to gate — but it was written once at creation and never updated by `PATCH`, while the
+    runner always evaluated grace from `config.graceSec`. Editing a heartbeat monitor's grace through
+    the UI therefore changed the enforced value correctly the whole time; querying the DB column
+    directly would have shown a stale number after the first edit. Migration `202609031200` removed
+    the column outright — do not resurrect a heartbeat-specific grace field outside `config`, and if a
+    future UI surface needs to read a heartbeat monitor's configured grace, read `config.graceSec` off
+    `MonitorDetail`, never a `monitor_heartbeats` column.
 
 ### UI consumers (built 2026-08-13; MON-20 additions 2026-09-02)
 
