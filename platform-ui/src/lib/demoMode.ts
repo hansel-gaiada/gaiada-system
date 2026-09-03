@@ -36,11 +36,15 @@ function isProductionRuntime(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+// Leads with the login bypass, deliberately. Whoever reads this at 2am is deciding whether to force
+// the deployment back up, and "invented data" sounds survivable while "anyone can log in" does not.
+// The severity ordering here is the message's whole job.
 export const DEMO_MODE_IN_PRODUCTION_MESSAGE =
-  "DEMO_MODE=1 is set while NODE_ENV=production. Refusing to start: in demo mode every API read is " +
-  "answered from in-memory fixtures instead of the platform, so the app would serve invented " +
-  "invoices, clients and monitors to real users while appearing completely healthy. Unset DEMO_MODE " +
-  "on this deployment. It is a local verification harness and is never valid in production.";
+  "DEMO_MODE=1 is set while NODE_ENV=production. Refusing to start: demo mode bypasses login " +
+  "(app/login/actions.ts accepts ANY email as a valid session) and answers every API read from " +
+  "in-memory fixtures instead of the platform, so this deployment would let anyone in and serve " +
+  "invented invoices, clients and monitors to real users while appearing completely healthy. Unset " +
+  "DEMO_MODE on this deployment. It is a local verification harness and is never valid in production.";
 
 /** Throws if DEMO_MODE is requested in a production runtime. Called from the boot guard
  *  (`next.config.ts`) so a misconfigured deployment dies at start, and again from `isDemoMode()` so
