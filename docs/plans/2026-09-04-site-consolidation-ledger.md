@@ -318,3 +318,35 @@ bigger than what a domain-key join fix should carry. A follow-up ticket should: 
 existing `search_properties.domain` values are not already lowercase, (2) if any, migrate them to
 lowercase (a genuine backfill, with the tenant GUC set correctly per-row, per the migration-
 backfill-RLS trap), and (3) then add the matching CHECK, mirroring `webdev_sites.domain`'s.
+
+---
+
+## Owner decisions, 2026-09-04 (post-apply)
+
+- **Client assignment APPLIED.** 76 of 81 registry rows now carry a client (was 23); 5 remain NULL
+  and all 5 are correct: four internal sites (a NULL client there is a delivery fact, WSK-D35) plus
+  one row where tracing made the question *sharper* rather than answerable — a culinary-school site
+  whose administrative contact is not ours and whose build lives in a third-party agency's
+  repository. Assigning a client there would assert a relationship nothing supports.
+- **Method that resolved it: trace, don't infer.** The owner could not identify the ambiguous rows
+  from the registry, so each was read at source — `wp option get blogname / blogdescription /
+  admin_email` against the live install on the hosts we operate. Reusable signal that fell out:
+  **`admin_email` says who MANAGES a site.** A `wp@` / `web@` / staff address on our own domain
+  means we built it; an address on the client's own domain means the client administers it. That is
+  very nearly the `access` fact this registry cannot currently populate, and it is far cheaper than
+  surveying 81 hosts by hand. Worth a ticket.
+- **Golden Monkey merged to ONE client (owner).** Ubud and Sanur were separate sites on separate
+  domains historically; the estate has since consolidated to one website on one domain. All three
+  staging rows now point at a single client, the two legacy rows carry a `notes` marker recording
+  why they exist, and the two residue client records were soft-deleted under an `origin_site` guard
+  so the statement could not touch a pre-existing client.
+- **DEFERRED (owner):** one client site is held in a staff member's personal code repository. This
+  is a repo-custody problem, not a client-relationship one — the relationship is unambiguously ours.
+  It is exactly the failure WSK-D29 rules against (org-owned credential, never a personal account).
+  Deferred by owner decision, recorded here so it is not lost; the affected site is identified in
+  the gitignored worklist, not in this public file.
+- **`api.gaiada.online` has no history in this estate.** Proposed as the public hostname for the
+  delivery surface, then traced on the owner's instruction: **NXDOMAIN**, zero references anywhere
+  in this repository, and no `api.*` `server_name` or TLS certificate on any of `gda-aicenter`,
+  `helios` or `delphi`. It was never a backend and never a test — it is simply a name that does not
+  exist yet, which is why it is unreachable. The hostname is still open for a different choice.
