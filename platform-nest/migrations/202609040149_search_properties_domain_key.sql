@@ -1,0 +1,134 @@
+-- 202609040149_search_properties_domain_key.sql — WSK-D35: domain, not (client_id, domain), is the
+-- key. Design: docs/blueprints/webdesk-design-v2.md §04 (webdev_sites <-> search_properties join),
+-- WSK-D31 ("one domain, one property row, one consent gate, one crawler"). Companion doc:
+-- docs/plans/2026-09-04-site-consolidation-ledger.md. Owner-approved 2026-09-04; the design doc's
+-- decision log (WSK-D35, recorded separately this same turn) is authoritative for the ruling text —
+-- this header restates only what the DDL below actually does.
+--
+-- ── NUMBERING (migrations/README.md — the timestamp scheme) ────────────────────────────────────
+-- `date -u +%Y%m%d%H%M` at authoring time. `ls migrations | sort | tail` showed head =
+-- 202609030200_monitor_channel_delivery_columns_comment.sql; re-verified immediately before writing.
+--
+-- ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────────────────────────
+-- `search_properties` (0034) carries `UNIQUE (tenant_id, client_id, domain)`. That permits the SAME
+-- domain to exist under TWO DIFFERENT client_id values — which contradicts WSK-D31's own words in
+-- the same breath it states them ("one domain, one property row"). The schema never enforced its
+-- own rule.
+--
+-- The symptom that surfaced it: webdev-design-v2.md §04 joins `webdev_sites.domain` to
+-- `search_properties` on `(tenant_id, client_id, domain)`. `webdev_sites.client_id` is NULLABLE
+-- (202608300747 — an internal site has no client); `search_properties.client_id` is NOT NULL
+-- (0034). A `webdev_sites` row with `client_id IS NULL` can therefore NEVER join to its own
+-- property row through that key, no matter what exists on the other side — not a missing-data
+-- problem, a wrong-key problem. This is exactly the live case for the two Hostinger cPanel/WHM VPS
+-- rows (`interlacenetwork.com`, `cosmedic.bimcbali.com`), imported with `client_id NULL` pending
+-- owner assignment.
+--
+-- ── THE FIX: DOMAIN IS THE KEY, client_id IS AN ATTRIBUTE ──────────────────────────────────────
+-- A domain belongs to exactly one client, so uniqueness must be per (tenant_id, domain), never per
+-- (tenant_id, client_id, domain). This migration adds the ADDITIONAL partial unique index that
+-- states that fact; the join this unblocks (`webdev_sites.domain` -> `search_properties.domain` on
+-- `(tenant_id, domain)` alone) is application/reporting-side work, not schema work, and is done in
+-- `scripts/webdesk-consolidation-ledger.sql` this same turn, not here.
+--
+-- ── WHY PARTIAL: `WHERE deleted_at IS NULL` ─────────────────────────────────────────────────────
+-- A plain `UNIQUE (tenant_id, lower(domain))` would let a single soft-deleted row block every future
+-- domain re-registration forever, because Postgres UNIQUE treats a soft-deleted row exactly like a
+-- live one — and, this estate has already been bitten by the mirror-image trap once
+-- (null-defeats-unique-constraints memory): NULL failing to constrain when it should. This is the
+-- opposite failure mode — a NON-NULL, soft-deleted row constraining when it should NOT — and the
+-- fix is the same shape webdev_sites' own `ux_webdev_sites_tenant_domain` (202608300747) already
+-- uses: partial, `WHERE deleted_at IS NULL`, so a soft-deleted property never blocks a live one.
+--
+-- ── WHY `lower(domain)`, NOT A PLAIN COLUMN INDEX ───────────────────────────────────────────────
+-- `webdev_sites.domain` carries `CHECK (domain = lower(domain) ...)` (202608300747) — every row is
+-- already normalized. `search_properties.domain` (0034) carries NO such CHECK — verified by reading
+-- 0034 and every later migration that touches this table (202608300818/SM-74, and this repo's own
+-- grep for `search_properties` across migrations/) directly rather than assumed. Two rows differing
+-- only by case (`Client.com` / `client.com`) would satisfy a plain `UNIQUE (tenant_id, domain)` while
+-- being the same domain in reality, and would defeat the very join this migration exists to make
+-- total. The functional index on `lower(domain)` is therefore what actually closes the gap; adding a
+-- CHECK to enforce stored-lowercase on `search_properties` would be a live-table behaviour change
+-- beyond this ruling's scope and is raised as a follow-up in the companion ledger doc instead, NOT
+-- done here.
+--
+-- ── WHAT THIS MIGRATION DELIBERATELY DOES NOT DO ────────────────────────────────────────────────
+-- 1. It does NOT touch the existing `UNIQUE (tenant_id, client_id, domain)` constraint (0034) in any
+--    way — no DROP, no re-declare. `202608311000_integration_connections_github_app_owner_kind.sql`
+--    (read in full before writing this file) records a live incident where a DROP+ADD on a shared
+--    CHECK re-declared the whole allow-list from a hardcoded list and silently deleted a value a
+--    DIFFERENT migration had added in between — the fix here is the same lesson applied to a UNIQUE
+--    constraint instead of a CHECK: purely additive, so there is nothing to silently lose.
+-- 2. It does NOT add a CHECK forcing `search_properties.domain` to be stored lowercase. See above.
+-- 3. It does NOT insert, update, or delete a single row — no sentinel internal-client row, no
+--    backfill, nothing. That is a ticket in the companion ledger doc (docs/plans/2026-09-04-site-
+--    consolidation-ledger.md), not DML here, for three reasons stated in full there: it touches live
+--    client data, `clients` is tenant-scoped under RLS (a migration-time INSERT runs as
+--    `platform_owner` with the tenant GUC unset — platform-nest/CLAUDE.md's "three walls" — which is
+--    exactly the migration-backfill-RLS trap: a WITH CHECK failure on live, invisible in CI because
+--    CI migrates as a superuser that bypasses RLS), and it needs an owner-visible name a migration
+--    file cannot decide on its own.
+-- 4. It is DDL-only: one DO block that only SELECTs (a precondition guard, see below) and one CREATE
+--    UNIQUE INDEX. No UPDATE/DELETE/INSERT anywhere in this file, so `lint:migration-rls`'s
+--    silent-no-op class (unset app.current_tenant_ids GUC during a migration -> ZERO rows touched,
+--    no error) has nothing to find here — confirmed by reading that lint's own detector logic, not
+--    assumed from the DML count.
+--
+-- ── THE PRECONDITION ────────────────────────────────────────────────────────────────────────────
+-- `CREATE UNIQUE INDEX` on data that already violates the new constraint fails with a bare
+-- `duplicate key value violates unique constraint` error, naming neither tenant nor domain clearly
+-- enough to act on. The readable diagnostic therefore has to run OUTSIDE this migration, as an
+-- operator step, for the RLS reason set out in full further down. The runner wraps every file in its
+-- own BEGIN/COMMIT (`src/db/migrate.ts`), so a failure here leaves nothing half-applied: either the
+-- whole file commits, or none of it does.
+--
+-- ── ROLLOUT ──────────────────────────────────────────────────────────────────────────────────────
+-- Additive, no deploy-order dependency on any application code (nothing reads this index yet; the
+-- join rewrite is in scripts/webdesk-consolidation-ledger.sql, a manually-run report, not a code
+-- path). Deploy step: run the duplicate-domain diagnostic (ledger doc's new first section) against
+-- the live database BEFORE this migration ships; if it returns any row, resolve every one first
+-- (reassign/merge/soft-delete) — this migration is expected to be a plain additive apply on a clean
+-- precondition, never a backfill.
+
+-- ── WHY THERE IS NO DO-BLOCK GUARD HERE (measured on the live box, 2026-09-04) ─────────────────
+-- An earlier draft of this file opened with a DO block that ran the duplicate-domain check and
+-- RAISEd a message naming every offending domain. **That guard was verified to be a silent no-op
+-- and has been removed rather than left in place looking protective.** Why, exactly:
+--
+--   * `search_properties` has `relrowsecurity = true` AND `relforcerowsecurity = true` — FORCE RLS
+--     applies its policies to the table OWNER too, not just to ordinary roles.
+--   * The migration runner connects as `platform_owner`, which was read from the live cluster and
+--     is `usesuper = false`, `bypassrls = false`.
+--   * Migrations set no tenant GUC, so `app_current_tenants()` returns the empty set.
+--
+-- Net effect: the guard's SELECT saw ZERO rows on a table holding 37, `dupe_count` was always 0, and
+-- the RAISE could never fire — the estate's own migration-backfill-RLS-trap (an unset GUC yields
+-- zero rows with NO error) reproduced inside a brand-new migration. `SET row_security = off` is not
+-- an escape either: for a non-BYPASSRLS role on a FORCE-RLS table it errors unconditionally, which
+-- would fail every deploy rather than only the unsafe ones.
+--
+-- So the precondition lives in the two places where it can actually be enforced:
+--   1. OPERATOR STEP, before this ships — Section 0 of `scripts/webdesk-consolidation-ledger.sql`,
+--      run as the APPLICATION role with EVERY tenant id in `app.current_tenant_ids` and
+--      `app.scopes = 'webdev,search'`. Run 2026-09-04 against the live database: 0 duplicate
+--      domains, 37 rows genuinely visible. That is the named-domain diagnostic.
+--   2. THE INDEX BUILD ITSELF — `CREATE UNIQUE INDEX` scans every row regardless of RLS, so real
+--      duplicates still abort this migration. The error is a bare constraint violation rather than
+--      a friendly list, which is precisely why step 1 is not optional.
+
+-- The domain-primary key WSK-D35 requires. ADDITIONAL to 0034's `UNIQUE (tenant_id, client_id,
+-- domain)` — that constraint is left completely alone (see header). Partial on `deleted_at IS NULL`
+-- (a soft-deleted row must never block re-registering its domain); functional on `lower(domain)`
+-- because this table, unlike webdev_sites, carries no stored-lowercase CHECK (see header) and a
+-- case-only duplicate would otherwise defeat both this index's own purpose and the join it enables.
+CREATE UNIQUE INDEX ux_search_properties_tenant_domain
+  ON search_properties (tenant_id, lower(domain))
+  WHERE deleted_at IS NULL;
+
+COMMENT ON INDEX ux_search_properties_tenant_domain IS
+  'WSK-D35: domain is the key, client_id is an attribute. One (tenant_id, lower(domain)) per live '
+  'row — enforces WSK-D31''s "one domain, one property row" literally, which the pre-existing '
+  '(tenant_id, client_id, domain) UNIQUE (0034) did not. Partial on deleted_at IS NULL so a '
+  'soft-deleted property never blocks re-registering its domain; functional on lower(domain) '
+  'because search_properties.domain carries no stored-lowercase CHECK (unlike webdev_sites.domain) '
+  '— see this migration''s header for the follow-up this raises.';

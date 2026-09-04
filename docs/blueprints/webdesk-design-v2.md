@@ -1,10 +1,27 @@
-# WebDesk — Design v2.0 (the unified backend, the portfolio, and repo control)
+# WebDesk — Design v2.2 (the unified backend, the portfolio, and repo control)
 
 > **Status:** AUTHORITATIVE. **Supersedes [`webdesk-design.md`](./webdesk-design.md) v1.1** and
 > **[`provision-erp-seam-design.md`](./provision-erp-seam-design.md) v1.0** (§08 absorbs the seam).
-> **Version:** v2.0 · **Date:** 2026-08-29 · **Author:** Claude, from owner rulings 2026-08-28/29
+> **Version:** v2.2 · **Date:** 2026-09-04 · **Author:** Claude, from owner rulings 2026-08-28/29,
+> 2026-08-31 and 2026-09-04
 > **Build from this file.** Where a section says *carried unchanged*, v1.1's text remains correct
 > and is not reproduced — read it there. Everything else here overrides it.
+>
+> **v2.2 records the three owner rulings of 2026-09-04 (WSK-D34 · D35 · D36, §14):** the two-proof
+> split — the P1 test suite runs on `sumopod`, the containment probes on `gda-aicenter` — resolving
+> OQ-2.9; domain becomes the `search_properties` join key with `client_id` demoted to an attribute,
+> enforced by an additive partial unique index (amends WSK-D31); and a sentinel internal-client row
+> that makes internal sites first-class in the SEO/monitoring path. Amended for them: §01 evidence
+> caveat · §03 (containment probe set, new) · §04 registry note + join subsection · §07 consent
+> gate · §12 P1 · §13 (**OQ-2.9 resolved**) · §14 (D31 marked amended; D34–D36 new). Nothing v2.2
+> adds is verified: the probes are unrun (P1, §12) and the index migration is unapplied — the
+> migration, the ledger rework and the sentinel ticket are sibling work in flight on 2026-09-04.
+>
+> **v2.1 folds in the 2026-08-31 estate re-zoning (WSK-D32, §14):** hosts are zoned by role,
+> superseding WSK-D27's two-tier rule and retiring Zone A/B as host nomenclature; WebDesk's host
+> is `gda-aicenter`, not `sumopod`. Amended: §00 move 1 · §00a · §01 evidence caveat · §02 ·
+> §03 (rewritten) · §10 lever 1 · §12 P1/P2 · §13 (OQ-2.2, OQ-2.7, new OQ-2.9; **OQ-2.6 resolved**) · §14 (WSK-D32, **WSK-D33** — the vault ruling of 2026-09-04).
+> The `gda-aicenter` facts in §03 were probed read-only on 2026-08-31.
 >
 > **Ground-checked against the working tree and the live estate on 2026-08-28/29.** Every status
 > claim below was read from source or probed read-only; none was taken from a tracker. Where a
@@ -22,10 +39,11 @@ what the estate actually is.
 
 Six moves:
 
-1. **Zone B lands on `sumopod`, hardened**, under a new estate rule that assigns every host to a
-   tier by purpose (§00a, §03). Not a dedicated box, so §03's containment claim is rewritten
-   honestly rather than restated — including a standing private path toward Zone A that the old
-   text would have called disqualifying.
+1. **The public delivery surface ("Zone B") lands on `gda-aicenter`, hardened in-box** — re-zoned
+   2026-08-31 by WSK-D32 (§00a, §03, §14), which supersedes the `sumopod` placement this summary
+   originally recorded. Not a dedicated box, so §03's containment claim is rewritten honestly
+   rather than restated — the surface now shares a kernel with the ERP database itself, which the
+   old text would have called disqualifying.
 2. **Payload is the editorial layer, not the read path** (WSK-D24, folded in properly at §05).
    `/v1` is served by our own tenant-aware SQL route. This already shipped; v1.1 never said so.
 3. **The portfolio becomes a first-class object** (§07). Most client sites will never be tenants,
@@ -42,7 +60,33 @@ Six moves:
 
 ---
 
-## §00a · The estate tier rule (WSK-D27 — owner-ruled 2026-08-29)
+## §00a · The estate zoning rule (WSK-D27, 2026-08-29 — SUPERSEDED by WSK-D32, 2026-08-31)
+
+> **SUPERSEDING RULING — WSK-D32 (owner, 2026-08-31; recorded §14).** Hosts are zoned by **role**,
+> and Zone A / Zone B is retired as a way of naming hosts:
+>
+> | Role | Hosts |
+> |---|---|
+> | **Control plane — the ERP** | `gda-aicenter` ("system lives in aicenter"); expandable if needed |
+> | **Client project delivery** | `delphi` (staging) · `helios` (production) · the Hostinger WP servers · client-owned servers. **Client projects only** |
+> | **Observation** | `sumopod` — observability for the whole estate, including `helios`/`delphi`/WP/client/cPanel |
+>
+> **What this changes here:** "Zone B runs on `sumopod`" is **withdrawn**. WebDesk is
+> ERP-operational, so it lands on `gda-aicenter` — as do the LMS lab-runner and Postiz.
+> Observability **stays** on `sumopod`: a monitor co-located with what it monitors dies with it.
+> Why the A/B tiers died as host names: A/B was a *trust tier* that needed a host to live on, and
+> when `gda-s01` was decommissioned it had nowhere to go; role zoning maps to machines that
+> actually exist. `sumopod` remains a personal VPS holding a company function, kept safe by one
+> rule: **nothing on it is the only copy, and nothing whose loss blocks a company function** —
+> backups *of* `gda-aicenter` may live there; backups of `sumopod`'s own workloads may not.
+>
+> **What survives from D27:** the corollary at the end of this section — headless WordPress is not
+> a deferrable phase, because Hostinger is client-delivery under role zoning and WP stays there
+> **permanently** — and "Milestone 0 stops being blocked", though for a different reason: its
+> proof tenant is internal, and internal/ERP-operational now means `gda-aicenter`, not `sumopod`.
+> The accepted cost of the move is stated in §03, not here.
+
+The superseded v2.0 text follows, kept readable per this document's convention:
 
 **Every host belongs to exactly one tier, decided by purpose, never by spare capacity.**
 
@@ -86,9 +130,14 @@ fixing it is part of this design's landing (§12, step 0).
 ### The evidence caveat that governs every row above
 
 A standing rule landed 2026-08-26: **tests count only on a Linux server, never the Windows laptop.**
-Every green in this program predates it. The code is not in doubt; the *evidence* is. Under §00a
-`sumopod` is now both the home and the test host, which is what makes re-verification possible at
-all — it is the first item in §12 and the real content of the Milestone-0 gate.
+Every green in this program predates it. The code is not in doubt; the *evidence* is. Under WSK-D32
+the home is `gda-aicenter`, and v2.0's convenient identity — home box and test box being the same
+machine — is gone: the home is now the live ERP kernel. Linux re-verification is still the first
+item in §12 and the real content of the Milestone-0 gate. **Which** Linux box runs the greens was
+OQ-2.9; WSK-D34 (2026-09-04) settled it as a split: the greens run on `sumopod` — the suite proves
+the *code* — while the containment probes prove the *boundary* and can only run on `gda-aicenter`
+(§03, §12). Home box and test box are different machines, this time by ruling rather than by
+accident.
 
 ### Two gaps that block live operation, named because they are easy to miss
 
@@ -115,8 +164,8 @@ flowchart TB
     UI --> PN --- PDB
     HUB --> PN
   end
-  subgraph ZB["ZONE B — WebDesk · sumopod (hardened, co-tenanted)"]
-    PX[Caddy — the only public listener]
+  subgraph ZB["ZONE B boundary — WebDesk · gda-aicenter, same kernel as Zone A (WSK-D32)"]
+    PX[Caddy — binds 127.0.0.1 only<br/>host nginx owns :80/:443, routes by hostname]
     GW[payload-gateway → /v1<br/>our own SQL read path]
     PAY[Payload 3 — admin/editorial only]
     API[NestJS api — forms · mail · media · control]
@@ -126,92 +175,156 @@ flowchart TB
     PAY --- ZDB
     API --- ZDB
   end
-  subgraph NB["NEIGHBOURS ON THE SAME BOX — not ours to trust"]
-    OBS[gaiada-obs · the estate's telemetry store]
-    LAB[lms-lab-runner · executes employee code]
-    OTH[10 unrelated projects]
-    WG[[WireGuard hub — live peer to gda-aicenter]]
+  subgraph NB["CO-TENANTS ON THE SAME KERNEL — gda-aicenter, 27 containers at the 2026-08-31 probe"]
+    WSP[gaiada-whisper — CPU-only, no resource limits<br/>60 s of audio ⇒ load 4.61 of 4]
+    LAB[lms-lab-runner · executes employee code<br/>moves here under WSK-D32 · runc-only box]
+    OTH[~20 further containers<br/>platform-ui published on 0.0.0.0:3005]
   end
   ADOPTED[Adopted client sites] -->|HTTPS + scoped key| PX
   TRACKED[Tracked sites — client cPanel, Hostinger, delphi/helios] -.->|"observed only, never touched"| PN
   PN ==>|"one A→B channel: control plane"| PX
-  API -. "B→A: signed fact webhooks · write-only OTLP" .-> ZA
+  API -. "B→A: signed fact webhooks" .-> ZA
+  API -. "write-only OTLP" .-> OBS[(sumopod — observation role<br/>the estate's observability store)]
   GH[(GitHub — repos created BY the ERP)] <-->|"org-owned credential"| PN
 ```
 
-**Reading it.** The only structural change from v1.1 is the middle-right box: Zone B no longer sits
-alone on a dedicated machine. It has neighbours, one of which is a code-execution sandbox and one of
-which is a tunnel endpoint into Zone A. That is what §03 now has to account for.
+**Reading it.** The structural fact (WSK-D32) is that the three boxes above share one kernel: the
+public surface's neighbours are no longer `sumopod`'s tenants but the ERP itself — its live
+Postgres, Keycloak and Cerbos — plus a code-execution sandbox and a neighbour with no resource
+limits. `sumopod` drops out of the serving path entirely and keeps only the observation role.
+That is what §03 now has to account for.
 
 ---
 
-## §03 · Trust zones — the sumopod exception, stated in full
+## §03 · Trust zones — the aicenter co-tenancy, stated in full
 
 Zone definitions carry unchanged from v1.1. The channel table (one A→B, two B→A) carries
-unchanged. **What changes is the containment statement**, and it must be rewritten rather than
-repeated, because v1.1 explicitly ruled out this exact arrangement:
+unchanged. **What changes is the containment statement**, again — v2.0 rewrote it for `sumopod`,
+and WSK-D32 (2026-08-31) makes that rewrite obsolete. v1.1 explicitly ruled out arrangements of
+exactly this shape:
 
 > v1.1 §03: *"GDA-AI01 is NOT a candidate for the Zone B box … co-tenanting Zone B beside unrelated
 > internet-facing services destroys the containment statement this whole section is built on — the
 > blast-radius table becomes fiction the moment a neighbour on the same box is compromised."*
 
-That reasoning was sound and it applies to `sumopod` too. The owner has weighed it and ruled
-(WSK-D27). What a design owes an accepted risk is not a re-argument, but an accurate statement of
-what was accepted and the cheapest available mitigation.
+That reasoning was sound, it applied to `sumopod`, and it applies with more force to
+`gda-aicenter`. The owner has weighed it and ruled — twice, the cost raised and reaffirmed both
+times (WSK-D27, then WSK-D32). What a design owes an accepted risk is not a re-argument, but an
+accurate statement of what was accepted and the cheapest available mitigation.
+
+### Zone B is a boundary, not a place
+
+Two host assignments in three days is the lesson: a hostname is not an architecture. What this
+section defends is a **boundary** — the public multi-tenant content/forms/media surface: its own
+compose project, its own Postgres/Redis/MinIO containers, its own docker network, zero ERP
+credentials, loopback-only behind the host's nginx. A boundary survives the next host move; a
+hostname does not. For new writing prefer **"the ERP control plane"** and **"the public delivery
+surface"**; "Zone A"/"Zone B" stay only where carried sections already use them.
 
 ### What is actually on the box
 
-**This repository is public, so the address map is deliberately not here.** Host identity, the
-neighbour inventory, the mesh addressing and the published-port list live in the gitignored
-operator note `docs/blueprints/webdesk-zoneb-box-detail.local.md` — measured
-read-only 2026-08-29 and kept current there. What follows is the part an architecture reader
-needs, and it is complete on its own terms.
+**This repository is public, so the address map is deliberately not here.** Host identity detail,
+the neighbour inventory and the published-port list live in the gitignored operator note
+`docs/blueprints/webdesk-zoneb-box-detail.local.md` — measured read-only against `sumopod` on
+2026-08-29, so it now needs **re-measuring against `gda-aicenter`** (a P1 item, §12). What follows
+is the part an architecture reader needs, from a read-only probe of `gda-aicenter` on 2026-08-31.
 
-Zone B does **not** have the box to itself. Sharing that kernel are:
+The box is 4 vCPU / 15.6 GiB, running 27 containers at probe (~5 GiB RAM used, load ~2.1 of 4,
+disk 46% of 99 GB), plus a host-tier service layer **outside Docker**: Postgres 15 + pgvector,
+Redis, Ollama. nginx owns `:80`/`:443` on the host and routes by hostname. There is no GPU and
+the machine family cannot take one. Sharing that kernel with the public surface are:
 
-| Neighbour class | Why it matters to Zone B |
+| Neighbour class | Why it matters to the public surface |
 |---|---|
-| **The estate's private-mesh endpoint** | **The one that matters.** An internet-facing service now shares a kernel with the tunnel endpoint into Zone A. The design's whole premise was that Zone B has no path inward. |
-| **The estate's observability store** | It holds telemetry for the whole estate, Zone A included. Reading it is reading a map. |
-| **A sandbox that executes untrusted code** | A hostile-workload neighbour by design. Sandbox escape and Zone B compromise become adjacent problems. |
-| **~10 unrelated third-party projects** | Ten projects' worth of attack surface and ten projects' worth of patching we do not control. |
-| **Pre-existing services published on all interfaces, one of them a database** | Not Zone B's doing, and now Zone B's neighbourhood. On this estate the container runtime's NAT rules are evaluated *before* the host firewall, so an all-interfaces bind is internet-reachable even where the firewall reports deny. |
-
-Capacity is shared and finite — roughly half the RAM and all four cores are contended — which is
-why the resource limits in the hardening list below are acceptance criteria, not tuning.
+| **The ERP itself — its live Postgres (company data, IAM grants, payroll), Keycloak, Cerbos** | **The one that matters.** v2.0's worst neighbour was a tunnel endpoint offering a *path* toward this data; now the surface stands on the same kernel as the data. There is no "inward" left to defend a path to. |
+| **The host-tier Postgres specifically** | `max_connections=100` with only ~10 in use — a shared ceiling that bites long before RAM does, and the reason the non-merge rule below is load-bearing. Estate-known failure: it binds before docker0 on reboot and 502s the whole ERP unaided. |
+| **A neighbour that can take the whole box** | `gaiada-whisper-1` runs CPU-only with **no CPU or memory limit**; 60 s of audio drives load to 4.61 on 4 cores. One existing neighbour can already starve everything — why the limits below are acceptance criteria, not tuning. |
+| **A pre-existing all-interfaces publish** | `platform-ui` is published on `0.0.0.0:3005` via docker-proxy, bypassing nginx. Not the surface's doing, and now its neighbourhood. On this estate the container runtime's NAT rules are evaluated *before* the host firewall, so an all-interfaces bind is internet-reachable even where the firewall reports deny. |
+| **A sandbox that executes untrusted code — when it lands** | The LMS lab-runner also moves here under WSK-D32. The box has only the `runc` runtime — no gVisor, no Kata (AppArmor + seccomp on, Docker rootful) — so sandbox-grade isolation for it is a mitigation to **build**, not a fact to lean on. |
 
 ### The honest blast-radius statement
 
-**A Zone B compromise on this box can reach**, at minimum: every other container's published port
-on the host; the observability store; and — subject to container escape — the mesh interface, and
-therefore a network path toward Zone A. **v1.1's claim that a Zone B compromise cannot
-reach Zone A no longer holds and must not be repeated anywhere.** What remains true is narrower and
-still worth having: Zone B holds **no Zone A credential**, no Keycloak secret, no ERP database
-password, and no deploy key. A path is not an authorisation; an attacker on that path still faces
-Zone A's own authentication. That is the containment claim v2.0 makes, and it is smaller than v1.1's.
+Every revision of this section has shrunk the claim; this one shrinks it furthest. v1.1 claimed a
+Zone B compromise could not reach Zone A — dead since v2.0. v2.0-as-written claimed the exposure
+was a network *path*: container escape could reach a mesh interface and therefore a route toward
+Zone A, while the surface held no Zone A credential. **On `gda-aicenter` that claim is dead too,
+and neither claim may be repeated anywhere:** the public surface shares a kernel with the ERP
+database itself, so "no path inward" is not merely weakened — it is meaningless.
+
+What remains true is narrower still, and still worth having: the public surface holds **no ERP
+database password, no Keycloak secret, no deploy key**. A shared kernel is not an authorisation —
+an attacker still needs an escape or a credential — but the geometry has changed: escape now lands
+*on* the data rather than on a route to it. Containment moves from "separate machine" to **in-box
+isolation**, which is weaker; the owner accepted exactly that cost, raised twice and reaffirmed
+(WSK-D32). That is the containment claim v2.1 made and v2.2 carries unchanged — WSK-D34 adds its
+verification, not its re-widening — and it is smaller than both of its predecessors'.
 
 ### Mandatory hardening (ACs, not aspirations)
 
 1. **Its own compose project** (`name: webdesk`), so the estate's `--remove-orphans` trap cannot
    reach it and neighbours cannot reach it by project name.
-2. **No host ports at all** except the proxy, bound to `127.0.0.1`. Verify against the **resolved**
-   config, never the overlay — see `webdesk/ops/README.md` for the `!reset`/`!override` mechanics
-   and the failure mode where `docker compose config` exits 0 on a broken overlay.
+2. **Caddy binds `127.0.0.1` and host nginx routes to it by hostname.** nginx owns `:80`/`:443`
+   on this box, so v2.0's "Caddy is the only public listener" is impossible here and withdrawn.
+   **No host ports at all** except that loopback bind — verified against the **resolved** config,
+   never the overlay; see `webdesk/ops/README.md` for the `!reset`/`!override` mechanics and the
+   failure mode where `docker compose config` exits 0 on a broken overlay.
 3. **Payload admin reachable only through an SSH tunnel.** No vhost, no published port, ever.
-4. **Own Postgres, own Redis, own MinIO** — no reuse of any neighbour's instance, no shared volume.
-5. **CPU and memory limits on every Zone B service**, so a Zone B spike cannot degrade the
-   observability hub the whole estate depends on, and a neighbour spike is survivable.
-6. **A written statement, re-verified at the gate, of what the mesh peering means** — including a
-   deliberate decision on whether Zone B's containers may route to the private mesh at all.
-   Default: **they may not**; an explicit deny is cheaper than an argument later. The addresses
-   are in the operator note, not here.
+4. **Own Postgres, own Redis, own MinIO containers, own docker network** — no reuse of any
+   neighbour's instance, no shared volume.
+5. **The surface's Postgres is never merged into the host-tier cluster.** Load-bearing, not
+   hygiene: **(a)** RLS is bypassed by a table's owner and by any `BYPASSRLS` role, so one shared
+   cluster lets the ERP's owner/migrator walk the surface's 15 `FORCE RLS` tables and vice versa —
+   grants become the only wall, where a separate cluster makes "the public surface holds no ERP
+   credential" a physical fact; **(b)** an internet-facing process's DB credential would then
+   authenticate against the cluster holding company data, payroll, Keycloak and IAM grants, so a
+   misgrant becomes cross-domain; **(c)** `max_connections=100` is a shared budget — Payload, the
+   API, BullMQ workers and migrations all pool, so a form-spam or build spike exhausts it and the
+   ERP 502s (the same coupling holds for shared_buffers, WAL, checkpoints and autovacuum); **(d)**
+   "two ledgers, never mixed" (§04) stops being enforceable, and both ledgers define
+   `app_current_tenants()` / `app_module_allowed()` — two tenancy models sharing GUC names on one
+   cluster is the exact trap this estate has already been burned by; **(e)** backup, PITR and
+   major-version upgrades are cluster-wide — restoring the public surface to a point in time would
+   roll back the ERP. Estate precedent seals it: the host Postgres already 502s the ERP unaided on
+   reboot; hanging an internet-facing dependent off it multiplies that blast radius.
+6. **The surface's containers may not reach the host-tier Postgres — nor any other host service:
+   the host Redis, Ollama, and the box's WireGuard interface toward `sumopod` included.** The only
+   host process in front of them is nginx. Default deny, written down and re-verified at the gate;
+   an explicit deny is cheaper than an argument later.
+7. **Rootless Docker for the public surface's project.** The box's daemon is rootful and `runc` is
+   its only runtime; rootless is the cheapest real reduction in what a container escape is worth,
+   for the one project that faces the internet.
+8. **Hard CPU, memory and pids limits on every service.** One existing neighbour with no limits
+   can already take all 4 cores; the public surface must be neither the next such neighbour nor
+   defenceless against the existing one.
+
+### The containment probe set — the boundary's own verification (WSK-D34)
+
+WSK-D34 (owner-ruled 2026-09-04, §14) split the P1 proof in two: the test suite proves the *code*
+and runs on `sumopod`; the probes below prove the *boundary*, and a boundary can only be probed
+where it stands — on `gda-aicenter`. This is a deploy-and-probe exercise with a change window and
+a rollback plan, not `npm test`. It is the second half of the P1 gate (§12); execution authority
+on the live ERP box is still OQ-2.2. **Status: PLANNED — specified here, none of it has been run.**
+
+| Probe | Verifies |
+|---|---|
+| Resolved-config port audit: nothing published but the proxy on `127.0.0.1`, read from `docker compose config` output — never from the overlay | AC 2 |
+| Host nginx routes by hostname to the loopback-bound Caddy, and `:80`/`:443` are still nginx's | AC 2 |
+| A host-Postgres connection attempt from inside a webdesk container is **DENIED**, with a **negative control that would succeed if the deny were absent** — a deny probe that cannot fail proves nothing | AC 6 |
+| Per-service CPU, memory and pids limits present on every service | AC 8 |
+| `--remove-orphans` on the ERP compose project cannot reach the `webdesk` project | AC 1 |
+| Egress sweep: no ERP credential anywhere in the surface, and no route from its containers to any ERP service | the blast-radius statement above; §11 |
+
+The set as ruled verifies ACs 1, 2, 6 and 8 directly. A verification story for ACs 3–5 and 7 is
+not specified by WSK-D34 and stays open — named here so the gap is visible, not papered over.
 
 ### Pre-existing exposures to raise separately
 
-The all-interfaces binds that predate this program — one of them a database — belong to other
-projects (enumerated in the operator note). **Zone B must not depend on them being fixed, and must not fix them unilaterally.**
-Raise them as their own item with the owner; note here so a future reader does not mistake silence
-for safety.
+Pre-dating this program, on this box: `platform-ui` published on `0.0.0.0:3005` bypassing nginx;
+`gaiada-whisper-1` with no CPU or memory limit; a rootful Docker daemon with `runc` as its only
+runtime. They belong to other parts of the estate.
+**The public surface must not depend on them being fixed, and must not fix them unilaterally.**
+Raise them as their own item with the owner; noted here so a future reader does not mistake
+silence for safety.
 
 ---
 
@@ -228,7 +341,7 @@ microsite, each with its own host, stack and adoption state.
 
 | Column group | Fields | Notes |
 |---|---|---|
-| Identity | `id`, `tenant_id`, `project_id` → `projects`, `client_id` → `clients`, `domain` | `project_id` nullable — an internal site has no client project |
+| Identity | `id`, `tenant_id`, `project_id` → `projects`, `client_id` → `clients`, `domain` | `project_id` **and `client_id`** nullable — an internal site has no client project and no client; a NULL `client_id` is a delivery fact, not missing data (WSK-D35) |
 | Hosting | `host_kind` (`our-box` · `client-cpanel` · `shared-hosting` · `external` · `unknown`), `host_ref`, `access` (`none` · `ftp` · `cpanel` · `ssh` · `full`) | **Independent of adoption.** Who owns the host and what access we hold are separate facts from how much of WebDesk the site uses |
 | Delivery | `kind` (`static` · `wp` · `fullstack`), `repo_url`, `adoption` (`tracked` · `linked` · `adopted` · `mandated`), `contract_version` | `kind` is the §08 vocabulary — one word, mapped everywhere |
 | Provenance | `origin` (`nexus-import` · `provisioned` · `manual`), `created_at`, `updated_at` | An imported row is a lead to verify, never a measurement |
@@ -252,15 +365,26 @@ The SEO module owns the domain-level asset and its crawl consent, and its schema
 
 | Existing asset | What it already provides |
 |---|---|
-| `search_properties` | tenant → client → **domain**, `UNIQUE (tenant_id, client_id, domain)`, and a **`verified_at` crawl-consent gate** |
+| `search_properties` | tenant → client → **domain**, `UNIQUE (tenant_id, client_id, domain)` — kept, though it **permits one domain under two clients**; domain identity is WSK-D35's additive partial unique on `(tenant_id, lower(domain))`, in flight — and a **`verified_at` crawl-consent gate** |
 | `search_audits` · `search_audit_findings` | per property × kind, idempotent ingest by `report_hash`, findings with severity/category/sample URLs and **regression diff between runs** |
 | `search_engagements` | `audit_technical` / `audit_cwv` toggles with cadences, plus a budget stop-loss |
 | `search-crawl-go` | a real crawler with its own `robots` and `egress` packages |
 | `src/seed/nexus-import.ts` (SM-70, **built**) | seeds ~63 real client properties, idempotent by construction |
 
-`webdev_sites.domain` joins `search_properties` on `(tenant_id, client_id, domain)`. WebDesk owns
-*delivery* facts; the SEO module keeps owning crawl, findings and consent. **One domain, one
-property row, one consent gate, one crawler.**
+`webdev_sites.domain` joins `search_properties` on **`(tenant_id, domain)`** — amended 2026-09-04
+by WSK-D35 from the `(tenant_id, client_id, domain)` this paragraph originally instructed. A domain
+belongs to exactly one client, so `client_id` is a fact *about* a property, an attribute — never
+part of its identity or of the join key. The old key was wrong twice over: the 3-column `UNIQUE`
+permits the same domain under two different clients, so D31's "one property row" was asserted but
+never enforced; and `webdev_sites.client_id` is nullable where `search_properties.client_id` is
+NOT NULL, so a site with an unassigned client could never match its property row — live today for
+the two Hostinger cPanel/WHM VPS rows imported with `client_id NULL`. A NULL
+`webdev_sites.client_id` is a legitimate *delivery* fact — an internal site has no client — not
+missing data to backfill away. Domain identity is enforced by WSK-D35's additive partial unique
+index (§14; sequence diagnostic → migration → ledger; sibling work in flight, deliberately unnamed
+here). WebDesk owns *delivery* facts; the SEO module keeps owning crawl, findings and consent.
+**One domain, one property row, one consent gate, one crawler — under D35 enforced by the schema,
+not asserted over it (index migration unapplied as of this writing).**
 
 ---
 
@@ -355,6 +479,21 @@ scheduled requests to someone else's server is a permissions question. MON-01's 
 only" rule is load-bearing: **an unverified property is not probed.** Scheduled auditing of
 client-owned infrastructure also needs an egress entry and a per-client answer on whether the
 engagement covers it (OQ-2.4).
+
+**Internal sites pass through the same gate, not around it (WSK-D36, 2026-09-04).** The paragraph
+above reads as if consent were only a question about client-owned infrastructure; under D36 the
+gate is the gate for *every* property, ours included. `search_properties.client_id` is NOT NULL,
+so without D36's **sentinel internal-client row** our own sites could not have a property row at
+all — and MON-01's "verified rows only" rule would leave the platform's own sites unmonitorable
+while client sites are watched. Internal properties therefore enter the **same table and the same
+gate**, handled by the sentinel rather than by an exception: their consent is trivially ours, so
+`verified_at` may be set immediately — which is precisely what makes MON-01 probe them at all —
+and they are **distinguishable, not merely present**: they belong to the sentinel client, which is
+exactly what any client-facing monitoring surface must exclude, because internal properties must
+never appear there. This matters now, not later — our own sites are the safe first adoption wave
+(§12), so they must be monitorable before any client site is. The sentinel row is a data change to
+a live tenant-scoped table under RLS, so it ships as a ticket in the ledger plan (sibling work),
+never inside a migration.
 
 **One nuance carried from the 2026-08-23 owner ruling:** Gaia Nexus is evidence, not specification.
 Import it for the **domain list and hosting facts**; measure everything fresh through MON-01. A
@@ -469,9 +608,10 @@ Levers, in size order:
 1. **Self-hosted runner.** Actions minutes are billed only for GitHub-hosted runners; self-hosted
    compute is unmetered, and for **private** repos this is the sanctioned pattern (the fork-PR
    hazard applies to public repos). **Placement is a security decision:** a runner executes
-   arbitrary repo code, so it must **not** go on `sumopod` (WireGuard hub, telemetry store, code
-   sandbox) or on `gda-aicenter`. It needs its own isolation — the same argument as Zone B, reached
-   independently.
+   arbitrary repo code, so it must **not** go on `sumopod` (WireGuard hub, the estate's observation
+   role) or on `gda-aicenter` — which WSK-D32 makes *more* true, not less: that kernel now carries
+   the ERP and the public surface together. It needs its own isolation — the argument v1.1 made
+   for Zone B; for a CI runner, no ruling has overridden it.
 2. **Adoption removes content-driven rebuilds.** Today a content edit is a build. On an `adopted`
    site content comes from `/v1`, so **content changes stop being builds**. Twenty edits a month
    becomes twenty builds today and zero after adoption. This gives the §07 ladder a hard-dollar ROI
@@ -504,16 +644,19 @@ New in v2.0:
 ## §12 · Rollout, re-cut
 
 The gate that could not close (Milestone 0 needing a frontend on an unreachable, observe-only box)
-is dissolved by §00a. The sequence below replaces v1.1 §12's six phases.
+is dissolved by the estate zoning rule (§00a — the dissolution survives WSK-D32: the proof tenant
+is internal, and internal now means `gda-aicenter`). The sequence below replaces v1.1 §12's six
+phases.
 
 **Step 0 — reconcile the record** (hours, not days). `MODULES.md` off `0.0.0 PLANNED`; D24/D25/D27
-and this document into the tracker; the tracker's stale "what's next" rewritten. The drift is why
-the program's direction became unreadable.
+and now D32 and this document into the tracker; the tracker's stale "what's next" rewritten. The
+drift is why the program's direction became unreadable — and D32 itself sat unrecorded for four
+days, so step 0 has already failed once and is not optional.
 
 | Phase | Contents | Gate |
 |---|---|---|
-| **P1 · Ground** | Harden `sumopod` per §03 and deploy Zone B there. Re-run all 34 provisional greens on it. | Every green is Linux-verified. `webdesk` appears in a CI workflow (today: zero hits). |
-| **P2 · The proof** | One **internal** site on `sumopod`, content from `/v1`, built from generated types. | The rail works end to end, on a box we can reach, with no client and no DNS move. |
+| **P1 · Ground** | Harden `gda-aicenter` per §03 and deploy the public surface there (WSK-D32); re-measure the §03 operator note against the box. Re-run all 34 provisional greens on Linux — on `sumopod`, per WSK-D34. | **Both halves of the WSK-D34 split, neither substituting for the other:** every green is Linux-verified on `sumopod` (the suite proves the code), **and** §03's containment probe set passes on `gda-aicenter` (the probe proves the boundary). `webdesk` appears in a CI workflow (today: zero hits). |
+| **P2 · The proof** | One **internal** site on `gda-aicenter`, content from `/v1`, built from generated types. | The rail works end to end, on a box we can reach, with no client and no DNS move. |
 | **P3 · Portfolio** | SM-70 import → SM-74 hosting topology → MON-01 probes → registry + console surface. | ~63 properties tracked, consent honoured, nothing on any client server touched. |
 | **P4 · Repo control** | §08: the three kinds, all four refusals lifted together, org credential, both gates, staff button. Go live **once**, with every kind supported. | A staff click and a signed PRD each produce a correct repo, for each of the three kinds. |
 | **P5 · WordPress** | Headless WP — permanent tier, not a deferred phase. PHP SDK is already generated. | A WP site renders entirely from `/v1`. |
@@ -529,27 +672,33 @@ else and pays for itself immediately.
 | # | Question | Default if unanswered |
 |---|---|---|
 | OQ-2.1 | Ratify: repo creation stays manual **except** through the scoped, template-only, WS4-gated ERP path; `github.createRepo` stays fail-closed forever | Adopt as written (§08) |
-| OQ-2.2 | Authority to configure `sumopod` for Zone B — direct, or runbook-for-owner-to-execute | Runbook only; nothing executed |
+| OQ-2.2 | Authority to configure `gda-aicenter` for the public surface — direct, or runbook-for-owner-to-execute. Heavier than the `sumopod` version it replaces: this is the live ERP box | Runbook only; nothing executed |
 | OQ-2.3 | The internal proof site's hostname — a real subdomain on `gaiada.online`, or close P2 on host:port | Real subdomain |
 | OQ-2.4 | Do client engagements permit scheduled auditing of their sites? | **Unverified per client** — `verified_at` stays false, nothing is probed |
 | OQ-2.5 | The monthly Actions figure, and which account owns the client repos | Assume the ERP monorepo dominates; act on lever 1 regardless |
-| OQ-2.6 | Vault choice for client hosting credentials (`vault_ref` target) | Blocked — no credentials enter the registry until answered |
-| OQ-2.7 | Per-tenant cost and quotas (v1.1's A-10, still open) | Deferred; `sumopod` capacity in §03 is the interim ceiling |
+| ~~OQ-2.6~~ | **RESOLVED 2026-09-04 — see WSK-D33.** There was no vault to choose: `integration_connections` (`0033`) already is one. Widen it; keep the existing key. | — |
+| OQ-2.7 | Per-tenant cost and quotas (v1.1's A-10, still open) | Deferred; `gda-aicenter` capacity in §03 is the interim ceiling |
 | OQ-2.8 | Payload trademark check on the rebrand (v1.1's A-11, still open) | Ship unbranded internally until answered |
+| ~~OQ-2.9~~ | **RESOLVED 2026-09-04 — see WSK-D34.** Split: the test suite runs on `sumopod`; the containment probes run on `gda-aicenter` (§03), where alone a boundary probe means anything. A suite proves the code; a probe proves the boundary — conflating them is what made this look like one question for four days. | — |
 
 ---
 
-## §14 · Decision log (v2.0)
+## §14 · Decision log (v2.2)
 
 Decisions **WSK-D1…D26 carry** from v1.1 §14 except where amended below.
 
 | # | Decision | Why |
 |---|---|---|
-| **WSK-D27** | **The two-tier estate rule; Zone B lands on `sumopod`, hardened.** The undocumented 2026-08-27 helios direction is **withdrawn** — its compose overlay and vhost template were deleted, their mechanics preserved in `webdesk/ops/README.md`. Nothing was ever run against helios. D26's client-frontend routing is unaffected. | One principle replaces per-question host haggling. It also resolves a live contradiction: that overlay deployed Zone B beside 23 live third-party client sites while §03 forbade exactly that. **Standing rule earned here: no ruling exists outside this log** — the overlay's only record was a comment on line 1 of the file it justified. |
+| **WSK-D27** | **SUPERSEDED by WSK-D32 (below).** **The two-tier estate rule; Zone B lands on `sumopod`, hardened.** The undocumented 2026-08-27 helios direction is **withdrawn** — its compose overlay and vhost template were deleted, their mechanics preserved in `webdesk/ops/README.md`. Nothing was ever run against helios. D26's client-frontend routing is unaffected. | One principle replaces per-question host haggling. It also resolves a live contradiction: that overlay deployed Zone B beside 23 live third-party client sites while §03 forbade exactly that. **Standing rule earned here: no ruling exists outside this log** — the overlay's only record was a comment on line 1 of the file it justified. |
 | **WSK-D28** | **One project-kind vocabulary — `static` · `wp` · `fullstack` — mapped through all four places, and the WP/full-stack refusals lifted together in one change.** | Four components currently disagree about what a kind is. Lifting the refusals piecemeal makes the console and the scaffolder disagree silently, which is worse than refusing. |
 | **WSK-D29** | **Provisioning is rebuilt inside the ERP; `provision` is retired once parity is proven.** Zone A holds an **org-owned** GitHub credential (never a personal PAT); it holds **no SSH key** and deploys nothing — repos self-deploy via org-level Actions secrets they are granted access to. **Amends D-P4.** | The external tool is internet-facing with demo credentials on its login page, and repo creation depended on one person's token. The split keeps the half of D-P4 that matters (no fleet key in Zone A) while removing the dependency. |
 | **WSK-D30** | **The portfolio registry is Zone A only, one row per site/domain, and stores no credentials — only a `vault_ref`.** Tracking never requires a Zone B tenant. | The registry is an inventory of the whole client estate — the first thing an attacker would want, and the last thing an internet-facing backend should hold. |
-| **WSK-D31** | **Join `search_properties`; do not duplicate it.** One domain, one property row, one consent gate, one crawler. | The SEO module already owns domain identity, crawl consent, audit history with regression diffs, and a crawler. A second registry would fork consent — the one thing that must never be ambiguous. |
+| **WSK-D31** | **AMENDED by WSK-D35 (below) — the join key and the missing constraint, not the intent.** **Join `search_properties`; do not duplicate it.** One domain, one property row, one consent gate, one crawler. | The SEO module already owns domain identity, crawl consent, audit history with regression diffs, and a crawler. A second registry would fork consent — the one thing that must never be ambiguous. |
+| **WSK-D32** | **Role-based estate zoning (owner-ruled 2026-08-31) — supersedes WSK-D27 and retires Zone A/Zone B as host nomenclature.** Hosts are zoned by role: **control plane** = `gda-aicenter` (the ERP — "system lives in aicenter"; expandable if needed); **client project delivery** = `delphi` (staging) · `helios` (production) · the Hostinger WP servers · client-owned servers, client projects **only**; **observation** = `sumopod`, observability for the whole estate — which stays there, because a monitor co-located with what it monitors dies with it. **WebDesk's host is therefore `gda-aicenter`**, alongside the LMS lab-runner and Postiz. Accepted cost, raised twice and reaffirmed: the ERP's kernel now also carries a public listener and untrusted code execution, so containment weakens from separate-machine to in-box isolation (§03). `sumopod`, a personal VPS holding a company function, is kept safe by one rule: nothing on it is the only copy, and nothing whose loss blocks a company function — backups *of* `gda-aicenter` may live there; backups of `sumopod`'s own workloads may not. | A/B was a *trust tier* that needed a host to live on; when `gda-s01` was decommissioned it had nowhere to go. Role zoning maps to machines that actually exist. **This entry is also D27's own lesson enforced late: the ruling lived four days (2026-08-31 → 2026-09-04) in no design doc — the second time this program produced exactly that drift. "No ruling exists outside this log" stands; the lateness is recorded so the pattern stays visible rather than silently repaired.** |
+| **WSK-D33** | **The credential vault is `integration_connections` (`0033`), widened — not a new store; and it keeps its **current** key (owner-ruled 2026-09-04). Resolves OQ-2.6.** There was never a vault to choose: `0033` already provides AES-256-GCM at rest (`enc:v1:`, `secret-box.ts`), `hasToken`-only reads so plaintext never serialises, third-wall RLS, and an `owner_kind` that already admits `'client'`. Client hosting credentials enter it by widening the `provider` CHECK (`cpanel` · `ftp` · `ssh` · `wp_admin`); `webdev_sites` still stores only a `vault_ref` pointer, so **WSK-D30 is untouched**. **OpenBao is explicitly NOT a precondition** — `INTEGRATION_TOKEN_KEY` stays a box env var and that custody is accepted, deliberately, in the knowledge that a box compromise decrypts the whole vault. Custody model for the credentials themselves: hold only principals **we** create (a per-site scoped deploy user), never a client's master panel login. Tickets: `VLT-1`…`VLT-7`. | A second secret store would fork custody, which is the one thing that must never be ambiguous — the same argument D31 makes for consent. **The accepted risk must be read together with a defect this ruling does NOT fix:** `token_key_version` is written as a constant `"v1"` and never read back by `decryptSecret()`, which always resolves the single current key — so **rotating `INTEGRATION_TOKEN_KEY` today silently makes every sealed row undecryptable**, surfacing later as a provider call failing rather than as a rotation error. "Use the current key" is therefore a decision to **not rotate**, not a decision that rotation is safe. A DO-NOT-ROTATE tripwire (a startup assertion, or at minimum a `rotate-before-staging` register entry) is a precondition of VLT-4's import, because after the import that key protects ~78 clients' hosting access. |
+| **WSK-D34** | **The two-proof split (owner-ruled 2026-09-04) — the P1 test suite runs on `sumopod`; the containment probes run on `gda-aicenter`. Resolves OQ-2.9.** The suite goes to the estate's proven containerised gate: a `node:22-bookworm` runner with `postgres:17-alpine` + `redis:7-alpine` + `cerbos` on a per-run docker network, publishing **no host ports** — container DNS lets several gates coexist without collision. Ephemeral test containers satisfy `sumopod`'s own safety rule (nothing on it is the only copy), so a transient gate does not violate its WSK-D32 observation role; nor does it reopen §10's runner placement — a standing self-hosted runner executing whatever is pushed stays banned from that box, and a transient operator-driven gate is not that. The probes — §03's containment probe set: resolved-config port audit, nginx→loopback-Caddy routing with `:80`/`:443` still nginx's, a host-Postgres connection from inside a webdesk container **denied with a negative control**, per-service cpu/mem/pids limits, `--remove-orphans` isolation, egress sweep — are a deploy-and-probe exercise with a change window and a rollback plan, NOT `npm test`, and can only be meaningful on `gda-aicenter`: a boundary can only be probed where it stands. | **A suite proves the code; a probe proves the boundary. Conflating the two proofs was the trap — it is what made "which box?" look like one question for four days.** The owner offered `gda-aicenter`; the suite still cannot move there: platform-nest alone is ~497 files / ~7004 tests / ~386 s, and the box is 4 vCPU / 15.6 GiB at load ~2.1 with host Postgres capped at `max_connections=100` and one neighbour (`gaiada-whisper-1`, no resource limit) already able to drive load to 4.61 on four cores — a harness there competes with the live ERP for the last core, and this estate's precedent for Postgres contention on that box is a whole-ERP 502. |
+| **WSK-D35** | **Domain is the key; `client_id` is an attribute (owner-ruled 2026-09-04). Amends WSK-D31 — the intent stands; the join key and the missing constraint were wrong.** `webdev_sites` joins `search_properties` on **`(tenant_id, domain)`**: a domain belongs to exactly one client, so `client_id` is a fact *about* the property, never part of its identity. Enforced by an **additive partial unique index on `(tenant_id, lower(domain)) WHERE deleted_at IS NULL`** — partial because NULL defeats UNIQUE here, `lower()` because `webdev_sites` CHECKs lowercase domains and the property table may not. The existing 3-column `UNIQUE` is **left alone and never re-declared**: this estate has a production incident where a DROP+ADD on a shared constraint silently deleted a value another migration had added. The index cannot be created while duplicates exist, so a **duplicate-domain diagnostic run on the server is a hard precondition of the migration**; the sequence is diagnostic → migration → ledger. The migration and the ledger rework are sibling work in flight (2026-09-04), deliberately not named here, and unapplied as of this writing. | The defect: `UNIQUE (tenant_id, client_id, domain)` **permits the same domain under two different clients**, so D31's own words — "one domain, one property row, one consent gate, one crawler" — were asserted by the design and not enforced by the schema. The symptom that surfaced it: §04 instructed joining on `(tenant_id, client_id, domain)` while `webdev_sites.client_id` is nullable (an internal site has no client) and `search_properties.client_id` is NOT NULL — so a site with an unassigned client can never match its property row, live today for the two Hostinger cPanel/WHM VPS rows imported with `client_id NULL`. |
+| **WSK-D36** | **Internal sites get a sentinel internal-client row in `search_properties` (owner-ruled 2026-09-04) — our own sites become first-class in the existing SEO/monitoring path, not a second path.** `search_properties.client_id` is NOT NULL, so without the sentinel an internal site cannot have a property row at all and MON-01 ("verified rows only") can never probe it. Two conditions are part of the ruling, both binding: **(a)** internal consent is trivially ours, so `verified_at` may be set immediately — which is exactly what makes MON-01 probe internal rows at all; **(b)** internal properties must be **distinguishable, not merely present** — they belong to the sentinel client, and a client-facing monitoring surface must never show them. The sentinel row is a data change to a live tenant-scoped table under RLS, so it is **specified as a ticket, never executed inside a migration**; the ticket is being written into the ledger plan as sibling work (2026-09-04) and is deliberately not written here. | It preserves D31's actual intent — one crawler, one consent gate, one property table — and needs no new code, where a second monitoring path for our own sites would fork exactly what D31 keeps singular. And it matters now rather than later: our own sites are the safe first adoption wave (§07, §12), so they must be monitorable before any client site is. |
 
 ---
 
