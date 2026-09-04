@@ -82,6 +82,10 @@ interface RawResponse {
   status: number;
   body: string;
   latencyMs: number;
+  /** The body hit `MAX_BODY_BYTES` and was cut short. A content assertion that did not match was
+   *  therefore evaluated over a PARTIAL page, and the driver says so rather than implying it read
+   *  the whole thing. */
+  truncated: boolean;
 }
 
 /**
@@ -139,15 +143,53 @@ async function guardedRequest(url: URL, ctx: ProbeCtx, method: string, hops = 0)
         }
         const chunks: Buffer[] = [];
         let size = 0;
+        let truncated = false;
+        // ONE settle, from four possible endings (`end`, the size cap, a premature `close`, an
+        // `error`). Without this guard the cap path settled NOTHING at all - see below.
+        let settled = false;
+        const succeed = () => {
+          if (settled) return;
+          settled = true;
+          resolve({
+            status,
+            body: Buffer.concat(chunks).toString("utf8"),
+            latencyMs: Date.now() - started,
+            truncated,
+          });
+        };
+        const fail = (e: Error) => {
+          if (settled) return;
+          settled = true;
+          reject(e);
+        };
+
         res.on("data", (d: Buffer) => {
+          if (settled) return;
           size += d.length;
-          if (size <= MAX_BODY_BYTES) chunks.push(d);
-          else res.destroy(); // stop reading; we have enough to evaluate an assertion
+          if (size <= MAX_BODY_BYTES) {
+            chunks.push(d);
+            return;
+          }
+          // The cap is reached: we have everything we are going to read, so ANSWER FIRST and stop
+          // reading second.
+          //
+          // This order is the whole fix. `res.destroy()` emits neither `end` nor `error` - it emits
+          // `close` - so destroying without resolving left this promise pending FOREVER, and the
+          // socket-inactivity `timeout` could not rescue it either because the socket was already
+          // gone. The only thing that ever ended such a probe was the runner's wall-clock deadline,
+          // which lands as `down: "probe exceeded 20000ms hard deadline"`. Net effect: **every site
+          // whose page is larger than the cap was reported DOWN while being perfectly up** - a
+          // 390 KB WordPress homepage is ordinary, so this hit real client sites (essentialbali.com,
+          // ypi-asia.com, both 200 in well under a second).
+          truncated = true;
+          succeed();
+          res.destroy();
         });
-        res.on("end", () =>
-          resolve({ status, body: Buffer.concat(chunks).toString("utf8"), latencyMs: Date.now() - started }),
-        );
-        res.on("error", reject);
+        res.on("end", succeed);
+        // A connection that dies mid-body emits `close` with no `end`. Same hang, different cause:
+        // state it as the failure it is rather than waiting out the deadline.
+        res.on("close", () => fail(new Error("connection closed before the response body completed")));
+        res.on("error", fail);
       },
     );
     req.on("timeout", () => req.destroy(new Error(`timeout after ${ctx.timeoutMs}ms`)));
@@ -198,7 +240,13 @@ export const keywordDriver: MonitorDriver<KeywordConfig> = {
       if (config.expect && !res.body.includes(config.expect)) {
         // DEGRADED, not down: the server answered correctly and the page is reachable, but it is not
         // serving what it should. A human reading the board should see those as different situations.
-        return { status: "degraded", latencyMs: res.latencyMs, detail: `body does not contain the expected text` };
+        return {
+          status: "degraded",
+          latencyMs: res.latencyMs,
+          detail: res.truncated
+            ? `body does not contain the expected text in the first ${MAX_BODY_BYTES} bytes (page was longer and is read only to that cap)`
+            : `body does not contain the expected text`,
+        };
       }
       return { status: "up", latencyMs: res.latencyMs, detail: null };
     } catch (e) {

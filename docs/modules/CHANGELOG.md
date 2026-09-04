@@ -11,6 +11,40 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.51.1` - a page bigger than 256 KB is UP, not a hung probe (2026-09-04) - DEV-VERIFIED
+
+Reported as "the Web Dev site portfolio shows sites down that are actually up". The portfolio is not
+at fault: its health column prints the monitoring module's status verbatim. The monitor was wrong.
+
+`monitoring/drivers/http.ts` capped the response body at `MAX_BODY_BYTES` (256 KB) by calling
+`res.destroy()` inside the `data` handler **without settling its promise**. `res.destroy()` emits
+`close` - not `end`, not `error` - so the probe hung forever, and the socket-inactivity `timeout`
+could not rescue it because the socket was already gone. The only thing that ever ended such a probe
+was the runner's wall-clock deadline (`probeWithDeadline`, added in alpha.325), recorded as
+`down: "probe exceeded 20000ms hard deadline"`.
+
+**So every site whose page exceeds 256 KB read as DOWN while serving 200 in well under a second.** A
+300-400 KB WordPress homepage is ordinary. Two live client sites were affected and had been filed on
+2026-09-01 as "hits the deadline - a deeper driver quirk, worth chasing separately": essentialbali.com
+(388 KB, 200 in 0.59s) and ypi-asia.com (323 KB, 200 in 4.3s). It hid well, because both are fast to a
+plain HEAD or curl - only the guarded GET that reads a body hangs. Reproduced standalone against the
+real target before changing anything: `destroy()` at 265968 bytes, `close` fires, promise never
+settles, 20s deadline.
+
+- **Settle first, destroy second**, behind one `settled` guard shared by all four possible endings
+  (`end`, the size cap, a premature `close`, `error`). A connection that dies mid-body now fails as
+  itself instead of waiting out the deadline.
+- **`RawResponse.truncated` travels**, so a `keyword` monitor whose `expect` text was not found in a
+  cut-short body says it read only the first 256 KB rather than implying it read the whole page. The
+  cap itself is unchanged - it is a memory-exhaustion bound, and it was never the bug.
+- Three regression tests (`http.test.ts`, "a page larger than the body cap is UP, not a hung probe")
+  serve a 600 KB body from the local test server. **They fail by TIMING OUT if the hang returns**, so
+  each carries its own 10s budget and asserts the probe finished well inside the ctx timeout.
+
+Unrelated and NOT fixed here, because it is data and not code: `blossomcatering.online` is genuinely
+misconfigured - it 301s to `schoolcatering.gaiada.online`, a different site, and so surfaces as an
+egress refusal (the redirect target is not an allowlisted verified property).
+
 ### platform-nest `0.51.0` - probe consent becomes a request, not a column somebody flips (2026-09-04) - PROTOTYPED
 
 Plan item 7, on the owner rulings recorded in `docs/plans/2026-09-03-probe-consent-rulings.md`.

@@ -34,7 +34,7 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.51.0` | IN PROGRESS | WS1 | 2026-09-04 |
+| platform-nest | `0.51.1` | IN PROGRESS | WS1 | 2026-09-04 |
 | platform-ui | `0.67.0` | IN PROGRESS | WS5 | 2026-09-04 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
@@ -63,7 +63,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.51.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.51.1` · IN PROGRESS
 **0.50.0 (2026-09-03, GM-blob live data repair + monitoring delivery/maintenance seed):** see
 `CHANGELOG.md` for the full account — a live-data repair (org-blob node-id collision, 7 people
 sharing one id, re-run through the sanctioned `refreshOrgStructure()`/`applyOrgStructure()` path) and

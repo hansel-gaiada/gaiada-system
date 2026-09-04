@@ -49,6 +49,15 @@ beforeAll(async () => {
     if (req.url === "/ok") { res.writeHead(200); res.end("<html>Book a table today</html>"); return; }
     if (req.url === "/spam") { res.writeHead(200); res.end("<html>cheap pharma pills</html>"); return; }
     if (req.url === "/blank") { res.writeHead(200); res.end(""); return; }
+    // Bigger than MAX_BODY_BYTES (256 KB) and otherwise perfectly healthy - an ordinary WordPress
+    // homepage is 300-400 KB. The keyword this serves sits in the FIRST chunk so a content check can
+    // still be satisfied from the truncated read.
+    if (req.url === "/huge") {
+      res.writeHead(200);
+      res.write("<html>Book a table today");
+      res.end("x".repeat(600 * 1024) + "</html>");
+      return;
+    }
     if (req.url === "/teapot") { res.writeHead(418); res.end("nope"); return; }
     if (req.url === "/loop") { res.writeHead(302, { location: "/loop" }); res.end(); return; }
     if (req.url === "/away") { res.writeHead(302, { location: "http://169.254.169.254/latest/meta-data/" }); res.end(); return; }
@@ -153,6 +162,41 @@ describe("keyword driver distinguishes the failure modes a status check cannot s
     expect(asStatus.status).toBe("up");
     expect(asContent.status).toBe("down");
   });
+});
+
+describe("a page larger than the body cap is UP, not a hung probe", () => {
+  // THE REGRESSION. The cap path used to call `res.destroy()` without settling the promise, and
+  // `destroy()` emits `close` - not `end`, not `error`. So the probe hung forever, the socket
+  // timeout could not fire (the socket was gone), and the only thing that ended it was the runner's
+  // wall-clock deadline, recorded as `down: probe exceeded 20000ms hard deadline`. Every site with a
+  // page over 256 KB read as DOWN on the board and in the Web Dev portfolio while serving 200 in
+  // under a second. These tests fail by TIMING OUT if that returns, so give them room to prove it.
+  it("reports up on an oversized body instead of hanging", async () => {
+    const started = Date.now();
+    const r = await httpDriver.probe(validateHttpConfig({ url: `${base}/huge` }), ctx(["127.0.0.1"]));
+    expect(r.status).toBe("up");
+    // Well inside the 3s ctx timeout, let alone the runner's timeout+5s deadline.
+    expect(Date.now() - started).toBeLessThan(3000);
+  }, 10_000);
+
+  it("still evaluates a content assertion over the truncated body", async () => {
+    const r = await keywordDriver.probe(
+      validateKeywordConfig({ url: `${base}/huge`, expect: "Book a table" }),
+      ctx(["127.0.0.1"]),
+    );
+    expect(r.status).toBe("up");
+  }, 10_000);
+
+  it("says the body was truncated when the expected text was not in the part it read", async () => {
+    // Honest degraded, not a silent one: the operator has to be able to tell "the page lost its
+    // content" from "the phrase is past the byte we stop reading at".
+    const r = await keywordDriver.probe(
+      validateKeywordConfig({ url: `${base}/huge`, expect: "phrase past the cap" }),
+      ctx(["127.0.0.1"]),
+    );
+    expect(r.status).toBe("degraded");
+    expect(r.detail).toMatch(/first \d+ bytes/);
+  }, 10_000);
 });
 
 describe("IP-literal targets are classified — the bypass found by probing Node", () => {
