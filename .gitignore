@@ -27,3 +27,7 @@ CREDENTIALS.local.md
 
 # Go build artifact (SAC-signed local build; never ship)
 infra/observability/synthetic-prober/synthetic-prober.exe
+
+# Client inventory + data-ops SQL: business names, staging URLs and per-site CMS versions.
+# This repo is PUBLIC; that pairing is a targeting list. Same rule as *.local.md.
+*.local.sql
