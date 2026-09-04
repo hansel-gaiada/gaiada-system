@@ -31,3 +31,7 @@ infra/observability/synthetic-prober/synthetic-prober.exe
 # Client inventory + data-ops SQL: business names, staging URLs and per-site CMS versions.
 # This repo is PUBLIC; that pairing is a targeting list. Same rule as *.local.md.
 *.local.sql
+# One-time / operator-run scripts that touch real client hosting credentials (VLT-4). Same rule as
+# *.local.md and *.local.sql above — the *.local. infix means "reads real secrets or real client
+# data, never commit", and this pattern was missing for the .mjs case.
+*.local.mjs

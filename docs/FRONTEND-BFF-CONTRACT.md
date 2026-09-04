@@ -1060,7 +1060,7 @@ for the Phase-2 OAuth callbacks that ride this foundation.
   interface ConnectionRow {
     id: string; tenantId: string;
     ownerKind: 'user'|'company'; ownerId: string;
-    provider: 'github'|'google_drive'|'claude';
+    provider: 'github'|'google_drive'|'claude'|'cpanel'|'ftp'|'ssh'|'wp_admin'; // VLT-1: the 4 hosting kinds added 2026-09-04
     externalAccount: string | null;            // github login / google email / claude seat email
     scopes: string[];
     status: 'unconfigured'|'pending'|'linked'|'error'|'revoked';
@@ -1125,6 +1125,51 @@ list every user's claude row in a tenant at once (the team roster). Reuses
 - Optional ops/QA seed: `npm run seed:claude-seats [companyName]` (default `Gaia Digital Agency`) —
   maps the first company member's seat, maps+unmaps the second (leaves a revoked row on hand), prints
   the team roster count. Distinct from WSUX-10's DEMO_MODE frontend fixtures.
+
+### 12b. VLT-3 — the human credential-reveal path (`docs/plans/2026-09-04-client-hosting-credential-vault.md`) — `src/core/integrations.controller.ts` + `src/core/connection-reveal.ts` — **STATUS: PROTOTYPED (no Linux-container verification run yet — see the ticket report)**
+
+`hasToken`-only reads (§12) are correct for machine deploys and useless when a person must log into
+a client's cPanel today. This is the ONE deliberate exception: Cerbos-gated, WS4-approved (never
+self-granted), TTL'd (default 15 min), single-use, exactly one audit row per successful reveal, and
+the plaintext is never logged and never returned twice for the same grant. Rides the EXISTING
+`automation_approvals` table (no new table, no new column, no new Cerbos action — see
+`connection-reveal.ts`'s header for why) rather than the D14 hub-redrive registry, which is built for
+automation/agent MCP tool calls and does not fit a human-facing single action.
+
+- ✅ `POST /api/:t/integrations/connections/:id/reveal-requests` → `201 { id, status: 'pending' }`.
+  Body: `{ reason? }`. Files a WS4 approval (`automation_approvals`, `origin='credential_reveal'`,
+  `impact:'high'`). Filing requires only the same `update`-tier reach §12's PATCH already requires
+  (self-owner, or manager+ for a company row/someone else's) — filing is not a promise of outcome.
+  400 if the connection has no stored credential at all.
+- ✅ `POST /api/:t/automation-approvals/:id/decide` (§ existing endpoint, unchanged path) — a
+  reveal request decides through the SAME generic decide surface every other approval uses. Two
+  reveal-specific rules apply ONLY when the row is a credential-reveal request: (1) the decider must
+  hold `core.integration_connection.manage` on the named connection, checked unconditionally
+  (`ownerId=""`) so a self-owned row's `owns` branch can never satisfy it — a plain member/viewer can
+  never decide one, ever; (2) the decider may not be the same principal who filed the request (403).
+  Approving does NOT return the plaintext — it only starts the grant's 15-minute clock.
+- ✅ `POST /api/:t/integrations/connections/:id/reveal` → `200 { connectionId, revealedAt, value }`
+  or a typed denial. Body: `{ approvalId }`. `value` is the plaintext credential — present in THIS
+  response body only, never persisted anywhere, never logged. Requires an `approved` grant filed by
+  THIS SAME principal, not yet redeemed, and still inside its 15-minute TTL from `decidedAt`; any
+  other state is a named denial (`no_such_grant`|`not_your_grant`|`grant_not_approved`|
+  `grant_already_used`|`grant_expired`|`connection_gone`|`no_token_to_reveal`) — 403/404/400
+  depending on which. A second call with the same `approvalId` always denies (`grant_already_used`).
+  Increments `integration_connections.reveal_count` and stamps `last_revealed_at` on success.
+- Audit: exactly one `activities` row per successful reveal (`verb='revealed'`,
+  `target_entity_type='integration_connection'`, `metadata.approvalId` — never the plaintext).
+- **Known gap, flagged rather than built quietly around:** there is no dedicated `reveal` Cerbos
+  permission key. Minting one requires a migration seeding `permissions`/`role_permissions`
+  (IAM-14c/WSK-31's own precedent), which this pass could not add — the schema/migration lane was
+  owned by a concurrent session. A role that should decide reveals but never otherwise administer
+  connections cannot be expressed until that migration lands. See the ticket report for the exact
+  migration shape needed.
+- **Also not built here (§6 OQ-2.6 of the plan doc):** `INTEGRATION_TOKEN_KEY` rotation
+  (`secret-box.ts`'s `token_key_version` is written, never read back — accepted as WSK-D33, not this
+  ticket's problem to fix), the `CREDENTIALS.local.md` import (VLT-4), the rotation runbook (VLT-5),
+  and last-used/expiry tracking beyond what VLT-6's columns already give this reveal path for free
+  (`last_revealed_at`/`reveal_count` bumped here; a general `last_used_at` write for non-reveal use is
+  a future deploy-automation ticket's job).
 
 ## 13. Creative module — Studio · Generation · DAM (CR-*, design `blueprints/creative-design.md`) — shapes canonical in `lib/creative.ts`
 
@@ -1734,6 +1779,29 @@ The Cerbos gate note below is ALSO corrected here: `resource_webdev_provisioned_
 | ✅ | GET | `/api/:t/modules/webdev/provisioned-sites` | `SiteDto[]` (list all, optionally filtered by `?runId=`). Authz: `webdev_provisioned_site` read (`resource_webdev_provisioned_site.yaml`, loaded). **2026-08-26:** also consumed tenant-wide (no `runId`) by the Web Dev Repositories tab — `lib/webdevProvisionedSites-data.ts::listProvisionedSites` → `lib/repoInventory.ts` attributes each site through its run's project to the department. |
 | ✅ | GET | `/api/:t/modules/webdev/provisioned-sites/:id` | `SiteDto` (single row). Authz: `webdev_provisioned_site` read. |
 | ✅ | POST | `/api/:t/modules/webdev/provisioned-sites/:id/reconcile` | `{} → SiteDto`. Re-drive the poller synchronously; same logic as `POST /provision` detached poll but on-demand and blocking. **2026-09-01:** against ERP repo control, this re-asks the filed approval's status and, once approved, GitHub itself (`GET /repos/{org}/{name}` via the read-only App) for the real repo — not `provision`. Authz: `webdev_provisioned_site` reconcile (different action, can cause egress). |
+
+#### 16g-i. VLT-2 — the site PORTFOLIO registry's first write path (`docs/plans/2026-09-04-client-hosting-credential-vault.md`) — DISTINCT table from `webdev_provisioned_sites` above
+
+`webdev_sites` (`202608300747_webdev_sites_portfolio_registry.sql`) is the "what exists" registry —
+~78 tracked sites across our own boxes, client cPanels, and legacy hosts, most of which were never
+provisioned by this platform. Before this pass it had a read model (`GET .../provisioned-sites`
+above does NOT read this table — see §24's own portfolio note) but **no HTTP write path at all**;
+every row that ever entered it was a direct test SQL INSERT. `vaultRef` is a POINTER to an
+`integration_connections.id` (§12), never a credential — WSK-D30, enforced structurally: the value
+must resolve to a real, same-tenant connection row, and a regression test asserts `webdev_sites`
+carries no column matching `/token|secret|password|credential/i`.
+
+Authz reuses the ALREADY-REGISTERED `webdev_provisioned_site` kind's existing literal actions
+(`provision` for create, `operate` for the vault-ref patch) rather than minting a new kind/action for
+this table — a deliberate, flagged trade-off (see `webdev.controller.ts`'s own VLT-2 comment): the
+`id` Cerbos sees for the PATCH names a `webdev_sites` row, not a `webdev_provisioned_sites` one.
+
+| Status | Method | Path | Notes |
+|---|---|---|---|
+| ✅ | POST | `/api/:t/modules/webdev/sites` | `{domain, environment?, projectId?, clientId?, hostKind?, hostRef?, access?, kind?, repoUrl?, repoBranch?, adoption?, contractVersion?, origin?, notes?}` → `201 WebdevSiteDto`. `vaultRef` is NOT accepted here (400 if present) — set it via the PATCH below, the one place that resolves it. `clientId` is deliberately nullable with no default (WSK-D35: an internal site with no client is a legitimate fact). 409 on a duplicate domain or a second `production` row for the same project (the table's own partial unique indexes). Authz: `webdev_provisioned_site` provision. |
+| ✅ | GET | `/api/:t/modules/webdev/sites/:id` | `WebdevSiteDto`. Authz: `webdev_provisioned_site` read. |
+| ✅ | PATCH | `/api/:t/modules/webdev/sites/:id` | Body must be EXACTLY `{vaultRef: string\|null}` — any other top-level key is a 400 (proves this cannot become a backdoor write path for any other column). `vaultRef` a string must resolve to an `integration_connections.id` in the SAME tenant (400 otherwise) or `null` to clear the pointer. Authz: `webdev_provisioned_site` operate. |
+| — | — | — | `WebdevSiteDto`: `{id, tenantId, domain, environment, projectId, clientId, hostKind, hostRef, access, kind, repoUrl, repoBranch, adoption, contractVersion, origin, vaultRef, notes, createdAt, updatedAt}`. `getPortfolio()`'s read model (§24-adjacent) now also carries `vaultRef` on each `PortfolioSite`. |
 
 ### 16h. Social post client-review (SMM-31, D-16) — `src/core/social-client-review-portal.controller.ts` — **STATUS: DEV-VERIFIED backend; portal UI IN PROGRESS (SMM-32)**
 

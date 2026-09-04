@@ -14,7 +14,15 @@ import { config } from "../config";
 import { emitEvent } from "../events/outbox.service";
 import { encryptSecret, TOKEN_KEY_VERSION } from "./secret-box";
 
-export const CONNECTION_PROVIDERS = new Set(["github", "google_drive", "claude"]);
+// VLT-1/VLT-2/VLT-3 (docs/plans/2026-09-04-client-hosting-credential-vault.md) — widened to admit
+// the four hosting-credential provider kinds (`cpanel`/`ftp`/`ssh`/`wp_admin`) alongside the
+// pre-existing OAuth ones, so a hosting connection can be created through the SAME generic HTTP path
+// a client-side integration already uses. Deliberately narrower than the full DB CHECK (VLT-1): the
+// search module's own providers (`google_search_console`/`google_analytics`/`google_ads`/`semrush`)
+// are still excluded here on purpose — they are created through search's own dedicated path, never
+// through this generic client-facing endpoint, and adding them here would be an unrelated widening
+// this ticket does not own.
+export const CONNECTION_PROVIDERS = new Set(["github", "google_drive", "claude", "cpanel", "ftp", "ssh", "wp_admin"]);
 /** Every owner_kind the DB CHECK admits (migration 202608311000 added 'github_app' — GH-01 §2.3(b)
  *  corrected). NOT the set a client may create through the generic HTTP API — see
  *  CLIENT_CREATABLE_OWNER_KINDS below for that. */

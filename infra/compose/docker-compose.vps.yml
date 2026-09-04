@@ -440,6 +440,13 @@ services:
       # variable, which is a better failure than refusing to start the whole stack on a box that does
       # not use these features.
       INTEGRATION_TOKEN_KEY: ${INTEGRATION_TOKEN_KEY:-}
+      # VLT-4 precondition (docs/runbooks/credential-vault-rotation.md) — the DO-NOT-ROTATE tripwire's
+      # canary. Deliberately declared here even though it is EMPTY by default, same reasoning as the
+      # INTEGRATION_TOKEN_KEY incident noted at SOCIAL_POSTIZ_ORG_API_KEY below: leaving this row out
+      # would mean setting it in `.env` does NOTHING to the container, and the tripwire would silently
+      # never arm. Safe to store in plaintext (it is ciphertext of a fixed non-secret string, never the
+      # key itself) — see src/core/token-key-tripwire.ts.
+      INTEGRATION_TOKEN_KEY_CANARY: ${INTEGRATION_TOKEN_KEY_CANARY:-}
       # ── GH-01/06/07 — GitHub App integration (docs/blueprints/github-integration-foundation.md) ──
       # NON-SECRET identifiers only. The credential itself (the App private key) is NEVER an env var:
       # it is sealed into `integration_connections` by `npm run seed:github-apps`, which is the ONLY

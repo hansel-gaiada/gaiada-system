@@ -21,12 +21,17 @@ import {
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../auth/guards";
-import { authorize } from "./http";
+import { authorize, writeActivity } from "./http";
 import {
   CLIENT_CREATABLE_OWNER_KINDS, CLIENT_SETTABLE_STATUSES, CONNECTION_PROVIDERS,
   createConnection, getConnectionRow, listConnections, patchConnection, revokeConnection,
   type ConnectionDbRow,
 } from "./integrations.service";
+import { fileAutomationApproval } from "./approval-filing";
+import {
+  INTEGRATION_CONNECTION_REVEAL_TOOL, INTEGRATION_CONNECTION_REVEAL_WORKFLOW,
+  redeemConnectionReveal, throwForRevealDenial,
+} from "./connection-reveal";
 
 interface CreateBody {
   ownerKind?: string;
@@ -186,6 +191,81 @@ export class IntegrationsController {
       connectionAction("delete", revokeAuthOwner, req.principal.userId ?? ""),
     );
     return revokeConnection(tenantId, id);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // VLT-3 (docs/plans/2026-09-04-client-hosting-credential-vault.md) — the reveal path. See
+  // `connection-reveal.ts`'s header for the full design (why `automation_approvals` and not a new
+  // table, why no new Cerbos action, why the redeem step is separate from decide()).
+  //
+  // FILE: any principal who could `update` this connection (self-owner, or manager+ for a company
+  // row / someone else's) may ASK for a reveal — filing is not a promise of outcome, same as every
+  // other automation_approval in this table (GH-12's own comment states the same for repo creation).
+  // The REAL gate is at decide() time: a DIFFERENT principal, holding `manage` on this exact
+  // connection, must approve — self-decision is refused there, never here.
+  @Post(":tenantId/integrations/connections/:id/reveal-requests")
+  @HttpCode(201)
+  async requestReveal(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { reason?: string },
+  ) {
+    const row = await this.loadOrThrow(tenantId, id);
+    if (!row.access_token_enc) {
+      throw new BadRequestException("this connection has no stored credential to reveal");
+    }
+    const authOwner = cerbosOwnerId(row.owner_kind, row.owner_id);
+    const me = req.principal.userId ?? "";
+    await authorize(
+      req.principal,
+      { kind: "integration_connection", id, tenantId, ownerId: authOwner },
+      connectionAction("update", authOwner, me),
+    );
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    return fileAutomationApproval({
+      tenantId,
+      workflowId: INTEGRATION_CONNECTION_REVEAL_WORKFLOW,
+      toolName: INTEGRATION_CONNECTION_REVEAL_TOOL,
+      toolArgs: { connectionId: id },
+      impact: "high",
+      reason: body?.reason ?? `reveal the stored credential for connection ${id}`,
+      origin: "credential_reveal",
+      requestedBy: req.principal.userId,
+    });
+  }
+
+  /** REDEEM: the one-time, TTL'd, single-use step that actually decrypts. Requires an `approved`
+   *  grant filed by THIS SAME principal (enforced inside `redeemConnectionReveal`, independent of
+   *  Cerbos — Cerbos has no notion of "the row that filed a specific approval"). The plaintext is
+   *  returned in this response body and NOWHERE else: never logged, never written to
+   *  `execution_result`, never re-servable on a second call with the same `approvalId`. */
+  @Post(":tenantId/integrations/connections/:id/reveal")
+  @HttpCode(200)
+  async redeemReveal(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { approvalId?: string },
+  ) {
+    const row = await this.loadOrThrow(tenantId, id);
+    const authOwner = cerbosOwnerId(row.owner_kind, row.owner_id);
+    const me = req.principal.userId ?? "";
+    await authorize(
+      req.principal,
+      { kind: "integration_connection", id, tenantId, ownerId: authOwner },
+      connectionAction("update", authOwner, me),
+    );
+    if (!req.principal.userId) throw new BadRequestException("an authenticated user is required");
+    if (!body?.approvalId) throw new BadRequestException("approvalId is required");
+    const outcome = await redeemConnectionReveal(tenantId, id, body.approvalId, req.principal.userId);
+    if (!outcome.ok) throwForRevealDenial(outcome.reason);
+    // Exactly ONE audit row per successful reveal. Metadata NEVER carries the plaintext — only the
+    // grant it was authorized under, which is what the acceptance bar asks the audit trail to prove.
+    await writeActivity(tenantId, req.principal.userId, "revealed", "integration_connection", id, {
+      approvalId: body.approvalId,
+    });
+    return { connectionId: outcome.connectionId, revealedAt: outcome.revealedAt, value: outcome.value };
   }
 
   /** Load a row scoped to the tenant (RLS). A missing/other-tenant id is a 404 BEFORE authz, so a

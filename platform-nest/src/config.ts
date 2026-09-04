@@ -305,6 +305,15 @@ const configBase = {
   // path is fail-closed 503 (mapping create/list/revoke still work); a future OpenBao/KMS key rotates
   // in behind token_key_version. NEVER logged.
   integrationTokenKey: process.env.INTEGRATION_TOKEN_KEY ?? "",
+  // DO-NOT-ROTATE TRIPWIRE (VLT-4 precondition, OQ-2.6.b / WSK-D33) — src/core/token-key-tripwire.ts.
+  // The ciphertext of a fixed, non-secret constant string, sealed under the currently-correct
+  // INTEGRATION_TOKEN_KEY. Safe to store in plaintext (even in a public repo): AES-256-GCM ciphertext
+  // of a known plaintext leaks nothing about the key. Every boot re-decrypts it with whatever key is
+  // CURRENTLY configured; a mismatch means INTEGRATION_TOKEN_KEY changed since the canary was minted,
+  // which means every already-sealed integration_connections row (OAuth tokens today, ~78 clients'
+  // hosting credentials after VLT-4) is about to silently stop decrypting. UNSET means "not yet
+  // armed" (first install) — logged loudly, does not block boot; SET-but-mismatched DOES block boot.
+  integrationTokenKeyCanary: process.env.INTEGRATION_TOKEN_KEY_CANARY ?? "",
   // D14-03/D14-04 — the ONE shared HMAC secret for the single-use automation-write EXECUTION GRANT
   // (contract: docs/superpowers/plans/2026-08-05-d14-and-assistant-tickets.md §1). platform-nest MINTS
   // a grant inside an approval's `pending -> executing` claim; mcp-hub VERIFIES it and lifts ONLY its

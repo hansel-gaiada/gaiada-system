@@ -29,6 +29,10 @@ import { IAM_POSITION_ASSIGN_WORKFLOW, executeApprovedIamRequest, isIamRequest }
 // GH-12: an approved github repo-creation request ALSO executes in-band — same reasoning as the IAM
 // case (the D14 registry's hub-redrive shape is unusable here; see repo-creation.ts's own header).
 import { executeApprovedGithubRepoCreation, isGithubRepoCreationRequest } from "./github/repo-creation";
+// VLT-3: a credential-reveal request does NOT execute in-band (see connection-reveal.ts's header for
+// why — the requester, not the decider, must receive the plaintext, so decide() only LIFTS the gate;
+// a separate, later, single-use `reveal` call does the actual decrypt).
+import { isIntegrationConnectionRevealRequest } from "./connection-reveal";
 
 const IMPACTS = new Set(["medium", "high", "unclassified"]);
 const ORIGINS = new Set(["automation", "agent"]);
@@ -293,6 +297,8 @@ export class AutomationApprovalsController {
     // repo-creation.ts's header for why no new literal Cerbos action was needed here, unlike
     // decide_override/decide_leave).
     const isGithubCreate = isGithubRepoCreationRequest(rowOrigin, existing.rows[0].workflow_id);
+    // VLT-3: identified the SAME way isOverride/isGithubCreate are (origin + workflow_id).
+    const isReveal = isIntegrationConnectionRevealRequest(rowOrigin, existing.rows[0].workflow_id);
     const subKind = isLeave ? "leave" : undefined;
     // Owner split (2026-08-19): the two IAM request kinds authorize against DIFFERENT actions, so a
     // policy can narrow one without narrowing the other, and the audit row records which kind of
@@ -316,6 +322,32 @@ export class AutomationApprovalsController {
       },
       decideAction,
     );
+
+    // ── VLT-3: a credential reveal may NEVER be self-granted (plan §6 OQ-2.6.c) ───────────────────
+    // Filing only requires `update`-tier reach on the connection (self-owner, or manager+); the
+    // real gate is HERE. Two independent checks, both load-bearing:
+    //   1. The DECIDER must not be the REQUESTER — a company_admin filing their own reveal and then
+    //      approving it is exactly the break-glass shortcut the plan rules out (never quietly built
+    //      as a side effect of the generic `decide` gate, which says nothing about self-approval).
+    //   2. The decider must hold `manage` — the company-wide "administer ANY connection" tier —
+    //      on THIS connection, checked against resource.attr.ownerId = "" so a self-owned row's
+    //      `owns` branch can never satisfy it. A plain member/viewer (even the connection's own
+    //      owner) can never approve a reveal, by construction, regardless of who filed it.
+    if (isReveal) {
+      const args = existing.rows[0].tool_args as { connectionId?: unknown } | null;
+      const connectionId = typeof args?.connectionId === "string" ? args.connectionId : "";
+      if (!connectionId) throw new BadRequestException("this reveal request names no connection");
+      if (existing.rows[0].requested_by && existing.rows[0].requested_by === req.principal.userId) {
+        throw new ForbiddenException(
+          "a credential reveal may not be approved by the same principal who requested it",
+        );
+      }
+      await authorize(
+        req.principal,
+        { kind: "integration_connection", id: connectionId, tenantId, ownerId: "" },
+        "manage",
+      );
+    }
 
     // ── Probe consent: the approver must hold the authority the GRANT needs (2026-09-03) ─────────
     // Ruling §1 (docs/plans/2026-09-03-probe-consent-rulings.md): Web Dev REQUESTS, a holder of
@@ -358,7 +390,13 @@ export class AutomationApprovalsController {
     const executable = decision === "approved" && (rowOrigin === "automation" || rowOrigin === "agent")
       ? getExecutable(rowToolName)
       : undefined;
-    const executionStatus: "pending" | "not_applicable" = executable ? "pending" : "not_applicable";
+    // VLT-3: an approved reveal ALSO starts at 'pending' — not because the D14 registry executes it
+    // (it never will: `automationApprovalExecutorHandler` below filters to origin
+    // automation|agent before it ever claims a row, so a `credential_reveal`-origin row sitting at
+    // 'pending' is never auto-claimed), but because 'pending' IS the redeemable-grant state
+    // `redeemConnectionReveal`'s own atomic claim consumes exactly once.
+    const executionStatus: "pending" | "not_applicable" =
+      executable || (isReveal && decision === "approved") ? "pending" : "not_applicable";
     const res = await withTenants([tenantId], async (c) => {
       const upd = await c.query<{ origin: string; tool_args: unknown; workflow_id: string; tool_name: string }>(
         `UPDATE automation_approvals

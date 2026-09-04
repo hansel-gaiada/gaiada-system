@@ -41,7 +41,7 @@
 // always refused before this ticket) — it does not block construction of the driver itself.
 import {
   BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException,
-  Param, Post, Query, Req, Res, ServiceUnavailableException, UseGuards,
+  Param, Patch, Post, Query, Req, Res, ServiceUnavailableException, UseGuards,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { withGlobal } from "../../db";
@@ -54,6 +54,7 @@ import {
   getProvisionedSite, listProvisionedSites, provisionSite, pollProvisioningSite,
   reconcileProvisionedSite, type SiteDto,
 } from "./provisioning.service";
+import { createWebdevSite, getWebdevSite, patchWebdevSiteVaultRef, type WebdevSiteDto } from "./site-registry.service";
 
 /** Test seam: suites drive a fake `ProvisionProvider` (or, for PRV-02's own historical idempotency
  *  suite, the real `provision-http` driver against the PRV-00 mock over real sockets). Nothing in
@@ -217,5 +218,105 @@ export class WebdevController {
       throw new ServiceUnavailableException({ message: outcome.site.failureReason ?? "failed", site: outcome.site });
     }
     return outcome.site;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // VLT-2 (docs/plans/2026-09-04-client-hosting-credential-vault.md) — the `webdev_sites` PORTFOLIO
+  // registry's first write path. DISTINCT table from `webdev_provisioned_sites` above: this is the
+  // "what exists" registry (portfolio-reads.service.ts), not the "how it was born" mirror.
+  //
+  // ── AUTHZ: REUSE, NOT A NEW KIND OR ACTION ──────────────────────────────────────────────────────
+  // No Cerbos resource kind exists for `webdev_sites` itself, and this ticket does not mint one (the
+  // six-artifact cost — a new policy file, a catalog entry, a migration seeding permissions/
+  // role_permissions, etc. — is out of scope for a first write path, and per the estate's own
+  // "reuse beats adding" instruction). It reuses the ALREADY-REGISTERED, already-tested
+  // `webdev_provisioned_site` kind's existing literal actions instead — the SAME reuse move
+  // `webdesk-control.controller.ts` already made for its own stub control-plane routes
+  // (resource_webdev_provisioned_site.yaml's WSK-31 note): `provision` for "create a new registry
+  // entry" and `operate` for "a medium-impact management write on a site" (setting vault_ref). Both
+  // are manager-tier (company_admin/manager/module_manager), which is the right tier for a registry
+  // write — never a plain-member action. This is a deliberate, flagged trade-off: the `id` passed to
+  // Cerbos for the PATCH is a `webdev_sites` row id, not a `webdev_provisioned_sites` one — Cerbos
+  // does not cross-check an id against a real row of any particular table, so this is safe, but a
+  // FUTURE reader should not assume `resource.attr.id` under this kind always names a provisioned-
+  // site row. If a dedicated `webdev_site` kind is ever minted, both authorize() calls below are the
+  // only two call sites that need to move.
+  @Post("sites")
+  @HttpCode(201)
+  async createSite(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Body() body: Record<string, unknown>,
+  ): Promise<WebdevSiteDto> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, module: "webdev" }, "provision");
+    // vaultRef is deliberately not accepted here — see site-registry.service.ts's own header. A
+    // caller sending it gets a clear, named rejection rather than a silently-ignored field.
+    if ("vaultRef" in body) {
+      throw new BadRequestException("vaultRef is not accepted on create — PATCH sites/:id after creating the row");
+    }
+    const site = await createWebdevSite(
+      tenantId,
+      {
+        domain: body.domain as string,
+        environment: body.environment as string | undefined,
+        projectId: (body.projectId as string | null | undefined) ?? null,
+        clientId: (body.clientId as string | null | undefined) ?? null,
+        hostKind: body.hostKind as string | undefined,
+        hostRef: (body.hostRef as string | null | undefined) ?? null,
+        access: body.access as string | undefined,
+        kind: (body.kind as string | null | undefined) ?? null,
+        repoUrl: (body.repoUrl as string | null | undefined) ?? null,
+        repoBranch: (body.repoBranch as string | null | undefined) ?? null,
+        adoption: body.adoption as string | undefined,
+        contractVersion: (body.contractVersion as string | null | undefined) ?? null,
+        origin: body.origin as string | undefined,
+        notes: (body.notes as string | null | undefined) ?? null,
+      },
+      req.principal.userId,
+    );
+    await writeActivity(tenantId, req.principal.userId, "created", "webdev_site", site.id, { domain: site.domain });
+    return site;
+  }
+
+  @Get("sites/:id")
+  async getSite(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+  ): Promise<WebdevSiteDto> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "read");
+    const site = await getWebdevSite(tenantId, id);
+    if (!site) throw new NotFoundException("webdev site not found");
+    return site;
+  }
+
+  /** THE `vault_ref` pointer write. Accepts EXACTLY `{ vaultRef }` — any other top-level key in the
+   *  body is a 400, which is what proves this endpoint cannot become a backdoor write path for any
+   *  other column, present or future (including a future accidental credential column — the
+   *  regression this whole ticket exists to keep impossible). `vaultRef` itself may be a string (an
+   *  `integration_connections.id` in this tenant) or `null` to clear the pointer. */
+  @Patch("sites/:id")
+  async patchSiteVaultRef(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: Record<string, unknown>,
+  ): Promise<WebdevSiteDto> {
+    await authorize(req.principal, { kind: "webdev_provisioned_site", tenantId, id, module: "webdev" }, "operate");
+    const keys = Object.keys(body ?? {});
+    if (keys.length !== 1 || keys[0] !== "vaultRef") {
+      throw new BadRequestException(
+        `this endpoint accepts exactly {"vaultRef": string|null} — got field(s): ${keys.join(",") || "(none)"}`,
+      );
+    }
+    const raw = body.vaultRef;
+    if (raw !== null && typeof raw !== "string") {
+      throw new BadRequestException("vaultRef must be a string (an integration_connections id) or null");
+    }
+    const site = await patchWebdevSiteVaultRef(tenantId, id, raw as string | null);
+    await writeActivity(tenantId, req.principal.userId, "updated", "webdev_site", site.id, {
+      vaultRefSet: site.vaultRef !== null,
+    });
+    return site;
   }
 }

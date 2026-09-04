@@ -45,6 +45,10 @@ export interface PortfolioSite {
   topologyCheckedAt: string | null;
   /** The consent gate. Probing is only permitted where this is true. */
   crawlConsent: boolean;
+  /** VLT-2 (docs/plans/2026-09-04-client-hosting-credential-vault.md) — a POINTER to an
+   *  `integration_connections.id` row, never a credential (WSK-D30). NULL means no hosting
+   *  credential has been vaulted for this site yet — an honest "not wired up", not an error. */
+  vaultRef: string | null;
 }
 
 export interface PortfolioProject {
@@ -81,6 +85,7 @@ export interface PortfolioResult {
 const PORTFOLIO_SQL = `
   SELECT s.id, s.domain, s.environment, s.host_kind, s.host_ref, s.access, s.kind, s.adoption,
          s.repo_url, s.repo_branch, s.contract_version, s.origin, s.last_seen_at, s.last_http_status, s.notes,
+         s.vault_ref,
          s.project_id, s.client_id,
          pr.name  AS project_name,
          cl.name  AS client_name,
@@ -103,7 +108,7 @@ interface Row {
   id: string; domain: string; environment: SiteEnvironment; host_kind: string; host_ref: string | null;
   access: string; kind: string | null; adoption: string; repo_url: string | null; repo_branch: string | null;
   contract_version: string | null; origin: string; last_seen_at: Date | null; last_http_status: number | null;
-  notes: string | null;
+  notes: string | null; vault_ref: string | null;
   project_id: string | null; client_id: string | null; project_name: string | null; client_name: string | null;
   property_id: string | null;
   hosting_provider: string | null; control_panel: string | null; stack: string | null;
@@ -133,6 +138,7 @@ function toSite(r: Row): PortfolioSite {
     stack: r.stack,
     topologyCheckedAt: r.topology_checked_at ? r.topology_checked_at.toISOString() : null,
     crawlConsent: r.crawl_consent === true,
+    vaultRef: r.vault_ref,
   };
 }
 

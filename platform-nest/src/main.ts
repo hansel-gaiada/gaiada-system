@@ -31,6 +31,9 @@ import { SocialPublisherErrorFilter, SocialOAuthErrorFilter } from "./modules/so
 import { LastResortExceptionFilter } from "./last-resort-exception.filter";
 import { maxUploadBytes } from "./core/meetings.controller";
 import { migrate } from "./db/migrate";
+// VLT-4 precondition (OQ-2.6.b / WSK-D33) — the DO-NOT-ROTATE tripwire. See its own header for why
+// this runs at boot rather than as a health signal or a docs-only register entry.
+import { assertIntegrationTokenKeyMatchesCanary } from "./core/token-key-tripwire";
 import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
 import { registerModule, validateModulePermissions } from "./modules/registry";
@@ -411,6 +414,11 @@ export function wireSearchProviderModeAndAdsWriteMode(
 // registration site, the event type and the watched stream are all unchanged. See that file's header
 // for the four invariants (authority / single-use / TOCTOU / loudness) and the crash-wedge rule.
 async function bootstrap(): Promise<void> {
+  // DO-NOT-ROTATE TRIPWIRE — runs FIRST, before migrate() or anything else: it needs no DB, and a
+  // wrong INTEGRATION_TOKEN_KEY should refuse this boot before it does anything else, not after a
+  // migration or module registration has already run. Throws (crashes boot) iff a canary IS
+  // configured and this key cannot reproduce it; see token-key-tripwire.ts.
+  assertIntegrationTokenKeyMatchesCanary();
   // Same startup sequence the Fastify server ran: migrate, register compiled-in modules +
   // core rollup providers, sync the governed metric registry, then serve.
   await migrate();
