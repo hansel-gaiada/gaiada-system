@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202609040505_automation_approvals_origin_credential_reveal.sql`
+- Head: `202609051010_iam_agency_discovery_intake_permissions.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 226 (121 legacy `NNNN_`, 105 timestamped)
+- Applied files on disk: 228 (121 legacy `NNNN_`, 107 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -196,6 +196,9 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/admin/positions.controller.ts` |
 | `/api` | `platform-nest/src/admin/role-grants.controller.ts` |
 | `/api` | `platform-nest/src/admin/service-assignments.controller.ts` |
+| `/api` | `platform-nest/src/core/agency-intake-portal.controller.ts` |
+| `/api` | `platform-nest/src/core/agency-lead-convert.controller.ts` |
+| `/api` | `platform-nest/src/core/agency-leads.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals-decide.controller.ts` |
 | `/api` | `platform-nest/src/core/approvals.controller.ts` |
 | `/api` | `platform-nest/src/core/authz-check.controller.ts` |

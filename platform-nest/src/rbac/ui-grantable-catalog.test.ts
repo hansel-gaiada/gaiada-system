@@ -76,8 +76,11 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // push/merge/deploy/secret_write/create_repo/delete_repo — the four D14-gated ones ARE grantable
     // in the catalog sense, per 0094's bundling methodology for attribute-gated rules), 387 -> 396 /
     // 372 -> 381.
-    expect(permissions.length).toBe(396);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(381);
+    // AD-7 (2026-09-05): +8 grantable / +8 total, on 2 NEW kinds (agency_lead: read/create/update/
+    // triage/convert/delete; agency_discovery_submission: read/delete — no update, design §3.2),
+    // 396 -> 404 / 381 -> 389.
+    expect(permissions.length).toBe(404);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(389);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

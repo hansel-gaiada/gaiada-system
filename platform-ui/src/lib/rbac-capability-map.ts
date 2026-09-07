@@ -808,4 +808,45 @@ export const CAPABILITY_MAP = {
     permissions: ["monitoring.maintenance.delete"],
     semantics: "all",
   },
+
+  // ── AD-11 · agency discovery intake ──────────────────────────────────────────────────────────
+  // These four were declared in `rbac.ts`'s Capability union and granted to roles, but their
+  // definitions never landed here (the authoring session was cut off mid-edit), which broke
+  // `satisfies Record<Capability, CapabilityDef>` for the whole map. Completed rather than
+  // reverted, because the union and the role grants were already correct.
+  //
+  // The tiers mirror `cerbos/policies/resource_agency_lead.yaml` exactly — the UI is a MIRROR of
+  // Cerbos, never the authority (CLAUDE.md's non-negotiable). If they disagree, Cerbos wins and
+  // this file is the bug.
+  "agency.lead.read": {
+    // Queue, lead detail, and the submission history — which is a SEPARATE Cerbos kind, so both
+    // permissions are required to render the detail page's answers without a partial view.
+    permissions: ["agency.lead.read", "agency.discovery_submission.read"],
+    semantics: "all",
+  },
+  "agency.lead.write": {
+    // Create a lead by hand (`agency_lead:create`), and mint/revoke its discovery invite link
+    // (`agency_lead:update`). `all`, not `any`, and the choice is load-bearing: this one capability
+    // gates BOTH the queue's "New lead" button and the detail page's invite controls, so under
+    // `any` a principal holding only `update` would be shown a create button that 403s — the exact
+    // failure this file exists to prevent. Checked against `role-permission-bundles.json`: every
+    // role that holds either key (platform_admin, company_admin, manager, member, owner) holds
+    // BOTH, so `all` is behaviourally identical to `any` for every role-driven principal and costs
+    // nothing today. It diverges only for a DIRECT single-key IAM grant, which does not exist yet
+    // — when one does, split this into `agency.lead.create` / `agency.lead.update` rather than
+    // loosening the semantics back, and gate each control on its own key.
+    permissions: ["agency.lead.create", "agency.lead.update"],
+    semantics: "all",
+  },
+  "agency.lead.triage": {
+    permissions: ["agency.lead.triage"],
+    semantics: "all",
+  },
+  "agency.lead.convert": {
+    // Deliberately its OWN capability, not folded into triage: convert mints a client, a project
+    // and a delivery run, and the policy holds it strictly narrower than triage (company_admin
+    // tier). A UI that gates the Convert button on triage renders a control most users 403 on.
+    permissions: ["agency.lead.convert"],
+    semantics: "all",
+  },
 } as const satisfies Record<Capability, CapabilityDef>;

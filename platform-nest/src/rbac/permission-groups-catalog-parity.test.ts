@@ -99,7 +99,11 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // secret_write,create_repo,delete_repo} (1 new Cerbos kind). 5 in a new "GitHub Repos" authoring
     // group (read/link/unlink/push/merge); the 4 D14-gated ones (deploy/secret_write/create_repo/
     // delete_repo) are advancedOnly, same reasoning core.position.assign uses. 372 -> 381.
-    expect(grantable.length).toBe(381);
+    // AD-7 (2026-09-05): +8 grantable — agency.lead.{read,create,update,triage,convert,delete} and
+    // agency.discovery_submission.{read,delete} (2 new Cerbos kinds). 4 new authoring groups
+    // (agency_leads CRUD; agency_lead_triage; agency_lead_convert; agency_discovery_submissions) —
+    // none advancedOnly. Relationship set untouched. 381 -> 389.
+    expect(grantable.length).toBe(389);
     expect(relationshipKeys.size).toBe(15);
   });
 

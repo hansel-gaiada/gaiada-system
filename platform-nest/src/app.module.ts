@@ -46,6 +46,20 @@ import { ContractsController } from "./core/contracts.controller";
 // module: there is no `src/modules/webdev/`, and `webdev_change_requests` takes the plain tenant wall
 // (D-2a) so no ModuleEnabledGuard belongs in front of triage. See the controller's own header.
 import { WebdevChangeRequestsController } from "./core/webdev-change-requests.controller";
+// AD-1 agency discovery intake. All three live in core/, NOT modules/agency/, for the reason the
+// design records in §3.1: these tables take the plain tenant wall rather than
+// app_module_allowed('agency'), so a ModuleEnabledGuard must never sit in front of them. Same
+// placement, and the same reasoning, as the webdev change-request pair immediately above.
+//
+// AgencyIntakePortalController is the ONLY controller in this list that does not carry AuthGuard.
+// It is guarded by IntakeTokenGuard instead — a prospect has no platform session and is not a
+// principal (design §5.1). It is not unauthenticated; it is authenticated by a capability token.
+import { AgencyIntakePortalController } from "./core/agency-intake-portal.controller";
+import { AgencyLeadsController } from "./core/agency-leads.controller";
+// Convert is split out of AgencyLeadsController the way ApprovalsDecideController is split out of
+// ApprovalsController: it is a different Cerbos action (`convert`, not `triage`) guarding a write
+// that mints a client, a project and a delivery run.
+import { AgencyLeadConvertController } from "./core/agency-lead-convert.controller";
 // GH-08: BFF for the GitHub repo registry (list/detail/link/unlink). Deliberately its own
 // controller file outside `core/github/` — see that file's own header for why.
 import { GithubReposController } from "./core/github-repos.controller";
@@ -155,7 +169,7 @@ import { MagicLinkController } from "./mail/magic-link/controller";
 @Module({
   controllers: [
     HealthController, IdentityController, CoreController, CustomFieldsController,
-    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
+    AuthzCheckController, AuthzPermissionsController, ClientWorkController, InvoiceController, CollabController, AutomationApprovalsController, PipelineController, ApprovalsController, ApprovalsDecideController, TasksMineController, MeetingRecordingsController, PortalController, PortalWorkspaceController, PortalCommerceController, PortalProfileController, PortalStreamController, WebdevChangeRequestsPortalController, SocialClientReviewPortalController, WebdevChangeRequestsController, AgencyIntakePortalController, AgencyLeadsController, AgencyLeadConvertController, GithubReposController, GithubWebhookController, ContractsController, ClientContactsController, ClientInviteAcceptController, FilesController, CreativeController, WorkActivityController, IntegrationsController, ClaudeSeatsController, AdminIdentityController,
     CompanyAdminController, EmployeesController, PositionsController, RoleGrantsController, ItAccountsController, ServiceAssignmentsController, CompanyCrudController, AdminSystemsController, ObservabilityController, AgentsController, MonitoringController, MonitoringHeartbeatController, BotAdminController, IntelligenceController,
     // Vertical modules (compiled-in; per-tenant enable gate at the controller).
     AgencyController, PmController, ItController, FinanceController, ClientsController, HrController, LoansController,

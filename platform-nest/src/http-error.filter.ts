@@ -25,15 +25,25 @@ export class HttpErrorFilter implements ExceptionFilter {
     let field: string | undefined;
     let existing: Record<string, unknown> | undefined;
     let site: Record<string, unknown> | undefined;
+    let reason: string | undefined;
     if (typeof res === "string") {
       error = res;
     } else {
       const r = res as {
         message?: string | string[]; field?: string; existing?: unknown; site?: unknown;
+        reason?: string;
       };
       const m = r.message;
       error = Array.isArray(m) ? m.join(", ") : m ?? exception.message;
       if (typeof r.field === "string") field = r.field;
+      // AD-2: `reason`, same additive rule as `field`/`existing`/`site`. The agency intake guard
+      // refuses an anonymous prospect with a MACHINE code (`token_expired`, `token_used`, …) and
+      // the documented contract says a caller branches on it. Without this line the field was
+      // silently dropped by the reshape below and only survived because the guard also copies it
+      // into `message` — so the documented field name was one nobody could actually read. QA caught
+      // that; forwarding it is the honest fix, and it is what agentic-native criterion 2 (typed
+      // refusals, not prose) actually requires.
+      if (typeof r.reason === "string") reason = r.reason;
       if (r.existing && typeof r.existing === "object" && !Array.isArray(r.existing)) {
         existing = r.existing as Record<string, unknown>;
       }
@@ -54,6 +64,7 @@ export class HttpErrorFilter implements ExceptionFilter {
     void reply.status(status).send({
       error,
       ...(field ? { field } : {}),
+      ...(reason ? { reason } : {}),
       ...(existing ? { existing } : {}),
       ...(site ? { site } : {}),
     });

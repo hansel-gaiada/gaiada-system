@@ -782,3 +782,113 @@ describe.skipIf(!live)("IAM-04-ROLLOUT-B4: dual-match isolation across the new-S
     expect(await allow(p, { kind: "task", id: "x1", tenantId: T1 }, "delete")).toBe(false); // neither arm grants this
   });
 });
+
+describe.skipIf(!live)("AD-7 (agency discovery intake, design §5.2): agency_lead / agency_discovery_submission", () => {
+  // NOT run in this session — no CERBOS_URL was reachable (stack off by owner decision, CLAUDE.md).
+  // Written and statically type-checked so a future session with a live, RESTARTED Cerbos (policy
+  // does not hot-reload — CLAUDE.md) can prove the decision the report can only describe.
+  const lead: Resource = { kind: "agency_lead", id: "lead-1", tenantId: T1 };
+  const submission: Resource = { kind: "agency_discovery_submission", id: "sub-1", tenantId: T1 };
+
+  it("agency_lead.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .convert", async () => {
+    const p = principal([], [{ key: "agency.lead.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, lead, "read")).toBe(true);
+    expect(await allow(p, { ...lead, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, lead, "convert")).toBe(false);
+  });
+
+  it("agency_lead: PERMISSION ARM ALONE covers create/update/triage/convert/delete independently, none bleeding into a sibling action", async () => {
+    for (const action of ["create", "update", "triage", "convert", "delete"]) {
+      const p = principal([], [{ key: `agency.lead.${action}`, scopeType: "company", scopeId: T1 }]);
+      expect(await allow(p, lead, action), `agency.lead.${action} via permission alone`).toBe(true);
+    }
+    const convertOnly = principal([], [{ key: "agency.lead.convert", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(convertOnly, lead, "triage")).toBe(false);
+    expect(await allow(convertOnly, lead, "update")).toBe(false);
+  });
+
+  it("agency_lead: PERMISSION ARM low assurance gets nothing; global-scope grant covers every tenant", async () => {
+    const low = principal([], [{ key: "agency.lead.read", scopeType: "company", scopeId: T1 }], [T1], "low");
+    expect(await allow(low, lead, "read")).toBe(false);
+    const global = principal([], [{ key: "agency.lead.read", scopeType: "global", scopeId: null }], [T1, T2]);
+    expect(await allow(global, lead, "read")).toBe(true);
+    expect(await allow(global, { ...lead, tenantId: T2 }, "read")).toBe(true);
+  });
+
+  it("ROLE ARM UNCHANGED — agency_lead: company_admin/manager/member/viewer read; member updates but cannot triage or convert; manager triages but cannot convert; only company_admin converts", async () => {
+    const viewer = principal([{ role: "viewer", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(viewer, lead, "read")).toBe(true);
+    expect(await allow(viewer, lead, "update")).toBe(false);
+
+    const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(member, lead, "update")).toBe(true); // "an AM who may edit a phone number..."
+    expect(await allow(member, lead, "triage")).toBe(false); // "...should not automatically be able to [convert]" — and not triage either, per this ruling
+    expect(await allow(member, lead, "convert")).toBe(false);
+
+    const manager = principal([{ role: "manager", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(manager, lead, "triage")).toBe(true);
+    expect(await allow(manager, lead, "convert")).toBe(false); // convert is the NARROWER of the two, design §5.2
+
+    const companyAdmin = principal([{ role: "company_admin", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(companyAdmin, lead, "convert")).toBe(true);
+
+    const platformAdmin = principal([{ role: "platform_admin", scopeType: "global", scopeId: null }], [], [T1]);
+    expect(await allow(platformAdmin, lead, "convert")).toBe(true); // the wildcard tier, role arm only — never mirrored (IAM-04c)
+  });
+
+  it("🔴 THE INVARIANT (0072:32-36 / design §5.1): a bare `client` grant reaches NOTHING on agency_lead — no rule in resource_agency_lead.yaml ever names the client derived role", async () => {
+    const client = principal([{ role: "client", scopeType: "company", scopeId: T1 }], []);
+    for (const action of ["read", "create", "update", "triage", "convert", "delete"]) {
+      expect(await allow(client, lead, action), `client must not reach agency_lead.${action}`).toBe(false);
+    }
+  });
+
+  it("agency_discovery_submission.read: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak; no sibling-action bleed into .delete", async () => {
+    const p = principal([], [{ key: "agency.discovery_submission.read", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, submission, "read")).toBe(true);
+    expect(await allow(p, { ...submission, tenantId: T2 }, "read")).toBe(false);
+    expect(await allow(p, submission, "delete")).toBe(false);
+  });
+
+  it("agency_discovery_submission.delete: PERMISSION ARM ALONE (roles: []) allows; no cross-tenant leak", async () => {
+    const p = principal([], [{ key: "agency.discovery_submission.delete", scopeType: "company", scopeId: T1 }]);
+    expect(await allow(p, submission, "delete")).toBe(true);
+    expect(await allow(p, { ...submission, tenantId: T2 }, "delete")).toBe(false);
+  });
+
+  it("agency_discovery_submission has NO update action at all — a permission key of that shape cannot even be asked for a matching Cerbos grant, so the flat `perms` array route is structurally absent, not merely undeclared", async () => {
+    // There is no `perm_agency_discovery_submission_update` derived role and no `update` rule in
+    // resource_agency_discovery_submission.yaml — design §3.2's INSERT-only invariant. Asking Cerbos
+    // for "update" on this kind can only ever fall through to a deny, from EVERY tier including the
+    // platform_admin wildcard's own action set (the catalog's action universe for this kind has no
+    // "update" member at all — see cerbos-catalog-alignment.test.ts's (c) orphaned-entry direction,
+    // which would catch an update-shaped catalog entry with nothing to back it).
+    const companyAdmin = principal([{ role: "company_admin", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(companyAdmin, submission, "update")).toBe(false);
+  });
+
+  it("ROLE ARM UNCHANGED — agency_discovery_submission: company_admin/manager/member/viewer read; delete narrowed to company_admin/manager (member denied)", async () => {
+    const member = principal([{ role: "member", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(member, submission, "read")).toBe(true);
+    expect(await allow(member, submission, "delete")).toBe(false);
+
+    const manager = principal([{ role: "manager", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(manager, submission, "delete")).toBe(true);
+  });
+
+  it("🔴 THE INVARIANT (0072:32-36 / design §5.1): a bare `client` grant reaches NOTHING on agency_discovery_submission either", async () => {
+    const client = principal([{ role: "client", scopeType: "company", scopeId: T1 }], []);
+    expect(await allow(client, submission, "read")).toBe(false);
+    expect(await allow(client, submission, "delete")).toBe(false);
+  });
+
+  it("BOTH ARMS TOGETHER still yield exactly one decision (role grants read via viewer on the submission, permission independently grants agency_lead.triage — neither leaks into the other kind)", async () => {
+    const p = principal(
+      [{ role: "viewer", scopeType: "company", scopeId: T1 }],
+      [{ key: "agency.lead.triage", scopeType: "company", scopeId: T1 }],
+    );
+    expect(await allow(p, submission, "read")).toBe(true); // role arm, on the submission kind
+    expect(await allow(p, lead, "triage")).toBe(true); // permission arm, on the DIFFERENT lead kind
+    expect(await allow(p, submission, "delete")).toBe(false); // viewer never held delete on either kind
+  });
+});

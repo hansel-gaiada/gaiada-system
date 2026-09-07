@@ -1,0 +1,70 @@
+# AD-7 (agency discovery intake, design §5.2) — the STAFF half of submission authorization.
+#
+# agency_discovery_submission = the IMMUTABLE record of what a prospect actually said (design §3.2:
+# "the evidentiary basis of scope"). It is INSERT-only by schema design: a correction arrives as a
+# NEW row with `supersedes_id` set, and both are kept. The prospect's own write into this table
+# (`POST /intake/submissions`) is authorized by `IntakeTokenGuard`, never by this file or by
+# `authorize()`/Cerbos — design §5.1 is explicit that a prospect is not a principal. This file is
+# reachable ONLY by an authenticated staff principal, for the two staff-facing actions below.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately — same invariant as
+# `resource_agency_lead.yaml`'s own header and `resource_webdev_change_request.yaml`'s precedent.
+# Migration 0072's header proved the portal design safe on exactly this property: a principal
+# holding just the `client` grant satisfies exactly one policy file (resource_portal.yaml). A
+# client-only principal must DENY on both actions below.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read   — render the submission (detail view, section by section, and the supersedes_id compare
+#            view per design §9.2). Same broad staff tier as `resource_agency_brief.yaml` and
+#            `resource_agency_lead.yaml`'s own read rule.
+#   delete — NO `update` action exists on this kind, and that omission is deliberate, not an
+#            oversight to be "fixed" for symmetry with agency_lead: design §3.2 states plainly that
+#            conflating mutable lead state with the immutable submission would let triage mutate
+#            the record of the client's own words, and the schema itself is INSERT-only (no UPDATE
+#            grant would ever have anywhere to apply). `delete` is kept — for retention/erasure
+#            paths (AD-10 is the follow-up ticket; design §7 flags retention as an open gap, not
+#            solved here) — but narrowed to company_admin/manager, EXCLUDING `member`: this row
+#            carries the same commercially-sensitive content (budget, competitors) and PII (contact
+#            name/email/phone) design §7 describes, and destroying an evidentiary record is a
+#            heavier act than editing a brief or a campaign. Judgment call, flagged in the AD-7
+#            report: the design doc specifies the action LIST (read, delete — explicitly no
+#            update) but not this specific role tier.
+#
+# No `module` attribute is read by this policy, matching resource_agency_lead.yaml's own reasoning
+# (no seeded agency_manager/agency_staff module-role pair exists).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: agency_discovery_submission
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
+    # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
+    # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the
+    # per-kind safety argument). Any group_executive-only or platform_admin wildcard rule on this
+    # kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the permission
+    # catalog).
+
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_discovery_submission_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_discovery_submission_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

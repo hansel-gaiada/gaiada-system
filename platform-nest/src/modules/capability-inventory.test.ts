@@ -36,7 +36,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { resetModules, registerModule, allModules } from "./registry";
-import { allCoreTools, resetCoreTools, registerIamCoreTools } from "../core/core-tools";
+import { allCoreTools, resetCoreTools, registerAllCoreTools } from "../core/core-tools";
 import type { McpToolDef } from "./contract";
 
 import { agencyModule } from "./agency";
@@ -228,9 +228,10 @@ let golden: GoldenRow[];
 describe("AGN-6 · capability inventory is generated, not remembered", () => {
   beforeAll(() => {
     resetModules();
-    // core-tools self-registers at import; a reset without this omits the nine `iam.*` tools.
+    // core-tools self-registers at import; a reset without this omits the nine `iam.*` tools and the
+    // `agency_intake.*` family (AD-8).
     resetCoreTools();
-    registerIamCoreTools();
+    registerAllCoreTools();
     for (const m of ALL_MODULES) registerModule(m);
 
     const rows: Row[] = [];

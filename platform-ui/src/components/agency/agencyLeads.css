@@ -1,0 +1,118 @@
+/* AD-11 — Agency Discovery Intake staff console. Prefix `adl-` (a genuinely new surface within
+   /agency, per platform-ui/CLAUDE.md's "new surface gets a new prefix" rule). Tokens only. */
+
+.adl-hint {
+  margin: 10px 0 0;
+  font: 400 12px/1.5 var(--font-body);
+  color: var(--ink-subtle);
+}
+
+.adl-subtle {
+  color: var(--ink-subtle);
+}
+
+.adl-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.adl-section + .adl-section {
+  margin-top: 12px;
+}
+
+.adl-section__title {
+  margin: 0;
+  font: 600 13px var(--font-display);
+  color: var(--ink);
+}
+
+.adl-heading {
+  margin: 8px 0 0;
+  font: 600 11px var(--font-body);
+  letter-spacing: 0.04em;
+  color: var(--ink-subtle);
+}
+
+.adl-qa {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.adl-qa:last-child {
+  border-bottom: none;
+}
+
+.adl-qa__label {
+  font: 500 12px var(--font-body);
+  color: var(--ink-muted);
+}
+
+.adl-qa__value {
+  font: 400 13px/1.5 var(--font-body);
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.adl-qa__value--skipped {
+  font-style: italic;
+  color: var(--ink-subtle);
+}
+
+.adl-qa__value--missing {
+  font-style: italic;
+  color: var(--status-critical-fg);
+}
+
+.adl-grid {
+  display: grid;
+  gap: 2px;
+  font: 400 12px/1.5 var(--font-body);
+}
+
+.adl-grid__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.adl-token {
+  display: block;
+  padding: 8px 10px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  font: 400 12px/1.5 var(--font-mono, monospace);
+  word-break: break-all;
+  color: var(--ink);
+}
+
+.adl-callout {
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 8px;
+}
+
+.adl-error {
+  margin: 0;
+  font: 400 13px var(--font-body);
+  color: var(--status-critical-fg);
+}
+
+.adl-delegation-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.adl-delegation-row:last-child {
+  border-bottom: none;
+}

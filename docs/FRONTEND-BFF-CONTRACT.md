@@ -4474,3 +4474,129 @@ Three contract rules a consumer must not simplify:
 
 `fiscalYearStartMonth` is returned but **not accepted** on write: the database refuses to move it
 once a calendar exists, and offering a field that will be rejected implies it is editable.
+
+---
+
+## Agency Discovery Intake — `/api/:tenantId/agency/leads*` and `/api/:tenantId/intake/*` (AD-1…AD-7, 2026-09-05) — **STATUS: PROTOTYPED**
+
+Design: `docs/superpowers/plans/2026-09-05-agency-discovery-intake-design.md`.
+Migration `202609050857_agency_discovery_intake.sql` (DEV-VERIFIED: applies clean, RLS + composite
+FKs + CHECKs + partial uniques driven under a NOBYPASSRLS role). The endpoints below are
+**PROTOTYPED** — typechecked and unit-tested, wired into `app.module.ts`, not yet driven end to end
+against the running estate.
+
+A prospect fills a structured discovery questionnaire through a link we send them; the agency
+reviews it in the ERP and declines, nurtures, or converts — where converting mints the client, the
+project, the delivery run seeded from their own answers, and the delegation tasks.
+
+### The one thing a consumer must understand before using any of this
+
+**`/intake/*` is the only surface in the estate that a caller reaches without a platform session.**
+It carries no `AuthGuard`. It is not unauthenticated — it is authenticated by a **capability token**
+(`X-Intake-Token`), and the caller is a prospect who has no `users` row, no membership, no derived
+role, and is **not a principal**. `authorize()` is never called on that path; a prospect satisfies
+no Cerbos policy at all, which is deliberate and preserves the `0072:32-36` invariant.
+
+### Prospect surface (token-guarded, NOT for platform-ui)
+
+| Method | Path | Returns | Guard |
+|---|---|---|---|
+| GET | `/api/:tenantId/intake/questionnaire` | `{ schemaVersion, sections[] }` | `IntakeTokenGuard` |
+| POST | `/api/:tenantId/intake/submissions` | `{ id, status }` | `IntakeTokenGuard` |
+
+- The token travels in the **`X-Intake-Token` header**, never a query parameter — a `?token=` lands
+  in nginx access logs, in the `Referer` of every outbound link, and in browser history. The
+  prospect-facing page reads it from the URL **fragment** and strips it from the address bar.
+- `:tenantId` in the path is **not an authorization fact** (design §2.3). It only scopes which
+  tenant's rows the hash lookup can see; a valid token against the wrong tenant resolves nothing and
+  is indistinguishable from an unknown hash. It is in the path because `agency_intake_tokens` ships
+  FORCE RLS with no `principal_lookup` bypass, so a tenant-blind lookup returns zero rows always.
+- **Refusals are typed, and the code leads.** `{ statusCode, reason, message }` where `reason` is
+  one of `token_missing` · `token_invalid` · `token_expired` · `token_used` · `token_revoked` (401),
+  or `open_intake_not_enabled` (403, names AD-9). A consumer must render off `reason`, never by
+  matching `message`.
+- **A replayed POST returns 200 with the EXISTING submission id, not a conflict.** This differs
+  deliberately from convert below: a prospect is not an operator who can act on a 409, and a dropped
+  response is far likelier than a real double submission. Do not "make them consistent".
+
+### Staff surface (platform-ui)
+
+| Method | Path | Returns | Cerbos |
+|---|---|---|---|
+| GET | `/api/:tenantId/agency/leads` | queue rows + `ageSeconds`, `hasSubmission` | `agency_lead:read` |
+| GET | `/api/:tenantId/agency/leads/:leadId` | lead + latest submission | `agency_lead:read` |
+| GET | `/api/:tenantId/agency/leads/:leadId/submissions` | full history (`supersedes_id` chains) | `agency_discovery_submission:read` |
+| POST | `/api/:tenantId/agency/leads` | `{ id, status: "new" }` (staff-entered, `source='staff'`) | `agency_lead:create` |
+| POST | `/api/:tenantId/agency/leads/:leadId/invite` | `{ tokenId, token, expiresAt }` — **the token is returned ONCE** | `agency_lead:update` |
+| POST | `/api/:tenantId/agency/leads/:leadId/invite/:tokenId/revoke` | `{ revoked }` (idempotent) | `agency_lead:update` |
+| POST | `/api/:tenantId/agency/leads/:leadId/open` | `{ ok }` — `submitted → in_review` | `agency_lead:triage` |
+| POST | `/api/:tenantId/agency/leads/:leadId/decline` | `{ ok }` — `reason` REQUIRED | `agency_lead:triage` |
+| POST | `/api/:tenantId/agency/leads/:leadId/nurture` | `{ ok }` | `agency_lead:triage` |
+| POST | `/api/:tenantId/agency/leads/:leadId/convert` | `{ id, status, clientId, projectId, runId }` | **`agency_lead:convert`** |
+
+### The invite token is shown once and never again
+
+`POST …/invite` returns the plaintext token in its response body, and that is the **only** time it
+exists anywhere — the database stores `sha256(token)` (design §2.2), so a lost link is re-minted,
+never recovered. A UI that renders it must therefore treat it like a generated password: show it
+once, offer copy, and say plainly that navigating away loses it.
+
+Build the link with the token in the **fragment** — `https://…/discovery#t=<token>` — never
+`?t=<token>`. A query parameter is written to nginx access logs, sent in the `Referer` header of
+every outbound link on the page, and kept in browser history; a fragment is never transmitted to
+any server. The prospect page reads it, strips it from the address bar, and replays it as
+`X-Intake-Token`.
+
+Minting also advances the lead `new → invited` in the same transaction, which is what moves it out
+of the queue's "we still owe them the form" tier. Re-minting for an expired link is safe and keeps
+the lead; it will not drag a lead that has already **submitted** backwards out of the review queue.
+
+### Six contract rules a consumer must not "simplify"
+
+1. **The queue sorts by whose move it is, not by recency.** `submitted`(0) → `new`(1) →
+   `invited`(2) → everything else(3), oldest-first within each. `new` outranks `invited` on purpose:
+   `new` means we created the lead and never sent the form — ours, and the easiest thing in an
+   agency pipeline to drop. A consumer that re-sorts by `createdAt` destroys the one signal the
+   queue exists to carry.
+2. **`convert` is a distinct Cerbos action from `triage`, and is narrower.** It mints a client, a
+   project and a delivery run. Currently `company_admin` only — flagged as a business call, not an
+   authz one. A UI that shows the Convert button on `agency_lead:triage` will render a control most
+   users get a 403 from.
+3. **A denial is never an empty list.** The reader deliberately does not fold 403/404 into `[]` —
+   the estate has a live defect from exactly that (`2026-08-03-agentic-native-erp-plan.md`,
+   cross-cutting item 3). Render the refusal; an empty queue and a forbidden queue must not look
+   alike.
+4. **`answers` is JSONB keyed by the questionnaire's stable field ids, and "key absent" ≠ "answered
+   empty".** The detail read returns it raw and never defaults it. A reviewer's first question is
+   *what did they not tell us*, so a consumer must render an unanswered field as visibly absent, not
+   as a blank string. The id set and `schemaVersion` come from
+   `core/agency-discovery-questionnaire.ts`; `SCHEMA_VERSION` is pinned per submission because a
+   stored answer set is meaningless without the question set that produced it.
+5. **Branch on `reason`, not on `error` text.** `HttpErrorFilter` forwards `reason` alongside
+   `error` (added for this feature — it was being silently dropped, so the documented field was one
+   no caller could actually read). `error` carries the same string today, but it is the human
+   message and is free to change wording; `reason` is the machine code and is not.
+6. **A submission is INSERT-only.** There is no update endpoint and no `update` action on
+   `agency_discovery_submission` — the row is the evidentiary record of what the client actually
+   said, and it is the basis of scope. Corrections arrive as a NEW submission with `supersedes_id`
+   set; both are kept and the compare view is the intended surface for the difference.
+
+### Convert — what it spawns, and the one thing it must never do
+
+One transaction: `clients` → `client_contacts` (`capability='signer'`, because a viewer-only contact
+would leave the `prd_sign` gate open onto nobody who could ever sign it) → `projects` →
+`pipeline_runs` → two `done` extraction stages whose `artifact_ref` is rendered from the prospect's
+own answers → the open client `prd_sign` gate → `pm_tasks` for delegation → `emitEvent
+pipeline.run.created`, which is what the shipped `pipeline-fanout` n8n workflow triggers on
+(`automation/workflows/pipeline-fanout.json:11`, verified) to open `scope_signoff` and notify the PM.
+
+**It never pre-seeds a signed gate.** The hard build gate requires PRD-signed AND scope-dual-signed,
+and a converted run satisfies that the same way every run does — by real client signatures.
+Pre-seeding would forge what a client signed.
+
+### Known limitation a consumer should not design around
+
+`convert` is medium-impact and therefore D14-gated, and the D14 **resume path is broken estate-wide**
+("approving a suspended write currently executes nothing" — the agentic-native plan's highest-leverage
+open item). So an agent-initiated convert suspends and never executes. **Convert is a human-driven
+capability until that lands.** This feature neither introduces nor can fix it.

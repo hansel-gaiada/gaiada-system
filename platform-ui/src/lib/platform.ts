@@ -7,7 +7,19 @@ export class PlatformError extends Error {
   // `existing` is additive too (MI-03/MI-05): the webdev triage 409 ("already triaged") carries the
   // artifact a race loser needs to navigate to instead of a bare failure — HttpErrorFilter forwards
   // it verbatim (platform-nest/src/http-error.filter.ts). undefined for every other caller.
-  constructor(public status: number, message: string, public field?: string, public existing?: Record<string, unknown>) {
+  // `reason` — AD-11, additive on the identical rule. The agency-leads invite endpoint's 409
+  // ("lead_already_dispositioned") is a MACHINE code, and the FRONTEND-BFF-CONTRACT.md's own rule 5
+  // for this feature says a consumer must branch on `reason`, never on `error` text (the human
+  // message is free to reword). `HttpErrorFilter` already forwards `reason` in the response body —
+  // it was PlatformError that dropped it on the way in, which would have made the documented field
+  // one no caller in this app could actually read. undefined for every other caller.
+  constructor(
+    public status: number,
+    message: string,
+    public field?: string,
+    public existing?: Record<string, unknown>,
+    public reason?: string,
+  ) {
     super(message);
   }
 }
@@ -25,8 +37,8 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     const body = typeof init.body === "string" ? init.body : undefined;
     const { status, json } = getDemoResponse(init.method ?? "GET", path, userId, body);
     if (status < 200 || status >= 300) {
-      const body = json as { error?: string; field?: string; existing?: Record<string, unknown> };
-      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field, body?.existing);
+      const body = json as { error?: string; field?: string; existing?: Record<string, unknown>; reason?: string };
+      throw new PlatformError(status, body?.error ?? `platform ${status}`, body?.field, body?.existing, body?.reason);
     }
     return json as T;
   }
@@ -68,13 +80,15 @@ export async function platformFetch<T>(path: string, userId: string, init: Reque
     let msg = `platform ${res.status}`;
     let field: string | undefined;
     let existing: Record<string, unknown> | undefined;
+    let reason: string | undefined;
     try {
-      const body = (await res.json()) as { error?: string; field?: string; existing?: Record<string, unknown> };
+      const body = (await res.json()) as { error?: string; field?: string; existing?: Record<string, unknown>; reason?: string };
       msg = body.error ?? msg;
       field = body.field;
       existing = body.existing;
+      reason = body.reason;
     } catch { /* keep default */ }
-    throw new PlatformError(res.status, msg, field, existing);
+    throw new PlatformError(res.status, msg, field, existing, reason);
   }
   return (await res.json()) as T;
 }

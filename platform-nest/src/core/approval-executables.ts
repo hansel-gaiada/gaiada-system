@@ -1597,6 +1597,93 @@ export function registerIamExecutableApprovals(): void {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
+// AD-8 — `agency_intake.convert` becomes agent-reachable through the D14 gate.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/superpowers/plans/2026-09-05-agency-discovery-intake-design.md §8(b), §6.2.
+// `core/core-tools.ts`'s AD-8 section declares `agency_intake.convert` as `write:true, impact:"medium"`
+// — that alone is what makes mcp-hub/src/policy.ts SUSPEND an unattended (agent or n8n) call before it
+// ever reaches the platform (proven in mcp-hub/src/agency-intake-tools.test.ts). Registering an entry
+// HERE is the other half: without it, a human-approved row for this tool would sit at
+// `execution_status='not_applicable'` FOREVER (the doctrine at the top of this file) — a human clicking
+// Approve on an agent's filed request would believe they authorized the conversion and nothing would
+// ever attempt it. That is a worse failure than suspending forever, so this entry exists.
+//
+// ── WHAT THIS DOES NOT CLAIM ──────────────────────────────────────────────────────────────────────
+// Registering the entry makes an approved row ELIGIBLE for the executor to attempt — it is not a claim
+// that a full approve-then-executed round trip has been driven for this tool. That needs a reachable
+// mcp-hub + Cerbos, which is out of every D14 registry suite's reach in this test harness (see
+// d14-09-agent-origin-authority.test.ts's own scope note for the identical gap on `origin='agent'`
+// generally). AD-8's own suite therefore proves the SUSPENSION at the mcp-hub tool-call boundary and
+// this registration's precondition/lockKey against real Postgres — it does not assert `status:
+// "executed"` the way `d14-iam-direct-registry.test.ts`'s "POSITIVE CONTROL" does for the IAM tools,
+// because that would be exactly the "pretended completion" design §8(b) asks this ticket not to claim.
+//
+// ── THE PRECONDITION IS DELIBERATELY SHALLOW ─────────────────────────────────────────────────────
+// It answers exactly one question — "did this lead already leave the OPEN set" — because that is the
+// one thing a retry needs to know to avoid re-attempting a landed conversion. It does NOT re-derive
+// `convertAgencyLead`'s staff-membership checks, delegation-plan resolution or contact-provisioning:
+// duplicating that here would be a second, driftable implementation of logic another ticket owns (same
+// doctrine as `grantRolePrecondition` above, which does not re-check `GrantWriteService`'s ceiling
+// arithmetic either). The REAL correctness guarantee is still `convertAgencyLead`'s own lock + re-check
+// + `ux_lead_client` (design §6.2), taken for real when the executor's hub call lands on the platform's
+// convert endpoint; this precondition only avoids firing that call needlessly for an already-decided
+// lead. `OPEN_STATUSES` is duplicated as a literal rather than imported from
+// `agency-lead-convert.service.ts` — that file is another ticket's in-flight work in this checkout, and
+// this precondition has no other reason to depend on it.
+//
+// ── LOCK SCOPE: THE LEAD ──────────────────────────────────────────────────────────────────────────
+// One unit of consistency per lead: two approvals racing to convert the SAME lead must serialize, two
+// for different leads must not. This is a SEPARATE advisory-lock space from
+// `agency-lead-convert.service.ts`'s own `AGENCY_LEAD_LOCK_NS` (a 2-argument
+// `pg_advisory_xact_lock(int, int)`, vs. this file's uniform 1-argument
+// `pg_advisory_xact_lock(hashtext(lockKey))` — Postgres treats those as distinct lock spaces by
+// construction), which is fine: this lock only needs to serialize concurrent EXECUTOR attempts against
+// each other, not against the service's own internal lock, which still applies for real inside
+// `convertAgencyLead` regardless of what raced to call it.
+
+async function agencyIntakeConvertPrecondition(
+  client: PoolClient,
+  args: Record<string, unknown>,
+): Promise<PreconditionVerdict> {
+  const tenantId = typeof args?.tenantId === "string" ? args.tenantId : "";
+  const leadId = typeof args?.leadId === "string" ? args.leadId : "";
+  if (!tenantId || !leadId) return { ok: false, reason: "missing_convert_args" };
+
+  const { rows } = await client.query<{ status: string }>(
+    `SELECT status FROM agency_leads WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+    [tenantId, leadId],
+  );
+  const row = rows[0];
+  // ALREADY LANDED (or never existed): a retry after a lost response, a human converting it by hand
+  // in the meantime, or a lead that was declined while the approval sat in the inbox.
+  if (!row) return { ok: false, reason: "lead_not_found" };
+  if (!["submitted", "in_review", "nurturing"].includes(row.status)) {
+    return { ok: false, reason: "lead_not_open_for_conversion" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Registers `agency_intake.convert`'s executor entry. Exported for the same reason the other
+ * bootstraps are: a suite that calls `resetExecutableApprovals()` can restore exactly this without
+ * re-deriving the lock/precondition.
+ *
+ * No `preconditionModules`: `agency_leads` is a CORE table with a plain tenant wall (design §3.1),
+ * not behind any module's third wall.
+ */
+export function registerAgencyIntakeExecutableApprovals(): void {
+  registerExecutableApproval({
+    toolName: "agency_intake.convert",
+    lockKey: (args) => {
+      const leadId = typeof args?.leadId === "string" && args.leadId ? args.leadId : null;
+      return leadId ? `agency-intake:convert:${leadId}` : `agency-intake:convert:malformed:${JSON.stringify(args ?? {})}`;
+    },
+    precondition: agencyIntakeConvertPrecondition,
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
 // THE production bootstrap — one list, so it cannot go stale
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 //
@@ -1630,6 +1717,7 @@ export function registerAllExecutableApprovals(): void {
   registerSocialMeteredExecutableApprovalIfEnabled();
   registerJmlExecutableApprovals();
   registerIamExecutableApprovals();
+  registerAgencyIntakeExecutableApprovals();
 }
 
 registerAllExecutableApprovals();

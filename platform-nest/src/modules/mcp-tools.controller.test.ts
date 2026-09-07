@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpToolsController } from "./mcp-tools.controller";
 import { resetModules, registerModule } from "./registry";
-import { allCoreTools, registerCoreTools, resetCoreTools, registerIamCoreTools } from "../core/core-tools";
+import { allCoreTools, registerCoreTools, resetCoreTools, registerAllCoreTools } from "../core/core-tools";
 import { agencyModule } from "./agency";
 import { pmModule } from "./pm";
 import { itModule } from "./it";
@@ -65,7 +65,7 @@ describe("McpToolsController (WS2 §6 aggregation)", () => {
       // Restore the production core set for whatever runs next in this worker — leaving the registry
       // holding a duplicate (or empty) would silently weaken every later assertion in this file.
       resetCoreTools();
-      registerIamCoreTools();
+      registerAllCoreTools();
     }
   });
 });

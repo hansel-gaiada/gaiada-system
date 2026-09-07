@@ -10,6 +10,7 @@ import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
+import { agencyLeadsDemo } from "./demoAgencyLeads";
 import { webdevProvisionedSitesDemo } from "./demoWebdevProvisionedSites";
 import { webdevConsoleDemo } from "./demoWebdevConsole";
 import { githubReposDemo } from "./demoGithubRepos";
@@ -2028,6 +2029,11 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // (lib/demoWebdevChangeRequests.ts).
   const webdevCr = webdevChangeRequestsDemo(method, p, url.searchParams, body, userId);
   if (webdevCr) return webdevCr;
+
+  // AD-11 — agency discovery intake staff console (queue/detail/triage/invite/convert) — stateful
+  // store (lib/demoAgencyLeads.ts). Placed alongside the other agency-adjacent fixture above.
+  const agencyLeads = agencyLeadsDemo(method, p, url.searchParams, body, userId);
+  if (agencyLeads) return agencyLeads;
 
   // PRV-04 — Web Dev "Site & repo" card (run workspace) — stateful store (lib/demoWebdevProvisionedSites.ts).
   const webdevSites = webdevProvisionedSitesDemo(method, p, url.searchParams, body, userId);

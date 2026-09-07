@@ -25,6 +25,19 @@ describe("P2-07 · the core-owned MCP tool surface", () => {
       "iam.revokeRoleGrant",
       "iam.assignPosition",
       "iam.unassignPosition",
+      // AD-8 (agency discovery intake), 2026-09-07. Eight tools, and the split matters: the first
+      // three are reads, `invite` mints a prospect-facing token, and `open`/`decline`/`nurture`/
+      // `convert` are the triage dispositions — `convert` being the only one that mints a client, a
+      // project and a delivery run. Their D14 impact classes are pinned separately by
+      // d14-ad8-agency-intake-registry.test.ts; this list is only the surface.
+      "agency_intake.listLeads",
+      "agency_intake.getLead",
+      "agency_intake.listSubmissions",
+      "agency_intake.invite",
+      "agency_intake.open",
+      "agency_intake.decline",
+      "agency_intake.nurture",
+      "agency_intake.convert",
     ]);
   });
 

@@ -30,6 +30,12 @@ export default async function AgencyPage() {
         subtitle="Campaigns for the active company."
         actions={
           <>
+            {/* AD-11 — the discovery-intake triage queue lives at its own route (a lead is not a
+                campaign), same "sibling area under /agency" pattern this file already uses for
+                approvals. */}
+            <Link href="/agency/leads" className="lux-btn lux-btn--ghost lux-btn--sm">
+              Discovery leads
+            </Link>
             <Link href="/approvals" className="lux-btn lux-btn--ghost lux-btn--sm">
               Pending approvals
             </Link>

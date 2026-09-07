@@ -224,10 +224,17 @@ describe.skipIf(!TEST_URL)("IAM-03a · assemblePrincipal() perms resolution", ()
 
   it("two roles at the SAME scope dedupe to the union, not the sum, with no duplicate (key,scope) pairs", async () => {
     const p = await assemblePrincipal(multiRoleId, "high");
-    // member (74) and manager (109) overlap substantially; the union must be strictly less than
-    // the naive sum (183) and every (key, scopeId) pair must be unique.
+    // member (79) and manager (116) overlap substantially; the union must be strictly less than
+    // the naive sum (195) and every (key, scopeId) pair must be unique.
+    //
+    // AD-7b (2026-09-05) grew both bundles: member 74->79 and manager 109->116, from the
+    // agency discovery-intake kinds (migration 202609051010). member's 5 new keys are a strict
+    // SUBSET of manager's 7, so the union grew by 7, not 12 — which is precisely the property this
+    // assertion exists to check, and why the literals must move together with the bundles rather
+    // than the bound simply being loosened. Same pinned-literal maintenance every kind-adding
+    // ticket in this file's history performs.
     expect(p!.perms!.length).toBeGreaterThan(0);
-    expect(p!.perms!.length).toBeLessThan(74 + 109);
+    expect(p!.perms!.length).toBeLessThan(79 + 116);
     const pairs = p!.perms!.map((g) => `${g.key}::${g.scopeType}::${g.scopeId}`);
     expect(new Set(pairs).size).toBe(pairs.length);
     // member's self-scoped hr.case.create AND manager's core.pipeline_stage.update must both survive

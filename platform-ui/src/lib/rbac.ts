@@ -367,6 +367,29 @@ export const CAPABILITIES = [
   "monitoring.channel.manage",      // create/edit/enable/disable/delete a channel, send a test notification, and create/edit/delete the routes that point at one — `sensitive: true` server-side (channels carry secret references and a test send is a real outward notification). No separate `monitoring.route.*` key exists in the backend's permission table; a route is the channel's own delivery config, so it rides the same grant.
   "monitoring.maintenance.create",  // schedule a maintenance window — suppresses alerting AND SLA math while it runs, `sensitive: true` server-side. This is the "hide an outage" direction (§14).
   "monitoring.maintenance.delete",  // cancel a window early — ends suppression, not conceal it, so the backend does NOT mark it sensitive. Kept as its own capability rather than folded into `.create` for the identical reason those two are separate Cerbos actions: granting cancel should not require granting the power to start a window that pages nobody.
+
+  // ── AD-11 (2026-09-05/07, agency discovery intake) — mirrors of `resource_agency_lead.yaml` /
+  // `resource_agency_discovery_submission.yaml` (AD-7, verified directly against both policy files,
+  // not inferred). Contract rule 2 (docs/FRONTEND-BFF-CONTRACT.md, "Agency Discovery Intake"):
+  // "`convert` is a distinct Cerbos action from `triage`, and is narrower... a UI that shows the
+  // Convert button on `agency_lead:triage` will render a control most users get a 403 from" — hence
+  // FOUR separate capabilities here, not one, so the convert control can be gated on its own action.
+  "agency.lead.read",     // the queue + lead detail + submission history. Cerbos `agency_lead:read`
+                          // AND `agency_discovery_submission:read` — IDENTICAL role tier on both
+                          // policies (company_admin/manager/member/viewer), so one capability covers
+                          // both reads rather than inventing a second that would always match it.
+  "agency.lead.write",    // staff-create a lead, mint/revoke an invite (Cerbos `create`/`update` on
+                          // `agency_lead` — the invite endpoint is `update`, per design §5.2: "sending
+                          // someone a form is ordinary lead maintenance; it disposes of nothing").
+                          // company_admin/manager/member — member INCLUDED, same tier `create`/
+                          // `update`/`delete` share on this resource.
+  "agency.lead.triage",   // open / decline / nurture (Cerbos `triage`) — company_admin/manager ONLY;
+                          // `member` is explicitly excluded from this rule (unlike `.write` above).
+  "agency.lead.convert",  // mints a client + project + pipeline_run (Cerbos `convert`) —
+                          // company_admin ONLY, strictly narrower than `.triage`. This is the ruling
+                          // `resource_agency_lead.yaml`'s own header flags as a judgment call ("not a
+                          // design-doc-specified tier") rather than a Cerbos-side certainty, but it is
+                          // what the enforcing policy says today, so it is what this file mirrors.
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -444,6 +467,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // rule (both `inTenant && notLow`) — the actual enforcement, not just the permission catalog
     // (see `owner`'s comment below for why that distinction matters here specifically).
     "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
+    // AD-11 — company_admin is named on every one of `resource_agency_lead.yaml`'s five rules
+    // (read/create/update/delete/triage/convert), the only role that is.
+    "agency.lead.read", "agency.lead.write", "agency.lead.triage", "agency.lead.convert",
   ],
   // §8's "Dept lead (own unit)" column. Reads person/project/department — NEVER company grain, NEVER
   // seal/amend, NEVER facts recompute, NEVER the n8n ops polls, NEVER cycle admin. May score the
@@ -516,6 +542,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     // (`derivedRoles: ["company_admin", "manager"]`, `inTenant && notLow`) — direct citation from
     // the enforcing policy, not the permission catalog.
     "monitoring.channel.manage", "monitoring.maintenance.create", "monitoring.maintenance.delete",
+    // AD-11 — manager sits on `resource_agency_lead.yaml`'s read/create/update/delete/triage rules
+    // (every one but `convert`, which names `company_admin` alone).
+    "agency.lead.read", "agency.lead.write", "agency.lead.triage",
   ],
   // A plain member's own report, own check-in and own appraisal are NOT capabilities — they are
   // self-service, gated server-side by `ownerId`/`subjectUserId == principal.id` (§11 principle 2:
@@ -546,7 +575,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // resource_lms_course.yaml names `member` in its read rule, because training you cannot see
   // is a support ticket. Unlike the enrolment keys (which member holds only self-scoped), this
   // one is real unconditional reach and therefore belongs in the mirror.
-  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view"],
+  // AD-11 — `member` is named on `resource_agency_lead.yaml`'s read/create/update/delete rule
+  // (`"read"` also on `resource_agency_discovery_submission.yaml`), but NOT on `triage`/`convert` —
+  // so `.read`/`.write` only, matching `pipeline.write`'s own member-inclusive-but-not-manage shape.
+  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view", "agency.lead.read", "agency.lead.write"],
   // Gap 3 find — see the `Role` union's `viewer` comment for the full evidence trail. Matches
   // `member`'s ORIGINAL two capabilities exactly: `pm.contribute` + `people.directory` (DR-2a above).
   // Deliberately does NOT also pick up `member`'s IAM-02a-FIX-2 `pipeline.write` grant: `viewer` is
@@ -556,7 +588,10 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // own discipline forbids. `viewer` and `member` are therefore no longer capability-identical, on
   // purpose; a future reader diffing the two should read this comment before "fixing" the gap back in.
   // excluded from every write rule this file gates other than pm_task's read+update).
-  viewer: ["pm.contribute", "people.directory"],
+  // AD-11 — `viewer` is named on BOTH resources' `read` rule alongside `member`/`manager`/
+  // `company_admin` (a lead is not yet a client, so there is no per-client sensitivity gate the way
+  // the portal's own data has, per that policy's own header) but on nothing else here.
+  viewer: ["pm.contribute", "people.directory", "agency.lead.read"],
   // IAM-DR67 / DR-6 (owner-decided 2026-08-10, drift register finding #7) — `company.manage`
   // REMOVED. Verified directly against the backing policies: `it_admin`'s entire Cerbos reach is
   // `resource_device.yaml`'s three `it.device.*` actions (create/update/delete) — ZERO overlap with
@@ -752,6 +787,17 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "social.inbox.escalate", "social.inbox.read", "social.inbox.reply", "social.ledger.read",
     "social.manage", "social.post.delete", "social.scope.write", "social.view", "webdev.provision",
     "github.link",
+    // AD-11 — GRANTED, and the reasoning that first withheld them was wrong. Reading only the ROLE
+    // arm of `resource_agency_lead.yaml` (`company_admin`/`manager`/`member`/`viewer`, plus the
+    // `platform_admin` wildcard — never `owner`) says owner has no reach here. But AD-7 also added
+    // the PERMISSION arm — `perm_agency_lead_{read,create,update,triage,convert}` in
+    // `derived_roles.yaml`, wired into the same resource policy — and `owner`'s bundle carries every
+    // one of those keys. Confirmed against a running Cerbos 0.54.0, not inferred: a principal with
+    // `roles:["user"]` holding ONLY the company-scoped permission keys is EFFECT_ALLOW on all five
+    // actions. Withholding them here is the UNDER-CLAIM direction — a working page the nav hides —
+    // which is why the parity test calls it dangerous rather than merely stale. The MON-20 comment
+    // above is NOT the same case: no `perm_monitor_*` arm exists, so owner really is shut out there.
+    "agency.lead.read", "agency.lead.write", "agency.lead.triage", "agency.lead.convert",
   ],
 };
 

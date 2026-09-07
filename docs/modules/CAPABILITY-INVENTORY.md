@@ -17,9 +17,9 @@ the estate-wide spine, not a replacement.
 
 ## Totals
 
-- **130** capabilities across **16** owners
-- **69** writes · 61 reads
-- Writes by impact: **high 18** · medium 20 · low 31
+- **138** capabilities across **16** owners
+- **74** writes · 64 reads
+- Writes by impact: **high 18** · medium 21 · low 35
 
 `high`/`medium` writes suspend for a human decision when the caller is unattended (D14, and
 see PERMISSION-CONTRACT §15 on why that is keyed on attendance rather than identity). `low`
@@ -39,11 +39,11 @@ unfalsifiable after.
 
 | Owner | Route families | Suites driving the real endpoint |
 |---|---|---|
-| agency | `agency` | 7 |
+| agency | `agency` | 9 |
 | assistant | `assistant` | 14 |
 | automation-console | `admin/automation` | 2 |
 | clients | `clients` | 4 |
-| core | `positions` · `role-grants` | 3 |
+| core | `agency` · `positions` · `role-grants` | 12 |
 | finance | `finance` | 1 |
 | hr | `hr` | 11 |
 | invoice | `invoices` | 3 |
@@ -65,6 +65,14 @@ unfalsifiable after.
 | assistant | `orchestrator.ask` | `POST` | `/api/:tenantId/assistant/ask` | write | `low` |
 | automation-console | `automation.listWorkflows` | `GET` | `/api/admin/automation/workflows` | read | — |
 | clients | `clients.listClients` | `GET` | `/api/:tenantId/clients` | read | — |
+| core | `agency_intake.convert` | `POST` | `/api/:tenantId/agency/leads/:leadId/convert` | write | `medium` |
+| core | `agency_intake.decline` | `POST` | `/api/:tenantId/agency/leads/:leadId/decline` | write | `low` |
+| core | `agency_intake.getLead` | `GET` | `/api/:tenantId/agency/leads/:leadId` | read | — |
+| core | `agency_intake.invite` | `POST` | `/api/:tenantId/agency/leads/:leadId/invite` | write | `low` |
+| core | `agency_intake.listLeads` | `GET` | `/api/:tenantId/agency/leads` | read | — |
+| core | `agency_intake.listSubmissions` | `GET` | `/api/:tenantId/agency/leads/:leadId/submissions` | read | — |
+| core | `agency_intake.nurture` | `POST` | `/api/:tenantId/agency/leads/:leadId/nurture` | write | `low` |
+| core | `agency_intake.open` | `POST` | `/api/:tenantId/agency/leads/:leadId/open` | write | `low` |
 | core | `iam.assignPosition` | `POST` | `/api/:tenantId/positions/:positionId/assign` | write | `medium` |
 | core | `iam.grantRole` | `POST` | `/api/:tenantId/role-grants` | write | `high` |
 | core | `iam.listAttachableRoles` | `GET` | `/api/:tenantId/positions/attachable-roles` | read | — |

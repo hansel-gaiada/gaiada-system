@@ -1,0 +1,109 @@
+# AD-7 (agency discovery intake, design §5.2) — the STAFF half of lead authorization.
+#
+# agency_lead = the mutable prospect record (owner, status, triage disposition) created either by
+# staff (kind='invite'/'staff' source) or minted alongside an invite token. The PROSPECT half of
+# this feature does NOT live here and never will: design §5.1 is explicit that a prospect is not a
+# principal at all — no `users` row, no membership, no derived role — and their one write
+# (`POST /intake/submissions`) is authorized entirely by `IntakeTokenGuard` validating the token
+# row, never by calling `authorize()`/Cerbos. This file is reachable ONLY by an authenticated
+# staff principal.
+#
+# ── THE INVARIANT THIS FILE MUST NOT BREAK ───────────────────────────────────────────────────────
+# The `client` derived role appears NOWHERE in this policy, deliberately. Migration 0072's header
+# proved the portal design safe on exactly this property — "a principal holding just the client
+# grant can therefore satisfy exactly one policy (resource_portal.yaml), so making `inTenant` true
+# for them opens nothing else" — and MI-02's `resource_webdev_change_request.yaml` restated it for
+# its own sibling feature (design §5.2 names that precedent explicitly). Adding a `client` rule
+# here (even a read-only one) would silently retire that argument for every future reader of the
+# decision log. A client-only principal must DENY on all six actions below.
+#
+# ── ACTIONS ──────────────────────────────────────────────────────────────────────────────────────
+#   read    — the triage queue + lead detail. Same broad staff tier as `resource_agency_brief.yaml`
+#             (company_admin/manager/member/viewer): a lead is not yet a client, so there is no
+#             per-client sensitivity gate to apply here the way the portal's own data has.
+#   create  — staff manually logging a lead (source='staff'), or the invite-mint path creating the
+#             lead row up front (design §2.1) so the queue can show "sent, not yet returned".
+#   update  — ordinary field edits (contact details, owner reassignment). Design §5.2: this is
+#             DELIBERATELY separate from `triage`/`convert` — "an AM who may edit a phone number
+#             should not automatically be able to [convert]".
+#   triage  — the disposition decision: opening the review, declining, or nurturing (§4.1's state
+#             machine). NOT `update`: mirrors `resource_webdev_change_request.yaml`'s own triage
+#             action, but unlike that file AD-1 keeps `convert` as a SEPARATE, narrower action
+#             rather than folding it into one "triage" verb — see below.
+#   convert — mints a client + project + pipeline_run + delegation tasks in one transaction (design
+#             §4.2/§4.3). Design §5.2 requires this be "the narrower grant of the two" relative to
+#             `triage`. Ruling made here (not specified further by the design, so recorded
+#             explicitly): `triage` is company_admin/manager tier (excludes `member`, the same
+#             narrowing `resource_webdev_change_request.yaml` applies to its own triage action);
+#             `convert` is company_admin ONLY — strictly narrower than `triage`, because minting a
+#             client/project is a heavier act than declining or nurturing a prospect. This is a
+#             judgment call flagged in the AD-7 report for architect/owner confirmation, not a
+#             design-doc-specified tier.
+#   delete  — removes a lead record. Kept at the same tier as create/update (company_admin/manager/
+#             member), mirroring `resource_agency_brief.yaml`'s undifferentiated create/update/delete
+#             tier — the design does not call out delete for narrowing the way it does triage/convert.
+#
+# No `module` attribute is read by this policy — unlike `resource_webdev_change_request.yaml`,
+# there is no seeded `agency_manager`/`agency_staff` module-role pair (only `agency_approver`
+# exists, used by `resource_agency_approval.yaml`), so `module_staff`/`module_manager` would match
+# nothing and are correctly omitted, matching every other agency_* resource kind's own shape
+# (resource_agency_brief.yaml, resource_agency_campaign.yaml, resource_agency_creative_asset.yaml).
+apiVersion: api.cerbos.dev/v1
+resourcePolicy:
+  version: default
+  resource: agency_lead
+  importDerivedRoles: ["gaiada_scopes"]
+  variables:
+    import: ["gaiada_common"]
+  rules:
+    - actions: ["*"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["platform_admin"]
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member", "viewer"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["create", "update", "delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager", "member"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin", "manager"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+    - actions: ["convert"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["company_admin"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow" } }
+
+    # =========== IAM-04-ROLLOUT-B12 -- permission-matching arm. PURELY ADDITIVE: every rule =====
+    # above is byte-for-byte unchanged. Generic global-or-company mirror per action (see this
+    # kind's entry in docs/superpowers/plans/2026-08-10-iam-04-rollout-b12-report.md for the
+    # per-kind safety argument). Any group_executive-only or platform_admin wildcard rule on this
+    # kind is deliberately NOT mirrored here (IAM-04c: the tier bypass never enters the permission
+    # catalog).
+
+    - actions: ["read"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_lead_read"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["create"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_lead_create"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["update"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_lead_update"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["triage"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_lead_triage"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["convert"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_lead_convert"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    - actions: ["delete"]
+      effect: EFFECT_ALLOW
+      derivedRoles: ["perm_agency_lead_delete"]
+      condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }

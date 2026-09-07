@@ -283,4 +283,233 @@ export function registerIamCoreTools(): void {
   registerCoreTools(IAM_CORE_TOOLS);
 }
 
-registerIamCoreTools();
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// AD-8 — `agency_intake.*`, the readiness-bar criterion-1 tool parity for Agency Discovery Intake.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Design: docs/superpowers/plans/2026-09-05-agency-discovery-intake-design.md §8 (compliance table),
+// §9.2 (staff surfaces), §6.2 (convert idempotency). Contract:
+// docs/FRONTEND-BFF-CONTRACT.md → "Agency Discovery Intake" — every pathTemplate/method pair below is
+// copied from that table verbatim, not re-derived, so this file cannot drift from the documented
+// staff surface.
+//
+// ── WHY HERE, NOT A MODULE (mirrors this file's own header) ─────────────────────────────────────────
+// `agency_leads` / `agency_discovery_submissions` take the PLAIN tenant wall, deliberately NOT
+// module-gated (design §3.1: the token-guarded prospect intake endpoint is a core surface with no
+// module scope, and a `ModuleEnabledGuard` in front of the staff side only would let a disabled
+// `agency` module strand a queue staff could no longer open while prospects kept submitting into it).
+// So exactly like `positions`/`role-grants`, there is no module these belong to — core is where a
+// core-table controller's tools go.
+//
+// ── ONLY `convert` GETS A `write:true, impact:"medium"` ─────────────────────────────────────────────
+// It mints a client, a project and a delivery run (design §4.2) — the design's own §8 table calls this
+// out as the one write in the feature that is not "a human waves it through without reading". The three
+// triage dispositions (open/decline/nurture) and the invite mint are LOW: each moves one row through a
+// state machine or issues a token, none creates a billable/commercial artifact.
+//
+// ── §8(b) — CONVERT IS REGISTERED, BUT THIS SHIPS NO CLAIM THAT IT COMPLETES UNATTENDED ─────────────
+// `impact:"medium"` is what makes mcp-hub/src/policy.ts SUSPEND an unattended (agent or n8n) call to
+// `agency_intake.convert` before it ever reaches the platform — proven by
+// mcp-hub/src/agency-intake-tools.test.ts. Separately, `core/approval-executables.ts` now carries a
+// real executor entry for this tool (lockKey + precondition against real Postgres), which is what
+// keeps a human-approved row from sitting at `execution_status='not_applicable'` forever — see that
+// file's own AD-8 section for the full reasoning and for why this ticket does NOT assert a full
+// approve-then-executed round trip (that needs a reachable mcp-hub + Cerbos, out of every D14 registry
+// suite's reach in this harness; see d14-09-agent-origin-authority.test.ts's identical scope note).
+const AGENCY_INTAKE_CORE_TOOLS: McpToolDef[] = [
+  // ── reads ──────────────────────────────────────────────────────────────────────────────────────
+  {
+    name: "agency_intake.listLeads",
+    description:
+      "The staff discovery-intake queue. Sorted by whose move it is, NOT by recency: submitted, then " +
+      "new, then invited, then everything else, oldest-first within each tier (design §9.2 rule 1) — " +
+      "do not re-sort by createdAt. A 403 is a refusal, never an empty queue (criterion 5): render the " +
+      "denial rather than treating [] as 'nothing here'.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/agency/leads",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" } },
+      required: ["tenantId"],
+    },
+  },
+  {
+    name: "agency_intake.getLead",
+    description:
+      "One lead plus its latest submission's answers, keyed by the questionnaire's stable field ids. " +
+      "A key ABSENT from `answers` means the prospect was never asked or left it blank — never rendered " +
+      "as an empty string; that distinction is the whole point of a reviewer reading this. 404 if the " +
+      "lead does not exist or is not visible; a 403 (cannot read agency_lead at all) is a distinct, " +
+      "typed refusal, never folded into the 404.",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, leadId: { type: "string" } },
+      required: ["tenantId", "leadId"],
+    },
+  },
+  {
+    name: "agency_intake.listSubmissions",
+    description:
+      "Full submission history for a lead, including `supersedes_id` chains — a submission is INSERT-only " +
+      "(a correction is a NEW row, never an edit). A separate Cerbos resource from `agency_lead` " +
+      "(`agency_discovery_submission:read`).",
+    minAssurance: "verified",
+    method: "GET",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/submissions",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, leadId: { type: "string" } },
+      required: ["tenantId", "leadId"],
+    },
+  },
+
+  // ── writes: low-impact — one row through a state machine, or a token minted ──────────────────────
+  {
+    name: "agency_intake.invite",
+    description:
+      "Mint a discovery-questionnaire invite for a lead and advance it new/invited-eligible -> invited " +
+      "in the same transaction. The PLAINTEXT token is returned exactly once, here, and is never " +
+      "recoverable afterward — only its hash is stored; a lost link must be re-minted, not looked up. " +
+      "Refuses (409, `reason: 'lead_already_dispositioned'`) for a lead already converted or declined.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/invite",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        leadId: { type: "string" },
+        ttlDays: { type: "integer", description: "Invite lifetime in days, capped at 365. Omit for the platform's own default." },
+      },
+      required: ["tenantId", "leadId"],
+    },
+  },
+  {
+    name: "agency_intake.open",
+    description:
+      "submitted -> in_review: mark that someone has picked this lead up. NOT a disposition (decline/nurture " +
+      "are); an illegal transition (e.g. already converted) 409s naming the current status rather than " +
+      "silently no-opping.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/open",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, leadId: { type: "string" } },
+      required: ["tenantId", "leadId"],
+    },
+  },
+  {
+    name: "agency_intake.decline",
+    description:
+      "in_review -> declined. `reason` is REQUIRED (the DB's own CHECK enforces it; this surface returns a " +
+      "typed 400 first rather than letting a reasonless decline hit that constraint as a raw 500).",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/decline",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        leadId: { type: "string" },
+        reason: { type: "string", description: "Why this lead is being declined. Required." },
+      },
+      required: ["tenantId", "leadId", "reason"],
+    },
+  },
+  {
+    name: "agency_intake.nurture",
+    description:
+      "in_review -> nurturing: 'not this quarter', distinct from a decline ('we said no'). Does not " +
+      "re-mint or re-send an invite.",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/nurture",
+    write: true,
+    impact: "low",
+    inputSchema: {
+      type: "object",
+      properties: { tenantId: { type: "string" }, leadId: { type: "string" } },
+      required: ["tenantId", "leadId"],
+    },
+  },
+
+  // ── the one medium-impact write ───────────────────────────────────────────────────────────────────
+  {
+    name: "agency_intake.convert",
+    description:
+      "Convert a lead: mints a client, a project, a delivery run seeded from the prospect's own answers, " +
+      "and delegation tasks (design §4.2/§4.3) — one transaction. A lead already converted (or no longer " +
+      "open — declined leads refuse too) returns 409 with `{existing:{clientId,projectId,runId}}`: a " +
+      "retrying caller must branch on THAT shape to learn 'already done, here are the ids' rather than " +
+      "treat it as a bare failure and retry into a false 'broken' conclusion. impact:'medium' — this is " +
+      "the one write in the namespace that is D14-gated: called by an unattended agent or n8n workflow it " +
+      "SUSPENDS for human approval rather than completing in the same call (design §8(b); the D14 " +
+      "resume/execute path itself is a separate, estate-wide concern this tool's registration does not " +
+      "attempt to resolve).",
+    minAssurance: "verified",
+    method: "POST",
+    pathTemplate: "/api/:tenantId/agency/leads/:leadId/convert",
+    write: true,
+    impact: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tenantId: { type: "string" },
+        leadId: { type: "string" },
+        delegations: {
+          type: "array",
+          description:
+            "Optional overrides/additions to the canonical delegation plan. An entry whose `role` matches " +
+            "a canonical role (discovery_review/sitemap/integrations/content_owners/dns) REPLACES that " +
+            "default entirely; any other (or absent) `role` is appended as its own task.",
+          items: {
+            type: "object",
+            properties: {
+              role: { type: "string" },
+              assigneeId: { type: "string", description: "Must be an existing staff member; re-verified server-side." },
+              dueAt: { type: "string", description: "YYYY-MM-DD" },
+              title: { type: "string" },
+            },
+            required: ["assigneeId"],
+          },
+        },
+      },
+      required: ["tenantId", "leadId"],
+    },
+  },
+];
+
+/**
+ * Exported for the same reason `registerIamCoreTools` is: a suite that calls `resetCoreTools()` can
+ * restore exactly this production set without keeping a second copy of these defs.
+ */
+export function registerAgencyIntakeCoreTools(): void {
+  registerCoreTools(AGENCY_INTAKE_CORE_TOOLS);
+}
+
+/**
+ * The ONE aggregate, mirroring `approval-executables.ts`'s `registerAllExecutableApprovals()` doctrine
+ * — that file's own header names the exact failure mode a hand-maintained list of "call these to
+ * restore" invites: a suite restores the areas IT knows about, and every LATER suite in the same
+ * vitest worker inherits a silently incomplete registry (this broke D14-17 on main, 2026-08-23, for
+ * the executable-approvals registry specifically). `registerIamCoreTools`/`registerAgencyIntakeCoreTools`
+ * stay exported for a suite that deliberately wants only its own area, but any suite that wants "the
+ * production core set back" should call this, not enumerate the areas by hand.
+ */
+export function registerAllCoreTools(): void {
+  registerIamCoreTools();
+  registerAgencyIntakeCoreTools();
+}
+
+registerAllCoreTools();

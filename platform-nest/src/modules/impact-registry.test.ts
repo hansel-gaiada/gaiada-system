@@ -20,7 +20,7 @@
 // quietly skipped here.
 import { describe, it, expect, beforeAll } from "vitest";
 import { resetModules, registerModule, allModules } from "./registry";
-import { allCoreTools, resetCoreTools, registerIamCoreTools } from "../core/core-tools";
+import { allCoreTools, resetCoreTools, registerAllCoreTools } from "../core/core-tools";
 import type { McpToolDef } from "./contract";
 
 import { agencyModule } from "./agency";
@@ -50,11 +50,13 @@ let tools: McpToolDef[];
 describe("AGN-5 · every write is impact-classified in the registry", () => {
   beforeAll(() => {
     resetModules();
-    // `core-tools.ts` registers the IAM core tools as an import-time side effect, so resetting the
+    // `core-tools.ts` registers every core tool family as an import-time side effect, so resetting the
     // registry means re-registering them explicitly — otherwise this audit silently omits the nine
-    // `iam.*` tools, which are the highest-impact writes in the estate.
+    // `iam.*` tools (the highest-impact writes in the estate) AND the `agency_intake.*` family
+    // (AD-8), which is exactly the "call the areas you remember" trap `registerAllCoreTools`'s own
+    // header warns about.
     resetCoreTools();
-    registerIamCoreTools();
+    registerAllCoreTools();
     for (const m of ALL_MODULES) registerModule(m);
     tools = [...allCoreTools(), ...allModules().flatMap((m) => m.mcpTools)];
   });

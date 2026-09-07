@@ -117,8 +117,11 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // advancedOnly note) -- the controller behind them is an honest 501 stub pending WSK-23.
     // GH-03 (2026-08-31): +9 pairs / +1 kind (github_repo: read/link/unlink/push/merge/deploy/
     // secret_write/create_repo/delete_repo), 387/96 -> 396/97.
-    expect(catalog.length).toBe(396);
-    expect(catalogKindSet.size).toBe(97);
+    // AD-7 (2026-09-05, agency discovery intake design §5.2): +8 pairs / +2 kinds (agency_lead:
+    // read/create/update/triage/convert/delete; agency_discovery_submission: read/delete —
+    // deliberately no update, design §3.2), 396/97 -> 404/99.
+    expect(catalog.length).toBe(404);
+    expect(catalogKindSet.size).toBe(99);
   });
 
   it("(a-forward) every catalog kind is backed by a real resourcePolicy file", () => {

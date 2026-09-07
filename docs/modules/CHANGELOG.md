@@ -11,6 +11,84 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.52.0` - agency discovery intake: a prospect can fill it, the ERP can act on it (2026-09-05) - DEV-VERIFIED
+
+AD-1..AD-8. Design: `docs/superpowers/plans/2026-09-05-agency-discovery-intake-design.md`.
+Converts the agency's existing 12-sheet client-discovery workbook into a real capability: a prospect
+who is **not yet a client** fills a 127-field questionnaire through a link we send them; the agency
+reviews it in the ERP and declines, nurtures, or converts - where converting mints the client, the
+project, the delivery run seeded from the prospect's own answers, and the delegation tasks.
+
+Two facts about the estate shaped the whole design, both verified in code rather than assumed:
+there was **no lead/prospect/deal table anywhere** in 226 migrations (only `companies`/`clients`/
+`client_contacts`), and **no unauthenticated write endpoint existed** - every controller carried
+`AuthGuard` except `health` and the `ServiceGuard`-gated `mcp-tools`.
+
+- **Not a public POST - a capability token.** `/intake/*` is reached without a platform session but
+  is *not* unauthenticated: it is guarded by `IntakeTokenGuard` against a bearer secret we mint per
+  named prospect. Only `sha256(token)` is stored. The prospect is deliberately **not a principal** -
+  `authorize()` is never called on that path and no derived role is invented for them, preserving
+  the `0072:32-36` invariant that the `client` role satisfies exactly one policy file.
+- **Three tables**, plain tenant wall, deliberately NOT `app_module_allowed('agency')` - MI-02's
+  owner-ratified D-2a doctrine: the primary writer declares no module scope, so a third wall would
+  make every prospect write and every subsequent read return zero rows, silently. `agency_leads` is
+  mutable state; `agency_discovery_submissions` is an INSERT-only evidentiary record of what the
+  client actually said, because that text is the basis of scope and triage must not mutate it.
+- **Convert reuses the pipeline spine with zero special-casing** - ordinary `pipeline_runs`, two
+  `done` extraction stages rendered from the answers, and a real client `prd_sign` gate. No signed
+  gate is ever pre-seeded: the hard build gate must be satisfied by real client signatures, and
+  pre-seeding would forge what a client signed.
+- **`role_permissions` seeded** (migration `202609051010`) for 6 roles x 8 keys = 38 pairs, with
+  `owner` mirroring `company_admin` exactly. `convert` is company_admin-only - **flagged for the
+  owner as a business call**, not an authz one: if account managers close their own deals, the
+  policy's role arm and this migration must move together.
+
+**Four defects were found by review and fixed, three of them silent:**
+
+1. **A hash-only token lookup is impossible.** The design specified it; under FORCE RLS with no
+   tenant GUC every query returns zero rows, so it would have resolved nothing, always. Tenancy now
+   comes from the `:tenantId` path - never trusted as an authorization fact, and a valid token
+   against the wrong tenant is byte-identically indistinguishable from an unknown one (proven).
+   Recorded as design §2.3 rather than left claiming something false.
+2. **Scrubbing every answer destroyed the prospect's email.** `scrubText()` redacts addresses, and
+   `contact_email` is one of the questionnaire's own fields. Contact-identity fields are now
+   exempted by an explicit named allowlist; the scrub still catches a PAN pasted into a narrative
+   field, which was the actual threat.
+3. **Three answer keys did not exist.** The convert renderer was written from the design's prose
+   before the questionnaire module existed: `audience`/`features`/`out_of_scope` instead of
+   `primary_audience`/`features_required`/`out_scope`. Nothing failed, because a missing key renders
+   the same `_Not answered._` as a genuinely skipped question - so **the client would have signed a
+   requirements doc with its audience, feature list and out-of-scope section silently blank.**
+   Fixed, and `agency-discovery-answer-key-parity.test.ts` now fails the build if any reader
+   references an id the questionnaire does not define (confirmed to fail when the bug is reinstated,
+   not merely to pass today).
+4. **No endpoint minted an invite, and minting never advanced the lead.** `mintInviteToken` shipped
+   as a service function no controller called - the flow read as complete in every unit test and
+   could not be started by a real person. `POST /agency/leads/:leadId/invite` now exists and flips
+   `new -> invited` in the same transaction as the token insert.
+
+**Verified by driving it, not by a green unit suite:** all 228 migrations apply clean from empty;
+RLS isolation, the composite-FK cross-tenant guarantee, the state-machine CHECKs and the partial
+uniques driven under a NOSUPERUSER/NOBYPASSRLS role. Convert's idempotency proven against real
+Postgres with the `webdev-cr-race.test.ts` method - the collision asserted via `pg_locks`, never a
+bare `Promise.all` - including a falsifiability arm that first shows the lock-less shape really does
+spawn two clients. Two and four concurrent converts each spawn exactly one client/project/run; the
+losers 409 with the winner's ids. Submit replay returns 200 with the existing id (deliberately
+unlike convert's 409). The golden case drives mint -> questionnaire -> submit -> open -> convert and
+asserts the spawned reality, including `client_contacts.capability='signer'` and the prospect's own
+text inside the artifact refs. Cerbos policies compiled and probed against a real `cerbos:0.54.0`
+engine. Full `src/core` + `src/rbac` sweep: **2074 passed, 0 failed.**
+
+**Not verified:** nothing has run on `erp.gaiada.online` or the 16-container stack (off by owner
+decision). Cerbos there must be restarted and re-probed before these decisions are live - a healthy
+container has served two-day-stale policy. No UI exists yet (AD-11), and `kind='open'` cold inbound
+is schema-admitted but endpoint-refused pending AD-9's bot-defence work.
+
+**A limitation this feature cannot fix:** `convert` is medium-impact and therefore D14-gated, and
+the D14 resume path is broken estate-wide ("approving a suspended write currently executes
+nothing"). So an agent-initiated convert suspends and never executes. Convert is a human-driven
+capability until that lands; the test asserts the suspension rather than pretending completion.
+
 ### platform-nest `0.51.1` - a page bigger than 256 KB is UP, not a hung probe (2026-09-04) - DEV-VERIFIED
 
 Reported as "the Web Dev site portfolio shows sites down that are actually up". The portfolio is not
