@@ -152,7 +152,6 @@ interface DueRow {
   last_checked_at: Date | null;
   severity: string;
   hb_last_seen_at: Date | null;
-  hb_grace_sec: number | null;
   open_incident_id: string | null;
   /** Hostnames from VERIFIED properties only — see the query. */
   allowlist: string[];
@@ -192,11 +191,18 @@ export async function ensureResultPartitions(c: PoolClient, now = new Date()): P
  * make us probe a host merely by typing it: someone had to pass the verification checkpoint first.
  * Feeding the guard a list derived from the monitor's own `target` would make the guard validate
  * attacker-supplied input against itself, which is not a guard at all.
+ *
+ * `monitor_heartbeats` contributes ONLY `last_seen_at` here. It used to also carry `grace_sec`,
+ * dropped by migration 202609031200 — that column was written once at creation, never updated by
+ * PATCH, and (despite being SELECTed here as `hb_grace_sec`) never actually consumed by this file:
+ * the grace period a heartbeat monitor is evaluated against has always come from
+ * `driver.validate(m.config)` below, i.e. `monitors.config.graceSec`, which IS kept current by every
+ * write path. See the migration for the full defect writeup.
  */
 const DUE_SELECT = `
   SELECT m.id, m.tenant_id, m.client_id, m.property_id, m.kind, m.config, m.target, m.name,
          m.interval_sec, m.status, m.last_checked_at, m.severity,
-         hb.last_seen_at AS hb_last_seen_at, hb.grace_sec AS hb_grace_sec,
+         hb.last_seen_at AS hb_last_seen_at,
          (SELECT i.id FROM monitor_incidents i
            WHERE i.monitor_id = m.id AND i.closed_at IS NULL LIMIT 1) AS open_incident_id,
          COALESCE((
@@ -384,6 +390,17 @@ async function notifyIncidents(tenantId: string, events: IncidentEvent[]): Promi
   );
 }
 
+/**
+ * ⚠ FOR WHOEVER WRITES THE NEXT SWEEP TEST: `now` is a free parameter for staleness math
+ * (`isDue`, `evaluateHeartbeat`) but NOT for where a result row can land. `monitor_results` is
+ * RANGE-partitioned and `ensureResultPartitions` derives its bounds from the DATABASE's own
+ * `now()` (see that function's own comment — its `now` argument is intentionally unused), not
+ * from whatever Date you pass in here. Call `runSweep(new Date("2020-01-01"))` and the sweep's own
+ * `INSERT INTO monitor_results` throws `no partition of relation "monitor_results" found for row`
+ * — found the hard way writing `heartbeat-gracesec-single-source.db.test.ts`. Anchor test
+ * timestamps on real `new Date()` (offsets from it are fine — only the absolute instant has to
+ * land inside a partition that actually exists), never on an arbitrary fixed calendar date.
+ */
 export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<SweepResult> {
 
   const out: SweepResult = { considered: 0, probed: 0, skippedNoDriver: 0, incidentsOpened: 0, incidentsClosed: 0 };

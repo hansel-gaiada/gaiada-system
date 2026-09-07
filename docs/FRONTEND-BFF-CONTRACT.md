@@ -3539,17 +3539,41 @@ endpoints. Merging the two is what made Gaia Nexus's monitoring dashboard fictio
 18. **MON-20 — `DELETE /maintenance/:id` cancels a window; it is not sensitive server-side** (ending
     suppression early is the opposite of concealing an outage — see monitoring-program.md §14's own
     reasoning for why `.create` and `.delete` are catalogued as two permissions, not one).
-19. **Deleting a channel does NOT delete its routes, and the DEMO_MODE fixture disagrees
-    with production on this.** `monitor_routes.channel_id` carries `ON DELETE CASCADE`
-    (`0116_module_monitoring.sql`:198), but `DELETE /channels/:id` is a SOFT delete, so the FK
-    cascade never fires and the route row survives its channel. Delivery is still safe — the
-    runner's fan-out filters `ch.enabled = true AND ch.deleted_at IS NULL` (`runner.ts`:311), so
-    nothing is ever sent to a deleted channel. The visible consequence is cosmetic and honest:
-    `RouteManager` renders `r.channelName ?? r.channelId`, so an orphaned route shows a raw uuid
-    instead of a name. `lib/demoMonitoring.ts` CASCADES instead, so demo and production diverge
-    here — resolved at merge (2026-09-02) from the schema and the runner, replacing what both
-    tickets had each documented as a guess. If the divergence is closed, make the FIXTURE match
-    production (stop cascading), not the other way round.
+19. **Deleting a channel does NOT delete its routes.** `monitor_routes.channel_id` carries
+    `ON DELETE CASCADE` (`0116_module_monitoring.sql`:198), but `DELETE /channels/:id` is a SOFT
+    delete, so the FK cascade never fires and the route row survives its channel. Delivery is
+    still safe — the runner's fan-out filters `ch.enabled = true AND ch.deleted_at IS NULL`
+    (`runner.ts`:311), so nothing is ever sent to a deleted channel.
+    **FIXED 2026-09-03 (FX):** `lib/demoMonitoring.ts` used to CASCADE-delete a channel's routes,
+    which diverged from production's soft-delete-and-survive behaviour; the fixture now soft-
+    deletes the channel (setting an internal `deletedAt`, filtered out of `GET /channels`/
+    `PATCH`/`DELETE`/`test`) and leaves `ROUTES` untouched, exactly like the real controller.
+    ⚠ **Doing this precisely surfaced a doc/code mismatch this note previously got wrong, still
+    open for an owner call:** the sentence this replaced claimed the visible consequence was
+    `RouteManager` rendering `r.channelName ?? r.channelId` (a raw uuid) for an orphaned route.
+    That is NOT what `listRoutes` actually does — `monitoring.controller.ts`'s query is an
+    **INNER JOIN** (`FROM monitor_routes r JOIN monitor_channels ch ... WHERE ch.deleted_at IS
+    NULL`), so a route whose channel was soft-deleted is dropped from `GET /routes` entirely, not
+    returned with a null `channelName`. `RouteManager.tsx`'s `?? r.channelId` fallback is
+    therefore dead code against this endpoint as written, and no test in
+    `monitoring.controller.test.ts` exercises the orphaned-route case either way. The fixture now
+    mirrors the CODE (excludes the orphaned route from `GET /routes`, matching the INNER JOIN),
+    not this note's older description — reported to the orchestrator as a backend
+    defect/doc-drift needing a decision: either correct this note (routes silently disappear when
+    their channel is deleted, full stop), or change `listRoutes` to a LEFT JOIN so an orphaned
+    route stays visible with a raw id, as originally intended. See `platform-nest/src/modules/
+    monitoring/monitoring.controller.ts:1119-1137`.
+20. **A heartbeat monitor's grace period has exactly ONE source of truth: `MonitorDetail.config`
+    (`graceSec`, part of the driver-validated config `POST`/`PATCH` already accept and persist to
+    `monitors.config`).** `monitor_heartbeats.grace_sec` existed from `0116` through 2026-09-03 and
+    LOOKED authoritative — same table as the heartbeat's `lastSeenAt`, same name as the value it
+    appeared to gate — but it was written once at creation and never updated by `PATCH`, while the
+    runner always evaluated grace from `config.graceSec`. Editing a heartbeat monitor's grace through
+    the UI therefore changed the enforced value correctly the whole time; querying the DB column
+    directly would have shown a stale number after the first edit. Migration `202609031200` removed
+    the column outright — do not resurrect a heartbeat-specific grace field outside `config`, and if a
+    future UI surface needs to read a heartbeat monitor's configured grace, read `config.graceSec` off
+    `MonitorDetail`, never a `monitor_heartbeats` column.
 
 ### UI consumers (built 2026-08-13; MON-20 additions 2026-09-02)
 

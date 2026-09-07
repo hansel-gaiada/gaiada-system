@@ -53,7 +53,7 @@ versions below; the running build reports it at `GET /health`.
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
-| monitoring | `0.3.1` | IN PROGRESS | Monitoring | 2026-09-03 |
+| monitoring | `0.3.2` | IN PROGRESS | Monitoring | 2026-09-03 |
 | finance | `0.16.0` | PROTOTYPED | Finance & Accounting | 2026-08-27 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -163,6 +163,17 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
 ## platform-ui — ERP Suite · `0.67.0` · IN PROGRESS
+
+**0.67.0 (2026-09-03, FX, DEMO_MODE fixture parity sweep — PROTOTYPED.)** Every UI claim verified
+under `DEMO_MODE` is only as honest as the fixture it ran against. Swept `lib/demoMonitoring.ts`
+(channels/routes/maintenance — highest-recent-churn fixture, MON-20 landed 2026-09-02) field-by-
+field against `monitoring.controller.ts` and fixed the documented channel-delete cascade divergence
+plus several more found the same way (status codes, validation, response shapes); audited the
+invoice maker/checker fixture the same way and confirmed it already matches production. Full
+detail, including a backend doc/code mismatch reported rather than fixed, in CHANGELOG.md.
+
+(0.66.0 — a concurrent, unrelated ticket; see CHANGELOG.md's `platform-ui 0.66.0` entry for its
+own writeup. Not touched by this pass.)
 
 **0.64.0 (2026-09-02, IAM-GAP-01, the invoice maker/checker gets a UI — PROTOTYPED.)** The `POST /invoices/:id/approve` endpoint had shipped with no UI, so `approved` was unreachable from the app and no invoice could legitimately reach `sent`/`paid`. Adds the Approve action, the createdBy/approvedBy/approvedAt trail, and honest copy for the self-approval DENY. Full detail in CHANGELOG.md. Renumbered from 0.63.0 at merge — MON-20 had already claimed that version the same day.
 

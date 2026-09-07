@@ -611,15 +611,18 @@ export class MonitoringController {
         // MON-13's ingest token, minted only for heartbeat monitors. Returned ONCE, in plaintext,
         // exactly like the design of the ingest endpoint itself demands — it is never stored except
         // as a SHA-256 hash, and there is no read path that can recover it afterwards.
+        //
+        // No grace period is written here. `monitors.config.graceSec` (validated above by
+        // `getDriver(kind).validate`) is the ONLY source of truth for the grace period — see
+        // migration 202609031200 — so there is nothing for this table to carry beyond the token.
         let heartbeatToken: string | undefined;
         if (kind === "heartbeat") {
           heartbeatToken = randomBytes(24).toString("hex");
           const hash = createHash("sha256").update(heartbeatToken).digest("hex");
-          const cfg = validatedConfig as { graceSec: number };
           await c.query(
-            `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, grace_sec)
-             VALUES ($1,$2,$3,$4,$5)`,
-            [tenantId, clientId, id, hash, cfg.graceSec],
+            `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash)
+             VALUES ($1,$2,$3,$4)`,
+            [tenantId, clientId, id, hash],
           );
         }
 

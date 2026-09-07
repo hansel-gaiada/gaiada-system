@@ -172,7 +172,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 228 (121 legacy `NNNN_`, 107 timestamped)
+- Applied files on disk: 229 (121 legacy `NNNN_`, 108 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -293,6 +293,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/admin/users`
 - `/agency`
 - `/agency/[campaignId]`
+- `/agency/leads`
+- `/agency/leads/[leadId]`
 - `/agency/new`
 - `/agents`
 - `/agents/goals/[goalId]`

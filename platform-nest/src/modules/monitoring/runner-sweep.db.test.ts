@@ -51,8 +51,8 @@ describe.skipIf(!TEST_URL)("MON-12 · runSweep sees monitors through RLS", () =>
     );
     monitorId = m.rows[0].id;
     await pool.query(
-      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, grace_sec)
-       VALUES ($1,$2,$3,'deadbeef',300)`,
+      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash)
+       VALUES ($1,$2,$3,'deadbeef')`,
       [enabled, clientA, monitorId],
     );
 

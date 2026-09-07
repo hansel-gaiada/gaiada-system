@@ -93,8 +93,8 @@ describe.skipIf(!TEST_URL)("monitoring module — live RLS + Cerbos", () => {
       `INSERT INTO monitors (tenant_id, client_id, name, kind, status, severity, interval_sec)
        VALUES ($1,$2,'nightly sweep','heartbeat','down','page',86400) RETURNING id`, [coA, clientA]);
     await pool.query(
-      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash, grace_sec)
-       VALUES ($1,$2,$3,$4,300)`,
+      `INSERT INTO monitor_heartbeats (tenant_id, client_id, monitor_id, token_hash)
+       VALUES ($1,$2,$3,$4)`,
       [coA, clientA, hbMonitor.rows[0].id, createHash("sha256").update(hbToken).digest("hex")]);
     await pool.query(
       `INSERT INTO monitor_incidents (tenant_id, client_id, monitor_id, cause, severity)

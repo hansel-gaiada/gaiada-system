@@ -290,6 +290,144 @@ compiles (the gate runs again) and `DEMO_MODE=1 npm run build` alone still **ref
 directions, since a guard tested only on its happy path would pass with no guard at all. The live
 box was inspected over SSH during this work: `gaiada-platform-ui-1` carries `NODE_ENV=production`
 and neither DEMO_MODE variable, which is the property the whole design rests on.
+### monitoring `0.3.2` - one source of truth for a heartbeat monitor's grace period (2026-09-03, GS) - PROTOTYPED
+
+`monitor_heartbeats.grace_sec` (0116) was written ONCE at monitor creation and never updated — the
+PATCH path (`updateMonitor`) only ever touched `monitors.config`. `runner.ts`'s `DUE_SELECT` aliased
+the column in as `hb_grace_sec` but nothing read that alias: the grace period `evaluateHeartbeat`
+actually used always came from `driver.validate(row.config)`, i.e. `monitors.config.graceSec`
+(defaulting to 300s). A column on the heartbeat table, named exactly like the thing it appeared to
+gate, silently diverged from the enforced value the moment a monitor was edited — already cost a real
+debugging cycle (a fixture set the column to 600 believing it controlled the grace, the runtime kept
+enforcing 300, and the test failed looking like an unrelated bug; see
+`runner-notify-delivery.db.test.ts`'s fixture comment for the full account).
+
+**Chose to DROP the column rather than teach the runner to read it.** `monitors.config.graceSec` was
+already authoritative in practice — validated by the driver, kept current by both write paths — and a
+repo-wide grep (platform-nest, platform-ui, mcp-hub, docs, every `*.sql`) found exactly one other
+reference: `monitoring_heartbeat_touch` (0119) selected and returned it, but its sole caller (the
+unauthenticated heartbeat-ingest endpoint) runs `SELECT * FROM monitoring_heartbeat_touch($1)` and
+discards the whole result. Nothing anywhere made a decision from this column.
+
+**Backend:**
+- `migrations/202609031200_monitor_heartbeats_drop_grace_sec.sql` — redefines
+  `monitoring_heartbeat_touch` without `grace_sec` in its `RETURNS TABLE` (a function's output columns
+  can't change under `CREATE OR REPLACE`, so it is dropped and recreated), then
+  `ALTER TABLE monitor_heartbeats DROP COLUMN grace_sec`. Surgical: the column's
+  `CHECK (grace_sec >= 30)` was single-column, not shared, so dropping it carries none of the
+  DROP+ADD-on-a-shared-CHECK risk this repo has been burned by before. **Not yet applied to any live
+  database — owner runs it.**
+- `monitoring.controller.ts`'s `createMonitor` no longer writes `grace_sec` on the
+  `monitor_heartbeats` INSERT (4 columns now, not 5).
+- `runner.ts`'s `DUE_SELECT` no longer selects `hb.grace_sec`; the `DueRow` type drops `hb_grace_sec`.
+  `monitor_heartbeats` now contributes only `last_seen_at` to a heartbeat evaluation.
+- Test fixtures that used to poke `monitor_heartbeats.grace_sec` directly
+  (`monitoring.controller.test.ts`, `runner-sweep.db.test.ts`, `runner-notify-delivery.db.test.ts`)
+  now set the grace period through `monitors.config.graceSec` instead, matching what the runner has
+  always actually read.
+- **New:** `heartbeat-gracesec-single-source.db.test.ts` pins the invariant this ticket exists to
+  guarantee — that the stored and enforced grace period cannot differ. A schema assertion proves
+  `monitor_heartbeats` has no `grace_sec` column at all (so the trap cannot be reintroduced by a
+  careless future migration); a behavioural test creates a heartbeat monitor via the real HTTP surface
+  with a 60s grace, drives it overdue, confirms `down`, then PATCHes the grace to 1000s covering the
+  SAME staleness and re-sweeps — this recovers to `up` only because the runner reads the current
+  config, not a value frozen at creation. Run against a version of the code that still read a frozen
+  `monitor_heartbeats.grace_sec`, this test would fail exactly the way the original defect did.
+
+**Cap: PROTOTYPED.** The migration is written, not deployed — see the gate run for the local suite
+result; a `senior-db`/owner-approved run against the live DB (18 real monitors) is a separate step.
+### platform-ui `0.67.0` - DEMO_MODE fixture parity sweep: monitoring channels/routes/maintenance (2026-09-03, FX) - PROTOTYPED
+
+A demo-mode-verified UI claim is only honest if `DEMO_MODE=1` behaves like the real platform-nest
+it stands in for. This pass swept `lib/demoMonitoring.ts` (the highest-recent-churn fixture — MON-20
+landed channel/route/maintenance writes 2026-09-02) against `monitoring.controller.ts` and fixed
+every divergence found; `lib/demoFixtures.ts`'s invoice maker/checker seam (IAM-GAP-01/02) was
+audited the same way and already matched production — no change needed there.
+
+**Fixed — the documented divergence (contract §20 note 19):** `DELETE /channels/:id` is a SOFT
+delete in production (`monitor_channels.deleted_at`), and `monitor_routes.channel_id`'s `ON DELETE
+CASCADE` therefore never fires — a channel's routes survive it, invisible (see the doc/code
+mismatch below) but not destroyed. The fixture used to hard-delete the channel AND cascade-delete
+every route pointing at it. Now: a channel gets an internal `deletedAt` marker (never serialized —
+`toPublicChannel()` strips it), is filtered out of `GET /channels`, and 404s from `PATCH`/`DELETE`/
+`POST .../test`; `ROUTES` is never touched by a channel delete.
+
+**Found while fixing it — a backend defect / doc-drift, reported, not fixed here (platform-nest is
+off-limits this pass):** the contract note claimed an orphaned route stays visible with
+`RouteManager.tsx` rendering `r.channelName ?? r.channelId` (a raw uuid). Production's `listRoutes`
+is actually an **INNER JOIN** (`FROM monitor_routes r JOIN monitor_channels ch ON ... WHERE
+ch.deleted_at IS NULL`), so an orphaned route is dropped from `GET /routes` entirely — the raw-uuid
+fallback is dead code against this endpoint, and no test in `monitoring.controller.test.ts` covers
+either outcome. The fixture now mirrors the CODE (excludes orphaned routes from `GET /routes`), not
+the note's original claim; the note itself is corrected in the same commit and flags the mismatch
+for an owner decision (fix the doc, or change `listRoutes` to a LEFT JOIN). See
+`platform-nest/src/modules/monitoring/monitoring.controller.ts:1119-1137`.
+
+**Other divergences fixed in the same file, found by a field-by-field comparison against the
+controller and its test suite:**
+- `POST /monitoring/monitors` and `POST /monitoring/incidents/:id/ack` returned HTTP 200; both are
+  bare `@Post()` handlers with no `@HttpCode` override, so Nest's real default is 201 (confirmed by
+  `monitoring.controller.test.ts`'s own `toBeLessThan(300)` assertions and its comment: "NestJS's
+  default success code for @Post is 201, not 200"). Both now return 201. The ack response also
+  gained its real shape (`{id, acknowledgedAt, acknowledgedBy}`, not a bare `{id: "inc-acked"}`) and
+  a 404 for an unknown incident id — left un-persisted (documented inline) since `incidents()` has
+  no writable store and the action has no caller anywhere in the UI today.
+- `POST /channels/:id/test` returned 422 with a made-up message for a missing destination, and never
+  checked `kind` at all — a telegram/mcp channel would "succeed" a test-send the real driver refuses
+  with a 400 (contract note 12). Now 400s on both, with production's wording, before setting health.
+- `POST`/`PATCH /channels`: `destination` was required for every kind; production requires it (and
+  validates it as a plausible email) only for `kind: "email"` — every other kind accepts anything, or
+  nothing (contract note 13). `kind` itself was never validated against the known set. Both fixed;
+  `PATCH` also now 400s on a blank `name` and returns the full updated row (`mapChannel()`'s shape),
+  not a bare `{id}`.
+- `POST /routes`: an unknown `channelId` reported "channel not found" (400, correct code, wrong
+  text) with no `matchSeverity` validation at all — any string was accepted silently. Now validates
+  `matchSeverity` against the real severity set and matches the controller's error text.
+  `PATCH /routes/:id` accepted a `channelId` reassignment the real `updateRoute` never reads (a
+  ticket the UI's own edit form can silently no-op against; see "found, not fixed" below), had the
+  same missing `matchSeverity` validation, and returned `{id}` instead of the full row; all three
+  fixed, plus the real "nothing to update" 400 when a PATCH body carries no recognised field.
+  `DELETE /routes/:id` and `DELETE /maintenance/:id` returned `{}` instead of `{id}`.
+- `POST /maintenance` never checked `endsAt > startsAt` (K7 — an inverted or open-ended window is
+  how alerting gets muted permanently) or that `scope` was `"all"`/`"monitor:<id>"` naming a real
+  monitor; both are 400 in production (`write-validation.ts::parseMaintenanceWindow`/
+  `parseMaintenanceScope`, `monitoring.controller.test.ts`'s "rejects an inverted window"/"rejects a
+  malformed scope" cases). Fixed, with one deliberate exception: production's scope parser requires
+  a strict uuid after `monitor:`, but every id in this demo store (monitors/channels/routes) is a
+  readable slug by design — enforcing the uuid shape would 400 every legitimate window
+  `MaintenanceManager.tsx` can actually construct, so only the structural + existence checks are
+  mirrored, not the id-format regex (documented inline).
+- `POST /monitoring/monitors` accepted literally anything and always "succeeded" — no `name`,
+  `kind`, or `clientId` check, and no rejection of a kind with no registered driver (mqtt/steam).
+  Added the cheap checks (all three, plus kind-availability against `kinds()`). **Deliberately left
+  un-mirrored:** the real endpoint's SSRF host-allowlist check (target's host must be a VERIFIED
+  `search_properties` row for the client) — that spans the `search` module's own demo fixtures,
+  which this file has no access to; flagged as a follow-up rather than half-wired.
+
+**Found, not fixed (a UX gap the parity work surfaced, not a fixture/production divergence):**
+`RouteManager.tsx`'s edit form lets you change a route's channel via the same dropdown used to
+create one; `saveRoute` sends the new `channelId` on both create and edit. Production's
+`updateRoute` (and now the fixture) silently ignores `channelId` in a PATCH body, so re-pointing an
+existing route's channel through the edit form appears to succeed and does nothing. Left to the
+component owner rather than fixed here — outside this pass's "fixture matches production" mandate.
+
+**Invoices (`lib/demoFixtures.ts`) — audited, MATCHES, no change:** the maker/checker seam
+(IAM-GAP-01/02) already mirrors `invoice.controller.ts` exactly — the self-approval 403 compares
+against the actual caller (not a hardcoded id, so it fires for every demo identity/tier, matching
+Cerbos's unconditional `approve` deny), `sent`/`paid` 400 unless the invoice is already `approved`,
+and every status code matches (`POST` 201, `PATCH`/`approve` 200, both via explicit
+`@HttpCode` in the real controller).
+
+**Verified:** `npx tsc --noEmit` clean. New `src/lib/demoMonitoring.test.ts` (22 cases) pins every
+fix above directly against the fixture dispatcher — soft-delete-not-cascade, every new 400/404, the
+201 status codes, and the ack shape. Full suite: 204 files / 3938 tests passed locally (baseline
+203/3916 + this file's 22); confirmed again on the sumopod gate (see report). `next build`
+(`DEMO_MODE=1 NEXT_DIST_DIR=.next-gate`) exit 0. Manually drove `/monitoring/channels` in a
+DEMO_MODE browser session: created an email and a webhook channel, sent a test on each (email
+succeeds, webhook 400s with "no notification driver..."), added a route to each, deleted the email
+channel and watched both the channel and its route disappear from their tables with no error,
+without deleting the route record underneath (confirmed by editing it via the fixture's own PATCH
+path in a second check).
 
 ### monitoring `0.3.1` - channel health is TRUE, not decorative (2026-09-03, CH) - PROTOTYPED
 
