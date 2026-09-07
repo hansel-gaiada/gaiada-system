@@ -41,14 +41,18 @@ resourcePolicy:
     - actions: ["*"]
       effect: EFFECT_ALLOW
       derivedRoles: ["platform_admin"]
-    - actions: ["create", "read", "triage"]
+    - actions: ["create", "read", "triage", "verify"]
       effect: EFFECT_ALLOW
       derivedRoles: ["company_admin", "manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
     # ORG-6 module tiers (derived_roles.yaml:108–135). The webdev dept's own manager disposes of
     # requests; its staff can read the queue but not decide it, and cannot log internal requests
     # against a client on the dept's behalf (that is a manager-tier act per OQ-2).
-    - actions: ["read", "triage"]
+    # CLIENT-QA B.3a: `verify` sits with the dept MANAGER tier, alongside triage, and is deliberately
+    # absent from module_staff below. The comment above already draws that line — dept staff read the
+    # queue but do not decide it — and verification IS a decision: it closes the loop and asserts a
+    # fix is real. Widening it to staff is an owner call, not this ticket's to presume.
+    - actions: ["read", "triage", "verify"]
       effect: EFFECT_ALLOW
       derivedRoles: ["module_manager"]
       condition: { match: { expr: "variables.inTenant && variables.notLow" } }
@@ -76,3 +80,19 @@ resourcePolicy:
       effect: EFFECT_ALLOW
       derivedRoles: ["perm_webdev_change_request_triage"]
       condition: { match: { expr: "variables.inTenant && variables.notLow && variables.inRoot" } }
+    # CLIENT-QA B.3a: `verify` is deliberately ROLE-ARM ONLY — no perm_* mirror here.
+    # A mirror was written and then removed on evidence. IAM-04-REG1's sweep flagged it immediately:
+    # mirroring `verify` the way `triage` is mirrored adds
+    #     "webdev_change_request.verify": ["webdev_manager"]
+    # to the out-of-scope register — the SAME hazard shape, on the same kind and the same role, that
+    # `webdev_change_request.triage` already carries as a baselined finding. `module_manager` composes
+    # its derived role from `attr.module` (derived_roles.yaml:126–135), so its role-arm reach is
+    # narrower than a mirror's generic tenant-wide condition, and the mirror would hand a
+    # webdev_manager reach its role arm does not grant.
+    # That pin's own instruction is "go fix the responsible kind's policy, do not widen this baseline
+    # to silence it". Adding a second instance of a known hazard to close a ticket is silencing it, so
+    # the mirror is omitted instead: role-arm only, fail-closed, matching the posture
+    # resource_hr_payroll.yaml / resource_employee.yaml / 202608272010_iam_finance_ap_credit_writeoff
+    # already take. A principal granted `webdev.change_request.verify` through the PERMISSION arm gets
+    # nothing until a follow-up IAM ticket audits triage's existing mirror and this one together —
+    # which is the same "one follow-up ticket wires all three" deferral hr_policy documents.

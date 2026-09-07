@@ -79,8 +79,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // AD-7 (2026-09-05): +8 grantable / +8 total, on 2 NEW kinds (agency_lead: read/create/update/
     // triage/convert/delete; agency_discovery_submission: read/delete — no update, design §3.2),
     // 396 -> 404 / 381 -> 389.
-    expect(permissions.length).toBe(404);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(389);
+    // CLIENT-QA B.3a (2026-08-27, re-applied 2026-09-07): +1 grantable / +1 total —
+    // `webdev.change_request.verify` on the EXISTING webdev_change_request kind. 404 -> 405 / 389 -> 390.
+    expect(permissions.length).toBe(405);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(390);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 

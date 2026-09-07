@@ -120,7 +120,9 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // AD-7 (2026-09-05, agency discovery intake design §5.2): +8 pairs / +2 kinds (agency_lead:
     // read/create/update/triage/convert/delete; agency_discovery_submission: read/delete —
     // deliberately no update, design §3.2), 396/97 -> 404/99.
-    expect(catalog.length).toBe(404);
+    // CLIENT-QA B.3a (re-applied 2026-09-07): +1 pair, NO new kind — `verify` is a new action on the
+    // existing webdev_change_request kind. 404/99 -> 405/99.
+    expect(catalog.length).toBe(405);
     expect(catalogKindSet.size).toBe(99);
   });
 

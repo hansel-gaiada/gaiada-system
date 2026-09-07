@@ -184,6 +184,17 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
   const triage = (crId: string, payload: Record<string, unknown>, actor = admin) =>
     app.inject({ method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/triage`, headers: asUser(actor), payload });
 
+  const verify = (crId: string, payload: Record<string, unknown> = {}, actor = admin) =>
+    app.inject({ method: "POST", url: `/api/${co}/webdev/change-requests/${crId}/verify`, headers: asUser(actor), payload });
+
+  /** A bug converted to pm_task — i.e. sitting at `in_progress`, the only state live rows reach. */
+  async function convertedBug(severity = "high") {
+    const cr = await internalCr({ kind: "bug" });
+    const t = await triage(cr.id, { action: "convert", route: "pm_task", severity });
+    expect(t.statusCode).toBe(200);
+    return cr;
+  }
+
   const crRow = async (id: string) =>
     (
       await adminPool().query(
@@ -247,6 +258,87 @@ describe.skipIf(!TEST_URL)("MI-03: staff change-request surface, triage + mini-r
         "perm_webdev_change_request_triage",
       ]),
     );
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  // CLIENT-QA B.3/B.5 — QA verification
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  it("verify moves a converted bug to `verified` and records WHO and against WHICH build", async () => {
+    const cr = await convertedBug();
+    const r = await verify(cr.id, { verifiedOnVersion: "Alpha 01.071.0192a" }, webdevManager);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ status: "verified", verified: true });
+
+    const row = await adminPool().query(
+      `SELECT status, verified_by, verified_at, verified_on_version FROM webdev_change_requests WHERE id = $1`,
+      [cr.id],
+    );
+    expect(row.rows[0]).toMatchObject({
+      status: "verified", verified_by: webdevManager, verified_on_version: "Alpha 01.071.0192a",
+    });
+    // Attribution is STRUCTURAL (`wcr_verified_has_attribution`), not controller discipline — a
+    // verified row with a null verifier is unrepresentable, so this asserts the timestamp landed too.
+    expect(row.rows[0].verified_at).not.toBeNull();
+  });
+
+  it("verify is refused 409 from a pre-triage state, and the request is untouched", async () => {
+    const cr = await internalCr({ kind: "bug" });          // still `new`
+    const r = await verify(cr.id, {}, webdevManager);
+    expect(r.statusCode).toBe(409);
+    expect(await crRow(cr.id)).toMatchObject({ status: "new" });
+  });
+
+  it("unverify returns it to in_progress and CLEARS attribution; a reason is required", async () => {
+    const cr = await convertedBug();
+    expect((await verify(cr.id, {}, webdevManager)).statusCode).toBe(200);
+
+    // No reason -> 400, and the verification still stands.
+    const bare = await verify(cr.id, { action: "unverify" }, webdevManager);
+    expect(bare.statusCode).toBe(400);
+    expect(await crRow(cr.id)).toMatchObject({ status: "verified" });
+
+    const undone = await verify(cr.id, { action: "unverify", reason: "came back on the same build" }, webdevManager);
+    expect(undone.statusCode).toBe(200);
+    const row = await adminPool().query(
+      `SELECT status, verified_by, verified_at, verified_on_version FROM webdev_change_requests WHERE id = $1`,
+      [cr.id],
+    );
+    // Status and attribution move together — the CHECK would reject any intermediate row where they
+    // disagreed, so observing both proves the single-statement update did what it claims.
+    expect(row.rows[0]).toMatchObject({
+      status: "in_progress", verified_by: null, verified_at: null, verified_on_version: null,
+    });
+  });
+
+  it("unverify is refused 409 on a request that was never verified", async () => {
+    const cr = await convertedBug();
+    const r = await verify(cr.id, { action: "unverify", reason: "nothing to undo" }, webdevManager);
+    expect(r.statusCode).toBe(409);
+  });
+
+  it("ADVERSARIAL: a client cannot verify their own bug, and webdev STAFF cannot verify either", async () => {
+    const cr = await convertedBug();
+
+    // Positive control first, exactly as the client-invariant test below does: this principal is a
+    // working portal client, so the refusal cannot be explained away as an unauthorized fixture.
+    const portalOk = await app.inject({
+      method: "POST", url: `/api/${co}/portal/change-requests`, headers: asUser(clientOnly),
+      payload: { kind: "bug", title: `client still submits ${uniq()}` },
+    });
+    expect(portalOk.statusCode).toBe(201);
+    expect((await verify(cr.id, {}, clientOnly)).statusCode).toBe(403);
+
+    // And the dept's own STAFF tier is excluded by design — staff read the queue, they do not decide
+    // it, and verification is a decision. Positive control: the same principal CAN read.
+    const staffRead = await app.inject({
+      method: "GET", url: `/api/${co}/webdev/change-requests`, headers: asUser(webdevStaff),
+    });
+    expect(staffRead.statusCode).toBe(200);
+    expect((await verify(cr.id, {}, webdevStaff)).statusCode).toBe(403);
+
+    // Nobody's refusal left a mark.
+    expect(await crRow(cr.id)).toMatchObject({ status: "in_progress" });
   });
 
   it("a client-role-only principal is DENIED on all three actions (read, create, triage) — while its portal surface still works", async () => {

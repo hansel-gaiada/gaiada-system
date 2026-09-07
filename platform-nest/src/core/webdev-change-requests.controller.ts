@@ -39,6 +39,10 @@ import { createPmTaskInTx, normalizePmTaskInput } from "../modules/pm/pm.control
 const KINDS = new Set(["content", "design", "feature", "bug"]);
 const ROUTES = new Set(["control_plane", "mini_run", "pm_task"]);
 const TRIAGE_ACTIONS = new Set(["decline", "convert"]);
+// B.3. `unverify` is a first-class action rather than a separate endpoint so both transitions share
+// one lock, one authz check and one audit shape — a reversal that took a different path from the
+// thing it reverses is how the two drift.
+const VERIFY_ACTIONS = new Set(["verify", "unverify"]);
 // Severity is a TRIAGE OUTPUT, not an intake field — see migration 202608271000's §3 header. The
 // portal deliberately cannot set it: asking a client to rank their own bug against everyone else's
 // reliably yields "critical". `wcr_bug_has_severity` enforces the same rule structurally, so a bug
@@ -572,6 +576,150 @@ export class WebdevChangeRequestsController {
     return result.route === "mini_run"
       ? { id, status: "in_progress", route: "mini_run", pipelineRunId: result.runId }
       : { id, status: "in_progress", route: "pm_task", pmTaskId: result.pmTaskId };
+  }
+
+  // ── CLIENT-QA B.3 — QA VERIFICATION ─────────────────────────────────────────────────────────────
+  // Migration 202608271900 adds `verified` + `verified_by/at/on_version`, and
+  // `wcr_verified_has_attribution` makes attribution STRUCTURAL: a verified row without a verifier
+  // cannot exist. This handler is the only thing that writes that state.
+  //
+  // ── WHY `verify` ACCEPTS `in_progress` AND NOT ONLY `done` ──────────────────────────────────────
+  // Nothing in this codebase ever writes `status='done'` — 0088 admits the value but no code path
+  // sets it (closing was meant to follow the linked pm_task/run completing, which was never wired).
+  // Gating verification on `done` would therefore make it unreachable on every live row. Both are
+  // accepted so the handler keeps working the day `done` IS wired, without a second migration.
+  //
+  // ── `unverify` EXISTS BECAUSE A VERIFICATION CAN BE WRONG ───────────────────────────────────────
+  // Someone verifies the wrong row, or the bug comes back on the same build. Without a reversal the
+  // only routes back are a DB edit or a duplicate request, and both lose the audit trail. It requires
+  // a reason for the same purpose `decline` does: a state that moved with no recorded why is how a
+  // client learns their fix "un-happened".
+  @Post(":tenantId/webdev/change-requests/:id/verify")
+  @HttpCode(200)
+  async verify(
+    @Req() req: FastifyRequest,
+    @Param("tenantId") tenantId: string,
+    @Param("id") id: string,
+    @Body() body: { action?: string; verifiedOnVersion?: string; reason?: string; severity?: string },
+  ) {
+    const action = body?.action ?? "verify";
+    if (!VERIFY_ACTIONS.has(action)) throw new BadRequestException("action must be verify|unverify");
+    if (body?.severity !== undefined && !SEVERITIES.has(body.severity)) {
+      throw new BadRequestException("severity must be critical|high|medium|low");
+    }
+    const onVersion = body?.verifiedOnVersion
+      ? scrubText(String(body.verifiedOnVersion)).text.trim().slice(0, SEEN_ON_VERSION_CAP)
+      : null;
+    const reason = action === "unverify"
+      ? scrubText(String(body?.reason ?? "")).text.trim().slice(0, REASON_CAP)
+      : null;
+    if (action === "unverify" && !reason) throw new BadRequestException("reason required when un-verifying");
+    await authorize(req.principal, { kind: "webdev_change_request", tenantId, id, module: "webdev" }, "verify");
+
+    const result = await withTenants([tenantId], async (c) => {
+      // Same serialize -> re-read -> precondition shape triage uses. The lock is not the fix; the
+      // re-read under it is — two verifiers racing must not both write attribution.
+      await lockChangeRequest(c, id);
+      const cur = await c.query<CrRow & { severity: string | null }>(
+        `SELECT ${CR_TRIAGE_COLUMNS}, cr.severity
+           FROM webdev_change_requests cr
+           LEFT JOIN users ru ON ru.id = cr.requested_by
+          WHERE cr.id = $1 AND cr.deleted_at IS NULL`,
+        [id],
+      );
+      const cr = cur.rows[0];
+      if (!cr) return { outcome: "not_found" as const };
+
+      if (action === "unverify") {
+        if (cr.status !== "verified") return { outcome: "wrong_state" as const, status: cr.status };
+        // Attribution is cleared in the SAME statement that leaves 'verified' — split across two and
+        // `wcr_verified_has_attribution` would reject the intermediate row, which is the constraint
+        // doing its job rather than an obstacle to work around.
+        await c.query(
+          `UPDATE webdev_change_requests
+              SET status = 'in_progress', verified_by = NULL, verified_at = NULL,
+                  verified_on_version = NULL, updated_at = now()
+            WHERE id = $1 AND status = 'verified' AND deleted_at IS NULL`,
+          [id],
+        );
+        await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
+          status: "in_progress", verified: false, reason, actorId: req.principal.userId,
+        });
+        return { outcome: "unverified" as const, kind: cr.kind };
+      }
+
+      // ---- verify ----
+      if (cr.status !== "in_progress" && cr.status !== "done") {
+        return { outcome: "wrong_state" as const, status: cr.status };
+      }
+      // LEGACY-ROW ACCOMMODATION, and the reason it is not just "trust the CHECK".
+      // `wcr_bug_has_severity` is NOT VALID (202608271000 §3): rows written before that migration can
+      // be kind='bug', status='in_progress', severity NULL. Verifying one moves it to 'verified',
+      // which the CHECK refuses — as a 500 from deep inside a transaction, naming a constraint the
+      // caller has never heard of. So it is detected here and answered as a typed 400 that says what
+      // to send. This does NOT reopen "clients set severity": the caller here is a VERIFIER, already
+      // authorized for `verify`, supplying the value triage never captured on a pre-migration row.
+      const severityToWrite = cr.kind === "bug" ? cr.severity ?? body?.severity ?? null : cr.severity;
+      if (cr.kind === "bug" && !severityToWrite) {
+        return { outcome: "needs_severity" as const };
+      }
+      await c.query(
+        `UPDATE webdev_change_requests
+            SET status = 'verified', verified_by = $2, verified_at = now(),
+                verified_on_version = $3, severity = $4, updated_at = now()
+          WHERE id = $1 AND status IN ('in_progress', 'done') AND deleted_at IS NULL`,
+        [id, req.principal.userId, onVersion, severityToWrite],
+      );
+      await emitEvent(c, tenantId, "webdev_change_request", id, "webdev.change_request.updated", {
+        status: "verified", verified: true, verifiedOnVersion: onVersion, kind: cr.kind,
+        actorId: req.principal.userId,
+      });
+      const clientRecipients = await dispositionClientRecipients(c, cr);
+      return {
+        outcome: "verified" as const, kind: cr.kind,
+        recipients: recipientsFor(cr.requested_by, clientRecipients),
+      };
+    });
+
+    if (result.outcome === "not_found") throw new NotFoundException("change request not found");
+    if (result.outcome === "needs_severity") {
+      throw new BadRequestException(
+        "severity required to verify this bug: it predates the severity column and triage never set one — send critical|high|medium|low",
+      );
+    }
+    if (result.outcome === "wrong_state") {
+      throw new ConflictException({
+        message: action === "unverify"
+          ? `only a verified change request can be un-verified (status ${result.status})`
+          : `only converted work can be verified (status ${result.status})`,
+        existing: { status: result.status },
+      });
+    }
+
+    if (result.outcome === "unverified") {
+      await writeActivity(tenantId, req.principal.userId, "unverified", "webdev_change_request", id, {
+        kind: result.kind, reason,
+      });
+      // No client notification, deliberately. Un-verifying is an internal correction; telling a client
+      // "your fix is unconfirmed again" before anyone has looked at it converts a bookkeeping fix into
+      // an alarm. They are told when it is verified AGAIN, which is the state they care about.
+      return { id, status: "in_progress", verified: false };
+    }
+
+    await writeActivity(tenantId, req.principal.userId, "verified", "webdev_change_request", id, {
+      kind: result.kind, verifiedOnVersion: onVersion,
+    });
+    // Best-effort AFTER commit, same rule as triage: a notify failure must never roll back a recorded
+    // verification.
+    await notifyBestEffort(tenantId, req.principal.userId, result.recipients, "webdev.change_request.verified", {
+      title: "Your request was confirmed fixed",
+      body: onVersion ? `Verified on ${onVersion}.` : undefined,
+      href: "/portal/requests",
+      entityType: "webdev_change_request",
+      entityId: id,
+      severity: "info",
+    });
+    return { id, status: "verified", verified: true, verifiedOnVersion: onVersion };
   }
 }
 

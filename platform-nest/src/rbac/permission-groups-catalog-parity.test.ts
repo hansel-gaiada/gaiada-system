@@ -103,7 +103,10 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // agency.discovery_submission.{read,delete} (2 new Cerbos kinds). 4 new authoring groups
     // (agency_leads CRUD; agency_lead_triage; agency_lead_convert; agency_discovery_submissions) —
     // none advancedOnly. Relationship set untouched. 381 -> 389.
-    expect(grantable.length).toBe(389);
+    // CLIENT-QA B.3a (re-applied 2026-09-07): +1 grantable — webdev.change_request.verify, in its OWN
+    // group (NOT folded into webdev_triage_change_requests: bundling them would make every triager a
+    // verifier). 389 -> 390.
+    expect(grantable.length).toBe(390);
     expect(relationshipKeys.size).toBe(15);
   });
 

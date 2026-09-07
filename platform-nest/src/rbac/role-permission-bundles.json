@@ -15,11 +15,11 @@
     "note": "class='relationship' permissions are NEVER present in any bundle (Ruling 3); enforced here by construction and re-checked by src/rbac/role-permission-bundles.db.test.ts against the live `role_permissions_reject_relationship` DB trigger (0093).",
     "counts": {
       "roles": 28,
-      "totalPairs": 1761,
+      "totalPairs": 1766,
       "perRole": {
-        "platform_admin": 389,
-        "company_admin": 356,
-        "manager": 171,
+        "platform_admin": 390,
+        "company_admin": 357,
+        "manager": 172,
         "member": 88,
         "viewer": 31,
         "org_unit_lead": 16,
@@ -35,7 +35,7 @@
         "reports_staff": 4,
         "reports_manager": 3,
         "webdev_staff": 9,
-        "webdev_manager": 15,
+        "webdev_manager": 16,
         "social_staff": 19,
         "social_manager": 33,
         "monitoring_staff": 10,
@@ -44,7 +44,7 @@
         "finance_manager": 43,
         "lms_staff": 2,
         "lms_manager": 11,
-        "owner": 356
+        "owner": 357
       },
       "selfScopedPairs": 28
     }
@@ -431,6 +431,7 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.change_request.verify",
       "webdev.contract_snapshot.read",
       "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.operate",
@@ -789,6 +790,7 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.change_request.verify",
       "webdev.contract_snapshot.read",
       "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.operate",
@@ -962,6 +964,7 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.change_request.verify",
       "webdev.contract_snapshot.read",
       "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.operate",
@@ -1331,6 +1334,7 @@
       "core.service_assignment.read",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.change_request.verify",
       "webdev.contract_snapshot.read",
       "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.operate",
@@ -1857,6 +1861,7 @@
       "webdev.change_request.create",
       "webdev.change_request.read",
       "webdev.change_request.triage",
+      "webdev.change_request.verify",
       "webdev.contract_snapshot.read",
       "webdev.contract_snapshot.refresh",
       "webdev.provisioned_site.operate",

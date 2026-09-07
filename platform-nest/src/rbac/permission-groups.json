@@ -6,9 +6,9 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 149,
-      "grantablePermissionsInCatalog": 389,
-      "permissionsCoveredByGroups": 357,
+      "groups": 150,
+      "grantablePermissionsInCatalog": 390,
+      "permissionsCoveredByGroups": 358,
       "permissionsAdvancedOnly": 32,
       "permissionsAppearingInMultipleGroups": 2,
       "sensitiveGroups": 102
@@ -1028,6 +1028,17 @@
       "description": "Accept, route, or reject an incoming website change request.",
       "permissions": [
         "webdev.change_request.triage",
+        "webdev.change_request.read"
+      ],
+      "sensitive": false
+    },
+    {
+      "key": "webdev_verify_change_requests",
+      "name": "Verify Website Change Requests",
+      "domain": "webdev",
+      "description": "Confirm a completed change request was actually fixed, against a named build. Deliberately separate from triage: bundling them would make every triager a verifier, and deciding what to do with a request is a different act from attesting the result is real.",
+      "permissions": [
+        "webdev.change_request.verify",
         "webdev.change_request.read"
       ],
       "sensitive": false
