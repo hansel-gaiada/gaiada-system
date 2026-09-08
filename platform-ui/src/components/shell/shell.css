@@ -46,6 +46,11 @@
 }
 /* Every grid child sits above the wash. */
 .erp-side, .erp-top, .erp-main, .erp-special { position: relative; z-index: 1; }
+/* The topbar is a stacking context (z-index above), so its dropdowns' own z-index can never escape
+   it: the account menu's z-index 50 painted UNDER the sticky special-access banner (z-index 6) and
+   Sign out was unclickable for exactly the elevated users who get that banner. The topbar itself
+   must sit above the banner so anything it pops does too. */
+.erp-top { z-index: 7; }
 
 /* The two glass panels. `border: none` replaces the old hairline edges:
    the material carries the separation now, through --glass-inner's inset
