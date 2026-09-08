@@ -32,15 +32,16 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(business.items.map((i) => i.label)).not.toContain("Projects");
     expect(business.items.map((i) => i.label)).not.toContain("Tasks");
     expect(business.items[0]).toEqual({ label: "Project Management", href: "/project-management", icon: "projects" });
-    // MON — Monitoring (Plane B: the CLIENT's properties) is ungated in the sidebar, so a plain
-    // member must see it. Pinned as an equality assertion rather than a `toContain` because the
-    // point is that it is NOT capability-gated here: the backend's `monitoring.read` is the real
-    // boundary, and adding a UI gate would hide a surface the server would happily serve, which
-    // reads to the user as "broken" rather than "forbidden".
-    expect(business.items).toContainEqual({ label: "Monitoring", href: "/monitoring", icon: "pulse" });
-    // TR-17: a plain member always sees the self/scoped grain reports, never the exec-only Company one.
+    // Owner decision 2026-09-08 (mirror trim, reversing the 2026-08 "ungated Plane B" call): the
+    // sidebar mirrors Cerbos. A plain member's monitor READ is denied (resource_monitor.yaml lists
+    // company_admin/manager/module tiers only), and the pipeline-run READ is manager-tier — so
+    // neither row renders for a member. The rows come back with the role, not with a click.
+    expect(business.items.map((i) => i.label)).not.toContain("Monitoring");
+    expect(business.items.map((i) => i.label)).not.toContain("Delivery Pipeline");
+    // TR-17 + mirror trim: self/scoped grains stay (their reads are attr-narrowed server-side);
+    // the department grain is a role-tier read a plain member does not hold.
     const reports = groups.find((g) => g.label === "Reports")!;
-    expect(reports.items.map((i) => i.label)).toEqual(["My Report", "Project Reports", "Department Reports"]);
+    expect(reports.items.map((i) => i.label)).toEqual(["My Report", "Project Reports"]);
     // TR-26: a plain member always sees their own appraisal history (self-service, no capability
     // gates it — same reasoning as check-ins) but never the manager/HR consoles.
     const appraisals = groups.find((g) => g.label === "Appraisals")!;
@@ -64,8 +65,30 @@ describe("navFor (RBAC-gated visibility)", () => {
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "SEO", "HR", "IT", "Finance"]);
-    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/departments/dept-2", "/hr", "/it", "/finance"]);
+    // Mirror trim: the functional HR and Finance console rows require hr.view / finance.statement.view
+    // (a plain member's reads there are denied); IT stays — a member may read devices.
+    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "SEO", "IT"]);
+    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/departments/dept-2", "/it"]);
+  });
+
+  it("shows the functional HR and Finance rows to the roles whose reads they are", () => {
+    const groups = navFor(
+      { ...base, roles: [
+        { role: "hr_staff", scopeType: "company", scopeId: "c1" },
+        { role: "finance_staff", scopeType: "company", scopeId: "c1" },
+      ] },
+      "c1",
+      [{ id: "dept-1", name: "Web Dev" }],
+    );
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "HR", "IT", "Finance"]);
+  });
+
+  it("manager keeps Delivery Pipeline and Monitoring — those reads are manager-tier", () => {
+    const groups = navFor({ ...base, roles: [{ role: "manager", scopeType: "company", scopeId: "c1" }] }, "c1");
+    const business = groups.find((g) => g.label === "Business")!;
+    expect(business.items.map((i) => i.label)).toContain("Delivery Pipeline");
+    expect(business.items.map((i) => i.label)).toContain("Monitoring");
   });
   // GM-01/OQ-4: GM is the ROOT of the department spine (platform-nest `seed/roster.ts`:
   // `DEPT_PARENT["d-gm"] = null`, every other department parents to it), so it must not sort
@@ -77,7 +100,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }, { id: "dept-5", name: "GM" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["GM", "Web Dev", "SEO", "HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["GM", "Web Dev", "SEO", "IT"]);
     // Ordering only — the href is untouched, so every existing deep link still resolves.
     expect(depts.items[0].href).toBe("/departments/dept-5");
   });
@@ -107,25 +130,35 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(depts.items.map((i) => i.label)).toContain("GM");
   });
 
-  it("still lists HR and IT in the Departments group when no business departments are passed", () => {
+  it("still lists IT in the Departments group when no business departments are passed (HR/Finance are cap-gated)", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1");
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["IT"]);
   });
   // An org structure that already has a Finance department must NOT get a second Finance row —
   // one label, two destinations, is how a nav loses trust. The org row is re-pointed at the
   // bespoke console instead.
-  it("re-points an org-structure Finance department at /finance instead of duplicating it", () => {
-    const groups = navFor(
+  it("re-points an org-structure Finance department at /finance only for someone the console serves", () => {
+    // One label, one destination either way. For finance_staff the org row IS the money console; for
+    // a plain member it stays an ordinary department read — the org chart is never hidden, and the
+    // console the member's reads would refuse is never linked.
+    const staff = navFor(
+      { ...base, roles: [{ role: "finance_staff", scopeType: "company", scopeId: "c1" }] },
+      "c1",
+      [{ id: "d1", name: "Web Dev" }, { id: "d6", name: "Finance" }],
+    );
+    const staffFinance = staff.find((g) => g.label === "Departments")!.items.filter((i) => i.label === "Finance");
+    expect(staffFinance).toHaveLength(1);
+    expect(staffFinance[0].href).toBe("/finance");
+
+    const member = navFor(
       { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "d1", name: "Web Dev" }, { id: "d6", name: "Finance" }],
     );
-    const depts = groups.find((g) => g.label === "Departments")!;
-    const finance = depts.items.filter((i) => i.label === "Finance");
-    expect(finance).toHaveLength(1);
-    expect(finance[0].href).toBe("/finance");
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "Finance", "HR", "IT"]);
+    const memberFinance = member.find((g) => g.label === "Departments")!.items.filter((i) => i.label === "Finance");
+    expect(memberFinance).toHaveLength(1);
+    expect(memberFinance[0].href).toBe("/departments/d6");
   });
 
   it("platform_admin gets a Settings entry and Rollups", () => {

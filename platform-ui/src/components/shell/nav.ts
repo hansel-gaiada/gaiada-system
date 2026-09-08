@@ -1,5 +1,5 @@
 import type { Me } from "@/lib/platform";
-import { can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
+import { canReadMonitoring, can, isElevated, isClientOnly, canManageIT } from "@/lib/rbac";
 import { PM_TERMS } from "@/lib/pmVocabulary";
 import { deptSlug } from "@/lib/deptToolkits";
 import type { IconName } from "./icons";
@@ -49,13 +49,18 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     ...(can(me, "company.manage", tenantId) ? [{ label: "Invoices", href: "/invoices", icon: "wallet" } as NavItem] : []),
     { label: "Agency", href: "/agency", icon: "sales" },
     { label: "Meetings", href: "/meetings", icon: "clock" },
-    { label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" },
+    // Owner decision 2026-09-08: the sidebar MIRRORS Cerbos — a row whose backing read the server
+    // denies this principal is hidden, not left to refuse on click. Delivery Pipeline's run READ is
+    // manager-tier (resource_pipeline_run.yaml: "reading pipeline runs is elevated"); a plain member
+    // holds only pipeline.write (create/update from a briefing), which is not a reason to show the
+    // dashboard.
+    ...(can(me, "pipeline.manage", tenantId) ? [{ label: "Delivery Pipeline", href: "/pipeline", icon: "pulse" } as NavItem] : []),
     // Monitoring is Plane B — the CLIENT's properties and services, not our own containers
     // (that is Plane A and lives in Grafana, deliberately off the ERP surface). It sits in
     // Business rather than Systems for exactly that reason: the subject is client work.
-    // Ungated for now, matching the Clients/Deliverables precedent — the backend's Cerbos
-    // `monitoring.read` is the real boundary and this row is only a mirror.
-    { label: "Monitoring", href: "/monitoring", icon: "pulse" },
+    // Same owner decision: gated on the monitor-read role mirror (no catalog permission exists for
+    // monitor read yet — see canReadMonitoring's header).
+    ...(canReadMonitoring(me, tenantId) ? [{ label: "Monitoring", href: "/monitoring", icon: "pulse" } as NavItem] : []),
     ...(can(me, "rollups.view") ? [{ label: "Rollups", href: "/rollups", icon: "pulse" } as NavItem] : []),
   ];
   // Departments is its own section (rendered exactly like Organization — a group
@@ -95,14 +100,19 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   const isFinanceRow = (name: string) => deptSlug(name) === "finance";
   const orgHasFinance = orderedDepartments.some((d) => isFinanceRow(d.name));
   const deptItems: NavItem[] = [
+    // Owner decision 2026-09-08 (mirror trim): the org-structure rows STAY for everyone — hiding a
+    // department from the tree would lie about the org chart — but the FUNCTIONAL console rows (HR,
+    // the Finance money surface) are gated on the caps their backing reads require. An org-claimed
+    // Finance department keeps its row either way; it is re-pointed at the /finance console only for
+    // someone the console would actually serve, and stays a plain department read otherwise.
     ...orderedDepartments.map((d) =>
-      isFinanceRow(d.name)
+      isFinanceRow(d.name) && can(me, "finance.statement.view", tenantId)
         ? { label: d.name, href: "/finance", icon: "wallet" as IconName }
         : { label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName },
     ),
-    { label: "HR", href: "/hr", icon: "hr" },
+    ...(can(me, "hr.view", tenantId) ? [{ label: "HR", href: "/hr", icon: "hr" } as NavItem] : []),
     { label: "IT", href: "/it", icon: "pulse" },
-    ...(orgHasFinance ? [] : [{ label: "Finance", href: "/finance", icon: "wallet" as IconName }]),
+    ...(orgHasFinance || !can(me, "finance.statement.view", tenantId) ? [] : [{ label: "Finance", href: "/finance", icon: "wallet" as IconName }]),
   ];
   const groups: NavGroup[] = [
     // "Me" is FIRST and ungated (employee-portal wave A). Every principal with a staff surface has a
@@ -166,7 +176,9 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     { label: "Reports", icon: "chart", items: [
       { label: "My Report", href: "/reports/person", icon: "pulse" },
       { label: "Project Reports", href: "/reports/project", icon: "pulse" },
-      { label: "Department Reports", href: "/reports/department", icon: "pulse" },
+      // Mirror trim: the department grain is a role-tier read (Cerbos read_department — led units);
+      // person/project stay, their reads are attr-narrowed server-side to the caller's own line.
+      ...(can(me, "reports.department.view", tenantId) ? [{ label: "Department Reports", href: "/reports/department", icon: "pulse" } as NavItem] : []),
       ...(can(me, "rollups.view") ? [{ label: "Company Report", href: "/reports/company", icon: "pulse" } as NavItem] : []),
     ] },
     // TR-26: `/appraisals/mine` is self-service (every principal reads their own record, always —

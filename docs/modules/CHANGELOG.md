@@ -11,6 +11,35 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.72.0` - the sidebar mirrors Cerbos, and shell overlays stack right (2026-09-08) - DEV-VERIFIED
+
+**Fixed**
+- ★ Shell stacking contexts: `.erp-side`/`.erp-top`/`.erp-main`/`.erp-special` were sibling stacking
+  contexts all at `z-index: 1`, so an overlay INSIDE one could never out-stack a later sibling
+  whatever its own z-index. Two live symptoms: the account menu (z 50) painted under the sticky
+  special-access banner (z 6) — Sign out unclickable for exactly the elevated users who get that
+  banner — and the departments rail flyout (z 150) painted under the page content. Topbar → 7,
+  sidebar → 8; fixed overlays (scrim 90, railmenu 150, railtip 200) unchanged.
+
+**Changed**
+- ★ Owner decision 2026-09-08: the sidebar MIRRORS Cerbos — a row whose backing read the server
+  denies this principal is hidden, not left to refuse on click (reverses the 2026-08 "ungated,
+  pages refuse" calls for these rows). For a plain `member`: Delivery Pipeline (run read is
+  manager-tier), Monitoring, the functional HR and Finance console rows, and Department Reports
+  disappear; Clients/Deliverables/Agency/Meetings/IT stay (their reads allow). Org-structure
+  department rows stay for EVERYONE (hiding one would lie about the org chart) — an org-claimed
+  Finance department is re-pointed at the /finance console only for a principal the console serves,
+  and stays a plain department read otherwise. My/Project reports stay (attr-narrowed server-side).
+- Monitoring has no catalog permission for its read yet (the capability-map's recorded discrepancy),
+  so `rbac.ts` gains `canReadMonitoring` — a ROLE mirror of `resource_monitor.yaml`'s read rows
+  (platform_admin/company_admin/manager/monitoring_manager/monitoring_staff), kept out of ROLE_CAPS
+  so the capability catalog stays 1:1 with the permission catalog. Replace with a real
+  `monitoring.view` capability when 0117's deferred permission arm lands.
+- Verified as a real webdev staff principal (member + webdev_staff) against live Cerbos on the local
+  stack: probes deny pipeline_run/monitor/hr_case/finance reads, allow client/deliverable/task/
+  project/meeting/device — the trimmed nav matches decision-for-decision. nav.test.ts updated +
+  role-contrast cases (manager keeps Pipeline/Monitoring; hr_staff/finance_staff keep their rows);
+  both rbac parity suites untouched and green (full run 4130).
 ### platform-nest `0.56.0` - clients get an owner, notes and a history; create keeps its status (2026-09-29) - PROTOTYPED
 
 Plan: `docs/plans/2026-09-29-client-centre.md` (CC-D10). Contract: BFF §26.
@@ -331,7 +360,6 @@ suites that exercise `withTenants` hardest; 9 new assertions across `pool-ceilin
 `dev-mode-guard.test.ts`. Status is **PROTOTYPED not DEV-VERIFIED** deliberately: the suite ran on
 Windows/Docker locally, and the estate rule is that the server run is what counts. The nginx half is
 already server-verified; the platform-nest half is proven by this cut's deploy.
-
 ### platform-nest `0.52.0` - agency discovery intake: a prospect can fill it, the ERP can act on it (2026-09-05) - DEV-VERIFIED
 
 AD-1..AD-8. Design: `docs/superpowers/plans/2026-09-05-agency-discovery-intake-design.md`.

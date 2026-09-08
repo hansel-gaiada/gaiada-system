@@ -839,6 +839,17 @@ export function can(me: Me, cap: Capability, companyId?: string | null): boolean
   });
 }
 
+// Monitoring READ has no catalog permission yet — rbac-capability-map.ts's monitoring note records
+// the live discrepancy, and the enforcing rules are resource_monitor{,_incident}.yaml's read rows:
+// platform_admin (wildcard), company_admin, manager, module_manager and module_staff for the
+// "monitoring" module. This helper is a ROLE mirror of exactly those rows, kept out of ROLE_CAPS so
+// the capability catalog stays 1:1 with the permission catalog; replace it with a real
+// `monitoring.view` capability when the module's permission arm lands (0117's deferred arm).
+const MONITOR_READERS = new Set<Role>(["platform_admin", "company_admin", "manager", "monitoring_manager", "monitoring_staff"]);
+export function canReadMonitoring(me: Me, companyId?: string | null): boolean {
+  return me.roles.some((g) => MONITOR_READERS.has(g.role as Role) && scopeCovers(g, companyId));
+}
+
 // "Elevated" = a global superadmin grant. Kept as a named concept because several surfaces
 // (People directory, org editing default) key off it.
 //
