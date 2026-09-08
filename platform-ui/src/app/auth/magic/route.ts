@@ -1,11 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { sealSession, SESSION_COOKIE } from "@/lib/session";
+import { sealSession, encodeSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session";
 
 // MAIL-10 (design §9) — the landing page a clicked magic-link email opens. Consumes the token
-// against platform-nest's single-use `POST /auth/magic-link/consume`, then mints EXACTLY the same
-// cookie shape dev-login uses (`sealSession(userId)` — a plain userId payload, not the OIDC-wrapped
-// `encodeSession(...)` form auth/callback/route.ts produces): a magic link is a login convenience,
-// not an IdP session, so it deliberately rides the "dev" cookie shape regardless of AUTH_MODE.
+// against platform-nest's single-use `POST /auth/magic-link/consume`, then mints the same cookie
+// shape dev-login uses — the "dev" MODE, not the OIDC-wrapped form auth/callback/route.ts
+// produces: a magic link is a login convenience, not an IdP session, so it deliberately rides the
+// dev cookie shape regardless of AUTH_MODE.
+//
+// 2026-09-08 (finding 08): this used to call `sealSession(userId)` with a BARE payload. Dev-login
+// no longer does — it wraps through `encodeSession`, which stamps iat/exp — and leaving this path
+// bare would have made a magic-link session the one login in the app with no absolute lifetime and
+// no cookie maxAge. Emailed credentials are the last place that should be true. Same mode, same
+// flow; the envelope only adds the time component.
 //
 // M11 restated at the one place a browser actually lands on this flow: this route NEVER decides
 // anything on the ERP's behalf — it only turns a valid, single-use token into a session cookie and
@@ -50,10 +56,17 @@ export async function GET(req: NextRequest) {
   if (!userId) return fail(req, "magic");
 
   const out = NextResponse.redirect(new URL("/", origin(req)));
-  out.cookies.set(SESSION_COOKIE, sealSession(userId), {
+  // Wrapped via `encodeSession` rather than `sealSession(userId)` (finding 08). The bare form
+  // carries NO time component at all, so a magic-link session was exempt from the absolute
+  // lifetime every other login path now gets — and a magic link is emailed, i.e. it lands in the
+  // one place a session-shaped secret is most likely to be forwarded or archived. It is still the
+  // "dev" cookie SHAPE (a magic link is a login convenience, not an IdP session — see this file's
+  // header); the envelope only adds iat/exp, it does not change which mode this is.
+  out.cookies.set(SESSION_COOKIE, sealSession(encodeSession({ mode: "dev", userId })), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
+    maxAge: SESSION_TTL_SECONDS,
     secure: process.env.NODE_ENV === "production",
   });
   return out;

@@ -5,7 +5,7 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { newId, withTenants } from "../db";
 import { config } from "../config";
-import { currentVia, currentApproval } from "./request-context";
+import { currentVia, currentApproval, memoiseSessionCurrent } from "./request-context";
 import { assemblePrincipal, auditDecision, sessionVersionCurrent, type Principal } from "../rbac/principal";
 import { check, type Resource } from "../rbac/cerbos";
 import { mailIntake } from "../mail/intake";
@@ -41,7 +41,7 @@ export function explainDenial(principal: Principal, reason: string): string {
 }
 
 /** RBAC gate: throws ForbiddenException (403) on deny, UnauthorizedException (401) on a
- *  revoked session for mutations (D11). Returns void on allow. */
+ *  revoked session (D11 — every action, reads included since F13). Returns void on allow. */
 export async function authorize(principal: Principal, resource: Resource, action: string): Promise<void> {
   const decision = await check(principal, resource, action);
   if (!decision.allow) {
@@ -101,7 +101,37 @@ export async function authorize(principal: Principal, resource: Resource, action
     // revocation path it does not need.
   }
 
-  if (action !== "read" && !(await sessionVersionCurrent(principal))) {
+  // ── F13 (fault-register finding 13, 2026-09-08): D11 WIDENED TO READS ───────────────────────────
+  // Originally write-only (see the D11 comment on `sessionVersionCurrent` in rbac/principal.ts).
+  // That framing WAS the finding: a terminated employee's already-issued session kept READING
+  // payroll, HR files, the general ledger and the client roster, because nothing on the read path
+  // ever asked whether the session was still current. There is no "safe" read for this purpose —
+  // read access to exactly that data is the compliance failure — so the exemption is removed
+  // rather than narrowed.
+  //
+  // GUARDED ON `principal.userId`, NOT ON `action`, now. `sessionVersionCurrent()` returns `false`
+  // unconditionally for a null userId (see its own comment) — there is no `users` row and so no
+  // session to be current OR stale. Before this change that only mattered for writes, and it was
+  // already latent there: an ANONYMOUS/unresolved-OBO principal that somehow cleared the Cerbos
+  // check above (it never does today — every resource policy in cerbos/policies gates on a role or
+  // a non-empty `companies`/`rootCompanies`, and ANONYMOUS carries neither) would have been thrown
+  // "session revoked" for a write it was never denied for having no session in the first place.
+  // Widening this to reads makes that latent inconsistency reachable in principle — a public/portal
+  // surface must keep answering with whatever Cerbos decided, never a confusing 401 about a session
+  // that never existed — so it is fixed here rather than carried forward: a principal with no
+  // `userId` skips this check entirely, on either action. It is still fully subject to the Cerbos
+  // decision above and to RLS; this only ever removes a check that could never have meant anything
+  // for it, never a grant.
+  //
+  // MEMOISED PER REQUEST (`memoiseSessionCurrent`, ./request-context.ts) because this now runs on
+  // every read, and a page render's fanned-out BFF calls share one caller principal across several
+  // `authorize()` invocations. See that function's own comment for why per-request scoping — not a
+  // cache keyed on the Principal object, not a TTL — is the one memoisation shape that cannot mask
+  // a revocation between calls. Measured cost: `src/rbac/session-current-perf.db.test.ts`.
+  if (
+    principal.userId &&
+    !(await memoiseSessionCurrent(principal.userId, principal.sessionVersion, () => sessionVersionCurrent(principal)))
+  ) {
     throw new UnauthorizedException("session revoked — re-authenticate");
   }
 }

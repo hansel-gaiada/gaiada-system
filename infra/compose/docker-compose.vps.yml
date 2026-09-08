@@ -28,6 +28,15 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
       - ../../infra/db/init-cluster.sh:/docker-entrypoint-initdb.d/10-init-cluster.sh:ro
+    # FAULT REGISTER FINDING 14 (2026-09-08) — GUESS, no live data: this profile (`data`) is
+    # DISABLED on gda-aicenter today (production uses an external host Postgres via PG_HOST — see
+    # the file header and infra/CLAUDE.md's "Postgres and Redis run on the HOST" note), so there is
+    # no running container to measure. Sized from Postgres's own tuning guidance for a small
+    # multi-tenant workload (four app DBs + Keycloak + n8n on one instance) — shared_buffers etc.
+    # are NOT tuned to this ceiling in postgresql.conf, so treat this as a crash-stop backstop, not
+    # a performance-tuned budget; revisit with real `docker stats` numbers the day this profile is
+    # ever actually turned on.
+    mem_limit: 2g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d gaiada"]
       interval: 5s
@@ -47,6 +56,11 @@ services:
     volumes:
       - pg-bot-data:/var/lib/postgresql/data
       - ../../infra/db/init-bot.sh:/docker-entrypoint-initdb.d/10-init-bot.sh:ro
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 34.44MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08; `gaiada-pg-bot-1`). This instance holds
+    # only the bot's crypto-shred PII store (one small tenant, no analytics workload), so headroom
+    # is generous mainly for autovacuum/WAL churn spikes rather than steady-state size.
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d gaiada"]
       interval: 5s
@@ -62,6 +76,18 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — GUESS, no live data: like `postgres` above, this
+    # profile is disabled on gda-aicenter (production points platform at an external host Redis via
+    # REDIS_URL). Sized as a generous multiple of redis-bot's REAL measured footprint below, since
+    # both run the same image/config shape (appendonly, no eviction policy set) and this one carries
+    # the platform's own event-stream + dead-letter traffic rather than the bot's lighter queue.
+    mem_limit: 512m
+    # redis-cli needs no auth here (no requirepass set) — matches the container's own config.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   # Bot Redis — BullMQ media queue, isolated with the bot's data plane (DB topology plan Phase F).
   redis-bot:
@@ -71,6 +97,15 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-bot-data:/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 10.25MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Headroom is almost entirely for a media
+    # backlog spike (BullMQ queue depth growing during a burst of WhatsApp media), not steady state.
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   waha:
     # Pinned (never :latest — a floating tag can shift engine/payload behavior under you, an
@@ -124,6 +159,20 @@ services:
       WHATSAPP_RESTART_ALL_SESSIONS: "True"
     volumes:
       - waha-sessions:/app/.sessions
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 93.43MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08) with one active NOWEB session. Given
+    # generous headroom (not a tight multiple of the measurement): Baileys' in-memory session
+    # store grows with contact/chat history sync and this is the ONE component in the stack where
+    # OOM-killing it risks a forced WhatsApp re-pair (a fresh QR scan, per the image-pin comments
+    # above) rather than a clean restart — a materially worse failure mode than most services here.
+    mem_limit: 1g
+    # WAHA's own `/ping` needs no API key (verified live); `/health` does and 401s, so don't use it.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # AI gateway — the Go service (ai-gateway-go/) IS the gateway. The Node ai-gateway/ it
   # replaced was retired 2026-07-14 after code-complete parity + green build/tests; the service
@@ -247,15 +296,63 @@ services:
       OTEL_SERVICE_NAME: ai-gateway
     volumes:
       - gateway-data:/app/data # egress audit (JSONL)
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 15.14MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). A Go binary with no local model weights
+    # (whisper/ollama are separate services it calls over HTTP); headroom is mostly for buffering
+    # concurrent media (vision/whisper) payloads in flight, not steady state.
+    mem_limit: 512m
+    # alpine's busybox wget (confirmed present in this image). 127.0.0.1, not "localhost" — same
+    # IPv4-vs-::1 trap `platform`'s own healthcheck comment below already documents for busybox wget.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # Keycloak (5b) — self-hosted IdP. Realm imported from ./keycloak on first boot. Backed by
   # Postgres (gaiada_keycloak) instead of embedded H2 (DB topology plan Phase D) — durable + backed
-  # up with the core instance. Kept on start-dev for the trial (no TLS/hostname setup); a prod
-  # deploy should move to `start` (KC_HOSTNAME + TLS) — see the plan's deploy notes.
+  # up with the core instance.
+  #
+  # ═══════════════════════════════════════════════════════════════════════════════════════════
+  # FAULT REGISTER FINDING 07 (2026-09-08) — moved OFF `start-dev` onto `start`.
+  #
+  # `start-dev` is explicitly documented by Keycloak as not for production: relaxed hostname
+  # strictness, no HTTPS requirement, a local-only cache with no clustering. This is the front
+  # door IdP for the whole ERP and AUTH_MODE=oidc is the effective default now (finding 04), so a
+  # dev-mode IdP sitting behind it was the actual gap — not a config nicety.
+  #
+  # ⚠ THIS CLASS OF CHANGE CAN LOCK EVERYONE OUT. `start` refuses to boot without either TLS or an
+  # explicit HTTP+proxy config, and a wrong KC_HOSTNAME mints issuer URLs the platform's
+  # `OIDC_ISSUER` check will reject — both failures look like a HEALTHY container (KC_HEALTH_ENABLED
+  # only proves the JVM is up, not that the issuer it mints is the one the platform accepts). See
+  # `infra/runbooks/keycloak-production-mode.md` for the mandatory post-deploy verification
+  # checklist and the one-line rollback — do not deploy this without running it.
+  #
+  # NOT using `--optimized`: that flag skips Keycloak's own startup build step and REQUIRES the
+  # image to have already been built with `kc build` baked in (a custom Dockerfile layer this repo
+  # does not have — `quay.io/keycloak/keycloak:26.0` here is the vanilla upstream image). Passing
+  # `--optimized` against an unbuilt image fails the KC_* config validation at boot. Plain `start`
+  # runs the build step at container start instead — slower boot (still well inside the 300s
+  # start_period this repo already budgets for platform/report-renderer's own slow-boot fix), but
+  # correct against this image. Revisit `--optimized` only alongside a custom Keycloak build stage.
   keycloak:
     profiles: [auth]
     image: quay.io/keycloak/keycloak:26.0
     restart: unless-stopped
+    # ⚠ HELD AT `start-dev` DELIBERATELY — this is the ONE line of finding 07 still open.
+    # Everything else finding 07 needed is already correct below: KC_HOSTNAME,
+    # KC_HTTP_RELATIVE_PATH, KC_PROXY_HEADERS and KC_HTTP_ENABLED now default to the real
+    # production shape (verified against the live container's own env), instead of the empty
+    # defaults that made a freshly-generated .env ship a broken IdP.
+    #
+    # Flipping this to `["start", "--import-realm"]` is the whole remaining change, and it is
+    # held back ON PURPOSE rather than bundled: `start` is the one edit here that can produce a
+    # HEALTHY-LOOKING container with a dead SSO front door, which would lock every user out of
+    # the ERP. It ships as its own cut, gated on the post-deploy checklist in
+    # infra/runbooks/keycloak-production-mode.md §2, with §3's rollback ready. Do not fold it
+    # into a cut that also changes anything else — the point is that a failed login afterwards
+    # has exactly one possible cause.
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -265,14 +362,37 @@ services:
       KC_DB_URL: jdbc:postgresql://${PG_HOST:-postgres}:5432/gaiada_keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
+      # `start` (unlike `start-dev`) speaks plain HTTP to nginx by policy, not by omission — this is
+      # the documented way to run Keycloak behind a TLS-terminating reverse proxy without Keycloak
+      # holding its own certificate. `KC_HOSTNAME_STRICT` stays at its default (true): with
+      # KC_HOSTNAME below already a full https:// URL, strict mode is what makes a wrong value FAIL
+      # LOUD instead of silently minting a bad issuer — the behavior this finding exists to add.
+      KC_HTTP_ENABLED: "true"
       # Behind nginx: Keycloak must build absolute URLs (issuer, auth endpoint, redirects) for the
       # PUBLIC host, not the container. Without KC_PROXY_HEADERS it trusts its own socket and mints
       # http://localhost URLs that the browser cannot follow and the platform will not accept.
       # Mounted at /idp, NOT /auth — the UI already owns /auth/callback and /auth/login, so /auth
       # would shadow the app's own OIDC routes.
-      KC_HOSTNAME: ${KC_HOSTNAME:-}
-      KC_HTTP_RELATIVE_PATH: ${KC_HTTP_RELATIVE_PATH:-/}
-      KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-}
+      #
+      # DEFAULTS CHANGED FROM EMPTY TO THE REAL LIVE SHAPE (2026-09-08, finding 07). `KC_HOSTNAME`
+      # is a full URL INCLUDING the /idp path (Keycloak 26's hostname-v2 provider accepts a
+      # full URL, not just a bare host) — confirmed against the running gda-aicenter container's
+      # own env (`docker exec gaiada-keycloak-1 env`, read-only) that this is already the box's
+      # real configured value, so this default now matches production instead of disagreeing with
+      # it. `KC_HTTP_RELATIVE_PATH` changed from `/` to `/idp` for the same reason: the vhost's
+      # `location /idp/` proxy_passes WITHOUT a URI (see erp.gaiada.online.conf), which does not
+      # strip the prefix, so Keycloak itself must serve under /idp or every request 404s — verified
+      # live (`/idp/health/ready` on the management port returns the health payload; the same path
+      # without the /idp prefix does not).
+      KC_HOSTNAME: ${KC_HOSTNAME:-https://erp.gaiada.online/idp}
+      KC_HTTP_RELATIVE_PATH: ${KC_HTTP_RELATIVE_PATH:-/idp}
+      # `xforwarded` matches nginx's proxy_set_header block on `location /idp/` (X-Forwarded-For/
+      # -Proto/-Host/-Port) — the other value Keycloak accepts, `forwarded`, expects the single
+      # RFC 7239 `Forwarded` header nginx does NOT send here. Confirmed live: the running
+      # container's env already carries `KC_PROXY_HEADERS=xforwarded`, so this default now matches
+      # what is actually deployed instead of shipping empty (which silently disables proxy-header
+      # trust and reintroduces the http://localhost issuer-URL bug the comment above describes).
+      KC_PROXY_HEADERS: ${KC_PROXY_HEADERS:-xforwarded}
       # MAIL-03: realm SMTP against the Mailpit dev sink (mailpit:1025, mail-dev profile).
       # NOT substituted into the realm-import JSON's `smtpServer` block (settled ex-Q-V6, see
       # docs/runbooks/idp-keycloak.md) — Keycloak's DirImportProvider does not expand `${env.*}`
@@ -293,6 +413,28 @@ services:
     volumes:
       - ./keycloak:/opt/keycloak/data/import:ro
       - kc-data:/opt/keycloak/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 492.9MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08) for a JVM that had been up for hours.
+    # 1.5G leaves real headroom for a realm import / admin-console burst without being large enough
+    # to let a wedged Keycloak starve Postgres and Cerbos on the same box (finding 14's own
+    # evidence: 38 services, zero limits, sharing one host with no ceiling anywhere).
+    mem_limit: 1500m
+    # No HTTP tool in this image (verified live: no curl/wget, `sh` IS bash so the /dev/tcp
+    # redirection trick works) — KC_HEALTH_ENABLED above serves `/health/ready` on the management
+    # port 9000, under the SAME KC_HTTP_RELATIVE_PATH prefix as the app (verified live:
+    # `/idp/health/ready` on :9000 returns {"status":"UP"}; the same path WITHOUT the /idp prefix
+    # 404s). Checks the readiness payload text, not just a 200 — a Cerbos-crash-loop-precedent-
+    # aware choice: a wrong prefix or a DB-down Keycloak can both still answer 200 with an empty or
+    # error body on some endpoints, so this greps for the actual "UP" status.
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /idp/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      # Realm import + `start`'s own build-on-boot step (see the command comment above) both add
+      # real time before the management port answers; generous on purpose, same reasoning as
+      # platform's own start_period below.
+      start_period: 180s
     depends_on:
       postgres:
         condition: service_healthy
@@ -338,6 +480,24 @@ services:
     volumes:
       - ../../platform-nest/cerbos:/config:ro
       - ../../platform-nest/cerbos/policies:/policies:ro
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 48.84MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Cerbos compiles the full policy set into
+    # memory and every authz call runs through it, so this is EVERY request's critical path — sized
+    # with real margin rather than a tight multiple.
+    mem_limit: 512m
+    # Cerbos ships a purpose-built healthcheck subcommand FOR this exact use (its own --help: "This
+    # can be used as a Docker HEALTHCHECK command"); reuses the same mounted config so it checks the
+    # gRPC endpoint the same way the real PDP traffic does. Deliberately NOT a hand-rolled port probe
+    # — the Cerbos crash-loop precedent this repo already carries (`green-suite-misses-server-only-
+    # violation`-class bug: a healthcheck that passes while serving stale/wrong policy) is exactly
+    # the failure mode a purpose-built check is meant to avoid. Verified live: exits 0 and prints
+    # "SERVING" against the running container.
+    healthcheck:
+      test: ["CMD", "/cerbos", "healthcheck", "--config=/config/cerbos.yaml"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   platform:
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-platform-nest:${GAIADA_TAG:-latest}
@@ -809,6 +969,11 @@ services:
       MONITORING_RUNNER_INTERVAL_MS: ${MONITORING_RUNNER_INTERVAL_MS:-}
     volumes:
       - platform-files:/data/files
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 148.4MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). This is THE platform — every request path
+    # (module registry, Cerbos calls, report generation, agent orchestration) runs through it, so
+    # headroom is sized generously rather than tightly against the snapshot.
+    mem_limit: 1g
     # SM-45: gives depends_on: condition: service_healthy something to attach to. GET /health is
     # the same root probe the admin console + mcp-hub's module-tools bootstrap already hit; node:22
     # -alpine ships busybox wget so no extra package is needed in the image. Use 127.0.0.1, NOT
@@ -877,6 +1042,18 @@ services:
     volumes:
       - sync-data:/app/data
       - gateway-data:/gateway-ca:ro # reuse the gateway's persisted internal CA
+    # FAULT REGISTER FINDING 14 (2026-09-08) — GUESS, no live data: `multisite` is not enabled on
+    # gda-aicenter (no second site enrolled yet, per this service's own header comment — "idle until
+    # a real second site is enrolled"), so there is nothing to measure. Sized like ai-gateway (same
+    # Go/alpine shape, comparable idle footprint expected); revisit with real numbers once a site
+    # node actually enrolls and this starts serving real push/pull traffic.
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3013/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -913,6 +1090,17 @@ services:
       MIN_HOST_GAP_MS: ${SEARCH_CRAWL_MIN_HOST_GAP_MS:-1000}
     volumes:
       - search-crawl-data:/app/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — GUESS, no live data: job-mode (`restart: "no"`, run
+    # per-crawl, never part of `up -d`), so nothing to measure via `docker stats` on the steady
+    # stack. Sized for a single-property crawl (MAX_PAGES default 25) with headroom for page-body
+    # buffering; a crawl of an unusually large property could need more — bump per-run with
+    # `docker compose run --rm -e ... search-crawl` if one OOMs.
+    mem_limit: 512m
+    # NO healthcheck, deliberately: this is a one-shot job (`restart: "no"`), not a long-running
+    # service — `depends_on: condition: service_healthy` has nothing to mean here, and a
+    # `docker compose run` invocation's own exit code is already the correct signal for "did the
+    # crawl succeed." Adding a liveness probe to a process that is SUPPOSED to exit would be exactly
+    # the "checks the wrong thing" trap this ticket's own guidance warns against.
     depends_on:
       postgres:
         condition: service_healthy
@@ -952,6 +1140,28 @@ services:
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
     ports:
       - "3005:3005"
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 194.3MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Next.js standalone server + SSR/RSC
+    # streaming; headroom covers report/print-view rendering and concurrent SSE (portal + assistant
+    # streams) connections held open per the vhost's own long-timeout comments.
+    mem_limit: 768m
+    # ⚠ platform-ui's Next server does NOT bind 0.0.0.0 or 127.0.0.1 inside its own container —
+    # verified live (`ss -tlnp` inside `gaiada-platform-ui-1`) it listens ONLY on its own assigned
+    # container IP, because Docker auto-populates `HOSTNAME` with the container's hostname and the
+    # standalone server.js binds to whatever `process.env.HOSTNAME` resolves to. A naive
+    # `wget http://127.0.0.1:3005/...` healthcheck (the pattern `platform`'s own healthcheck above
+    # uses) would therefore ALWAYS report unhealthy here — connection refused, every time — a
+    # sibling of the exact "localhost resolves to ::1" trap that comment already documents, one
+    # level further. Using `$HOSTNAME` instead is self-referential and correct regardless of which
+    # address the process ends up bound to. Hitting `/login` (a real, publicly-reachable, no-auth-
+    # required page) rather than a nonexistent `/api/health` — this app has no dedicated health
+    # route today. Verified live: exits 0 against the running container.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://$$HOSTNAME:3005/login >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     depends_on:
       platform:
         condition: service_healthy
@@ -976,6 +1186,14 @@ services:
       # the-network) origin so the render/SSRF guard has a real value to lock against today, even
       # though nothing serves a real /print/reports/:jobToken route until TR-20 lands.
       PLATFORM_UI_INTERNAL_URL: ${PLATFORM_UI_INTERNAL_URL:-http://platform-ui:3005}
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 185.2MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08) at IDLE (no render in flight — TR-20's
+    # print route isn't wired yet, per this block's own header comment). Sized generously rather
+    # than close to the idle measurement: this is the ONE image in the estate carrying Chromium, and
+    # an actual PDF render (once TR-20 lands) can spike well past an idle reading — Playwright's own
+    # guidance for a single headless Chromium context is commonly 1GB+. Flagging that this is an
+    # idle-state measurement, not a load-tested ceiling.
+    mem_limit: 1500m
     healthcheck:
       # node is guaranteed present (it's the runtime); avoids relying on curl/wget being in the
       # Playwright base image.
@@ -1005,6 +1223,22 @@ services:
     restart: unless-stopped
     volumes:
       - whisper-models:/root/.cache/huggingface
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 34.7MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08) — but FLAGGED AS AN UNDER-MEASUREMENT: the
+    # container was idle with no model loaded at capture time (this service's own header comment:
+    # "First request downloads the model into the volume"). faster-whisper-small held in memory is
+    # commonly several hundred MB to ~1GB depending on compute type, on top of per-request audio
+    # buffering. 2G is a GUESS sized for the loaded-model case, not the measured idle one — the
+    # single largest gap between "what was measured" and "what matters" in this pass; revisit once a
+    # real transcription has been driven and re-measured hot.
+    mem_limit: 2g
+    # Confirmed live (no curl/wget in this image, but python3 is): /health returns 200.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   knowledge:
     image: ghcr.io/${GHCR_OWNER:-hansel-gaiada}/gaiada-ai-agents:${GAIADA_TAG:-latest}
@@ -1023,6 +1257,17 @@ services:
       OTEL_ENABLED: ${OTEL_ENABLED:-0}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
       OTEL_SERVICE_NAME: knowledge
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 125.2MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Headroom covers a corpus-refresh sweep
+    # (KNOWLEDGE_INGEST_ENABLED) or an embedding batch, which run in bursts rather than steady state.
+    mem_limit: 768m
+    # Confirmed live: GET /health -> {"ok":true} on this exact container.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -1071,6 +1316,17 @@ services:
       # APPROVAL_GRANT_SECRET, which WAS passed through for three services while `.env` simply had no
       # value — so every D14 grant was rejected until 2026-08-06. A passthrough line is not a set value.
       AGENT_SERVING_PROVIDER: ${AGENT_SERVING_PROVIDER:-openai}
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 114MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Headroom covers the goal queue holding
+    # several in-flight agent runs at once, which is bursty rather than steady state.
+    mem_limit: 768m
+    # Confirmed live: GET /health -> {"ok":true,"agents":[...],"queue":{...}} on this exact container.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -1120,6 +1376,19 @@ services:
       OTEL_SERVICE_NAME: mcp-hub
     volumes:
       - hub-data:/app/data # tool audit
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 142.5MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Headroom covers the tool-audit write path
+    # and a large module-tools registration burst (136 tools registered at last boot, per its own
+    # /health payload).
+    mem_limit: 768m
+    # Confirmed live: GET /health -> {"ok":true,"tools":[...],"moduleTools":{...}} on this exact
+    # container (136 registered tools at capture time).
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     # SM-45: this closes the boot-order half of the fix — condition: service_healthy on platform
     # means the hub's FIRST module-tools fetch (at boot) usually just succeeds instead of needing a
     # retry. It is deliberately NOT the whole fix: a platform restart after the hub is already up
@@ -1159,6 +1428,16 @@ services:
       APPROVAL_GRANT_SECRET: ${APPROVAL_GRANT_SECRET:-}
     volumes:
       - hub-central-data:/app/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — GUESS, no live data: `multisite` disabled on
+    # gda-aicenter (per this service's own header comment, "idle-but-defined"), so not running.
+    # Sized identically to its site-hub sibling above (same codebase, same image).
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       ai-gateway:
         condition: service_started
@@ -1200,6 +1479,20 @@ services:
       OTEL_SERVICE_NAME: wa-chat-bot
     volumes:
       - bot-data:/app/data # LocalKms keys + schedule state + discovery + groups registry (EXCLUDE keys.json from backups!)
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 172.4MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Headroom covers LocalKms crypto + the
+    # in-process media poller's own burst (this container also runs the dev-mode in-process fallback
+    # noted at bot-media-worker's own header, if the queue worker below is ever not running).
+    mem_limit: 768m
+    # Confirmed live: GET /health -> {"ok":true,"ai":"echo","session":"STOPPED"} on this exact
+    # container (STOPPED because no session was paired at capture time — the field itself, not its
+    # value, is what a healthcheck needs).
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       pg-bot:
         condition: service_healthy
@@ -1226,6 +1519,21 @@ services:
       OTEL_SERVICE_NAME: bot-media-worker
     volumes:
       - bot-data:/app/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 151.7MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Headroom covers a burst of large media
+    # (voice notes, images) being downloaded + transcoded concurrently, gated by
+    # MEDIA_WORKER_CONCURRENCY (default 2) — two concurrent large files is the realistic ceiling to
+    # size against, not the idle measurement.
+    mem_limit: 1g
+    # NO healthcheck: verified live this process opens no HTTP listener at all (checked
+    # `wa-chat-bot/src/media-worker.ts` — it is a BullMQ consumer + reconciler loop only, confirmed
+    # against the running container: `wget http://127.0.0.1:3001/...` refuses to connect). A
+    # process-alive check (e.g. `pgrep -f media-worker`) was considered and rejected: `restart:
+    # unless-stopped` already restarts on process death, and a pgrep-based check adds no real signal
+    # beyond that — it would report "healthy" for a wedged-but-alive worker, which is precisely the
+    # "checks the wrong thing" trap this ticket's own guidance warns is worse than no check at all.
+    # Giving this a meaningful liveness signal would need an actual code change (e.g. a small HTTP
+    # listener exposing queue-processing heartbeat) — out of scope for an infra-only ticket.
     depends_on:
       pg-bot:
         condition: service_healthy
@@ -1256,6 +1564,9 @@ services:
       - "127.0.0.1:8025:8025" # UI+API — LOOPBACK ONLY, never publish this beyond the box
     volumes:
       - mailpit-data:/data
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 35.35MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08). Dev-only mail sink, low traffic by design.
+    mem_limit: 256m
     healthcheck:
       # `readyz` auto-detects the container's own bind interface/port (see `mailpit readyz --help`).
       test: ["CMD", "/mailpit", "readyz"]
@@ -1281,6 +1592,12 @@ services:
     restart: unless-stopped
     volumes:
       - clamav-data:/var/lib/clamav
+    # FAULT REGISTER FINDING 14 (2026-09-08) — measured 674.4MiB working set on gda-aicenter
+    # (`docker stats --no-stream`, read-only, 2026-09-08) with signatures already loaded. ClamAV's
+    # own docs recommend 2-3GB for a full signature database in memory; 2G leaves headroom above the
+    # measured figure for a freshclam definitions update (which loads a second copy transiently
+    # before swapping) without being large enough to let a stuck freshclam run starve the box.
+    mem_limit: 2g
     healthcheck:
       # Official image ships clamdcheck.sh; exits 0 only once clamd is up AND has loaded signatures
       # (the first boot can take a few minutes while freshclam downloads the database).

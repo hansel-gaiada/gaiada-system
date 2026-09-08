@@ -89,3 +89,36 @@ describe("needsRefresh", () => {
     expect(REFRESH_SKEW_MS).toBeGreaterThanOrEqual(60_000);
   });
 });
+
+// ── Absolute lifetime must survive a token refresh (finding 08 + finding 01 interaction) ────────
+// Added after the finding-08 work: `encodeSession` stamps a fresh iat/exp whenever iat is absent,
+// and `/auth/refresh` rebuilds the session object on every silent refresh — roughly hourly for an
+// active user. If that route lets iat default, the 12h ABSOLUTE lifetime is restamped on every hop
+// and is never once reached by anybody actually using the ERP. It would still expire idle and
+// replayed sessions, so every test of `isSessionExpired` in isolation stays green while the control
+// silently protects almost nobody.
+describe("session lifetime survives a refresh (findings 01 + 08)", () => {
+  it("carrying iat forward keeps the ORIGINAL expiry — renewing the access token is not renewing the session", async () => {
+    const { encodeSession, decodeSession } = await import("./session");
+    const signedInAt = Date.now() - 11 * 60 * 60 * 1000; // 11h ago, inside a 12h cap
+
+    // What /auth/refresh does: rebuild the session with a NEW access token, passing iat through.
+    const refreshed = decodeSession(
+      encodeSession({
+        mode: "oidc", userId: "u1", accessToken: "new-token", refreshToken: "rt",
+        expiresAt: Date.now() + 3_600_000,
+        iat: Math.floor(signedInAt / 1000),
+      }),
+    );
+    expect(refreshed?.iat).toBe(Math.floor(signedInAt / 1000));
+
+    // And the regression it guards: omitting iat restamps the clock to "now".
+    const restamped = decodeSession(
+      encodeSession({
+        mode: "oidc", userId: "u1", accessToken: "new-token", refreshToken: "rt",
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    );
+    expect(restamped?.iat).toBeGreaterThan(Math.floor(signedInAt / 1000));
+  });
+});

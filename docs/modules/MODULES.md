@@ -34,14 +34,14 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.53.0` | IN PROGRESS | WS1 | 2026-09-08 |
-| platform-ui | `0.68.0` | IN PROGRESS | WS5 | 2026-09-08 |
+| platform-nest | `0.54.0` | IN PROGRESS | WS1 | 2026-09-08 |
+| platform-ui | `0.69.0` | IN PROGRESS | WS5 | 2026-09-08 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
 | automation (n8n) | `0.4.1` | DEV-VERIFIED | WS4 | 2026-07 |
 | observability | `0.6.2` | DEV-VERIFIED | WS9 | 2026-08-06 |
-| infra | `0.8.7` | PROTOTYPED | WS10 | 2026-08-06 |
+| infra | `0.8.8` | PROTOTYPED | WS10 | 2026-09-08 |
 | wa-chat-bot | `0.9.2` | PROTOTYPED | WS5 | 2026-08-03 |
 | ai-agents | `0.8.1` | PROTOTYPED | WS8 | 2026-08-23 |
 | hermes-gateway | `0.2.0` | PROTOTYPED | WS3 | 2026-07 |
@@ -63,7 +63,7 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.53.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.54.0` · IN PROGRESS
 **0.50.0 (2026-09-03, GM-blob live data repair + monitoring delivery/maintenance seed):** see
 `CHANGELOG.md` for the full account — a live-data repair (org-blob node-id collision, 7 people
 sharing one id, re-run through the sanctioned `refreshOrgStructure()`/`applyOrgStructure()` path) and
@@ -162,7 +162,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.68.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.69.0` · IN PROGRESS
 
 **0.67.0 (2026-09-03, FX, DEMO_MODE fixture parity sweep — PROTOTYPED.)** Every UI claim verified
 under `DEMO_MODE` is only as honest as the fixture it ran against. Swept `lib/demoMonitoring.ts`
@@ -344,7 +344,7 @@ end-to-end on a live Docker stack** (2026-07-15).
 **Known gaps:** filelog→Loki env-limited on Docker Desktop (works on Linux VPS); not deployed to prod.
 **Future plans:** deploy the stack to a real host → tune SLOs against prod traffic.
 
-## infra — Platform Engineering & Delivery · `0.8.7` · PROTOTYPED
+## infra — Platform Engineering & Delivery · `0.8.8` · PROTOTYPED
 
 **What exists (dev):** full VPS Docker Compose stack, per-component Dockerfiles, local CI (`test-all.sh`),
 GH Actions (inert until the repo is standalone), crypto-shred-safe backups, supply-chain pipeline

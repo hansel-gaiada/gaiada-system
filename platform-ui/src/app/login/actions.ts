@@ -1,7 +1,7 @@
 "use server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { sealSession, SESSION_COOKIE } from "@/lib/session";
+import { sealSession, encodeSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session";
 import { demoIdentityFor } from "@/lib/demoIdentity";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 import { isDemoMode } from "@/lib/demoMode";
@@ -27,11 +27,15 @@ export async function login(_prev: { error: string } | null, formData: FormData)
     // load-bearing enough to need tests (see demoIdentity.test.ts).
     const userId = demoIdentityFor(email);
     const jar = await cookies();
-    jar.set(SESSION_COOKIE, sealSession(userId), {
+    // Routed through encodeSession (rather than sealSession(userId) directly) so this cookie gets
+    // the new signed iat/exp envelope (fault register finding 08) instead of the legacy bare-userId
+    // shape — see session.ts for why the bare shape still has to be accepted on read.
+    jar.set(SESSION_COOKIE, sealSession(encodeSession({ mode: "dev", userId })), {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
       secure: process.env.NODE_ENV === "production",
+      maxAge: SESSION_TTL_SECONDS,
     });
     redirect(returnTo);
   }
@@ -44,11 +48,12 @@ export async function login(_prev: { error: string } | null, formData: FormData)
   if (!res.ok) return { error: "We couldn't find that account. Check the address and try again." };
   const { id } = (await res.json()) as { id: string };
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, sealSession(id), {
+  jar.set(SESSION_COOKIE, sealSession(encodeSession({ mode: "dev", userId: id })), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     secure: process.env.NODE_ENV === "production",
+    maxAge: SESSION_TTL_SECONDS,
   });
   redirect(returnTo);
 }

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { sealSession, encodeSession, SESSION_COOKIE } from "@/lib/session";
+import { sealSession, encodeSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session";
 import { sanitizeReturnTo } from "@/lib/returnTo";
 
 // OIDC callback: verify state, exchange the code (with the PKCE verifier) for tokens, resolve the
@@ -79,6 +79,11 @@ export async function GET(req: NextRequest) {
     sameSite: "lax",
     path: "/",
     secure: process.env.NODE_ENV === "production",
+    // Absolute lifetime on the cookie attribute (fault register finding 08). This alone only
+    // stops the BROWSER from replaying it past this point — the load-bearing half is the signed
+    // `exp` inside the payload (see session.ts/session-server.ts), which a stolen cookie value
+    // cannot outrun regardless of what the client does with this attribute.
+    maxAge: SESSION_TTL_SECONDS,
   });
   res.cookies.set("oidc_pkce", "", { maxAge: 0, path: "/" });
   return res;

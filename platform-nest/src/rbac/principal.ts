@@ -409,7 +409,11 @@ export function principalHasPermission(
 }
 
 /** D11: sensitive paths re-check the live session version — a revoked/downgraded user
- *  is cut off immediately, not at token expiry. */
+ *  is cut off immediately, not at token expiry. F13 (2026-09-08) widened `http.ts`'s `authorize()`
+ *  to call this on reads too (previously write-only, which was the finding: a terminated
+ *  employee's live session kept reading payroll/HR/ledger/roster data). The null-userId contract
+ *  right below is what makes that widening safe for ANONYMOUS/unresolved-OBO principals — see the
+ *  call site's own comment. */
 export async function sessionVersionCurrent(p: Principal): Promise<boolean> {
   if (!p.userId) return false;
   const { rows } = await withGlobal((c) =>

@@ -54,6 +54,14 @@ export interface RequestApproval {
 interface RequestStore {
   via?: RequestVia;
   approval?: RequestApproval;
+  /** F13 (fault-register finding 13, 2026-09-08): memoised `sessionVersionCurrent()` (D11) result
+   *  for THIS request's calling principal — see `memoiseSessionCurrent` below and
+   *  `core/http.ts`'s `authorize()`, its only caller. Keyed on (userId, sessionVersion) rather than
+   *  cached unconditionally: the ordinary request has exactly one calling principal, so the key
+   *  never actually changes mid-request, but keying on it anyway means a mismatched pair — which
+   *  should never happen — MISSES the cache instead of returning a stale answer for the wrong
+   *  user. The failure mode of a bug here is "one extra query", never "a wrong decision". */
+  sessionCurrent?: { key: string; result: Promise<boolean> };
 }
 
 const als = new AsyncLocalStorage<RequestStore>();
@@ -92,6 +100,48 @@ export function currentApproval(): RequestApproval | undefined {
 /** The current request's channel, or undefined. */
 export function currentVia(): RequestVia | undefined {
   return als.getStore()?.via;
+}
+
+/**
+ * F13: memoise `sessionVersionCurrent()` (D11) once per HTTP request. `compute` runs at most once
+ * per (userId, sessionVersion) pair for the life of the CURRENT request; every subsequent
+ * `authorize()` call in the same request — and D11 now runs on reads too, so a single page
+ * render's fanned-out BFF calls each drive one — reuses the same in-flight/settled promise instead
+ * of opening a fresh pool connection per call.
+ *
+ * ── WHY THIS IS SAFE ACROSS, NOT JUST WITHIN, A REQUEST ─────────────────────────────────────────
+ * The cache lives in the SAME per-request box `registerRequestContext` resets at `onRequest` — the
+ * earliest Fastify hook, running before the AuthGuard. A revocation between two DIFFERENT requests
+ * is therefore never masked: the next request gets a fresh, empty store no matter how long the
+ * previous request's cached promise would otherwise have lived. That property is why the two
+ * simpler alternatives were rejected rather than used:
+ *   - a cache keyed on the `Principal` OBJECT's identity would keep answering "current" for as long
+ *     as something held that exact object — which is precisely the "a live session outlives
+ *     revocation" shape this ticket exists to close, since not every caller reassembles a fresh
+ *     principal before reusing it (see `act-for-delegation.db.test.ts`'s own `principalFor()`
+ *     helper, which callers deliberately reuse across several `authorize()` calls to simulate
+ *     exactly that);
+ *   - a bare TTL would reopen the same window this ticket exists to close, just narrower, and for
+ *     no reason: nothing here is expensive enough to need one once it's per-request.
+ * Per-request scoping closes the window to exactly zero rather than to "smaller".
+ *
+ * FAIL-SILENT/FAIL-SAFE OUTSIDE A REQUEST (no store — a unit test or a consumer loop calling
+ * `authorize()` directly, same contract as `currentVia`/`currentApproval` above): every call
+ * recomputes, i.e. behaves as if this function did not exist. That is the conservative direction to
+ * fail in — the worst outcome is a redundant query, never a stale "yes".
+ */
+export function memoiseSessionCurrent(
+  userId: string,
+  sessionVersion: number,
+  compute: () => Promise<boolean>,
+): Promise<boolean> {
+  const store = als.getStore();
+  if (!store) return compute();
+  const key = `${userId}:${sessionVersion}`;
+  if (store.sessionCurrent?.key === key) return store.sessionCurrent.result;
+  const result = compute();
+  store.sessionCurrent = { key, result };
+  return result;
 }
 
 /**

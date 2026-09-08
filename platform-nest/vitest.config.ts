@@ -1,10 +1,16 @@
 import swc from "unplugin-swc";
 import { defaultExclude, defineConfig } from "vitest/config";
 
-// The one file excluded from this config, run instead by `npm run test:perf` (vitest.perf.config.ts).
+// The files excluded from this config, run instead by `npm run test:perf` (vitest.perf.config.ts).
 // Exported so the perf config can use it as its `include` — one list, so a file can never end up in
 // both runs or in neither.
-export const PERF_TESTS = ["src/rbac/principal-perf.db.test.ts"];
+//
+// F13 (fault-register finding 13, 2026-09-08) added `session-current-perf.db.test.ts` here for the
+// SAME reason IAM-03b's file is here: it runs its own 300-iteration/20-call request-path timing and
+// prints EXPLAIN ANALYZE plans and p95s for a human to read, and this run is parallel — sharing a
+// 4-vCPU runner with three sibling workers would measure contention, not the code, exactly as the
+// comment below already found for principal-perf.db.test.ts.
+export const PERF_TESTS = ["src/rbac/principal-perf.db.test.ts", "src/rbac/session-current-perf.db.test.ts"];
 
 // NestJS DI needs decorator METADATA, which esbuild (vitest's default transform) does not
 // emit. unplugin-swc runs SWC instead, honoring .swcrc (legacyDecorator + decoratorMetadata),

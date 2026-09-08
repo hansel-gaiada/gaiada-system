@@ -99,6 +99,15 @@ export async function GET(req: NextRequest) {
       // `revokeRefreshToken` on).
       refreshToken: tok.refresh_token ?? session.refreshToken,
       expiresAt: Date.now() + (tok.expires_in ?? 300) * 1000,
+      // ⚠ CARRY `iat` FORWARD — DO NOT LET IT DEFAULT (finding 08).
+      // `encodeSession` stamps a fresh iat/exp whenever iat is absent. This route runs on every
+      // silent refresh, roughly hourly for an active user, so omitting this would restamp the
+      // session's ABSOLUTE lifetime on every hop: the 12h cap would never once be reached by
+      // anyone actually using the ERP, and would bite only idle or replayed sessions. That is the
+      // precise shape of a security control that appears to be in place and is not.
+      // Renewing the ACCESS token must not renew the SESSION — that distinction is the whole point
+      // of an absolute lifetime, so it is anchored to the original sign-in here.
+      iat: session.iat,
     }),
   );
 

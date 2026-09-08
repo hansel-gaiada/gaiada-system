@@ -11,6 +11,96 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.54.0` - revoking a user now stops them READING, not just writing (2026-09-08) - PROTOTYPED
+
+Fault-register finding 13. A Legal Gate 1 blocker: `authorize()` gated D11 on `action !== "read"`,
+so a terminated employee's already-issued session kept reading payroll, HR files, the general ledger
+and the client roster. `session_version` is bumped in eight places (termination, role change, grant
+expiry, IAM approval) and none of it reached the read path.
+
+- **Widened to every action, guarded on `principal.userId` rather than on `action`.** An
+  ANONYMOUS/unresolved-OBO principal has no `users` row, so it now skips the check entirely instead
+  of being told "session revoked" about a session that never existed. Verified that is not a hole:
+  ANONYMOUS is `{userId: null, roles: []}`, every Cerbos rule requires `hub_caller` or `user`, and
+  the Cerbos denial throws BEFORE this line - the branch was structurally dead, not a wall.
+- **Memoised per REQUEST, not per Principal object.** A `WeakMap<Principal, ...>` was rejected on
+  evidence: `act-for-delegation.db.test.ts` deliberately reuses one `Principal` across several
+  `authorize()` calls to simulate a session outliving a later DB change. Object-identity caching
+  would answer "still current" forever for exactly that shape - reintroducing this very bug through
+  the fix's own plumbing. A TTL cache has the same flaw in miniature. The existing per-request
+  `AsyncLocalStorage` box is the only provably request-bounded scope, so it gained one slot.
+- **`actFor` untouched, byte for byte.** Its "no D11 check here, freshness is structural" comment
+  stands - that principal is assembled from the DB at decision time, so no stale window exists.
+
+Measured, not asserted: the lookup is a PK index scan at `Execution Time: 0.134 ms`; end-to-end
+`sessionVersionCurrent()` p95 1.85ms against Cerbos's own ~14ms round trip, which dominates both
+runs. Across a 20-read fan-out the memoisation removes 19 DB round trips.
+
+Verification: `tsc` clean; `src/core` + `src/rbac` **136 files / 2125 tests**; `src/db` plus the new
+adversarial tests **45 files / 544 tests** against real Postgres AND a live Cerbos - including a test
+that bumps `session_version` and proves a READ is refused, paired with a control proving a legitimate
+read still works, so it cannot pass for the wrong reason.
+
+### platform-ui `0.69.0` - an absolute session lifetime that a refresh cannot reset (2026-09-08) - PROTOTYPED
+
+Fault-register finding 08. The session cookie had **no `maxAge` and no time component in the signed
+payload at all** - a copied value was valid indefinitely, with no absolute lifetime, no idle timeout,
+and no server-side record to revoke against.
+
+- 12h absolute lifetime stamped into the SIGNED payload (`iat`/`exp`) and enforced in `getSession`.
+  A cookie `maxAge` alone only binds an honest browser; the signed `exp` is what binds a replay.
+- `maxAge` added at every mint site.
+- **Two follow-on defects found and fixed in the same pass, either of which would have gutted this
+  silently:**
+  1. `/auth/refresh` (added hours earlier for finding 01) rebuilt the session without carrying
+     `iat`. `encodeSession` stamps a fresh `iat`/`exp` when it is absent, and that route runs
+     roughly hourly for every active user - so the 12h cap would have been RESET on every refresh
+     and never once reached by anybody actually using the ERP. It would still have expired idle and
+     replayed sessions, so every isolated test of `isSessionExpired` stays green while the control
+     protects almost nobody. Renewing an ACCESS token must not renew the SESSION.
+  2. `auth/magic/route.ts` minted `sealSession(userId)` bare - no time component, no `maxAge` -
+     making an EMAILED credential the only login in the app with no lifetime. Now wrapped.
+- **No mass logout on deploy.** Pre-existing cookies stay parseable and are simply not covered by
+  the cap until reissued.
+- `session_version` rides in the payload as an additive field but is **deliberately unpopulated**:
+  no source returns it (`/api/me` and `/dev/user-by-email` do not), and faking a value would be
+  worse than an honest gap. platform-nest `0.54.0` above is the enforcement half.
+
+Verification: `tsc` clean; `next build` clean; full suite **209 files / 4157 tests**, including a
+regression test asserting `iat` survives a refresh AND that omitting it restamps.
+
+### infra `0.8.8` - the login surface gets a rate limit; every service gets a memory ceiling (2026-09-08) - PROTOTYPED
+
+Fault-register findings 06 and 14, plus most of 07.
+
+- **06:** `/api/mail/` was the ONLY rate-limited surface in the vhost - the login page, the whole
+  BFF, the client portal and every server action had no `limit_req` and no `limit_conn` at all. Two
+  zones now: a generous `general_limit` on `location /` (sized as a flood backstop, not an
+  interactive budget - one office NAT can carry ~50 staff) and a tighter `login_limit` on `/login`,
+  `/auth/login` and `/auth/callback`. `/api/webhooks/` stays deliberately unlimited: GitHub treats
+  429 as a failure and retries, so throttling amplifies a redelivery storm.
+  ⚠ Carving those paths into their own blocks meant they stopped inheriting `location /`'s
+  `proxy_redirect` - which exists precisely because "the OIDC callback sends the browser to
+  https://<container-id>:3005/ and the user lands nowhere". Restored in each new block. That gap was
+  masked today only because `PUBLIC_ORIGIN` happens to be set on the box; compose defaults it empty.
+  Keycloak's own `/idp/` login form - the REAL brute-force surface once OIDC is the default - is
+  deliberately NOT limited here; that belongs to realm-level Brute Force Detection, flagged as a
+  follow-up rather than bolted on as a same-prefix zone that would also throttle the admin console.
+- **14:** `mem_limit` on every service, sized from live `docker stats` with the guesses named as
+  guesses (`postgres`, `redis`, `sync-central`, `mcp-hub-central`, `search-crawl` are
+  profile-disabled and could not be measured), and real healthchecks on 20 of 22 - each command run
+  against the actual running container rather than guessed. `bot-media-worker` and `search-crawl`
+  are left without one on purpose: no HTTP surface, and a one-shot job. A healthcheck that lies is
+  worse than none - a green deploy has already hidden a Cerbos crash loop on this estate.
+- **07, partially:** `KC_HOSTNAME`, `KC_HTTP_RELATIVE_PATH`, `KC_PROXY_HEADERS` and
+  `KC_HTTP_ENABLED` now default to the real production shape instead of empty, so a freshly
+  generated `.env` no longer ships a broken IdP. All three documented in `.env.example`.
+  ⚠ **`command:` is deliberately still `start-dev`.** Flipping it to `start` is the one remaining
+  edit and it ships as its OWN cut, gated on the new `infra/runbooks/keycloak-production-mode.md`:
+  `start` is the single change here that can produce a healthy-looking container with a dead SSO
+  front door, locking every user out of the ERP. Isolated so that a failed login afterwards has
+  exactly one possible cause.
+
 ### platform-ui `0.68.0` - the SSO session stops dying every hour (2026-09-08) - PROTOTYPED
 
 Fault-register finding 01 - the defect users felt every single day.
