@@ -51,6 +51,11 @@
    Sign out was unclickable for exactly the elevated users who get that banner. The topbar itself
    must sit above the banner so anything it pops does too. */
 .erp-top { z-index: 7; }
+/* Same trap for the sidebar: the rail flyout (.erp-railmenu, 150) and rail tooltip (.erp-railtip,
+   200) are fixed-position CHILDREN of this stacking context, so at z-index 1 they painted under
+   .erp-main's content (equal z, later in the DOM). The sidebar goes above banner and topbar — its
+   region never overlaps either, but its flyouts overlap everything. */
+.erp-side { z-index: 8; }
 
 /* The two glass panels. `border: none` replaces the old hairline edges:
    the material carries the separation now, through --glass-inner's inset
