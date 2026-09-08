@@ -554,7 +554,7 @@ Declared `id` is load-bearing (sub-workflow references). Import with the CLI, ne
 
 Contracts + top-level docs (`docs/`): `BLUEPRINTS.md`, `FRONTEND-BFF-CONTRACT.md`, `PERMISSION-CONTRACT.md`, `PLACEHOLDER-PRINCIPALS.md`, `a11y-manual-checklist.md`, `sidebar-nav-map.md`, `ui-work-split.md`
 
-Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-offsite-backup.md`, `internal-ca.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
+Runbooks (`infra/runbooks/`): `alerting-wire-a-real-receiver.md`, `db-topology-cutover.md`, `deploy-vps.md`, `enable-estate-blackbox-and-alert-routing.md`, `enable-mfa.md`, `erp-offsite-backup.md`, `internal-ca.md`, `keycloak-production-mode.md`, `local-model-serving.md`, `nginx-mail-inbound-route.md`, `observability-loki.md`, `observability-slo.md`, `observability.md`, `onboard-server.md`, `restore-drill.md`, `webdesk-zoneb-backups.md`, `webdesk-zoneb-box-hardening.md`, `webdesk-zoneb-otel.md`, `webdesk-zoneb-status-page.md`
 
 Ops scripts (`infra/scripts/`): `backup-cron.sh`, `backup.sh`, `erp-backup-read.sh`, `erp-offsite-pull.sh`, `healthcheck.sh`, `lint-observability.sh`, `restore-drill.sh`, `rollback-to.sh`, `sync-client-property-targets.sh`, `test-all.sh`, `wire-env.sh`
 
