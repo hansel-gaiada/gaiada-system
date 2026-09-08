@@ -520,6 +520,7 @@ Browser-facing route handlers (`route.ts`) — these exist only where the browse
 - `/auth/callback`
 - `/auth/login`
 - `/auth/magic`
+- `/auth/refresh`
 
 ## automation — n8n workflows
 
