@@ -90,8 +90,24 @@ if have node; then
   done
 fi
 
-# 5) Shell scripts parse.
-for s in "$ROOT"/infra/scripts/*.sh; do sh -n "$s" || { echo "SH FAIL $s"; fail=1; }; done
+# 5) Shell scripts parse — WITH THE INTERPRETER EACH ONE ACTUALLY DECLARES.
+#
+# This used to be an unconditional `sh -n`, which silently assumed every script in this directory
+# is POSIX. That held until `erp-offsite-pull.sh` (2026-09-08) arrived as a genuine bash script:
+# its integrity check pipes through `tee >(sha256sum ...)`, and process substitution, herestrings
+# and `[[ =~ ]]` are all bash-only. `sh -n` rejected it and failed this job.
+#
+# Rewriting that script into POSIX to satisfy the linter would have meant dropping the construct
+# that verifies backup bytes against the source hash — i.e. weakening a backup integrity check to
+# please a syntax check. So the linter learns to read shebangs instead. Scripts declaring `sh`
+# are still checked as POSIX exactly as before; nothing about the existing files changes.
+for s in "$ROOT"/infra/scripts/*.sh; do
+  case "$(head -1 "$s")" in
+    *bash*) if have bash; then bash -n "$s" || { echo "BASH FAIL $s"; fail=1; }
+            else echo "bash not found — skipping syntax check for $s"; fi ;;
+    *)      sh -n "$s" || { echo "SH FAIL $s"; fail=1; } ;;
+  esac
+done
 
 [ "$fail" -eq 0 ] && echo "=== observability config-lint OK ===" || echo "=== observability config-lint FAILED ==="
 exit "$fail"
