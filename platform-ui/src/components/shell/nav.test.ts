@@ -65,15 +65,40 @@ describe("navFor (RBAC-gated visibility)", () => {
       { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }],
+      "dept-1",
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    // Mirror trim: the functional HR and Finance console rows require hr.view / finance.statement.view
-    // (a plain member's reads there are denied); IT stays — a member may read devices.
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "SEO", "IT"]);
-    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/departments/dept-2", "/it"]);
+    // Mirror trim + own-department scope (owner decision 2026-09-08): a member sees the department
+    // they are PLACED in, nothing else; the functional HR and Finance console rows require
+    // hr.view / finance.statement.view; IT stays — a member may read devices.
+    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "IT"]);
+    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/it"]);
+  });
+
+  it("a manager keeps the full department list — pm.manage is the cross-department tier", () => {
+    const groups = navFor(
+      { ...base, roles: [{ role: "manager", scopeType: "company", scopeId: "c1" }] },
+      "c1",
+      [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }],
+      "dept-1",
+    );
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items.map((i) => i.label)).toEqual(expect.arrayContaining(["Web Dev", "SEO"]));
+  });
+
+  it("an unplaced member gets no department rows, only the consoles their caps allow", () => {
+    const groups = navFor(
+      { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
+      "c1",
+      [{ id: "dept-1", name: "Web Dev" }],
+    );
+    const depts = groups.find((g) => g.label === "Departments")!;
+    expect(depts.items.map((i) => i.label)).toEqual(["IT"]);
   });
 
   it("shows the functional HR and Finance rows to the roles whose reads they are", () => {
+    // Module staff without pm.manage: no org-structure rows beyond their own placement (none here),
+    // but the functional consoles their module tiers back are present.
     const groups = navFor(
       { ...base, roles: [
         { role: "hr_staff", scopeType: "company", scopeId: "c1" },
@@ -83,7 +108,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       [{ id: "dept-1", name: "Web Dev" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["HR", "IT", "Finance"]);
   });
 
   it("manager keeps Delivery Pipeline and Monitoring — those reads are manager-tier", () => {
@@ -106,7 +131,7 @@ describe("navFor (RBAC-gated visibility)", () => {
   // among its own children.
   it("hoists GM to the top of the Departments group whatever order it arrives in", () => {
     const groups = navFor(
-      { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
+      { ...base, roles: [{ role: "manager", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }, { id: "dept-5", name: "GM" }],
     );
@@ -116,13 +141,14 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(depts.items[0].href).toBe("/departments/dept-5");
   });
 
-  it("keeps the GM row for a plain member — the row is ungated, the CONSOLE gates its content", () => {
-    // A UI gate here would hide a department from the org tree, which would lie about the chart.
-    // `lib/gm.ts` refuses the CONTENT instead, so a member who clicks gets an explanation.
+  it("keeps the GM row for a member PLACED in GM — the scope is placement, the CONSOLE gates content", () => {
+    // Own-department scope (2026-09-08): a member sees the department they are placed in. For the
+    // person placed in GM that IS the GM row; `lib/gm.ts` still refuses the exec content on click.
     const groups = navFor(
       { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "dept-5", name: "GM" }],
+      "dept-5",
     );
     const depts = groups.find((g) => g.label === "Departments")!;
     expect(depts.items.map((i) => i.label)).toContain("GM");
@@ -136,7 +162,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       { id: "d4", name: "Social Media" }, { id: "d5", name: "Legal" }, { id: "d6", name: "Finance" },
       { id: "d7", name: "GM" },
     ];
-    const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1", many);
+    const groups = navFor({ ...base, roles: [{ role: "manager", scopeType: "company", scopeId: "c1" }] }, "c1", many);
     const depts = groups.find((g) => g.label === "Departments")!;
     expect(depts.items.map((i) => i.label)).toContain("GM");
   });
@@ -157,6 +183,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       { ...base, roles: [{ role: "finance_staff", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "d1", name: "Web Dev" }, { id: "d6", name: "Finance" }],
+      "d6",
     );
     const staffFinance = staff.find((g) => g.label === "Departments")!.items.filter((i) => i.label === "Finance");
     expect(staffFinance).toHaveLength(1);
@@ -166,6 +193,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "d1", name: "Web Dev" }, { id: "d6", name: "Finance" }],
+      "d6",
     );
     const memberFinance = member.find((g) => g.label === "Departments")!.items.filter((i) => i.label === "Finance");
     expect(memberFinance).toHaveLength(1);

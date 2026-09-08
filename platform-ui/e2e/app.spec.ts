@@ -377,7 +377,9 @@ test("a project's Meetings tab is the PRD Studio flow, filed under that project"
 test("Repositories tab is the department's code inventory — repos from provisioned runs, problems first", async ({ page }) => {
   await switchToAgency(page);
   await page.goto("/departments/dept-1/repositories");
-  await expect(page.getByRole("heading", { name: "Repositories" })).toBeVisible();
+  // GHT-3 split the page into two sections: the pipeline inventory and the org-wide GitHub
+  // registry. The page heading is the department's; the inventory owns this section heading.
+  await expect(page.getByRole("heading", { name: "Provisioned by the pipeline" })).toBeVisible();
   // run-demo-1 (Web Dev project) has two provisioned sites in the demo store: one failed, one live.
   await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
   const rows = page.locator(".repo-table .lux-table__row");
@@ -385,13 +387,13 @@ test("Repositories tab is the department's code inventory — repos from provisi
   await expect(rows.nth(0)).toContainText("Failed"); // problems first
   await expect(rows.nth(0).getByText(/that name belongs to someone else's site/i)).toBeVisible();
   await expect(rows.nth(0).getByRole("link", { name: /start a new provision/i })).toHaveAttribute("href", "/pipeline/run-demo-1");
-  await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/Gaia-Digital-Agency\/northwind-site-redesign-kickoff/);
+  await expect(rows.nth(1).getByRole("link", { name: "northwind-site-redesign-kickoff", exact: true })).toHaveAttribute("href", /github\.com\/gaiadabali\/northwind-site-redesign-kickoff/);
   await expect(rows.nth(1).getByText("Northwind Traders · Client site redesign")).toBeVisible();
   await expect(rows.nth(1).getByText("Live")).toBeVisible();
   await expect(rows.nth(1).getByRole("link", { name: /northwind-site-redesign-kickoff\.gaiada\.online/ })).toBeVisible();
   // GitHub line: the demo persona has an identity-only connection, and the App isn't installed.
   await expect(page.getByText(/github: hansel-gh · identity only/i)).toBeVisible();
-  await expect(page.getByText(/commit and pr activity appears once the github app is connected/i)).toBeVisible();
+  await expect(page.getByText(/org-wide commit, pr and workflow state is in the github org registry below/i)).toBeVisible();
 });
 
 test("Repositories tab: Create repository provisions a PRD run and the row appears as Provisioning", async ({ page }) => {
@@ -414,7 +416,9 @@ test("Repositories tab: Create repository provisions a PRD run and the row appea
   if ((await lumen.count()) > 0) {
     await runSelect.selectOption({ label: "Lumen — portfolio discovery · Lumen Studio" });
     await expect(page.getByRole("textbox", { name: /repository name/i })).toHaveValue("lumen-portfolio-discovery");
-    await page.getByRole("combobox", { name: /framework/i }).selectOption("nextjs");
+    // §08 narrowed the offered stacks: legacy vite/nextjs rows still render but are no longer
+    // offered for NEW sites, so pick the full-stack option instead of the removed legacy one.
+    await page.getByRole("combobox", { name: /framework/i }).selectOption("node");
     await page.getByRole("button", { name: /^create repository$/i }).click();
     await expect(page.getByRole("status")).toContainText(/lumen-portfolio-discovery.*is being provisioned/i);
   }
@@ -488,7 +492,11 @@ test("Repositories tab: ?preview=sample shows the layout with sample rows behind
   await expect(page.getByRole("button", { name: /check status now/i })).toHaveCount(0); // samples offer no real actions
   await page.getByRole("link", { name: /back to real data/i }).click();
   await page.waitForURL(/\/departments\/dept-1\/repositories$/);
-  await expect(page.getByText("2 repos · 1 live · 1 failed")).toBeVisible();
+  // Real data again — but the demo store is stateful for the life of the server and this file's
+  // create tests add rows, so assert the shape (a real summary, no sample banner), not a count
+  // that depends on test order.
+  await expect(page.getByText(/\d+ repos? ·/)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0);
 });
 
 test("a meeting recording links to its ingested pipeline run", async ({ page }) => {

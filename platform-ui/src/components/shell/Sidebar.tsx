@@ -12,7 +12,7 @@ import { SidebarToggle } from "./SidebarToggle";
 import { SidebarState } from "./sidebarState";
 import { Eyebrow } from "@/components/ui";
 
-export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[] }) {
+export async function Sidebar({ me, tenantId, departments = [], myDeptId = null }: { me: Me; tenantId?: string | null; departments?: { id: string; name: string }[]; myDeptId?: string | null }) {
   const initials = me.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const collapsed = (await getSidebarState()) === "collapsed";
   // RBAC-gated global create menu. Moved here from TopBar with the button:
@@ -46,7 +46,7 @@ export async function Sidebar({ me, tenantId, departments = [] }: { me: Me; tena
         </div>
 
         <nav className="erp-side__nav erp-scroll">
-          {navFor(me, tenantId, departments).map((group) =>
+          {navFor(me, tenantId, departments, myDeptId).map((group) =>
             group.label ? (
               <NavGroupSection key={group.label} group={group} />
             ) : (

@@ -35,6 +35,18 @@ local stack). None of these mean "production-done".
   (platform_admin/company_admin/manager/monitoring_manager/monitoring_staff), kept out of ROLE_CAPS
   so the capability catalog stays 1:1 with the permission catalog. Replace with a real
   `monitoring.view` capability when 0117's deferred permission arm lands.
+- Third pass, same decision: STAFF SEE THEIR OWN DEPARTMENT ONLY. The Departments group (and the
+  command palette's department entries — a hidden row must not resurface as a searchable jump) narrows
+  to the department the person is placed in (`lib/departments.ts::myPlacement`, resolved once in the
+  app layout); the cross-department tier is `pm.manage` or an elevated grant, so managers/admins keep
+  the whole list, and an unplaced member gets only the cap-gated functional consoles. ⚠ NAV SCOPE,
+  NOT AN AUTHORIZATION WALL — tracked gap: Cerbos has no department condition on project/task/activity
+  reads today, so a member can still read another department's generic surfaces by URL. Closing that
+  is a backend model change (Cerbos attr conditions + query narrowing), owner-priced separately.
+- Repaired the repositories e2e that GHT-3/§08 (merged from main, where the chromium project never
+  runs in CI) had silently broken: the section heading, the demo GitHub org (gaiadabali), the retired
+  legacy framework option, and a sample-preview assertion that depended on test order against the
+  stateful demo store.
 - Second pass, same decision: Systems narrows by tier — WA/TG Bot, AI Gateway, MCP Hub and
   Observability are `admin.access`; Automation is the one manager-tier row (its read rule lists
   exactly company_admin + manager, the `company.manage` holders). Knowledge is `knowledge.review`

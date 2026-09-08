@@ -3,7 +3,7 @@ import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { getPrefs } from "@/lib/prefs";
-import { listDepartmentBriefs, type DeptBrief } from "@/lib/departments";
+import { listDepartmentBriefs, myPlacement, type DeptBrief } from "@/lib/departments";
 import { Shell } from "@/components/shell/Shell";
 import { isClientOnly } from "@/lib/rbac";
 
@@ -32,9 +32,13 @@ export default async function AppLayout({ children, drawer }: { children: React.
   const departments: DeptBrief[] = tenantId
     ? await listDepartmentBriefs(userId, tenantId).catch(() => [] as DeptBrief[])
     : [];
+  // Staff-scope for the Departments nav (owner decision 2026-09-08): the sidebar shows a
+  // non-manager only the department they are placed in. Resolved here once per request, same
+  // source the Command Center's "My department" button uses.
+  const placement = tenantId ? await myPlacement(userId, tenantId, userId).catch(() => null) : null;
   return (
     <>
-      <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments}>
+      <Shell me={me} tenantId={tenantId} moduleLabel="My Workspace" prefs={prefs} departments={departments} myDeptId={placement?.deptId ?? null}>
         {children}
       </Shell>
       {drawer}

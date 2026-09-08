@@ -20,7 +20,24 @@ export interface NavGroup { label: string; items: NavItem[]; icon?: IconName; pi
 // `departments` (id+name for the active company) are threaded in so the
 // Organization → Departments item becomes an expandable disclosure, one child
 // per department linking straight into that department's console/interface.
-export function navFor(me: Me, tenantId?: string | null, departments: { id: string; name: string }[] = []): NavGroup[] {
+// Owner decision 2026-09-08 (third pass of the mirror trim): STAFF SEE THEIR OWN DEPARTMENT ONLY.
+// The cross-department tier is pm.manage (manager/company_admin — the people who run work across
+// departments) or an elevated grant; everyone else's Departments group narrows to the department
+// they are placed in (layout.tsx resolves it via lib/departments.ts::myPlacement), or none when
+// unplaced. ⚠ This is a NAV scope, not an authorization wall: the backend still serves
+// tenant-wide project/task/activity reads to a member (Cerbos has no department condition today).
+// The real wall is a tracked backend gap — see the 0.68.0 changelog entry.
+export function visibleDepartments(
+  me: Me,
+  tenantId: string | null | undefined,
+  departments: { id: string; name: string }[],
+  myDeptId?: string | null,
+): { id: string; name: string }[] {
+  if (isElevated(me) || can(me, "pm.manage", tenantId)) return departments;
+  return departments.filter((d) => d.id === myDeptId);
+}
+
+export function navFor(me: Me, tenantId?: string | null, departments: { id: string; name: string }[] = [], myDeptId?: string | null): NavGroup[] {
   // WS11: an external client (not also staff) gets a clean portal-only nav — never the staff surface.
   // `isClientOnly`, not `isClient && !isElevated`: the latter is true for a MANAGER or company_admin
   // who is also a client contact (isElevated covers only global admin/exec), and handed that person
@@ -80,9 +97,10 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   // (OQ-4) and was not taken: it spends a rail glyph and a group header on one row that already has
   // a natural home.
   const isGmRow = (name: string) => deptSlug(name) === "gm";
+  const scopedDepartments = visibleDepartments(me, tenantId, departments, myDeptId);
   const orderedDepartments = [
-    ...departments.filter((d) => isGmRow(d.name)),
-    ...departments.filter((d) => !isGmRow(d.name)),
+    ...scopedDepartments.filter((d) => isGmRow(d.name)),
+    ...scopedDepartments.filter((d) => !isGmRow(d.name)),
   ];
   // Finance has a bespoke console at /finance rather than the generic /departments/[id] shell —
   // it is an operating surface (aging, the close gate, integrity checks), not a department read.
