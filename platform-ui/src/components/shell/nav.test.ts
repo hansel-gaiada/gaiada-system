@@ -13,7 +13,9 @@ describe("navFor (RBAC-gated visibility)", () => {
     const labels = groups.map((g) => g.label);
     // Mirror trim 2026-09-08: every Systems row's backing read is admin- or manager-tier, so for a
     // member the whole group is empty and an empty group renders no header.
-    expect(labels).toEqual(["Me", "Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Learning", "Intelligence"]);
+    // The Departments group itself is gone for this fixture: unplaced member, no org rows passed,
+    // and every functional console row (HR/IT/Finance) is cap-gated away.
+    expect(labels).toEqual(["Me", "Workspace", "Organization", "Business", "Reports", "Appraisals", "Learning", "Intelligence"]);
     // Employee-portal wave A: "Me" is FIRST and ungated — every principal with a staff surface has a
     // personal hub, and there is no capability to hold. Gating it would gate someone out of their own
     // leave, loans and inbox.
@@ -71,8 +73,8 @@ describe("navFor (RBAC-gated visibility)", () => {
     // Mirror trim + own-department scope (owner decision 2026-09-08): a member sees the department
     // they are PLACED in, nothing else; the functional HR and Finance console rows require
     // hr.view / finance.statement.view; IT stays — a member may read devices.
-    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev", "IT"]);
-    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1", "/it"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["Web Dev"]);
+    expect(depts.items.map((i) => i.href)).toEqual(["/departments/dept-1"]);
   });
 
   it("a manager keeps the full department list — pm.manage is the cross-department tier", () => {
@@ -86,14 +88,19 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(depts.items.map((i) => i.label)).toEqual(expect.arrayContaining(["Web Dev", "SEO"]));
   });
 
-  it("an unplaced member gets no department rows, only the consoles their caps allow", () => {
+  it("an unplaced member with no console caps gets no Departments group at all", () => {
     const groups = navFor(
       { ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] },
       "c1",
       [{ id: "dept-1", name: "Web Dev" }],
     );
+    expect(groups.find((g) => g.label === "Departments")).toBeUndefined();
+  });
+
+  it("IT shows for it.manage holders, not for every member", () => {
+    const groups = navFor({ ...base, roles: [{ role: "it_admin", scopeType: "company", scopeId: "c1" }] }, "c1");
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["IT"]);
+    expect(depts.items.map((i) => i.label)).toContain("IT");
   });
 
   it("shows the functional HR and Finance rows to the roles whose reads they are", () => {
@@ -108,7 +115,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       [{ id: "dept-1", name: "Web Dev" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["HR", "IT", "Finance"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["HR", "Finance"]);
   });
 
   it("manager keeps Delivery Pipeline and Monitoring — those reads are manager-tier", () => {
@@ -136,7 +143,7 @@ describe("navFor (RBAC-gated visibility)", () => {
       [{ id: "dept-1", name: "Web Dev" }, { id: "dept-2", name: "SEO" }, { id: "dept-5", name: "GM" }],
     );
     const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["GM", "Web Dev", "SEO", "IT"]);
+    expect(depts.items.map((i) => i.label)).toEqual(["GM", "Web Dev", "SEO"]);
     // Ordering only — the href is untouched, so every existing deep link still resolves.
     expect(depts.items[0].href).toBe("/departments/dept-5");
   });
@@ -167,10 +174,9 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(depts.items.map((i) => i.label)).toContain("GM");
   });
 
-  it("still lists IT in the Departments group when no business departments are passed (HR/Finance are cap-gated)", () => {
+  it("a member with no departments passed has no Departments group — every console row is cap-gated", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] }, "c1");
-    const depts = groups.find((g) => g.label === "Departments")!;
-    expect(depts.items.map((i) => i.label)).toEqual(["IT"]);
+    expect(groups.find((g) => g.label === "Departments")).toBeUndefined();
   });
   // An org structure that already has a Finance department must NOT get a second Finance row —
   // one label, two destinations, is how a nav loses trust. The org row is re-pointed at the

@@ -129,7 +129,10 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
         : { label: d.name, href: `/departments/${d.id}`, icon: "hr" as IconName },
     ),
     ...(can(me, "hr.view", tenantId) ? [{ label: "HR", href: "/hr", icon: "hr" } as NavItem] : []),
-    { label: "IT", href: "/it", icon: "pulse" },
+    // Own-department follow-up (2026-09-08): IT is a functional console like HR/Finance, not part of
+    // anyone else's department — it shows for the people whose console it is (it.manage holders),
+    // not for every member whose device read happens to be allowed.
+    ...(canManageIT(me, tenantId) ? [{ label: "IT", href: "/it", icon: "pulse" } as NavItem] : []),
     ...(orgHasFinance || !can(me, "finance.statement.view", tenantId) ? [] : [{ label: "Finance", href: "/finance", icon: "wallet" as IconName }]),
   ];
   const groups: NavGroup[] = [

@@ -39,7 +39,9 @@ local stack). None of these mean "production-done".
   command palette's department entries — a hidden row must not resurface as a searchable jump) narrows
   to the department the person is placed in (`lib/departments.ts::myPlacement`, resolved once in the
   app layout); the cross-department tier is `pm.manage` or an elevated grant, so managers/admins keep
-  the whole list, and an unplaced member gets only the cap-gated functional consoles. ⚠ NAV SCOPE,
+  the whole list, and an unplaced member gets only the cap-gated functional consoles. IT joined
+  HR/Finance behind its cap the same day (`canManageIT`) — a console shows for the people whose
+  console it is, and a group whose every row hid renders no header. ⚠ NAV SCOPE,
   NOT AN AUTHORIZATION WALL — tracked gap: Cerbos has no department condition on project/task/activity
   reads today, so a member can still read another department's generic surfaces by URL. Closing that
   is a backend model change (Cerbos attr conditions + query narrowing), owner-priced separately.
