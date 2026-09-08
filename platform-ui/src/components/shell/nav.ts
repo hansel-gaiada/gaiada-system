@@ -209,7 +209,10 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
     // gets their own thread history, nothing more, mirroring the backend's owner-only Cerbos rule.
     { label: "Intelligence", icon: "agents", items: [
       { label: "Assistant", href: "/assistant", icon: "assistant" },
-      { label: "Knowledge", href: "/knowledge", icon: "box" },
+      // Mirror trim: knowledge_source read is the company_admin tier (plus permission-arm grants
+      // the capability mirror cannot see yet — resource_knowledge_source.yaml's perm_* derived
+      // roles); a member's read is denied, so the row hides with the tier.
+      ...(can(me, "knowledge.review", tenantId) ? [{ label: "Knowledge", href: "/knowledge", icon: "box" as IconName }] : []),
       { label: "AI Agents", href: "/agents", icon: "agents" },
       // The Office is the SPATIAL view of the same principals `/agents` lists — one event spine,
       // two renderers (docs/superpowers/plans/2026-08-23-virtual-office-plan.md §1) — so it belongs
@@ -218,19 +221,21 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
       // not exist. Staff-only comes free from `(app)/layout.tsx`'s isClientOnly redirect.
       { label: "The Office", href: "/office", icon: "pulse" },
     ] },
+    // Owner decision 2026-09-08 (mirror trim, reversing the "ungated, refusal reads as not-yours"
+    // stance the Observability row's original comment argued): the infrastructure consoles are
+    // admin surfaces and their rows hide with the tier. Automation is the one manager-tier row —
+    // resource_automation_approval.yaml's read rule lists exactly company_admin + manager, the same
+    // principal set that holds `company.manage` (Gap 3 widened it onto manager deliberately).
+    // MON-09i's Plane A/Plane B split is unchanged — Observability is OUR box, Business > Monitoring
+    // is the client's sites. An empty Systems group is dropped entirely below.
     { label: "Systems", icon: "server", items: [
-      { label: "WA/TG Bot", href: "/systems/bot", icon: "bot" },
-      { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" },
-      { label: "MCP Hub", href: "/systems/hub", icon: "hub" },
-      { label: "Automation", href: "/systems/automation", icon: "automation" },
-      // MON-09i. Plane A (this box) belongs in Systems, which is where OUR infrastructure
-      // consoles live -- as opposed to Business > Monitoring, which is the CLIENT's sites.
-      // Until now Plane A had no ERP surface at all: server metrics were collected for weeks
-      // and readable only by SSH-tunnelling to Prometheus, which is how a completely broken
-      // datastore exporter stayed invisible. The backend gates on platform-admin; this row is
-      // ungated like its siblings, and a non-admin gets an explicit "restricted" page rather
-      // than a missing row -- a hidden row reads as "gone", a refusal reads as "not yours".
-      { label: "Observability", href: "/systems/observability", icon: "pulse" },
+      ...(can(me, "admin.access", tenantId) ? [
+        { label: "WA/TG Bot", href: "/systems/bot", icon: "bot" as IconName },
+        { label: "AI Gateway", href: "/systems/gateway", icon: "gateway" as IconName },
+        { label: "MCP Hub", href: "/systems/hub", icon: "hub" as IconName },
+      ] : []),
+      ...(can(me, "company.manage", tenantId) ? [{ label: "Automation", href: "/systems/automation", icon: "automation" as IconName }] : []),
+      ...(can(me, "admin.access", tenantId) ? [{ label: "Observability", href: "/systems/observability", icon: "pulse" as IconName }] : []),
     ] },
   ];
   // Settings (formerly "Admin") — a single sidebar entry; its sub-sections
@@ -238,6 +243,7 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   if (can(me, "admin.access", tenantId)) {
     groups.push({ label: "", items: [{ label: "Settings", href: "/admin", icon: "settings" }] });
   }
-  return groups;
+  // A group whose every row was tier-hidden renders nothing — no header pointing at nothing.
+  return groups.filter((g) => g.items.length > 0);
 }
 

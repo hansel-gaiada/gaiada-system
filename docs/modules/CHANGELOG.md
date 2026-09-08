@@ -35,6 +35,13 @@ local stack). None of these mean "production-done".
   (platform_admin/company_admin/manager/monitoring_manager/monitoring_staff), kept out of ROLE_CAPS
   so the capability catalog stays 1:1 with the permission catalog. Replace with a real
   `monitoring.view` capability when 0117's deferred permission arm lands.
+- Second pass, same decision: Systems narrows by tier — WA/TG Bot, AI Gateway, MCP Hub and
+  Observability are `admin.access`; Automation is the one manager-tier row (its read rule lists
+  exactly company_admin + manager, the `company.manage` holders). Knowledge is `knowledge.review`
+  (company_admin tier; the policy's permission-arm grants are a recorded blind spot of the
+  capability mirror). Assistant, AI Agents and The Office stay for everyone — assistant threads are
+  owner-private by policy and `agent_run` read is `owns`-narrowed, the same reason My Report stays.
+  A group whose every row hid renders no header (a member has no Systems group at all).
 - Verified as a real webdev staff principal (member + webdev_staff) against live Cerbos on the local
   stack: probes deny pipeline_run/monitor/hr_case/finance reads, allow client/deliverable/task/
   project/meeting/device — the trimmed nav matches decision-for-decision. nav.test.ts updated +

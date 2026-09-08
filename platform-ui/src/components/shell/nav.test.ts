@@ -8,10 +8,12 @@ const base: Me = {
 };
 
 describe("navFor (RBAC-gated visibility)", () => {
-  it("member sees Workspace/Organization/Departments/Business/Reports/Intelligence/Systems but no Settings, no Rollups", () => {
+  it("member sees Workspace/Organization/Departments/Business/Reports/Intelligence — Systems is admin/manager territory", () => {
     const groups = navFor({ ...base, roles: [{ role: "member", scopeType: "company", scopeId: "c1" }] });
     const labels = groups.map((g) => g.label);
-    expect(labels).toEqual(["Me", "Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Learning", "Intelligence", "Systems"]);
+    // Mirror trim 2026-09-08: every Systems row's backing read is admin- or manager-tier, so for a
+    // member the whole group is empty and an empty group renders no header.
+    expect(labels).toEqual(["Me", "Workspace", "Organization", "Departments", "Business", "Reports", "Appraisals", "Learning", "Intelligence"]);
     // Employee-portal wave A: "Me" is FIRST and ungated — every principal with a staff surface has a
     // personal hub, and there is no capability to hold. Gating it would gate someone out of their own
     // leave, loans and inbox.
@@ -89,6 +91,15 @@ describe("navFor (RBAC-gated visibility)", () => {
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).toContain("Delivery Pipeline");
     expect(business.items.map((i) => i.label)).toContain("Monitoring");
+  });
+
+  it("Systems narrows by tier: manager gets Automation only, company_admin the full set; Knowledge is admin-tier", () => {
+    const managerGroups = navFor({ ...base, roles: [{ role: "manager", scopeType: "company", scopeId: "c1" }] }, "c1");
+    expect(managerGroups.find((g) => g.label === "Systems")!.items.map((i) => i.label)).toEqual(["Automation"]);
+    expect(managerGroups.find((g) => g.label === "Intelligence")!.items.map((i) => i.label)).toEqual(["Assistant", "AI Agents", "The Office"]);
+    const adminGroups = navFor({ ...base, roles: [{ role: "company_admin", scopeType: "company", scopeId: "c1" }] }, "c1");
+    expect(adminGroups.find((g) => g.label === "Systems")!.items.map((i) => i.label)).toEqual(["WA/TG Bot", "AI Gateway", "MCP Hub", "Automation", "Observability"]);
+    expect(adminGroups.find((g) => g.label === "Intelligence")!.items.map((i) => i.label)).toEqual(["Assistant", "Knowledge", "AI Agents", "The Office"]);
   });
   // GM-01/OQ-4: GM is the ROOT of the department spine (platform-nest `seed/roster.ts`:
   // `DEPT_PARENT["d-gm"] = null`, every other department parents to it), so it must not sort
