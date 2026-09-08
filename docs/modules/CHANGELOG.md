@@ -11,6 +11,50 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.53.0` - connection-pool ceilings, a passwordless-auth boot refusal, and the estate's first security headers (2026-09-08) - PROTOTYPED
+
+Fault-register findings 03, 04, 05 and 16 (`docs/audits/` register, 2026-09-08). Operational
+hardening only - no schema change, no migration, no new service, no endpoint touched.
+
+- **Pool ceilings (03).** `getPool()` was `new Pool({ connectionString })`: every pg default, so
+  **max 10** and **`connectionTimeoutMillis: 0` - wait forever**. Request traffic and the ~15
+  background loops `main.ts` starts share that one pool, and `statement_timeout` appeared **nowhere
+  in the repository**. One slow query on a grown table therefore took the whole ERP down - every
+  caller blocked on `pool.connect()` indefinitely - while `/health`, which touches none of it, kept
+  answering 200. Now bounded: `max 20`, connect 5s, idle 30s, `statement_timeout` 30s,
+  `idle_in_transaction_session_timeout` 60s, all via `positiveIntFromEnv` so compose's `${VAR:-}`
+  empty-string cannot silently mean zero. **Migrations are unaffected** - `db/migrate.ts` builds its
+  own pool, and DDL legitimately runs longer than any request should.
+  Driven, not assumed: `pg_sleep(5)` against a 1500ms ceiling was cancelled at 1555ms.
+- **Passwordless-auth boot refusal (04).** `docker-compose.vps.yml` defaulted `AUTH_MODE` to
+  **`dev`** - a mode in which the login form takes an email address and **no password**. Any
+  regenerated or half-copied `.env` produced a passwordless ERP behind a healthy 200. Default flipped
+  to `:-oidc` on both services, `.env.example` ships `oidc`, and `assertAuthModeBootSafe()` refuses
+  to boot a `NODE_ENV=production` runtime in dev mode.
+  ⚠ **`NODE_ENV` was EMPTY on the live container and read nowhere in this codebase**, so a guard
+  written against it would have shipped and never fired. `NODE_ENV: production` was added to the
+  platform service to give it a real precondition - but that precondition is **not test-enforced**,
+  because pinning it needs a test reaching into `infra/`, which the root guide forbids. Recorded in
+  the guard's own header rather than left as an implied protection. The `:-oidc` default is the
+  layer that holds if someone deletes that compose line.
+- **Security headers (05).** The estate served **none**. HSTS, `nosniff`, `SAMEORIGIN`,
+  `Referrer-Policy` and a `Permissions-Policy` now ship from the vhost, all with `always` so they
+  reach 4xx/5xx too. `SAMEORIGIN` not `DENY` because n8n and the report-renderer frame same-origin;
+  camera/microphone stay `self` because WS11's recorder does real audio **and** video takes.
+  **No CSP** - a correct one needs a per-request nonce through the Next root layout, and a guessed
+  one either breaks the app or asserts nothing. Applied and verified live 2026-09-08 (5/5 headers on
+  `/login`, `/n8n/`, `/api/webhooks/`, `/api/mail/`, `/print`, and on a 404).
+- **Guarded both `ROLLBACK`s (16).** An unguarded rollback throws when the connection is already
+  gone and **replaces the original error**. Newly load-bearing: cancelled statements are now an
+  expected event, so masking their cause would make the ceilings added above actively hinder the
+  debugging they exist to aid.
+
+Verification: `tsc --noEmit` clean; **520 tests / 42 files** green across `src/db/` including the RLS
+suites that exercise `withTenants` hardest; 9 new assertions across `pool-ceilings.test.ts` and
+`dev-mode-guard.test.ts`. Status is **PROTOTYPED not DEV-VERIFIED** deliberately: the suite ran on
+Windows/Docker locally, and the estate rule is that the server run is what counts. The nginx half is
+already server-verified; the platform-nest half is proven by this cut's deploy.
+
 ### platform-nest `0.52.0` - agency discovery intake: a prospect can fill it, the ERP can act on it (2026-09-05) - DEV-VERIFIED
 
 AD-1..AD-8. Design: `docs/superpowers/plans/2026-09-05-agency-discovery-intake-design.md`.

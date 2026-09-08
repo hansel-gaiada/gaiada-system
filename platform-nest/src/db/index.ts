@@ -10,7 +10,27 @@ let pool: Pool | null = null;
 export function getPool(): Pool {
   if (!pool) {
     if (!config.databaseUrl) throw new Error("DATABASE_URL not set");
-    pool = new Pool({ connectionString: config.databaseUrl });
+    // ── THE CEILINGS ARE THE POINT (2026-09-08) ──────────────────────────────────────────────
+    // This was `new Pool({ connectionString })` — every pg default, i.e. max 10 and
+    // `connectionTimeoutMillis: 0`, which means a caller waits for a free connection FOREVER.
+    // Request traffic and the ~15 background loops main.ts starts share this one pool, and no
+    // `statement_timeout` existed anywhere in the repo, so one slow query could hold a connection
+    // indefinitely and the tenth one took the whole ERP down while /health stayed green.
+    //
+    // `connectionTimeoutMillis` is the load-bearing one: it turns "hang until nginx gives up at
+    // 300s" into a fast, visible failure. `statement_timeout` bounds the query that caused it.
+    // Rationale, numbers and the migration carve-out live on the config keys — see config.ts.
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      max: config.poolMax,
+      connectionTimeoutMillis: config.poolConnectionTimeoutMs,
+      idleTimeoutMillis: config.poolIdleTimeoutMs,
+      // Sent as Postgres startup parameters on every connection this pool opens, so they apply to
+      // background-loop queries as well as request queries — the loops are exactly the callers
+      // nobody is watching.
+      statement_timeout: config.statementTimeoutMs,
+      idle_in_transaction_session_timeout: config.idleInTransactionTimeoutMs,
+    });
     attachPoolErrorHandler(pool);
   }
   return pool;
@@ -135,7 +155,14 @@ export async function withTenants<T>(
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    // Guarded because an UNGUARDED rollback replaces the error that caused it. When the failure
+    // is connection-level — a killed backend, a Postgres restart, or now a `statement_timeout`
+    // firing — this ROLLBACK throws too, and its error propagates INSTEAD of the real one. The
+    // caller then sees "Connection terminated" in the one situation where they most need to know
+    // which query was cancelled. Newly load-bearing as of the 2026-09-08 timeout change: cancelled
+    // statements are now an expected event, so masking their cause would make the ceilings that
+    // were added to aid debugging actively hinder it.
+    try { await client.query("ROLLBACK"); } catch { /* connection already gone; keep the original error */ }
     throw err;
   } finally {
     client.release();
@@ -175,7 +202,14 @@ export async function withMailContext<T>(fn: (client: PoolClient) => Promise<T>)
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    // Guarded because an UNGUARDED rollback replaces the error that caused it. When the failure
+    // is connection-level — a killed backend, a Postgres restart, or now a `statement_timeout`
+    // firing — this ROLLBACK throws too, and its error propagates INSTEAD of the real one. The
+    // caller then sees "Connection terminated" in the one situation where they most need to know
+    // which query was cancelled. Newly load-bearing as of the 2026-09-08 timeout change: cancelled
+    // statements are now an expected event, so masking their cause would make the ceilings that
+    // were added to aid debugging actively hinder it.
+    try { await client.query("ROLLBACK"); } catch { /* connection already gone; keep the original error */ }
     throw err;
   } finally {
     client.release();

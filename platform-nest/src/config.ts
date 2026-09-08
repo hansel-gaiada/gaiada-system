@@ -256,6 +256,44 @@ const configBase = {
   // the restricted runtime role). Empty -> migrate() falls back to databaseUrl at call time
   // (dev/tests, where owner==runtime).
   migrateDatabaseUrl: process.env.MIGRATE_DATABASE_URL ?? "",
+  /**
+   * ── POOL CEILINGS AND TIMEOUTS (2026-09-08) ────────────────────────────────────────────────
+   * Until this landed, `getPool()` was `new Pool({ connectionString })` with every default:
+   * **max 10** connections and **connectionTimeoutMillis 0 — wait forever** — shared between all
+   * request traffic and the ~15 background loops `main.ts` starts in this same process. There was
+   * no `statement_timeout` anywhere in the repository.
+   *
+   * That combination has one failure mode and it is total: a single slow query on a grown table
+   * takes a connection, ten concurrent requests take the rest, and every subsequent caller blocks
+   * on `pool.connect()` FOREVER. The BFF has no fetch timeout either, so Next holds each hung
+   * request and nginx holds it for 300s. The event loop starves while `/health` — which touches
+   * none of this — keeps answering 200. The ERP is down and every dashboard is green.
+   *
+   * These four bounds convert that into a handful of visible 504s. They are ceilings, not tuning:
+   * the real numbers should come from the load test (fault register finding 09), which has never
+   * been run. Deliberately generous so nothing that works today starts failing.
+   *
+   * `statementTimeoutMs` is 30s rather than the 15s first proposed, because background sweeps
+   * (reports fact-job, knowledge ingest, the position reconciler) share this pool and none has a
+   * measured p99. Migrations are UNAFFECTED — `db/migrate.ts` builds its own pool and must keep
+   * doing so, since a DDL statement legitimately runs longer than any request should.
+   *
+   * `poolMax` 20 (from pg's default 10): aicenter's host Postgres is `max_connections=100` shared
+   * with knowledge/agent-runner/sync, so 20 for the platform is headroom, not greed. Raise only
+   * with that ceiling in view.
+   *
+   * All four use `positiveIntFromEnv`, not `Number(process.env.X ?? n)` — compose's `${VAR:-}`
+   * passthrough yields an EMPTY string, `??` does not fire on it, and `Number("")` is 0. A zero
+   * here would mean "no connections" or "no timeout". See that helper's header.
+   */
+  poolMax: positiveIntFromEnv("PG_POOL_MAX", 20),
+  poolConnectionTimeoutMs: positiveIntFromEnv("PG_CONNECTION_TIMEOUT_MS", 5_000),
+  poolIdleTimeoutMs: positiveIntFromEnv("PG_IDLE_TIMEOUT_MS", 30_000),
+  statementTimeoutMs: positiveIntFromEnv("PG_STATEMENT_TIMEOUT_MS", 30_000),
+  /** Bounds a transaction left open by a handler that threw between BEGIN and COMMIT/ROLLBACK.
+   *  Longer than `statementTimeoutMs` on purpose: this catches an IDLE transaction holding a
+   *  connection and its locks, which is a different fault from a slow statement. */
+  idleInTransactionTimeoutMs: positiveIntFromEnv("PG_IDLE_IN_TXN_TIMEOUT_MS", 60_000),
   // Service token surfaces (bot, mcp-hub, n8n) must present. Empty -> reject (fail-closed).
   serviceToken: process.env.PLATFORM_SERVICE_TOKEN ?? "",
   // This site's identifier (sync retrofit later; recorded on every row now).

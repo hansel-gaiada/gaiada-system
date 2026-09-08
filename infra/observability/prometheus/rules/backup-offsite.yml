@@ -1,0 +1,108 @@
+# Offsite-backup alerts — closes Fault Register finding 02.
+#
+# Before this file the estate had 29 alert rules and NOT ONE of them mentioned backups. The
+# nightly dump on gda-aicenter could have stopped months ago and the first person to find out
+# would have been whoever needed a restore. That is the specific failure these rules exist to
+# make impossible.
+#
+# Metrics come from erp-offsite-pull.sh (sumopod) via node-exporter's textfile collector.
+#
+# READ THE TWO STALENESS RULES AS A PAIR — they fail differently and the fix differs:
+#   * OffsiteBackupPullStale  -> THIS box stopped copying. Source is probably fine.
+#   * OffsiteBackupSourceStale -> aicenter stopped PRODUCING. Copying is fine; there is
+#     nothing new to copy. This is the silent-cron-death case, and it is the one that used
+#     to be completely undetectable.
+# Collapsing them into one alert would send whoever is on call to the wrong host.
+groups:
+  - name: gaiada_offsite_backup
+    rules:
+      # --- The offsite pull stopped running at all.
+      # aicenter dumps at 03:15 UTC, sumopod pulls at 04:15 UTC. 26h gives one full missed
+      # cycle plus a margin, so a single slow night does not page but a dead cron does.
+      - alert: OffsiteBackupPullStale
+        expr: time() - gaiada_backup_last_success_timestamp_seconds > 26 * 3600
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "ERP offsite backup pull has not run in over 26h"
+          description: >-
+            sumopod has not completed an offsite pull since
+            {{ $value | humanizeDuration }} ago. The ERP's only off-box copy is going stale.
+            Check ~/erp-offsite/state/pull.log on sumopod and the WireGuard link to 10.88.0.1.
+
+      # --- The SOURCE stopped producing. Nothing new to copy.
+      # 30h, deliberately looser than the pull alert: this only fires once aicenter has
+      # actually skipped its nightly dump, not merely when a pull was late.
+      - alert: OffsiteBackupSourceStale
+        expr: time() - gaiada_backup_newest_file_timestamp_seconds > 30 * 3600
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "No new ERP backup has been produced on gda-aicenter in over 30h"
+          description: >-
+            The newest artifact held offsite is {{ $value | humanizeDuration }} old. The pull
+            is working, so this is the SOURCE: gda-aicenter's 03:15 cron
+            (infra/scripts/backup-cron.sh) has stopped producing dumps. Check
+            ~/gaiada-backups/backup.log on aicenter — and its disk.
+
+      # --- A file arrived with the wrong hash. Never treat this as noise.
+      # The pull discards the file rather than keeping it, so this fires on a backup that
+      # does NOT exist offsite — silence here after a corrupt run would mean a gap.
+      - alert: OffsiteBackupCorrupt
+        expr: gaiada_backup_corrupt_total > 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $value }} ERP backup file(s) failed hash verification on transfer"
+          description: >-
+            Bytes received did not match the source sha256 and were discarded, so those
+            artifacts are NOT held offsite. Suspect the WireGuard path or disk on either end.
+            Re-run ~/erp-offsite/bin/erp-offsite-pull.sh on sumopod and check whether it recurs.
+
+      # --- Transfers are erroring (distinct from corruption: nothing arrived at all).
+      - alert: OffsiteBackupPullFailing
+        expr: gaiada_backup_failed_total > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "{{ $value }} ERP backup file(s) failed to transfer offsite"
+          description: >-
+            Transfer or encryption errors on the last pull. Usually the restricted key, the
+            forced-command wrapper on aicenter, or the tunnel. Not yet data loss — the next
+            run retries — but it is a gap until it clears.
+
+      # --- The offsite copy SHRANK sharply. Tamper / accidental-deletion signal.
+      # Normal pruning removes a day at a time from a 90-day window (~1%). A >20% drop in an
+      # hour is not retention; it is someone or something deleting backups.
+      - alert: OffsiteBackupShrinkingFast
+        expr: >-
+          (gaiada_backup_bytes_total - gaiada_backup_bytes_total offset 1h)
+          / (gaiada_backup_bytes_total offset 1h) < -0.20
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "ERP offsite backup set shrank by more than 20% in an hour"
+          description: >-
+            Retention prunes ~1% a day from a 90-day window, so this is not retention.
+            Treat as deletion or tampering until proven otherwise. Do NOT re-run the pull
+            before looking — check ~/erp-offsite/state/pull.log and auth logs on sumopod.
+
+      # --- Headroom on the offsite host.
+      # sumopod has gone 49% -> 75% disk in a single hour (a build). The pull refuses to run
+      # below its own 15G floor, so this warns while there is still room to act.
+      - alert: OffsiteBackupDiskLow
+        expr: gaiada_backup_disk_free_gb < 25
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "sumopod has only {{ $value }}G free — offsite backups stop at 15G"
+          description: >-
+            erp-offsite-pull.sh refuses to run below 15G to avoid filling the disk that also
+            carries the estate's entire observability stack. Reclaim with
+            'docker builder prune -a' (has returned 80G before) and check container log sizes.

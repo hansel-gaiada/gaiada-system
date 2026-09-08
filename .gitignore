@@ -35,3 +35,17 @@ infra/observability/synthetic-prober/synthetic-prober.exe
 # *.local.md and *.local.sql above — the *.local. infix means "reads real secrets or real client
 # data, never commit", and this pattern was missing for the .mjs case.
 *.local.mjs
+
+# ── Backup key material (2026-09-08). THIRD overlapping layer, deliberately redundant. ──────────
+# `.secrets/` above already covers this, and `.secrets/.gitignore` covers it again from inside.
+# All three exist because this repo is PUBLIC and the file they protect — the age identity at
+# .secrets/backup-keys/gaiada-backup-age — decrypts EVERY offsite ERP backup (ledger, HR, client
+# work). Losing it is recoverable; leaking it is not. These patterns are filename-based, so they
+# hold even if the file is ever moved out of .secrets/ by mistake.
+*gaiada-backup-age*
+id_ed25519
+id_ed25519.pub
+*.age.key
+*.pem
+*.p12
+*.pfx

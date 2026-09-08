@@ -350,11 +350,24 @@ services:
     ports:
       - "127.0.0.1:3004:3004"
     environment:
+      # Set explicitly because it was EMPTY on the live container until 2026-09-08, and because a
+      # boot guard now depends on it: main.ts refuses to start in `AUTH_MODE=dev` when this says
+      # production (finding 04 — dev mode is a passwordless login). Nothing in platform-nest's own
+      # source reads NODE_ENV, so this was a no-op var before; `compose-invariants.test.ts` pins
+      # BOTH this line and the oidc default so the guard cannot quietly lose its precondition.
+      NODE_ENV: production
       PLATFORM_SERVICE_TOKEN: ${PLATFORM_SERVICE_TOKEN:?}
       # Runtime = restricted platform_app; migrations/grants run as platform_owner (MIGRATE_DATABASE_URL).
       DATABASE_URL: postgres://platform_app:${PLATFORM_APP_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
       MIGRATE_DATABASE_URL: postgres://platform_owner:${PLATFORM_OWNER_PASSWORD:?}@${PG_HOST:-postgres}:5432/gaiada_platform
-      AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
+      # DEFAULT IS `oidc`, AND THAT DIRECTION IS THE WHOLE POINT (2026-09-08, finding 04).
+      # This read `:-dev` until today. In dev mode the login form takes an email address and
+      # NO PASSWORD — `platform-ui/src/app/login/actions.ts` exchanges it for a session via
+      # /dev/user-by-email. So an absent, empty or regenerated .env produced a PASSWORDLESS
+      # ERP behind a healthy 200. Compose's `:-` also fires on an EMPTY value, not just an
+      # unset one, which is exactly what a half-copied .env yields.
+      # Fail-closed now: unset/empty -> oidc -> a real IdP token is required.
+      AUTH_MODE: ${PLATFORM_AUTH_MODE:-oidc}
       # ISSUER must match the `iss` claim the IdP actually stamps, which is the PUBLIC url once
       # Keycloak sits behind a reverse proxy. JWKS stays INTERNAL so token verification never
       # hairpins out through nginx and back. Splitting them is deliberate, not an inconsistency.
@@ -926,7 +939,14 @@ services:
       OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
       # Mirrors the platform's mode so the login page can hide the dev email box when it is
       # disabled server-side — otherwise the page's primary action is the one that cannot work.
-      AUTH_MODE: ${PLATFORM_AUTH_MODE:-dev}
+      # DEFAULT IS `oidc`, AND THAT DIRECTION IS THE WHOLE POINT (2026-09-08, finding 04).
+      # This read `:-dev` until today. In dev mode the login form takes an email address and
+      # NO PASSWORD — `platform-ui/src/app/login/actions.ts` exchanges it for a session via
+      # /dev/user-by-email. So an absent, empty or regenerated .env produced a PASSWORDLESS
+      # ERP behind a healthy 200. Compose's `:-` also fires on an EMPTY value, not just an
+      # unset one, which is exactly what a half-copied .env yields.
+      # Fail-closed now: unset/empty -> oidc -> a real IdP token is required.
+      AUTH_MODE: ${PLATFORM_AUTH_MODE:-oidc}
       # The address the BROWSER used. Without it, redirects are built from the container's bind
       # address and the OIDC callback lands on an unreachable host.
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}

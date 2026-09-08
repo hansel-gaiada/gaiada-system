@@ -34,6 +34,9 @@ import { migrate } from "./db/migrate";
 // VLT-4 precondition (OQ-2.6.b / WSK-D33) — the DO-NOT-ROTATE tripwire. See its own header for why
 // this runs at boot rather than as a health signal or a docs-only register entry.
 import { assertIntegrationTokenKeyMatchesCanary } from "./core/token-key-tripwire";
+// Finding 04 — refuses to boot a NODE_ENV=production runtime configured for passwordless (`dev`)
+// auth. Sits beside the token tripwire above because both are no-DB, refuse-before-anything guards.
+import { assertAuthModeBootSafe } from "./auth/dev-mode-guard";
 import { getPool } from "./db";
 import { seedClockFromDb } from "./events/hlc";
 import { registerModule, validateModulePermissions } from "./modules/registry";
@@ -419,6 +422,12 @@ async function bootstrap(): Promise<void> {
   // migration or module registration has already run. Throws (crashes boot) iff a canary IS
   // configured and this key cannot reproduce it; see token-key-tripwire.ts.
   assertIntegrationTokenKeyMatchesCanary();
+  // PASSWORDLESS-AUTH REFUSAL — placed immediately after the token tripwire and for the same
+  // reason: it needs no DB, and a runtime that would serve credential-free logins must die here
+  // rather than after migrate() has already moved the schema. `AUTH_MODE=dev` accepts an email
+  // address and no password (finding 04); refusing is the only useful response, because the
+  // symptom of that misconfiguration is that everything appears to work perfectly.
+  assertAuthModeBootSafe();
   // Same startup sequence the Fastify server ran: migrate, register compiled-in modules +
   // core rollup providers, sync the governed metric registry, then serve.
   await migrate();
