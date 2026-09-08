@@ -11,6 +11,51 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.68.0` - the SSO session stops dying every hour (2026-09-08) - PROTOTYPED
+
+Fault-register finding 01 - the defect users felt every single day.
+
+`auth/callback` has always sealed `refreshToken` and `expiresAt` into the session cookie and
+**nothing ever read either one**. `platformFetch` sent the access token verbatim forever. With the
+realm's `accessTokenLifespan` at 3600s, an hour after signing in every backend call began returning
+401 - while `middleware.ts` checked only that the cookie EXISTED, so the user was never redirected
+and never logged out. They got an ERP where every page threw and no way back except finding
+`/auth/login` by hand. Every user, every hour.
+
+- **Why the fix is not in `platformFetch`.** That is the obvious place and it cannot work: the
+  helper is called from ~131 files, overwhelmingly from Server Components during a render, and Next
+  only permits `cookies().set()` in Server Actions, Route Handlers and Middleware. A refresh there
+  would get a new token and have nowhere to put it.
+- **Why it is not in middleware either.** Middleware runs on Edge, which cannot load `node:crypto`,
+  so it can neither verify nor re-sign the session HMAC - the reason it was a presence check to
+  begin with. It CAN cheaply read the expiry, so it detects and hands off.
+- **The split.** `lib/session-expiry.ts` (Edge-safe, `atob` + `TextDecoder`, no Buffer) reads the
+  expiry; middleware redirects a stale GET to `app/auth/refresh/route.ts` (`runtime = "nodejs"`),
+  which verifies properly, exchanges the refresh token, re-seals and redirects back. It also
+  serialises the refresh: navigations arrive one at a time, so a page's parallel fetches never race.
+- **Fail-open, never fail-loop.** Every failure path lands on `/auth/login`, not back on the page,
+  and clears the stale cookie. Against a live SSO session (10h vs the 1h token) that completes with
+  no password prompt. Middleware's whole block is wrapped so any error falls through to previous
+  behaviour - it runs on every request, so its failure mode must be "does nothing".
+- **Exemptions, each load-bearing.** `/auth/*` (self-redirect loop), `/api/*` (those answer JSON and
+  SSE - a 307 to HTML tears the portal/assistant streams and breaks client `fetch`), `/print` (the
+  report-renderer calls it with a jobToken and no cookies). Non-GET is excluded because a 307
+  replays the body, which on a Server Action would re-submit the user's write.
+
+Tests pin the failure that would be SILENT: `session-expiry.test.ts` round-trips the Edge decoder
+against the Node sealer across every base64 padding residue and the `-`/`_` alphabet, because if
+those two implementations ever disagree the refresh simply never fires, with no error anywhere.
+`middleware.test.ts` pins the exemptions and the GET-only rule.
+
+Verification: `tsc` clean, `next build` clean (compiled, typechecked, 120/120 static pages - the
+Edge bundle accepting `session-expiry.ts` was the real build risk), full suite **209 files / 4148
+tests** green. PROTOTYPED not DEV-VERIFIED: local/Windows, server run is what counts.
+
+**Follow-up, deliberately not in this change:** drop `accessTokenLifespan` from 3600s back toward
+Keycloak's 300s default. The 12x value is itself a symptom of refresh being broken, and it is also a
+one-hour revocation window. Tighten it only once this route is proven in production - doing both at
+once would mean a five-minute breakage cycle if the refresh has any flaw.
+
 ### platform-nest `0.53.0` - connection-pool ceilings, a passwordless-auth boot refusal, and the estate's first security headers (2026-09-08) - PROTOTYPED
 
 Fault-register findings 03, 04, 05 and 16 (`docs/audits/` register, 2026-09-08). Operational

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { sanitizeReturnTo } from "@/lib/returnTo";
+import { peekSessionExpiry, needsRefresh } from "@/lib/session-expiry";
 
 // Edge runtime can't use node:crypto — presence check only here; every page
 // verifies the HMAC server-side via getSessionUserId() before using the id.
@@ -31,6 +32,49 @@ export function middleware(req: NextRequest) {
     if (target !== "/") loginUrl.searchParams.set("return", target);
     return NextResponse.redirect(loginUrl);
   }
+
+  // ── SILENT TOKEN REFRESH (finding 01, 2026-09-08) ──────────────────────────────────────────────
+  // The access token expires an hour after sign-in and nothing renewed it, so every backend call
+  // started 401-ing while this middleware — which only ever checked that the cookie EXISTED — kept
+  // waving the request through. The user was never logged out, just broken. See
+  // `app/auth/refresh/route.ts` for why the renewal lives in a route handler and not here.
+  //
+  // STRICTLY ADDITIVE AND FAIL-OPEN. Everything below can only ADD a redirect to /auth/refresh; any
+  // uncertainty (dev-mode session, malformed cookie, unreadable expiry, thrown error) falls through
+  // to `NextResponse.next()`, i.e. exactly the behaviour that shipped before this block existed.
+  // This code runs on every request in the app, so its failure mode must be "does nothing", never
+  // "breaks the site".
+  //
+  // GET ONLY, AND THAT IS LOAD-BEARING. A 307 on a POST replays the body at the new location; on a
+  // Server Action that would re-submit the user's write to a route that is not expecting it. Writes
+  // therefore ride the existing token — safe in practice because the navigation that rendered the
+  // form refreshed first, and REFRESH_SKEW_MS leaves a 2-minute margin behind it.
+  try {
+    // Excluded, each for its own reason — none of these is cosmetic:
+    //   /auth/*  — the refresh route itself. Redirecting it to itself is an infinite loop.
+    //   /api/*   — these answer JSON and Server-Sent Events. A 307 to an HTML page is not a
+    //              contract these callers can honour: a client `fetch()` would parse a redirect
+    //              body as JSON, and the portal/assistant SSE streams would be torn off mid-flight.
+    //              They ride the existing token; the next navigation refreshes it.
+    //   /print   — the report-renderer sidecar calls it with a one-shot jobToken and NO cookies at
+    //              all, by design. It would fall out below anyway (no cookie -> null expiry), but
+    //              a PDF render must never be able to end up at a login page.
+    const exempt =
+      pathname.startsWith("/auth/") || pathname.startsWith("/api/") || pathname.startsWith("/print");
+    if (req.method === "GET" && !exempt) {
+      const expiresAt = peekSessionExpiry(req.cookies.get("gaiada_session")?.value);
+      if (needsRefresh(expiresAt)) {
+        const target = sanitizeReturnTo(`${pathname}${req.nextUrl.search}`);
+        const refreshUrl = new URL("/auth/refresh", req.url);
+        refreshUrl.searchParams.set("return", target);
+        return NextResponse.redirect(refreshUrl);
+      }
+    }
+  } catch {
+    // Deliberately swallowed. A refresh that does not happen is yesterday's behaviour; a middleware
+    // that throws is every page down.
+  }
+
   return NextResponse.next();
 }
 

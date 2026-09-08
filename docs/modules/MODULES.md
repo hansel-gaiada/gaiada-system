@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.53.0` | IN PROGRESS | WS1 | 2026-09-08 |
-| platform-ui | `0.67.0` | IN PROGRESS | WS5 | 2026-09-04 |
+| platform-ui | `0.68.0` | IN PROGRESS | WS5 | 2026-09-08 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -162,7 +162,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.67.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.68.0` · IN PROGRESS
 
 **0.67.0 (2026-09-03, FX, DEMO_MODE fixture parity sweep — PROTOTYPED.)** Every UI claim verified
 under `DEMO_MODE` is only as honest as the fixture it ran against. Swept `lib/demoMonitoring.ts`
