@@ -7,7 +7,10 @@ import type { ModuleContract } from "../contract";
 
 export const clientsModule: ModuleContract = {
   key: "clients",
-  migrations: ["0001_core.sql"],
+  // Client Centre (CC piece 2): client_centre_profiles is its OWN migration, deliberately not
+  // module-walled (client-reachable table — see that migration's own header). Listed here for
+  // documentation only; nothing in the registry reads ModuleContract.migrations programmatically.
+  migrations: ["0001_core.sql", "202609281655_client_centre_profiles.sql"],
   // IAM-01d migration: all 4 CLEAN but RE-DOMAINED — `client` is a 0001 core-schema kind shared by
   // files/meetings/pipeline/portal/contracts/search (catalog Judgement J1), so the grantable
   // permission is `core.client.*`, not `clients.client.*`, even though this module owns the CRUD
