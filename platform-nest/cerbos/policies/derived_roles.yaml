@@ -2178,6 +2178,22 @@ derivedRoles:
           expr: >-
             request.principal.attr.perms.exists(g, g.key == "portal.approve_post" &&
               g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
+    # CLIENT-CENTRE CC-D4 (2026-09-29, docs/plans/2026-09-29-client-centre.md): the 8th
+    # `perm_portal_*` mirror, added the same way and under the same safety argument as the 7 above —
+    # company-scope-only (no global branch), faithfully mirroring the `client` role-arm rule's OWN
+    # reach in resource_portal.yaml, never the generic "global || company" shape. CC-D4's actual
+    # editor narrowing (active, client-wide, capability=signer contact for THAT client, or the legacy
+    # `clients.portal_user_id`) is enforced in src/core/portal-centre.controller.ts's
+    # `canEditCentre()`, which Cerbos cannot see (it has no row) — exactly the same layering `sign`/
+    # `pay` already use on this resource (Cerbos grants "may attempt the action"; the route's own
+    # query narrows to the specific object).
+    - name: perm_portal_edit_company_profile
+      parentRoles: ["user"]
+      condition:
+        match:
+          expr: >-
+            request.principal.attr.perms.exists(g, g.key == "portal.edit_company_profile" &&
+              g.scopeType == "company" && g.scopeId == request.resource.attr.tenantId)
 
     # ══════════ IAM-14b (2026-08-22) — integration_connection, SELF-SCOPED MIRROR ONLY ══════════
     # Wired for `owner`, which is permission-native (IAM-04c §3: zero policy rules), so without a

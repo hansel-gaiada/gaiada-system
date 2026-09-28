@@ -6,12 +6,12 @@
     "catalogSource": "platform-nest/src/rbac/permission-catalog.json (369 grantable permissions, WSK-31 2026-08-27)",
     "model": "Two-layer (Ruling 1, option C): groups are the authoring surface; every permission remains individually assignable via an 'advanced' expansion. A group's sensitive flag is mechanical — true iff ANY member permission carries catalog sensitive:true.",
     "counts": {
-      "groups": 150,
-      "grantablePermissionsInCatalog": 390,
-      "permissionsCoveredByGroups": 358,
+      "groups": 151,
+      "grantablePermissionsInCatalog": 391,
+      "permissionsCoveredByGroups": 359,
       "permissionsAdvancedOnly": 32,
       "permissionsAppearingInMultipleGroups": 2,
-      "sensitiveGroups": 102
+      "sensitiveGroups": 103
     }
   },
   "groups": [
@@ -1116,6 +1116,16 @@
       "description": "Approve, or request changes to, social posts drafted for your brand before they are published.",
       "permissions": [
         "portal.approve_post"
+      ],
+      "sensitive": true
+    },
+    {
+      "key": "portal_edit_company_profile",
+      "name": "Client Portal — Edit Company Profile",
+      "domain": "portal",
+      "description": "Edit your company's Client Centre profile from the client portal (CC-D4: an active, client-wide contact with signing capability only — every other contact sees it read-only).",
+      "permissions": [
+        "portal.edit_company_profile"
       ],
       "sensitive": true
     },

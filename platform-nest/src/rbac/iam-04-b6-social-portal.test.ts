@@ -82,8 +82,10 @@ describe("IAM-04-B6 · portal + social_* permission-arm rollout (static, re-deri
     // lifted, not assuming it). Per this program's own discipline ("if it SHRANK, update the
     // baseline down, don't leave it stale" — REG1's own header), this pin is updated to match, not
     // silenced: the finding changed, deliberately, with evidence.
+    // CLIENT-CENTRE CC-D4 (2026-09-29): +1 action, `edit_company_profile` — see
+    // `iam-04-b7-portal.test.ts` for the full structural pin of the (now 8-action) wired set.
     expect([...wiredPermActions(kinds, "portal")].sort()).toEqual(
-      ["approve_post", "decide", "pay", "read", "request_change", "sign", "update_profile"],
+      ["approve_post", "decide", "edit_company_profile", "pay", "read", "request_change", "sign", "update_profile"],
     );
   });
 

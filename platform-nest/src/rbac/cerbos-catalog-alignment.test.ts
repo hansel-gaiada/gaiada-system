@@ -122,7 +122,10 @@ describe("IAM-07b link 1 · Cerbos policies <-> permission-catalog.json (the wav
     // deliberately no update, design §3.2), 396/97 -> 404/99.
     // CLIENT-QA B.3a (re-applied 2026-09-07): +1 pair, NO new kind — `verify` is a new action on the
     // existing webdev_change_request kind. 404/99 -> 405/99.
-    expect(catalog.length).toBe(405);
+    // CLIENT-CENTRE CC-D4 (2026-09-29): +1 pair, NO new kind — `edit_company_profile` is a new
+    // action on the EXISTING `portal` kind (the client-editor half of the Client Centre profile
+    // surface). 405/99 -> 406/99.
+    expect(catalog.length).toBe(406);
     expect(catalogKindSet.size).toBe(99);
   });
 

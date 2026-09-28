@@ -22,7 +22,7 @@ import { join } from "node:path";
 import * as yaml from "js-yaml";
 
 const POLICIES_DIR = join(__dirname, "../../cerbos/policies");
-const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post"] as const;
+const PORTAL_ACTIONS = ["read", "decide", "sign", "pay", "update_profile", "request_change", "approve_post", "edit_company_profile"] as const;
 
 interface ParsedRule {
   actions: string[];
@@ -86,7 +86,7 @@ describe("IAM-04-B7 · portal permission-arm retry (static, re-derived every run
   const derivedExprs = loadDerivedRoleExprs();
   const portalRules = wiredPermRules(kinds, "portal");
 
-  it("portal now wires exactly the 7 catalogued actions — not more, not fewer", () => {
+  it("portal now wires exactly the catalogued actions — not more, not fewer (CLIENT-CENTRE CC-D4, 2026-09-29: 7 -> 8, +edit_company_profile)", () => {
     expect([...portalRules.keys()].sort()).toEqual([...PORTAL_ACTIONS].sort());
   });
 

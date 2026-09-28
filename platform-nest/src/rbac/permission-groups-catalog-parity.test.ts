@@ -106,7 +106,10 @@ describe("IAM-07b · permission-groups.json <-> permission-catalog.json (previou
     // CLIENT-QA B.3a (re-applied 2026-09-07): +1 grantable — webdev.change_request.verify, in its OWN
     // group (NOT folded into webdev_triage_change_requests: bundling them would make every triager a
     // verifier). 389 -> 390.
-    expect(grantable.length).toBe(390);
+    // CLIENT-CENTRE CC-D4 (2026-09-29): +1 grantable — portal.edit_company_profile, in its OWN group
+    // (portal_edit_company_profile — NOT folded into portal_basic_access: bundling it would make
+    // every basic-access contact an editor). 390 -> 391.
+    expect(grantable.length).toBe(391);
     expect(relationshipKeys.size).toBe(15);
   });
 

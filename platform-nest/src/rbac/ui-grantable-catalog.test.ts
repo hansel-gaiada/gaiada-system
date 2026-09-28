@@ -81,8 +81,10 @@ describe("IAM Phase 2 (P2-03) · ui_grantable allow-list — catalog completenes
     // 396 -> 404 / 381 -> 389.
     // CLIENT-QA B.3a (2026-08-27, re-applied 2026-09-07): +1 grantable / +1 total —
     // `webdev.change_request.verify` on the EXISTING webdev_change_request kind. 404 -> 405 / 389 -> 390.
-    expect(permissions.length).toBe(405);
-    expect(permissions.filter((p) => p.class === "grantable").length).toBe(390);
+    // CLIENT-CENTRE CC-D4 (2026-09-29): +1 grantable / +1 total — `portal.edit_company_profile` on
+    // the EXISTING `portal` kind. 405 -> 406 / 390 -> 391.
+    expect(permissions.length).toBe(406);
+    expect(permissions.filter((p) => p.class === "grantable").length).toBe(391);
     expect(permissions.filter((p) => p.class === "relationship").length).toBe(15);
   });
 
