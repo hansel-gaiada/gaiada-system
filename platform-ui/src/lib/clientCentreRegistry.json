@@ -1,0 +1,3409 @@
+{
+  "_comment": "GENERATED from cmc/origin/index.html (Company Management Centre, 2026-09-19) by the client-centre registry extractor. Data only: every field, connection, department, industry module and settings map CMC ships, title-cased exactly as CMC renders it. Do not hand-edit without bumping `version`.",
+  "version": 1,
+  "fieldGroups": [
+    "Identity",
+    "Offering",
+    "Audience & market",
+    "Brand & voice",
+    "Digital presence",
+    "Location & contact",
+    "Operations",
+    "Finance",
+    "Legal",
+    "People",
+    "Sales",
+    "Communication",
+    "Goals & reporting",
+    "SEO & AI visibility",
+    "Product & IT",
+    "Industry"
+  ],
+  "fields": {
+    "legal": {
+      "label": "Legal / registered name",
+      "type": "text",
+      "group": "Identity"
+    },
+    "trading": {
+      "label": "Trading name / brand",
+      "type": "text",
+      "group": "Identity"
+    },
+    "tagline": {
+      "label": "Tagline",
+      "type": "text",
+      "group": "Identity"
+    },
+    "description": {
+      "label": "Company description",
+      "type": "textarea",
+      "group": "Identity",
+      "help": "2–4 sentences: what you do, for whom, and where."
+    },
+    "industry": {
+      "label": "Industry / category",
+      "type": "text",
+      "group": "Identity"
+    },
+    "founded": {
+      "label": "Founded (year)",
+      "type": "text",
+      "group": "Identity"
+    },
+    "size": {
+      "label": "Company size",
+      "type": "text",
+      "group": "Identity"
+    },
+    "story": {
+      "label": "Brand story & history",
+      "type": "textarea",
+      "group": "Identity"
+    },
+    "products": {
+      "label": "Products & services",
+      "type": "textarea",
+      "group": "Offering",
+      "help": "One per line, with a short description."
+    },
+    "usps": {
+      "label": "Unique selling points",
+      "type": "textarea",
+      "group": "Offering",
+      "help": "Why customers choose you over alternatives."
+    },
+    "pricing": {
+      "label": "Pricing & packages",
+      "type": "textarea",
+      "group": "Offering"
+    },
+    "revenue": {
+      "label": "Revenue streams",
+      "type": "textarea",
+      "group": "Offering"
+    },
+    "awards": {
+      "label": "Certifications, awards & memberships",
+      "type": "textarea",
+      "group": "Offering",
+      "help": "Credentials that build trust (used for E-E-A-T and PR)."
+    },
+    "audience": {
+      "label": "Target audience / personas",
+      "type": "textarea",
+      "group": "Audience & market"
+    },
+    "segments": {
+      "label": "Customer segments",
+      "type": "textarea",
+      "group": "Audience & market",
+      "help": "e.g. leisure vs corporate, local vs international."
+    },
+    "markets": {
+      "label": "Primary markets / countries",
+      "type": "text",
+      "group": "Audience & market"
+    },
+    "service_area": {
+      "label": "Service area / locations served",
+      "type": "text",
+      "group": "Audience & market"
+    },
+    "competitors": {
+      "label": "Main competitors",
+      "type": "textarea",
+      "group": "Audience & market",
+      "help": "Name and website, one per line."
+    },
+    "positioning": {
+      "label": "Positioning statement",
+      "type": "textarea",
+      "group": "Audience & market"
+    },
+    "seasonality": {
+      "label": "Seasonality & peak periods",
+      "type": "text",
+      "group": "Audience & market"
+    },
+    "faq": {
+      "label": "Top customer questions",
+      "type": "textarea",
+      "group": "Audience & market",
+      "help": "The questions customers actually ask — drives FAQ, AEO and support content."
+    },
+    "voice": {
+      "label": "Tone of voice",
+      "type": "textarea",
+      "group": "Brand & voice"
+    },
+    "messaging": {
+      "label": "Key messages",
+      "type": "textarea",
+      "group": "Brand & voice"
+    },
+    "guidelines": {
+      "label": "Brand guidelines link",
+      "type": "url",
+      "group": "Brand & voice"
+    },
+    "assets": {
+      "label": "Brand asset library link",
+      "type": "url",
+      "group": "Brand & voice",
+      "help": "Logos, photos, videos, templates."
+    },
+    "logo": {
+      "label": "Logo URL",
+      "type": "url",
+      "group": "Brand & voice"
+    },
+    "color": {
+      "label": "Primary brand colour",
+      "type": "text",
+      "group": "Brand & voice"
+    },
+    "website": {
+      "label": "Website",
+      "type": "url",
+      "group": "Digital presence"
+    },
+    "domains": {
+      "label": "Other domains & subdomains",
+      "type": "textarea",
+      "group": "Digital presence"
+    },
+    "cms": {
+      "label": "CMS / website platform",
+      "type": "text",
+      "group": "Digital presence"
+    },
+    "gbp": {
+      "label": "Google Business Profile link",
+      "type": "url",
+      "group": "Digital presence"
+    },
+    "social": {
+      "label": "Social profiles",
+      "type": "textarea",
+      "group": "Digital presence",
+      "help": "Platform and URL, one per line."
+    },
+    "reviews": {
+      "label": "Review platforms & listings",
+      "type": "textarea",
+      "group": "Digital presence",
+      "help": "Google, TripAdvisor, Trustpilot, etc. with links."
+    },
+    "content": {
+      "label": "Existing content assets",
+      "type": "textarea",
+      "group": "Digital presence",
+      "help": "Blog, guides, videos, podcasts — where they live."
+    },
+    "booking_url": {
+      "label": "Online booking URL",
+      "type": "url",
+      "group": "Digital presence"
+    },
+    "address": {
+      "label": "Address",
+      "type": "textarea",
+      "group": "Location & contact"
+    },
+    "city": {
+      "label": "City",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "country": {
+      "label": "Country",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "maps": {
+      "label": "Google Maps link",
+      "type": "url",
+      "group": "Location & contact"
+    },
+    "mapsid": {
+      "label": "Google Maps place ID",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "locations": {
+      "label": "Other locations / branches",
+      "type": "textarea",
+      "group": "Location & contact"
+    },
+    "phone": {
+      "label": "Phone",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "whatsapp": {
+      "label": "WhatsApp",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "email": {
+      "label": "Primary email",
+      "type": "email",
+      "group": "Location & contact"
+    },
+    "hours": {
+      "label": "Opening / operating hours",
+      "type": "textarea",
+      "group": "Location & contact"
+    },
+    "timezone": {
+      "label": "Timezone",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "languages": {
+      "label": "Languages",
+      "type": "text",
+      "group": "Location & contact"
+    },
+    "capacity": {
+      "label": "Capacity (rooms, tables, seats, slots)",
+      "type": "text",
+      "group": "Operations"
+    },
+    "leadtime": {
+      "label": "Booking lead time / advance window",
+      "type": "text",
+      "group": "Operations"
+    },
+    "deposit": {
+      "label": "Deposit policy",
+      "type": "textarea",
+      "group": "Operations"
+    },
+    "cancellation": {
+      "label": "Cancellation & no-show policy",
+      "type": "textarea",
+      "group": "Operations"
+    },
+    "suppliers": {
+      "label": "Key suppliers",
+      "type": "textarea",
+      "group": "Operations"
+    },
+    "maintenance": {
+      "label": "Maintenance contractors",
+      "type": "textarea",
+      "group": "Operations"
+    },
+    "licenses": {
+      "label": "Licences & permits",
+      "type": "textarea",
+      "group": "Operations",
+      "help": "Type, number, expiry."
+    },
+    "ops_lead": {
+      "label": "Operations lead / contact",
+      "type": "text",
+      "group": "Operations"
+    },
+    "fye": {
+      "label": "Fiscal year end",
+      "type": "text",
+      "group": "Finance"
+    },
+    "currency": {
+      "label": "Reporting currency",
+      "type": "text",
+      "group": "Finance"
+    },
+    "taxid": {
+      "label": "Tax / registration number",
+      "type": "text",
+      "group": "Finance"
+    },
+    "accountant": {
+      "label": "Accountant / bookkeeper contact",
+      "type": "text",
+      "group": "Finance"
+    },
+    "banks": {
+      "label": "Banks used",
+      "type": "text",
+      "group": "Finance"
+    },
+    "payment_methods": {
+      "label": "Payment methods accepted",
+      "type": "text",
+      "group": "Finance"
+    },
+    "invoicing": {
+      "label": "Invoicing & payment terms",
+      "type": "text",
+      "group": "Finance"
+    },
+    "budget_mk": {
+      "label": "Monthly marketing budget",
+      "type": "text",
+      "group": "Finance"
+    },
+    "budget_seo": {
+      "label": "Monthly SEO / content budget",
+      "type": "text",
+      "group": "Finance"
+    },
+    "fin_cadence": {
+      "label": "Financial review cadence",
+      "type": "text",
+      "group": "Finance"
+    },
+    "entity": {
+      "label": "Entity type",
+      "type": "text",
+      "group": "Legal"
+    },
+    "jurisdiction": {
+      "label": "Jurisdiction",
+      "type": "text",
+      "group": "Legal"
+    },
+    "regno": {
+      "label": "Company registration number",
+      "type": "text",
+      "group": "Legal"
+    },
+    "agent": {
+      "label": "Registered agent / address",
+      "type": "text",
+      "group": "Legal"
+    },
+    "directors": {
+      "label": "Directors & shareholders",
+      "type": "textarea",
+      "group": "Legal"
+    },
+    "lawyer": {
+      "label": "Legal counsel contact",
+      "type": "text",
+      "group": "Legal"
+    },
+    "trademarks": {
+      "label": "Trademarks & IP",
+      "type": "textarea",
+      "group": "Legal"
+    },
+    "insurance": {
+      "label": "Insurance policies",
+      "type": "textarea",
+      "group": "Legal",
+      "help": "Type, insurer, policy number, expiry."
+    },
+    "contracts": {
+      "label": "Contract storage location",
+      "type": "url",
+      "group": "Legal"
+    },
+    "renewals": {
+      "label": "Key filing & renewal dates",
+      "type": "textarea",
+      "group": "Legal"
+    },
+    "headcount": {
+      "label": "Current headcount",
+      "type": "text",
+      "group": "People"
+    },
+    "org": {
+      "label": "Org structure & key roles",
+      "type": "textarea",
+      "group": "People"
+    },
+    "hr_contact": {
+      "label": "HR lead / contact",
+      "type": "text",
+      "group": "People"
+    },
+    "emp_types": {
+      "label": "Employment types",
+      "type": "text",
+      "group": "People",
+      "help": "Full-time, part-time, casual, contractor."
+    },
+    "emp_countries": {
+      "label": "Countries of employment",
+      "type": "text",
+      "group": "People"
+    },
+    "pay_cycle": {
+      "label": "Pay cycle",
+      "type": "text",
+      "group": "People"
+    },
+    "benefits": {
+      "label": "Benefits offered",
+      "type": "textarea",
+      "group": "People"
+    },
+    "eor": {
+      "label": "PEO / EOR provider",
+      "type": "text",
+      "group": "People"
+    },
+    "review_cycle": {
+      "label": "Performance review cycle",
+      "type": "text",
+      "group": "People"
+    },
+    "roster": {
+      "label": "Shift pattern / rostering",
+      "type": "textarea",
+      "group": "People"
+    },
+    "authors": {
+      "label": "Experts & spokespeople",
+      "type": "textarea",
+      "group": "People",
+      "help": "Team members who can be credited as authors or quoted in PR."
+    },
+    "sales_model": {
+      "label": "Sales model",
+      "type": "text",
+      "group": "Sales",
+      "help": "Inbound, outbound, partner, walk-in."
+    },
+    "deal_size": {
+      "label": "Average deal / transaction size",
+      "type": "text",
+      "group": "Sales"
+    },
+    "sales_cycle": {
+      "label": "Average sales cycle",
+      "type": "text",
+      "group": "Sales"
+    },
+    "quota": {
+      "label": "Quota period",
+      "type": "text",
+      "group": "Sales"
+    },
+    "lead_sources": {
+      "label": "Lead sources",
+      "type": "textarea",
+      "group": "Sales"
+    },
+    "territories": {
+      "label": "Territories / segments per rep",
+      "type": "textarea",
+      "group": "Sales"
+    },
+    "sales_lead": {
+      "label": "Sales lead / contact",
+      "type": "text",
+      "group": "Sales"
+    },
+    "channels": {
+      "label": "Customer channels offered",
+      "type": "text",
+      "group": "Communication"
+    },
+    "response": {
+      "label": "Response time targets",
+      "type": "text",
+      "group": "Communication"
+    },
+    "escalation": {
+      "label": "Escalation contacts",
+      "type": "textarea",
+      "group": "Communication"
+    },
+    "templates": {
+      "label": "Message templates location",
+      "type": "url",
+      "group": "Communication"
+    },
+    "comm_lead": {
+      "label": "Communication lead / contact",
+      "type": "text",
+      "group": "Communication"
+    },
+    "goals": {
+      "label": "Business goals (12 months)",
+      "type": "textarea",
+      "group": "Goals & reporting"
+    },
+    "kpis": {
+      "label": "Key KPIs tracked",
+      "type": "textarea",
+      "group": "Goals & reporting"
+    },
+    "conversions": {
+      "label": "What counts as a conversion",
+      "type": "textarea",
+      "group": "Goals & reporting",
+      "help": "Bookings, calls, form fills, purchases, WhatsApp chats…"
+    },
+    "reporting": {
+      "label": "Reporting cadence",
+      "type": "text",
+      "group": "Goals & reporting"
+    },
+    "planning": {
+      "label": "Planning cadence",
+      "type": "text",
+      "group": "Goals & reporting"
+    },
+    "board": {
+      "label": "Board / investor meeting cadence",
+      "type": "text",
+      "group": "Goals & reporting"
+    },
+    "investors": {
+      "label": "Investors & stakeholders",
+      "type": "textarea",
+      "group": "Goals & reporting"
+    },
+    "advisors": {
+      "label": "Advisors & mentors",
+      "type": "textarea",
+      "group": "Goals & reporting"
+    },
+    "agency": {
+      "label": "Agencies & partners",
+      "type": "textarea",
+      "group": "Goals & reporting"
+    },
+    "keywords": {
+      "label": "Target keywords & topics",
+      "type": "textarea",
+      "group": "SEO & AI visibility"
+    },
+    "priority_pages": {
+      "label": "Priority pages / URLs",
+      "type": "textarea",
+      "group": "SEO & AI visibility",
+      "help": "The pages that matter most commercially."
+    },
+    "seo_history": {
+      "label": "Previous SEO work & agencies",
+      "type": "textarea",
+      "group": "SEO & AI visibility",
+      "help": "Past agencies, migrations, penalties, known issues."
+    },
+    "ai_visibility": {
+      "label": "Current AI visibility",
+      "type": "textarea",
+      "group": "SEO & AI visibility",
+      "help": "How ChatGPT, Gemini and Perplexity describe you today, and where you're missing."
+    },
+    "press": {
+      "label": "Press mentions & citations",
+      "type": "textarea",
+      "group": "SEO & AI visibility"
+    },
+    "product_type": {
+      "label": "Product type / platform",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "stack": {
+      "label": "Tech stack",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "envs": {
+      "label": "Environments",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "release": {
+      "label": "Release cadence",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "pd_lead": {
+      "label": "Product / engineering lead",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "devices": {
+      "label": "Managed devices",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "idp": {
+      "label": "Identity provider",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "it_contact": {
+      "label": "IT support contact / MSP",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "backup": {
+      "label": "Backup policy",
+      "type": "text",
+      "group": "Product & IT"
+    },
+    "rooms": {
+      "label": "Number of rooms / units",
+      "type": "text",
+      "group": "Industry"
+    },
+    "rating": {
+      "label": "Star rating / category",
+      "type": "text",
+      "group": "Industry"
+    },
+    "checkin": {
+      "label": "Check-in / check-out times",
+      "type": "text",
+      "group": "Industry"
+    },
+    "adr": {
+      "label": "Average daily rate",
+      "type": "text",
+      "group": "Industry"
+    },
+    "gm": {
+      "label": "General manager / contact",
+      "type": "text",
+      "group": "Industry"
+    },
+    "seats": {
+      "label": "Seats / covers",
+      "type": "text",
+      "group": "Industry"
+    },
+    "cuisine": {
+      "label": "Cuisine / concept",
+      "type": "text",
+      "group": "Industry"
+    },
+    "spend": {
+      "label": "Average spend per head",
+      "type": "text",
+      "group": "Industry"
+    },
+    "manager": {
+      "label": "Manager / head chef contact",
+      "type": "text",
+      "group": "Industry"
+    },
+    "beds": {
+      "label": "Beds / consultation rooms",
+      "type": "text",
+      "group": "Industry"
+    },
+    "specialties": {
+      "label": "Specialties offered",
+      "type": "textarea",
+      "group": "Industry"
+    },
+    "facility_licence": {
+      "label": "Facility licence number",
+      "type": "text",
+      "group": "Industry"
+    },
+    "accreditation": {
+      "label": "Accreditation",
+      "type": "text",
+      "group": "Industry"
+    },
+    "director": {
+      "label": "Medical director / contact",
+      "type": "text",
+      "group": "Industry"
+    },
+    "treatment_rooms": {
+      "label": "Treatment rooms",
+      "type": "text",
+      "group": "Industry"
+    },
+    "therapists": {
+      "label": "Number of therapists",
+      "type": "text",
+      "group": "Industry"
+    },
+    "ticket": {
+      "label": "Average ticket",
+      "type": "text",
+      "group": "Industry"
+    },
+    "clients": {
+      "label": "Active clients",
+      "type": "text",
+      "group": "Industry"
+    },
+    "billing_model": {
+      "label": "Billing model",
+      "type": "text",
+      "group": "Industry",
+      "help": "Retainer, project, hourly."
+    },
+    "utilisation": {
+      "label": "Utilisation target",
+      "type": "text",
+      "group": "Industry"
+    },
+    "stores": {
+      "label": "Number of stores",
+      "type": "text",
+      "group": "Industry"
+    },
+    "skus": {
+      "label": "Approx. SKUs",
+      "type": "text",
+      "group": "Industry"
+    },
+    "platform": {
+      "label": "E-commerce platform",
+      "type": "text",
+      "group": "Industry"
+    },
+    "aov": {
+      "label": "Average order value",
+      "type": "text",
+      "group": "Industry"
+    },
+    "plans": {
+      "label": "Pricing plans",
+      "type": "textarea",
+      "group": "Industry"
+    },
+    "mrr": {
+      "label": "MRR",
+      "type": "text",
+      "group": "Industry"
+    },
+    "customers": {
+      "label": "Active customers",
+      "type": "text",
+      "group": "Industry"
+    },
+    "sla": {
+      "label": "Uptime SLA",
+      "type": "text",
+      "group": "Industry"
+    }
+  },
+  "connections": {
+    "ga4": {
+      "name": "Google Analytics (GA4)",
+      "idLabel": "Property ID"
+    },
+    "gsc": {
+      "name": "Google Search Console",
+      "idLabel": "Property URL"
+    },
+    "gtm": {
+      "name": "Google Tag Manager",
+      "idLabel": "Container ID"
+    },
+    "gads": {
+      "name": "Google Ads",
+      "idLabel": "Customer ID"
+    },
+    "meta": {
+      "name": "Meta Business & Ads",
+      "idLabel": "Ad account ID"
+    },
+    "otherads": {
+      "name": "LinkedIn / TikTok Ads",
+      "idLabel": "Account ID"
+    },
+    "gbp": {
+      "name": "Google Business Profile",
+      "idLabel": "Location ID"
+    },
+    "seo_tool": {
+      "name": "SEO tool (Semrush, Ahrefs)",
+      "idLabel": "Project name"
+    },
+    "rank": {
+      "name": "Rank tracker",
+      "idLabel": "Account"
+    },
+    "bing": {
+      "name": "Bing Webmaster Tools",
+      "idLabel": "Site"
+    },
+    "crawler": {
+      "name": "Site crawler (Screaming Frog, Sitebulb)",
+      "idLabel": "Licence / account"
+    },
+    "ai_vis": {
+      "name": "AI visibility tool (Peec, Profound, Otterly)",
+      "idLabel": "Account"
+    },
+    "looker": {
+      "name": "Reporting (Looker Studio, AgencyAnalytics)",
+      "idLabel": "Report link"
+    },
+    "schema": {
+      "name": "Schema / structured data tool",
+      "idLabel": "Account"
+    },
+    "cms": {
+      "name": "CMS (WordPress, Webflow)",
+      "idLabel": "Site URL"
+    },
+    "dns": {
+      "name": "Domain registrar & DNS",
+      "idLabel": "Domain"
+    },
+    "hosting": {
+      "name": "Hosting",
+      "idLabel": "Account / server"
+    },
+    "esp": {
+      "name": "Email platform (Mailchimp, Klaviyo, HubSpot)",
+      "idLabel": "Account name"
+    },
+    "crm": {
+      "name": "CRM (HubSpot, Salesforce, Pipedrive)",
+      "idLabel": "Workspace"
+    },
+    "social": {
+      "name": "Social accounts (Instagram, Facebook, LinkedIn, TikTok, YouTube, X)",
+      "idLabel": "Handles"
+    },
+    "design": {
+      "name": "Design tools (Canva, Figma)",
+      "idLabel": "Team / workspace"
+    },
+    "sched": {
+      "name": "Social scheduling tool",
+      "idLabel": "Account"
+    },
+    "reviews": {
+      "name": "Review platforms (Google, TripAdvisor, Trustpilot)",
+      "idLabel": "Listings"
+    },
+    "booking": {
+      "name": "Booking / reservation system",
+      "idLabel": "Account"
+    },
+    "channel_mgr": {
+      "name": "Channel manager",
+      "idLabel": "Account"
+    },
+    "ota": {
+      "name": "Booking.com / Expedia / Agoda",
+      "idLabel": "Property or listing IDs"
+    },
+    "airbnb": {
+      "name": "Airbnb",
+      "idLabel": "Listing ID"
+    },
+    "tables": {
+      "name": "OpenTable / SevenRooms / Chope",
+      "idLabel": "Account"
+    },
+    "rwg": {
+      "name": "Reserve with Google",
+      "idLabel": "Listing"
+    },
+    "cal": {
+      "name": "Calendar sync (Google, iCal)",
+      "idLabel": "Calendar"
+    },
+    "gateway": {
+      "name": "Payment gateway / deposits",
+      "idLabel": "Merchant ID"
+    },
+    "reminders": {
+      "name": "Confirmation & reminder messaging (email, WhatsApp, SMS)",
+      "idLabel": "Account"
+    },
+    "widget": {
+      "name": "Website booking widget",
+      "idLabel": "URL"
+    },
+    "accounting": {
+      "name": "Accounting software (Xero, QuickBooks)",
+      "idLabel": "Organisation name"
+    },
+    "bank": {
+      "name": "Business bank",
+      "idLabel": "Bank & account name"
+    },
+    "processor": {
+      "name": "Payment processor (Stripe, PayPal)",
+      "idLabel": "Account name"
+    },
+    "payroll": {
+      "name": "Payroll provider",
+      "idLabel": "Account"
+    },
+    "expenses": {
+      "name": "Expense management tool",
+      "idLabel": "Account"
+    },
+    "invoicing": {
+      "name": "Invoicing tool",
+      "idLabel": "Account"
+    },
+    "taxportal": {
+      "name": "Tax authority portal",
+      "idLabel": "Portal / ID"
+    },
+    "insurer": {
+      "name": "Insurance provider(s)",
+      "idLabel": "Policy reference"
+    },
+    "captable": {
+      "name": "Cap table tool",
+      "idLabel": "Account"
+    },
+    "hris": {
+      "name": "HRIS (BambooHR, Gusto, Deel, Rippling)",
+      "idLabel": "Company account"
+    },
+    "ats": {
+      "name": "Applicant tracking system",
+      "idLabel": "Account"
+    },
+    "benefits": {
+      "name": "Benefits provider",
+      "idLabel": "Account"
+    },
+    "jobboards": {
+      "name": "Job boards (LinkedIn, Indeed)",
+      "idLabel": "Company page"
+    },
+    "lms": {
+      "name": "Learning platform",
+      "idLabel": "Account"
+    },
+    "timeclock": {
+      "name": "Time, leave & rostering",
+      "idLabel": "Account"
+    },
+    "handbook": {
+      "name": "Employee handbook location",
+      "idLabel": "Link"
+    },
+    "esign": {
+      "name": "E-signature (DocuSign, PandaDoc)",
+      "idLabel": "Account"
+    },
+    "docs_store": {
+      "name": "Contract & document storage",
+      "idLabel": "Folder link"
+    },
+    "registry": {
+      "name": "Company registry portal",
+      "idLabel": "Portal / ID"
+    },
+    "tm_registry": {
+      "name": "Trademark registry",
+      "idLabel": "Registration numbers"
+    },
+    "compliance": {
+      "name": "Compliance / privacy tool",
+      "idLabel": "Account"
+    },
+    "permits": {
+      "name": "Licences & permits register",
+      "idLabel": "Link"
+    },
+    "prospecting": {
+      "name": "Prospecting (Apollo, Sales Navigator)",
+      "idLabel": "Account"
+    },
+    "sequencer": {
+      "name": "Sequencing / dialer",
+      "idLabel": "Account"
+    },
+    "proposals": {
+      "name": "Proposal & quoting tool",
+      "idLabel": "Account"
+    },
+    "scheduler": {
+      "name": "Meeting scheduler (Calendly)",
+      "idLabel": "Link"
+    },
+    "mail": {
+      "name": "Email provider (Google Workspace, Microsoft 365)",
+      "idLabel": "Domain"
+    },
+    "helpdesk": {
+      "name": "Shared inbox / helpdesk (Zendesk, Intercom, Front)",
+      "idLabel": "Workspace"
+    },
+    "wa": {
+      "name": "WhatsApp Business",
+      "idLabel": "Business number"
+    },
+    "sms": {
+      "name": "SMS provider (Twilio, MessageBird)",
+      "idLabel": "Account"
+    },
+    "voip": {
+      "name": "Phone system / VoIP",
+      "idLabel": "Number / account"
+    },
+    "chat": {
+      "name": "Live chat widget",
+      "idLabel": "Account"
+    },
+    "dm": {
+      "name": "Instagram & Messenger inbox",
+      "idLabel": "Page / account"
+    },
+    "kb": {
+      "name": "Knowledge base",
+      "idLabel": "URL"
+    },
+    "survey": {
+      "name": "Survey tool (NPS, CSAT)",
+      "idLabel": "Account"
+    },
+    "signatures": {
+      "name": "Email signatures & templates",
+      "idLabel": "Link"
+    },
+    "code": {
+      "name": "Code host (GitHub, GitLab)",
+      "idLabel": "Organisation"
+    },
+    "issues": {
+      "name": "Issue tracker (Jira, Linear)",
+      "idLabel": "Workspace"
+    },
+    "sentry": {
+      "name": "Error monitoring (Sentry)",
+      "idLabel": "Organisation"
+    },
+    "prod_analytics": {
+      "name": "Product analytics (Mixpanel, PostHog)",
+      "idLabel": "Project"
+    },
+    "cloud": {
+      "name": "Cloud / hosting (AWS, Vercel)",
+      "idLabel": "Account"
+    },
+    "cicd": {
+      "name": "CI / CD",
+      "idLabel": "Account"
+    },
+    "appstores": {
+      "name": "App stores",
+      "idLabel": "Developer account"
+    },
+    "workspace": {
+      "name": "Workspace suite (Google Workspace, Microsoft 365)",
+      "idLabel": "Domain / tenant"
+    },
+    "pw": {
+      "name": "Password manager (1Password, Bitwarden)",
+      "idLabel": "Team account"
+    },
+    "mdm": {
+      "name": "Device management (MDM)",
+      "idLabel": "Account"
+    },
+    "backup": {
+      "name": "Backup service",
+      "idLabel": "Account"
+    },
+    "edr": {
+      "name": "Antivirus / EDR",
+      "idLabel": "Account"
+    },
+    "saasmgmt": {
+      "name": "SaaS management",
+      "idLabel": "Account"
+    },
+    "chat_internal": {
+      "name": "Internal chat (Slack, WhatsApp, Teams)",
+      "idLabel": "Workspace"
+    },
+    "wiki": {
+      "name": "Docs / wiki (Notion, Google Drive)",
+      "idLabel": "Workspace"
+    },
+    "pm": {
+      "name": "Project management (Asana, ClickUp, Trello)",
+      "idLabel": "Workspace"
+    },
+    "files": {
+      "name": "File storage (Drive, Dropbox)",
+      "idLabel": "Root folder"
+    },
+    "inventory": {
+      "name": "Inventory / stock system",
+      "idLabel": "Account"
+    },
+    "supplier_reg": {
+      "name": "Supplier register",
+      "idLabel": "Link"
+    },
+    "maint": {
+      "name": "Maintenance ticketing",
+      "idLabel": "Account"
+    },
+    "utilities": {
+      "name": "Utilities accounts (power, water, internet)",
+      "idLabel": "Account numbers"
+    },
+    "automation": {
+      "name": "Automation (Zapier, n8n)",
+      "idLabel": "Account"
+    },
+    "okr": {
+      "name": "OKR / goals tool",
+      "idLabel": "Workspace"
+    },
+    "boardportal": {
+      "name": "Board portal / data room",
+      "idLabel": "Link"
+    },
+    "bi": {
+      "name": "BI dashboard (Looker, Metabase)",
+      "idLabel": "Account"
+    },
+    "investor_tool": {
+      "name": "Investor update tool",
+      "idLabel": "Account"
+    },
+    "strategy_docs": {
+      "name": "Strategy documents",
+      "idLabel": "Folder link"
+    },
+    "pms": {
+      "name": "Property management system (Cloudbeds, Mews, Opera)",
+      "idLabel": "Property ID"
+    },
+    "hotel_ads": {
+      "name": "Google Hotel Ads",
+      "idLabel": "Account"
+    },
+    "rms": {
+      "name": "Revenue management tool",
+      "idLabel": "Account"
+    },
+    "fnb_pos": {
+      "name": "F&B point of sale",
+      "idLabel": "Account"
+    },
+    "locks": {
+      "name": "Door lock / key system",
+      "idLabel": "Vendor"
+    },
+    "guest_msg": {
+      "name": "Guest messaging (WhatsApp, in-stay app)",
+      "idLabel": "Account"
+    },
+    "pos": {
+      "name": "Point of sale (Square, Toast, Lightspeed, Shopify POS)",
+      "idLabel": "Account"
+    },
+    "delivery": {
+      "name": "Delivery platforms (GoFood, GrabFood, Uber Eats)",
+      "idLabel": "Merchant IDs"
+    },
+    "qr": {
+      "name": "QR / online ordering",
+      "idLabel": "URL"
+    },
+    "recipe": {
+      "name": "Inventory & recipe costing",
+      "idLabel": "Account"
+    },
+    "terminal": {
+      "name": "Payment terminal",
+      "idLabel": "Merchant ID"
+    },
+    "food_safety": {
+      "name": "Food safety records",
+      "idLabel": "Link"
+    },
+    "supplier_order": {
+      "name": "Supplier ordering platform",
+      "idLabel": "Account"
+    },
+    "ehr": {
+      "name": "EHR / EMR system",
+      "idLabel": "Account"
+    },
+    "pmsys": {
+      "name": "Practice management system",
+      "idLabel": "Account"
+    },
+    "claims": {
+      "name": "Insurance / claims platform",
+      "idLabel": "Provider IDs"
+    },
+    "lab": {
+      "name": "Laboratory system",
+      "idLabel": "Account"
+    },
+    "pharmacy": {
+      "name": "Pharmacy / inventory system",
+      "idLabel": "Account"
+    },
+    "telehealth": {
+      "name": "Telehealth platform",
+      "idLabel": "Account"
+    },
+    "portal": {
+      "name": "Patient / client portal",
+      "idLabel": "URL"
+    },
+    "devices_reg": {
+      "name": "Medical device register",
+      "idLabel": "Link"
+    },
+    "regulator": {
+      "name": "Regulator portal",
+      "idLabel": "Registration number"
+    },
+    "membership": {
+      "name": "Membership / loyalty platform",
+      "idLabel": "Account"
+    },
+    "giftcards": {
+      "name": "Gift card platform",
+      "idLabel": "Account"
+    },
+    "retail_inv": {
+      "name": "Retail inventory",
+      "idLabel": "Account"
+    },
+    "product_suppliers": {
+      "name": "Product suppliers",
+      "idLabel": "Account"
+    },
+    "timetrack": {
+      "name": "Time tracking (Harvest, Toggl)",
+      "idLabel": "Account"
+    },
+    "client_portal": {
+      "name": "Client portal",
+      "idLabel": "URL"
+    },
+    "freelancers": {
+      "name": "Freelancer platform",
+      "idLabel": "Account"
+    },
+    "whitelabel": {
+      "name": "White-label tools",
+      "idLabel": "Accounts"
+    },
+    "client_access": {
+      "name": "Client ad & analytics access",
+      "idLabel": "Access list"
+    },
+    "storefront": {
+      "name": "Storefront (Shopify, WooCommerce)",
+      "idLabel": "Store URL"
+    },
+    "wms": {
+      "name": "3PL / warehouse",
+      "idLabel": "Account"
+    },
+    "shipping": {
+      "name": "Shipping & carriers",
+      "idLabel": "Accounts"
+    },
+    "marketplaces": {
+      "name": "Marketplaces (Amazon, Tokopedia, Shopee)",
+      "idLabel": "Seller IDs"
+    },
+    "reviews_app": {
+      "name": "Reviews app",
+      "idLabel": "Account"
+    },
+    "subs_app": {
+      "name": "Subscription app",
+      "idLabel": "Account"
+    },
+    "fraud": {
+      "name": "Fraud prevention",
+      "idLabel": "Account"
+    },
+    "loyalty": {
+      "name": "Loyalty program",
+      "idLabel": "Account"
+    },
+    "infl_platform": {
+      "name": "Influencer platform (Modash, Upfluence)",
+      "idLabel": "Account"
+    },
+    "affiliate": {
+      "name": "Affiliate platform (Impact, PartnerStack)",
+      "idLabel": "Account"
+    },
+    "pr_tool": {
+      "name": "PR & media database (Muck Rack, Prowly)",
+      "idLabel": "Account"
+    },
+    "events_platform": {
+      "name": "Event platform (Eventbrite, Luma)",
+      "idLabel": "Account"
+    },
+    "video_host": {
+      "name": "Video hosting (YouTube, Vimeo)",
+      "idLabel": "Channel"
+    },
+    "ab_tool": {
+      "name": "A/B testing tool (VWO, Optimizely)",
+      "idLabel": "Account"
+    },
+    "heatmaps": {
+      "name": "Heatmaps & session recording (Hotjar, Clarity)",
+      "idLabel": "Site"
+    },
+    "billing_sys": {
+      "name": "Billing (Stripe Billing, Chargebee)",
+      "idLabel": "Account"
+    },
+    "status": {
+      "name": "Status page",
+      "idLabel": "URL"
+    },
+    "cs_platform": {
+      "name": "Customer success platform",
+      "idLabel": "Account"
+    },
+    "soc": {
+      "name": "Compliance (Vanta, Drata)",
+      "idLabel": "Account"
+    },
+    "devportal": {
+      "name": "API / developer portal",
+      "idLabel": "URL"
+    }
+  },
+  "connectionStatuses": [
+    "Not connected",
+    "Connected",
+    "Needs attention"
+  ],
+  "connectionMethods": [
+    "Manual",
+    "Claude connector",
+    "API",
+    "Zapier / n8n"
+  ],
+  "businessTypes": [
+    {
+      "id": "hotel",
+      "label": "Hotel / villa / accommodation"
+    },
+    {
+      "id": "restaurant",
+      "label": "Restaurant / café / bar"
+    },
+    {
+      "id": "hospital",
+      "label": "Hospital / clinic / medical"
+    },
+    {
+      "id": "spa",
+      "label": "Spa / wellness / fitness"
+    },
+    {
+      "id": "agency",
+      "label": "Digital marketing agency"
+    },
+    {
+      "id": "services",
+      "label": "Professional services / consulting"
+    },
+    {
+      "id": "retail",
+      "label": "Retail store"
+    },
+    {
+      "id": "ecommerce",
+      "label": "E-commerce"
+    },
+    {
+      "id": "saas",
+      "label": "Software / SaaS"
+    },
+    {
+      "id": "other",
+      "label": "Other"
+    }
+  ],
+  "defaultOffDepartments": {
+    "hotel": [],
+    "restaurant": [],
+    "hospital": [],
+    "spa": [],
+    "agency": [
+      "rs"
+    ],
+    "services": [
+      "rs"
+    ],
+    "retail": [
+      "rs"
+    ],
+    "ecommerce": [
+      "rs"
+    ],
+    "saas": [
+      "rs"
+    ],
+    "other": []
+  },
+  "generalFields": [
+    {
+      "title": "Identity",
+      "keys": [
+        "legal",
+        "trading",
+        "tagline",
+        "description",
+        "industry",
+        "founded",
+        "size"
+      ]
+    },
+    {
+      "title": "Contact",
+      "keys": [
+        "website",
+        "email",
+        "phone",
+        "whatsapp"
+      ]
+    },
+    {
+      "title": "Location",
+      "keys": [
+        "address",
+        "city",
+        "country",
+        "maps",
+        "mapsid",
+        "hours",
+        "timezone",
+        "currency",
+        "languages"
+      ]
+    },
+    {
+      "title": "Brand",
+      "keys": [
+        "logo",
+        "color",
+        "social"
+      ]
+    }
+  ],
+  "departments": [
+    {
+      "id": "rs",
+      "name": "Reservations",
+      "pages": [
+        {
+          "name": "Booking Calendar & Availability"
+        },
+        {
+          "name": "Online Booking Engine"
+        },
+        {
+          "name": "Third-Party Platforms & OTAs"
+        },
+        {
+          "name": "Rates, Packages & Deposits"
+        },
+        {
+          "name": "Booking Policies (Cancellation, No-Show)"
+        },
+        {
+          "name": "Confirmations & Reminders"
+        },
+        {
+          "name": "Group & Event Bookings"
+        },
+        {
+          "name": "Waitlist & Overbooking"
+        },
+        {
+          "name": "Guest / Customer Profiles"
+        },
+        {
+          "name": "Reservation Reports"
+        }
+      ]
+    },
+    {
+      "id": "mk",
+      "name": "Marketing",
+      "pages": [
+        {
+          "id": "mk_strat",
+          "name": "Strategy & Planning",
+          "pages": [
+            {
+              "name": "Market & Customer Research"
+            },
+            {
+              "name": "Competitor Analysis"
+            },
+            {
+              "name": "Brand Strategy & Positioning"
+            },
+            {
+              "name": "Customer Journey Mapping"
+            },
+            {
+              "name": "Marketing Plan & Budget"
+            },
+            {
+              "name": "Channel Mix & Media Planning"
+            },
+            {
+              "name": "Go-To-Market Plans for Launches"
+            }
+          ]
+        },
+        {
+          "id": "mk_brand",
+          "name": "Brand & Creative",
+          "pages": [
+            {
+              "name": "Brand Identity (Logo, Palette, Type, Guidelines)"
+            },
+            {
+              "name": "Copywriting & Tone of Voice"
+            },
+            {
+              "name": "Graphic Design"
+            },
+            {
+              "name": "Illustration & Animation"
+            },
+            {
+              "name": "Print & Collateral"
+            },
+            {
+              "name": "Brand Asset Library"
+            }
+          ]
+        },
+        {
+          "id": "mk_web",
+          "name": "Web Design & Development",
+          "pages": [
+            {
+              "name": "Domain & Hosting"
+            },
+            {
+              "name": "UX & Website Design"
+            },
+            {
+              "name": "Website Build & Maintenance"
+            },
+            {
+              "name": "Landing Pages"
+            },
+            {
+              "name": "Conversion Rate Optimisation"
+            },
+            {
+              "name": "Accessibility & Page Speed"
+            },
+            {
+              "name": "Website Analytics"
+            }
+          ]
+        },
+        {
+          "id": "se",
+          "name": "SEO, AEO & GEO",
+          "pages": [
+            {
+              "name": "Keyword & Topic Strategy"
+            },
+            {
+              "name": "Technical SEO"
+            },
+            {
+              "name": "On-Page & Content Optimisation"
+            },
+            {
+              "name": "Local SEO & Google Business Profile"
+            },
+            {
+              "name": "Link Building & Digital PR"
+            },
+            {
+              "name": "Schema & Structured Data"
+            },
+            {
+              "name": "AEO: Answer Engines & Featured Snippets"
+            },
+            {
+              "name": "GEO: Generative Engines (ChatGPT, Gemini, Perplexity)"
+            },
+            {
+              "name": "LLMs.txt & AI Crawler Access"
+            },
+            {
+              "name": "Rankings & Visibility Tracking"
+            },
+            {
+              "name": "Competitor Benchmarking"
+            },
+            {
+              "name": "Reporting"
+            }
+          ]
+        },
+        {
+          "id": "mk_content",
+          "name": "Content Marketing",
+          "pages": [
+            {
+              "name": "Content Strategy & Editorial Calendar"
+            },
+            {
+              "name": "Blog Posts & Articles"
+            },
+            {
+              "name": "Whitepapers, Ebooks, Guides, Case Studies"
+            },
+            {
+              "name": "Newsletter"
+            },
+            {
+              "name": "Webinars & Podcasts"
+            },
+            {
+              "name": "Content Distribution & Syndication"
+            }
+          ]
+        },
+        {
+          "id": "mk_social",
+          "name": "Social Media",
+          "pages": [
+            {
+              "name": "Channel Strategy & Profile Setup"
+            },
+            {
+              "name": "Content Creation & Scheduling"
+            },
+            {
+              "name": "Community Management"
+            },
+            {
+              "name": "Social Listening & Monitoring"
+            },
+            {
+              "name": "User-Generated Content"
+            },
+            {
+              "name": "Social Reporting"
+            }
+          ]
+        },
+        {
+          "id": "mk_paid",
+          "name": "Paid Media & PPC",
+          "pages": [
+            {
+              "name": "Search Ads (Google, Bing)"
+            },
+            {
+              "name": "Social Ads (Meta, TikTok, LinkedIn)"
+            },
+            {
+              "name": "Display & Programmatic"
+            },
+            {
+              "name": "Video Ads (YouTube, CTV)"
+            },
+            {
+              "name": "Shopping & Marketplace Ads"
+            },
+            {
+              "name": "Retargeting"
+            },
+            {
+              "name": "Ad Creative Production & Testing"
+            },
+            {
+              "name": "Budget Pacing & Bid Management"
+            }
+          ]
+        },
+        {
+          "id": "mk_email",
+          "name": "Email & Marketing Automation",
+          "pages": [
+            {
+              "name": "Email Platform & Deliverability"
+            },
+            {
+              "name": "List Building & Lead Magnets"
+            },
+            {
+              "name": "Automated Sequences (Welcome, Nurture, Onboarding, Win-Back)"
+            },
+            {
+              "name": "Segmentation & Personalisation"
+            },
+            {
+              "name": "SMS / WhatsApp Marketing"
+            },
+            {
+              "name": "Push Notifications & In-App Messaging"
+            }
+          ]
+        },
+        {
+          "id": "mk_infl",
+          "name": "Influencer & Affiliate",
+          "pages": [
+            {
+              "name": "Influencer & Creator Partnerships"
+            },
+            {
+              "name": "Affiliate Program"
+            },
+            {
+              "name": "Ambassador Program"
+            },
+            {
+              "name": "Sponsorships"
+            }
+          ]
+        },
+        {
+          "id": "mk_pr",
+          "name": "PR & Communications",
+          "pages": [
+            {
+              "name": "Press Releases & Media Relations"
+            },
+            {
+              "name": "Thought Leadership & Bylined Articles"
+            },
+            {
+              "name": "Awards Submissions"
+            },
+            {
+              "name": "Crisis Communications Plan"
+            },
+            {
+              "name": "Speaking Engagements"
+            },
+            {
+              "name": "Analyst Relations"
+            }
+          ]
+        },
+        {
+          "id": "mk_video",
+          "name": "Video & Photography",
+          "pages": [
+            {
+              "name": "Photography"
+            },
+            {
+              "name": "Video Production"
+            },
+            {
+              "name": "Editing & Post-Production"
+            },
+            {
+              "name": "Motion Graphics"
+            },
+            {
+              "name": "Short-Form & Reels"
+            },
+            {
+              "name": "Drone & 360"
+            }
+          ]
+        },
+        {
+          "id": "mk_events",
+          "name": "Events & Experiential",
+          "pages": [
+            {
+              "name": "Trade Shows & Conferences"
+            },
+            {
+              "name": "Hosted Events, Meetups & Workshops"
+            },
+            {
+              "name": "Virtual Events & Webinars"
+            },
+            {
+              "name": "Product Launch Events"
+            },
+            {
+              "name": "Merchandise & Swag"
+            }
+          ]
+        },
+        {
+          "id": "mk_cust",
+          "name": "Customer Marketing & Loyalty",
+          "pages": [
+            {
+              "name": "Reviews & Ratings Management"
+            },
+            {
+              "name": "Testimonials & Case Studies"
+            },
+            {
+              "name": "Referral & Loyalty Programs"
+            },
+            {
+              "name": "Customer Community"
+            },
+            {
+              "name": "Customer Advocacy Program"
+            },
+            {
+              "name": "Onboarding & Education Content"
+            }
+          ]
+        },
+        {
+          "id": "mk_partner",
+          "name": "Partnerships & Channels",
+          "pages": [
+            {
+              "name": "Co-Marketing with Partners"
+            },
+            {
+              "name": "Marketplace & App-Store Listings"
+            },
+            {
+              "name": "Reseller / Channel Programs"
+            },
+            {
+              "name": "Integrations Marketing"
+            }
+          ]
+        },
+        {
+          "id": "mk_product",
+          "name": "Product Marketing",
+          "pages": [
+            {
+              "name": "Launch Planning & Messaging"
+            },
+            {
+              "name": "Feature Announcements & Release Notes"
+            },
+            {
+              "name": "Competitive Intelligence"
+            },
+            {
+              "name": "Pricing & Comparison Pages"
+            },
+            {
+              "name": "Win / Loss Analysis"
+            }
+          ]
+        },
+        {
+          "id": "mk_analytics",
+          "name": "Analytics & Reporting",
+          "pages": [
+            {
+              "name": "Tracking Setup (Tags, Pixels, Conversion Events)"
+            },
+            {
+              "name": "Attribution Modelling"
+            },
+            {
+              "name": "Dashboards & Regular Reporting"
+            },
+            {
+              "name": "A/B & Multivariate Testing"
+            },
+            {
+              "name": "Customer Data Platform"
+            },
+            {
+              "name": "Marketing Mix Modelling"
+            }
+          ]
+        },
+        {
+          "id": "mk_tech",
+          "name": "Marketing Technology",
+          "pages": [
+            {
+              "name": "CMS"
+            },
+            {
+              "name": "Social Scheduling Tool"
+            },
+            {
+              "name": "Design Tools"
+            },
+            {
+              "name": "Analytics & SEO Tools"
+            },
+            {
+              "name": "Project & Digital Asset Management"
+            },
+            {
+              "name": "Survey & Feedback Tools"
+            },
+            {
+              "name": "Chatbot / Live Chat"
+            },
+            {
+              "name": "AI Tools"
+            }
+          ]
+        },
+        {
+          "id": "mk_compliance",
+          "name": "Compliance",
+          "pages": [
+            {
+              "name": "Privacy Compliance (GDPR, CCPA, Cookie Consent)"
+            },
+            {
+              "name": "Email / SMS Consent & Anti-Spam"
+            },
+            {
+              "name": "Trademark & Brand Protection"
+            },
+            {
+              "name": "Advertising Disclosures (Influencers, Affiliates)"
+            },
+            {
+              "name": "Agency & Freelancer Contracts"
+            },
+            {
+              "name": "Brand & Content Approval Workflow"
+            }
+          ]
+        },
+        {
+          "id": "mk_team",
+          "name": "Team & Resourcing",
+          "pages": [
+            {
+              "name": "In-House Marketing Team"
+            },
+            {
+              "name": "Agencies & Freelancers"
+            },
+            {
+              "name": "Training & Skills Development"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fi",
+      "name": "Accounting",
+      "pages": [
+        {
+          "name": "Bank Accounts & Cards"
+        },
+        {
+          "name": "Bookkeeping"
+        },
+        {
+          "name": "Accounting Software"
+        },
+        {
+          "name": "Financial Reporting"
+        },
+        {
+          "name": "Payables & Receivables"
+        },
+        {
+          "name": "Invoicing & Payments"
+        },
+        {
+          "name": "Payroll"
+        },
+        {
+          "name": "Tax & Compliance"
+        },
+        {
+          "name": "Budgeting & Forecasting"
+        },
+        {
+          "name": "Cash Flow"
+        },
+        {
+          "name": "Audits & Year-End"
+        },
+        {
+          "name": "Expense Management"
+        },
+        {
+          "name": "Fundraising & Cap Table"
+        },
+        {
+          "name": "Insurance"
+        },
+        {
+          "name": "Financial Controls"
+        },
+        {
+          "name": "Advisors (CFO, Accountant, Tax)"
+        }
+      ]
+    },
+    {
+      "id": "hr",
+      "name": "Human Resources",
+      "pages": [
+        {
+          "name": "Recruiting"
+        },
+        {
+          "name": "Employer Branding & Careers"
+        },
+        {
+          "name": "Contracts & Offer Letters"
+        },
+        {
+          "name": "Onboarding & Offboarding"
+        },
+        {
+          "name": "HR Information System"
+        },
+        {
+          "name": "Payroll & Benefits"
+        },
+        {
+          "name": "Compensation"
+        },
+        {
+          "name": "Handbook & Policies"
+        },
+        {
+          "name": "Labor Law Compliance"
+        },
+        {
+          "name": "Performance & Goals"
+        },
+        {
+          "name": "Learning & Development"
+        },
+        {
+          "name": "Engagement & Culture"
+        },
+        {
+          "name": "Diversity & Inclusion"
+        },
+        {
+          "name": "Health & Safety"
+        },
+        {
+          "name": "Grievance & Disciplinary"
+        },
+        {
+          "name": "Rostering & Shift Scheduling"
+        },
+        {
+          "name": "HR Analytics"
+        },
+        {
+          "name": "Contractors & Freelancers"
+        }
+      ]
+    },
+    {
+      "id": "lg",
+      "name": "Legal & Corporate",
+      "pages": [
+        {
+          "name": "Registration & Licenses"
+        },
+        {
+          "name": "Corporate Governance"
+        },
+        {
+          "name": "Contract Templates"
+        },
+        {
+          "name": "Intellectual Property"
+        },
+        {
+          "name": "Terms & Privacy Policy"
+        },
+        {
+          "name": "Regulatory Compliance"
+        },
+        {
+          "name": "Legal Counsel"
+        }
+      ]
+    },
+    {
+      "id": "sa",
+      "name": "Sales",
+      "pages": [
+        {
+          "name": "Strategy & Pipeline"
+        },
+        {
+          "name": "Team, Quotas & Commissions"
+        },
+        {
+          "name": "CRM"
+        },
+        {
+          "name": "Outbound Tooling"
+        },
+        {
+          "name": "Training & Playbooks"
+        },
+        {
+          "name": "Negotiation & E-Signature"
+        }
+      ]
+    },
+    {
+      "id": "cs",
+      "name": "Communication",
+      "pages": [
+        {
+          "name": "Email"
+        },
+        {
+          "name": "WhatsApp"
+        },
+        {
+          "name": "SMS"
+        },
+        {
+          "name": "Phone & Voice"
+        },
+        {
+          "name": "Live Chat"
+        },
+        {
+          "name": "Social Messaging (Instagram, Messenger)"
+        },
+        {
+          "name": "Helpdesk & Ticketing"
+        },
+        {
+          "name": "Shared Inboxes"
+        },
+        {
+          "name": "Knowledge Base"
+        },
+        {
+          "name": "Service Levels"
+        },
+        {
+          "name": "Feedback (NPS, CSAT)"
+        }
+      ]
+    },
+    {
+      "id": "it",
+      "name": "IT & Security",
+      "pages": [
+        {
+          "name": "Devices & Productivity Suite"
+        },
+        {
+          "name": "Identity & Access"
+        },
+        {
+          "name": "Cybersecurity"
+        },
+        {
+          "name": "Software & SaaS Management"
+        },
+        {
+          "name": "Storage & File Sharing"
+        },
+        {
+          "name": "IT Support"
+        }
+      ]
+    },
+    {
+      "id": "op",
+      "name": "Operations",
+      "pages": [
+        {
+          "name": "Locations & Facilities"
+        },
+        {
+          "name": "Maintenance & Repairs"
+        },
+        {
+          "name": "Suppliers & Procurement"
+        },
+        {
+          "name": "Inventory & Stock"
+        },
+        {
+          "name": "Health, Safety & Hygiene"
+        },
+        {
+          "name": "Utilities & Services"
+        },
+        {
+          "name": "Internal Communication"
+        },
+        {
+          "name": "Project Management & Docs"
+        },
+        {
+          "name": "Standard Operating Procedures"
+        },
+        {
+          "name": "Business Continuity & Risk"
+        }
+      ]
+    }
+  ],
+  "industryModules": {
+    "hotel": {
+      "id": "ix",
+      "name": "Hotel Operations",
+      "pages": [
+        {
+          "name": "Front Desk & Check-In"
+        },
+        {
+          "name": "Rooms & Housekeeping"
+        },
+        {
+          "name": "Rates & Revenue Management"
+        },
+        {
+          "name": "Food & Beverage"
+        },
+        {
+          "name": "Guest Experience & Reviews"
+        },
+        {
+          "name": "Concierge & Activities"
+        },
+        {
+          "name": "Maintenance & Engineering"
+        },
+        {
+          "name": "Security"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "rooms",
+          "rating",
+          "checkin",
+          "adr",
+          "seasonality",
+          "capacity",
+          "hours",
+          "gm",
+          "reviews"
+        ],
+        "connections": [
+          "pms",
+          "channel_mgr",
+          "ota",
+          "hotel_ads",
+          "reviews",
+          "rms",
+          "fnb_pos",
+          "locks",
+          "guest_msg"
+        ]
+      }
+    },
+    "restaurant": {
+      "id": "ix",
+      "name": "Restaurant Operations",
+      "pages": [
+        {
+          "name": "Tables & Floor Plan"
+        },
+        {
+          "name": "Menu & Pricing"
+        },
+        {
+          "name": "Kitchen & Production"
+        },
+        {
+          "name": "POS & Payments"
+        },
+        {
+          "name": "Delivery & Takeaway Platforms"
+        },
+        {
+          "name": "Suppliers & Food Inventory"
+        },
+        {
+          "name": "Food Safety & Hygiene"
+        },
+        {
+          "name": "Reviews & Guest Feedback"
+        },
+        {
+          "name": "Events & Private Dining"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "seats",
+          "cuisine",
+          "hours",
+          "spend",
+          "manager",
+          "suppliers",
+          "licenses",
+          "reviews"
+        ],
+        "connections": [
+          "pos",
+          "tables",
+          "delivery",
+          "qr",
+          "recipe",
+          "terminal",
+          "reviews",
+          "food_safety",
+          "supplier_order"
+        ]
+      }
+    },
+    "hospital": {
+      "id": "ix",
+      "name": "Clinical Operations",
+      "pages": [
+        {
+          "name": "Appointments & Scheduling"
+        },
+        {
+          "name": "Patient Records (EHR / EMR)"
+        },
+        {
+          "name": "Clinical Staff & Credentials"
+        },
+        {
+          "name": "Billing & Insurance Claims"
+        },
+        {
+          "name": "Pharmacy & Medical Supplies"
+        },
+        {
+          "name": "Laboratory & Diagnostics"
+        },
+        {
+          "name": "Telehealth"
+        },
+        {
+          "name": "Compliance & Accreditation"
+        },
+        {
+          "name": "Patient Experience & Feedback"
+        },
+        {
+          "name": "Emergency & Referrals"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "beds",
+          "specialties",
+          "facility_licence",
+          "accreditation",
+          "hours",
+          "director",
+          "languages",
+          "insurance"
+        ],
+        "connections": [
+          "ehr",
+          "pmsys",
+          "booking",
+          "claims",
+          "lab",
+          "pharmacy",
+          "telehealth",
+          "portal",
+          "devices_reg",
+          "regulator"
+        ]
+      }
+    },
+    "spa": {
+      "id": "ix",
+      "name": "Spa & Wellness Operations",
+      "pages": [
+        {
+          "name": "Treatment Menu & Pricing"
+        },
+        {
+          "name": "Therapists & Rosters"
+        },
+        {
+          "name": "Rooms & Facilities"
+        },
+        {
+          "name": "Products & Retail"
+        },
+        {
+          "name": "Memberships & Packages"
+        },
+        {
+          "name": "Gift Cards & Vouchers"
+        },
+        {
+          "name": "Hygiene & Compliance"
+        },
+        {
+          "name": "Guest Experience & Reviews"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "treatment_rooms",
+          "therapists",
+          "hours",
+          "ticket",
+          "manager",
+          "products",
+          "pricing",
+          "roster"
+        ],
+        "connections": [
+          "booking",
+          "pos",
+          "membership",
+          "giftcards",
+          "rwg",
+          "reviews",
+          "retail_inv",
+          "product_suppliers"
+        ]
+      }
+    },
+    "agency": {
+      "id": "ix",
+      "name": "Agency Operations",
+      "pages": [
+        {
+          "name": "Clients & Accounts"
+        },
+        {
+          "name": "Client Onboarding"
+        },
+        {
+          "name": "Projects & Delivery"
+        },
+        {
+          "name": "Proposals & Contracts"
+        },
+        {
+          "name": "Time Tracking & Utilisation"
+        },
+        {
+          "name": "Client Billing & Retainers"
+        },
+        {
+          "name": "Client Reporting"
+        },
+        {
+          "name": "Tools & Subscriptions"
+        },
+        {
+          "name": "Freelancer Network"
+        },
+        {
+          "name": "Portfolio & Case Studies"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "clients",
+          "products",
+          "billing_model",
+          "utilisation",
+          "pricing",
+          "sales_lead",
+          "awards"
+        ],
+        "connections": [
+          "pm",
+          "timetrack",
+          "proposals",
+          "looker",
+          "crm",
+          "client_portal",
+          "freelancers",
+          "whitelabel",
+          "client_access"
+        ]
+      }
+    },
+    "services": {
+      "id": "ix",
+      "name": "Client Services",
+      "pages": [
+        {
+          "name": "Clients & Engagements"
+        },
+        {
+          "name": "Client Onboarding"
+        },
+        {
+          "name": "Proposals & Contracts"
+        },
+        {
+          "name": "Scheduling & Appointments"
+        },
+        {
+          "name": "Time & Billing"
+        },
+        {
+          "name": "Deliverables & Reporting"
+        },
+        {
+          "name": "Referrals & Partnerships"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "clients",
+          "products",
+          "billing_model",
+          "pricing",
+          "sales_lead",
+          "awards"
+        ],
+        "connections": [
+          "crm",
+          "scheduler",
+          "timetrack",
+          "esign",
+          "client_portal"
+        ]
+      }
+    },
+    "retail": {
+      "id": "ix",
+      "name": "Store Operations",
+      "pages": [
+        {
+          "name": "Store & POS"
+        },
+        {
+          "name": "Inventory & Stock"
+        },
+        {
+          "name": "Suppliers & Purchasing"
+        },
+        {
+          "name": "Pricing & Promotions"
+        },
+        {
+          "name": "Visual Merchandising"
+        },
+        {
+          "name": "Shipping & Fulfilment"
+        },
+        {
+          "name": "Returns & Exchanges"
+        },
+        {
+          "name": "Loss Prevention"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "stores",
+          "hours",
+          "skus",
+          "manager",
+          "suppliers",
+          "locations"
+        ],
+        "connections": [
+          "pos",
+          "inventory",
+          "storefront",
+          "supplier_order",
+          "loyalty",
+          "shipping",
+          "marketplaces"
+        ]
+      }
+    },
+    "ecommerce": {
+      "id": "ix",
+      "name": "E-Commerce Operations",
+      "pages": [
+        {
+          "name": "Storefront & Platform"
+        },
+        {
+          "name": "Product Catalogue"
+        },
+        {
+          "name": "Inventory & Warehouse"
+        },
+        {
+          "name": "Orders & Fulfilment"
+        },
+        {
+          "name": "Shipping & Carriers"
+        },
+        {
+          "name": "Returns"
+        },
+        {
+          "name": "Payments & Fraud"
+        },
+        {
+          "name": "Marketplaces"
+        },
+        {
+          "name": "Customer Reviews"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "platform",
+          "skus",
+          "markets",
+          "aov",
+          "products",
+          "payment_methods",
+          "cancellation",
+          "ops_lead"
+        ],
+        "connections": [
+          "storefront",
+          "gateway",
+          "wms",
+          "shipping",
+          "marketplaces",
+          "reviews_app",
+          "subs_app",
+          "fraud"
+        ]
+      }
+    },
+    "saas": {
+      "id": "ix",
+      "name": "SaaS Operations",
+      "pages": [
+        {
+          "name": "Subscriptions & Billing"
+        },
+        {
+          "name": "Onboarding & Activation"
+        },
+        {
+          "name": "Customer Success"
+        },
+        {
+          "name": "Usage Analytics"
+        },
+        {
+          "name": "Uptime & Status"
+        },
+        {
+          "name": "Security & Compliance"
+        },
+        {
+          "name": "Integrations & API Partners"
+        },
+        {
+          "name": "Churn & Retention"
+        }
+      ],
+      "settings": {
+        "fields": [
+          "plans",
+          "mrr",
+          "customers",
+          "sla",
+          "product_type",
+          "pd_lead"
+        ],
+        "connections": [
+          "billing_sys",
+          "prod_analytics",
+          "status",
+          "cs_platform",
+          "soc",
+          "devportal"
+        ]
+      }
+    }
+  },
+  "sectionSettings": {
+    "rs": {
+      "fields": [
+        "trading",
+        "products",
+        "capacity",
+        "leadtime",
+        "deposit",
+        "cancellation",
+        "pricing",
+        "seasonality",
+        "hours",
+        "timezone",
+        "languages",
+        "payment_methods",
+        "booking_url",
+        "conversions",
+        "ops_lead"
+      ],
+      "connections": [
+        "booking",
+        "channel_mgr",
+        "ota",
+        "airbnb",
+        "tables",
+        "rwg",
+        "cal",
+        "gateway",
+        "reminders",
+        "widget",
+        "reviews"
+      ]
+    },
+    "mk": {
+      "fields": [
+        "trading",
+        "tagline",
+        "description",
+        "products",
+        "usps",
+        "pricing",
+        "positioning",
+        "audience",
+        "segments",
+        "markets",
+        "competitors",
+        "seasonality",
+        "voice",
+        "messaging",
+        "guidelines",
+        "assets",
+        "website",
+        "social",
+        "reviews",
+        "content",
+        "budget_mk",
+        "goals",
+        "kpis",
+        "conversions",
+        "reporting",
+        "agency"
+      ],
+      "connections": [
+        "ga4",
+        "gsc",
+        "gtm",
+        "gads",
+        "meta",
+        "otherads",
+        "gbp",
+        "cms",
+        "dns",
+        "hosting",
+        "esp",
+        "crm",
+        "social",
+        "design",
+        "sched",
+        "reviews",
+        "looker"
+      ]
+    },
+    "se": {
+      "fields": [
+        "trading",
+        "legal",
+        "description",
+        "story",
+        "products",
+        "usps",
+        "awards",
+        "audience",
+        "markets",
+        "service_area",
+        "competitors",
+        "faq",
+        "voice",
+        "website",
+        "domains",
+        "cms",
+        "gbp",
+        "social",
+        "reviews",
+        "content",
+        "address",
+        "phone",
+        "hours",
+        "languages",
+        "keywords",
+        "priority_pages",
+        "seo_history",
+        "ai_visibility",
+        "press",
+        "authors",
+        "conversions",
+        "kpis",
+        "budget_seo",
+        "reporting"
+      ],
+      "connections": [
+        "gsc",
+        "ga4",
+        "gtm",
+        "gbp",
+        "bing",
+        "seo_tool",
+        "rank",
+        "crawler",
+        "ai_vis",
+        "schema",
+        "cms",
+        "dns",
+        "hosting",
+        "looker",
+        "reviews"
+      ]
+    },
+    "mk_strat": {
+      "fields": [
+        "description",
+        "products",
+        "usps",
+        "positioning",
+        "audience",
+        "segments",
+        "markets",
+        "competitors",
+        "seasonality",
+        "goals",
+        "kpis",
+        "budget_mk",
+        "conversions"
+      ],
+      "connections": [
+        "ga4",
+        "crm",
+        "looker"
+      ]
+    },
+    "mk_brand": {
+      "fields": [
+        "trading",
+        "tagline",
+        "story",
+        "voice",
+        "messaging",
+        "guidelines",
+        "assets",
+        "logo",
+        "color",
+        "trademarks"
+      ],
+      "connections": [
+        "design",
+        "files"
+      ]
+    },
+    "mk_web": {
+      "fields": [
+        "website",
+        "domains",
+        "cms",
+        "priority_pages",
+        "conversions",
+        "booking_url",
+        "languages",
+        "guidelines"
+      ],
+      "connections": [
+        "cms",
+        "dns",
+        "hosting",
+        "ga4",
+        "gtm",
+        "crawler",
+        "heatmaps",
+        "ab_tool"
+      ]
+    },
+    "mk_content": {
+      "fields": [
+        "audience",
+        "faq",
+        "voice",
+        "keywords",
+        "content",
+        "authors",
+        "awards",
+        "reporting"
+      ],
+      "connections": [
+        "cms",
+        "esp",
+        "wiki",
+        "seo_tool",
+        "video_host"
+      ]
+    },
+    "mk_social": {
+      "fields": [
+        "trading",
+        "voice",
+        "audience",
+        "social",
+        "assets",
+        "reviews",
+        "faq",
+        "budget_mk",
+        "seasonality"
+      ],
+      "connections": [
+        "social",
+        "sched",
+        "meta",
+        "design",
+        "dm",
+        "video_host"
+      ]
+    },
+    "mk_paid": {
+      "fields": [
+        "products",
+        "pricing",
+        "usps",
+        "audience",
+        "markets",
+        "competitors",
+        "seasonality",
+        "budget_mk",
+        "conversions",
+        "kpis",
+        "website"
+      ],
+      "connections": [
+        "gads",
+        "meta",
+        "otherads",
+        "hotel_ads",
+        "gtm",
+        "ga4",
+        "looker"
+      ]
+    },
+    "mk_email": {
+      "fields": [
+        "audience",
+        "segments",
+        "voice",
+        "templates",
+        "faq",
+        "conversions",
+        "reporting"
+      ],
+      "connections": [
+        "esp",
+        "crm",
+        "wa",
+        "sms",
+        "gtm"
+      ]
+    },
+    "mk_infl": {
+      "fields": [
+        "audience",
+        "products",
+        "budget_mk",
+        "social",
+        "guidelines",
+        "pricing"
+      ],
+      "connections": [
+        "infl_platform",
+        "affiliate",
+        "social"
+      ]
+    },
+    "mk_pr": {
+      "fields": [
+        "story",
+        "awards",
+        "authors",
+        "press",
+        "messaging",
+        "escalation",
+        "assets"
+      ],
+      "connections": [
+        "pr_tool",
+        "files"
+      ]
+    },
+    "mk_video": {
+      "fields": [
+        "assets",
+        "guidelines",
+        "locations",
+        "address",
+        "products",
+        "voice"
+      ],
+      "connections": [
+        "design",
+        "files",
+        "video_host",
+        "social"
+      ]
+    },
+    "mk_events": {
+      "fields": [
+        "locations",
+        "address",
+        "capacity",
+        "budget_mk",
+        "seasonality",
+        "audience"
+      ],
+      "connections": [
+        "events_platform",
+        "scheduler",
+        "esp"
+      ]
+    },
+    "mk_cust": {
+      "fields": [
+        "reviews",
+        "faq",
+        "voice",
+        "conversions",
+        "pricing"
+      ],
+      "connections": [
+        "reviews",
+        "esp",
+        "crm",
+        "survey",
+        "loyalty"
+      ]
+    },
+    "mk_partner": {
+      "fields": [
+        "products",
+        "markets",
+        "agency",
+        "pricing",
+        "usps"
+      ],
+      "connections": [
+        "crm",
+        "marketplaces",
+        "client_portal"
+      ]
+    },
+    "mk_product": {
+      "fields": [
+        "products",
+        "pricing",
+        "usps",
+        "competitors",
+        "positioning",
+        "release"
+      ],
+      "connections": [
+        "issues",
+        "wiki",
+        "crm"
+      ]
+    },
+    "mk_analytics": {
+      "fields": [
+        "kpis",
+        "conversions",
+        "reporting",
+        "goals",
+        "website"
+      ],
+      "connections": [
+        "ga4",
+        "gtm",
+        "gsc",
+        "looker",
+        "bi",
+        "crm",
+        "heatmaps",
+        "ab_tool"
+      ]
+    },
+    "mk_tech": {
+      "fields": [
+        "cms",
+        "stack",
+        "budget_mk"
+      ],
+      "connections": [
+        "cms",
+        "esp",
+        "crm",
+        "sched",
+        "design",
+        "pm",
+        "files",
+        "automation",
+        "chat",
+        "survey"
+      ]
+    },
+    "mk_compliance": {
+      "fields": [
+        "jurisdiction",
+        "markets",
+        "lawyer",
+        "trademarks",
+        "contracts"
+      ],
+      "connections": [
+        "compliance",
+        "esign",
+        "tm_registry"
+      ]
+    },
+    "mk_team": {
+      "fields": [
+        "org",
+        "hr_contact",
+        "agency",
+        "budget_mk"
+      ],
+      "connections": [
+        "pm",
+        "chat_internal",
+        "timetrack"
+      ]
+    },
+    "fi": {
+      "fields": [
+        "legal",
+        "taxid",
+        "entity",
+        "fye",
+        "currency",
+        "banks",
+        "accountant",
+        "payment_methods",
+        "invoicing",
+        "revenue",
+        "pricing",
+        "budget_mk",
+        "budget_seo",
+        "insurance",
+        "fin_cadence",
+        "investors"
+      ],
+      "connections": [
+        "accounting",
+        "bank",
+        "processor",
+        "payroll",
+        "expenses",
+        "invoicing",
+        "taxportal",
+        "insurer",
+        "captable"
+      ]
+    },
+    "hr": {
+      "fields": [
+        "legal",
+        "headcount",
+        "org",
+        "hr_contact",
+        "emp_types",
+        "emp_countries",
+        "pay_cycle",
+        "benefits",
+        "eor",
+        "review_cycle",
+        "roster",
+        "hours",
+        "locations",
+        "voice"
+      ],
+      "connections": [
+        "hris",
+        "ats",
+        "payroll",
+        "benefits",
+        "jobboards",
+        "lms",
+        "timeclock",
+        "handbook"
+      ]
+    },
+    "lg": {
+      "fields": [
+        "legal",
+        "trading",
+        "entity",
+        "jurisdiction",
+        "regno",
+        "taxid",
+        "agent",
+        "directors",
+        "lawyer",
+        "trademarks",
+        "licenses",
+        "insurance",
+        "contracts",
+        "renewals",
+        "address"
+      ],
+      "connections": [
+        "esign",
+        "docs_store",
+        "registry",
+        "tm_registry",
+        "compliance",
+        "permits",
+        "insurer"
+      ]
+    },
+    "sa": {
+      "fields": [
+        "products",
+        "pricing",
+        "usps",
+        "audience",
+        "segments",
+        "markets",
+        "competitors",
+        "sales_model",
+        "deal_size",
+        "sales_cycle",
+        "quota",
+        "lead_sources",
+        "territories",
+        "sales_lead",
+        "conversions"
+      ],
+      "connections": [
+        "crm",
+        "prospecting",
+        "sequencer",
+        "proposals",
+        "esign",
+        "scheduler",
+        "gateway"
+      ]
+    },
+    "cs": {
+      "fields": [
+        "trading",
+        "channels",
+        "hours",
+        "timezone",
+        "languages",
+        "response",
+        "escalation",
+        "templates",
+        "voice",
+        "faq",
+        "phone",
+        "whatsapp",
+        "email",
+        "comm_lead"
+      ],
+      "connections": [
+        "mail",
+        "helpdesk",
+        "wa",
+        "sms",
+        "voip",
+        "chat",
+        "dm",
+        "kb",
+        "survey",
+        "signatures"
+      ]
+    },
+    "it": {
+      "fields": [
+        "devices",
+        "idp",
+        "it_contact",
+        "backup",
+        "domains",
+        "headcount",
+        "locations"
+      ],
+      "connections": [
+        "workspace",
+        "pw",
+        "mdm",
+        "backup",
+        "edr",
+        "dns",
+        "saasmgmt"
+      ]
+    },
+    "op": {
+      "fields": [
+        "locations",
+        "address",
+        "hours",
+        "capacity",
+        "suppliers",
+        "maintenance",
+        "licenses",
+        "ops_lead",
+        "seasonality"
+      ],
+      "connections": [
+        "chat_internal",
+        "wiki",
+        "pm",
+        "files",
+        "inventory",
+        "supplier_reg",
+        "maint",
+        "utilities",
+        "automation"
+      ]
+    }
+  },
+  "icons": {
+    "home": "<svg viewBox=\"0 0 24 24\"><path d=\"M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z\"/></svg>",
+    "rs": "<svg viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"M3 10h18M8 3v4M16 3v4M9 15l2 2 4-4\"/></svg>",
+    "mk": "<svg viewBox=\"0 0 24 24\"><path d=\"M4 10v4a1 1 0 0 0 1 1h3l6 4V5L8 9H5a1 1 0 0 0-1 1z\"/><path d=\"M17 9a4 4 0 0 1 0 6\"/></svg>",
+    "se": "<svg viewBox=\"0 0 24 24\"><circle cx=\"10.5\" cy=\"10.5\" r=\"6.5\"/><path d=\"M15.5 15.5L21 21\"/><path d=\"M18 3l.8 1.8L20.5 5.5l-1.7.8L18 8l-.8-1.7-1.7-.8 1.7-.7z\"/></svg>",
+    "fi": "<svg viewBox=\"0 0 24 24\"><ellipse cx=\"12\" cy=\"6\" rx=\"7\" ry=\"3\"/><path d=\"M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6\"/><path d=\"M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6\"/></svg>",
+    "hr": "<svg viewBox=\"0 0 24 24\"><circle cx=\"9\" cy=\"8\" r=\"3.2\"/><path d=\"M3 20a6 6 0 0 1 12 0\"/><circle cx=\"17\" cy=\"9\" r=\"2.5\"/><path d=\"M15.5 14.5A5 5 0 0 1 21 19\"/></svg>",
+    "lg": "<svg viewBox=\"0 0 24 24\"><path d=\"M12 4v16M6 20h12M12 6l6 2-2.5 6a3.5 3.5 0 0 1-7 0z\" /><path d=\"M12 6L6 8l2.5 6\"/></svg>",
+    "sa": "<svg viewBox=\"0 0 24 24\"><path d=\"M4 19h16\"/><path d=\"M5 15l4-5 4 3 6-7\"/><path d=\"M16 6h3v3\"/></svg>",
+    "cs": "<svg viewBox=\"0 0 24 24\"><path d=\"M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 4v-4H6a2 2 0 0 1-2-2z\"/><path d=\"M8 9h8M8 12.5h5\"/></svg>",
+    "it": "<svg viewBox=\"0 0 24 24\"><path d=\"M12 3l8 3v6c0 4.5-3.4 7.7-8 9-4.6-1.3-8-4.5-8-9V6z\"/><path d=\"M9 12l2 2 4-4\"/></svg>",
+    "op": "<svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z\"/></svg>",
+    "ix": "<svg viewBox=\"0 0 24 24\"><path d=\"M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h2M13 10h2M9 14h2M13 14h2\"/></svg>",
+    "gen": "<svg viewBox=\"0 0 24 24\"><path d=\"M4 7h10M18 7h2M4 12h2M10 12h10M4 17h12M20 17h0\"/><circle cx=\"16\" cy=\"7\" r=\"2\"/><circle cx=\"8\" cy=\"12\" r=\"2\"/><circle cx=\"18\" cy=\"17\" r=\"2\"/></svg>",
+    "chev": "<svg class=\"chev\" viewBox=\"0 0 24 24\"><path d=\"M6 9l6 6 6-6\"/></svg>"
+  }
+}
