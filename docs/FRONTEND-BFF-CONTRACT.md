@@ -4624,3 +4624,110 @@ Pre-seeding would forge what a client signed.
 ("approving a suspended write currently executes nothing" — the agentic-native plan's highest-leverage
 open item). So an agent-initiated convert suspends and never executes. **Convert is a human-driven
 capability until that lands.** This feature neither introduces nor can fix it.
+
+## 25. Client Centre — CMC's layout/categorisation as native ERP pages (CC-D1…D7, 2026-09-29) — `src/modules/clients/centre/`, `src/core/portal-centre.controller.ts` — **STATUS: PROTOTYPED (backend only — typechecked + unit-tested; DB-backed proofs written, not yet run on the Linux gate)**
+
+Design: `docs/plans/2026-09-29-client-centre.md` (decision log CC-D1..D7, data model, full API
+contract). This section is the backend's record of the SHIPPED shape; the plan doc is the spec and
+takes precedence if the two ever disagree.
+
+> **Numbering note:** the plan asked for "§23"; that number was already taken (LMS module, added
+> concurrently by another session — see §23/§24 above). This lands as §25, the next free number.
+
+### The registry
+
+`src/modules/clients/centre/registry.json` (mirrored byte-for-byte at
+`platform-ui/src/lib/clientCentreRegistry.json`, parity-tested) is the single source for every
+field/connection/department id this feature validates against — see the plan doc's own "The
+registry" section for its shape. Nothing below hand-lists a field or department id; the validator
+(`validation.ts`) derives every allow-list from this file at import time.
+
+### Data model
+
+`client_centre_profiles` (migration `202609281655_client_centre_profiles.sql`) — one row per
+`(tenant_id, client_id)`. **Deliberately NOT `app_module_allowed('clients')`** — this table is
+client-reachable (the portal routes below read/write it directly), and the `0072:214` / `0075:242`
+/ `202609050857` doctrine is that a client-reachable table is never module-walled: a portal contact
+must never lose access to their own company's profile because their agency's tenant happens not to
+have the `clients` staff module enabled. **The staff routes ARE module-gated**
+(`ModuleEnabledGuard("clients")`) — that gate is an app-layer concern orthogonal to the table's RLS
+shape, exactly like the `clients` table itself. A missing row means an empty profile; the GET routes
+synthesise registry defaults and the first accepted PATCH inserts the row.
+
+### Endpoints
+
+| Method + path | Authz | Notes |
+|---|---|---|
+| `GET /api/:t/clients/centre` | `client` read | Staff, `ModuleEnabledGuard("clients")`. Every non-deleted client: `[{clientId, clientName, clientStatus, businessType, city, fieldsFilled: {filled,total}, connectionsConnected: {connected,total}, updatedAt}]` — `fieldsFilled` is against the registry's fixed Company-settings field keys (23); `connectionsConnected`'s `total` is the union of every connection id reachable across all sections for that client's business type (varies by business type + custom connections) — both computed by `sections.ts`, a byte-for-byte port of platform-ui's own `allSections`/`connectionIdsFor` so the two surfaces cannot disagree about what "N of M" means. Registered as a STATIC route — verified by test that it is never captured by the `:clientId` route below. |
+| `GET /api/:t/clients/:clientId/centre` | `client` read | Staff. Returns `CentreProfile`; `canEdit` = would `client` **update** be allowed (checked via `rbac/cerbos`'s non-throwing `check()`, not authorize+catch). |
+| `PATCH /api/:t/clients/:clientId/centre` | `client` update | Staff. Returns the merged `CentreProfile`. |
+| `GET /api/:t/portal/centre` | `portal` read + portal scope | Client. The caller's own client(s): `[{clientId, clientName, canEdit}]`. |
+| `GET /api/:t/portal/centre/:clientId` | `portal` read + `clientId ∈ scope.clientIds` | Client. `CentreProfile`; a clientId outside scope is **404**, never 403 (no existence oracle — matches every other portal route). |
+| `PATCH /api/:t/portal/centre/:clientId` | `portal` **`edit_company_profile`** + scope + CC-D4 | Client. Returns `CentreProfile`; on a real change, best-effort notifies the client's project owners (`client.centre_updated`, href `/client-centre/<clientId>`). |
+
+`CentreProfile` / `CentrePatch` are exactly the shapes in the plan doc's "API contract" section —
+not repeated here to avoid the two copies drifting; that document is normative for the wire shape.
+
+### CC-D4, enforced once, called from both routes
+
+`canEditCentre(c, userId, clientId)` (`src/core/portal-centre.controller.ts`) is the ONE function
+both the GET's `canEdit` and the PATCH's authorization gate call — an active, client-wide
+(`project_id IS NULL`) `client_contacts` row with `capability = 'signer'` for that exact client, OR
+the legacy `clients.portal_user_id` whole-client signer. A **project-scoped** signer reads fine
+(`canEdit:false`) but is refused the PATCH with a plain-English 403. This is narrower than
+`portal-scope.ts`'s own `canSign` (a per-caller union across every client/project the caller
+touches) — CC-D4 asks the sharper per-CLIENT question, so it is its own query, never a reuse of
+`canSign`.
+
+### Validation (`src/modules/clients/centre/validation.ts`) — one function, both routes
+
+`applyCentrePatch(current, patch)` is shared by the staff PATCH and the portal PATCH — the two
+surfaces cannot validate differently. Rules exactly as specced: unknown top-level/profile/
+connection/department/section keys are refused 400 naming the field; strings capped at 5,000
+characters, the whole body at 256KB; `null`/`""` deletes a profile key or a connection sub-key (an
+entry with every sub-key deleted is pruned, not persisted as `{}`); `null` on a whole connection or
+a department key deletes it; `customConnections[section]` REPLACES that section's list (not
+merged); custom connection ids match `/^x[a-z0-9]{4,40}$/`, names are 1..120 chars; `method`/
+`status` must be one of the registry's own value lists; `businessType` must be a registry id.
+**Credential-looking values are refused anywhere a string appears — including inside `connections.*
+.creds` and `.notes`** (a PEM block, `AKIA…`, `sk-…`, `ghp_…`/`github_pat_…`, `xox[abp]-…`, a JWT, or
+a `password=`/`pwd:` pair), per CMC-SEC-1 follow-up 3 — `creds` documents WHERE a credential lives,
+never the credential itself, and the scanner does not trust the field name to enforce that.
+
+Every ACCEPTED write (i.e. `changes.length > 0` after validation): increments `revision`, sets
+`updated_by`/`updated_at`, writes exactly ONE `activities` row (`entity_type: "client"`,
+`id = clientId`, `metadata: {via: "client-centre" | "portal", changes: [{path, before, after}]}`,
+values truncated to 200 characters), and emits `client.centre_updated` in the **same transaction**
+as the row write (transactional outbox). A PATCH that changes nothing (every key already had the
+patched value) still returns 200 with the current profile and writes **no** activity and **no**
+event — verified by DB test.
+
+### IAM: the new `portal.edit_company_profile` action (CC-D4)
+
+A full chain, not a YAML-only change — touched: `permission-catalog.json` (+1 grantable, 406 pairs/
+391 grantable), `permission-groups.json` (+1 group `portal_edit_company_profile`, 151 groups),
+`derived_roles.yaml` (`perm_portal_edit_company_profile`, company-scope-only — faithfully mirrors
+`client`'s own reach, never the generic "global || company" shape every other perm-arm mirror uses,
+matching the other 7 `perm_portal_*` mirrors' own precedent), `resource_portal.yaml` (added to the
+`client` role-arm rule's action list + its own perm-arm rule), a migration
+(`202609281704_iam_client_centre_edit_company_profile.sql`, mirroring `0106`'s `portal.approve_post`
+idiom exactly — one permission row, one `(client, portal.edit_company_profile)` bundle row, nobody
+else), and `role-permission-bundles.json` (regenerated — only `client` and `platform_admin`'s
+wildcard changed; `owner`/`company_admin`/every other role holds zero `portal.*` keys, unchanged).
+Every pinned test that names the portal action set was updated deliberately (`PORTAL_ACTIONS` in
+`iam-04-b7-portal.{test,db.test}.ts` and `mon00i-portal-root-anchor.db.test.ts`; the wired-action pin
+in `iam-04-b6-social-portal.test.ts`; the catalog headline counts in `cerbos-catalog-alignment.test.ts`,
+`permission-groups-catalog-parity.test.ts` and `ui-grantable-catalog.test.ts`). `uiGrantable: false`,
+matching every other `portal.*` key (no one can self-grant a portal permission through the UI role
+editor). `permission-arm-hazard-scan.test.ts` and `scope-constrained-roles.json` needed no change
+(the hazard-scan gate re-derives from disk every run and the scope-constrained map is keyed by
+ROLE, not by action — `client`'s own condition is unchanged).
+
+### Open items for the frontend lead
+
+- `platform-ui`'s `rbac-capability-parity` test (if it enumerates portal permissions) may need
+  `portal.edit_company_profile` added to its own mirror — **not edited here**; grep
+  `platform-ui/src -l "portal.approve_post\|portal.update_profile"` to find every file that mirrors
+  the portal action set.
+- No staff nav change is part of this piece — the sidebar row, `/client-centre` pages and the portal
+  `Company` tab are the frontend agent's own piece (§3 of the plan).
