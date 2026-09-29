@@ -168,11 +168,11 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 
 ## platform-nest — migrations
 
-- Head: `202609051010_iam_agency_discovery_intake_permissions.sql`
+- Head: `202609281704_iam_client_centre_edit_company_profile.sql`
 - New migrations: `YYYYMMDDHHMM_snake_case.sql` (UTC — `date -u +%Y%m%d%H%M`). The sequential
   `NNNN_` scheme is **closed above `0118`** and CI-enforced (`npm run lint:migration-names`);
   it collided four times between concurrent sessions in this shared checkout.
-- Applied files on disk: 230 (121 legacy `NNNN_`, 109 timestamped)
+- Applied files on disk: 232 (121 legacy `NNNN_`, 111 timestamped)
 - Unused numbers below head: `0058`, `0059`, `0070` (dead reservations — do not backfill)
 
 ## platform-nest — HTTP surface (`@Controller` prefixes)
@@ -217,6 +217,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/integrations.controller.ts` |
 | `/api` | `platform-nest/src/core/meetings.controller.ts` |
 | `/api` | `platform-nest/src/core/pipeline.controller.ts` |
+| `/api` | `platform-nest/src/core/portal-centre.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-commerce.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-profile.controller.ts` |
 | `/api` | `platform-nest/src/core/portal-stream.controller.ts` |
@@ -229,6 +230,7 @@ Never run one alone — see `infra/CLAUDE.md` for the required pairs.
 | `/api` | `platform-nest/src/core/work-activity.controller.ts` |
 | `/api` | `platform-nest/src/mail/thread.controller.ts` |
 | `/api` | `platform-nest/src/modules/assistant/assistant.controller.ts` |
+| `/api` | `platform-nest/src/modules/clients/centre/clients-centre.controller.ts` |
 | `/api` | `platform-nest/src/modules/clients/clients.controller.ts` |
 | `/api` | `platform-nest/src/modules/finance/finance.controller.ts` |
 | `/api` | `platform-nest/src/modules/invoice/invoice.controller.ts` |
@@ -310,6 +312,8 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/assistant`
 - `/billing/[[...rest]]`
 - `/calendar`
+- `/client-centre`
+- `/client-centre/[clientId]/[[...section]]`
 - `/clients`
 - `/clients/[clientId]`
 - `/clients/[clientId]/details`
@@ -455,6 +459,7 @@ Pages (`page.tsx`), route groups `(x)` stripped:
 - `/portal`
 - `/portal/approvals`
 - `/portal/approvals/[runId]`
+- `/portal/company/[[...section]]`
 - `/portal/contracts`
 - `/portal/contracts/[contractId]`
 - `/portal/deliverables`

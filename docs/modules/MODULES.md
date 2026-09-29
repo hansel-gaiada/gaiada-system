@@ -34,8 +34,8 @@ versions below; the running build reports it at `GET /health`.
 
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
-| platform-nest | `0.54.0` | IN PROGRESS | WS1 | 2026-09-08 |
-| platform-ui | `0.69.0` | IN PROGRESS | WS5 | 2026-09-08 |
+| platform-nest | `0.55.0` | IN PROGRESS | WS1 | 2026-09-29 |
+| platform-ui | `0.70.0` | IN PROGRESS | WS5 | 2026-09-29 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -63,7 +63,8 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.54.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.55.0` · IN PROGRESS
+**0.55.0 (2026-09-29, Client Centre backend — PROTOTYPED):** `client_centre_profiles` + staff (`/clients/centre`, `/clients/:id/centre`) and portal (`/portal/centre*`) routes, registry-validated key-level PATCH with value-scanning credential refusal and before/after activity, new Cerbos action `portal.edit_company_profile` (CC-D4). Plan: `docs/plans/2026-09-29-client-centre.md`; contract: BFF §25.
 **0.50.0 (2026-09-03, GM-blob live data repair + monitoring delivery/maintenance seed):** see
 `CHANGELOG.md` for the full account — a live-data repair (org-blob node-id collision, 7 people
 sharing one id, re-run through the sanctioned `refreshOrgStructure()`/`applyOrgStructure()` path) and
@@ -162,7 +163,9 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.69.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.70.0` · IN PROGRESS
+
+**0.70.0 (2026-09-29, Client Centre — PROTOTYPED):** CMC's client-first layout as native pages — Business → Client Centre (`/client-centre`, `/client-centre/[clientId]/…`) for staff and a portal **Company** tab (`/portal/company/…`) for client contacts. Plan: `docs/plans/2026-09-29-client-centre.md`.
 
 **0.67.0 (2026-09-03, FX, DEMO_MODE fixture parity sweep — PROTOTYPED.)** Every UI claim verified
 under `DEMO_MODE` is only as honest as the fixture it ran against. Swept `lib/demoMonitoring.ts`

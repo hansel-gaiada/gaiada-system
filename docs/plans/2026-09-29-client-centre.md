@@ -145,9 +145,9 @@ server only after the owner confirms.
 
 | # | Piece | Owner | Status |
 |---|---|---|---|
-| 1 | Registry extraction + this plan | lead | IN PROGRESS |
-| 2 | Migration, endpoints, validation, `portal.edit_company_profile` IAM chain, tests, BFF §23 | backend agent | PLANNED |
-| 3 | Staff + portal pages, nav row, portal tab, DEMO_MODE fixture, tests | frontend agent | PLANNED |
-| 4 | helios dump → mapping → import script | lead | PLANNED |
-| 5 | Linux gate on sumopod, merge, MODULES/CHANGELOG/MAP | lead | PLANNED |
+| 1 | Registry extraction + this plan | lead | committed (e0520469) |
+| 2 | Migration, endpoints, validation, `portal.edit_company_profile` IAM chain, tests, BFF §25 | backend agent | PROTOTYPED — fixes aa88b98f, gate re-run pending |
+| 3 | Staff + portal pages, nav row, portal tab, DEMO_MODE fixture, tests | frontend agent | PROTOTYPED — sumopod 211/4194 + next build green |
+| 4 | helios dump → mapping → import script | lead | script committed; **export BLOCKED** (production read needs owner permission or an owner-run export) |
+| 5 | Linux gate on sumopod, merge, MODULES/CHANGELOG/MAP | lead | docs done; final combined gate pending |
 | 6 | Release + live import | lead, **owner go-ahead** | PLANNED |

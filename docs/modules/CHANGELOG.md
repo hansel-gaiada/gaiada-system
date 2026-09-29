@@ -11,6 +11,47 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-ui `0.70.0` - the Client Centre: CMC's client-first layout as native ERP pages (2026-09-29) - PROTOTYPED
+
+Owner ruling CC-D1: the standalone Company Management Centre (`cmc.gaiada.com`, built outside git on
+helios) had the categorisation the ERP lacked, so its layout is rebuilt here on the ERP's components,
+login and policy, for employees AND client contacts. The live CMC is not touched (CC-D2).
+
+- **Staff:** Business → **Client Centre** (`/client-centre`) lists every client with business type,
+  city and completion. `/client-centre/[clientId]/…` is CMC's workspace:
+  - a client switcher and an in-page department tree;
+  - Home, Company settings and section overviews;
+  - section settings, with fields grouped by the 16 registry groups ("Shared · N"), the connections
+    accordion and custom connections;
+  - leaf "Coming soon" pages.
+- **Client:** portal tab **Company** (`/portal/company/…`), using the same components and scoped to the
+  caller's client(s). It is read-only unless the backend returns `canEdit`.
+- The registry `src/lib/clientCentreRegistry.json` is byte-pinned to platform-nest's copy by a test.
+  Autosave sends only changed keys. Creating a custom connection saves immediately, so its id exists
+  before anyone edits it.
+- Verification (sumopod Linux gate, through `40c19a87`): **211 files / 4194 tests passed**, `tsc`
+  clean, `next build` exit 0. Not yet driven by a logged-in user in a browser.
+
+### platform-nest `0.55.0` - Client Centre backend + `portal.edit_company_profile` (2026-09-29) - PROTOTYPED
+
+- `client_centre_profiles`: one row per client, core tenant RLS, and a same-tenant composite FK. It is not
+  module-walled, because the portal reaches it. A missing row means an empty profile.
+- Staff routes: `GET /clients/centre` and `GET|PATCH /clients/:clientId/centre`, with `client`
+  read/update and `ModuleEnabledGuard("clients")`.
+- Portal routes: `GET /portal/centre` and `GET|PATCH /portal/centre/:clientId`, within the portal scope.
+  An out-of-scope client answers 404. Only an active client-wide signer can edit (CC-D4).
+- One validator for both PATCHes:
+  - registry keys only;
+  - null/"" deletes a key (CMC could never clear a field);
+  - credential refusal scans values (CMC checked top-level keys only);
+  - 5,000-character and 256KB caps.
+  Each accepted write bumps `revision`, writes one activity with before/after values, and emits
+  `client.centre_updated`.
+- New Cerbos action `portal.edit_company_profile`: policy + mirror derived role, catalog
+  (`uiGrantable: false`), groups, seed migration (`client` + `platform_admin`), bundles, pinned tests.
+- Offline import builder `scripts/cmc/build-import.mjs` for the CMC profiles, writing `*.local.*` files
+  only. The `cmc/origin/index.html` snapshot is gitignored because it embeds every client profile (CC-D7).
+
 ### platform-nest `0.54.0` - revoking a user now stops them READING, not just writing (2026-09-08) - PROTOTYPED
 
 Fault-register finding 13. A Legal Gate 1 blocker: `authorize()` gated D11 on `action !== "read"`,
