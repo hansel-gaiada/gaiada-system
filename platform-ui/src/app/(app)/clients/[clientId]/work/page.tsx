@@ -3,7 +3,7 @@ import Link from "next/link";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
-import { listProjects } from "@/lib/entities";
+import { listDeliverables, listProjects } from "@/lib/entities";
 import { listAllPmTasksPaged } from "@/lib/pm";
 import { Card, HairlineTable, StatusBadge } from "@/components/ui";
 import { EmptyNote } from "@/components/systems/EmptyNote";
@@ -29,19 +29,39 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
   const { clientId } = await params;
   if (!tenant) notFound();
 
-  const [projects, tasks] = await Promise.all([
+  const [projects, tasks, allDeliverables] = await Promise.all([
     listProjects(userId, tenant, clientId).catch(() => []),
     // `includeClosed` defaults to true in the reader; kept explicit because "Done" tasks are part of
     // the story a client's work tells — a project reading 100% with nothing listed is not a finding.
     listAllPmTasksPaged(userId, tenant, { clientId, includeClosed: true }),
+    listDeliverables(userId, tenant),
   ]);
+  // CC-D8 — moved here from the old Details tab. Still narrowed in the browser, as it was there:
+  // `/deliverables` takes no client filter yet.
+  const deliverables = allDeliverables.filter((d) => d.client_id === clientId);
+  const deliverablesCard = (
+    <Card title={`Deliverables${deliverables.length ? ` · ${deliverables.length}` : ""}`}>
+      {deliverables.length === 0 ? (
+        <EmptyNote>No deliverables for this client.</EmptyNote>
+      ) : (
+        <HairlineTable
+          columns={[{ label: "Deliverable" }, { label: "Status" }, { label: "Due", align: "right" }]}
+          rows={deliverables.map((d) => [d.name, <StatusBadge key="s" label={d.status} />, formatDate(d.due_date)])}
+          tcols="2fr 1fr 1fr"
+        />
+      )}
+    </Card>
+  );
 
   if (projects.length === 0) {
     return (
-      <EmptyNote>
-        This client has no projects yet. Create one from <Link href="/projects">Projects</Link> and it
-        will appear here — along with its tasks, milestones and deliverables.
-      </EmptyNote>
+      <div style={{ display: "grid", gap: 20 }}>
+        <EmptyNote>
+          This client has no projects yet. Create one from <Link href="/projects">Projects</Link> and it
+          will appear here — along with its tasks and milestones.
+        </EmptyNote>
+        {deliverablesCard}
+      </div>
     );
   }
 
@@ -60,6 +80,7 @@ export default async function ClientWorkPage({ params }: { params: Promise<{ cli
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
+      {deliverablesCard}
       {projects.map((p) => {
         const own = byProject.get(p.id) ?? [];
         const done = own.filter((t) => t.status === "done").length;

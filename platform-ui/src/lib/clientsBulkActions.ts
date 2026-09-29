@@ -21,7 +21,8 @@ export async function bulkDeleteClientsAction(ids: string[]): Promise<BulkResult
   const me = await getMe(userId);
   const tenant = await getActiveTenant(me);
   if (!tenant) return { ok: false, error: "Select a company first." };
-  if (!can(me, "pm.manage", tenant)) return { ok: false, error: "You don't have permission to delete clients." };
+  // CC-D10: a delete needs `client.delete` (manager+), the resource_client.yaml line.
+  if (!can(me, "client.delete", tenant)) return { ok: false, error: "You don't have permission to delete clients." };
 
   let succeeded = 0;
   const failures: string[] = [];

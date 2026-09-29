@@ -11,6 +11,76 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### platform-nest `0.56.0` - clients get an owner, notes and a history; create keeps its status (2026-09-29) - PROTOTYPED
+
+Plan: `docs/plans/2026-09-29-client-centre.md` (CC-D10). Contract: BFF §26.
+
+- **Owner (account manager):** new nullable `clients.owner_user_id` (migration `202609290551_client_owner.sql`,
+  no DML). Set on create or `PATCH` via `ownerUserId`. The user must be active staff of THIS tenant,
+  checked through the tenant-scoped connection (an FK alone would accept another tenant's user).
+  Every client read returns `owner_user_id` and `owner_name`.
+- **`POST /clients` stores `status`.** It was dropped, so the New client form's Status select did
+  nothing and every client was born `active`.
+- **`PATCH /clients/:id` validates and merges.** `contact` is merged key by key (a string sets, `null`
+  or `""` deletes, omitted is untouched); it used to replace the whole object. A blank `name` is a 400
+  (it used to be stored as ""); `status` must be a lowercase token. The activity row records
+  `{changes: [{field, before, after}]}`.
+- **Notes:** `GET/POST /clients/:id/notes`, `DELETE /clients/:id/notes/:noteId`. Stored in the core
+  `comments` table, which no client/portal role can read. Adding needs `client` update; deleting your
+  own needs update, anyone else's needs `client` delete (manager+).
+- **History:** `GET /clients/:id/history`, the client's activity rows newest first, `authz.*` excluded.
+- Tests: `client-input.test.ts` (validation) and `clients-crud.db.test.ts` (real DB + live Cerbos:
+  member edits, the merge keeps untouched keys, a cross-tenant owner is refused, member-vs-manager
+  note deletion).
+
+### platform-ui `0.73.0` - clients are editable by every staff member, with owner, contacts, archive, notes and history (2026-09-29) - PROTOTYPED
+
+- **Staff can edit.** Every client control was gated on `pm.manage` (managers and up), although
+  `resource_client.yaml` lets ordinary staff (`member`) create and edit clients. New capabilities
+  mirror the policy: **`client.write`** (company_admin, manager, member, owner) for New, Edit,
+  Archive and notes, and **`client.delete`** (company_admin, manager, owner) for Delete and bulk
+  delete. Pinned in `rbac.test.ts`; `rbac-capability-parity.test.ts` checks both against the
+  permission bundles.
+- **Edit and New client** cover name, status, **owner**, primary email, phone, address, billing
+  contact and billing email. The form sends every contact key it owns and the backend merges, so keys
+  the form does not show are never touched.
+- **Archive / Restore** in the client header. Archived clients leave the default Clients list
+  ("Show N archived" brings them back). **Delete asks for confirmation** now.
+- **Clients list:** new Owner column. **Hub header:** shows the owner.
+- **Contacts & meetings:** a Contact details card (owner, email, phone, address, billing contact).
+- **New tab, Notes & history:** internal notes (add; delete your own, or anyone's with
+  `client.delete`) and a history of every change, including Client Centre and portal profile edits,
+  with before → after per field.
+- Demo-mode fixtures for client GET/PATCH, notes and history.
+
+### platform-ui `0.72.0` - one client, one page: Client Centre becomes the client hub's Profile tab (2026-09-29) - PROTOTYPED
+
+Owner rulings CC-D8 and CC-D9 (`docs/plans/2026-09-29-client-centre.md`). Staff had two lists and
+two pages per client (`/clients/…` and `/client-centre/…`); now there is one of each.
+
+- **Sidebar:** the Business → **Client Centre** row is gone. **Clients** is the only client entry.
+- **Clients list:** two new columns, **Business type** and **Profile** (share of setup fields filled),
+  from `GET /clients/centre`. If that read fails the columns show "—", and the list still renders.
+- **Client hub tabs** are now **Overview · Work · Profile · Contacts & meetings**:
+  - **Profile** (`/clients/[id]/profile/…`) is the former Client Centre workspace, unchanged inside.
+    It has no client switcher and no "Edit in Clients" links any more.
+  - **Contacts & meetings** (`/clients/[id]/contacts`) is the former **Details** tab: primary email,
+    portal access, scheduled meetings and recordings.
+  - The client's **status** moved into the hub header, and **deliverables** moved to the Work tab.
+- **Renames (CC-D9)**, because "company" in the ERP means one of our own group companies:
+  - "Company settings" → **Business details**. Its "Company name (shown in the app)" label → **Client name**.
+  - Portal tab **Company** → **Business profile**. The URL stays `/portal/company`.
+- **Redirects:** `/client-centre` → `/clients`; `/client-centre/[id]/…` → `/clients/[id]/profile/…`
+  (same section path); `/clients/[id]/details` → `/clients/[id]/contacts`.
+- **No backend, migration or permission change.** The profile table, API and CC-D4 edit rule are as
+  they were in 0.70.0.
+- **Client edit (new):** an **Edit** button in the client hub header opens `/clients/[id]/edit` for
+  name, status and primary email (`pm.manage`, same as New and Delete). Before this there was no way
+  to rename a client in the UI, although Client Centre's "Edit in Clients" link implied one. That link
+  is gone; Business details now points at Edit. The email is merged into the stored `contact` object,
+  because the backend replaces `contact` whole and sending only `{email}` would erase the other keys.
+  Pinned by `lib/clientWorkActions.test.ts`. Uses the existing `PATCH /clients/:id`; no backend change.
+
 ### monitoring `0.4.0` - Cert and Domain columns are filled; the row opens the monitor, the name opens the site (2026-09-29) - PROTOTYPED
 
 - **Cert expiry:** `monitors.cert_expires_at` and `domain_expires_at` had columns since 0116 and a UI

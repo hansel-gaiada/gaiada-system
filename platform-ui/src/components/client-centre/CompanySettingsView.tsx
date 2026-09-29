@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   registry,
   allDepts,
@@ -8,14 +7,15 @@ import {
 import { FieldControl } from "./FieldControl";
 import { Breadcrumb } from "./Breadcrumb";
 
-// CMC's `renderGeneral`: company name (READ-ONLY, CC-D5) + business type select, the shared general
-// field groups, department toggles, and — instead of CMC's "Delete company"/"New company" (CC-D5:
-// not rebuilt) — a staff-only link back to the existing Clients edit/delete flow.
+// CMC's `renderGeneral`, titled "Business details" (CC-D9; CMC called it "Company settings", which
+// collides with the ERP's own companies): client name (READ-ONLY, CC-D5) + business type select, the
+// shared general field groups and department toggles. CMC's "Delete company"/"New company" are not
+// rebuilt (CC-D5); on the staff side this view sits inside the client hub, whose header has Delete.
 export function CompanySettingsView({
   clientName,
   draft,
   canEdit,
-  staffClientHref,
+  isPortal,
   onFieldChange,
   onBusinessTypeChange,
   onDeptToggle,
@@ -23,8 +23,7 @@ export function CompanySettingsView({
   clientName: string;
   draft: CentreDraft;
   canEdit: boolean;
-  /** Staff only: `/clients/:id`, the existing client edit/delete flow. Undefined in the portal. */
-  staffClientHref?: string;
+  isPortal: boolean;
   onFieldChange: (key: string, value: string) => void;
   onBusinessTypeChange: (businessType: string) => void;
   onDeptToggle: (deptId: string, enabled: boolean) => void;
@@ -32,27 +31,27 @@ export function CompanySettingsView({
   const depts = allDepts(registry, draft.businessType);
   return (
     <div className="cc-content">
-      <Breadcrumb items={[clientName, "Company settings"]} />
-      <div className="cc-head-row"><h1>Company settings</h1></div>
+      <Breadcrumb items={[clientName, "Business details"]} />
+      <div className="cc-head-row"><h1>Business details</h1></div>
       <p className="cc-lede">
         The basics every section shares. Each section&apos;s own settings page adds what that specialist
         needs on top. Changes save automatically.
       </p>
 
-      <h2 className="cc-sec-h">Company</h2>
+      <h2 className="cc-sec-h">Business</h2>
       <div className="cc-form">
         <label className="cc-field" htmlFor="cc-company-name">
           <span className="cc-field__label">
-            Company name (shown in the app)
-            {staffClientHref && (
-              <Link href={staffClientHref} className="cc-shared" style={{ color: "var(--erp-accent)" }}>
-                Edit in Clients
-              </Link>
-            )}
+            {isPortal ? "Name" : "Client name"}
           </span>
           {/* CC-D5: read-only for EVERY caller here — it is the CRM `clients.name` shown on issued
-              invoices and signed contracts; only the Clients edit flow may rename it. */}
+              invoices and signed contracts. */}
           <span className="cc-readonly-value" id="cc-company-name">{clientName}</span>
+          <span className="cc-field__help">
+            {isPortal
+              ? "This is the name on your invoices and contracts. Ask your account manager to change it."
+              : "This is the name on invoices and contracts. Change it with Edit at the top of the client page."}
+          </span>
         </label>
         <label className="cc-field" htmlFor="cc-business-type">
           <span className="cc-field__label">Business type</span>
@@ -113,17 +112,6 @@ export function CompanySettingsView({
           </label>
         ))}
       </div>
-
-      {staffClientHref && (
-        <>
-          <h2 className="cc-sec-h">Manage this client</h2>
-          <div className="cc-danger">
-            <span className="cc-field__help">
-              Renaming, archiving or deleting {clientName} happens on the Clients page, not here.
-            </span>
-            <Link href={staffClientHref} className="lux-btn lux-btn--ghost lux-btn--sm">Open in Clients</Link>
-          </div>
-        </>
-      )}    </div>
+    </div>
   );
 }

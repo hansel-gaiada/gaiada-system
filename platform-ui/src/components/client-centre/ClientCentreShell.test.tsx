@@ -3,7 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ClientCentreShell } from "./ClientCentreShell";
 import type { CentreProfile } from "@/lib/clientCentre";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/client-centre/cl-1" }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/clients/cl-1/profile" }));
 
 function makeProfile(overrides: Partial<CentreProfile> = {}): CentreProfile {
   return {
@@ -30,7 +30,7 @@ describe("ClientCentreShell", () => {
   it("renders Home by default: client name, description lede, and department cards", () => {
     const patchAction = vi.fn();
     render(
-      <ClientCentreShell clientId="cl-1" basePath="/client-centre/cl-1" segments={[]} profile={makeProfile()} isPortal={false} patchAction={patchAction} />,
+      <ClientCentreShell clientId="cl-1" basePath="/clients/cl-1/profile" segments={[]} profile={makeProfile()} isPortal={false} patchAction={patchAction} />,
     );
     expect(screen.getByRole("heading", { name: "Demo Harbour Hotel" })).toBeInTheDocument();
     expect(screen.getByText("A boutique waterfront hotel.")).toBeInTheDocument();
@@ -40,17 +40,22 @@ describe("ClientCentreShell", () => {
     expect(screen.getAllByText("Reservations").length).toBeGreaterThan(0);
   });
 
-  it("renders Company settings: business type select, department toggles, staff-only Clients link", () => {
+  it("renders Business details: business type select, department toggles, read-only client name", () => {
     const patchAction = vi.fn();
     render(
       <ClientCentreShell
-        clientId="cl-1" basePath="/client-centre/cl-1" segments={["company"]} profile={makeProfile()} isPortal={false}
-        patchAction={patchAction} staffClientHref="/clients/cl-1"
+        clientId="cl-1" basePath="/clients/cl-1/profile" segments={["company"]} profile={makeProfile()} isPortal={false}
+        patchAction={patchAction}
       />,
     );
-    expect(screen.getByRole("heading", { name: "Company settings" })).toBeInTheDocument();
+    // CC-D9: "Business details", never "Company settings" — "company" is the ERP's own group company.
+    expect(screen.getByRole("heading", { name: "Business details" })).toBeInTheDocument();
+    expect(screen.queryByText(/company settings/i)).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("Hotel / villa / accommodation")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Edit in Clients" })).toHaveAttribute("href", "/clients/cl-1");
+    // CC-D8: the view sits inside the client hub, so there is no "Edit in Clients" link; the help text
+    // points at the hub header's Edit button, which is where the name is changed.
+    expect(screen.queryByRole("link", { name: /in Clients/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Change it with Edit/i)).toBeInTheDocument();
     // CC-D5: the client name itself is read-only everywhere, never an input.
     expect(screen.getByText("Demo Harbour Hotel", { selector: ".cc-readonly-value" })).toBeInTheDocument();
   });
@@ -58,7 +63,7 @@ describe("ClientCentreShell", () => {
   it("read-only banner names the reason and who to ask, differently for staff vs the portal", () => {
     const patchAction = vi.fn();
     const { rerender } = render(
-      <ClientCentreShell clientId="cl-1" basePath="/client-centre/cl-1" segments={[]} profile={makeProfile({ canEdit: false })} isPortal={false} patchAction={patchAction} />,
+      <ClientCentreShell clientId="cl-1" basePath="/clients/cl-1/profile" segments={[]} profile={makeProfile({ canEdit: false })} isPortal={false} patchAction={patchAction} />,
     );
     expect(screen.getByText(/don't have permission/i)).toBeInTheDocument();
     rerender(
@@ -67,10 +72,10 @@ describe("ClientCentreShell", () => {
     expect(screen.getByText(/ask your account manager/i)).toBeInTheDocument();
   });
 
-  it("a read-only viewer sees values but no inputs on Company settings", () => {
+  it("a read-only viewer sees values but no inputs on Business details", () => {
     const patchAction = vi.fn();
     render(
-      <ClientCentreShell clientId="cl-1" basePath="/client-centre/cl-1" segments={["company"]} profile={makeProfile({ canEdit: false })} isPortal={false} patchAction={patchAction} />,
+      <ClientCentreShell clientId="cl-1" basePath="/clients/cl-1/profile" segments={["company"]} profile={makeProfile({ canEdit: false })} isPortal={false} patchAction={patchAction} />,
     );
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.getAllByText("Demo Harbour Hotel").length).toBeGreaterThan(0);
@@ -80,7 +85,7 @@ describe("ClientCentreShell", () => {
     const patchAction = vi.fn().mockResolvedValue({ ok: true, profile: makeProfile({ profile: { trading: "New Name" } }) });
     const { container } = render(
       <ClientCentreShell
-        clientId="cl-1" basePath="/client-centre/cl-1" segments={["rs", "settings"]} profile={makeProfile()} isPortal={false}
+        clientId="cl-1" basePath="/clients/cl-1/profile" segments={["rs", "settings"]} profile={makeProfile()} isPortal={false}
         patchAction={patchAction}
       />,
     );
@@ -98,7 +103,7 @@ describe("ClientCentreShell", () => {
     const patchAction = vi.fn();
     const { container } = render(
       <ClientCentreShell
-        clientId="cl-1" basePath="/client-centre/cl-1" segments={["rs", "settings"]} profile={makeProfile({ canEdit: false })} isPortal={false}
+        clientId="cl-1" basePath="/clients/cl-1/profile" segments={["rs", "settings"]} profile={makeProfile({ canEdit: false })} isPortal={false}
         patchAction={patchAction}
       />,
     );
@@ -112,7 +117,7 @@ describe("ClientCentreShell", () => {
     const patchAction = vi.fn().mockResolvedValue({ ok: false, error: "trading looks like it contains a credential", field: "profile.trading" });
     const { container } = render(
       <ClientCentreShell
-        clientId="cl-1" basePath="/client-centre/cl-1" segments={["rs", "settings"]} profile={makeProfile()} isPortal={false}
+        clientId="cl-1" basePath="/clients/cl-1/profile" segments={["rs", "settings"]} profile={makeProfile()} isPortal={false}
         patchAction={patchAction}
       />,
     );

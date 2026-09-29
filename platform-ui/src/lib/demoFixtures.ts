@@ -633,6 +633,15 @@ const CLIENTS: Record<string, unknown>[] = [
   { id: "cl-2", name: "Cedar Group", contact: { email: "hello@cedar.example" }, status: "active", custom_fields: {} },
   { id: "cl-3", name: "Lumen Studio", contact: {}, status: "prospect", custom_fields: {} },
 ];
+// CC-D10 demo stores: empty until the demo session writes to them.
+const DEMO_CLIENT_NOTES: Record<string, { id: string; body: string; authorId: string; authorName: string; createdAt: string }[]> = {};
+const DEMO_CLIENT_HISTORY: Record<string, { id: string; verb: string; metadata: Record<string, unknown>; occurredAt: string; actorId: string; actorName: string }[]> = {};
+function demoClientHistory(clientId: string, actorId: string, verb: string, metadata: Record<string, unknown>): void {
+  (DEMO_CLIENT_HISTORY[clientId] ??= []).unshift({
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, verb, metadata,
+    occurredAt: new Date().toISOString(), actorId, actorName: "You (demo)",
+  });
+}
 const DELIVERABLES: Record<string, unknown>[] = [
   { id: "dl-1", project_id: "p-web-1", client_id: "cl-1", name: "Homepage redesign", status: "in_progress", due_date: "2026-07-20" },
   { id: "dl-2", project_id: "p-web-1", client_id: "cl-1", name: "Checkout rebuild", status: "todo", due_date: "2026-07-28" },
@@ -2617,8 +2626,68 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
       needsClient,
     });
   }
+  // CC-D10 — notes + history, mirroring clients.controller.ts: notes newest first, history built from
+  // what this demo session actually did (the PATCH below appends to it), never a hand-written story.
+  const clientNotes = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/notes(?:\/([^/]+))?$/);
+  if (clientNotes) {
+    const [, cid, noteId] = clientNotes;
+    const notes = (DEMO_CLIENT_NOTES[cid] ??= []);
+    if (m === "POST") {
+      const b = JSON.parse(body || "{}");
+      const text = String(b.body ?? "").trim();
+      if (!text) return { status: 400, json: { error: "body must not be blank" } };
+      const n = { id: demoId("note"), body: text, authorId: userId, authorName: "You (demo)", createdAt: new Date().toISOString() };
+      notes.unshift(n);
+      demoClientHistory(cid, userId, "noted", { noteId: n.id });
+      return { status: 201, json: { id: n.id } };
+    }
+    if (m === "DELETE" && noteId) {
+      const i = notes.findIndex((n) => n.id === noteId);
+      if (i < 0) return { status: 404, json: { error: "note not found" } };
+      notes.splice(i, 1);
+      demoClientHistory(cid, userId, "note_deleted", { noteId });
+      return ok({ ok: true });
+    }
+    return ok(notes);
+  }
+  const clientHistory = p.match(/^\/api\/[^/]+\/clients\/([^/]+)\/history$/);
+  if (clientHistory) return ok(DEMO_CLIENT_HISTORY[clientHistory[1]] ?? []);
+
   const clientOne = p.match(/^\/api\/[^/]+\/clients\/([^/]+)$/);
   if (clientOne && m === "DELETE") { const i = CLIENTS.findIndex((c) => c.id === clientOne[1]); if (i >= 0) CLIENTS.splice(i, 1); return ok({ ok: true }); }
+  if (clientOne && m === "GET") {
+    const c = CLIENTS.find((x) => x.id === clientOne[1]);
+    return c ? ok({ owner_user_id: null, owner_name: null, ...c }) : { status: 404, json: { error: "client not found" } };
+  }
+  if (clientOne && m === "PATCH") {
+    const c = CLIENTS.find((x) => x.id === clientOne[1]);
+    if (!c) return { status: 404, json: { error: "client not found" } };
+    const b = JSON.parse(body || "{}") as { name?: string; status?: string; ownerUserId?: string | null; contact?: Record<string, string | null> };
+    const changes: { field: string; before: string | null; after: string | null }[] = [];
+    const set = (field: string, key: string, v: unknown) => {
+      const before = (c[key] as string | null | undefined) ?? null;
+      if (before !== v) { changes.push({ field, before, after: (v as string | null) ?? null }); c[key] = v; }
+    };
+    if (b.name !== undefined) set("name", "name", b.name.trim());
+    if (b.status !== undefined) set("status", "status", b.status);
+    if (b.ownerUserId !== undefined) {
+      set("owner", "owner_user_id", b.ownerUserId || null);
+      const members = (MEMBERS[tenantFromPath(p)!] ?? []) as { user_id: string; name: string }[];
+      c.owner_name = members.find((mm) => mm.user_id === c.owner_user_id)?.name ?? null;
+    }
+    if (b.contact) {
+      // Key-level merge, exactly as the backend: a string sets, null/"" deletes, omitted is untouched.
+      const contact = { ...((c.contact as Record<string, string>) ?? {}) };
+      for (const [k, v] of Object.entries(b.contact)) {
+        const before = contact[k] ?? null;
+        if (v === null || v === "") delete contact[k]; else contact[k] = v;
+        if ((contact[k] ?? null) !== before) changes.push({ field: `contact.${k}`, before, after: contact[k] ?? null });
+      }
+      c.contact = contact;
+    }
+    demoClientHistory(clientOne[1], userId, "updated", changes.length ? { changes } : {});
+    return ok({ id: c.id });
+  }
   const clientsMatch = p.match(/^\/api\/[^/]+\/clients$/);
   if (clientsMatch) {
     if (m === "POST") { const b = JSON.parse(body || "{}"); const c = { id: demoId("cl"), name: String(b.name ?? "New client"), contact: b.contact ?? {}, status: (b.status as string) ?? "active", custom_fields: {} }; CLIENTS.push(c); return { status: 201, json: { id: c.id } }; }

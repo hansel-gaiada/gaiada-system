@@ -42,9 +42,8 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   const business: NavItem[] = [
     { label: PM_TERMS.projectManagement, href: "/project-management", icon: "projects" },
     { label: "Clients", href: "/clients", icon: "finance" },
-    // CC-D1 — CMC's layout/categorisation as native ERP pages, directly after Clients (same object,
-    // a different lens: the client-first workspace rather than the CRM row).
-    { label: "Client Centre", href: "/client-centre", icon: "finance" },
+    // CC-D8 — no separate "Client Centre" row: a client's profile is the Profile tab of the client
+    // hub, so one client has one page (the old `/client-centre` routes redirect there).
     { label: "Deliverables", href: "/deliverables", icon: "box" },
     { label: "Timesheets", href: "/timesheets", icon: "clock" },
     ...(can(me, "company.manage", tenantId) ? [{ label: "Invoices", href: "/invoices", icon: "wallet" } as NavItem] : []),

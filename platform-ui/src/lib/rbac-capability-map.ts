@@ -193,6 +193,17 @@ export const CAPABILITY_MAP = {
     semantics: "all",
   },
 
+  // CC-D10 — resource_client.yaml: `create` and `update` share one role list (company_admin,
+  // manager, member) under one condition; `delete` drops member. Hence two capabilities, both `all`.
+  "client.write": {
+    permissions: ["core.client.create", "core.client.update"],
+    semantics: "all",
+  },
+  "client.delete": {
+    permissions: ["core.client.delete"],
+    semantics: "all",
+  },
+
   // Owner decision 2026-08-06 ("anyone can pass the ball") + the capability's own comment: mirrors
   // Cerbos's `pm_task:update` specifically — the server diffs `assignee.refId` vs
   // `assignee.responsibleId` and only escalates to the `pm.manage` tier when OWNERSHIP actually

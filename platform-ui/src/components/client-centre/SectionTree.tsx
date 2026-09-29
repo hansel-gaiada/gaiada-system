@@ -11,7 +11,7 @@ import {
   type ClientCentreRegistry,
 } from "@/lib/clientCentre";
 
-// The CMC-style in-page department tree: Home · Company settings · each ACTIVE department
+// The CMC-style in-page department tree: Home · Business details · each ACTIVE department
 // (industry module first), expandable into its sub-sections and leaf pages, each branch ending in
 // its own "Settings" link. Native `<details>` was considered and rejected: CMC's own affordance
 // separates "navigate to this section's overview" (clicking the name) from "expand/collapse its
@@ -35,7 +35,7 @@ export function SectionTree({
   basePath: string;
   businessType: string;
   activeDepts: RegistrySection[];
-  /** The section id currently open (department or sub-section), or null on Home/Company settings. */
+  /** The section id currently open (department or sub-section), or null on Home/Business details. */
   currentSectionId: string | null;
   /** Called after any link click — lets the mobile shell collapse the tree back down. */
   onNavigate?: () => void;
@@ -125,7 +125,7 @@ export function SectionTree({
   const companyHref = sectionHref(basePath, { kind: "company" });
 
   return (
-    <nav className="cc-tree" aria-label="Client Centre sections">
+    <nav className="cc-tree" aria-label="Profile sections">
       <div className="cc-tree__row">
         <Link href={homeHref} className="cc-tree__link" aria-current={isActive(homeHref) ? "page" : undefined} onClick={onNavigate}>
           <span className="cc-tree__icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon("home") }} />
@@ -135,7 +135,7 @@ export function SectionTree({
       <div className="cc-tree__row">
         <Link href={companyHref} className="cc-tree__link" aria-current={isActive(companyHref) ? "page" : undefined} onClick={onNavigate}>
           <span className="cc-tree__icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon("gen") }} />
-          Company settings
+          Business details
         </Link>
       </div>
       {activeDepts.map((d) => renderSection(d, 0))}

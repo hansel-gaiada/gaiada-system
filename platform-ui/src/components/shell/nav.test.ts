@@ -24,9 +24,9 @@ describe("navFor (RBAC-gated visibility)", () => {
     expect(learning.items.map((i) => i.label)).toEqual(["Overview", "Catalogue"]);
     const business = groups.find((g) => g.label === "Business")!;
     expect(business.items.map((i) => i.label)).not.toContain("Rollups");
-    // CC-D1 — Client Centre sits directly after Clients (same object, a client-first lens).
-    const clientsIdx = business.items.findIndex((i) => i.label === "Clients");
-    expect(business.items[clientsIdx + 1]).toEqual({ label: "Client Centre", href: "/client-centre", icon: "finance" });
+    // CC-D8 — Client Centre is the Profile tab of the client hub, not a second sidebar row.
+    expect(business.items.map((i) => i.label)).toContain("Clients");
+    expect(business.items.map((i) => i.label)).not.toContain("Client Centre");
     // 2026-08-10 owner directive: Business collapses to ONE "Project Management" entry — Projects
     // and Tasks are no longer separate sidebar rows (they're tabs on /project-management now).
     expect(business.items.map((i) => i.label)).not.toContain("Projects");

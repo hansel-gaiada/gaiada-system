@@ -265,7 +265,7 @@ export function connectionsConnectedCount(connections: Record<string, Connection
 }
 
 // ── Route model ──────────────────────────────────────────────────────────────────────────────────
-// The catch-all segment (`[[...section]]`) under `/client-centre/[clientId]` (staff) and
+// The catch-all segment (`[[...section]]`) under `/clients/[clientId]/profile` (staff) and
 // `/portal/company` (portal). Every section id is unique registry-wide (see `allSections` above),
 // so the route never needs to encode a parent — `["se", "settings"]` finds SEO directly even
 // though it nests under Marketing.

@@ -8,7 +8,6 @@
 // secret" names the exact field via `PlatformError.field`, and replacing that with a generic
 // "something went wrong" would throw away the one actionable part.
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getSessionUserId } from "./session-server";
 import { getMe, platformFetch, PlatformError, type Me } from "./platform";
 import { getActiveTenant } from "./tenant";
@@ -46,19 +45,12 @@ export async function patchClientCentreAction(clientId: string, patch: CentrePat
       method: "PATCH",
       body: JSON.stringify(patch),
     });
-    revalidatePath(`/client-centre/${clientId}`, "layout");
-    revalidatePath("/client-centre");
+    revalidatePath(`/clients/${clientId}/profile`, "layout");
+    revalidatePath("/clients"); // the list's Business type + Profile columns
     return { ok: true, profile };
   } catch (e) {
     return fail(e);
   }
-}
-
-/** Staff client switcher (the workspace's own dropdown, distinct from the `/client-centre` list):
- *  the client id is already in the staff URL, so switching is a plain redirect — no cookie needed. */
-export async function switchStaffCentreClient(formData: FormData): Promise<void> {
-  const clientId = String(formData.get("clientId") ?? "");
-  redirect(`/client-centre/${clientId}`);
 }
 
 /** Portal PATCH: `PATCH /api/:t/portal/centre/:clientId`. CC-D4: the BFF enforces

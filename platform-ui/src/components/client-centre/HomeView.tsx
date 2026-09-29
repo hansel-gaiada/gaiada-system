@@ -9,7 +9,7 @@ import {
 import { Breadcrumb } from "./Breadcrumb";
 
 // CMC's Home: description lede, 4 overview facts, department cards with "N areas" — read-only (the
-// description itself is edited on Company settings, not here).
+// description itself is edited on Business details, not here).
 export function HomeView({ clientId, basePath, profile }: { clientId: string; basePath: string; profile: CentreProfile }) {
   const p = profile.profile;
   const depts = activeDepts(registry, profile.businessType, profile.departments);
@@ -24,11 +24,11 @@ export function HomeView({ clientId, basePath, profile }: { clientId: string; ba
       <div className="cc-head-row">
         <h1>{profile.clientName}</h1>
         <Link href={sectionHref(basePath, { kind: "company" })} className="lux-btn lux-btn--ghost lux-btn--sm">
-          Company settings
+          Business details
         </Link>
       </div>
       <p className="cc-lede">
-        {p.description || "Add a description, location and contact details in Company settings."}
+        {p.description || "Add a description, location and contact details in Business details."}
       </p>
 
       <div className="cc-overview">
@@ -56,7 +56,7 @@ export function HomeView({ clientId, basePath, profile }: { clientId: string; ba
         ))}
       </div>
       <p style={{ marginTop: 14, color: "var(--ink-subtle)", fontSize: 13.5 }}>
-        Turn departments on or off for this business in Company settings.
+        Turn departments on or off for this business in Business details.
       </p>
     </div>
   );

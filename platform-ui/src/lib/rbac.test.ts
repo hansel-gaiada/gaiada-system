@@ -553,3 +553,27 @@ describe("IAM-DR67 map defect — hr.manage excludes hr.case.cancel", () => {
     );
   });
 });
+
+// CC-D10 — resource_client.yaml: create/update → company_admin, manager, member (owner decision
+// 2026-08-18: "agency staff plausibly onboard and edit clients as ordinary work"); delete → company_admin,
+// manager only. The UI gated all of it on `pm.manage` before, so ordinary staff could not see New or
+// Edit although Cerbos allowed both.
+describe("client.write / client.delete (CC-D10) — exact role sets", () => {
+  const coAdminA = me([{ role: "company_admin", scopeType: "company", scopeId: "co-a" }]);
+  const mgrA = me([{ role: "manager", scopeType: "company", scopeId: "co-a" }]);
+  const memberA = me([{ role: "member", scopeType: "company", scopeId: "co-a" }]);
+  const ownerA = me([{ role: "owner", scopeType: "company", scopeId: "co-a" }]);
+  const viewerA = me([{ role: "viewer", scopeType: "company", scopeId: "co-a" }]);
+  const clientA = me([{ role: "client", scopeType: "company", scopeId: "co-a" }]);
+
+  it("client.write: company_admin, manager, member, owner — NOT viewer or a client contact", () => {
+    for (const who of [coAdminA, mgrA, memberA, ownerA]) expect(can(who, "client.write", "co-a")).toBe(true);
+    for (const who of [viewerA, clientA]) expect(can(who, "client.write", "co-a")).toBe(false);
+    expect(can(memberA, "client.write", "co-b")).toBe(false);
+  });
+
+  it("client.delete: company_admin, manager, owner — member explicitly excluded", () => {
+    for (const who of [coAdminA, mgrA, ownerA]) expect(can(who, "client.delete", "co-a")).toBe(true);
+    for (const who of [memberA, viewerA, clientA]) expect(can(who, "client.delete", "co-a")).toBe(false);
+  });
+});

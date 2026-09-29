@@ -38,7 +38,7 @@ export interface ClientMoneyRow {
 }
 
 export interface ClientOverview {
-  client: { id: string; name: string; status: string | null; contact: Record<string, unknown> | null };
+  client: { id: string; name: string; status: string | null; contact: Record<string, unknown> | null; owner_user_id?: string | null; owner_name?: string | null };
   projects: { total: number; active: number; done: number; percent: number };
   tasks: { total: number; open: number; overdue: number; blocked: number };
   deliverables: { total: number; delivered: number; overdue: number };

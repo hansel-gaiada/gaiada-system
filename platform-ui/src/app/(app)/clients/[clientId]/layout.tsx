@@ -1,13 +1,15 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
 import { getActiveTenant } from "@/lib/tenant";
 import { can } from "@/lib/rbac";
 import { getClientOverview } from "@/lib/clientHub";
-import { deleteClientForm } from "@/lib/clientWorkActions";
+import { deleteClientForm, setClientArchivedForm } from "@/lib/clientWorkActions";
+import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/ui";
 import { ClientHubTabs, type ClientHubTab } from "@/components/clients/ClientHubTabs";
+import { ConfirmSubmitButton } from "@/components/clients/ConfirmSubmitButton";
 import "@/components/clients/clientHub.css";
 
 // CC-3 — the client hub shell.
@@ -54,11 +56,22 @@ export default async function ClientHubLayout({
   const tabs: ClientHubTab[] = [
     { segment: "", label: "Overview", badge: overview.needsUs.length },
     { segment: "work", label: "Work", badge: overview.tasks.overdue },
-    { segment: "details", label: "Details" },
+    // CC-D8 — Profile is the former Client Centre workspace (how the client's business is set up);
+    // Contacts & meetings is the former Details tab (who on the client side can see what, and when we
+    // meet). Status moved into the header; deliverables moved to Work, where the rest of the work is.
+    { segment: "profile", label: "Profile" },
+    { segment: "contacts", label: "Contacts & meetings" },
+    // CC-D10 — internal notes plus the change history (who renamed, re-owned or archived it, and when).
+    { segment: "notes", label: "Notes & history" },
   ];
 
-  const canManage = can(me, "pm.manage", tenant);
+  // CC-D10: editing is `client.write` (any staff member), deleting is `client.delete` (manager+) —
+  // the same line resource_client.yaml draws. Both were `pm.manage` before, which hid Edit from staff.
+  const canWrite = can(me, "client.write", tenant);
+  const canDelete = can(me, "client.delete", tenant);
   const del = deleteClientForm.bind(null, clientId);
+  const isArchived = overview.client.status === "archived";
+  const toggleArchive = setClientArchivedForm.bind(null, clientId, !isArchived);
 
   return (
     <>
@@ -67,13 +80,24 @@ export default async function ClientHubLayout({
         breadcrumbs={[{ label: "Clients", href: "/clients" }, { label: overview.client.name }]}
         actions={
           <>
-            {/* CC-D1 — a link, not a tab: the Client Centre workspace lives at its own route
-                (`/client-centre/[clientId]`), not a segment under this hub, so it does not fit
-                `ClientHubTabs`' base-relative href scheme. */}
-            <Link href={`/client-centre/${clientId}`} className="lux-btn lux-btn--ghost lux-btn--sm">Client Centre</Link>
-            {canManage && (
+            {overview.client.status && <StatusBadge label={overview.client.status} />}
+            <span style={{ font: "400 12px var(--font-body)", color: "var(--ink-muted)" }}>
+              Owner: {overview.client.owner_name ?? "none"}
+            </span>
+            {canWrite && (
+              <Link href={`/clients/${clientId}/edit`} className="lux-btn lux-btn--ghost lux-btn--sm">Edit</Link>
+            )}
+            {canWrite && (
+              <form action={toggleArchive}>
+                <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">{isArchived ? "Restore" : "Archive"}</button>
+              </form>
+            )}
+            {canDelete && (
               <form action={del}>
-                <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button>
+                <ConfirmSubmitButton
+                  label="Delete"
+                  message={`Delete ${overview.client.name}? Archive keeps the client and its history; Delete removes it from the ERP.`}
+                />
               </form>
             )}
           </>

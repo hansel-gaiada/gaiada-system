@@ -4663,7 +4663,7 @@ synthesise registry defaults and the first accepted PATCH inserts the row.
 | `PATCH /api/:t/clients/:clientId/centre` | `client` update | Staff. Returns the merged `CentreProfile`. |
 | `GET /api/:t/portal/centre` | `portal` read + portal scope | Client. The caller's own client(s): `[{clientId, clientName, canEdit}]`. |
 | `GET /api/:t/portal/centre/:clientId` | `portal` read + `clientId ∈ scope.clientIds` | Client. `CentreProfile`; a clientId outside scope is **404**, never 403 (no existence oracle — matches every other portal route). |
-| `PATCH /api/:t/portal/centre/:clientId` | `portal` **`edit_company_profile`** + scope + CC-D4 | Client. Returns `CentreProfile`; on a real change, best-effort notifies the client's project owners (`client.centre_updated`, href `/client-centre/<clientId>`). |
+| `PATCH /api/:t/portal/centre/:clientId` | `portal` **`edit_company_profile`** + scope + CC-D4 | Client. Returns `CentreProfile`; on a real change, best-effort notifies the client's project owners (`client.centre_updated`, href `/client-centre/<clientId>`, which the UI redirects to `/clients/<clientId>/profile` since CC-D8). |
 
 `CentreProfile` / `CentrePatch` are exactly the shapes in the plan doc's "API contract" section —
 not repeated here to avoid the two copies drifting; that document is normative for the wire shape.
@@ -4731,3 +4731,24 @@ ROLE, not by action — `client`'s own condition is unchanged).
   the portal action set.
 - No staff nav change is part of this piece — the sidebar row, `/client-centre` pages and the portal
   `Company` tab are the frontend agent's own piece (§3 of the plan).
+
+
+## 26. Client edit, owner, notes and history (CC-D10, 2026-09-29) — `src/modules/clients/clients.controller.ts`, `client-input.ts` — **STATUS: PROTOTYPED**
+
+Design: `docs/plans/2026-09-29-client-centre.md` (CC-D10). Migration `202609290551_client_owner.sql`
+adds `clients.owner_user_id`. Notes reuse the core `comments` table (`target_entity_type = 'client'`),
+which no client/portal role can read (`resource_comment.yaml`). No new Cerbos kind or action: every
+route below uses the existing `client` resource.
+
+| Method + path | Authz | Notes |
+|---|---|---|
+| `GET /api/:t/clients` · `GET /api/:t/clients/:id` | `client` read | **Additive:** each row now carries `owner_user_id` and `owner_name` (both null when unassigned). |
+| `POST /api/:t/clients` | `client` create | Body `{name, status?, contact?, ownerUserId?, customFields?}`. **Fix:** `status` is now stored (it was dropped, so every client was born `active`). |
+| `PATCH /api/:t/clients/:id` | `client` update | **Behaviour change:** `contact` is a key-level MERGE: a string sets that key, `null`/`""` deletes it, an omitted key is untouched. It used to replace the whole object. `ownerUserId`: omitted = unchanged, `null` = clear, a user id must be ACTIVE STAFF of this tenant (400 otherwise; checked through the tenant-scoped connection, so another tenant's user is refused). `name` must not be blank; `status` must be a lowercase token. The activity row carries `{changes: [{field, before, after}]}`. |
+| `GET /api/:t/clients/:id/notes` | `client` read | Newest first, max 200: `[{id, body, authorId, authorName, createdAt}]`. |
+| `POST /api/:t/clients/:id/notes` | `client` update | Body `{body}` (1–5,000 chars, trimmed). Returns `{id}`. Writes activity `noted`. |
+| `DELETE /api/:t/clients/:id/notes/:noteId` | own note: `client` update · anyone else's: `client` delete | Soft delete. Writes activity `note_deleted`. |
+| `GET /api/:t/clients/:id/history?limit=` | `client` read | Activity rows targeting this client, newest first (default 50, max 200), `authz.*` excluded: `[{id, verb, metadata, occurredAt, actorId, actorName}]`. |
+
+UI mirror: capabilities `client.write` (company_admin, manager, member, owner) and `client.delete`
+(company_admin, manager, owner) in `platform-ui/src/lib/rbac.ts`, matching `resource_client.yaml`.

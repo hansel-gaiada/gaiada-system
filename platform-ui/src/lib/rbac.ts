@@ -166,6 +166,13 @@ export const CAPABILITIES = [
   // exists so the UI stops being stricter than the server: it previously gated the ball on
   // `pm.manage`, which silently made a hand-off leads-only.
   "pm.contribute",      // pass the ball, execution edits (status/progress/dates) — any member
+  // CC-D10 — the client (CRM) row. Two capabilities because resource_client.yaml draws the line
+  // between them: `create`/`update` go to company_admin, manager AND member (owner decision
+  // 2026-08-18, "agency staff plausibly onboard and edit clients as ordinary work"), `delete` to
+  // company_admin and manager only. The UI gated all three on `pm.manage` before, which hid New and
+  // Edit from ordinary staff that Cerbos already allowed — a UI-side under-claim.
+  "client.write",       // create a client, edit it (name/status/contact/owner/profile), add notes
+  "client.delete",      // delete a client, or somebody else's note on one
   "it.manage",          // register/edit devices
   "approvals.decide",   // approve/reject
   // D14-08 — retry a FAILED (or stuck-executing) automation write's execution (Cerbos action
@@ -430,6 +437,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   platform_admin: ALL,
   company_admin: [
     "admin.access", "company.manage", "invoice.approve", "org.edit", "people.directory", "pm.manage", "pm.contribute", "it.manage", "approvals.decide", "approvals.retry", "knowledge.review",
+    "client.write", "client.delete", // CC-D10 — resource_client.yaml create/update/delete
     // IAM-02a-FIX-2 — company_admin appears in every one of the five backing policies for these three
     // (resource_pipeline_run/stage/gate.yaml, resource_scope_signoff.yaml,
     // resource_webdev_provisioned_site.yaml), same as it always did for `approvals.decide`'s own
@@ -508,6 +516,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // manager never had it and loses nothing.
   manager: [
     "pm.manage", "pm.contribute", "people.directory",
+    "client.write", "client.delete", // CC-D10 — resource_client.yaml create/update/delete
     "pipeline.write", "pipeline.manage", "webdev.provision", "github.link",
     // Gap 3 (2026-08 sweep): resource_integration_connection.yaml's "company.manage tier" rule
     // (its own header's name for the rule) explicitly lists `company_admin` AND `manager` for
@@ -578,7 +587,8 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // AD-11 — `member` is named on `resource_agency_lead.yaml`'s read/create/update/delete rule
   // (`"read"` also on `resource_agency_discovery_submission.yaml`), but NOT on `triage`/`convert` —
   // so `.read`/`.write` only, matching `pipeline.write`'s own member-inclusive-but-not-manage shape.
-  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view", "agency.lead.read", "agency.lead.write"],
+  // CC-D10 — `client.write` but NOT `client.delete`: resource_client.yaml's 2026-08-18 split.
+  member: ["pm.contribute", "people.directory", "pipeline.write", "lms.catalogue.view", "agency.lead.read", "agency.lead.write", "client.write"],
   // Gap 3 find — see the `Role` union's `viewer` comment for the full evidence trail. Matches
   // `member`'s ORIGINAL two capabilities exactly: `pm.contribute` + `people.directory` (DR-2a above).
   // Deliberately does NOT also pick up `member`'s IAM-02a-FIX-2 `pipeline.write` grant: `viewer` is
@@ -763,6 +773,9 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
     "it.manage", "knowledge.review", "lms.assign", "lms.authoring", "lms.catalogue.view", "lms.grade",
     "lms.progress.view", "lms.publish", "lms.waive", "org.edit", "people.directory", "pipeline.manage",
     "pipeline.write", "pm.contribute", "pm.manage",
+    // CC-D10 — owner holds core.client.create/update/delete in role-permission-bundles.json and
+    // resource_client.yaml's permission-matching arm (perm_client_*) honours them.
+    "client.write", "client.delete",
     // MON-20: deliberately NOT granted, despite `platform-nest/src/rbac/role-permission-
     // bundles.json` (the generated artifact `rbac-capability-parity.test.ts` diffs against) listing
     // `owner` holding all three. That bundle is administrative catalog data the resource policies

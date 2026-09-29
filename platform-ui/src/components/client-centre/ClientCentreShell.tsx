@@ -19,8 +19,8 @@ import { SectionSettingsView } from "./SectionSettingsView";
 import { LeafPageView } from "./LeafPageView";
 import "./clientCentre.css";
 
-// The CMC-style workspace, shared by the staff (`/client-centre/[clientId]`) and portal
-// (`/portal/company/[clientId]`) shells: a client switcher (portal, when there is more than one), the
+// The CMC-style workspace, shared by the staff client hub's Profile tab (`/clients/[clientId]/profile`)
+// and the portal's Business profile tab (`/portal/company`): a client switcher (portal, when there is more than one), the
 // in-page department tree, a breadcrumb, and the content area — all driven off ONE fetched
 // `CentreProfile` and its live-edited `CentreDraft` (see `useCentreAutosave`).
 //
@@ -34,7 +34,6 @@ export function ClientCentreShell({
   profile,
   isPortal,
   patchAction,
-  staffClientHref,
   switcherOptions,
   onSwitchClient,
 }: {
@@ -45,10 +44,8 @@ export function ClientCentreShell({
   profile: CentreProfile;
   isPortal: boolean;
   patchAction: (clientId: string, patch: CentrePatch) => Promise<CentreActionResult>;
-  /** Staff only: link to the existing Clients edit/delete flow (CC-D5). */
-  staffClientHref?: string;
-  /** Rendered only when there is more than one option — one client goes straight in with no
-   *  switcher at all, matching the plan. Staff redirects to `/client-centre/:id`; the portal writes
+  /** Portal only (staff move between clients from the Clients list, CC-D8). Rendered only when there
+   *  is more than one option — one client goes straight in with no switcher at all. The portal writes
    *  the `gaiada_portal_client` cookie (see `lib/portalCentreClient.ts`) and redirects to
    *  `/portal/company` — the same "pick, persist server-side, redirect" shape `tenant.ts`'s company
    *  switcher already uses, so nothing here needs the client id threaded through every link's href. */
@@ -63,7 +60,7 @@ export function ClientCentreShell({
   const canEdit = profile.canEdit;
   const readOnlyReason = isPortal
     ? "Your access is view-only. Ask your account manager if you need changes made here."
-    : "You don't have permission to edit this client's Client Centre profile. Ask an admin for access.";
+    : "You don't have permission to edit this client's profile. Ask an admin for access.";
   const currentSectionId = route.kind === "section" ? route.sectionId : null;
 
   const setProfileField = (key: string, value: string) =>
@@ -105,7 +102,7 @@ export function ClientCentreShell({
         clientName={profile.clientName}
         draft={draft}
         canEdit={canEdit}
-        staffClientHref={staffClientHref}
+        isPortal={isPortal}
         onFieldChange={setProfileField}
         onBusinessTypeChange={setBusinessType}
         onDeptToggle={setDeptToggle}

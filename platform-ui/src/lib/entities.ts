@@ -195,7 +195,23 @@ export const getRollups = (u: string, period?: string) =>
   platformFetch<RollupRow[]>(`/api/rollups${period ? `?period=${period}` : ""}`, u);
 
 // ---- Client-work: clients / deliverables / time entries (5c.2 — endpoints exist) ----
-export interface Client { id: string; name: string; contact: Record<string, unknown>; status: string; custom_fields: Record<string, unknown> }
+/** `owner_*` (CC-D10) are the staff member who owns the relationship; both null when unassigned.
+ *  Optional so an older backend (pre-migration) still type-checks as "no owner". */
+export interface Client {
+  id: string; name: string; contact: Record<string, unknown>; status: string; custom_fields: Record<string, unknown>;
+  owner_user_id?: string | null; owner_name?: string | null;
+}
+/** The contact keys the staff UI edits (platform-nest `client-input.ts` CONTACT_KEYS). */
+export const CLIENT_CONTACT_KEYS = ["email", "phone", "address", "billingName", "billingEmail"] as const;
+export type ClientContactKey = (typeof CLIENT_CONTACT_KEYS)[number];
+export const CLIENT_CONTACT_LABELS: Record<ClientContactKey, string> = {
+  email: "Primary email", phone: "Phone", address: "Address", billingName: "Billing contact", billingEmail: "Billing email",
+};
+export interface ClientNote { id: string; body: string; authorId: string | null; authorName: string | null; createdAt: string }
+export interface ClientHistoryEntry {
+  id: string; verb: string; occurredAt: string; actorId: string | null; actorName: string | null;
+  metadata: { changes?: { field: string; before: string | null; after: string | null }[]; via?: string; [k: string]: unknown };
+}
 export interface Deliverable { id: string; project_id: string; client_id: string | null; name: string; status: string; due_date: string | null }
 export interface TimeEntry { id: string; user_id: string; project_id: string; task_id: string | null; minutes: number; billable: boolean; entry_date: string; notes: string }
 
@@ -206,8 +222,23 @@ export async function getClient(u: string, t: string, id: string): Promise<Clien
   return list.find((c) => c.id === id) ?? null;
 }
 // Client-work CRUD — BFF contract (backend TODO, see docs/FRONTEND-BFF-CONTRACT.md).
-export const createClient = (u: string, t: string, body: { name: string; status?: string; contact?: Record<string, unknown> }) =>
+export const createClient = (u: string, t: string, body: { name: string; status?: string; contact?: Record<string, string>; ownerUserId?: string | null }) =>
   platformFetch<{ id: string }>(`/api/${t}/clients`, u, { method: "POST", body: JSON.stringify(body) });
+/** `PATCH /api/:t/clients/:id`. `contact` is a KEY-LEVEL MERGE on the backend (CC-D10): a string sets
+ *  that key, `null` deletes it, an omitted key is left alone — so send only what the form owns.
+ *  `ownerUserId`: omitted = unchanged, `null` = no owner. */
+export const updateClient = (u: string, t: string, id: string, body: { name?: string; status?: string; contact?: Record<string, string | null>; ownerUserId?: string | null }) =>
+  platformFetch<{ id: string }>(`/api/${t}/clients/${id}`, u, { method: "PATCH", body: JSON.stringify(body) });
+// CC-D10 — notes + history. Both degrade to [] on 404/403 (an older backend, or a module-off tenant)
+// via skipUnavailable, the same rule as listClients; anything else throws to the error boundary.
+export const listClientNotes = (u: string, t: string, id: string) =>
+  skipUnavailable(platformFetch<ClientNote[]>(`/api/${t}/clients/${id}/notes`, u), [] as ClientNote[]);
+export const listClientHistory = (u: string, t: string, id: string) =>
+  skipUnavailable(platformFetch<ClientHistoryEntry[]>(`/api/${t}/clients/${id}/history`, u), [] as ClientHistoryEntry[]);
+export const createClientNote = (u: string, t: string, id: string, body: string) =>
+  platformFetch<{ id: string }>(`/api/${t}/clients/${id}/notes`, u, { method: "POST", body: JSON.stringify({ body }) });
+export const deleteClientNote = (u: string, t: string, id: string, noteId: string) =>
+  platformFetch<{ ok: true }>(`/api/${t}/clients/${id}/notes/${noteId}`, u, { method: "DELETE" });
 export const deleteClient = (u: string, t: string, id: string) =>
   platformFetch<{ ok: true }>(`/api/${t}/clients/${id}`, u, { method: "DELETE" });
 

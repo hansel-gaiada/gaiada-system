@@ -63,7 +63,9 @@ versions below; the running build reports it at `GET /health`.
 
 ---
 
-## platform-nest — Platform Core · `0.55.0` · IN PROGRESS
+## platform-nest — Platform Core · `0.56.0` · IN PROGRESS
+
+**0.56.0 (2026-09-29, client edit surface — PROTOTYPED):** `clients.owner_user_id` (migration `202609290551`), owner validated as active tenant staff; `POST /clients` stores `status` (was dropped); `PATCH /clients/:id` merges `contact` key by key and logs before/after; new `/clients/:id/notes` (GET/POST/DELETE, on the core `comments` table) and `/clients/:id/history`. Contract: BFF §26 (CC-D10).
 **0.55.0 (2026-09-29, Client Centre backend — PROTOTYPED):** `client_centre_profiles` + staff (`/clients/centre`, `/clients/:id/centre`) and portal (`/portal/centre*`) routes, registry-validated key-level PATCH with value-scanning credential refusal and before/after activity, new Cerbos action `portal.edit_company_profile` (CC-D4). Plan: `docs/plans/2026-09-29-client-centre.md`; contract: BFF §25.
 **0.50.0 (2026-09-03, GM-blob live data repair + monitoring delivery/maintenance seed):** see
 `CHANGELOG.md` for the full account — a live-data repair (org-blob node-id collision, 7 people
@@ -163,7 +165,11 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.71.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.73.0` · IN PROGRESS
+
+**0.73.0 (2026-09-29, clients editable by staff — PROTOTYPED):** capabilities `client.write` (member+) / `client.delete` (manager+) replace `pm.manage` on every client control; client Edit (name, status, owner, email, phone, address, billing contact), Archive/Restore, a confirm on Delete, archived hidden from the default list, Owner column, and a **Notes & history** tab. Uses BFF §26 (CC-D10).
+
+**0.72.0 (2026-09-29, one client one page — PROTOTYPED):** Client Centre folds into the client hub as its **Profile** tab (`/clients/[id]/profile/…`). The sidebar row goes; the Clients list gains Business type + Profile columns; the Details tab becomes **Contacts & meetings**. Renames: "Company settings" → Business details, portal "Company" → Business profile (CC-D8/D9). Old routes redirect.
 
 **0.70.0 (2026-09-29, Client Centre — PROTOTYPED):** CMC's client-first layout as native pages — Business → Client Centre (`/client-centre`, `/client-centre/[clientId]/…`) for staff and a portal **Company** tab (`/portal/company/…`) for client contacts. Plan: `docs/plans/2026-09-29-client-centre.md`.
 

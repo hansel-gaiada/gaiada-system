@@ -26,6 +26,9 @@ Cerbos policy and deploy pipeline, for **both** employees and the client's own c
 | CC-D5 | 2026-09-29 | The **client name is read-only** in the Client Centre for everyone. It is the CRM `clients.name` shown on issued invoices and signed contracts; staff rename a client in the existing client edit flow. CMC's "Delete company" and "New company" are **not** rebuilt; they link to the existing Clients flows. | — |
 | CC-D6 | 2026-09-29 | Reconciling the profile with the AD-3 discovery questionnaire is **deferred**. The Client Centre registry is taken from CMC unchanged (registry `version: 1`). | — |
 | CC-D7 | 2026-09-29 | **Real client data never enters this public repo.** `cmc/origin/index.html` embeds all 50 client profiles (`SEED_COMPANIES_V2`, ~77KB on one line) and is gitignored alongside `seed.local.js`. The committed registry is data-only and was extracted mechanically (checked: no client name appears in it). Import files are `*.local.*`. | — |
+| CC-D8 | 2026-09-29 (owner) | **One client, one page.** The Client Centre is not a separate staff surface: it is the client hub's **Profile** tab (`/clients/[clientId]/profile/…`). The Business → Client Centre sidebar row is removed. The `/client-centre` list folds into the Clients list as two columns, **Business type** and **Profile** (completion). The hub's tabs are **Overview · Work · Profile · Contacts & meetings**. Contacts & meetings is the former Details tab; status moves to the hub header and deliverables to Work. The old `/client-centre/…` and `/clients/[id]/details` routes redirect. What each tab is for: Overview/Work = what we are doing for the client and who has the ball; Profile = how their business is set up and what each department needs; Contacts & meetings = the people side. | CC-D1's separate `/client-centre` workspace and its sidebar row (the "UI" section below, as first built in alpha.341) |
+| CC-D10 | 2026-09-29 (owner) | **Clients are edited by staff, and get an owner, contacts, archive, notes and history.** Every staff member Cerbos allows (`resource_client.yaml`: create/update → company_admin, manager, member; delete → company_admin, manager) can use the matching UI controls, via capabilities `client.write` / `client.delete`, which replace `pm.manage`. A client has an optional **owner** (`clients.owner_user_id`, active tenant staff only) and structured **contact details** in `contact` (email, phone, address, billing contact, billing email), which `PATCH` merges key by key. **Archive** (status `archived`) is the everyday alternative to Delete; archived clients leave the default list. **Notes** are internal (core `comments` table, staff-only) and a **history** tab reads the client's activity log. `POST /clients` now stores the chosen status. Contract: BFF §26. | CC-D5's "staff rename a client in the existing client edit flow" (no such flow existed until this) |
+| CC-D9 | 2026-09-29 (owner) | **"Company" is reserved for the ERP's own group companies.** On the client profile, CMC's "Company settings" is renamed **Business details**, and its "Company name" label becomes **Client name**. The portal tab **Company** becomes **Business profile**; its URL stays `/portal/company` so links already sent to clients keep working. | — |
 
 ## The registry
 
@@ -124,13 +127,15 @@ Validation (both PATCH routes, one shared function):
 
 ## UI (`platform-ui`)
 
-- **Staff:** a new sidebar row **Business → Client Centre** (`/client-centre`) directly after Clients.
-  `/client-centre` lists every client with business type, city and completion.
-  `/client-centre/[clientId]/…` is the CMC layout: a client switcher, an in-page department tree
-  (Home · Company settings · departments → sub-sections → pages · Settings), and the content area.
-  The client hub (`/clients/[clientId]`) gains a link to it.
-- **Client:** a new portal tab **Company** (`/portal/company/…`) with the same components, scoped to
-  the caller's client(s), and read-only unless `canEdit`.
+As changed by CC-D8/CC-D9 (platform-ui 0.72.0). As first built in alpha.341 the staff side was a separate
+sidebar row and workspace at `/client-centre/…`; those routes now redirect.
+
+- **Staff:** the client hub's **Profile** tab (`/clients/[clientId]/profile/…`) is the CMC layout: an
+  in-page department tree (Home · Business details · departments → sub-sections → pages · Settings) and
+  the content area. There is no client switcher; the Clients list is where you pick a client, and it
+  shows each client's business type and profile completion.
+- **Client:** the portal tab **Business profile** (`/portal/company/…`) with the same components, scoped
+  to the caller's client(s), and read-only unless `canEdit`.
 - Autosave: debounced ~600ms, sends only the changed keys, shows a "Saved" note, and toasts errors.
 - CMC's copy is preserved: ledes, the no-credentials callout, "Shared · N", stats, "Coming soon".
 
@@ -149,4 +154,6 @@ server only after the owner confirms.
 | 3 | Staff + portal pages, nav row, portal tab, DEMO_MODE fixture, tests | frontend agent | PROTOTYPED — sumopod 211/4194 + next build green |
 | 4 | helios dump → mapping → import script | lead | DONE on live 2026-09-29: read-only export of 29 CMC companies; owner-reviewed mapping (20 name matches, 4 manual: BRCA, BIMC CosMedic → BIMC, Bali Catering and Events → Bali Catering, D&A Caviar → Caviar; 4 created: Cascades Suites, DeityLabs, GAIA Digital Agency, Sepeda Motor Indonesia); dry run rolled back, then applied. CMC held no connections or department toggles. |
 | 5 | Linux gate on sumopod, merge, MODULES/CHANGELOG/MAP | lead | sumopod whole branch: nest 519/523 files (fails: monitoring pre-existing on main; ui-grantable pin fixed 6037755e, re-run 13/13), ui 211/211, next build 0 |
+| 8 | CC-D10: staff-editable clients, owner, contacts, archive, notes, history | lead | PROTOTYPED on `feat/client-hub-profile` |
+| 7 | CC-D8/D9: Client Centre → hub Profile tab, sidebar row removed, list columns, Details → Contacts & meetings, renames, redirects, plus the missing client Edit page (the rename flow CC-D5 refers to) | lead | PROTOTYPED on `feat/client-hub-profile` — Linux gate pending, not released |
 | 6 | Release + live import | lead | release DEPLOYED alpha.341 (migrations applied, Cerbos restarted, platform + ui on 341, healthy). CI on 4f1c8773 red on 2 unrelated jobs: monitoring maintenance test (pre-existing) and webdesk-api (Docker Hub denied minio/minio pull). Live import DONE (piece 4) |

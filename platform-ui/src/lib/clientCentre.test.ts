@@ -166,7 +166,7 @@ describe("route model", () => {
     expect(parseSectionRoute(["mk", "settings", "extra"])).toEqual({ kind: "home" });
   });
   it("round-trips through sectionHref", () => {
-    const base = "/client-centre/cl-1";
+    const base = "/clients/cl-1/profile";
     for (const segs of [undefined, ["company"], ["mk"], ["mk", "settings"], ["mk", "3"]]) {
       const route = parseSectionRoute(segs as string[] | undefined);
       expect(parseSectionRoute(sectionHref(base, route).slice(base.length + 1).split("/").filter(Boolean))).toEqual(route);

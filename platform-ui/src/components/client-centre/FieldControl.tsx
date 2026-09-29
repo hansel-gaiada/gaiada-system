@@ -15,7 +15,7 @@ export function FieldControl({
   value: string;
   businessType: string;
   /** The section currently being edited — excluded from its own "Shared · N" count, matching CMC's
-   *  `usedBy(...).filter(n => n !== currentDept.name)`. Omit on Company settings (nothing to exclude). */
+   *  `usedBy(...).filter(n => n !== currentDept.name)`. Omit on Business details (nothing to exclude). */
   excludeSectionId?: string;
   canEdit: boolean;
   onChange: (key: string, value: string) => void;
