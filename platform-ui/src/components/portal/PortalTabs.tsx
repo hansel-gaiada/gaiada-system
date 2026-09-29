@@ -12,6 +12,10 @@ import { usePathname } from "next/navigation";
 // able to find your own contract is a headline feature of a client portal, not an administrative detail.
 const TABS: Array<{ href: string; label: string; badge?: "pending" }> = [
   { href: "/portal", label: "Overview" },
+  // CC-D1 — the Client Centre profile (business type, setup fields, connections), CC-D4-editable by
+  // a client-wide signer contact and read-only for everyone else. Right after Overview per the plan:
+  // "who we are" belongs beside "where things stand", ahead of the transactional tabs that follow.
+  { href: "/portal/company", label: "Company" },
   { href: "/portal/projects", label: "Projects" },
   { href: "/portal/timeline", label: "Timeline" },
   { href: "/portal/deliverables", label: "Deliverables" },

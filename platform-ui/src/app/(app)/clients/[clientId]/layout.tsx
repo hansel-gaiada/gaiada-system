@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSessionUserId } from "@/lib/session-server";
 import { getMe } from "@/lib/platform";
@@ -65,11 +66,17 @@ export default async function ClientHubLayout({
         title={overview.client.name}
         breadcrumbs={[{ label: "Clients", href: "/clients" }, { label: overview.client.name }]}
         actions={
-          canManage ? (
-            <form action={del}>
-              <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button>
-            </form>
-          ) : undefined
+          <>
+            {/* CC-D1 — a link, not a tab: the Client Centre workspace lives at its own route
+                (`/client-centre/[clientId]`), not a segment under this hub, so it does not fit
+                `ClientHubTabs`' base-relative href scheme. */}
+            <Link href={`/client-centre/${clientId}`} className="lux-btn lux-btn--ghost lux-btn--sm">Client Centre</Link>
+            {canManage && (
+              <form action={del}>
+                <button type="submit" className="lux-btn lux-btn--ghost lux-btn--sm">Delete</button>
+              </form>
+            )}
+          </>
         }
       />
       <ClientHubTabs clientId={clientId} tabs={tabs} />

@@ -1,0 +1,350 @@
+/* Client Centre (CC-D1) — CMC's layout and categorisation as native ERP pages. Tokens only, no
+   literal colours (enforced by `src/styles/tokens.test.ts`).
+
+   A genuinely NEW surface (per platform-ui/CLAUDE.md's class-prefix rule), so it gets its own
+   prefix, `cc-`, rather than borrowing `cp-` (the client PORTAL shell's own vocabulary) even though
+   this file is shared by both the staff and portal shells — the point of a shared component here is
+   shared MARKUP/BEHAVIOUR, not shared CSS classes with an unrelated surface. */
+
+/* ── Workspace shell: switcher + in-page tree + breadcrumb + content ─────────────────────────────── */
+.cc-workspace {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.cc-switcher {
+  margin-bottom: 14px;
+}
+.cc-switcher select {
+  font: 500 13px/1.3 var(--font-body);
+  color: var(--ink-strong);
+  background: var(--surface-page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px 11px;
+  width: 100%;
+}
+
+/* Mobile tree toggle — hidden on desktop, where the tree is always visible in its own column. */
+.cc-tree-toggle { display: none; }
+
+.cc-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cc-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cc-tree__link {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  font: 500 13px/1.3 var(--font-body);
+  color: var(--ink-body);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cc-tree__link:hover { background: var(--tint-hover); color: var(--ink-strong); }
+.cc-tree__link[aria-current="page"] {
+  background: var(--accent-fill);
+  color: var(--ink-on-accent-fill);
+  font-weight: 600;
+}
+.cc-tree__icon { flex: 0 0 auto; width: 15px; height: 15px; opacity: 0.75; }
+.cc-tree__icon svg { width: 100%; height: 100%; fill: currentColor; }
+.cc-tree__toggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  transition: transform 160ms var(--erp-ease);
+}
+.cc-tree__toggle:hover { background: var(--tint-hover); color: var(--ink-strong); }
+.cc-tree__toggle[aria-expanded="true"] { transform: rotate(90deg); }
+.cc-tree__children {
+  display: flex;
+  flex-direction: column;
+  padding-left: 18px;
+  border-left: 1px solid var(--line-soft);
+  margin: 2px 0 4px 12px;
+}
+.cc-tree__children .cc-tree__link { font-size: 12.5px; padding: 6px 9px; }
+.cc-tree__settings-link { color: var(--ink-muted) !important; font-style: italic; }
+
+.cc-content { min-width: 0; }
+
+/* ── Breadcrumb / header ──────────────────────────────────────────────────────────────────────────── */
+.cc-crumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font: 400 12px/1.4 var(--font-body);
+  color: var(--ink-subtle);
+  margin-bottom: 10px;
+}
+.cc-crumb span:not(:last-child)::after { content: "/"; margin-left: 6px; color: var(--ink-faint); }
+.cc-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.cc-head-row h1 { font: 600 22px/1.25 var(--font-display); color: var(--ink-strong); margin: 0; }
+.cc-lede { font: 400 14px/1.55 var(--font-body); color: var(--ink-muted); max-width: 72ch; margin: 0 0 18px; }
+.cc-saved-note {
+  font: 500 12px/1 var(--font-body);
+  color: var(--status-ok-fg);
+  min-width: 42px;
+}
+.cc-save-error {
+  font: 500 12px/1.4 var(--font-body);
+  color: var(--status-danger-fg);
+  margin-bottom: 14px;
+}
+
+/* ── Read-only banner ─────────────────────────────────────────────────────────────────────────────── */
+.cc-readonly-note {
+  font: 400 13px/1.5 var(--font-body);
+  color: var(--ink-muted);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 13px;
+  margin-bottom: 18px;
+}
+
+/* ── Home ─────────────────────────────────────────────────────────────────────────────────────────── */
+.cc-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+  margin: 16px 0 24px;
+}
+.cc-overview__item { display: grid; gap: 4px; }
+.cc-overview__item span { font: 500 11px/1.3 var(--font-body); color: var(--ink-subtle); letter-spacing: 0.04em; }
+.cc-overview__item b { font: 500 14px/1.4 var(--font-body); color: var(--ink-strong); }
+.cc-overview__item a { color: var(--erp-accent); text-decoration: none; }
+.cc-overview__item a:hover { text-decoration: underline; }
+
+.cc-sec-h { font: 600 15px/1.3 var(--font-display); color: var(--ink-strong); margin: 22px 0 12px; }
+
+.cc-dept-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.cc-dept-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-card-solid);
+  text-decoration: none;
+  text-align: left;
+  min-width: 0;
+}
+.cc-dept-card:hover { border-color: var(--accent-fg); background: var(--tint-hover); }
+.cc-dept-card__icon { flex: 0 0 auto; width: 20px; height: 20px; color: var(--erp-accent); }
+.cc-dept-card__icon svg { width: 100%; height: 100%; fill: currentColor; }
+.cc-dept-card b { display: block; font: 500 13.5px/1.3 var(--font-body); color: var(--ink-strong); }
+.cc-dept-card small { display: block; font: 400 11.5px/1.4 var(--font-body); color: var(--ink-subtle); margin-top: 2px; }
+
+/* ── Stats ────────────────────────────────────────────────────────────────────────────────────────── */
+.cc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 4px 0 20px;
+}
+.cc-stat {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--surface-card-solid);
+}
+.cc-stat b { font: 600 20px/1.2 var(--font-display); color: var(--ink-strong); }
+.cc-stat .cc-stat__of { font: 500 13px/1 var(--font-body); color: var(--ink-subtle); }
+.cc-stat span { display: block; font: 400 12px/1.4 var(--font-body); color: var(--ink-muted); margin-top: 2px; }
+
+/* ── Callout (no-credentials notice, verbatim CMC copy) ──────────────────────────────────────────── */
+.cc-callout {
+  font: 400 12.5px/1.55 var(--font-body);
+  color: var(--ink-muted);
+  background: var(--tint-hover);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--erp-accent);
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+  margin-bottom: 20px;
+}
+
+/* ── Fields ───────────────────────────────────────────────────────────────────────────────────────── */
+.cc-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px 18px;
+  margin-bottom: 8px;
+}
+.cc-field { display: grid; gap: 5px; min-width: 0; }
+.cc-field--wide { grid-column: 1 / -1; }
+.cc-field__label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font: 500 12px/1.4 var(--font-body);
+  color: var(--ink-muted);
+}
+.cc-shared {
+  font: 500 10.5px/1 var(--font-body);
+  color: var(--erp-accent);
+  font-style: normal;
+  white-space: nowrap;
+}
+.cc-field__help { font: 400 11px/1.4 var(--font-body); color: var(--ink-subtle); }
+.cc-input, .cc-select, .cc-textarea {
+  font: 400 14px/1.4 var(--font-body);
+  color: var(--ink-body);
+  background: var(--surface-page);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  width: 100%;
+}
+.cc-input:hover, .cc-select:hover, .cc-textarea:hover { border-color: var(--line-strong); }
+.cc-input:focus-visible, .cc-select:focus-visible, .cc-textarea:focus-visible {
+  outline: 2px solid var(--erp-accent);
+  outline-offset: 1px;
+}
+.cc-input:disabled, .cc-select:disabled, .cc-textarea:disabled { opacity: var(--opacity-soft, 0.6); }
+.cc-textarea { min-height: 78px; resize: vertical; }
+.cc-readonly-value {
+  font: 400 14px/1.4 var(--font-body);
+  color: var(--ink-strong);
+  padding: 9px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+/* ── Department toggles (Company settings) ───────────────────────────────────────────────────────── */
+.cc-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 18px;
+  margin-bottom: 8px;
+}
+.cc-toggle { display: flex; align-items: center; gap: 9px; font: 400 13.5px/1.4 var(--font-body); color: var(--ink-body); }
+
+/* ── Danger zone ──────────────────────────────────────────────────────────────────────────────────── */
+.cc-danger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid var(--status-danger);
+  border-radius: var(--radius-md);
+  padding: 13px 14px;
+}
+.cc-danger a { color: var(--erp-accent); }
+
+/* ── Connections accordion ────────────────────────────────────────────────────────────────────────── */
+.cc-conn-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.cc-conn {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-card-solid);
+  overflow: hidden;
+}
+.cc-conn > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  cursor: pointer;
+  list-style: none;
+  font: 500 13.5px/1.3 var(--font-body);
+  color: var(--ink-strong);
+}
+.cc-conn > summary::-webkit-details-marker { display: none; }
+.cc-conn-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--status-idle); }
+.cc-conn-dot--connected { background: var(--status-ok); }
+.cc-conn-dot--attention { background: var(--status-warning); }
+.cc-conn-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-conn-meta { flex: 1 1 auto; min-width: 0; font: 400 12px/1.3 var(--font-body); color: var(--ink-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-conn-status { flex: 0 0 auto; font: 500 11.5px/1 var(--font-body); color: var(--ink-muted); }
+.cc-conn-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 16px;
+  padding: 4px 14px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.cc-conn-remove { grid-column: 1 / -1; }
+
+.cc-add-conn { display: flex; gap: 8px; margin-bottom: 24px; }
+.cc-add-conn input { flex: 1 1 auto; }
+
+/* ── Coming soon (leaf page) ──────────────────────────────────────────────────────────────────────── */
+.cc-soon {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  text-align: center;
+}
+.cc-soon__tag {
+  display: inline-block;
+  font: 600 10px/1 var(--font-body);
+  letter-spacing: 0.08em;
+  color: var(--erp-accent);
+  background: var(--tint-hover);
+  border-radius: var(--radius-pill);
+  padding: 5px 10px;
+  margin-bottom: 12px;
+}
+.cc-soon h2 { font: 600 17px/1.3 var(--font-display); color: var(--ink-strong); margin: 0 0 6px; }
+.cc-soon p { font: 400 13.5px/1.5 var(--font-body); color: var(--ink-muted); margin: 0; }
+
+/* ── Mobile: the tree collapses, no horizontal scroll at 375px ───────────────────────────────────── */
+@media (max-width: 767px) {
+  .cc-workspace { grid-template-columns: 1fr; gap: 14px; }
+  .cc-tree-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    font: 500 13px/1.3 var(--font-body);
+    color: var(--ink-strong);
+    background: var(--surface-card-solid);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 10px 13px;
+    margin-bottom: 8px;
+  }
+  .cc-tree-panel { display: none; }
+  .cc-tree-panel--open { display: block; }
+  .cc-form, .cc-toggles, .cc-overview, .cc-stats, .cc-dept-grid { grid-template-columns: 1fr; }
+  .cc-conn-body { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-tree__toggle { transition: none; }
+}

@@ -8,6 +8,7 @@ import "server-only";
 import { pmDemo, allTrackerNotifications, pmTasksForUser } from "./demoPm";
 import { meetingsDemo } from "./demoMeetings";
 import { pipelineDemo, portalDemo } from "./demoPipeline";
+import { clientCentreDemo } from "./demoClientCentre";
 import { socialDemo, socialClientReviewPortalDemo } from "./demoSocial";
 import { webdevChangeRequestsDemo } from "./demoWebdevChangeRequests";
 import { agencyLeadsDemo } from "./demoAgencyLeads";
@@ -2018,6 +2019,13 @@ export function getDemoResponse(method: string, fullPath: string, userId: string
   // Delivery pipeline runs/stages/gates (WD-02 run workspace) — stateful store (lib/demoPipeline.ts).
   const pipeline = pipelineDemo(method, p, url.searchParams, body);
   if (pipeline) return pipeline;
+
+  // Client Centre (CC-D1) — CMC's layout/categorisation as native ERP pages, staff (`/clients/centre`)
+  // and portal (`/portal/centre`) — stateful store (lib/demoClientCentre.ts). Placed here, before the
+  // generic `ok([])`/`ok({})` fallbacks further down, so a PATCH's validation 400 and the real
+  // CentreProfile shape are both exercised rather than swallowed by a catch-all.
+  const clientCentre = clientCentreDemo(method, p, userId, body);
+  if (clientCentre) return clientCentre;
 
   // Social Media department — calendar + composer (SMM-12), stateful store (lib/demoSocial.ts).
   // Before this, `/departments/dept-4/{calendar,composer}` had no fixture at all, so SMM-12 could

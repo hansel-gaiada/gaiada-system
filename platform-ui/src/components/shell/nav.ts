@@ -42,6 +42,9 @@ export function navFor(me: Me, tenantId?: string | null, departments: { id: stri
   const business: NavItem[] = [
     { label: PM_TERMS.projectManagement, href: "/project-management", icon: "projects" },
     { label: "Clients", href: "/clients", icon: "finance" },
+    // CC-D1 — CMC's layout/categorisation as native ERP pages, directly after Clients (same object,
+    // a different lens: the client-first workspace rather than the CRM row).
+    { label: "Client Centre", href: "/client-centre", icon: "finance" },
     { label: "Deliverables", href: "/deliverables", icon: "box" },
     { label: "Timesheets", href: "/timesheets", icon: "clock" },
     ...(can(me, "company.manage", tenantId) ? [{ label: "Invoices", href: "/invoices", icon: "wallet" } as NavItem] : []),
