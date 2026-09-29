@@ -156,7 +156,7 @@ describe.skipIf(!TEST_URL)("Client Centre · staff routes (clients-centre.contro
     });
     const after = await withTenants([co], (c) =>
       c.query<{ verb: string; metadata: { via: string; changes: Array<{ path: string; before: unknown; after: unknown }> } }>(
-        `SELECT verb, metadata FROM activities WHERE target_entity_type = 'client' AND target_entity_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        `SELECT verb, metadata FROM activities WHERE target_entity_type = 'client' AND target_entity_id = $1 ORDER BY occurred_at DESC LIMIT 1`,
         [clientA],
       ),
     );

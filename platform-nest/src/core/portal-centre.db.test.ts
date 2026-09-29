@@ -192,7 +192,7 @@ describe.skipIf(!TEST_URL)("Client Centre · portal routes (portal-centre.contro
     });
     const rows = await withTenants([co], (c) =>
       c.query<{ metadata: { via: string } }>(
-        `SELECT metadata FROM activities WHERE target_entity_type = 'client' AND target_entity_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        `SELECT metadata FROM activities WHERE target_entity_type = 'client' AND target_entity_id = $1 ORDER BY occurred_at DESC LIMIT 1`,
         [clientA],
       ),
     );
