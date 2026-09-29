@@ -77,7 +77,7 @@ if (flags.mapping) {
 }
 
 // ── transform ───────────────────────────────────────────────────────────────────────────────────────
-const report = { imported: 0, skipped: [], unknownKeys: [], secrets: [], badBusinessType: [] };
+const report = { imported: 0, created: [], skipped: [], unknownKeys: [], secrets: [], badBusinessType: [] };
 const fieldKeys = new Set(Object.keys(registry.fields));
 const connKeys = new Set(Object.keys(registry.connections));
 const sectionIds = new Set(Object.keys(registry.sectionSettings));
@@ -101,9 +101,19 @@ const rowsByTenant = new Map();
 for (const m of mapping) {
   const row = cmc.find((r) => r.id === m.cmc_id);
   if (!row) { report.skipped.push(`${m.cmc_id}: not in the CMC export`); continue; }
-  if (m.status !== "auto" && m.status !== "manual") { report.skipped.push(`${row.name}: ${m.status}`); continue; }
-  const target = erpById.get(m.erp_client_id);
-  if (!target) { report.skipped.push(`${row.name}: ERP client ${m.erp_client_id} not in the ERP export`); continue; }
+  if (m.status !== "auto" && m.status !== "manual" && m.status !== "create") { report.skipped.push(`${row.name}: ${m.status}`); continue; }
+  // `create`: the ERP has no client for this company yet. The import creates it (by name, only if
+  // absent, so a re-run never duplicates it) in the --tenant company, then attaches the profile.
+  let target;
+  if (m.status === "create") {
+    if (!flags.tenant) throw new Error("status=create needs --tenant=<company uuid>");
+    const name = String(m.erp_name || row.name).trim();
+    target = { id: null, tenant_id: flags.tenant, name };
+    report.created.push(name);
+  } else {
+    target = erpById.get(m.erp_client_id);
+    if (!target) { report.skipped.push(`${row.name}: ERP client ${m.erp_client_id} not in the ERP export`); continue; }
+  }
 
   const profile = {};
   for (const [k, v] of Object.entries(row.profile ?? {})) {
@@ -142,7 +152,7 @@ for (const m of mapping) {
   if (!btypes.has(businessType)) { report.badBusinessType.push(`${row.name}: ${businessType}`); businessType = "other"; }
 
   const list = rowsByTenant.get(target.tenant_id) ?? [];
-  list.push({ clientId: target.id, legacyId: row.id, businessType, profile, connections, departments, customConnections });
+  list.push({ clientId: target.id, createName: target.id ? null : target.name, legacyId: row.id, businessType, profile, connections, departments, customConnections });
   rowsByTenant.set(target.tenant_id, list);
   report.imported++;
 }
@@ -162,12 +172,27 @@ for (const [tenantId, rows] of rowsByTenant) {
   if (!uuidRe.test(tenantId)) throw new Error(`bad tenant id ${tenantId}`);
   sql += `\nBEGIN;\nSELECT set_config('app.current_tenant_ids', ${lit(tenantId)}, true);\n`;
   for (const r of rows) {
-    if (!uuidRe.test(r.clientId)) throw new Error(`bad client id ${r.clientId}`);
+    let clientExpr;
+    if (r.createName) {
+      clientExpr = `(SELECT id FROM clients WHERE tenant_id = ${lit(tenantId)} AND name = ${lit(r.createName)} AND deleted_at IS NULL ORDER BY created_at LIMIT 1)`;
+      sql += `WITH ins AS (
+  INSERT INTO clients (id, tenant_id, name, origin_site)
+  SELECT gen_random_uuid(), ${lit(tenantId)}, ${lit(r.createName)}, ${lit(originSite)}
+  WHERE NOT EXISTS (SELECT 1 FROM clients WHERE tenant_id = ${lit(tenantId)} AND name = ${lit(r.createName)} AND deleted_at IS NULL)
+  RETURNING id)
+INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
+SELECT gen_random_uuid(), ${lit(tenantId)}, NULL, 'created', 'client', ins.id, ${jsonLit({ via: "cmc-import", name: r.createName })}, ${lit(originSite)} FROM ins;\n`;
+    } else {
+      if (!uuidRe.test(r.clientId)) throw new Error(`bad client id ${r.clientId}`);
+      clientExpr = lit(r.clientId);
+    }
     sql += `INSERT INTO client_centre_profiles (id, tenant_id, client_id, business_type, profile, connections, departments, custom_connections, legacy_cmc_id, origin_site)
-VALUES (gen_random_uuid(), ${lit(tenantId)}, ${lit(r.clientId)}, ${lit(r.businessType)}, ${jsonLit(r.profile)}, ${jsonLit(r.connections)}, ${jsonLit(r.departments)}, ${jsonLit(r.customConnections)}, ${lit(r.legacyId)}, ${lit(originSite)})
+VALUES (gen_random_uuid(), ${lit(tenantId)}, ${clientExpr},${lit(r.businessType)}, ${jsonLit(r.profile)}, ${jsonLit(r.connections)}, ${jsonLit(r.departments)}, ${jsonLit(r.customConnections)}, ${lit(r.legacyId)}, ${lit(originSite)})
 ON CONFLICT (tenant_id, client_id) DO UPDATE SET business_type = EXCLUDED.business_type, profile = EXCLUDED.profile,
   connections = EXCLUDED.connections, departments = EXCLUDED.departments, custom_connections = EXCLUDED.custom_connections,
   legacy_cmc_id = EXCLUDED.legacy_cmc_id, revision = client_centre_profiles.revision + 1, updated_at = now();\n`;
+    sql += `INSERT INTO activities (id, tenant_id, actor_id, verb, target_entity_type, target_entity_id, metadata, origin_site)
+VALUES (gen_random_uuid(), ${lit(tenantId)}, NULL, 'updated', 'client', ${clientExpr}, ${jsonLit({ via: "cmc-import", legacy_cmc_id: r.legacyId })}, ${lit(originSite)});\n`;
   }
   sql += `-- Fail the transaction if RLS silently filtered the upserts (unset GUC => zero rows, no error).\n`;
   sql += `DO $$ BEGIN IF (SELECT count(*) FROM client_centre_profiles WHERE legacy_cmc_id IS NOT NULL) < ${rows.length} THEN RAISE EXCEPTION 'import visible rows below ${rows.length}'; END IF; END $$;\nCOMMIT;\n`;
@@ -178,6 +203,7 @@ const txt = [
   `CMC companies: ${cmc.length}   ERP clients offered: ${erp.length}`,
   `mapping: ${Object.entries(mapping.reduce((a, m) => ((a[m.status] = (a[m.status] ?? 0) + 1), a), {})).map(([k, v]) => `${k}=${v}`).join(" ")}`,
   `imported: ${report.imported}`,
+  `clients created (${report.created.length}): ${report.created.join(", ")}`,
   `skipped (${report.skipped.length}):`, ...report.skipped.map((s) => `  ${s}`),
   `unknown keys dropped (${report.unknownKeys.length}):`, ...report.unknownKeys.map((s) => `  ${s}`),
   `credential-looking values (${report.secrets.length})${flags["drop-secrets"] !== undefined ? " — DROPPED" : " — KEPT; re-run with --drop-secrets or fix by hand"}:`, ...report.secrets.map((s) => `  ${s}`),
