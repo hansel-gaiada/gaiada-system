@@ -72,12 +72,19 @@ export function useCentreAutosave(
   );
 
   const update = useCallback(
-    (mutate: (d: CentreDraft) => CentreDraft, canEdit: boolean) => {
+    (mutate: (d: CentreDraft) => CentreDraft, canEdit: boolean, opts?: { immediate?: boolean }) => {
       setDraft((prev) => {
         const next = mutate(prev);
         if (canEdit) {
           if (timerRef.current) clearTimeout(timerRef.current);
-          timerRef.current = setTimeout(() => void flush(next), DEBOUNCE_MS);
+          // `immediate` (used only for "create a custom connection") skips the debounce entirely.
+          // The backend's validator (`validation.ts`) only accepts a `connections.<id>` edit for an
+          // id ALREADY present in `customConnections` at the START of that same PATCH — it does not
+          // look ahead within one request — so a create-then-edit-immediately burst coalesced into
+          // one debounced patch would 400 as "unknown connection". Flushing the create on its own
+          // request means the id exists server-side before any edit to it can be typed.
+          if (opts?.immediate) void flush(next);
+          else timerRef.current = setTimeout(() => void flush(next), DEBOUNCE_MS);
         }
         return next;
       });

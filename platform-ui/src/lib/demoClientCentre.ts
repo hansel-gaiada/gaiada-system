@@ -193,12 +193,29 @@ const KNOWN_DEPARTMENT_IDS = new Set([
   "ix",
 ]);
 const CONNECTION_SUBKEYS = new Set(["tool", "account", "url", "owner", "creds", "method", "status", "notes"]);
+const VALID_CONNECTION_METHODS = new Set(registry.connectionMethods);
+const VALID_CONNECTION_STATUSES = new Set(registry.connectionStatuses);
+const VALID_SECTION_IDS = new Set(Object.keys(registry.sectionSettings));
 
-/** Mirrors the shared validation function both real PATCH routes call (plan §Validation): unknown
- *  keys refused with 400 naming the field, values capped at 5,000 chars, and every value scanned for
- *  a credential shape. A custom connection id (`/^x[a-z0-9]{4,40}$/`) is accepted alongside a
- *  registry connection key. Returns the first violation, or null if the patch is clean. */
-function validatePatch(patch: CentrePatch): { error: string; field: string } | null {
+/** Every custom id ALREADY in `customConnections` before this patch applies — mirrors the real
+ *  `validation.ts::existingCustomIds`. A `connections.<id>` edit is only valid for an id that is
+ *  either a registry key or one already created — a patch cannot create-and-edit the same custom
+ *  connection in one request (see `useCentreAutosave.ts`'s "immediate" flush, which exists so the
+ *  UI never tries to). */
+function existingCustomIds(s: StoredCentre): Set<string> {
+  const ids = new Set<string>();
+  for (const list of Object.values(s.customConnections)) for (const item of list) ids.add(item.id);
+  return ids;
+}
+
+/** Mirrors the shared validation function both real PATCH routes call
+ *  (`platform-nest/src/modules/clients/centre/validation.ts::applyCentrePatch`): unknown keys
+ *  refused with 400 naming the field, values capped at 5,000 chars, every value scanned for a
+ *  credential shape, `method`/`status` checked against the registry's own value lists, and a
+ *  `connections` key must be a registry connection or an ALREADY-existing custom id (checked
+ *  against `current`, not this same patch's own `customConnections`). Returns the first violation,
+ *  or null if the patch is clean. */
+function validatePatch(patch: CentrePatch, current: StoredCentre): { error: string; field: string } | null {
   if (patch.businessType && !registry.businessTypes.some((t) => t.id === patch.businessType)) {
     return { error: `unknown business type: ${patch.businessType}`, field: "businessType" };
   }
@@ -212,8 +229,9 @@ function validatePatch(patch: CentrePatch): { error: string; field: string } | n
     }
   }
   if (patch.connections) {
+    const validCustomIds = existingCustomIds(current);
     for (const [k, entry] of Object.entries(patch.connections)) {
-      if (!KNOWN_CONNECTION_KEYS.has(k) && !/^x[a-z0-9]{4,40}$/.test(k)) {
+      if (!KNOWN_CONNECTION_KEYS.has(k) && !validCustomIds.has(k)) {
         return { error: `unknown connection: ${k}`, field: `connections.${k}` };
       }
       if (!entry) continue;
@@ -222,6 +240,8 @@ function validatePatch(patch: CentrePatch): { error: string; field: string } | n
         if (typeof sv === "string") {
           if (sv.length > 5000) return { error: `${sk} exceeds 5,000 characters`, field: `connections.${k}.${sk}` };
           if (looksLikeSecret(sv)) return { error: `${sk} looks like it contains a credential — record where it's stored instead`, field: `connections.${k}.${sk}` };
+          if (sk === "method" && !VALID_CONNECTION_METHODS.has(sv)) return { error: `method must be one of the registry methods: ${sv}`, field: `connections.${k}.method` };
+          if (sk === "status" && !VALID_CONNECTION_STATUSES.has(sv)) return { error: `status must be one of the registry statuses: ${sv}`, field: `connections.${k}.status` };
         }
       }
     }
@@ -233,6 +253,7 @@ function validatePatch(patch: CentrePatch): { error: string; field: string } | n
   }
   if (patch.customConnections) {
     for (const [sectionId, list] of Object.entries(patch.customConnections)) {
+      if (!VALID_SECTION_IDS.has(sectionId)) return { error: `unknown section: ${sectionId}`, field: `customConnections.${sectionId}` };
       for (const c of list) {
         if (!/^x[a-z0-9]{4,40}$/.test(c.id)) return { error: `invalid custom connection id: ${c.id}`, field: `customConnections.${sectionId}` };
         if (!c.name || c.name.length > 120) return { error: `custom connection name must be 1-120 characters`, field: `customConnections.${sectionId}` };
@@ -267,7 +288,11 @@ function applyPatch(s: StoredCentre, patch: CentrePatch, byUserId: string): Stor
         if (sv === null || sv === "") delete (merged as Record<string, unknown>)[sk];
         else (merged as Record<string, unknown>)[sk] = sv;
       }
-      next.connections[k] = merged;
+      // An entry with every sub-key deleted is pruned, not persisted as `{}` (matches
+      // `validation.ts`'s own comment: an empty connection object carries no information a missing
+      // key doesn't already carry).
+      if (Object.keys(merged).length === 0) delete next.connections[k];
+      else next.connections[k] = merged;
     }
   }
   if (patch.departments) {
@@ -307,9 +332,9 @@ export function clientCentreDemo(method: string, p: string, userId: string, body
     if (m === "GET") return ok(toProfile(clientId, STORE[clientId] ?? emptyCentre(), true));
     if (m === "PATCH") {
       const patch = JSON.parse(body || "{}") as CentrePatch;
-      const violation = validatePatch(patch);
-      if (violation) return err(400, violation.error, violation.field);
       const current = STORE[clientId] ?? emptyCentre();
+      const violation = validatePatch(patch, current);
+      if (violation) return err(400, violation.error, violation.field);
       STORE[clientId] = applyPatch(current, patch, userId);
       return ok(toProfile(clientId, STORE[clientId], true));
     }
@@ -327,11 +352,12 @@ export function clientCentreDemo(method: string, p: string, userId: string, body
     if (!scope) return err(404, "not found"); // out-of-scope answers 404, never 403 (plan's own rule)
     if (m === "GET") return ok(toProfile(clientId, STORE[clientId] ?? emptyCentre(), scope.canEdit));
     if (m === "PATCH") {
-      if (!scope.canEdit) return err(403, "your access is view-only — ask your account manager to change it");
+      // Verbatim server copy (`portal-centre.controller.ts::patch`'s ForbiddenException).
+      if (!scope.canEdit) return err(403, "your access is view-only — ask your account manager for company-wide signing access");
       const patch = JSON.parse(body || "{}") as CentrePatch;
-      const violation = validatePatch(patch);
-      if (violation) return err(400, violation.error, violation.field);
       const current = STORE[clientId] ?? emptyCentre();
+      const violation = validatePatch(patch, current);
+      if (violation) return err(400, violation.error, violation.field);
       STORE[clientId] = applyPatch(current, patch, userId);
       return ok(toProfile(clientId, STORE[clientId], scope.canEdit));
     }

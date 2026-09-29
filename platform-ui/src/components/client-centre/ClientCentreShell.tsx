@@ -84,6 +84,7 @@ export function ClientCentreShell({
         customConnections: { ...d.customConnections, [sectionId]: [...(d.customConnections[sectionId] ?? []), { id, name }] },
       }),
       canEdit,
+      { immediate: true }, // see useCentreAutosave.ts: the id must exist server-side before it can be edited
     );
   };
   const removeCustomConnection = (sectionId: string, connId: string) => {
