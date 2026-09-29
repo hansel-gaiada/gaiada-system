@@ -1,7 +1,6 @@
 # Client Centre — CMC's layout and categorisation as native ERP pages
 
-**Status: IN PROGRESS** (2026-09-29). Branch `feat/client-centre`.
-Nothing here is deployed until a tagged release says so.
+**Status: PROTOTYPED — DEPLOYED to gda-aicenter in `v1.0.0-alpha.341`** (2026-09-29, release run 36513771830). Profiles are EMPTY until the CMC import runs (piece 4, blocked). Not yet driven end to end by a logged-in user.
 
 ## What this is
 
@@ -149,5 +148,5 @@ server only after the owner confirms.
 | 2 | Migration, endpoints, validation, `portal.edit_company_profile` IAM chain, tests, BFF §25 | backend agent | PROTOTYPED — fixes aa88b98f, gate re-run pending |
 | 3 | Staff + portal pages, nav row, portal tab, DEMO_MODE fixture, tests | frontend agent | PROTOTYPED — sumopod 211/4194 + next build green |
 | 4 | helios dump → mapping → import script | lead | script committed; **export BLOCKED** (production read needs owner permission or an owner-run export) |
-| 5 | Linux gate on sumopod, merge, MODULES/CHANGELOG/MAP | lead | docs done; final combined gate pending |
-| 6 | Release + live import | lead, **owner go-ahead** | PLANNED |
+| 5 | Linux gate on sumopod, merge, MODULES/CHANGELOG/MAP | lead | sumopod whole branch: nest 519/523 files (fails: monitoring pre-existing on main; ui-grantable pin fixed 6037755e, re-run 13/13), ui 211/211, next build 0 |
+| 6 | Release + live import | lead | release DEPLOYED alpha.341 (migrations applied, Cerbos restarted, platform + ui on 341, healthy). CI on 4f1c8773 red on 2 unrelated jobs: monitoring maintenance test (pre-existing) and webdesk-api (Docker Hub denied minio/minio pull). Live import PENDING the helios export |
