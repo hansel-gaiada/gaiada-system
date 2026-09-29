@@ -163,8 +163,8 @@ for (const [tenantId, rows] of rowsByTenant) {
   sql += `\nBEGIN;\nSELECT set_config('app.current_tenant_ids', ${lit(tenantId)}, true);\n`;
   for (const r of rows) {
     if (!uuidRe.test(r.clientId)) throw new Error(`bad client id ${r.clientId}`);
-    sql += `INSERT INTO client_centre_profiles (tenant_id, client_id, business_type, profile, connections, departments, custom_connections, legacy_cmc_id, origin_site)
-VALUES (${lit(tenantId)}, ${lit(r.clientId)}, ${lit(r.businessType)}, ${jsonLit(r.profile)}, ${jsonLit(r.connections)}, ${jsonLit(r.departments)}, ${jsonLit(r.customConnections)}, ${lit(r.legacyId)}, ${lit(originSite)})
+    sql += `INSERT INTO client_centre_profiles (id, tenant_id, client_id, business_type, profile, connections, departments, custom_connections, legacy_cmc_id, origin_site)
+VALUES (gen_random_uuid(), ${lit(tenantId)}, ${lit(r.clientId)}, ${lit(r.businessType)}, ${jsonLit(r.profile)}, ${jsonLit(r.connections)}, ${jsonLit(r.departments)}, ${jsonLit(r.customConnections)}, ${lit(r.legacyId)}, ${lit(originSite)})
 ON CONFLICT (tenant_id, client_id) DO UPDATE SET business_type = EXCLUDED.business_type, profile = EXCLUDED.profile,
   connections = EXCLUDED.connections, departments = EXCLUDED.departments, custom_connections = EXCLUDED.custom_connections,
   legacy_cmc_id = EXCLUDED.legacy_cmc_id, revision = client_centre_profiles.revision + 1, updated_at = now();\n`;
