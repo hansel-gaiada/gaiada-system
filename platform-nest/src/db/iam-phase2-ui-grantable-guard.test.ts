@@ -93,9 +93,9 @@ describe.skipIf(!TEST_URL)("IAM Phase 2 (P2-03) — permissions.ui_grantable + p
       expect(mismatches, mismatches.join("\n")).toEqual([]);
     });
 
-    it("exactly 22 rows are ui_grantable=false (15 relationship + 7 portal.*)", async () => {
+    it("exactly 23 rows are ui_grantable=false (15 relationship + 8 portal.* — CC-D4 added portal.edit_company_profile)", async () => {
       const { rows } = await withGlobal((c) => c.query<{ n: string }>(`SELECT count(*)::text AS n FROM permissions WHERE ui_grantable = false`));
-      expect(Number(rows[0].n)).toBe(22);
+      expect(Number(rows[0].n)).toBe(23);
     });
   });
 
