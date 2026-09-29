@@ -112,6 +112,13 @@
    fastest way to make a glass surface unreadable. */
 .lux-table__row { min-height: var(--row-height); border-bottom: 1px solid var(--line); transition: background 0.2s var(--erp-ease); }
 .lux-table__row:hover { background: var(--tint-hover); }
+/* Whole-row link (HairlineTable `rowLinks`): the anchor covers the row beneath its cells, and any
+   link or button inside a cell is lifted above it so it keeps its own target. */
+.lux-table__row--linked { position: relative; cursor: pointer; }
+.lux-table__rowlink { position: absolute; inset: 0; z-index: 0; }
+.lux-table__rowlink:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.lux-table__row--linked > span { position: relative; z-index: 1; pointer-events: none; }
+.lux-table__row--linked > span a, .lux-table__row--linked > span button { pointer-events: auto; }
 .lux-table__cell--right { justify-self: end; text-align: right; }
 
 /* Sortable column header (HairlineTable's opt-in `sortKey`/`onSort`). A BUTTON, not a styled span:

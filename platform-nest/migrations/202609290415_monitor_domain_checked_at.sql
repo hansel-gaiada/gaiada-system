@@ -1,0 +1,11 @@
+-- 202609290415_monitor_domain_checked_at.sql — when the runner last looked up a monitor's domain
+-- expiry over RDAP (src/modules/monitoring/drivers/rdap.ts).
+--
+-- `monitors.cert_expires_at` / `domain_expires_at` existed since 0116 with NO writer, so the Cert
+-- and Domain columns on /monitoring were always empty. The runner now writes cert_expires_at from the
+-- probe's TLS handshake on every check, and domain_expires_at from RDAP at most once a day — this
+-- column is what makes "once a day" possible (and pushes a failed lookup's retry an hour out).
+--
+-- Additive, nullable, no default, no DML: NULL means "never looked up", which is exactly how every
+-- existing row should read. Nothing to backfill, so the RLS zero-row backfill trap does not apply.
+ALTER TABLE monitors ADD COLUMN domain_checked_at timestamptz;

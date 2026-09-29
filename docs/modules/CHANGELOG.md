@@ -11,6 +11,37 @@ local stack). None of these mean "production-done".
 
 ## Untagged — queued for the next app release cut
 
+### monitoring `0.4.0` - Cert and Domain columns are filled; the row opens the monitor, the name opens the site (2026-09-29) - PROTOTYPED
+
+- **Cert expiry:** `monitors.cert_expires_at` and `domain_expires_at` had columns since 0116 and a UI
+  column, but NO writer, so every row showed an empty Cert/Domain.
+  - The `http`/`keyword` probe now reads `notAfter` off the first https hop's certificate. That is the
+    monitored host's own certificate, before any redirect.
+  - The runner stores it with `COALESCE`, so a probe that saw no certificate keeps the last known date.
+- **Domain expiry** comes from RDAP (`drivers/rdap.ts`):
+  - IANA bootstrap, https registries only, cached a day;
+  - at most one lookup per monitor per day (new `monitors.domain_checked_at`, migration
+    `202609290415`);
+  - a failed lookup retries in an hour and never writes a guess.
+  - It skips the egress guard: its host is an IANA-listed registry, and the tenant's domain is only a
+    validated path segment.
+  - It is OFF under vitest.
+  - Verified by hand against `.com` (Verisign), `.online` (Radix) and `.id` (PANDI).
+- **/monitoring table:** the whole row opens the monitor's page, while the monitor NAME opens the
+  website in a new tab. This uses a new opt-in `rowLinks` on `HairlineTable`: a stretched anchor under
+  the cells. It works in a server component and from the keyboard, and it leaves the other ~60 tables
+  unchanged.
+
+### platform-ui `0.71.0` - Client Centre tree fixes + table row links (2026-09-29) - PROTOTYPED
+
+- Client Centre section tree:
+  - the expand button lost the browser's default border;
+  - the chevron now points right when collapsed and down when open (it pointed LEFT when open);
+  - CMC's line icons are stroked, not filled into blobs;
+  - long page names wrap instead of being clipped mid-word;
+  - the nav's accessible name no longer contains the client's uuid.
+- `HairlineTable` gained the opt-in `rowLinks` prop (see monitoring 0.4.0).
+
 ### platform-ui `0.70.0` - the Client Centre: CMC's client-first layout as native ERP pages (2026-09-29) - PROTOTYPED
 
 Owner ruling CC-D1: the standalone Company Management Centre (`cmc.gaiada.com`, built outside git on

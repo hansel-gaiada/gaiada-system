@@ -18,6 +18,7 @@ import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
 import net from "node:net";
+import type { TLSSocket } from "node:tls";
 import { createGuardedLookup, isDeniedAddress, isHostAllowlisted, normalizeHost } from "./egress";
 import type { MonitorDriver, ProbeCtx, ProbeResult } from "./registry";
 
@@ -86,6 +87,24 @@ interface RawResponse {
    *  therefore evaluated over a PARTIAL page, and the driver says so rather than implying it read
    *  the whole thing. */
   truncated: boolean;
+  /** notAfter of the FIRST https hop's certificate — the monitored host's own, before any redirect
+   *  hands off to another host. null when no hop was https. */
+  certExpiresAt: Date | null;
+}
+
+/** The peer certificate's expiry on this response's socket, or null. Never throws: a monitor must
+ *  not go DOWN because we could not read a date off a certificate the handshake already accepted. */
+export function peerCertExpiry(socket: unknown): Date | null {
+  try {
+    const s = socket as Partial<TLSSocket> | null;
+    if (!s || typeof s.getPeerCertificate !== "function") return null;
+    const cert = s.getPeerCertificate();
+    if (!cert || !cert.valid_to) return null;
+    const d = new Date(cert.valid_to);
+    return Number.isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -129,6 +148,7 @@ async function guardedRequest(url: URL, ctx: ProbeCtx, method: string, hops = 0)
       (res) => {
         const status = res.statusCode ?? 0;
         const location = res.headers.location;
+        const hopCert = url.protocol === "https:" ? peerCertExpiry(res.socket) : null;
         if (status >= 300 && status < 400 && location) {
           res.resume(); // drain, or the socket lingers
           let next: URL;
@@ -138,7 +158,9 @@ async function guardedRequest(url: URL, ctx: ProbeCtx, method: string, hops = 0)
             reject(e as Error);
             return;
           }
-          guardedRequest(next, ctx, method, hops + 1).then(resolve, reject);
+          // This hop's certificate wins over any later hop's: the earliest https hop is the host the
+          // monitor was pointed at (or its own http→https upgrade).
+          guardedRequest(next, ctx, method, hops + 1).then((r) => resolve({ ...r, certExpiresAt: hopCert ?? r.certExpiresAt }), reject);
           return;
         }
         const chunks: Buffer[] = [];
@@ -155,6 +177,7 @@ async function guardedRequest(url: URL, ctx: ProbeCtx, method: string, hops = 0)
             body: Buffer.concat(chunks).toString("utf8"),
             latencyMs: Date.now() - started,
             truncated,
+            certExpiresAt: hopCert,
           });
         };
         const fail = (e: Error) => {
@@ -210,9 +233,10 @@ export const httpDriver: MonitorDriver<HttpConfig> = {
           status: "down",
           latencyMs: res.latencyMs,
           detail: `expected HTTP ${config.expectStatus}, got ${res.status}`,
+          certExpiresAt: res.certExpiresAt,
         };
       }
-      return { status: "up", latencyMs: res.latencyMs, detail: null };
+      return { status: "up", latencyMs: res.latencyMs, detail: null, certExpiresAt: res.certExpiresAt };
     } catch (e) {
       // `down`, never `unknown`: we reached a definite conclusion (it did not answer correctly).
       // `unknown` is reserved for "we did not check", and conflating them would let a real outage
@@ -230,12 +254,12 @@ export const keywordDriver: MonitorDriver<KeywordConfig> = {
     try {
       const res = await guardedRequest(new URL(config.url), ctx, "GET");
       if (res.status !== config.expectStatus) {
-        return { status: "down", latencyMs: res.latencyMs, detail: `expected HTTP ${config.expectStatus}, got ${res.status}` };
+        return { status: "down", latencyMs: res.latencyMs, detail: `expected HTTP ${config.expectStatus}, got ${res.status}`, certExpiresAt: res.certExpiresAt };
       }
       if (config.forbid && res.body.includes(config.forbid)) {
         // DOWN, not degraded: forbidden content is the defacement/spam signal, and a compromised
         // page serving 200 is the failure this kind exists to catch.
-        return { status: "down", latencyMs: res.latencyMs, detail: `body contains forbidden text` };
+        return { status: "down", latencyMs: res.latencyMs, detail: `body contains forbidden text`, certExpiresAt: res.certExpiresAt };
       }
       if (config.expect && !res.body.includes(config.expect)) {
         // DEGRADED, not down: the server answered correctly and the page is reachable, but it is not
@@ -246,9 +270,10 @@ export const keywordDriver: MonitorDriver<KeywordConfig> = {
           detail: res.truncated
             ? `body does not contain the expected text in the first ${MAX_BODY_BYTES} bytes (page was longer and is read only to that cap)`
             : `body does not contain the expected text`,
+          certExpiresAt: res.certExpiresAt,
         };
       }
-      return { status: "up", latencyMs: res.latencyMs, detail: null };
+      return { status: "up", latencyMs: res.latencyMs, detail: null, certExpiresAt: res.certExpiresAt };
     } catch (e) {
       return { status: "down", latencyMs: null, detail: (e as Error).message };
     }

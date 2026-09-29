@@ -21,6 +21,31 @@ import { getDriver, hasDriver, parseKind, type MonitorStatus, type ProbeCtx, typ
 import type { HeartbeatProbeCtx } from "./drivers/heartbeat";
 import { enqueueMail } from "../../mail/queue";
 import { config } from "../../config";
+import { lookupDomainExpiry, registrableDomain } from "./drivers/rdap";
+
+/** Domain-expiry lookup (RDAP). OFF under vitest so no suite ever dials a real registry; a test that
+ *  wants it installs a fake with `setDomainLookupForTests`. */
+let domainLookup: ((domain: string) => Promise<Date | null>) | null = process.env.VITEST ? null : (d) => lookupDomainExpiry(d);
+export function setDomainLookupForTests(fn: ((domain: string) => Promise<Date | null>) | null): void {
+  domainLookup = fn;
+}
+const DOMAIN_RECHECK_MS = 24 * 60 * 60 * 1000;
+/** Kinds whose target is a website with a registrable domain. */
+const DOMAIN_KINDS = new Set(["http", "keyword", "tls", "tcp", "dns"]);
+
+/** The host a monitor points at: its config URL, else its target (URL or bare host). */
+export function monitorHost(config: Record<string, unknown> | null, target: string | null): string | null {
+  for (const raw of [config?.url, target]) {
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    const s = raw.trim();
+    try {
+      return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`).hostname || null;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 // PURE DECISIONS
@@ -151,6 +176,7 @@ interface DueRow {
   status: MonitorStatus;
   last_checked_at: Date | null;
   severity: string;
+  domain_checked_at: Date | null;
   hb_last_seen_at: Date | null;
   open_incident_id: string | null;
   /** Hostnames from VERIFIED properties only — see the query. */
@@ -201,7 +227,7 @@ export async function ensureResultPartitions(c: PoolClient, now = new Date()): P
  */
 const DUE_SELECT = `
   SELECT m.id, m.tenant_id, m.client_id, m.property_id, m.kind, m.config, m.target, m.name,
-         m.interval_sec, m.status, m.last_checked_at, m.severity,
+         m.interval_sec, m.status, m.last_checked_at, m.severity, m.domain_checked_at,
          hb.last_seen_at AS hb_last_seen_at,
          (SELECT i.id FROM monitor_incidents i
            WHERE i.monitor_id = m.id AND i.closed_at IS NULL LIMIT 1) AS open_incident_id,
@@ -477,10 +503,39 @@ export async function runSweep(now = new Date(), timeoutMs = 10_000): Promise<Sw
       );
 
       await c.query(
-        `UPDATE monitors SET status = $2, last_checked_at = $3, last_latency_ms = $4, updated_at = now()
+        // cert_expires_at: COALESCE, so a probe that did not observe a certificate (a failed dial, an
+        // http-only target) keeps the last known date instead of blanking the column.
+        `UPDATE monitors SET status = $2, last_checked_at = $3, last_latency_ms = $4,
+                cert_expires_at = COALESCE($6, cert_expires_at), updated_at = now()
           WHERE id = $1 AND tenant_id = $5`,
-        [row.id, t.status, now, observed.latencyMs, row.tenant_id],
+        [row.id, t.status, now, observed.latencyMs, row.tenant_id, observed.certExpiresAt ?? null],
       );
+
+      // Domain expiry: at most once a day per monitor. A lookup failure is "not checked" — it keeps the
+      // old date and retries in an hour, never writes a guess.
+      const lookup = domainLookup;
+      if (
+        lookup && DOMAIN_KINDS.has(row.kind) &&
+        (!row.domain_checked_at || now.getTime() - new Date(row.domain_checked_at).getTime() > DOMAIN_RECHECK_MS)
+      ) {
+        const host = monitorHost(row.config, row.target);
+        const domain = host ? registrableDomain(host) : null;
+        if (domain) {
+          try {
+            const expires = await lookup(domain);
+            await c.query(
+              `UPDATE monitors SET domain_expires_at = COALESCE($2, domain_expires_at), domain_checked_at = $3
+                WHERE id = $1 AND tenant_id = $4`,
+              [row.id, expires, now, row.tenant_id],
+            );
+          } catch {
+            await c.query(
+              `UPDATE monitors SET domain_checked_at = $2 WHERE id = $1 AND tenant_id = $3`,
+              [row.id, new Date(now.getTime() - DOMAIN_RECHECK_MS + 60 * 60 * 1000), row.tenant_id],
+            );
+          }
+        }
+      }
 
       if (t.openIncident) {
         // ON CONFLICT DO NOTHING against the partial unique index: two runners racing must not turn a

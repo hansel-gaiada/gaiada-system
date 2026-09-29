@@ -32,6 +32,20 @@ export const dynamic = "force-dynamic";
  * Inside 30 days the day count is coloured (attention family); beyond that it stays quiet text,
  * because a board where every row is highlighted highlights nothing.
  */
+/** The website a monitor watches, as a link target. `target` is stored either as a URL or a bare
+ *  hostname; a heartbeat has none. Only http(s) is ever linked — anything else renders as plain text. */
+function siteHref(target: string | null | undefined): string | null {
+  const s = (target ?? "").trim();
+  if (!s) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+  try {
+    const u = new URL(withScheme);
+    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function ExpiryCell({ iso }: { iso: string | null | undefined }) {
   const days = daysUntil(iso);
   if (days === null) return <span style={{ opacity: 0.5 }}>—</span>;
@@ -162,12 +176,19 @@ export default async function MonitoringBoardPage() {
               { label: "Cert", align: "right" },
               { label: "Domain", align: "right" },
             ]}
+            rowLinks={rows.map((m: Monitor) => ({ href: `/monitoring/${m.id}`, label: `Open monitor ${m.name}` }))}
             rows={rows.map((m: Monitor) => {
               const stale = isStale(m, now);
               return [
-                <Link key={`n-${m.id}`} href={`/monitoring/${m.id}`}>
-                  {m.name}
-                </Link>,
+                // The NAME opens the website (new tab); the rest of the row opens the monitor, via
+                // HairlineTable's `rowLinks` below.
+                siteHref(m.target) ? (
+                  <a key={`n-${m.id}`} href={siteHref(m.target) as string} target="_blank" rel="noopener noreferrer">
+                    {m.name}
+                  </a>
+                ) : (
+                  <span key={`n-${m.id}`}>{m.name}</span>
+                ),
                 m.clientName ?? "—",
                 m.kind,
                 <span key={`s-${m.id}`} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>

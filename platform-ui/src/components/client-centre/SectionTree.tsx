@@ -18,6 +18,9 @@ import {
 // children" (the chevron) — two different actions on one row — and a native `<summary>` collapses
 // both into a single click target. `aria-expanded` on a dedicated toggle button keeps both actions
 // reachable and announced, matching the plan's a11y requirement.
+// CMC's own chevron (a down-pointing line), used if the registry's icon set ever lacks it.
+const CHEV_FALLBACK = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
+
 export function SectionTree({
   registry,
   clientId,
@@ -98,7 +101,7 @@ export function SectionTree({
             aria-label={`Toggle ${section.name} menu`}
             onClick={() => toggle(section.id)}
           >
-            {icon("chev") ? <span dangerouslySetInnerHTML={{ __html: icon("chev") }} style={{ width: 12, height: 12 }} /> : "▸"}
+            <span className="cc-tree__chev" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon("chev") || CHEV_FALLBACK }} />
           </button>
         </div>
         {expanded && (
@@ -122,7 +125,7 @@ export function SectionTree({
   const companyHref = sectionHref(basePath, { kind: "company" });
 
   return (
-    <nav className="cc-tree" aria-label={`${clientId} sections`}>
+    <nav className="cc-tree" aria-label="Client Centre sections">
       <div className="cc-tree__row">
         <Link href={homeHref} className="cc-tree__link" aria-current={isActive(homeHref) ? "page" : undefined} onClick={onNavigate}>
           <span className="cc-tree__icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon("home") }} />

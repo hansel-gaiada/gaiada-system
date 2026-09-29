@@ -35,7 +35,7 @@ versions below; the running build reports it at `GET /health`.
 | Module | Ver | Status | Workstream | Since |
 |---|---|---|---|---|
 | platform-nest | `0.55.0` | IN PROGRESS | WS1 | 2026-09-29 |
-| platform-ui | `0.70.0` | IN PROGRESS | WS5 | 2026-09-29 |
+| platform-ui | `0.71.0` | IN PROGRESS | WS5 | 2026-09-29 |
 | ai-gateway-go | `0.13.2` | PROTOTYPED | WS3 | 2026-08-07 |
 | mcp-hub | `0.12.1` | PROTOTYPED | WS2 | 2026-08-31 |
 | sync-engine-go | `0.7.0` | PROTOTYPED | WS1 | 2026-07 |
@@ -53,7 +53,7 @@ versions below; the running build reports it at `GET /health`.
 | hr | `0.5.0` | IN PROGRESS | HR | 2026-08-26 |
 | lms | `0.7.0` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
 | lab-runner | `0.2.1` | DEV-VERIFIED | Cross-cutting | 2026-08-25 |
-| monitoring | `0.3.2` | IN PROGRESS | Monitoring | 2026-09-03 |
+| monitoring | `0.4.0` | IN PROGRESS | Monitoring | 2026-09-29 |
 | finance | `0.16.0` | PROTOTYPED | Finance & Accounting | 2026-08-27 |
 | creative | `0.1.0` | PROTOTYPED | Creative | 2026-07 |
 | render-gateway-go | `0.0.0` | PLANNED | Creative | 2026-07-23 |
@@ -163,7 +163,7 @@ authoritative `/admin/session/status`, instead of showing "unknown" as if it wer
 **Known gaps:** not deployed to production.
 **Future plans:** additional verticals (resort/marine/print) → hardening to production.
 
-## platform-ui — ERP Suite · `0.70.0` · IN PROGRESS
+## platform-ui — ERP Suite · `0.71.0` · IN PROGRESS
 
 **0.70.0 (2026-09-29, Client Centre — PROTOTYPED):** CMC's client-first layout as native pages — Business → Client Centre (`/client-centre`, `/client-centre/[clientId]/…`) for staff and a portal **Company** tab (`/portal/company/…`) for client contacts. Plan: `docs/plans/2026-09-29-client-centre.md`.
 
@@ -3816,7 +3816,8 @@ agents against one test Postgres produced a `57P01` failure that was contention,
 
 ---
 
-## monitoring — Uptime · Incidents · Status Pages · `0.3.1` · IN PROGRESS
+## monitoring — Uptime · Incidents · Status Pages · `0.4.0` · IN PROGRESS
+**0.4.0 (2026-09-29, PROTOTYPED):** Cert expiry from the probe's TLS handshake, domain expiry from RDAP once a day (`domain_checked_at`), and on /monitoring the row opens the monitor while the name opens the site. See CHANGELOG.
 
 **What exists (dev):** the `monitoring` module vertical — monitors, incidents, maintenance windows
 and status pages, with **18 uptime monitors live** on the estate. `0.2.0` was a correctness wave over

@@ -178,10 +178,15 @@ export function KpiTile({ label, value, delta, deltaUp, foot, hint }: {
   );
 }
 
-export function HairlineTable({ columns, rows, tcols, sort, onSort }: {
+export function HairlineTable({ columns, rows, tcols, sort, onSort, rowLinks }: {
   /** `sortKey` opts a column into the sort affordance below; columns without one stay static. */
   columns: { label: string; align?: "right"; sortKey?: string }[];
   rows: ReactNode[][];
+  /** Opt-in whole-row link, parallel to `rows` (2026-09-29, monitoring). Rendered as a "stretched"
+   *  anchor under the row's cells, so it works in a server component and from the keyboard, while
+   *  any link or button INSIDE a cell stays on top and keeps its own target (the monitor name opens
+   *  the website; the rest of the row opens the monitor). `label` is the anchor's accessible name. */
+  rowLinks?: ({ href: string; label: string } | null)[];
   tcols?: string;
   /** The column currently sorted, and which way. Omit for an unsorted table. */
   sort?: { key: string; dir: "asc" | "desc" };
@@ -267,7 +272,10 @@ export function HairlineTable({ columns, rows, tcols, sort, onSort }: {
         ))}
       </div>
       {rows.map((cells, i) => (
-        <div className="lux-table__row" key={i}>
+        <div className={rowLinks?.[i] ? "lux-table__row lux-table__row--linked" : "lux-table__row"} key={i}>
+          {rowLinks?.[i] && (
+            <a className="lux-table__rowlink" href={rowLinks[i]!.href} aria-label={rowLinks[i]!.label} />
+          )}
           {cells.map((cell, j) => (
             <span key={j} className={columns[j]?.align === "right" ? "lux-table__cell--right" : undefined}
               style={{ font: j === 0 ? "400 14px var(--font-body)" : "400 13px var(--font-body)", color: j === 0 ? "var(--text-primary)" : "var(--ink-muted)" }}>

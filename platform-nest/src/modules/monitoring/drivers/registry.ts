@@ -73,6 +73,9 @@ export interface ProbeResult {
   latencyMs: number | null;
   /** Why it failed, from the driver. NOT public-safe: may quote an assertion string. */
   detail: string | null;
+  /** The TLS certificate's notAfter, when the probe made an https connection. Absent/null means
+   *  "not observed this time" — the runner keeps the previous value rather than erasing it. */
+  certExpiresAt?: Date | null;
 }
 
 export interface ProbeCtx {

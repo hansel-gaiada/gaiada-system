@@ -76,6 +76,24 @@ describe("ui primitives", () => {
     expect(screen.getByRole("button", { name: "New" }).className).toContain("lux-btn--ghost");
   });
 
+  it("HairlineTable rowLinks: the row opens its own page while a link inside a cell keeps its target", () => {
+    render(
+      <HairlineTable
+        columns={[{ label: "Monitor" }, { label: "Status" }]}
+        rowLinks={[{ href: "/monitoring/m1", label: "Open monitor Site A" }, null]}
+        rows={[
+          [<a key="n" href="https://site-a.example/">Site A</a>, "up"],
+          ["Site B", "down"],
+        ]}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Open monitor Site A" })).toHaveAttribute("href", "/monitoring/m1");
+    expect(screen.getByRole("link", { name: "Site A" })).toHaveAttribute("href", "https://site-a.example/");
+    // A null entry leaves that row exactly as before: no row link, no linked class.
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+    expect(screen.getByText("Site B").closest(".lux-table__row")).not.toHaveClass("lux-table__row--linked");
+  });
+
   it("Toast renders the message", () => {
     render(<Toast message="Approved — routed to finance" />);
     expect(screen.getByText("Approved — routed to finance")).toBeInTheDocument();
