@@ -594,7 +594,10 @@ test("create: a new item is filled in on the same form, then created as a draft"
 
 test("history: versions with head/live chips, diff against live, and Restore as draft", async ({ page }) => {
   await open(page, SERVICE_SEO);
-  await page.getByRole("link", { name: "Version history" }).click();
+  const historyLink = page.getByRole("link", { name: "Version history" });
+  await hydrated(historyLink); // a click that lands mid-hydration is lost (the editor stays; seen under load on the built app)
+  await historyLink.click();
+  await expect(page).toHaveURL(/\/history\?/);
   const table = page.getByTestId("versions-table");
   await expect(table.locator("tbody tr")).toHaveCount(3);
   await expect(table.locator("tr", { hasText: "v3" }).locator(".wc-chip", { hasText: "head" })).toBeVisible();
